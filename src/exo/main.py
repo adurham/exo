@@ -29,6 +29,7 @@ from exo.utils.pydantic_ext import CamelCaseModel
 from exo.worker.download.impl_shard_downloader import exo_shard_downloader
 from exo.worker.main import Worker
 
+PEER_LISTEN_PORT = 5678
 
 @dataclass
 class Node:
@@ -307,8 +308,8 @@ class Args(CamelCaseModel):
         tb_only: If True, restrict network to Thunderbolt connections only.
             Default is False.
         use_rdma: Whether to require RDMA; enforced per-host overrides.
-        host: Bind address for networking; enforced per-host overrides.
-        discovery_port: Port used for peer discovery; enforced per-host overrides.
+        host: Bind address for networking; enforced per-host overrides. Defaults to 0.0.0.0.
+        discovery_port: Port used for peer discovery; enforced per-host overrides. Defaults to 5678.
         seeds: Optional list of manual seed peers; extended per-host overrides.
     """
 
@@ -317,9 +318,9 @@ class Args(CamelCaseModel):
     spawn_api: bool = False
     api_port: PositiveInt = 52415
     tb_only: bool = False
-    use_rdma: bool = False
-    host: str = "127.0.0.1"
-    discovery_port: PositiveInt = 52415
+    use_rdma: bool = True
+    host: str = "0.0.0.0"
+    discovery_port: PositiveInt = PEER_LISTEN_PORT
     seeds: list[str] | None = None
 
     @classmethod
@@ -383,9 +384,18 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds = list(args.seeds or [])
 
     seeds_by_hostname: dict[str, tuple[str, ...]] = {
-        "macstudio-m4": ("192.168.201.2:52415", "192.168.202.2:52415"),
-        "macbook-m4": ("192.168.201.1:52415", "192.168.204.2:52415"),
-        "work-macbook-m4": ("192.168.202.1:52415", "192.168.204.1:52415"),
+        "macstudio-m4": (
+            f"192.168.201.2:{PEER_LISTEN_PORT}",
+            f"192.168.202.2:{PEER_LISTEN_PORT}",
+        ),
+        "macbook-m4": (
+            f"192.168.201.1:{PEER_LISTEN_PORT}",
+            f"192.168.204.2:{PEER_LISTEN_PORT}",
+        ),
+        "work-macbook-m4": (
+            f"192.168.202.1:{PEER_LISTEN_PORT}",
+            f"192.168.204.1:{PEER_LISTEN_PORT}",
+        ),
     }
 
     seeds.extend(seeds_by_hostname.get(hostname, ()))
@@ -394,7 +404,7 @@ def apply_hostname_overrides(args: Args) -> Args:
         update={
             "use_rdma": True,
             "host": "0.0.0.0",
-            "discovery_port": 52415,
+            "discovery_port": PEER_LISTEN_PORT,
             "seeds": seeds,
         },
         deep=True,

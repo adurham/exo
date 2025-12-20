@@ -14,8 +14,9 @@ pub type Swarm = libp2p::Swarm<Behaviour>;
 ///       this is all VERY very hard to figure out and needs to be mulled over as a team.
 pub const NETWORK_VERSION: &[u8] = b"v0.0.1";
 pub const OVERRIDE_VERSION_ENV_VAR: &str = "EXO_LIBP2P_NAMESPACE";
+pub const PEER_TO_PEER_LISTEN_PORT: u16 = 5678;
 
-/// Create and configure a swarm which listens to all ports on OS
+/// Create and configure a swarm which listens on a fixed TCP port.
 pub fn create_swarm(keypair: identity::Keypair) -> alias::AnyResult<Swarm> {
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
@@ -23,8 +24,8 @@ pub fn create_swarm(keypair: identity::Keypair) -> alias::AnyResult<Swarm> {
         .with_behaviour(Behaviour::new)?
         .build();
 
-    // Listen on all interfaces and whatever port the OS assigns
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    // Listen on all interfaces on a static peer-to-peer port to simplify discovery.
+    swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{PEER_TO_PEER_LISTEN_PORT}").parse()?)?;
     Ok(swarm)
 }
 
