@@ -7,6 +7,7 @@ including routing, worker operations, master election, and API services.
 import argparse
 import multiprocessing as mp
 import signal
+import socket
 from dataclasses import dataclass, field
 from typing import Self
 
@@ -280,7 +281,7 @@ def main() -> None:
         the synchronous entry point. The node runs until SIGINT or explicit
         shutdown.
     """
-    args = Args.parse()
+    args = apply_hostname_overrides(Args.parse())
 
     mp.set_start_method("spawn")
     logger_setup(EXO_LOG, args.verbosity)
@@ -305,6 +306,10 @@ class Args(CamelCaseModel):
             Default is 52415.
         tb_only: If True, restrict network to Thunderbolt connections only.
             Default is False.
+        use_rdma: Whether to require RDMA; enforced per-host overrides.
+        host: Bind address for networking; enforced per-host overrides.
+        discovery_port: Port used for peer discovery; enforced per-host overrides.
+        seeds: Optional list of manual seed peers; extended per-host overrides.
     """
 
     verbosity: int = 0
@@ -312,6 +317,10 @@ class Args(CamelCaseModel):
     spawn_api: bool = False
     api_port: PositiveInt = 52415
     tb_only: bool = False
+    use_rdma: bool = False
+    host: str = "127.0.0.1"
+    discovery_port: PositiveInt = 52415
+    seeds: list[str] | None = None
 
     @classmethod
     def parse(cls) -> Self:
@@ -367,3 +376,26 @@ class Args(CamelCaseModel):
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - We are intentionally validating here, we can't do it statically
+
+
+def apply_hostname_overrides(args: Args) -> Args:
+    hostname = socket.gethostname()
+    seeds = list(args.seeds or [])
+
+    seeds_by_hostname: dict[str, tuple[str, ...]] = {
+        "macstudio-m4": ("192.168.201.2:52415", "192.168.202.2:52415"),
+        "macbook-m4": ("192.168.201.1:52415", "192.168.204.2:52415"),
+        "work-macbook-m4": ("192.168.202.1:52415", "192.168.204.1:52415"),
+    }
+
+    seeds.extend(seeds_by_hostname.get(hostname, ()))
+
+    return args.model_copy(
+        update={
+            "use_rdma": True,
+            "host": "0.0.0.0",
+            "discovery_port": 52415,
+            "seeds": seeds,
+        },
+        deep=True,
+    )
