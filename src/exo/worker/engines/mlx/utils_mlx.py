@@ -7,6 +7,7 @@ KV cache creation, chat template application, and other MLX-specific operations.
 import json
 import os
 import resource
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -18,7 +19,9 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.worker.engines.mlx.constants import (
     CACHE_GROUP_SIZE,
+    KV_GROUP_SIZE,
     KV_CACHE_BITS,
+    QUANTIZE_MODEL_MODE,
     TEMPERATURE,
     TRUST_REMOTE_CODE,
 )
@@ -30,6 +33,10 @@ except ImportError:
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.utils import load_model
+try:
+    from mlx_lm.utils import quantize_model  # type: ignore
+except ImportError:
+    quantize_model = None
 from pydantic import RootModel
 
 from exo.shared.types.api import ChatCompletionMessageText
@@ -52,10 +59,71 @@ from exo.worker.engines.mlx.auto_parallel import (
     pipeline_auto_parallel,
     tensor_auto_parallel,
 )
+from exo.networking.manual_topology import NodeRole, RoleDetection, infer_role_from_ips
 from exo.worker.runner.bootstrap import logger
 
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, 4096))
 """Increase file descriptor limit for 8-bit models."""
+
+
+FAST_ROLES = {"A", "B", "C"}
+
+
+def _local_thunderbolt_ips() -> set[str]:
+    ips: set[str] = set()
+    for iface in ("en2", "en3", "en4", "en5", "en6", "en7"):
+        try:
+            output = subprocess.check_output(
+                ["ipconfig", "getifaddr", iface], text=True
+            ).strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+        if output:
+            ips.add(output)
+    return ips
+
+
+def _detect_role() -> RoleDetection:
+    role_env = os.getenv("EXO_NODE_ROLE")
+    ips = _local_thunderbolt_ips()
+    inferred = infer_role_from_ips(ips)
+    role_raw = role_env or inferred
+    if role_raw is None:
+        raise RuntimeError("Cannot infer node role; set EXO_NODE_ROLE to A/B/C")
+    role = role_raw.upper()
+    if role not in FAST_ROLES:
+        raise RuntimeError(f"Unsupported role {role}; only A/B/C are allowed")
+    role_typed = cast(NodeRole, role)
+    has_rdma = _has_rdma()
+    if not has_rdma:
+        raise RuntimeError("RDMA required on all nodes; ibv_devices missing")
+    return RoleDetection(role=role_typed, has_rdma=True)
+
+
+def _has_rdma() -> bool:
+    try:
+        output = subprocess.check_output(["ibv_devices"], text=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return any(line.strip().startswith("rdma_") for line in output.splitlines())
+
+
+def _maybe_quantize_qwen(
+    model: nn.Module, config: Any, model_id: str, *, bits: int = 4
+) -> None:
+    if "qwen3-235b" not in model_id.lower():
+        return
+    if quantize_model is None:
+        raise RuntimeError("mlx quantize_model not available for Qwen3 4-bit path")
+    group_size = KV_GROUP_SIZE or 64
+    mode = QUANTIZE_MODEL_MODE or "affine"
+    quantize_model(
+        model,
+        config,
+        group_size=group_size,
+        bits=bits,
+        mode=mode,
+    )
 
 
 def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
@@ -138,7 +206,7 @@ class HostList(RootModel[list[str]]):
 
 def mlx_distributed_init(
     bound_instance: BoundInstance,
-) -> mx.distributed.Group:
+) -> mx.distributed.Group | None:
     """Initialize MLX distributed computing.
 
     Sets up distributed MLX based on instance type:
@@ -152,7 +220,8 @@ def mlx_distributed_init(
         Initialized distributed group.
     """
     rank = bound_instance.bound_shard.device_rank
-    logger.info(f"Starting initialization for rank {rank}")
+    role_detection = _detect_role()
+    logger.info(f"Starting initialization for rank {rank} role={role_detection.role}")
 
     # TODO: singleton instances
     match bound_instance.instance:
@@ -211,7 +280,13 @@ def initialize_mlx(
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_meta.model_id)
         start_time = time.perf_counter()
-        model, _ = load_model(model_path, strict=True)
+        model, config = load_model(model_path, strict=True)
+        _maybe_quantize_qwen(
+            model,
+            config,
+            bound_instance.bound_shard.model_meta.model_id,
+            bits=4,
+        )
         end_time = time.perf_counter()
         logger.info(f"Time taken to load model: {(end_time - start_time):.2f}s")
         if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
@@ -227,6 +302,8 @@ def initialize_mlx(
         group = mlx_distributed_init(bound_instance)
 
         start_time = time.perf_counter()
+        if group is None:
+            raise RuntimeError("Distributed group initialization failed")
         model, tokenizer = shard_and_load(bound_instance.bound_shard, group=group)
         end_time = time.perf_counter()
         logger.info(
@@ -246,7 +323,8 @@ def shard_and_load(
 ) -> tuple[nn.Module, TokenizerWrapper]:
     model_path = build_model_path(shard_metadata.model_meta.model_id)
 
-    model, _ = load_model(model_path, lazy=True, strict=False)
+    model, config = load_model(model_path, lazy=True, strict=False)
+    _maybe_quantize_qwen(model, config, shard_metadata.model_meta.model_id, bits=4)
     logger.debug(model)
     if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
         pass

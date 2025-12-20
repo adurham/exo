@@ -98,8 +98,6 @@ class PipelineShardMetadata(BaseShardMetadata):
     to the next device in the pipeline.
     """
 
-    pass
-
 
 class TensorShardMetadata(BaseShardMetadata):
     """Tensor parallelism shard metadata.

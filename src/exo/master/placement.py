@@ -5,6 +5,7 @@ in the cluster, taking into account topology, memory constraints, and
 sharding strategies.
 """
 
+import os
 import random
 from collections.abc import Mapping
 from copy import deepcopy
@@ -20,6 +21,7 @@ from exo.master.placement_utils import (
     get_shard_assignments,
     get_smallest_cycles,
 )
+from exo.networking.manual_topology import infer_role_from_ips
 from exo.shared.topology import Topology
 from exo.shared.types.commands import (
     CreateInstance,
@@ -37,6 +39,13 @@ from exo.shared.types.worker.instances import (
     MlxJacclInstance,
     MlxRingInstance,
 )
+
+
+def _role_for_node_info(node: NodeInfo) -> str | None:
+    if node.node_profile is None:
+        return None
+    ips = {iface.ip_address for iface in node.node_profile.network_interfaces}
+    return infer_role_from_ips(ips)
 
 
 def random_ephemeral_port() -> int:
@@ -154,6 +163,11 @@ def place_instance(
 
     cycle_digraph: Topology = topology.get_subgraph_from_nodes(selected_cycle)
 
+    if os.getenv("EXO_USE_MANUAL_PIPELINE", "1") == "1":
+        roles = {_role_for_node_info(n) for n in selected_cycle}
+        if roles != {"A", "B", "C"}:
+            raise ValueError("Manual pipeline requires nodes A, B, and C only")
+
     instance_id = InstanceId()
     target_instances = dict(deepcopy(current_instances))
 
@@ -167,12 +181,21 @@ def place_instance(
     # TODO: Single node instances
     match command.instance_meta:
         case InstanceMeta.MlxJaccl:
+            manual_hybrid = os.getenv("EXO_USE_MANUAL_PIPELINE", "1") == "1"
+            ibv_cycle = (
+                [n for n in selected_cycle if _role_for_node_info(n) in {"A", "B", "C"}]
+                if manual_hybrid
+                else selected_cycle
+            )
+            if manual_hybrid and len(ibv_cycle) != 3:
+                raise ValueError("Manual hybrid topology requires A/B/C present for RDMA")
+
             mlx_ibv_devices = get_mlx_ibv_devices_matrix(
-                selected_cycle,
+                ibv_cycle,
                 cycle_digraph,
             )
             mlx_ibv_coordinators = get_mlx_ibv_coordinators(
-                selected_cycle,
+                ibv_cycle,
                 coordinator_port=random_ephemeral_port(),
                 cycle_digraph=cycle_digraph,
             )

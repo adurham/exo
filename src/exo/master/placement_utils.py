@@ -7,10 +7,16 @@ cycles based on memory constraints.
 
 from collections.abc import Generator
 from typing import TypeGuard, cast
+import os
 
 from loguru import logger
 from pydantic import BaseModel
 
+from exo.networking.manual_topology import (
+    PIPELINE_ORDER,
+    apply_layer_range,
+    infer_role_from_ips,
+)
 from exo.shared.topology import Topology
 from exo.shared.types.common import Host, NodeId
 from exo.shared.types.memory import Memory
@@ -51,6 +57,55 @@ def narrow_all_nodes(nodes: list[NodeInfo]) -> TypeGuard[list[NodeWithProfile]]:
         True if all nodes have non-None node_profile, enabling type narrowing.
     """
     return all(node.node_profile is not None for node in nodes)
+
+
+def _role_for_node(node: NodeWithProfile) -> str | None:
+    ips = {iface.ip_address for iface in node.node_profile.network_interfaces}
+    return infer_role_from_ips(ips)
+
+
+def _build_manual_pipeline_assignments(
+    model_meta: ModelMetadata, nodes: list[NodeWithProfile]
+) -> ShardAssignments:
+    role_map: dict[str, NodeWithProfile] = {}
+    for node in nodes:
+        role = _role_for_node(node)
+        if role is None:
+            continue
+        role_map.setdefault(role, node)
+
+    missing_roles = [r for r in PIPELINE_ORDER if r not in role_map]
+    if missing_roles:
+        raise ValueError(
+            f"Manual pipeline requires roles {PIPELINE_ORDER}, missing {missing_roles}"
+        )
+
+    total_layers = model_meta.n_layers
+    runner_to_shard: dict[RunnerId, ShardMetadata] = {}
+    node_to_runner: dict[NodeId, RunnerId] = {}
+
+    role_rank_map = {"C": 0, "B": 1, "A": 2}
+    for role in PIPELINE_ORDER:
+        node = role_map[role]
+        start_layer, end_layer = apply_layer_range(role, total_layers)
+        shard = PipelineShardMetadata(
+            model_meta=model_meta,
+            device_rank=role_rank_map[role],
+            world_size=3,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            n_layers=total_layers,
+        )
+
+        runner_id = RunnerId()
+        runner_to_shard[runner_id] = shard
+        node_to_runner[node.node_id] = runner_id
+
+    return ShardAssignments(
+        model_id=model_meta.model_id,
+        runner_to_shard=runner_to_shard,
+        node_to_runner=node_to_runner,
+    )
 
 
 def filter_cycles_by_memory(
@@ -96,6 +151,9 @@ def get_shard_assignments_for_pipeline_parallel(
     model_meta: ModelMetadata,
     selected_cycle: list[NodeWithProfile],
 ):
+    if os.getenv("EXO_USE_MANUAL_PIPELINE", "1") == "1":
+        return _build_manual_pipeline_assignments(model_meta, selected_cycle)
+
     cycle_memory = sum(
         (node.node_profile.memory.ram_available for node in selected_cycle),
         start=Memory(),
@@ -206,6 +264,8 @@ def get_shard_assignments(
                 selected_cycle=selected_cycle,
             )
         case Sharding.Tensor:
+            if os.getenv("EXO_DISABLE_TENSOR_SHARDING", "1") == "1":
+                raise ValueError("Tensor sharding is disabled for hybrid pipeline topology")
             return get_shard_assignments_for_tensor_parallel(
                 model_meta=model_meta,
                 selected_cycle=selected_cycle,
