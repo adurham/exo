@@ -10,10 +10,12 @@ HOST="$1"
 shift
 QUERY="$*"
 
+MODEL="${MODEL:-mlx-community/Qwen3-235B-Instruct-4bit}"
+
 curl -sN -X POST "http://$HOST:52415/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d "{
-        \"model\": \"mlx-community/Kimi-K2-Thinking\",
+        \"model\": \"${MODEL}\",
         \"stream\": true,
         \"messages\": [{ \"role\": \"user\",   \"content\": \"$QUERY\"}]
       }" |

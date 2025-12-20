@@ -1,0 +1,26 @@
+# Phase 1: PoC on Existing Hardware
+# Model: Qwen 3 (235B MoE) - 4-bit MLX
+# Backend: Thunderbolt 5 RDMA (Requires 'mlx' engine)
+
+model: "mlx-community/Qwen3-235B-Instruct-4bit"
+
+node_config:
+  engine: "mlx" # CRITICAL: Unlocks RDMA backend. Do not use 'tinygrad'.
+
+nodes:
+  # Node A: Mac Studio M4 Max (128GB) - Leader & Heavy Lifter
+  - host: "192.168.201.1"
+    port: 52415
+    split_ratio: 60   # Loads ~90GB (Leaves ~38GB for OS/Overhead)
+
+  # Node B: MBP M4 Pro (48GB) - Worker
+  - host: "192.168.202.2"
+    port: 52415
+    split_ratio: 20   # Loads ~30GB (Leaves ~18GB for OS)
+
+  # Node C: MBP M4 Max (36GB) - Tail / Context
+  - host: "192.168.203.2"
+    port: 52415
+    split_ratio: 20   # Loads ~30GB (Leaves ~6GB for OS/Context)
+    # Note: If Node C runs out of memory, lower this split_ratio to 10.
+
