@@ -20,8 +20,8 @@ class Id(str):
     should inherit from Id to create distinct identifier types that cannot
     be mixed (e.g., NodeId, CommandId).
 
-    Args:
-        value: Optional string value for the ID. If None, generates a new UUID.
+    When instantiated without a value, automatically generates a new UUID string.
+    When instantiated with a value, uses that value directly.
 
     Examples:
         >>> node_id = NodeId()  # Generates new UUID

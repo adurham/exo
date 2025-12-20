@@ -56,6 +56,14 @@ class State(CamelCaseModel):
 
     @field_serializer("topology", mode="plain")
     def _encode_topology(self, value: Topology) -> TopologySnapshot:
+        """Serialize Topology to TopologySnapshot for JSON compatibility.
+
+        Args:
+            value: Topology instance to serialize.
+
+        Returns:
+            TopologySnapshot representation of the topology.
+        """
         return value.to_snapshot()
 
     @field_validator("topology", mode="before")
