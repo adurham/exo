@@ -1,3 +1,12 @@
+"""Core planning logic for the Worker component.
+
+This module provides the plan function, which acts as a state machine decision
+maker. It evaluates the current state of runners, downloads, instances, and
+tasks to determine the next Task the worker should execute. The planning logic
+handles tasks such as creating runners, starting downloads, loading models,
+coordinating warmup sequences, and shutting down runners when necessary.
+"""
+
 # pyright: reportUnusedImport = false
 
 from collections.abc import Mapping, Sequence

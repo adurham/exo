@@ -1,3 +1,14 @@
+"""Automatic parallelization strategies for MLX models.
+
+This module implements parallelization techniques for distributing MLX models
+across multiple devices. It supports Pipeline Parallelism (splitting layers
+across nodes) and Tensor Parallelism (sharding model weights across devices).
+The module defines wrapper classes like PipelineFirstLayer and PipelineLastLayer
+to handle distributed communication (send/recv) and modifies model architectures
+to support sharding for various model types including Llama, DeepSeek V3, and
+Qwen3 MoE.
+"""
+
 from abc import ABC, abstractmethod
 from functools import partial
 from inspect import signature

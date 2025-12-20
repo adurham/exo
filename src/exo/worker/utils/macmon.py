@@ -1,3 +1,12 @@
+"""Utilities for monitoring system performance metrics on macOS.
+
+This module provides utilities for monitoring system performance metrics on
+macOS devices, specifically Apple Silicon (ARM) chips. It wraps the macmon
+binary to fetch power consumption, temperature, CPU/GPU usage, and other
+performance metrics. The module defines data models for structured metric
+representation and provides an asynchronous function to fetch these metrics.
+"""
+
 import platform
 import shutil
 from subprocess import CalledProcessError
