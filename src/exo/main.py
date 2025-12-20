@@ -30,6 +30,7 @@ from exo.worker.download.impl_shard_downloader import exo_shard_downloader
 from exo.worker.main import Worker
 
 PEER_LISTEN_PORT = 5678
+BIND_HOST = "0.0.0.0"
 
 @dataclass
 class Node:
@@ -67,6 +68,9 @@ class Node:
     api: API | None
 
     node_id: NodeId
+    listen_port: PositiveInt
+    host: str
+    seeds: tuple[str, ...]
     _tg: TaskGroup = field(init=False, default_factory=anyio.create_task_group)
 
     @classmethod
@@ -137,7 +141,18 @@ class Node:
             election_result_sender=er_send,
         )
 
-        return cls(router, worker, election, er_recv, master, api, node_id)
+        return cls(
+            router,
+            worker,
+            election,
+            er_recv,
+            master,
+            api,
+            node_id,
+            listen_port=PEER_LISTEN_PORT,
+            host=BIND_HOST,
+            seeds=tuple(args.seeds or ()),
+        )
 
     async def run(self) -> None:
         """Run the node's main event loop.
@@ -319,7 +334,7 @@ class Args(CamelCaseModel):
     api_port: PositiveInt = 52415
     tb_only: bool = False
     use_rdma: bool = True
-    host: str = "0.0.0.0"
+    host: str = BIND_HOST
     discovery_port: PositiveInt = PEER_LISTEN_PORT
     seeds: list[str] | None = None
 
@@ -403,7 +418,7 @@ def apply_hostname_overrides(args: Args) -> Args:
     return args.model_copy(
         update={
             "use_rdma": True,
-            "host": "0.0.0.0",
+            "host": BIND_HOST,
             "discovery_port": PEER_LISTEN_PORT,
             "seeds": seeds,
         },
