@@ -13,7 +13,7 @@ use crate::pylibp2p::ident::{PyKeypair, PyPeerId};
 use libp2p::futures::StreamExt as _;
 use libp2p::gossipsub::{IdentTopic, Message, MessageId, PublishError};
 use libp2p::swarm::SwarmEvent;
-use libp2p::{gossipsub, mdns};
+use libp2p::{gossipsub, mdns, Multiaddr};
 use networking::discovery;
 use networking::swarm::create_swarm;
 use pyo3::prelude::{PyModule, PyModuleMethods as _};
@@ -145,6 +145,10 @@ enum ToTask {
         data: Vec<u8>,
         result_tx: oneshot::Sender<PyResult<MessageId>>,
     },
+    DialMultiaddr {
+        addr: String,
+        result_tx: oneshot::Sender<PyResult<bool>>,
+    },
 }
 
 #[allow(clippy::enum_glob_use)]
@@ -209,6 +213,18 @@ async fn networking_task(
                         // send response oneshot (or exit if connection closed)
                         if let Err(e) = result_tx.send(pyresult) {
                             log::error!("RUST: could not publish gossipsub message since channel already closed: {e:?}");
+                            continue;
+                        }
+                    }
+                    DialMultiaddr { addr, result_tx } => {
+                        // attempt to parse and dial multiaddr, returning success boolean
+                        let result = addr
+                            .parse::<Multiaddr>()
+                            .map_err(PyErr::from)
+                            .and_then(|addr| swarm.dial(addr).map(|_| true).pyerr());
+
+                        if let Err(e) = result_tx.send(result) {
+                            log::error!("RUST: could not dial since channel already closed: {e:?}");
                             continue;
                         }
                     }
@@ -502,6 +518,22 @@ impl PyNetworkingHandle {
             .await
             .map_err(|_| PyErr::receiver_channel_closed())??;
         Ok(())
+    }
+
+    /// Dial a peer by multiaddr.
+    ///
+    /// Returns `True` on successful dial initiation.
+    async fn dial_multiaddr(&self, addr: String) -> PyResult<bool> {
+        let (tx, rx) = oneshot::channel();
+
+        self.to_task_tx()
+            .send_py(ToTask::DialMultiaddr { addr, result_tx: tx })
+            .allow_threads_py()
+            .await?;
+
+        rx.allow_threads_py()
+            .await
+            .map_err(|_| PyErr::receiver_channel_closed())?
     }
 
     // ---- Gossipsub message receiver methods ----

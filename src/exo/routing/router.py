@@ -9,7 +9,7 @@ from itertools import count
 from math import inf
 from os import PathLike
 from pathlib import Path
-from typing import cast
+from typing import Iterable, cast
 
 from anyio import (
     BrokenResourceError,
@@ -226,6 +226,25 @@ class Router:
         router.senders.add(cast(Sender[CamelCaseModel], send))
 
         return recv
+
+    async def connect_seeds(self, seeds: Iterable[str]) -> None:
+        """Dial seed peers to bootstrap beyond mDNS."""
+        for seed in seeds:
+            addr = self._to_multiaddr(seed)
+            try:
+                await self._net.dial_multiaddr(addr)
+            except Exception as exc:  # pragma: no cover - networking failures surface at runtime
+                logger.warning(f"Failed to dial seed {seed} as {addr}: {exc}")
+
+    @staticmethod
+    def _to_multiaddr(seed: str) -> str:
+        """Convert host:port or multiaddr string to multiaddr."""
+        if seed.strip().startswith("/"):
+            return seed
+        if ":" not in seed:
+            raise ValueError(f"Seed must be host:port or multiaddr, got '{seed}'")
+        host, port = seed.rsplit(":", 1)
+        return f"/ip4/{host}/tcp/{port}"
 
     async def run(self):
         logger.debug("Starting Router")

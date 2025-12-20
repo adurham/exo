@@ -161,6 +161,7 @@ class NetworkingHandle:
         
         If no peers are found that subscribe to this topic, throws `NoPeersSubscribedToTopicError` exception.
         """
+    async def dial_multiaddr(self, addr: builtins.str) -> builtins.bool: ...
     async def gossipsub_recv(self) -> tuple[builtins.str, bytes]:
         r"""
         Receives the next message from the `GossipSub` network.

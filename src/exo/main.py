@@ -99,6 +99,8 @@ class Node:
         await router.register_topic(topics.COMMANDS)
         await router.register_topic(topics.ELECTION_MESSAGES)
         await router.register_topic(topics.CONNECTION_MESSAGES)
+        if args.seeds:
+            await router.connect_seeds(args.seeds)
 
         logger.info(f"Starting node {node_id}")
         if args.spawn_api:
