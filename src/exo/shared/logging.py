@@ -1,3 +1,9 @@
+"""Logging configuration and utilities.
+
+This module provides logging setup that integrates loguru with Python's standard
+logging library and Hypercorn's logging system.
+"""
+
 import logging
 import sys
 from pathlib import Path
@@ -8,17 +14,31 @@ from loguru import logger
 
 
 class InterceptLogger(HypercornLogger):
+    """Logger that intercepts Hypercorn logs and routes them to loguru.
+
+    Replaces Hypercorn's default logging handlers with loguru handlers.
+    """
+
     def __init__(self, config: Config):
+        """Initialize the intercept logger.
+
+        Args:
+            config: Hypercorn configuration.
+        """
         super().__init__(config)
         assert self.error_logger
-        # TODO: Decide if we want to provide access logs
-        # assert self.access_logger
-        # self.access_logger.handlers = [_InterceptHandler()]
         self.error_logger.handlers = [_InterceptHandler()]
 
 
 class _InterceptHandler(logging.Handler):
-    def emit(self, record: logging.LogRecord):
+    """Handler that routes standard library logs to loguru."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record to loguru.
+
+        Args:
+            record: Log record to emit.
+        """
         try:
             level = logger.level(record.levelname).name
         except ValueError:
@@ -27,8 +47,19 @@ class _InterceptHandler(logging.Handler):
         logger.opt(depth=3, exception=record.exc_info).log(level, record.getMessage())
 
 
-def logger_setup(log_file: Path | None, verbosity: int = 0):
-    """Set up logging for this process - formatting, file handles, verbosity and output"""
+def logger_setup(log_file: Path | None, verbosity: int = 0) -> None:
+    """Set up logging for this process.
+
+    Configures loguru with appropriate formatting, file handles, verbosity,
+    and output destinations. Replaces all existing loguru handlers and sets up
+    interception of standard library logging.
+
+    Args:
+        log_file: Optional path to log file. If provided, logs are written
+            to this file with rotation (weekly). If None, no file logging.
+        verbosity: Verbosity level. 0 = INFO, >0 = DEBUG. Negative values
+            may reduce verbosity further.
+    """
     logger.remove()
 
     # replace all stdlib loggers with _InterceptHandlers that log to loguru
@@ -61,8 +92,12 @@ def logger_setup(log_file: Path | None, verbosity: int = 0):
         )
 
 
-def logger_cleanup():
-    """Flush all queues before shutting down so any in-flight logs are written to disk"""
+def logger_cleanup() -> None:
+    """Flush all log queues before shutdown.
+
+    Ensures all in-flight logs are written to disk before the process exits.
+    Should be called during graceful shutdown.
+    """
     logger.complete()
 
 

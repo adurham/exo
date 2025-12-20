@@ -56,12 +56,85 @@ from exo.utils.channels import Receiver, Sender, channel
 from exo.utils.dashboard_path import find_dashboard
 from exo.utils.event_buffer import OrderedBuffer
 
+"""REST API server for EXO cluster.
+
+This module provides the FastAPI-based REST API for interacting with the
+EXO cluster, including chat completions, instance management, and state queries.
+"""
+
+import time
+from collections.abc import AsyncGenerator
+from typing import cast
+
+import anyio
+from anyio import create_task_group
+from anyio.abc import TaskGroup
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from hypercorn.asyncio import serve  # pyright: ignore[reportUnknownVariableType]
+from hypercorn.config import Config
+from hypercorn.typing import ASGIFramework
+from loguru import logger
+
+from exo.master.placement import place_instance as get_instance_placements
+from exo.shared.apply import apply
+from exo.shared.election import ElectionMessage
+from exo.shared.logging import InterceptLogger
+from exo.shared.models.model_cards import MODEL_CARDS
+from exo.shared.models.model_meta import get_model_meta
+from exo.shared.types.api import (
+    ChatCompletionMessage,
+    ChatCompletionResponse,
+    CreateInstanceParams,
+    CreateInstanceResponse,
+    DeleteInstanceResponse,
+    ModelList,
+    ModelListModel,
+    PlaceInstanceParams,
+    PlacementPreview,
+    PlacementPreviewResponse,
+    StreamingChoiceResponse,
+)
+from exo.shared.types.chunks import TokenChunk
+from exo.shared.types.commands import (
+    ChatCompletion,
+    Command,
+    CreateInstance,
+    DeleteInstance,
+    ForwarderCommand,
+    PlaceInstance,
+    TaskFinished,
+)
+from exo.shared.types.common import CommandId, NodeId, SessionId
+from exo.shared.types.events import ChunkGenerated, Event, ForwarderEvent, IndexedEvent
+from exo.shared.types.memory import Memory
+from exo.shared.types.models import ModelId, ModelMetadata
+from exo.shared.types.state import State
+from exo.shared.types.tasks import ChatCompletionTaskParams
+from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
+from exo.shared.types.worker.shards import Sharding
+from exo.utils.banner import print_startup_banner
+from exo.utils.channels import Receiver, Sender, channel
+from exo.utils.dashboard_path import find_dashboard
+from exo.utils.event_buffer import OrderedBuffer
+
 HIDE_THINKING = False
 
 
 def chunk_to_response(
     chunk: TokenChunk, command_id: CommandId
 ) -> ChatCompletionResponse:
+    """Convert a token chunk to a chat completion response.
+
+    Args:
+        chunk: Token chunk from generation.
+        command_id: Command ID for this completion.
+
+    Returns:
+        ChatCompletionResponse formatted for streaming.
+    """
     return ChatCompletionResponse(
         id=command_id,
         created=int(time.time()),
@@ -77,6 +150,16 @@ def chunk_to_response(
 
 
 async def resolve_model_meta(model_id: str) -> ModelMetadata:
+    """Resolve model metadata from model ID.
+
+    Checks model cards first, then falls back to fetching from Hugging Face.
+
+    Args:
+        model_id: Model identifier.
+
+    Returns:
+        ModelMetadata for the model.
+    """
     if model_id in MODEL_CARDS:
         model_card = MODEL_CARDS[model_id]
         return model_card.metadata
@@ -85,26 +168,58 @@ async def resolve_model_meta(model_id: str) -> ModelMetadata:
 
 
 class API:
+    """REST API server for EXO cluster interactions.
+
+    Provides HTTP endpoints for:
+    - Chat completions (OpenAI-compatible)
+    - Instance management (create, delete, placement)
+    - Model listing
+    - State queries
+    - Dashboard static files
+
+    Maintains local state by applying events from the master, and can pause
+    during elections to avoid serving stale state.
+
+    Attributes:
+        state: Local cluster state (derived from events).
+        node_id: Node ID of this node.
+        session_id: Current session ID.
+        port: Port number for the HTTP server.
+        paused: Whether the API is currently paused (during elections).
+        app: FastAPI application instance.
+        _event_log: Local event log for debugging/querying.
+        _chat_completion_queues: Queues for streaming chat completions.
+        _tg: Task group for background operations.
+    """
+
     def __init__(
         self,
         node_id: NodeId,
         session_id: SessionId,
         *,
         port: int,
-        # Ideally this would be a MasterForwarderEvent but type system says no :(
         global_event_receiver: Receiver[ForwarderEvent],
         command_sender: Sender[ForwarderCommand],
-        # This lets us pause the API if an election is running
         election_receiver: Receiver[ElectionMessage],
     ) -> None:
+        """Initialize the API server.
+
+        Args:
+            node_id: Node ID of this node.
+            session_id: Initial session ID.
+            port: Port number to bind the HTTP server to.
+            global_event_receiver: Channel to receive indexed events from master.
+            command_sender: Channel to send commands to master.
+            election_receiver: Channel to receive election messages (for pausing).
+        """
         self.state = State()
         self._event_log: list[Event] = []
         self.command_sender = command_sender
         self.global_event_receiver = global_event_receiver
         self.election_receiver = election_receiver
         self.event_buffer: OrderedBuffer[Event] = OrderedBuffer[Event]()
-        self.node_id: NodeId = node_id
-        self.session_id: SessionId = session_id
+        self.node_id = node_id
+        self.session_id = session_id
         self.last_completed_election: int = 0
         self.port = port
 
@@ -127,7 +242,16 @@ class API:
         self._chat_completion_queues: dict[CommandId, Sender[TokenChunk]] = {}
         self._tg: TaskGroup | None = None
 
-    def reset(self, new_session_id: SessionId, result_clock: int):
+    def reset(self, new_session_id: SessionId, result_clock: int) -> None:
+        """Reset API state for a new session.
+
+        Clears state, event log, and chat queues, then unpauses with the
+        new session ID. Called when a new master is elected.
+
+        Args:
+            new_session_id: New session ID.
+            result_clock: Election clock value.
+        """
         logger.info("Resetting API State")
         self.state = State()
         self.session_id = new_session_id
@@ -135,7 +259,12 @@ class API:
         self._chat_completion_queues = {}
         self.unpause(result_clock)
 
-    def unpause(self, result_clock: int):
+    def unpause(self, result_clock: int) -> None:
+        """Unpause the API after an election completes.
+
+        Args:
+            result_clock: Election clock value for the completed election.
+        """
         logger.info("Unpausing API")
         self.last_completed_election = result_clock
         self.paused = False
@@ -143,6 +272,7 @@ class API:
         self.paused_ev = anyio.Event()
 
     def _setup_cors(self) -> None:
+        """Configure CORS middleware to allow all origins."""
         self.app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
@@ -152,6 +282,21 @@ class API:
         )
 
     def _setup_routes(self) -> None:
+        """Register all API endpoints with FastAPI.
+
+        Sets up routes for:
+        - GET /node_id: Get this node's ID
+        - POST /instance: Create instance with explicit config
+        - POST /place_instance: Place instance with automatic placement
+        - GET /instance/placement: Get placement preview
+        - GET /instance/previews: Get placement previews for all configs
+        - GET /instance/{instance_id}: Get instance details
+        - DELETE /instance/{instance_id}: Delete instance
+        - GET /models, /v1/models: List available models
+        - POST /v1/chat/completions: Generate chat completion
+        - GET /state: Get cluster state
+        - GET /events: Get event log
+        """
         self.app.get("/node_id")(lambda: self.node_id)
         self.app.post("/instance")(self.create_instance)
         self.app.post("/place_instance")(self.place_instance)
@@ -165,7 +310,15 @@ class API:
         self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(lambda: self._event_log)
 
-    async def place_instance(self, payload: PlaceInstanceParams):
+    async def place_instance(self, payload: PlaceInstanceParams) -> CreateInstanceResponse:
+        """Place an instance with automatic placement calculation.
+
+        Args:
+            payload: Placement parameters including model ID, sharding, etc.
+
+        Returns:
+            Response with command ID for tracking.
+        """
         command = PlaceInstance(
             model_meta=await resolve_model_meta(payload.model_id),
             sharding=payload.sharding,
@@ -182,6 +335,14 @@ class API:
     async def create_instance(
         self, payload: CreateInstanceParams
     ) -> CreateInstanceResponse:
+        """Create an instance with explicit configuration.
+
+        Args:
+            payload: Instance configuration to create.
+
+        Returns:
+            Response with command ID for tracking.
+        """
         command = CreateInstance(instance=payload.instance)
         await self._send(command)
 
@@ -197,6 +358,23 @@ class API:
         instance_meta: InstanceMeta = InstanceMeta.MlxRing,
         min_nodes: int = 1,
     ) -> Instance:
+        """Get placement preview for a model without creating the instance.
+
+        Calculates where an instance would be placed but doesn't actually
+        create it. Useful for previewing placement decisions.
+
+        Args:
+            model_id: Model identifier.
+            sharding: Sharding strategy to use.
+            instance_meta: Instance metadata/type.
+            min_nodes: Minimum nodes required.
+
+        Returns:
+            Instance configuration that would be created.
+
+        Raises:
+            HTTPException: If placement fails or produces unexpected results.
+        """
         model_meta = await resolve_model_meta(model_id)
 
         try:
@@ -228,6 +406,25 @@ class API:
     async def get_placement_previews(
         self, model_id: ModelId
     ) -> PlacementPreviewResponse:
+        """Get placement previews for all sharding/instance combinations.
+
+        Calculates placements for a model across all combinations of:
+        - Sharding strategies (Pipeline, Tensor)
+        - Instance types (MlxRing, MlxJaccl)
+        - Minimum node counts (1 to number of nodes)
+
+        Returns previews showing where each configuration would be placed,
+        including memory deltas per node and any placement errors.
+
+        Args:
+            model_id: Model identifier to get previews for.
+
+        Returns:
+            PlacementPreviewResponse with all placement previews.
+
+        Raises:
+            HTTPException: If model not found (404) or no nodes in topology.
+        """
         seen: set[tuple[ModelId, Sharding, InstanceMeta, int]] = set()
         previews: list[PlacementPreview] = []
         if len(list(self.state.topology.list_nodes())) == 0:
@@ -334,11 +531,33 @@ class API:
         return PlacementPreviewResponse(previews=previews)
 
     def get_instance(self, instance_id: InstanceId) -> Instance:
+        """Get instance details by ID.
+
+        Args:
+            instance_id: Instance identifier.
+
+        Returns:
+            Instance configuration.
+
+        Raises:
+            HTTPException: If instance not found (404).
+        """
         if instance_id not in self.state.instances:
             raise HTTPException(status_code=404, detail="Instance not found")
         return self.state.instances[instance_id]
 
     async def delete_instance(self, instance_id: InstanceId) -> DeleteInstanceResponse:
+        """Delete an instance.
+
+        Args:
+            instance_id: Instance identifier to delete.
+
+        Returns:
+            Response with command ID for tracking.
+
+        Raises:
+            HTTPException: If instance not found (404).
+        """
         if instance_id not in self.state.instances:
             raise HTTPException(status_code=404, detail="Instance not found")
 
@@ -355,8 +574,20 @@ class API:
     async def _generate_chat_stream(
         self, command_id: CommandId
     ) -> AsyncGenerator[str, None]:
-        """Generate chat completion stream as JSON strings."""
+        """Generate chat completion stream as Server-Sent Events (SSE).
 
+        Receives token chunks from the worker and formats them as SSE messages.
+        Handles thinking/reasoning tokens if HIDE_THINKING is enabled.
+
+        Args:
+            command_id: Command ID for this completion.
+
+        Yields:
+            SSE-formatted JSON strings (data: {...}\n\n).
+
+        Note:
+            Sends TaskFinished command when stream completes or is cancelled.
+        """
         try:
             self._chat_completion_queues[command_id], recv = channel[TokenChunk]()
 
@@ -380,12 +611,6 @@ class API:
                         break
 
         except anyio.get_cancelled_exc_class():
-            # TODO: TaskCancelled
-            """
-            self.command_sender.send_nowait(
-                ForwarderCommand(origin=self.node_id, command=command)
-            )
-            """
             raise
         finally:
             command = TaskFinished(finished_command_id=command_id)
@@ -393,6 +618,14 @@ class API:
             del self._chat_completion_queues[command_id]
 
     async def _trigger_notify_user_to_download_model(self, model_id: str) -> None:
+        """Trigger notification to user about missing model.
+
+        Args:
+            model_id: Model ID that is not available.
+
+        Note:
+            Currently just logs a warning. TODO: Implement actual notification.
+        """
         logger.warning(
             "TODO: we should send a notification to the user to download the model"
         )
@@ -400,7 +633,20 @@ class API:
     async def chat_completions(
         self, payload: ChatCompletionTaskParams
     ) -> StreamingResponse:
-        """Handle chat completions with proper streaming response."""
+        """Handle chat completion request (OpenAI-compatible endpoint).
+
+        Validates that an instance exists for the requested model, sends
+        a ChatCompletion command, and returns a streaming SSE response.
+
+        Args:
+            payload: Chat completion parameters (messages, temperature, etc.).
+
+        Returns:
+            StreamingResponse with Server-Sent Events containing token chunks.
+
+        Raises:
+            HTTPException: If no instance exists for the requested model (404).
+        """
         model_meta = await resolve_model_meta(payload.model)
         payload.model = model_meta.model_id
 
@@ -423,7 +669,13 @@ class API:
         )
 
     def _calculate_total_available_memory(self) -> Memory:
-        """Calculate total available memory across all nodes in bytes."""
+        """Calculate total available memory across all nodes.
+
+        Sums up RAM available from all nodes in the topology.
+
+        Returns:
+            Total available memory as a Memory object.
+        """
         total_available = Memory()
 
         for node in self.state.topology.list_nodes():
@@ -433,7 +685,11 @@ class API:
         return total_available
 
     async def get_models(self) -> ModelList:
-        """Returns list of available models."""
+        """Get list of available models.
+
+        Returns:
+            ModelList containing all models from model cards.
+        """
         return ModelList(
             data=[
                 ModelListModel(
@@ -447,10 +703,14 @@ class API:
             ]
         )
 
-    async def run(self):
+    async def run(self) -> None:
+        """Run the API server.
+
+        Starts background tasks for state application and election monitoring,
+        then starts the Hypercorn HTTP server. Blocks until shutdown.
+        """
         cfg = Config()
         cfg.bind = f"0.0.0.0:{self.port}"
-        # nb: shared.logging needs updating if any of this changes
         cfg.accesslog = None
         cfg.errorlog = "-"
         cfg.logger_class = InterceptLogger
@@ -470,7 +730,13 @@ class API:
         self.command_sender.close()
         self.global_event_receiver.close()
 
-    async def _applystate(self):
+    async def _applystate(self) -> None:
+        """Apply indexed events to local state.
+
+        Receives indexed events from the master, orders them using OrderedBuffer,
+        and applies them to the local state. Also routes ChunkGenerated events
+        to chat completion queues for streaming responses.
+        """
         with self.global_event_receiver as events:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
@@ -488,13 +754,26 @@ class API:
                             event.chunk
                         )
 
-    async def _pause_on_new_election(self):
+    async def _pause_on_new_election(self) -> None:
+        """Monitor election messages and pause API during new elections.
+
+        Pauses the API when a new election starts (clock > last_completed_election)
+        to avoid serving stale state during master transitions.
+        """
         with self.election_receiver as ems:
             async for message in ems:
                 if message.clock > self.last_completed_election:
                     self.paused = True
 
-    async def _send(self, command: Command):
+    async def _send(self, command: Command) -> None:
+        """Send a command to the master, waiting if API is paused.
+
+        Blocks until the API is unpaused (after election completes), then
+        sends the command wrapped in a ForwarderCommand.
+
+        Args:
+            command: Command to send to the master.
+        """
         while self.paused:
             await self.paused_ev.wait()
         await self.command_sender.send(

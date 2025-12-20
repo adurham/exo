@@ -1,3 +1,9 @@
+"""Message routing infrastructure for libp2p-based communication.
+
+This module provides the Router and TopicRouter classes for routing messages
+across libp2p topics to local receivers and the network.
+"""
+
 from copy import copy
 from itertools import count
 from math import inf
@@ -29,17 +35,39 @@ from .connection_message import ConnectionMessage
 from .topics import CONNECTION_MESSAGES, PublishPolicy, TypedTopic
 
 
-# A significant current limitation of the TopicRouter is that it is not capable
-# of preventing feedback, as it does not ask for a system id so cannot tell
-# which message is coming/going to which system.
-# This is currently only relevant for Election
 class TopicRouter[T: CamelCaseModel]:
+    """Router for messages on a specific topic.
+
+    Routes messages between local senders/receivers and the libp2p network.
+    Supports different publish policies (Never, Minimal, Always) to control
+    when messages are sent to the network.
+
+    Note:
+        Current limitation: TopicRouter cannot prevent feedback loops as it
+        doesn't track system IDs to identify message origin. This is only
+        relevant for Election messages.
+
+    Attributes:
+        topic: Typed topic this router handles.
+        senders: Set of local senders subscribed to this topic.
+        receiver: Receiver for incoming messages from the network.
+        _sender: Internal sender for routing messages locally.
+        networking_sender: Sender for publishing messages to the network.
+    """
+
     def __init__(
         self,
         topic: TypedTopic[T],
         networking_sender: Sender[tuple[str, bytes]],
         max_buffer_size: float = inf,
     ):
+        """Initialize a topic router.
+
+        Args:
+            topic: Typed topic configuration.
+            networking_sender: Channel for sending to network layer.
+            max_buffer_size: Maximum buffer size (currently unused).
+        """
         self.topic: TypedTopic[T] = topic
         self.senders: set[Sender[T]] = set()
         send, recv = channel[T]()
@@ -47,11 +75,17 @@ class TopicRouter[T: CamelCaseModel]:
         self._sender: Sender[T] = send
         self.networking_sender: Sender[tuple[str, bytes]] = networking_sender
 
-    async def run(self):
+    async def run(self) -> None:
+        """Run the topic router's message routing loop.
+
+        Receives messages and routes them according to the topic's publish policy:
+        - Minimal: Only publish to network if no local receivers
+        - Always: Always publish to network
+        - Never: Never publish to network (local only)
+        """
         logger.debug(f"Topic Router {self.topic} ready to send")
         with self.receiver as items:
             async for item in items:
-                # Check if we should send to network
                 if (
                     len(self.senders) == 0
                     and self.topic.publish_policy is PublishPolicy.Minimal
@@ -60,22 +94,28 @@ class TopicRouter[T: CamelCaseModel]:
                     continue
                 if self.topic.publish_policy is PublishPolicy.Always:
                     await self._send_out(item)
-                # Then publish to all senders
                 await self.publish(item)
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
+        """Shutdown the topic router and close all channels."""
         logger.debug(f"Shutting down Topic Router {self.topic}")
-        # Close all the things!
         for sender in self.senders:
             sender.close()
         self._sender.close()
         self.receiver.close()
 
-    async def publish(self, item: T):
-        """
-        Publish item T on this topic to all senders.
-        NB: this sends to ALL receivers, potentially including receivers held by the object doing the sending.
-        You should handle your own output if you hold a sender + receiver pair.
+    async def publish(self, item: T) -> None:
+        """Publish an item to all local receivers.
+
+        Sends the item to all subscribed senders. Automatically removes
+        closed/broken senders from the set.
+
+        Args:
+            item: Message to publish.
+
+        Note:
+            This sends to ALL receivers, including those held by the sender.
+            Handle your own output filtering if you hold both sender and receiver.
         """
         to_clear: set[Sender[T]] = set()
         for sender in copy(self.senders):
@@ -85,13 +125,30 @@ class TopicRouter[T: CamelCaseModel]:
                 to_clear.add(sender)
         self.senders -= to_clear
 
-    async def publish_bytes(self, data: bytes):
+    async def publish_bytes(self, data: bytes) -> None:
+        """Publish a message from bytes.
+
+        Deserializes the bytes and publishes the resulting message.
+
+        Args:
+            data: Serialized message bytes.
+        """
         await self.publish(self.topic.deserialize(data))
 
     def new_sender(self) -> Sender[T]:
+        """Create a new sender for this topic.
+
+        Returns:
+            Cloned sender for this topic.
+        """
         return self._sender.clone()
 
-    async def _send_out(self, item: T):
+    async def _send_out(self, item: T) -> None:
+        """Send a message to the network layer.
+
+        Args:
+            item: Message to send.
+        """
         logger.trace(f"TopicRouter {self.topic.topic} sending {item}")
         await self.networking_sender.send(
             (str(self.topic.topic), self.topic.serialize(item))
@@ -99,11 +156,37 @@ class TopicRouter[T: CamelCaseModel]:
 
 
 class Router:
+    """Main router managing all topic routers and libp2p networking.
+
+    Coordinates multiple TopicRouter instances and handles libp2p networking
+    operations (subscribe, unsubscribe, send, receive). Provides typed
+    senders and receivers for each registered topic.
+
+    Attributes:
+        topic_routers: Mapping of topic names to TopicRouter instances.
+        networking_receiver: Receiver for messages from libp2p network.
+        _net: Libp2p networking handle.
+        _tg: Task group for background operations.
+    """
+
     @classmethod
     def create(cls, identity: Keypair) -> "Router":
+        """Create a new router with the given identity.
+
+        Args:
+            identity: Libp2p keypair for node identity.
+
+        Returns:
+            New Router instance.
+        """
         return cls(handle=NetworkingHandle(identity))
 
     def __init__(self, handle: NetworkingHandle):
+        """Initialize router with networking handle.
+
+        Args:
+            handle: Libp2p networking handle.
+        """
         self.topic_routers: dict[str, TopicRouter[CamelCaseModel]] = {}
         send, recv = channel[tuple[str, bytes]]()
         self.networking_receiver: Receiver[tuple[str, bytes]] = recv
@@ -197,14 +280,18 @@ class Router:
                 router = cast(TopicRouter[ConnectionMessage], router)
                 await router.publish(message)
 
-    async def _networking_publish(self):
+    async def _networking_publish(self) -> None:
+        """Publish messages from networking_receiver to libp2p network.
+
+        Receives messages from topic routers and publishes them to the
+        libp2p gossipsub network. Silently handles errors when no peers
+        are subscribed or queues are full.
+        """
         with self.networking_receiver as networked_items:
             async for topic, data in networked_items:
                 try:
                     logger.trace(f"Sending message on {topic} with payload {data}")
                     await self._net.gossipsub_publish(topic, data)
-                # As a hack, this also catches AllQueuesFull
-                # Need to fix that ASAP.
                 except (NoPeersSubscribedToTopicError, AllQueuesFullError):
                     pass
 
@@ -212,12 +299,30 @@ class Router:
 def get_node_id_keypair(
     path: str | bytes | PathLike[str] | PathLike[bytes] = EXO_NODE_ID_KEYPAIR,
 ) -> Keypair:
-    """
-    Obtains the :class:`Keypair` associated with this node-ID.
-    Obtain the :class:`PeerId` by from it.
+    """Obtain the libp2p keypair for this node's identity.
+
+    Loads or generates a keypair from the specified path. Uses file locking
+    to prevent race conditions when generating the keypair across processes.
+
+    Args:
+        path: Path to the keypair file (defaults to EXO_NODE_ID_KEYPAIR).
+
+    Returns:
+        Libp2p keypair for this node. Can be used to obtain PeerId.
+
+    Note:
+        Uses file locking to ensure atomic keypair generation if it doesn't exist.
     """
 
     def lock_path(path: str | bytes | PathLike[str] | PathLike[bytes]) -> Path:
+        """Get lock file path for a given file path.
+
+        Args:
+            path: Original file path.
+
+        Returns:
+            Lock file path (original path + ".lock").
+        """
         return Path(str(path) + ".lock")
 
     # operate with cross-process lock to avoid race conditions

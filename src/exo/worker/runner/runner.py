@@ -1,3 +1,9 @@
+"""Main runner process for executing model inference tasks.
+
+This module provides the main runner function that runs in a separate process,
+managing the model lifecycle and processing inference tasks.
+"""
+
 import time
 
 from exo.shared.types.api import ChatCompletionMessageText
@@ -45,7 +51,17 @@ def main(
     bound_instance: BoundInstance,
     event_sender: MpSender[Event],
     task_receiver: MpReceiver[Task],
-):
+) -> None:
+    """Main entry point for runner process.
+
+    Manages the runner lifecycle, processing tasks and maintaining state.
+    Handles LoadModel, StartWarmup, ChatCompletion, and Shutdown tasks.
+
+    Args:
+        bound_instance: Instance this runner handles.
+        event_sender: Multiprocessing sender for events.
+        task_receiver: Multiprocessing receiver for tasks.
+    """
     instance, runner_id, shard_metadata = (
         bound_instance.instance,
         bound_instance.bound_runner_id,

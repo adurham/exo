@@ -1,3 +1,9 @@
+"""MLX engine utility functions.
+
+This module provides utilities for MLX model initialization, distributed setup,
+KV cache creation, chat template application, and other MLX-specific operations.
+"""
+
 import json
 import os
 import resource
@@ -48,13 +54,22 @@ from exo.worker.engines.mlx.auto_parallel import (
 )
 from exo.worker.runner.bootstrap import logger
 
-# Needed for 8 bit model
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, 4096))
+"""Increase file descriptor limit for 8-bit models."""
 
 
-# TODO: Test this
-#  ALSO https://github.com/exo-explore/exo/pull/233#discussion_r2549683673
 def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
+    """Calculate the weight size for a model shard.
+
+    For pipeline parallelism, returns size proportional to layer count.
+    For tensor parallelism, divides total size by world_size.
+
+    Args:
+        model_shard_meta: Shard metadata.
+
+    Returns:
+        Memory size of weights for this shard.
+    """
     return Memory.from_float_kb(
         (model_shard_meta.end_layer - model_shard_meta.start_layer)
         / model_shard_meta.n_layers
@@ -67,7 +82,12 @@ def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
     )
 
 
-def mx_barrier(group: mx.distributed.Group | None = None):
+def mx_barrier(group: mx.distributed.Group | None = None) -> None:
+    """Synchronize all processes in a distributed group.
+
+    Args:
+        group: Distributed group to synchronize (None for no-op).
+    """
     mx.eval(
         mx.distributed.all_sum(
             mx.array(1.0),
@@ -77,7 +97,16 @@ def mx_barrier(group: mx.distributed.Group | None = None):
     )
 
 
-def broadcast_from_zero(value: int, group: mx.distributed.Group | None = None):
+def broadcast_from_zero(value: int, group: mx.distributed.Group | None = None) -> int:
+    """Broadcast a value from rank 0 to all ranks in a group.
+
+    Args:
+        value: Value to broadcast (used by rank 0).
+        group: Distributed group (None returns value unchanged).
+
+    Returns:
+        The value from rank 0 on all ranks.
+    """
     if group is None:
         return value
 
@@ -92,22 +121,35 @@ def broadcast_from_zero(value: int, group: mx.distributed.Group | None = None):
 
 
 class HostList(RootModel[list[str]]):
+    """Pydantic model for list of host strings."""
+
     @classmethod
     def from_hosts(cls, hosts: list[Host]) -> "HostList":
+        """Create HostList from list of Host objects.
+
+        Args:
+            hosts: List of Host objects.
+
+        Returns:
+            HostList with string representations.
+        """
         return cls(root=[str(host) for host in hosts])
 
 
 def mlx_distributed_init(
     bound_instance: BoundInstance,
 ) -> mx.distributed.Group:
-    """
-    Initialize the MLX distributed (runs in thread pool).
+    """Initialize MLX distributed computing.
 
-    Either hosts or mlx_ibv_devices must be provided:
-    - hosts: traditional host-based connectivity using MLX_HOSTFILE
-    - mlx_ibv_devices: RDMA connectivity matrix using MLX_IBV_DEVICES
-    - mlx_ibv_coordinator: coordinator address (IP:PORT) for RDMA setup
-    - strict: if True, raise an error if the distributed backend is not available
+    Sets up distributed MLX based on instance type:
+    - MlxRingInstance: Uses ring backend with hostfile
+    - MlxJacclInstance: Uses jaccl backend with RDMA devices and coordinator
+
+    Args:
+        bound_instance: Instance configuration.
+
+    Returns:
+        Initialized distributed group.
     """
     rank = bound_instance.bound_shard.device_rank
     logger.info(f"Starting initialization for rank {rank}")

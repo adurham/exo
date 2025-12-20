@@ -1,3 +1,9 @@
+"""Performance profiling utilities for worker nodes.
+
+This module provides functions for collecting and polling performance metrics,
+including CPU, GPU, memory, and system information.
+"""
+
 import asyncio
 import os
 import platform
@@ -28,14 +34,25 @@ from .system_info import (
 
 
 async def get_metrics_async() -> Metrics | None:
-    """Return detailed Metrics on macOS or a minimal fallback elsewhere."""
+    """Get detailed system metrics.
 
+    Returns detailed metrics on macOS, or None on other platforms.
+
+    Returns:
+        Metrics object on macOS, None otherwise.
+    """
     if platform.system().lower() == "darwin":
         return await macmon_get_metrics_async()
+    return None
 
 
 def get_memory_profile() -> MemoryPerformanceProfile:
-    """Construct a MemoryPerformanceProfile using psutil"""
+    """Get memory performance profile using psutil.
+
+    Returns:
+        MemoryPerformanceProfile with current memory usage.
+        Can be overridden via OVERRIDE_MEMORY_MB environment variable.
+    """
     override_memory_env = os.getenv("OVERRIDE_MEMORY_MB")
     override_memory: int | None = (
         Memory.from_mb(int(override_memory_env)).in_bytes
@@ -69,7 +86,15 @@ async def start_polling_memory_metrics(
 
 async def start_polling_node_metrics(
     callback: Callable[[NodePerformanceProfile], Coroutine[Any, Any, None]],
-):
+) -> None:
+    """Continuously poll and emit comprehensive node performance metrics.
+
+    Polls system metrics, network interfaces, model/chip info, and memory
+    at 1 second intervals, calling the callback with NodePerformanceProfile.
+
+    Args:
+        callback: Coroutine called with a fresh NodePerformanceProfile each tick.
+    """
     poll_interval_s = 1.0
     while True:
         try:

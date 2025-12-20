@@ -16,11 +16,25 @@ from exo.utils.pydantic_ext import CamelCaseModel
 
 
 class State(CamelCaseModel):
-    """Global system state.
+    """Global cluster state managed through event sourcing.
 
-    The :class:`Topology` instance is encoded/decoded via an immutable
-    :class:`~shared.topology.TopologySnapshot` to ensure compatibility with
-    standard JSON serialisation.
+    Represents the complete state of the EXO cluster, including all instances,
+    tasks, runners, downloads, topology, and node information. State is updated
+    by applying events in order using the functions in exo.shared.apply.
+
+    The Topology instance is encoded/decoded via an immutable TopologySnapshot
+    to ensure compatibility with standard JSON serialisation.
+
+    Attributes:
+        instances: Mapping of instance IDs to model instances.
+        runners: Mapping of runner IDs to runner statuses.
+        downloads: Mapping of node IDs to sequences of download progress updates.
+        tasks: Mapping of task IDs to tasks.
+        node_profiles: Mapping of node IDs to performance profiles.
+        last_seen: Mapping of node IDs to last seen timestamps.
+        topology: Graph representation of the cluster topology.
+        last_event_applied_idx: Index of the last event applied to this state.
+            Used to ensure events are applied in order. Initial value is -1.
     """
 
     model_config = ConfigDict(

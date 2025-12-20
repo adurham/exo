@@ -1,3 +1,10 @@
+"""Master component for coordinating cluster state.
+
+The Master is responsible for managing cluster state through event sourcing,
+processing commands, and coordinating instance placement. Only one master
+exists per cluster session (determined by election).
+"""
+
 from datetime import datetime, timedelta, timezone
 
 import anyio
@@ -45,19 +52,47 @@ from exo.utils.event_buffer import MultiSourceBuffer
 
 
 class Master:
+    """Master component that coordinates cluster state and commands.
+
+    The Master manages cluster state through event sourcing, processes commands
+    from the API, coordinates instance placement, and maintains the authoritative
+    event log. Events from workers are collected, ordered, indexed, and then
+    broadcast back to all nodes.
+
+    Attributes:
+        state: Current cluster state (derived from events).
+        node_id: Node ID of this master node.
+        session_id: Session ID for the current cluster session.
+        command_task_mapping: Mapping from command IDs to task IDs for tracking.
+        command_receiver: Channel to receive commands.
+        local_event_receiver: Channel to receive events from workers.
+        global_event_sender: Channel to send indexed events to all nodes.
+        event_sender: Channel for internal event routing.
+        _event_log: List of all events (for event log requests).
+        _multi_buffer: Buffer for ordering events from multiple sources.
+        _loopback_event_receiver: Receiver for loopback events (master's own events).
+        _loopback_event_sender: Sender for loopback events.
+        _tg: Task group for managing concurrent operations.
+    """
+
     def __init__(
         self,
         node_id: NodeId,
         session_id: SessionId,
         *,
         command_receiver: Receiver[ForwarderCommand],
-        # Receiving indexed events from the forwarder to be applied to state
-        # Ideally these would be WorkerForwarderEvents but type system says no :(
         local_event_receiver: Receiver[ForwarderEvent],
-        # Send events to the forwarder to be indexed (usually from command processing)
-        # Ideally these would be MasterForwarderEvents but type system says no :(
         global_event_sender: Sender[ForwarderEvent],
     ):
+        """Initialize the Master component.
+
+        Args:
+            node_id: Node ID of this master node.
+            session_id: Session ID for the current cluster session.
+            command_receiver: Channel to receive commands from API/router.
+            local_event_receiver: Channel to receive events from workers.
+            global_event_sender: Channel to send indexed events to all nodes.
+        """
         self.state = State()
         self._tg: TaskGroup = anyio.create_task_group()
         self.node_id = node_id
@@ -73,10 +108,19 @@ class Master:
             local_event_receiver.clone_sender()
         )
         self._multi_buffer = MultiSourceBuffer[NodeId, Event]()
-        # TODO: not have this
         self._event_log: list[Event] = []
 
-    async def run(self):
+    async def run(self) -> None:
+        """Run the master's main event loop.
+
+        Starts background tasks for:
+        - Event processing (collecting and indexing events from workers)
+        - Command processing (handling commands from API)
+        - Loopback processing (routing master's own events)
+        - Planning (cleanup of broken instances and timed-out nodes)
+
+        The method blocks until shutdown is requested via shutdown().
+        """
         logger.info("Starting Master")
 
         async with self._tg as tg:
@@ -90,11 +134,27 @@ class Master:
         self._loopback_event_sender.close()
         self._loopback_event_receiver.close()
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
+        """Shutdown the master gracefully.
+
+        Cancels the task group, stopping all background operations.
+        """
         logger.info("Stopping Master")
         self._tg.cancel_scope.cancel()
 
     async def _command_processor(self) -> None:
+        """Process commands from the API/router.
+
+        Handles different command types:
+        - ChatCompletion: Creates a chat completion task on an available instance
+        - PlaceInstance: Calculates placement and creates instance
+        - CreateInstance: Creates instance with explicit configuration
+        - DeleteInstance: Removes an instance
+        - TaskFinished: Cleans up completed tasks
+        - RequestEventLog: Sends event log to requesting node
+
+        Generates events for state changes and sends them via event_sender.
+        """
         with self.command_receiver as commands:
             async for forwarder_command in commands:
                 try:
@@ -196,10 +256,18 @@ class Master:
                 except ValueError as e:
                     logger.opt(exception=e).warning("Error in command processor")
 
-    # These plan loops are the cracks showing in our event sourcing architecture - more things could be commands
     async def _plan(self) -> None:
+        """Periodic planning task for cleanup operations.
+
+        Runs every 10 seconds to:
+        1. Remove instances whose nodes are no longer connected
+        2. Timeout nodes that haven't sent heartbeats in 30+ seconds
+
+        Note:
+            This represents a design choice - these operations could
+            potentially be commands instead of a periodic loop.
+        """
         while True:
-            # kill broken instances
             connected_node_ids = set(
                 [x.node_id for x in self.state.topology.list_nodes()]
             )
@@ -211,7 +279,6 @@ class Master:
                         )
                         break
 
-            # time out dead nodes
             for node_id, time in self.state.last_seen.items():
                 now = datetime.now(tz=timezone.utc)
                 if now - time > timedelta(seconds=30):
@@ -221,9 +288,17 @@ class Master:
             await anyio.sleep(10)
 
     async def _event_processor(self) -> None:
+        """Process and index events from workers.
+
+        Collects events from workers, orders them using MultiSourceBuffer,
+        applies them to state, indexes them, and broadcasts them to all nodes.
+        Only processes events from the current session.
+
+        Events are assigned a global index and timestamped before being
+        added to the event log and broadcast.
+        """
         with self.local_event_receiver as local_events:
             async for local_event in local_events:
-                # Discard all events not from our session
                 if local_event.session != self.session_id:
                     continue
                 self._multi_buffer.ingest(
@@ -242,8 +317,17 @@ class Master:
                     await self._send_event(indexed)
 
     async def _loopback_processor(self) -> None:
-        # this would ideally not be necessary.
-        # this is WAY less hacky than how I was working around this before
+        """Process loopback events from the master itself.
+
+        Routes events generated by the master (from command processing) back
+        through the event forwarding system so they are indexed like worker events.
+        This ensures master-generated events go through the same ordering and
+        indexing pipeline.
+
+        Note:
+            This design is a workaround - ideally master events would go through
+            the same path, but this is cleaner than previous approaches.
+        """
         local_index = 0
         with self._loopback_event_receiver as events:
             async for event in events:
@@ -257,9 +341,17 @@ class Master:
                 )
                 local_index += 1
 
-    # This function is re-entrant, take care!
-    async def _send_event(self, event: IndexedEvent):
-        # Convenience method since this line is ugly
+    async def _send_event(self, event: IndexedEvent) -> None:
+        """Send an indexed event to all nodes via global event sender.
+
+        Wraps the indexed event in a ForwarderEvent for network transmission.
+
+        Args:
+            event: Indexed event to broadcast.
+
+        Note:
+            This function is re-entrant - may be called concurrently.
+        """
         await self.global_event_sender.send(
             ForwarderEvent(
                 origin=self.node_id,

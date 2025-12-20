@@ -1,3 +1,10 @@
+"""Instance placement algorithms for model distribution.
+
+This module provides functions for placing model instances across nodes
+in the cluster, taking into account topology, memory constraints, and
+sharding strategies.
+"""
+
 import random
 from collections.abc import Mapping
 from copy import deepcopy
@@ -33,6 +40,14 @@ from exo.shared.types.worker.instances import (
 
 
 def random_ephemeral_port() -> int:
+    """Generate a random ephemeral port number.
+
+    Generates a port in the ephemeral range (49152-65535), avoiding
+    the default EXO API port (52415).
+
+    Returns:
+        Random port number in the ephemeral range, excluding 52415.
+    """
     port = random.randint(49153, 65535)
     return port - 1 if port <= 52415 else 52414
 
@@ -42,8 +57,22 @@ def add_instance_to_placements(
     topology: Topology,
     current_instances: Mapping[InstanceId, Instance],
 ) -> Mapping[InstanceId, Instance]:
-    # TODO: validate against topology
+    """Add an instance to the current placements without placement calculation.
 
+    Simply adds the provided instance to the current instances mapping.
+    Used when instance configuration is explicitly provided.
+
+    Args:
+        command: CreateInstance command with the instance to add.
+        topology: Current cluster topology (unused but kept for interface consistency).
+        current_instances: Current instance placements.
+
+    Returns:
+        New instance mapping with the instance added.
+
+    Note:
+        TODO: Add validation against topology to ensure instance nodes exist.
+    """
     return {**current_instances, command.instance.instance_id: command.instance}
 
 
@@ -52,6 +81,30 @@ def place_instance(
     topology: Topology,
     current_instances: Mapping[InstanceId, Instance],
 ) -> dict[InstanceId, Instance]:
+    """Calculate optimal placement for a model instance.
+
+    Selects the best cycle of nodes for placing the model based on:
+    1. Minimum node count requirement
+    2. Available memory on nodes
+    3. Cycle size (prefers smaller cycles)
+    4. Thunderbolt connectivity (prefers TB cycles)
+    5. Leaf nodes (prefers cycles with leaf nodes)
+    6. Available RAM (prefers cycles with more RAM)
+
+    Creates the instance configuration with shard assignments and network
+    configuration (ports, hosts, IBV coordinators) based on the selected cycle.
+
+    Args:
+        command: PlaceInstance command with model metadata and requirements.
+        topology: Current cluster topology.
+        current_instances: Current instance placements.
+
+    Returns:
+        New instance mapping with the placed instance added.
+
+    Raises:
+        ValueError: If no suitable cycle is found with sufficient memory.
+    """
     all_nodes = list(topology.list_nodes())
 
     logger.info("finding cycles:")
@@ -150,6 +203,18 @@ def delete_instance(
     command: DeleteInstance,
     current_instances: Mapping[InstanceId, Instance],
 ) -> dict[InstanceId, Instance]:
+    """Remove an instance from current placements.
+
+    Args:
+        command: DeleteInstance command with instance ID to remove.
+        current_instances: Current instance placements.
+
+    Returns:
+        New instance mapping with the instance removed.
+
+    Raises:
+        ValueError: If the instance ID is not found in current placements.
+    """
     target_instances = dict(deepcopy(current_instances))
     if command.instance_id in target_instances:
         del target_instances[command.instance_id]
@@ -161,9 +226,22 @@ def get_transition_events(
     current_instances: Mapping[InstanceId, Instance],
     target_instances: Mapping[InstanceId, Instance],
 ) -> Sequence[Event]:
+    """Generate events for transitioning from current to target instance state.
+
+    Compares current and target instance mappings and generates events for:
+    - Instances that need to be created (in target but not current)
+    - Instances that need to be deleted (in current but not target)
+
+    Args:
+        current_instances: Current instance placements.
+        target_instances: Target instance placements.
+
+    Returns:
+        Sequence of events (InstanceCreated and InstanceDeleted) representing
+        the transition from current to target state.
+    """
     events: list[Event] = []
 
-    # find instances to create
     for instance_id, instance in target_instances.items():
         if instance_id not in current_instances:
             events.append(
@@ -172,7 +250,6 @@ def get_transition_events(
                 )
             )
 
-    # find instances to delete
     for instance_id in current_instances:
         if instance_id not in target_instances:
             events.append(

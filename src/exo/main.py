@@ -1,3 +1,9 @@
+"""Main entry point for EXO cluster node.
+
+This module provides the Node class that coordinates all components of an EXO node,
+including routing, worker operations, master election, and API services.
+"""
+
 import argparse
 import multiprocessing as mp
 import signal
@@ -23,12 +29,37 @@ from exo.worker.download.impl_shard_downloader import exo_shard_downloader
 from exo.worker.main import Worker
 
 
-# I marked this as a dataclass as I want trivial constructors.
 @dataclass
 class Node:
+    """Coordinates all components of an EXO cluster node.
+
+    A Node represents a single device in the EXO cluster. It manages:
+    - Router: Handles message routing and topic subscriptions
+    - Worker: Executes tasks (model loading, inference, etc.)
+    - Election: Participates in master election (every node participates to ensure
+      a master exists even if no master candidates are present)
+    - Master: Optional master component that manages cluster state (every node
+      starts with a master, but only the elected one is active)
+    - API: Optional API server for external interactions
+
+    The Node coordinates these components and handles master election transitions,
+    ensuring workers and API are recreated with the correct session when leadership
+    changes.
+
+    Attributes:
+        router: Message router handling topic-based pub/sub.
+        worker: Worker instance that executes tasks assigned to this node.
+        election: Election service participating in master election.
+        election_result_receiver: Channel receiver for election results.
+        master: Master instance if this node is/was master, None otherwise.
+        api: API server instance if enabled, None otherwise.
+        node_id: Unique identifier for this node.
+        _tg: Internal task group for managing concurrent operations.
+    """
+
     router: Router
     worker: Worker
-    election: Election  # Every node participates in election, as we do want a node to become master even if it isn't a master candidate if no master candidates are present.
+    election: Election
     election_result_receiver: Receiver[ElectionResult]
     master: Master | None
     api: API | None
@@ -38,6 +69,21 @@ class Node:
 
     @classmethod
     async def create(cls, args: "Args") -> "Self":
+        """Create and initialize a new Node instance.
+
+        This factory method sets up all node components:
+        - Generates node identity from keypair
+        - Creates initial session (node starts as its own master)
+        - Initializes router with required topics
+        - Creates worker, master, election, and optionally API components
+        - Connects all components via topic-based channels
+
+        Args:
+            args: Configuration arguments for node startup.
+
+        Returns:
+            Fully initialized Node instance ready to run.
+        """
         keypair = get_node_id_keypair()
         node_id = NodeId(keypair.to_peer_id().to_base58())
         session_id = SessionId(master_node_id=node_id, election_clock=0)
@@ -70,7 +116,6 @@ class Node:
             local_event_sender=router.sender(topics.LOCAL_EVENTS),
             command_sender=router.sender(topics.COMMANDS),
         )
-        # We start every node with a master
         master = Master(
             node_id,
             session_id,
@@ -82,10 +127,7 @@ class Node:
         er_send, er_recv = channel[ElectionResult]()
         election = Election(
             node_id,
-            # If someone manages to assemble 1 MILLION devices into an exo cluster then. well done. good job champ.
             seniority=1_000_000 if args.force_master else 0,
-            # nb: this DOES feedback right now. i have thoughts on how to address this,
-            # but ultimately it seems not worth the complexity
             election_message_sender=router.sender(topics.ELECTION_MESSAGES),
             election_message_receiver=router.receiver(topics.ELECTION_MESSAGES),
             connection_message_receiver=router.receiver(topics.CONNECTION_MESSAGES),
@@ -95,7 +137,24 @@ class Node:
 
         return cls(router, worker, election, er_recv, master, api, node_id)
 
-    async def run(self):
+    async def run(self) -> None:
+        """Run the node's main event loop.
+
+        Starts all node components concurrently in a task group:
+        - Router for message routing
+        - Worker for task execution
+        - Election service for master election
+        - Master (if present) for state management
+        - API (if present) for external interface
+        - Election result handler for leadership transitions
+
+        Sets up SIGINT handler for graceful shutdown. The method blocks until
+        shutdown is requested.
+
+        Note:
+            This method should be called after Node.create(). It runs indefinitely
+            until shutdown() is called or SIGINT is received.
+        """
         async with self._tg as tg:
             signal.signal(signal.SIGINT, lambda _, __: self.shutdown())
             tg.start_soon(self.router.run)
@@ -107,28 +166,43 @@ class Node:
                 tg.start_soon(self.api.run)
             tg.start_soon(self._elect_loop)
 
-    def shutdown(self):
-        # if this is our second call to shutdown, just sys.exit
+    def shutdown(self) -> None:
+        """Initiate graceful shutdown of the node.
+
+        Cancels the task group, which will stop all running components. If called
+        a second time (e.g., during shutdown cleanup), forces immediate exit.
+
+        Note:
+            This method is safe to call from signal handlers and will trigger
+            cleanup of all node components.
+        """
         if self._tg.cancel_scope.cancel_called:
             import sys
 
             sys.exit(1)
         self._tg.cancel_scope.cancel()
 
-    async def _elect_loop(self):
+    async def _elect_loop(self) -> None:
+        """Handle election results and manage master transitions.
+
+        Listens for election results and coordinates component state based on
+        leadership changes. When a new master is elected:
+
+        1. If this node becomes master: promote self to master (if not already)
+        2. If another node becomes master: demote self (shutdown local master)
+        3. On new master election (any node): recreate worker with new session
+        4. On new master election: reset API with new session
+        5. On non-new master election: unpause API
+
+        This ensures all components operate with consistent session state
+        matching the current cluster leadership.
+
+        Note:
+            Worker and API are recreated (not just reset) when a new master
+            is elected to ensure clean state with the new session ID.
+        """
         with self.election_result_receiver as results:
             async for result in results:
-                # This function continues to have a lot of very specific entangled logic
-                # At least it's somewhat contained
-
-                # I don't like this duplication, but it's manageable for now.
-                # TODO: This function needs refactoring generally
-
-                # Ok:
-                # On new master:
-                # - Elect master locally if necessary
-                # - Shutdown and re-create the worker
-                # - Shut down and re-create the API
 
                 if (
                     result.session_id.master_node_id == self.node_id
@@ -187,11 +261,28 @@ class Node:
                         self.api.unpause(result.won_clock)
 
 
-def main():
+def main() -> None:
+    """Main entry point for EXO cluster node.
+
+    Parses command-line arguments, sets up logging, creates and runs a Node
+    instance. Handles the full node lifecycle from startup to shutdown.
+
+    Process:
+        1. Parse command-line arguments
+        2. Configure multiprocessing start method
+        3. Initialize logging system
+        4. Create Node instance
+        5. Run node until shutdown
+        6. Cleanup logging
+
+    Note:
+        This function uses anyio.run() to bridge async Node operations with
+        the synchronous entry point. The node runs until SIGINT or explicit
+        shutdown.
+    """
     args = Args.parse()
 
     mp.set_start_method("spawn")
-    # TODO: Refactor the current verbosity system
     logger_setup(EXO_LOG, args.verbosity)
     logger.info("Starting EXO")
 
@@ -202,6 +293,20 @@ def main():
 
 
 class Args(CamelCaseModel):
+    """Command-line arguments for EXO node configuration.
+
+    Attributes:
+        verbosity: Logging verbosity level. Positive values increase verbosity,
+            negative decrease (quiet mode). Default is 0 (normal).
+        force_master: If True, set election seniority to very high value (1,000,000)
+            to force this node to win elections and become master. Default is False.
+        spawn_api: If True, start the API server. Default is False (API disabled).
+        api_port: Port number for the API server. Must be a positive integer.
+            Default is 52415.
+        tb_only: If True, restrict network to Thunderbolt connections only.
+            Default is False.
+    """
+
     verbosity: int = 0
     force_master: bool = False
     spawn_api: bool = False
@@ -210,6 +315,21 @@ class Args(CamelCaseModel):
 
     @classmethod
     def parse(cls) -> Self:
+        """Parse command-line arguments into Args instance.
+
+        Sets up argument parser with options:
+        - `-q, --quiet`: Decrease verbosity (sets verbosity to -1)
+        - `-v, --verbose`: Increase verbosity (can be repeated: -vv, -vvv)
+        - `-m, --force-master`: Force this node to become master
+        - `--no-api`: Disable API server (overrides default)
+        - `--api-port PORT`: Set API server port (default: 52415)
+
+        Returns:
+            Validated Args instance with parsed values.
+
+        Raises:
+            SystemExit: If argument parsing fails (argparse behavior).
+        """
         parser = argparse.ArgumentParser(prog="EXO")
         default_verbosity = 0
         parser.add_argument(

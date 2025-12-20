@@ -1,3 +1,9 @@
+"""System information utilities.
+
+This module provides functions for retrieving system information including
+computer name, model, chip, and network interfaces.
+"""
+
 import socket
 import sys
 from subprocess import CalledProcessError
@@ -9,10 +15,13 @@ from exo.shared.types.profiling import NetworkInterfaceInfo
 
 
 async def get_friendly_name() -> str:
-    """
-    Asynchronously gets the 'Computer Name' (friendly name) of a Mac.
-    e.g., "John's MacBook Pro"
-    Returns the name as a string, or None if an error occurs or not on macOS.
+    """Get the friendly computer name.
+
+    On macOS, retrieves the Computer Name via scutil. On other platforms,
+    returns the hostname.
+
+    Returns:
+        Friendly computer name (e.g., "John's MacBook Pro") or hostname.
     """
     hostname = socket.gethostname()
 
@@ -29,11 +38,12 @@ async def get_friendly_name() -> str:
 
 
 def get_network_interfaces() -> list[NetworkInterfaceInfo]:
-    """
-    Retrieves detailed network interface information on macOS.
-    Parses output from 'networksetup -listallhardwareports' and 'ifconfig'
-    to determine interface names, IP addresses, and types (ethernet, wifi, vpn, other).
-    Returns a list of NetworkInterfaceInfo objects.
+    """Get network interface information.
+
+    Retrieves network interfaces and their IP addresses using psutil.
+
+    Returns:
+        List of NetworkInterfaceInfo objects with interface names and IP addresses.
     """
     interfaces_info: list[NetworkInterfaceInfo] = []
 
@@ -51,7 +61,14 @@ def get_network_interfaces() -> list[NetworkInterfaceInfo]:
 
 
 async def get_model_and_chip() -> tuple[str, str]:
-    """Get Mac system information using system_profiler."""
+    """Get system model and chip information.
+
+    On macOS, uses system_profiler to get model name and chip. On other
+    platforms, returns "Unknown Model" and "Unknown Chip".
+
+    Returns:
+        Tuple of (model_name, chip_name).
+    """
     model = "Unknown Model"
     chip = "Unknown Chip"
 

@@ -1,9 +1,29 @@
+"""Model card definitions for supported models.
+
+This module provides ModelCard definitions for models supported by EXO,
+including metadata, descriptions, and storage information.
+"""
+
 from exo.shared.types.memory import Memory
 from exo.shared.types.models import ModelId, ModelMetadata
 from exo.utils.pydantic_ext import CamelCaseModel
 
 
 class ModelCard(CamelCaseModel):
+    """Card describing a supported model.
+
+    Contains human-readable information and metadata about a model
+    for display in the API and dashboard.
+
+    Attributes:
+        short_id: Short identifier for the model (used in API).
+        model_id: Full Hugging Face model identifier.
+        name: Human-readable model name.
+        description: Description of the model.
+        tags: List of tags for categorization.
+        metadata: Model metadata (size, layers, etc.).
+    """
+
     short_id: str
     model_id: ModelId
     name: str

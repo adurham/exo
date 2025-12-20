@@ -1,3 +1,9 @@
+"""Network reachability checking utilities.
+
+This module provides functions for checking network connectivity between nodes
+in the topology.
+"""
+
 import socket
 
 from anyio import create_task_group, to_thread
@@ -6,10 +12,19 @@ from exo.shared.topology import Topology
 from exo.shared.types.common import NodeId
 
 
-# TODO: ref. api port
 async def check_reachability(
     target_ip: str, target_node_id: NodeId, out: dict[NodeId, set[str]]
 ) -> None:
+    """Check if a target IP is reachable and record it.
+
+    Attempts to connect to target_ip on port 52415 (API port). If successful,
+    adds the IP to the out dictionary for the target_node_id.
+
+    Args:
+        target_ip: IP address to check.
+        target_node_id: Node ID of the target.
+        out: Dictionary to update with reachable IPs.
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1)  # 1 second timeout
     try:
@@ -28,6 +43,16 @@ async def check_reachability(
 
 
 async def check_reachable(topology: Topology) -> dict[NodeId, set[str]]:
+    """Check reachability for all nodes in the topology.
+
+    Checks connectivity from all network interfaces of all nodes in parallel.
+
+    Args:
+        topology: Topology containing nodes to check.
+
+    Returns:
+        Dictionary mapping node IDs to sets of reachable IP addresses.
+    """
     reachable: dict[NodeId, set[str]] = {}
     async with create_task_group() as tg:
         for node in topology.list_nodes():

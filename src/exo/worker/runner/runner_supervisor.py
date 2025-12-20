@@ -1,3 +1,9 @@
+"""Supervisor for managing runner processes.
+
+This module provides RunnerSupervisor for supervising model runner processes,
+handling inter-process communication, and managing runner lifecycle.
+"""
+
 import contextlib
 import signal
 from dataclasses import dataclass, field
@@ -27,11 +33,31 @@ from exo.utils.channels import MpReceiver, MpSender, Sender, mp_channel
 from exo.worker.runner.bootstrap import entrypoint
 
 PREFILL_TIMEOUT_SECONDS = 60
+"""Timeout for prefill operations."""
 DECODE_TIMEOUT_SECONDS = 5
+"""Timeout for decode operations."""
 
 
 @dataclass(eq=False)
 class RunnerSupervisor:
+    """Supervisor for a model runner process.
+
+    Manages the lifecycle of a runner process, handles inter-process
+    communication via multiprocessing channels, and tracks runner status.
+
+    Attributes:
+        shard_metadata: Metadata for the model shard this runner handles.
+        bound_instance: Instance this runner is bound to.
+        runner_process: Multiprocessing process running the model.
+        initialize_timeout: Timeout for runner initialization.
+        status: Current runner status (updated from events).
+        pending: Dictionary of pending tasks awaiting acknowledgment.
+        _ev_recv: Multiprocessing receiver for events from runner.
+        _task_sender: Multiprocessing sender for tasks to runner.
+        _event_sender: Async sender for events to worker.
+        _tg: Task group for background operations.
+    """
+
     shard_metadata: ShardMetadata
     bound_instance: BoundInstance
     runner_process: Process
@@ -52,6 +78,18 @@ class RunnerSupervisor:
         event_sender: Sender[Event],
         initialize_timeout: float = 400,
     ) -> Self:
+        """Create a new runner supervisor.
+
+        Creates multiprocessing channels and spawns a runner process.
+
+        Args:
+            bound_instance: Instance this runner will handle.
+            event_sender: Async sender for forwarding events to worker.
+            initialize_timeout: Timeout for runner initialization in seconds.
+
+        Returns:
+            New RunnerSupervisor instance with spawned process.
+        """
         ev_send, ev_recv = mp_channel[Event]()
         # A task is kind of a runner command
         task_sender, task_recv = mp_channel[Task]()
@@ -82,7 +120,13 @@ class RunnerSupervisor:
 
         return self
 
-    async def run(self):
+    async def run(self) -> None:
+        """Run the supervisor's event loop.
+
+        Starts the runner process and forwards events. On shutdown,
+        attempts graceful shutdown (join), then terminates, then kills
+        if necessary.
+        """
         self.runner_process.start()
         async with create_task_group() as tg:
             self._tg = tg
@@ -113,11 +157,21 @@ class RunnerSupervisor:
             "Runner process didn't respond to SIGKILL. System resources may have leaked"
         )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
+        """Shutdown the supervisor.
+
+        Cancels the task group, which triggers graceful shutdown of
+        the runner process.
+        """
         assert self._tg
         self._tg.cancel_scope.cancel()
 
-    async def start_task(self, task: Task):
+    async def start_task(self, task: Task) -> None:
+        """Start a task on the runner and wait for acknowledgment.
+
+        Args:
+            task: Task to execute on the runner.
+        """
         logger.info(f"Starting task {task}")
         event = anyio.Event()
         self.pending[task.task_id] = event
@@ -129,7 +183,12 @@ class RunnerSupervisor:
         await event.wait()
         logger.info(f"Finished task {task}")
 
-    async def _forward_events(self):
+    async def _forward_events(self) -> None:
+        """Forward events from runner process to worker.
+
+        Receives events via multiprocessing channel and forwards them
+        to the worker. Updates local status and handles task acknowledgments.
+        """
         with self._ev_recv as events:
             try:
                 async for event in events:

@@ -1,3 +1,9 @@
+"""Model metadata fetching from Hugging Face.
+
+This module provides functions for fetching model metadata (storage size,
+layer count) from Hugging Face Hub.
+"""
+
 from typing import Annotated
 
 import aiofiles
@@ -16,19 +22,41 @@ from exo.worker.download.download_utils import (
 
 
 class ConfigData(BaseModel):
-    model_config = {"extra": "ignore"}  # Allow unknown fields
+    """Model configuration data from config.json.
 
-    # Common field names for number of layers across different architectures
+    Parses model configuration files, extracting layer count from
+    various field names used across different architectures.
+
+    Attributes:
+        num_hidden_layers: Layer count (BERT, etc.).
+        num_layers: Layer count (generic).
+        n_layer: Layer count (GPT-style).
+        n_layers: Layer count (alternative naming).
+        num_decoder_layers: Decoder layer count (encoder-decoder models).
+        decoder_layers: Decoder layers (alternative naming).
+    """
+
+    model_config = {"extra": "ignore"}
+
     num_hidden_layers: Annotated[int, Field(ge=0)] | None = None
     num_layers: Annotated[int, Field(ge=0)] | None = None
     n_layer: Annotated[int, Field(ge=0)] | None = None
-    n_layers: Annotated[int, Field(ge=0)] | None = None  # Sometimes used
-    num_decoder_layers: Annotated[int, Field(ge=0)] | None = None  # Transformer models
-    decoder_layers: Annotated[int, Field(ge=0)] | None = None  # Some architectures
+    n_layers: Annotated[int, Field(ge=0)] | None = None
+    num_decoder_layers: Annotated[int, Field(ge=0)] | None = None
+    decoder_layers: Annotated[int, Field(ge=0)] | None = None
 
     @property
     def layer_count(self) -> int:
-        # Check common field names for layer count
+        """Extract layer count from configuration.
+
+        Checks common field names used by different model architectures.
+
+        Returns:
+            Number of layers in the model.
+
+        Raises:
+            ValueError: If no layer count field is found.
+        """
         layer_fields = [
             self.num_hidden_layers,
             self.num_layers,
@@ -48,7 +76,14 @@ class ConfigData(BaseModel):
 
 
 async def get_config_data(model_id: str) -> ConfigData:
-    """Downloads and parses config.json for a model."""
+    """Download and parse config.json for a Hugging Face model.
+
+    Args:
+        model_id: Hugging Face model identifier.
+
+    Returns:
+        ConfigData with parsed configuration.
+    """
     target_dir = (await ensure_models_dir()) / str(model_id).replace("/", "--")
     await aios.makedirs(target_dir, exist_ok=True)
     config_path = await download_file_with_retry(
@@ -65,7 +100,20 @@ async def get_config_data(model_id: str) -> ConfigData:
 
 
 async def get_safetensors_size(model_id: str) -> Memory:
-    """Gets model size from safetensors index or falls back to HF API."""
+    """Get model storage size from safetensors index or Hugging Face API.
+
+    Attempts to get size from the safetensors index file first, falling
+    back to the Hugging Face API if metadata is not available.
+
+    Args:
+        model_id: Hugging Face model identifier.
+
+    Returns:
+        Memory object with model storage size.
+
+    Raises:
+        ValueError: If safetensors info cannot be found.
+    """
     target_dir = (await ensure_models_dir()) / str(model_id).replace("/", "--")
     await aios.makedirs(target_dir, exist_ok=True)
     index_path = await download_file_with_retry(
@@ -91,9 +139,20 @@ async def get_safetensors_size(model_id: str) -> Memory:
 
 
 _model_meta_cache: dict[str, ModelMetadata] = {}
+"""Cache for fetched model metadata."""
 
 
 async def get_model_meta(model_id: str) -> ModelMetadata:
+    """Get model metadata with caching.
+
+    Fetches metadata from cache if available, otherwise fetches and caches it.
+
+    Args:
+        model_id: Hugging Face model identifier.
+
+    Returns:
+        ModelMetadata with storage size and layer count.
+    """
     if model_id in _model_meta_cache:
         return _model_meta_cache[model_id]
     model_meta = await _get_model_meta(model_id)
@@ -102,7 +161,16 @@ async def get_model_meta(model_id: str) -> ModelMetadata:
 
 
 async def _get_model_meta(model_id: str) -> ModelMetadata:
-    """Fetches storage size and number of layers for a Hugging Face model, returns Pydantic ModelMeta."""
+    """Fetch storage size and layer count for a Hugging Face model.
+
+    Downloads config.json and safetensors index to extract metadata.
+
+    Args:
+        model_id: Hugging Face model identifier.
+
+    Returns:
+        ModelMetadata with storage size and layer count.
+    """
     config_data = await get_config_data(model_id)
     num_layers = config_data.layer_count
     mem_size_bytes = await get_safetensors_size(model_id)

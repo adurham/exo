@@ -1,3 +1,10 @@
+"""Placement utility functions for shard assignment and cycle filtering.
+
+This module provides helper functions for the placement algorithm, including
+shard assignment calculation for different parallelism strategies and filtering
+cycles based on memory constraints.
+"""
+
 from collections.abc import Generator
 from typing import TypeGuard, cast
 
@@ -20,17 +27,45 @@ from exo.shared.types.worker.shards import (
 
 
 class NodeWithProfile(BaseModel):
+    """Node with guaranteed non-None performance profile.
+
+    Used for type narrowing in placement algorithms that require
+    node performance profiles to be available.
+
+    Attributes:
+        node_id: Node identifier.
+        node_profile: Node performance profile (guaranteed non-None).
+    """
+
     node_id: NodeId
     node_profile: NodePerformanceProfile
 
 
 def narrow_all_nodes(nodes: list[NodeInfo]) -> TypeGuard[list[NodeWithProfile]]:
+    """Type guard to check if all nodes have performance profiles.
+
+    Args:
+        nodes: List of nodes to check.
+
+    Returns:
+        True if all nodes have non-None node_profile, enabling type narrowing.
+    """
     return all(node.node_profile is not None for node in nodes)
 
 
 def filter_cycles_by_memory(
     cycles: list[list[NodeInfo]], required_memory: Memory
 ) -> list[list[NodeInfo]]:
+    """Filter cycles to only those with sufficient total memory.
+
+    Args:
+        cycles: List of cycles (lists of nodes).
+        required_memory: Minimum memory required across the cycle.
+
+    Returns:
+        List of cycles where total available RAM >= required_memory.
+        Cycles with nodes missing performance profiles are excluded.
+    """
     filtered_cycles: list[list[NodeInfo]] = []
     for cycle in cycles:
         if not narrow_all_nodes(cycle):
@@ -45,6 +80,14 @@ def filter_cycles_by_memory(
 
 
 def get_smallest_cycles(cycles: list[list[NodeInfo]]) -> list[list[NodeInfo]]:
+    """Get cycles with the minimum number of nodes.
+
+    Args:
+        cycles: List of cycles to filter.
+
+    Returns:
+        List of cycles with the smallest node count.
+    """
     min_nodes = min(len(cycle) for cycle in cycles)
     return [cycle for cycle in cycles if len(cycle) == min_nodes]
 
@@ -138,6 +181,22 @@ def get_shard_assignments(
     selected_cycle: list[NodeInfo],
     sharding: Sharding,
 ) -> ShardAssignments:
+    """Calculate shard assignments based on sharding strategy.
+
+    Delegates to the appropriate shard assignment function based on the
+    sharding strategy (Pipeline or Tensor).
+
+    Args:
+        model_meta: Model metadata including layer count.
+        selected_cycle: List of nodes selected for placement.
+        sharding: Sharding strategy (Pipeline or Tensor).
+
+    Returns:
+        ShardAssignments mapping runners to shards.
+
+    Raises:
+        ValueError: If any nodes in selected_cycle lack performance profiles.
+    """
     if not narrow_all_nodes(selected_cycle):
         raise ValueError("All nodes must have profiles to create shard assignments")
     match sharding:
@@ -154,6 +213,19 @@ def get_shard_assignments(
 
 
 def get_hosts_from_subgraph(cycle_digraph: Topology) -> list[Host]:
+    """Extract host addresses from a cycle in the topology.
+
+    Finds a cycle containing all nodes in the subgraph and extracts
+    host addresses (IP and port) for connections in the cycle. Prefers
+    Thunderbolt connections if available.
+
+    Args:
+        cycle_digraph: Topology subgraph containing a cycle.
+
+    Returns:
+        List of Host objects representing connections in the cycle, ordered
+        by cycle traversal. Empty list if no suitable cycle found.
+    """
     cycles = cycle_digraph.get_cycles()
     expected_length = len(list(cycle_digraph.list_nodes()))
     cycles = [cycle for cycle in cycles if len(cycle) == expected_length]
@@ -238,8 +310,17 @@ def _find_connection_ip(
     node_i: NodeInfo,
     node_j: NodeInfo,
     cycle_digraph: Topology,
-) -> Generator[str]:
-    """Find all IP addresses that connect node i to node j."""
+) -> Generator[str, None, None]:
+    """Find all IP addresses that connect node i to node j.
+
+    Args:
+        node_i: Source node.
+        node_j: Destination node.
+        cycle_digraph: Topology to search for connections.
+
+    Yields:
+        IP addresses from connections from node_i to node_j.
+    """
     for connection in cycle_digraph.list_connections():
         if (
             connection.local_node_id == node_i.node_id
@@ -252,6 +333,18 @@ def _find_interface_name_for_ip(
     ip_address: str,
     node_info: NodeInfo,
 ) -> str | None:
+    """Find the network interface name for a given IP address on a node.
+
+    Searches the node's network interface information to find which interface
+    has the specified IP address.
+
+    Args:
+        ip_address: IP address to look up.
+        node_info: Node information containing network interface data.
+
+    Returns:
+        Interface name if found, None otherwise.
+    """
     if node_info.node_profile is None:
         return None
 
@@ -276,8 +369,22 @@ def get_mlx_ibv_coordinators(
 ) -> dict[NodeId, str]:
     """Get the coordinator addresses for MLX IBV (rank 0 device).
 
-    Select an IP address that each node can reach for the rank 0 node. Returns
-    address in format "X.X.X.X:PORT" per node.
+    Selects an IP address that each node can reach for the rank 0 node
+    (first node in selected_cycle). The rank 0 node uses "0.0.0.0" as a
+    bind address, while other nodes use the IP they use to connect to rank 0.
+
+    Args:
+        selected_cycle: List of nodes in the cycle (rank 0 is first).
+        coordinator_port: Port number for the coordinator.
+        cycle_digraph: Topology containing connection information.
+
+    Returns:
+        Dictionary mapping each node ID to a coordinator address string
+        in format "IP:PORT".
+
+    Raises:
+        ValueError: If any node cannot find a direct connection to rank 0
+                    (required for all-to-all RDMA connections).
     """
     rank_0_node = selected_cycle[0]
     logger.info(f"Selecting coordinator from rank 0 node: {rank_0_node.node_id}")

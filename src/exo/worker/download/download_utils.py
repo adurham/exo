@@ -1,3 +1,9 @@
+"""Download utilities for model shards.
+
+This module provides functions and types for downloading model files from
+Hugging Face, tracking download progress, and managing model directories.
+"""
+
 import asyncio
 import hashlib
 import os
@@ -35,21 +41,57 @@ from exo.worker.download.huggingface_utils import (
 
 
 class ModelSafetensorsIndexMetadata(BaseModel):
+    """Metadata from model.safetensors.index.json.
+
+    Attributes:
+        total_size: Total size of all safetensors files in bytes.
+    """
+
     total_size: PositiveInt
 
 
 class ModelSafetensorsIndex(BaseModel):
+    """Index file for sharded safetensors models.
+
+    Attributes:
+        metadata: Optional metadata including total size.
+        weight_map: Mapping from weight names to shard filenames.
+    """
+
     metadata: ModelSafetensorsIndexMetadata | None
     weight_map: dict[str, str]
 
 
 class FileListEntry(BaseModel):
+    """Entry in a repository file list.
+
+    Attributes:
+        type: Type of entry (file or directory).
+        path: Path relative to repository root.
+        size: File size in bytes (None for directories).
+    """
+
     type: Literal["file", "directory"]
     path: str
     size: int | None = None
 
 
 class RepoFileDownloadProgress(BaseModel):
+    """Download progress for a single file.
+
+    Attributes:
+        repo_id: Hugging Face repository ID.
+        repo_revision: Repository revision/branch.
+        file_path: Path to file in repository.
+        downloaded: Total bytes downloaded (may include previous sessions).
+        downloaded_this_session: Bytes downloaded in current session.
+        total: Total file size.
+        speed: Download speed in bytes per second.
+        eta: Estimated time to completion.
+        status: Current download status.
+        start_time: Timestamp when download started.
+    """
+
     repo_id: str
     repo_revision: str
     file_path: str
@@ -65,6 +107,25 @@ class RepoFileDownloadProgress(BaseModel):
 
 
 class RepoDownloadProgress(BaseModel):
+    """Download progress for a repository shard.
+
+    Aggregates progress across all files needed for a shard.
+
+    Attributes:
+        repo_id: Hugging Face repository ID.
+        repo_revision: Repository revision/branch.
+        shard: Shard metadata this download is for.
+        completed_files: Number of files completed.
+        total_files: Total number of files to download.
+        downloaded_bytes: Total bytes downloaded.
+        downloaded_bytes_this_session: Bytes downloaded this session.
+        total_bytes: Total size of all files.
+        overall_speed: Overall download speed in bytes per second.
+        overall_eta: Overall estimated time to completion.
+        status: Current download status.
+        file_progress: Progress for each file in the shard.
+    """
+
     repo_id: str
     repo_revision: str
     shard: ShardMetadata
@@ -82,6 +143,14 @@ class RepoDownloadProgress(BaseModel):
 
 
 def trim_etag(etag: str) -> str:
+    """Remove quotes from ETag header value.
+
+    Args:
+        etag: ETag string, possibly quoted.
+
+    Returns:
+        ETag without surrounding quotes.
+    """
     if (etag[0] == '"' and etag[-1] == '"') or (etag[0] == "'" and etag[-1] == "'"):
         return etag[1:-1]
     return etag
@@ -90,6 +159,14 @@ def trim_etag(etag: str) -> str:
 def map_repo_file_download_progress_to_download_progress_data(
     repo_file_download_progress: RepoFileDownloadProgress,
 ) -> DownloadProgressData:
+    """Convert file download progress to DownloadProgressData.
+
+    Args:
+        repo_file_download_progress: File-level progress.
+
+    Returns:
+        DownloadProgressData representation.
+    """
     return DownloadProgressData(
         downloaded_bytes=repo_file_download_progress.downloaded,
         downloaded_bytes_this_session=repo_file_download_progress.downloaded_this_session,
@@ -105,6 +182,16 @@ def map_repo_file_download_progress_to_download_progress_data(
 def map_repo_download_progress_to_download_progress_data(
     repo_download_progress: RepoDownloadProgress,
 ) -> DownloadProgressData:
+    """Convert repository download progress to DownloadProgressData.
+
+    Aggregates file-level progress into overall progress.
+
+    Args:
+        repo_download_progress: Repository-level progress.
+
+    Returns:
+        DownloadProgressData with aggregated file progress.
+    """
     return DownloadProgressData(
         total_bytes=repo_download_progress.total_bytes,
         downloaded_bytes=repo_download_progress.downloaded_bytes,
@@ -123,19 +210,47 @@ def map_repo_download_progress_to_download_progress_data(
 
 
 def build_model_path(model_id: str) -> DirectoryPath:
+    """Build directory path for a model ID.
+
+    Replaces "/" with "--" to create a valid directory name.
+
+    Args:
+        model_id: Hugging Face model ID.
+
+    Returns:
+        Path to model directory.
+    """
     return EXO_MODELS_DIR / model_id.replace("/", "--")
 
 
 async def resolve_model_path_for_repo(repo_id: str) -> Path:
+    """Resolve directory path for a repository ID.
+
+    Args:
+        repo_id: Hugging Face repository ID.
+
+    Returns:
+        Path to repository directory.
+    """
     return (await ensure_models_dir()) / repo_id.replace("/", "--")
 
 
 async def ensure_exo_home() -> Path:
+    """Ensure EXO_HOME directory exists.
+
+    Returns:
+        Path to EXO_HOME.
+    """
     await aios.makedirs(EXO_HOME, exist_ok=True)
     return EXO_HOME
 
 
 async def has_exo_home_read_access() -> bool:
+    """Check if EXO_HOME has read access.
+
+    Returns:
+        True if readable, False otherwise.
+    """
     try:
         return await aios.access(EXO_HOME, os.R_OK)
     except OSError:
@@ -143,6 +258,11 @@ async def has_exo_home_read_access() -> bool:
 
 
 async def has_exo_home_write_access() -> bool:
+    """Check if EXO_HOME has write access.
+
+    Returns:
+        True if writable, False otherwise.
+    """
     try:
         return await aios.access(EXO_HOME, os.W_OK)
     except OSError:

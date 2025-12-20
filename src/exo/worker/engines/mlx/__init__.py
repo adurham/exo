@@ -1,14 +1,25 @@
+"""MLX engine type stubs and wrappers.
+
+This module provides type stubs for MLX components to ensure type safety
+across the EXO codebase, since MLX's types are not as strict as EXO requires.
+
+These are protocol-style definitions that match MLX's actual interfaces.
+"""
+
 from typing import Any
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.cache import KVCache
 
-# These are wrapper functions to fix the fact that mlx is not strongly typed in the same way that EXO is.
-# For example - MLX has no guarantee of the interface that nn.Module will expose. But we need a guarantee that it has a __call__() function
-
 
 class Model(nn.Module):
+    """Type stub for MLX model.
+
+    Provides a strongly-typed interface for MLX models, ensuring
+    they have the expected __call__ signature.
+    """
+
     layers: list[nn.Module]
 
     def __call__(
@@ -20,6 +31,11 @@ class Model(nn.Module):
 
 
 class Detokenizer:
+    """Type stub for MLX detokenizer.
+
+    Provides a strongly-typed interface for detokenizing model outputs.
+    """
+
     def reset(self) -> None: ...
     def add_token(self, token: int) -> None: ...
     def finalize(self) -> None: ...
@@ -29,6 +45,12 @@ class Detokenizer:
 
 
 class TokenizerWrapper:
+    """Type stub for MLX tokenizer wrapper.
+
+    Provides a strongly-typed interface for tokenizing inputs and
+    applying chat templates.
+    """
+
     bos_token: str | None
     eos_token_ids: list[int]
     detokenizer: Detokenizer

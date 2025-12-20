@@ -1,3 +1,10 @@
+"""Worker component for executing tasks and managing resources.
+
+The Worker is responsible for downloading model shards, running model inference,
+managing runner processes, and reporting status to the master. Each node runs
+a Worker component that executes tasks assigned by the master.
+"""
+
 from datetime import datetime, timezone
 from random import random
 
@@ -64,10 +71,19 @@ class Worker:
         connection_message_receiver: Receiver[ConnectionMessage],
         global_event_receiver: Receiver[ForwarderEvent],
         local_event_sender: Sender[ForwarderEvent],
-        # This is for requesting updates. It doesn't need to be a general command sender right now,
-        # but I think it's the correct way to be thinking about commands
         command_sender: Sender[ForwarderCommand],
     ):
+        """Initialize the Worker component.
+
+        Args:
+            node_id: Node ID of this worker.
+            session_id: Current session ID.
+            shard_downloader: Downloader for model shards.
+            connection_message_receiver: Channel for connection events.
+            global_event_receiver: Channel for indexed events from master.
+            local_event_sender: Channel for sending events to master.
+            command_sender: Channel for sending commands (e.g., RequestEventLog).
+        """
         self.node_id: NodeId = node_id
         self.session_id: SessionId = session_id
 
@@ -94,10 +110,23 @@ class Worker:
 
         self.event_sender, self.event_receiver = channel[Event]()
 
-    async def run(self):
+    async def run(self) -> None:
+        """Run the worker's main event loop.
+
+        Starts background tasks for:
+        - Planning and executing tasks (plan_step)
+        - Polling system and memory metrics
+        - Processing connection messages
+        - Resending events that failed delivery
+        - Applying events from master to local state
+        - Forwarding local events to master
+        - Polling connection updates
+
+        Blocks until shutdown is requested. On shutdown, gracefully closes
+        channels and shuts down all runner supervisors.
+        """
         logger.info("Starting Worker")
 
-        # TODO: CLEANUP HEADER
         async def resource_monitor_callback(
             node_performance_profile: NodePerformanceProfile,
         ) -> None:
@@ -120,8 +149,6 @@ class Worker:
                 )
             )
 
-        # END CLEANUP
-
         async with create_task_group() as tg:
             self._tg = tg
             tg.start_soon(self.plan_step)
@@ -134,13 +161,18 @@ class Worker:
             tg.start_soon(self._forward_events)
             tg.start_soon(self._poll_connection_updates)
 
-        # Actual shutdown code - waits for all tasks to complete before executing.
         self.local_event_sender.close()
         self.command_sender.close()
         for runner in self.runners.values():
             runner.shutdown()
 
-    async def _event_applier(self):
+    async def _event_applier(self) -> None:
+        """Apply indexed events from master to local state.
+
+        Receives events from the master, orders them using OrderedBuffer,
+        and applies them to local state. Handles NACK (negative acknowledgment)
+        requests when events arrive out of order by requesting missing events.
+        """
         with self.global_event_receiver as events:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
@@ -150,7 +182,6 @@ class Worker:
                 if event_id in self.out_for_delivery:
                     del self.out_for_delivery[event_id]
 
-                # 2. for each event, apply it to the state
                 indexed_events = self.event_buffer.drain_indexed()
                 if indexed_events:
                     self._nack_attempts = 0
@@ -160,7 +191,6 @@ class Worker:
                     or self._nack_cancel_scope.cancel_called
                 ):
                     assert self._tg
-                    # Request the next index.
                     self._tg.start_soon(
                         self._nack_request, self.state.last_event_applied_idx + 1
                     )
@@ -171,10 +201,19 @@ class Worker:
                 for idx, event in indexed_events:
                     self.state = apply(self.state, IndexedEvent(idx=idx, event=event))
 
-    async def plan_step(self):
+    async def plan_step(self) -> None:
+        """Continuously plan and execute tasks based on current state.
+
+        Periodically calls plan() to determine the next task to execute based on:
+        - Runner lifecycle (create, shutdown)
+        - Download status
+        - Model loading requirements
+        - Pending tasks
+
+        Executes the planned task and sends appropriate events to update state.
+        """
         while True:
             await anyio.sleep(0.1)
-            # 3. based on the updated state, we plan & execute an operation.
             task: Task | None = plan(
                 self.node_id,
                 self.runners,
@@ -247,22 +286,47 @@ class Worker:
                 case task:
                     await self.runners[self._task_to_runner_id(task)].start_task(task)
 
-    def shutdown(self):
+    def shutdown(self) -> None:
+        """Shutdown the worker gracefully.
+
+        Cancels the task group, stopping all background operations.
+        """
         if self._tg:
             self._tg.cancel_scope.cancel()
 
-    def _task_to_runner_id(self, task: Task):
+    def _task_to_runner_id(self, task: Task) -> RunnerId:
+        """Get the runner ID for a task based on instance and node.
+
+        Args:
+            task: Task to get runner ID for.
+
+        Returns:
+            Runner ID assigned to this node for the task's instance.
+        """
         instance = self.state.instances[task.instance_id]
         return instance.shard_assignments.node_to_runner[self.node_id]
 
-    async def _connection_message_event_writer(self):
+    async def _connection_message_event_writer(self) -> None:
+        """Convert connection messages to topology events.
+
+        Receives connection messages (connected/disconnected) and converts
+        them to TopologyEdgeCreated/TopologyEdgeDeleted events.
+        """
         with self.connection_message_receiver as connection_messages:
             async for msg in connection_messages:
                 await self.event_sender.send(
                     self._convert_connection_message_to_event(msg)
                 )
 
-    def _convert_connection_message_to_event(self, msg: ConnectionMessage):
+    def _convert_connection_message_to_event(self, msg: ConnectionMessage) -> Event:
+        """Convert a ConnectionMessage to a topology event.
+
+        Args:
+            msg: Connection message to convert.
+
+        Returns:
+            TopologyEdgeCreated or TopologyEdgeDeleted event.
+        """
         match msg.connection_type:
             case ConnectionMessageType.Connected:
                 return TopologyEdgeCreated(
@@ -287,9 +351,15 @@ class Worker:
                 )
 
     async def _nack_request(self, since_idx: int) -> None:
-        # We request all events after (and including) the missing index.
-        # This function is started whenever we receive an event that is out of sequence.
-        # It is cancelled as soon as we receiver an event that is in sequence.
+        """Request missing events using negative acknowledgment (NACK).
+
+        Sends a RequestEventLog command to request all events starting from
+        since_idx. Uses exponential backoff for retries. This is called when
+        events arrive out of sequence.
+
+        Args:
+            since_idx: Index to request events from (inclusive).
+        """
 
         if since_idx < 0:
             logger.warning(f"Negative value encountered for nack request {since_idx=}")

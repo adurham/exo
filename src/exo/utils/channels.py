@@ -1,3 +1,11 @@
+"""Channel utilities for asynchronous message passing.
+
+This module provides typed channels for communication between components.
+Supports both in-process channels (using anyio) and inter-process channels
+(using multiprocessing). Channels are typed and support cloning for fan-out
+patterns.
+"""
+
 import multiprocessing as mp
 from dataclasses import dataclass, field
 from math import inf
@@ -25,32 +33,88 @@ from anyio.streams.memory import (
 
 
 class Sender[T](AnyioSender[T]):
+    """Typed sender for asynchronous channels.
+
+    Extends anyio's MemoryObjectSendStream with cloning capabilities for
+    creating multiple receivers from a single sender (fan-out pattern).
+    """
+
     def clone(self) -> "Sender[T]":
+        """Create a new sender sharing the same underlying channel state.
+
+        Returns:
+            New Sender instance that sends to the same channel.
+
+        Raises:
+            ClosedResourceError: If the channel is already closed.
+        """
         if self._closed:
             raise ClosedResourceError
         return Sender(_state=self._state)
 
     def clone_receiver(self) -> "Receiver[T]":
-        """Constructs a Receiver using a Senders shared state - similar to calling Receiver.clone() without needing the receiver"""
+        """Create a receiver sharing this sender's channel state.
+
+        Useful for creating a receiver when you only have a sender reference,
+        enabling fan-out patterns where one sender has multiple receivers.
+
+        Returns:
+            New Receiver instance that receives from the same channel.
+
+        Raises:
+            ClosedResourceError: If the channel is already closed.
+        """
         if self._closed:
             raise ClosedResourceError
         return Receiver(_state=self._state)
 
 
 class Receiver[T](AnyioReceiver[T]):
+    """Typed receiver for asynchronous channels.
+
+    Extends anyio's MemoryObjectReceiveStream with cloning and convenience
+    methods for collecting multiple items.
+    """
+
     def clone(self) -> "Receiver[T]":
+        """Create a new receiver sharing the same underlying channel state.
+
+        Returns:
+            New Receiver instance that receives from the same channel.
+
+        Raises:
+            ClosedResourceError: If the channel is already closed.
+        """
         if self._closed:
             raise ClosedResourceError
         return Receiver(_state=self._state)
 
     def clone_sender(self) -> Sender[T]:
-        """Constructs a Sender using a Receivers shared state - similar to calling Sender.clone() without needing the sender"""
+        """Create a sender sharing this receiver's channel state.
+
+        Useful for creating a sender when you only have a receiver reference,
+        enabling communication in both directions from a single reference.
+
+        Returns:
+            New Sender instance that sends to the same channel.
+
+        Raises:
+            ClosedResourceError: If the channel is already closed.
+        """
         if self._closed:
             raise ClosedResourceError
         return Sender(_state=self._state)
 
     def collect(self) -> list[T]:
-        """Collect all currently available items from this receiver"""
+        """Collect all currently available items without blocking.
+
+        Receives all items that are immediately available in the channel buffer
+        without waiting for new items.
+
+        Returns:
+            List of all immediately available items. May be empty if channel
+            buffer is empty.
+        """
         out: list[T] = []
         while True:
             try:
@@ -61,6 +125,18 @@ class Receiver[T](AnyioReceiver[T]):
         return out
 
     async def receive_at_least(self, n: int) -> list[T]:
+        """Receive at least n items, waiting if necessary.
+
+        Receives items until at least n are available. Will block waiting for
+        items if the channel buffer doesn't have enough immediately available.
+
+        Args:
+            n: Minimum number of items to receive.
+
+        Returns:
+            List containing at least n items (may contain more if additional
+            items were available).
+        """
         out: list[T] = []
         out.append(await self.receive())
         out.extend(self.collect())
@@ -97,14 +173,32 @@ class MpState[T]:
 
 @dataclass(eq=False)
 class MpSender[T]:
-    """
-    An interprocess channel, mimicing the Anyio structure.
-    It should be noted that none of the clone methods are implemented for simplicity, for now.
+    """Interprocess sender for multiprocessing channels.
+
+    Provides blocking and non-blocking send operations for communicating between
+    processes using multiprocessing.Queue. Mimics the anyio Sender interface
+    but uses synchronous operations that can cross process boundaries.
+
+    Note:
+        Clone methods are not implemented for interprocess channels to keep
+        the implementation simple.
+
+    Attributes:
+        _state: Internal state containing the multiprocessing queue and close flag.
     """
 
     _state: MpState[T] = field()
 
     def send_nowait(self, item: T) -> None:
+        """Send an item without blocking.
+
+        Args:
+            item: Item to send.
+
+        Raises:
+            ClosedResourceError: If the channel is closed.
+            WouldBlock: If the channel buffer is full.
+        """
         if self._state.closed.is_set():
             raise ClosedResourceError
         try:
@@ -116,26 +210,48 @@ class MpSender[T]:
             raise ClosedResourceError from e
 
     def send(self, item: T) -> None:
+        """Send an item, blocking if the buffer is full.
+
+        Args:
+            item: Item to send.
+
+        Raises:
+            ClosedResourceError: If the channel is closed.
+        """
         if self._state.closed.is_set():
             raise ClosedResourceError
         try:
             self.send_nowait(item)
         except WouldBlock:
-            # put anyway, blocking
             self._state.buffer.put(item, block=True)
 
     async def send_async(self, item: T) -> None:
+        """Send an item asynchronously using a thread pool.
+
+        Args:
+            item: Item to send.
+
+        Note:
+            Cancellation may not work well with this method.
+        """
         await to_thread.run_sync(self.send, item, limiter=CapacityLimiter(1))
 
     def close(self) -> None:
+        """Close the sender and signal end of stream to receivers."""
         if not self._state.closed.is_set():
             self._state.closed.set()
         self._state.buffer.put(_MpEndOfStream())
         self._state.buffer.close()
 
-    # == unique to Mp channels ==
     def join(self) -> None:
-        """Ensure any queued messages are resolved before continuing"""
+        """Wait for all queued messages to be processed.
+
+        Blocks until all messages in the queue have been consumed. Channel must
+        be closed before calling join().
+
+        Raises:
+            AssertionError: If channel is not closed.
+        """
         assert self._state.closed.is_set(), (
             "Mp channels must be closed before being joined"
         )
@@ -161,14 +277,34 @@ class MpSender[T]:
 
 @dataclass(eq=False)
 class MpReceiver[T]:
-    """
-    An interprocess channel, mimicing the Anyio structure.
-    It should be noted that none of the clone methods are implemented for simplicity, for now.
+    """Interprocess receiver for multiprocessing channels.
+
+    Provides blocking and non-blocking receive operations for communicating
+    between processes using multiprocessing.Queue. Supports iteration and
+    async iteration. Mimics the anyio Receiver interface but uses synchronous
+    operations that can cross process boundaries.
+
+    Note:
+        Clone methods are not implemented for interprocess channels to keep
+        the implementation simple.
+
+    Attributes:
+        _state: Internal state containing the multiprocessing queue and close flag.
     """
 
     _state: MpState[T] = field()
 
     def receive_nowait(self) -> T:
+        """Receive an item without blocking.
+
+        Returns:
+            The received item.
+
+        Raises:
+            ClosedResourceError: If the channel is closed.
+            WouldBlock: If no items are available.
+            EndOfStream: If the sender has closed and no items remain.
+        """
         if self._state.closed.is_set():
             raise ClosedResourceError
 
@@ -185,6 +321,15 @@ class MpReceiver[T]:
             raise ClosedResourceError from e
 
     def receive(self) -> T:
+        """Receive an item, blocking if none are available.
+
+        Returns:
+            The received item.
+
+        Raises:
+            ClosedResourceError: If the channel is closed.
+            EndOfStream: If the sender has closed and no items remain.
+        """
         try:
             return self.receive_nowait()
         except WouldBlock:
@@ -194,18 +339,32 @@ class MpReceiver[T]:
                 raise EndOfStream from None
             return item
 
-    # nb: this function will not cancel particularly well
     async def receive_async(self) -> T:
+        """Receive an item asynchronously using a thread pool.
+
+        Returns:
+            The received item.
+
+        Note:
+            Cancellation may not work well with this method.
+        """
         return await to_thread.run_sync(self.receive, limiter=CapacityLimiter(1))
 
     def close(self) -> None:
+        """Close the receiver."""
         if not self._state.closed.is_set():
             self._state.closed.set()
         self._state.buffer.close()
 
-    # == unique to Mp channels ==
     def join(self) -> None:
-        """Block until all enqueued messages are drained off our side of the buffer"""
+        """Block until all enqueued messages are drained.
+
+        Blocks until all messages in the queue have been consumed. Channel must
+        be closed before calling join().
+
+        Raises:
+            AssertionError: If channel is not closed.
+        """
         assert self._state.closed.is_set(), (
             "Mp channels must be closed before being joined"
         )
@@ -270,7 +429,21 @@ class MpReceiver[T]:
 
 
 class channel[T]:  # noqa: N801
-    """Create a pair of asynchronous channels for communicating within the same process"""
+    """Create a pair of asynchronous channels for same-process communication.
+
+    Creates a typed sender/receiver pair using anyio's memory streams. Suitable
+    for communication between tasks in the same process.
+
+    Args:
+        max_buffer_size: Maximum buffer size. Use math.inf for unbounded buffer.
+            Must be an integer or math.inf.
+
+    Returns:
+        Tuple of (Sender, Receiver) instances sharing the same channel.
+
+    Raises:
+        ValueError: If max_buffer_size is not an integer or math.inf.
+    """
 
     def __new__(cls, max_buffer_size: float = inf) -> tuple[Sender[T], Receiver[T]]:
         if max_buffer_size != inf and not isinstance(max_buffer_size, int):
@@ -280,9 +453,23 @@ class channel[T]:  # noqa: N801
 
 
 class mp_channel[T]:  # noqa: N801
-    """Create a pair of synchronous channels for interprocess communication"""
+    """Create a pair of synchronous channels for interprocess communication.
 
-    # max buffer size uses math.inf to represent an unbounded queue, and 0 to represent a yet unimplemented "unbuffered" queue.
+    Creates a typed sender/receiver pair using multiprocessing.Queue. Suitable
+    for communication between processes. Uses synchronous operations that work
+    across process boundaries.
+
+    Args:
+        max_buffer_size: Maximum buffer size. Use math.inf for unbounded buffer.
+            Must be an integer or math.inf. Zero-sized buffers are not supported.
+
+    Returns:
+        Tuple of (MpSender, MpReceiver) instances sharing the same channel.
+
+    Raises:
+        ValueError: If max_buffer_size is not an integer or math.inf, or is 0.
+    """
+
     def __new__(cls, max_buffer_size: float = inf) -> tuple[MpSender[T], MpReceiver[T]]:
         if (
             max_buffer_size == 0

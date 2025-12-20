@@ -1,3 +1,9 @@
+"""Hugging Face API and repository utilities.
+
+This module provides utilities for interacting with Hugging Face, including
+filtering repository objects, authentication, and pattern matching.
+"""
+
 import os
 from fnmatch import fnmatch
 from pathlib import Path
@@ -17,6 +23,24 @@ def filter_repo_objects[T](
     ignore_patterns: list[str] | str | None = None,
     key: Callable[[T], str] | None = None,
 ) -> Generator[T, None, None]:
+    """Filter repository objects by filename patterns.
+
+    Filters items based on allow/ignore patterns using fnmatch. Directory
+    patterns ending with "/" are automatically expanded to include all
+    contents with "*".
+
+    Args:
+        items: Items to filter.
+        allow_patterns: Patterns to allow (if provided, items must match one).
+        ignore_patterns: Patterns to ignore (items matching are excluded).
+        key: Function to extract path string from items (defaults to str/Path).
+
+    Yields:
+        Filtered items.
+
+    Raises:
+        ValueError: If key is needed but item is not str or Path.
+    """
     if isinstance(allow_patterns, str):
         allow_patterns = [allow_patterns]
     if isinstance(ignore_patterns, str):
@@ -53,22 +77,43 @@ def filter_repo_objects[T](
 
 
 def _add_wildcard_to_directories(pattern: str) -> str:
+    """Add wildcard to directory patterns.
+
+    Args:
+        pattern: Pattern string.
+
+    Returns:
+        Pattern with "*" appended if it ends with "/".
+    """
     if pattern[-1] == "/":
         return pattern + "*"
     return pattern
 
 
 def get_hf_endpoint() -> str:
+    """Get Hugging Face API endpoint.
+
+    Returns:
+        Endpoint URL from HF_ENDPOINT env var or default.
+    """
     return os.environ.get("HF_ENDPOINT", "https://huggingface.co")
 
 
 def get_hf_home() -> Path:
-    """Get the Hugging Face home directory."""
+    """Get the Hugging Face home directory.
+
+    Returns:
+        Path from HF_HOME env var or default ~/.cache/huggingface.
+    """
     return Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
 
 
 async def get_hf_token() -> str | None:
-    """Retrieve the Hugging Face token from the user's HF_HOME directory."""
+    """Retrieve the Hugging Face token from the user's HF_HOME directory.
+
+    Returns:
+        Token string if found, None otherwise.
+    """
     token_path = get_hf_home() / "token"
     if await aios.path.exists(token_path):
         async with aiofiles.open(token_path, "r") as f:
@@ -77,7 +122,11 @@ async def get_hf_token() -> str | None:
 
 
 async def get_auth_headers() -> dict[str, str]:
-    """Get authentication headers if a token is available."""
+    """Get authentication headers for Hugging Face API.
+
+    Returns:
+        Dictionary with Authorization header if token available, empty dict otherwise.
+    """
     token = await get_hf_token()
     if token:
         return {"Authorization": f"Bearer {token}"}
@@ -85,7 +134,14 @@ async def get_auth_headers() -> dict[str, str]:
 
 
 def extract_layer_num(tensor_name: str) -> int | None:
-    # This is a simple example and might need to be adjusted based on the actual naming convention
+    """Extract layer number from tensor name.
+
+    Args:
+        tensor_name: Tensor name (e.g., "layers.5.attention.qkv").
+
+    Returns:
+        Layer number if found, None otherwise.
+    """
     parts = tensor_name.split(".")
     for part in parts:
         if part.isdigit():
@@ -94,6 +150,18 @@ def extract_layer_num(tensor_name: str) -> int | None:
 
 
 def get_allow_patterns(weight_map: dict[str, str], shard: ShardMetadata) -> list[str]:
+    """Get file patterns to download for a shard.
+
+    Includes default patterns (config, tokenizer files) plus shard-specific
+    safetensors files from the weight map.
+
+    Args:
+        weight_map: Mapping from weight names to safetensors filenames.
+        shard: Shard metadata.
+
+    Returns:
+        List of filename patterns to download.
+    """
     default_patterns = set(
         ["*.json", "*.py", "tokenizer.model", "*.tiktoken", "*.txt", "*.jinja"]
     )

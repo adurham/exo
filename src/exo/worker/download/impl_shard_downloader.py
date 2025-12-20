@@ -1,3 +1,9 @@
+"""Shard downloader implementation with caching and singleton behavior.
+
+This module provides implementations of ShardDownloader with features like
+caching, singleton behavior, and resumable downloads.
+"""
+
 import asyncio
 from pathlib import Path
 from typing import AsyncIterator, Callable
@@ -13,12 +19,31 @@ from exo.worker.download.shard_downloader import ShardDownloader
 
 
 def exo_shard_downloader(max_parallel_downloads: int = 8) -> ShardDownloader:
+    """Create the default EXO shard downloader.
+
+    Returns a downloader with singleton, caching, and resumable download
+    capabilities.
+
+    Args:
+        max_parallel_downloads: Maximum number of parallel file downloads.
+
+    Returns:
+        Configured ShardDownloader instance.
+    """
     return SingletonShardDownloader(
         CachedShardDownloader(ResumableShardDownloader(max_parallel_downloads))
     )
 
 
 async def build_base_shard(model_id: str) -> ShardMetadata:
+    """Build a base shard metadata for a model (single-node, all layers).
+
+    Args:
+        model_id: Hugging Face model ID.
+
+    Returns:
+        PipelineShardMetadata representing the full model on a single node.
+    """
     model_meta = await get_model_meta(model_id)
     return PipelineShardMetadata(
         model_meta=model_meta,
@@ -31,6 +56,17 @@ async def build_base_shard(model_id: str) -> ShardMetadata:
 
 
 async def build_full_shard(model_id: str) -> PipelineShardMetadata:
+    """Build a full shard metadata for a model.
+
+    Similar to build_base_shard but returns a PipelineShardMetadata with
+    explicit end_layer matching n_layers.
+
+    Args:
+        model_id: Hugging Face model ID.
+
+    Returns:
+        PipelineShardMetadata representing the full model.
+    """
     base_shard = await build_base_shard(model_id)
     return PipelineShardMetadata(
         model_meta=base_shard.model_meta,
@@ -43,13 +79,33 @@ async def build_full_shard(model_id: str) -> PipelineShardMetadata:
 
 
 class SingletonShardDownloader(ShardDownloader):
+    """ShardDownloader wrapper ensuring only one download per shard.
+
+    Prevents duplicate downloads by tracking active download tasks and
+    reusing them if a shard is requested multiple times.
+
+    Attributes:
+        shard_downloader: Wrapped downloader to delegate to.
+        active_downloads: Dictionary of active download tasks by shard.
+    """
+
     def __init__(self, shard_downloader: ShardDownloader):
+        """Initialize singleton downloader.
+
+        Args:
+            shard_downloader: Downloader to wrap.
+        """
         self.shard_downloader = shard_downloader
         self.active_downloads: dict[ShardMetadata, asyncio.Task[Path]] = {}
 
     def on_progress(
         self, callback: Callable[[ShardMetadata, RepoDownloadProgress], None]
     ) -> None:
+        """Register progress callback.
+
+        Args:
+            callback: Function to call with download progress updates.
+        """
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
@@ -78,7 +134,22 @@ class SingletonShardDownloader(ShardDownloader):
 
 
 class CachedShardDownloader(ShardDownloader):
+    """ShardDownloader wrapper that caches download results.
+
+    Caches downloaded shard paths by (model_id, shard) to avoid re-downloading
+    the same shard multiple times.
+
+    Attributes:
+        shard_downloader: Wrapped downloader to delegate to.
+        cache: Cache of (model_id, shard) -> Path mappings.
+    """
+
     def __init__(self, shard_downloader: ShardDownloader):
+        """Initialize cached downloader.
+
+        Args:
+            shard_downloader: Downloader to wrap.
+        """
         self.shard_downloader = shard_downloader
         self.cache: dict[tuple[str, ShardMetadata], Path] = {}
 
@@ -110,7 +181,22 @@ class CachedShardDownloader(ShardDownloader):
 
 
 class ResumableShardDownloader(ShardDownloader):
+    """ShardDownloader that downloads shards with resumable downloads.
+
+    Provides the core download implementation with progress callbacks and
+    parallel download support.
+
+    Attributes:
+        max_parallel_downloads: Maximum number of parallel file downloads.
+        on_progress_callbacks: List of registered progress callbacks.
+    """
+
     def __init__(self, max_parallel_downloads: int = 8):
+        """Initialize resumable downloader.
+
+        Args:
+            max_parallel_downloads: Maximum parallel downloads.
+        """
         self.max_parallel_downloads = max_parallel_downloads
         self.on_progress_callbacks: list[
             Callable[[ShardMetadata, RepoDownloadProgress], None]
