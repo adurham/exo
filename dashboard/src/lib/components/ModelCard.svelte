@@ -141,6 +141,31 @@ function toggleNodeDetails(nodeId: string): void {
 	}
 	
 	const clampPercent = (value: number): number => Math.min(100, Math.max(0, value));
+	
+	/**
+	 * Check if a node would exceed memory buffer constraints after adding model usage.
+	 * Matches backend logic: ensures minimum 12GB free space AND caps at 90% usage.
+	 * 
+	 * @param totalGB Total memory in GB
+	 * @param currentUsedGB Currently used memory in GB
+	 * @param modelUsageGB Model memory usage to add in GB
+	 * @returns true if the node would exceed buffer constraints (should show red)
+	 */
+	function wouldExceedBuffer(totalGB: number, currentUsedGB: number, modelUsageGB: number): boolean {
+		const minFreeGB = 12; // Minimum absolute free space requirement
+		const maxUsagePercent = 0.9; // Maximum 90% usage
+		
+		const newUsedGB = currentUsedGB + modelUsageGB;
+		const newFreeGB = totalGB - newUsedGB;
+		const newUsagePercent = newUsedGB / totalGB;
+		
+		// Check if we'd violate either constraint
+		const violatesMinFree = newFreeGB < minFreeGB;
+		const violatesMaxPercent = newUsagePercent > maxUsagePercent;
+		
+		return violatesMinFree || violatesMaxPercent;
+	}
+	
 	const huggingFaceModelId = $derived(modelIdOverride ?? model.id);
 
 	// Get node list in the same order as the topology graph (insertion order of
@@ -632,7 +657,7 @@ function toggleNodeDetails(nodeId: string): void {
 								text-anchor="middle"
 								font-size={node.isKVCache ? "7" : "8"}
 								font-family="SF Mono, Monaco, monospace"
-								fill={node.isUsed ? (node.newPercent > 90 ? '#f87171' : '#FFD700') : '#4B5563'}
+								fill={node.isUsed ? (wouldExceedBuffer(node.totalGB, node.currentUsedGB, node.modelUsageGB) ? '#f87171' : '#FFD700') : '#4B5563'}
 							>
 								{node.isKVCache ? 'KV Cache' : `${node.modelAllocationPercent.toFixed(0)}%`}
 							</text>

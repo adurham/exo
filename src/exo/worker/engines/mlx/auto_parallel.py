@@ -74,6 +74,45 @@ class PipelineFirstLayer(CustomMlxLayer):
         return self.original_layer(x, *args, **kwargs)
 
 
+class PipelinePassThroughLayer(nn.Module):
+    """A pass-through layer for nodes with 0 layers (KV cache only).
+    
+    This layer receives input from the previous rank, forwards it without processing,
+    and sends it to the next rank. It's used when a node has no layers assigned
+    but still needs to participate in the pipeline for KV cache purposes.
+    """
+    def __init__(
+        self,
+        r: int,
+        s: int,
+        group: mx.distributed.Group,
+    ):
+        super().__init__()
+        self.r: int = r
+        self.s: int = s
+        self.group = group
+        self.is_singleton = group.size() == 1
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        # Receive from previous rank if not rank 0
+        if self.r != 0 and not self.is_singleton:
+            x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+        
+        # Pass through without processing (identity function)
+        output = x
+        
+        # Send to next rank if not last rank
+        if self.r != self.s - 1 and not self.is_singleton:
+            output = mx.distributed.send(
+                output, (self.r + 1) % self.s, group=self.group
+            )
+        
+        # All gather for final output
+        if not self.is_singleton:
+            output = mx.distributed.all_gather(output, group=self.group)[-output.shape[0] :]
+        return output
+
+
 class PipelineLastLayer(CustomMlxLayer):
     def __init__(
         self,
@@ -171,25 +210,25 @@ def pipeline_auto_parallel(
     start_layer, end_layer = model_shard_meta.start_layer, model_shard_meta.end_layer
     device_rank, world_size = model_shard_meta.device_rank, model_shard_meta.world_size
 
-    # Handle nodes with 0 layers (KV cache only) - skip layer processing
-    if start_layer == end_layer:
-        # This node has no layers to process, only contributes to KV cache
-        # Return model as-is without layer modifications
-        return model
-
     inner_model_instance: nn.Module = _inner_model(model)
 
     # Handle both model.layers and model.h cases
     layers: list[_LayerCallable] = _get_layers(inner_model_instance)
 
-    layers = layers[start_layer:end_layer]
-    layers[0] = PipelineFirstLayer(layers[0], device_rank, group=group)
-    layers[-1] = PipelineLastLayer(
-        layers[-1],
-        device_rank,
-        world_size,
-        group=group,
-    )
+    # Handle nodes with 0 layers (KV cache only)
+    if start_layer == end_layer:
+        # This node has no layers to process, only contributes to KV cache
+        # Create a single pass-through layer that handles receive/send but doesn't process
+        layers = [PipelinePassThroughLayer(device_rank, world_size, group=group)]
+    else:
+        layers = layers[start_layer:end_layer]
+        layers[0] = PipelineFirstLayer(layers[0], device_rank, group=group)
+        layers[-1] = PipelineLastLayer(
+            layers[-1],
+            device_rank,
+            world_size,
+            group=group,
+        )
 
     _set_layers(model, layers)
 
