@@ -1,6 +1,6 @@
 import socket
 import sys
-from subprocess import CalledProcessError
+import subprocess
 
 import psutil
 from anyio import run_process
@@ -18,11 +18,16 @@ def _get_thunderbolt_interfaces() -> set[str]:
         return set()
     
     try:
-        process = run_process(["networksetup", "-listallhardwareports"], check=True)
-    except CalledProcessError:
+        result = subprocess.run(
+            ["networksetup", "-listallhardwareports"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return set()
     
-    output = process.stdout.decode("utf-8", errors="replace")
+    output = result.stdout
     thunderbolt_interfaces: set[str] = set()
     
     lines = output.split("\n")
@@ -72,13 +77,27 @@ def get_network_interfaces() -> list[NetworkInterfaceInfo]:
     Returns a list of NetworkInterfaceInfo objects.
     """
     interfaces_info: list[NetworkInterfaceInfo] = []
+    thunderbolt_interfaces = _get_thunderbolt_interfaces()
+    interface_stats = psutil.net_if_stats()
 
     for iface, services in psutil.net_if_addrs().items():
         for service in services:
             match service.family:
-                case socket.AF_INET | socket.AF_INET6:
+                case socket.AF_INET:
+                    stats = interface_stats.get(iface)
                     interfaces_info.append(
-                        NetworkInterfaceInfo(name=iface, ip_address=service.address)
+                        NetworkInterfaceInfo(
+                            name=iface,
+                            ip_address=service.address,
+                            netmask=service.netmask,
+                            is_thunderbolt=iface in thunderbolt_interfaces
+                            if thunderbolt_interfaces
+                            else None,
+                            is_up=stats.isup if stats is not None else None,
+                            maximum_transmission_unit=stats.mtu
+                            if stats is not None
+                            else None,
+                        )
                     )
                 case _:
                     pass

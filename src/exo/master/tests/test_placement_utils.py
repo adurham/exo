@@ -5,6 +5,7 @@ import pytest
 from exo.master.placement_utils import (
     filter_cycles_by_memory,
     get_hosts_from_subgraph,
+    get_mlx_ibv_devices_matrix,
     get_mlx_ibv_coordinators,
     get_shard_assignments,
     get_smallest_cycles,
@@ -395,3 +396,82 @@ def test_get_mlx_ibv_coordinators(
     assert coordinators[node_c_id] == (
         f"{conn_c_a.send_back_multiaddr.ip_address}:5000"
     ), "node_c should use the IP from conn_c_a"
+
+
+def test_mlx_rdma_pairing_uses_interface_subnets(
+    topology: Topology,
+    create_node: Callable[[int, NodeId | None], NodeInfo],
+):
+    # Arrange a 3-node fully-connected RDMA fabric over /30 point-to-point links:
+    #
+    # - 201.1 <-> 201.2 (A <-> B)
+    # - 202.1 <-> 202.2 (A <-> C)
+    # - 204.1 <-> 204.2 (B <-> C)
+    #
+    # Use only TB1/TB2 interfaces (en2, en3).
+    netmask = "255.255.255.252"
+
+    node_a_id = NodeId()
+    node_b_id = NodeId()
+    node_c_id = NodeId()
+
+    node_a = create_node(500 * 1024, node_a_id)
+    node_b = create_node(500 * 1024, node_b_id)
+    node_c = create_node(500 * 1024, node_c_id)
+
+    assert node_a.node_profile is not None
+    assert node_b.node_profile is not None
+    assert node_c.node_profile is not None
+
+    node_a.node_profile = NodePerformanceProfile(
+        model_id="test",
+        chip_id="test",
+        friendly_name="test",
+        memory=node_a.node_profile.memory,
+        network_interfaces=[
+            NetworkInterfaceInfo(name="en2", ip_address="192.168.201.1", netmask=netmask),
+            NetworkInterfaceInfo(name="en3", ip_address="192.168.202.1", netmask=netmask),
+        ],
+        system=node_a.node_profile.system,
+    )
+    node_b.node_profile = NodePerformanceProfile(
+        model_id="test",
+        chip_id="test",
+        friendly_name="test",
+        memory=node_b.node_profile.memory,
+        network_interfaces=[
+            NetworkInterfaceInfo(name="en2", ip_address="192.168.201.2", netmask=netmask),
+            NetworkInterfaceInfo(name="en3", ip_address="192.168.204.1", netmask=netmask),
+        ],
+        system=node_b.node_profile.system,
+    )
+    node_c.node_profile = NodePerformanceProfile(
+        model_id="test",
+        chip_id="test",
+        friendly_name="test",
+        memory=node_c.node_profile.memory,
+        network_interfaces=[
+            NetworkInterfaceInfo(name="en2", ip_address="192.168.202.2", netmask=netmask),
+            NetworkInterfaceInfo(name="en3", ip_address="192.168.204.2", netmask=netmask),
+        ],
+        system=node_c.node_profile.system,
+    )
+
+    topology.add_node(node_a)
+    topology.add_node(node_b)
+    topology.add_node(node_c)
+
+    # No topology edges are required for subnet-based RDMA selection.
+    matrix = get_mlx_ibv_devices_matrix([node_a, node_b, node_c], topology)
+
+    # A uses en2 to reach B, en3 to reach C.
+    assert matrix[0][1] == "rdma_en2"
+    assert matrix[0][2] == "rdma_en3"
+
+    # B uses en2 to reach A, en3 to reach C.
+    assert matrix[1][0] == "rdma_en2"
+    assert matrix[1][2] == "rdma_en3"
+
+    # C uses en2 to reach A (202.x), en3 to reach B (204.x).
+    assert matrix[2][0] == "rdma_en2"
+    assert matrix[2][1] == "rdma_en3"

@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import ipaddress
+import os
 from collections.abc import Generator
 from typing import TypeGuard, cast
 
@@ -13,6 +14,7 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.models import ModelMetadata
 from exo.shared.types.profiling import NodePerformanceProfile
 from exo.shared.types.topology import NodeInfo
+from exo.shared.types.profiling import NetworkInterfaceInfo
 from exo.shared.types.worker.runners import RunnerId, ShardAssignments
 from exo.shared.types.worker.shards import (
     PipelineShardMetadata,
@@ -31,6 +33,8 @@ _THUNDERBOLT_INTERFACE_NAME_GUESS: frozenset[str] = frozenset(
         "en7",
     }
 )
+
+_MLX_RDMA_ALLOWED_INTERFACES_ENV_VAR: str = "EXO_MLX_RDMA_INTERFACES"
 
 
 class NodeWithProfile(BaseModel):
@@ -226,40 +230,41 @@ def get_mlx_ibv_devices_matrix(
         [None for _ in range(num_nodes)] for _ in range(num_nodes)
     ]
 
-    # MLX RDMA requires Thunderbolt connections - filter for connections where
-    # the IP is on a Thunderbolt interface (en2-en7) of the target node
-    get_thunderbolt = True
-    logger.info("MLX RDMA filtering for connections over Thunderbolt interfaces (en2-en7)")
+    # MLX RDMA requires Thunderbolt connections - restrict candidate interfaces to TB.
+    logger.info("MLX RDMA selecting RDMA interfaces over Thunderbolt (IPv4 only)")
 
     for i, node_i in enumerate(selected_cycle):
         for j, node_j in enumerate(selected_cycle):
             if i == j:
                 continue
 
-            # Find the IP J uses to talk to I
-            # Note: we pass get_thunderbolt=False here and filter manually because
-            # we need to check if the IP is on node_i's Thunderbolt interfaces
-            all_connection_ips = list(_find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False))
-            connection_ips = []
-            for conn_ip in all_connection_ips:
-                if get_thunderbolt:
-                    # Check if the connection IP is on a Thunderbolt interface of node_i
-                    if _is_ip_on_thunderbolt_interface(conn_ip, node_i):
-                        connection_ips.append(conn_ip)
-                else:
-                    connection_ips.append(conn_ip)
-            interface_found = False
+            # Prefer deterministic profile-based matching:
+            # find a Thunderbolt IPv4 interface on node_i whose subnet contains an IPv4
+            # address on node_j (supports /30 and other non-/24 masks).
+            interface_name = _find_mlx_rdma_interface_for_peer(node_i, node_j)
+            if interface_name is not None:
+                matrix[i][j] = interface_name
+                continue
+
+            # Fallback: match via topology "send_back_multiaddr" addresses if we cannot
+            # compute subnets from profiles (e.g., missing netmask).
+            connection_ips = list(
+                _find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False)
+            )
+            connection_ips = [
+                ip
+                for ip in connection_ips
+                if _is_ip_on_thunderbolt_interface(ip, node_i)
+            ]
             for connection_ip in connection_ips:
-                # This is a local IP on I, which is attached to an interface: find that interface
                 if interface_name := _find_interface_name_for_ip(connection_ip, node_i):
                     matrix[i][j] = interface_name
                     logger.info(
                         f"Interface name for {connection_ip} on {node_i.node_id}: {interface_name}"
                     )
-                    interface_found = True
                     break
             
-            if not interface_found:
+            if matrix[i][j] is None:
                 available_ips = []
                 if node_i.node_profile:
                     thunderbolt_interfaces = _get_thunderbolt_interfaces_for_node(node_i)
@@ -271,15 +276,14 @@ def get_mlx_ibv_devices_matrix(
                                 f"{_to_rdma_interface_name(iface.name)}:{iface.ip_address}"
                             )
                 
-                connection_type = "Thunderbolt" if get_thunderbolt else "any"
                 logger.error(
                     f"Failed to find interface name between {node_i.node_id} and {node_j.node_id}. "
-                    f"Searched {connection_type} connection IPs: {connection_ips}. "
+                    f"Searched Thunderbolt connection IPs: {connection_ips}. "
                     f"Available RDMA interfaces on {node_i.node_id}: {available_ips or 'none'}"
                 )
                 raise ValueError(
                     f"Current ibv backend requires all-to-all rdma connections over Thunderbolt. "
-                    f"Could not match {connection_type} connection IPs {connection_ips} to any RDMA interface on node {node_i.node_id}"
+                    f"Could not match Thunderbolt connection IPs {connection_ips} to any RDMA interface on node {node_i.node_id}"
                 )
 
     return matrix
@@ -327,6 +331,88 @@ def _to_rdma_interface_name(interface_name: str) -> str:
     return interface_name if interface_name.startswith("rdma_") else f"rdma_{interface_name}"
 
 
+def _get_mlx_rdma_allowed_interface_names() -> frozenset[str] | None:
+    configured = os.getenv(_MLX_RDMA_ALLOWED_INTERFACES_ENV_VAR)
+    if configured is None or configured.strip() == "":
+        return None
+    names = {name.strip() for name in configured.split(",") if name.strip() != ""}
+    return frozenset(names) if names else None
+
+
+def _get_mlx_rdma_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> list[NetworkInterfaceInfo]:
+    if node_info.node_profile is None:
+        return []
+
+    thunderbolt_names = _get_thunderbolt_interfaces_for_node(node_info)
+    allowed = _get_mlx_rdma_allowed_interface_names()
+    if allowed is not None:
+        thunderbolt_names = thunderbolt_names & set(allowed)
+
+    all_candidates: list[NetworkInterfaceInfo] = []
+    for interface in node_info.node_profile.network_interfaces:
+        if interface.name not in thunderbolt_names:
+            continue
+        if not _is_ipv4_address(interface.ip_address):
+            continue
+        all_candidates.append(interface)
+
+    # Auto-restrict to the "active" Thunderbolt links when possible:
+    # if we can identify MTU/up state, prefer the interfaces that look like the
+    # dedicated RDMA links (typically MTU 9000 and up).
+    preferred_candidates = [
+        interface
+        for interface in all_candidates
+        if (interface.is_up is not False)
+        and (
+            interface.maximum_transmission_unit is None
+            or interface.maximum_transmission_unit >= 9000
+        )
+    ]
+    candidates = preferred_candidates if preferred_candidates else all_candidates
+
+    candidates.sort(key=lambda iface: (iface.name, iface.ip_address))
+    return candidates
+
+
+def _ipv4_interface_network(interface: NetworkInterfaceInfo) -> ipaddress.IPv4Network | None:
+    if not _is_ipv4_address(interface.ip_address):
+        return None
+    if interface.netmask is None or not _is_ipv4_address(interface.netmask):
+        return None
+    try:
+        return ipaddress.ip_network(
+            f"{interface.ip_address}/{interface.netmask}",
+            strict=False,
+        )
+    except ValueError:
+        return None
+
+
+def _find_mlx_rdma_interface_for_peer(
+    node_local: NodeInfo,
+    node_peer: NodeInfo,
+) -> str | None:
+    local_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_local)
+    peer_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_peer)
+    if not local_ifaces or not peer_ifaces:
+        return None
+
+    peer_ipv4_addresses = [
+        ipaddress.ip_address(peer_iface.ip_address)
+        for peer_iface in peer_ifaces
+        if _is_ipv4_address(peer_iface.ip_address)
+    ]
+
+    for local_iface in local_ifaces:
+        local_network = _ipv4_interface_network(local_iface)
+        if local_network is None:
+            continue
+        for peer_ip in peer_ipv4_addresses:
+            if peer_ip in local_network:
+                return _to_rdma_interface_name(local_iface.name)
+
+    return None
+
 def _get_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> set[str]:
     """
     Get the set of Thunderbolt interface names for a node.
@@ -342,6 +428,14 @@ def _get_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> set[str]:
     """
     if node_info.node_profile is None:
         return set()
+
+    thunderbolt_from_profile = {
+        interface.name
+        for interface in node_info.node_profile.network_interfaces
+        if interface.is_thunderbolt is True
+    }
+    if thunderbolt_from_profile:
+        return thunderbolt_from_profile
     
     # Try system-based detection first (works for local interfaces)
     # Note: This only works if we're running on the same machine as the node
@@ -488,33 +582,45 @@ def get_mlx_ibv_coordinators(
     rank_0_node = selected_cycle[0]
     logger.info(f"Selecting coordinator from rank 0 node: {rank_0_node.node_id}")
     
-    # MLX RDMA requires Thunderbolt connections - filter for connections where
-    # the IP is on a Thunderbolt interface (en2-en7) of the target node
-    get_thunderbolt = True
-
     def get_ip_for_node(n: NodeInfo) -> str:
         if n.node_id == rank_0_node.node_id:
             return "0.0.0.0"
 
-        # Find connection IPs, filtering for Thunderbolt if needed
-        all_connection_ips = list(_find_connection_ip(n, rank_0_node, cycle_digraph, thunderbolt_only=False))
-        connection_ips = []
-        for conn_ip in all_connection_ips:
-            if get_thunderbolt:
-                # Check if the connection IP is on a Thunderbolt interface of rank_0_node
-                if _is_ip_on_thunderbolt_interface(conn_ip, rank_0_node):
-                    connection_ips.append(conn_ip)
-            else:
-                connection_ips.append(conn_ip)
-        
+        # Prefer subnet-based selection: choose the rank-0 IPv4 on a Thunderbolt interface
+        # whose subnet contains one of this node's Thunderbolt IPv4s.
+        rank_0_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(rank_0_node)
+        node_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(n)
+
+        node_ipv4_addresses = [
+            ipaddress.ip_address(iface.ip_address)
+            for iface in node_ifaces
+            if _is_ipv4_address(iface.ip_address)
+        ]
+        for rank_0_iface in rank_0_ifaces:
+            rank_0_network = _ipv4_interface_network(rank_0_iface)
+            if rank_0_network is None:
+                continue
+            if any(node_ip in rank_0_network for node_ip in node_ipv4_addresses):
+                return rank_0_iface.ip_address
+
+        # Fallback to topology matching.
+        connection_ips = list(
+            _find_connection_ip(n, rank_0_node, cycle_digraph, thunderbolt_only=False)
+        )
+        connection_ips = [
+            ip
+            for ip in connection_ips
+            if _is_ip_on_thunderbolt_interface(ip, rank_0_node)
+        ]
         if connection_ips:
             return connection_ips[0]
 
-        connection_type = "Thunderbolt" if get_thunderbolt else "any"
         logger.warning(
-            f"Failed to find directly connected {connection_type} ip between {n.node_id} and {rank_0_node.node_id}"
+            f"Failed to find directly connected Thunderbolt ip between {n.node_id} and {rank_0_node.node_id}"
         )
-        raise ValueError("Current ibv backend requires all-to-all rdma connections over Thunderbolt")
+        raise ValueError(
+            "Current ibv backend requires all-to-all rdma connections over Thunderbolt"
+        )
 
     return {
         n.node_id: f"{get_ip_for_node(n)}:{coordinator_port}" for n in selected_cycle
