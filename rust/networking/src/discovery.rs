@@ -393,8 +393,8 @@ impl NetworkBehaviour for Behaviour {
 
                     // handle ping events => if error then disconnect
                     managed::BehaviourEvent::Ping(e) => {
-                        if let Err(_) = e.result {
-                            self.close_connection(e.peer, e.connection.clone())
+                        if let Err(err) = e.result {
+                            log::warn!("RUST: ping error {:?} on {:?}, keeping connection", err, e.peer);
                         }
                     }
                 }
