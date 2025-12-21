@@ -414,8 +414,10 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_env_seeds())
 
     local_ips = _local_ipv4s()
+    logger.info(f"Local IPv4s detected: {sorted(local_ips)}")
     subnets = _thunderbolt_subnets()
     if not subnets:
+        logger.warning("No Thunderbolt subnets from ifconfig; applying fallback from local IPs")
         subnets = _fallback_subnets_from_ips(local_ips)
     if subnets:
         os.environ["EXO_TB_SUBNETS"] = ",".join(str(net) for net in subnets)
@@ -533,6 +535,10 @@ def _thunderbolt_subnets() -> set[ipaddress.IPv4Network]:
             if net.prefixlen > 30:
                 continue
             nets.add(net)
+    if not nets:
+        logger.warning("ifconfig parsing found no TB subnets")
+    else:
+        logger.info(f"ifconfig TB subnets: {sorted(str(n) for n in nets)}")
     return nets
 
 
