@@ -69,9 +69,22 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.is_singleton = group.size() == 1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        from exo.worker.runner.bootstrap import logger
+        
+        mlx_group_rank = self.group.rank()
+        logger.debug(
+            f"PipelineFirstLayer[rank={self.r}]: Input shape={x.shape}, "
+            f"group_rank={mlx_group_rank}, group_size={self.group.size()}, singleton={self.is_singleton}"
+        )
+        
         if self.r != 0 and not self.is_singleton:
+            logger.debug(f"PipelineFirstLayer[rank={self.r}]: Receiving from rank {self.r - 1}")
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
-        return self.original_layer(x, *args, **kwargs)
+            logger.debug(f"PipelineFirstLayer[rank={self.r}]: Received shape={x.shape}")
+        
+        output = self.original_layer(x, *args, **kwargs)
+        logger.debug(f"PipelineFirstLayer[rank={self.r}]: Output shape={output.shape}")
+        return output
 
 
 class PipelinePassThroughLayer(nn.Module):
@@ -94,22 +107,38 @@ class PipelinePassThroughLayer(nn.Module):
         self.is_singleton = group.size() == 1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        from exo.worker.runner.bootstrap import logger
+        
+        mlx_group_rank = self.group.rank()
+        logger.debug(
+            f"PipelinePassThroughLayer[rank={self.r}]: Input shape={x.shape}, "
+            f"group_rank={mlx_group_rank}, group_size={self.group.size()}, singleton={self.is_singleton}"
+        )
+        
         # Receive from previous rank if not rank 0
         if self.r != 0 and not self.is_singleton:
+            logger.debug(f"PipelinePassThroughLayer[rank={self.r}]: Receiving from rank {self.r - 1}")
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+            logger.debug(f"PipelinePassThroughLayer[rank={self.r}]: Received shape={x.shape}")
         
         # Pass through without processing (identity function)
         output = x
         
         # Send to next rank if not last rank
         if self.r != self.s - 1 and not self.is_singleton:
+            next_rank = (self.r + 1) % self.s
+            logger.debug(f"PipelinePassThroughLayer[rank={self.r}]: Sending shape {output.shape} to rank {next_rank}")
             output = mx.distributed.send(
-                output, (self.r + 1) % self.s, group=self.group
+                output, next_rank, group=self.group
             )
         
         # All gather for final output
         if not self.is_singleton:
-            output = mx.distributed.all_gather(output, group=self.group)[-output.shape[0] :]
+            logger.debug(f"PipelinePassThroughLayer[rank={self.r}]: Participating in all_gather")
+            gathered = mx.distributed.all_gather(output, group=self.group)
+            logger.debug(f"PipelinePassThroughLayer[rank={self.r}]: all_gather returned shape {gathered.shape}")
+            output = gathered[-output.shape[0] :]
+            logger.debug(f"PipelinePassThroughLayer[rank={self.r}]: Returning shape {output.shape}")
         return output
 
 

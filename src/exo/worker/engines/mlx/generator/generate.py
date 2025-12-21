@@ -102,6 +102,8 @@ def mlx_generate(
     caches = make_kv_cache(model=model)
 
     max_tokens = task.max_tokens or MAX_TOKENS
+    token_count = 0
+    logger.info(f"Starting generation: max_tokens={max_tokens}, prompt_length={len(prompt)}")
     for out in stream_generate(
         model=model,
         tokenizer=tokenizer,
@@ -113,7 +115,8 @@ def mlx_generate(
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
-        logger.debug(out.text)
+        token_count += 1
+        logger.info(f"Generated token #{token_count}: text='{out.text}', token_id={out.token}, finish_reason={out.finish_reason}")
         if out.finish_reason is not None and out.finish_reason not in get_args(
             FinishReason
         ):
