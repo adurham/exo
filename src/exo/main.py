@@ -415,6 +415,8 @@ def apply_hostname_overrides(args: Args) -> Args:
 
     local_ips = _local_ipv4s()
     subnets = _thunderbolt_subnets()
+    if not subnets:
+        subnets = _fallback_subnets_from_ips(local_ips)
     if subnets:
         os.environ["EXO_TB_SUBNETS"] = ",".join(str(net) for net in subnets)
         logger.info(f"Using Thunderbolt subnets for discovery: {os.environ['EXO_TB_SUBNETS']}")
@@ -531,6 +533,22 @@ def _thunderbolt_subnets() -> set[ipaddress.IPv4Network]:
             if net.prefixlen > 30:
                 continue
             nets.add(net)
+    return nets
+
+
+def _fallback_subnets_from_ips(local_ips: set[str]) -> set[ipaddress.IPv4Network]:
+    """Fallback: derive /30 subnets from private local IPs (excluding link-local)."""
+    nets: set[ipaddress.IPv4Network] = set()
+    for ip in local_ips:
+        try:
+            addr = ipaddress.ip_address(ip)
+            if not addr.is_private:
+                continue
+            if ip.startswith("169.254."):
+                continue
+            nets.add(ipaddress.IPv4Network(f"{ip}/30", strict=False))
+        except Exception:
+            continue
     return nets
 
 
