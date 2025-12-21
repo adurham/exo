@@ -314,6 +314,7 @@ class API:
                             if runner_id is None:
                                 # Node is in instance but has no runner (shouldn't happen, but handle gracefully)
                                 memory_delta_by_node[str(node_id)] = 0
+                                logger.warning(f"Node {node_id} has no runner_id, setting memory_delta to 0")
                                 continue
                                 
                             shard_meta = shard_assignments.runner_to_shard.get(runner_id)
@@ -321,20 +322,24 @@ class API:
                             if shard_meta is not None:
                                 if isinstance(shard_meta, PipelineShardMetadata):
                                     layers_per_node = shard_meta.end_layer - shard_meta.start_layer
-                                    node_bytes = int(layers_per_node * bytes_per_layer)
-                                    # Explicitly set to 0 if no layers assigned (KV cache only)
+                                    # CRITICAL: If layers_per_node is 0, node_bytes MUST be 0 (KV cache only)
                                     if layers_per_node == 0:
                                         node_bytes = 0
+                                    else:
+                                        node_bytes = int(layers_per_node * bytes_per_layer)
                                     logger.info(
-                                        f"Node {node_id}: {layers_per_node} layers, "
-                                        f"{node_bytes / (1024**3):.2f} GB (KV cache: {layers_per_node == 0})"
+                                        f"Node {node_id}: start={shard_meta.start_layer}, end={shard_meta.end_layer}, "
+                                        f"layers={layers_per_node}, bytes={node_bytes} ({node_bytes / (1024**3):.2f} GB), "
+                                        f"KV_CACHE={layers_per_node == 0}"
                                     )
                                 else:
                                     node_bytes = total_bytes // len(node_ids)
                             else:
                                 node_bytes = 0
+                                logger.warning(f"Node {node_id} has no shard_meta, setting memory_delta to 0")
                             
-                            memory_delta_by_node[str(node_id)] = node_bytes
+                            # EXPLICITLY ensure 0 is stored as integer 0, not float or None
+                            memory_delta_by_node[str(node_id)] = int(node_bytes) if node_bytes is not None else 0
                     else:
                         per_node = total_bytes // len(node_ids)
                         remainder = total_bytes % len(node_ids)
