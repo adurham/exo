@@ -220,11 +220,19 @@ def get_shard_assignments_for_pipeline_parallel(
         reverse=True,
     )
     
+    logger.info(
+        f"Pipeline placement ranking: {[(c.node_id, c.membw_gbps, c.ram_total_bytes) for c in ranked_capacities]}"
+    )
+    
     sorted_cycle = [
         node_id_to_node[c.node_id]
         for c in ranked_capacities
         if c.node_id in node_id_to_node
     ]
+    
+    logger.info(
+        f"Sorted cycle order: {[node.node_id for node in sorted_cycle]}"
+    )
     
     if sum(c.max_layers_by_memory for c in capacities) < total_layers:
         # This should be rare given we pre-filter cycles by total memory, but

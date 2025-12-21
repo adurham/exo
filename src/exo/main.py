@@ -12,11 +12,13 @@ from pydantic import PositiveInt
 import exo.routing.topics as topics
 from exo.master.api import API  # TODO: should API be in master?
 from exo.master.main import Master
+from exo.master.placement_utils import estimated_memory_bandwidth_gbps
 from exo.routing.router import Router, get_node_id_keypair
 from exo.shared.constants import EXO_LOG
 from exo.shared.election import Election, ElectionResult
 from exo.shared.logging import logger_cleanup, logger_setup
 from exo.shared.types.common import NodeId, SessionId
+from exo.shared.types.events import NodePerformanceMeasured
 from exo.utils.channels import Receiver, channel
 from exo.utils.pydantic_ext import CamelCaseModel
 from exo.worker.download.impl_shard_downloader import exo_shard_downloader
@@ -106,6 +108,7 @@ class Node:
             if self.api:
                 tg.start_soon(self.api.run)
             tg.start_soon(self._elect_loop)
+            tg.start_soon(self._update_election_hardware)
 
     def shutdown(self):
         # if this is our second call to shutdown, just sys.exit
@@ -185,6 +188,20 @@ class Node:
                 else:
                     if self.api:
                         self.api.unpause(result.won_clock)
+
+    async def _update_election_hardware(self) -> None:
+        """Listen for this node's performance profile and update election hardware info."""
+        with self.router.receiver(topics.GLOBAL_EVENTS) as events:
+            async for event in events:
+                if isinstance(event.event, NodePerformanceMeasured):
+                    if event.event.node_id == self.node_id:
+                        profile = event.event.node_profile
+                        membw = estimated_memory_bandwidth_gbps(chip_id=profile.chip_id)
+                        ram_total = profile.memory.ram_total.in_bytes
+                        self.election.update_hardware_info(membw, ram_total)
+                        logger.info(
+                            f"Updated election hardware info: {membw} GB/s, {ram_total} bytes"
+                        )
 
 
 def main():

@@ -18,6 +18,8 @@ def em(
     node_id: str,
     commands_seen: int = 0,
     election_clock: int | None = None,
+    membw_gbps: float = 0.0,
+    ram_total_bytes: int = 0,
 ) -> ElectionMessage:
     """
     Helper to build ElectionMessages for a given proposer node.
@@ -33,6 +35,8 @@ def em(
             election_clock=clock if election_clock is None else election_clock,
         ),
         commands_seen=commands_seen,
+        membw_gbps=membw_gbps,
+        ram_total_bytes=ram_total_bytes,
     )
 
 

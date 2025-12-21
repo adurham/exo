@@ -6,6 +6,7 @@ from typing import Sequence
 from loguru import logger
 
 from exo.master.placement_utils import (
+    estimated_memory_bandwidth_gbps,
     filter_cycles_by_memory,
     get_hosts_from_subgraph,
     get_mlx_ibv_coordinators,
@@ -97,7 +98,19 @@ def place_instance(
     )
 
     # Ensure the fastest + largest machine becomes device_rank=0 (and RDMA rank 0).
-    selected_cycle = rotate_cycle_to_best_rank_0_node(selected_cycle)
+    # Sort by (bandwidth, ram_total) to guarantee Mac Studio (M4 Max, 128GB) is first.
+    if all(node.node_profile is not None for node in selected_cycle):
+        selected_cycle = sorted(
+            selected_cycle,
+            key=lambda node: (
+                estimated_memory_bandwidth_gbps(chip_id=node.node_profile.chip_id),
+                node.node_profile.memory.ram_total.in_bytes,
+                str(node.node_id),
+            ),
+            reverse=True,
+        )
+    else:
+        selected_cycle = rotate_cycle_to_best_rank_0_node(selected_cycle)
 
     shard_assignments = get_shard_assignments(
         command.model_meta, selected_cycle, command.sharding

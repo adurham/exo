@@ -24,11 +24,17 @@ class ElectionMessage(CamelCaseModel):
     seniority: int
     proposed_session: SessionId
     commands_seen: int
+    membw_gbps: float = 0.0
+    ram_total_bytes: int = 0
 
     # Could eventually include a list of neighbour nodes for centrality
     def __lt__(self, other: Self) -> bool:
         if self.clock != other.clock:
             return self.clock < other.clock
+        if self.membw_gbps != other.membw_gbps:
+            return self.membw_gbps < other.membw_gbps
+        if self.ram_total_bytes != other.ram_total_bytes:
+            return self.ram_total_bytes < other.ram_total_bytes
         if self.seniority != other.seniority:
             return self.seniority < other.seniority
         elif self.commands_seen != other.commands_seen:
@@ -58,6 +64,8 @@ class Election:
         command_receiver: Receiver[ForwarderCommand],
         is_candidate: bool = True,
         seniority: int = 0,
+        membw_gbps: float = 0.0,
+        ram_total_bytes: int = 0,
     ):
         # If we aren't a candidate, simply don't increment seniority.
         # For reference: This node can be elected master if all nodes are not master candidates
@@ -66,6 +74,8 @@ class Election:
         self.clock = 0
         self.node_id = node_id
         self.commands_seen = 0
+        self.membw_gbps = membw_gbps
+        self.ram_total_bytes = ram_total_bytes
         # Every node spawns as master
         self.current_session: SessionId = SessionId(
             master_node_id=node_id, election_clock=0
@@ -83,6 +93,15 @@ class Election:
         self._campaign_cancel_scope: CancelScope | None = None
         self._campaign_done: Event | None = None
         self._tg: TaskGroup | None = None
+
+    def update_hardware_info(self, membw_gbps: float, ram_total_bytes: int) -> None:
+        """Update hardware capability information for election priority.
+        
+        Called when node performance profile is measured to ensure
+        election messages include current hardware capabilities.
+        """
+        self.membw_gbps = membw_gbps
+        self.ram_total_bytes = ram_total_bytes
 
     async def run(self):
         logger.info("Starting Election")
@@ -270,4 +289,6 @@ class Election:
             clock=c,
             seniority=self.seniority,
             commands_seen=self.commands_seen,
+            membw_gbps=self.membw_gbps,
+            ram_total_bytes=self.ram_total_bytes,
         )
