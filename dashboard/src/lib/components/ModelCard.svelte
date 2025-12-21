@@ -224,6 +224,7 @@ function toggleNodeDetails(nodeId: string): void {
 			currentPercent: number;
 			newPercent: number;
 			isUsed: boolean;
+			isKVCache: boolean;
 			x: number;
 			y: number;
 			iconSize: number;
@@ -240,6 +241,8 @@ function toggleNodeDetails(nodeId: string): void {
 				const modelUsageGB = deltaBytes / (1024 * 1024 * 1024);
 				// Node is "used" if it's in the instance (even with 0 layers for KV cache)
 				const isUsed = n.id in memoryDelta;
+				// Node has 0 layers if it's in the instance but has no memory delta (used for KV cache)
+				const isKVCache = isUsed && deltaBytes === 0;
 				const angle = numNodes === 1 ? 0 : (i / numNodes) * Math.PI * 2 - Math.PI / 2;
 				const safeTotal = Math.max(n.totalGB, 0.001);
 				const currentPercent = clampPercent((n.usedGB / safeTotal) * 100);
@@ -256,6 +259,7 @@ function toggleNodeDetails(nodeId: string): void {
 					currentPercent,
 					newPercent,
 					isUsed,
+					isKVCache,
 					x: centerX + Math.cos(angle) * radius,
 					y: centerY + Math.sin(angle) * radius,
 					iconSize,
@@ -282,6 +286,7 @@ function toggleNodeDetails(nodeId: string): void {
 					currentPercent,
 					newPercent: currentPercent,
 					isUsed: false,
+					isKVCache: false,
 					x: centerX + Math.cos(angle) * radius,
 					y: centerY + Math.sin(angle) * radius,
 					iconSize,
@@ -313,6 +318,7 @@ function toggleNodeDetails(nodeId: string): void {
 						currentPercent,
 						newPercent,
 						isUsed: true,
+						isKVCache: false,
 						x: centerX + Math.cos(angle) * radius,
 						y: centerY + Math.sin(angle) * radius,
 						iconSize,
@@ -343,6 +349,7 @@ function toggleNodeDetails(nodeId: string): void {
 						currentPercent,
 						newPercent,
 						isUsed,
+						isKVCache: false,
 						x: centerX + Math.cos(angle) * radius,
 						y: centerY + Math.sin(angle) * radius,
 						iconSize,
@@ -608,15 +615,15 @@ function toggleNodeDetails(nodeId: string): void {
 								</g>
 							{/if}
 							
-							<!-- Percentage label -->
+							<!-- Percentage label or KV Cache label -->
 							<text 
 								y={node.iconSize/2 + 12}
 								text-anchor="middle"
-								font-size="8"
+								font-size={node.isKVCache ? "7" : "8"}
 								font-family="SF Mono, Monaco, monospace"
 								fill={node.isUsed ? (node.newPercent > 90 ? '#f87171' : '#FFD700') : '#4B5563'}
 							>
-								{node.newPercent.toFixed(0)}%
+								{node.isKVCache ? 'KV Cache' : `${node.newPercent.toFixed(0)}%`}
 							</text>
 						</g>
 					{/each}
