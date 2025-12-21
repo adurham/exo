@@ -246,18 +246,18 @@ def get_shard_assignments_for_pipeline_parallel(
             start=Memory(),
         )
         desired_layers: list[int] = []
-        layers_assigned = 0
+    layers_assigned = 0
         for i, node in enumerate(sorted_cycle):
             if i == world_size - 1:
-                node_layers = total_layers - layers_assigned
-            else:
-                node_layers = round(
-                    total_layers
-                    * (
-                        node.node_profile.memory.ram_available.in_bytes
-                        / cycle_memory.in_bytes
-                    )
+            node_layers = total_layers - layers_assigned
+        else:
+            node_layers = round(
+                total_layers
+                * (
+                    node.node_profile.memory.ram_available.in_bytes
+                    / cycle_memory.in_bytes
                 )
+            )
                 node_layers = max(0, node_layers)
             desired_layers.append(node_layers)
             layers_assigned += node_layers
@@ -288,33 +288,8 @@ def get_shard_assignments_for_pipeline_parallel(
             desired_layers[node_index] += take
             remaining -= take
 
-        if remaining > 0:
-            # If we still have layers remaining after filling all nodes to capacity,
-            # distribute them proportionally based on remaining headroom
-            total_headroom = sum(
-                c.max_layers_by_memory - desired_layers[node_id_to_index[c.node_id]]
-                for c in ranked_capacities
-                if c.max_layers_by_memory > desired_layers[node_id_to_index[c.node_id]]
-            )
-            
-            if total_headroom > 0:
-                for c in ranked_capacities:
-                    if remaining <= 0:
-                        break
-                    node_index = node_id_to_index[c.node_id]
-                    headroom = c.max_layers_by_memory - desired_layers[node_index]
-                    if headroom <= 0:
-                        continue
-                    
-                    # Proportional share of remaining layers based on headroom
-                    proportional_share = (headroom / total_headroom) * remaining
-                    take = min(remaining, max(1, int(round(proportional_share))))
-                    take = min(take, headroom)
-                    
-                    desired_layers[node_index] += take
-                    remaining -= take
-
-        # Final pass: distribute any remaining layers to nodes with capacity
+        # If we still have layers remaining after filling nodes sequentially,
+        # only distribute to slower nodes if faster nodes are at capacity
         if remaining > 0:
             for c in ranked_capacities:
                 if remaining <= 0:
@@ -323,6 +298,9 @@ def get_shard_assignments_for_pipeline_parallel(
                 headroom = c.max_layers_by_memory - desired_layers[node_index]
                 if headroom <= 0:
                     continue
+                
+                # Only give layers to this node if we have remaining layers
+                # (faster nodes should already be at capacity from the first pass)
                 take = min(remaining, headroom)
                 desired_layers[node_index] += take
                 remaining -= take
