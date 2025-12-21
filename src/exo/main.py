@@ -414,9 +414,12 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_env_seeds())
 
     local_ips = _local_ipv4s()
-    subnets = _thunderbolt_subnets(local_ips)
+    subnets = _thunderbolt_subnets()
     if subnets:
         os.environ["EXO_TB_SUBNETS"] = ",".join(str(net) for net in subnets)
+        logger.info(f"Using Thunderbolt subnets for discovery: {os.environ['EXO_TB_SUBNETS']}")
+    else:
+        logger.warning("No Thunderbolt subnets detected; mDNS not filtered")
 
     seeds = _dedupe_preserve_order(seeds)
 
@@ -477,47 +480,57 @@ def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     return ordered
 
 
-def _thunderbolt_subnets(local_ips: set[str]) -> set[ipaddress.IPv4Network]:
-    """Infer Thunderbolt subnets from local interface addresses; no hardcoded IPs."""
+def _thunderbolt_subnets() -> set[ipaddress.IPv4Network]:
+    """Infer Thunderbolt subnets from interface inet/netmask; skip Wi-Fi (en0) and loopback."""
     nets: set[ipaddress.IPv4Network] = set()
     try:
-        iface_list = subprocess.check_output(["ifconfig", "-l"], text=True).strip()
+        ifconfig_out = subprocess.check_output(["ifconfig"], text=True)
     except Exception:
-        iface_list = ""
-    for iface in iface_list.split():
-        try:
-            ip = (
-                subprocess.check_output(["ipconfig", "getifaddr", iface], text=True)
-                .strip()
-            )
-            if not ip:
+        return nets
+
+    blocks = ifconfig_out.split("\n\n")
+    for block in blocks:
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if not lines:
+            continue
+        iface = lines[0].split(":")[0]
+        if iface.startswith("lo"):
+            continue
+        if iface == "en0":  # skip Wi-Fi
+            continue
+        for ln in lines:
+            if not ln.startswith("inet "):
+                continue
+            parts = ln.split()
+            if len(parts) < 4 or parts[0] != "inet":
+                continue
+            ip = parts[1]
+            mask_hex = None
+            if "netmask" in parts:
+                try:
+                    idx = parts.index("netmask")
+                    mask_hex = parts[idx + 1]
+                except Exception:
+                    mask_hex = None
+            if not ipaddress.ip_address(ip).is_private:
                 continue
             if ip.startswith("169.254."):
-                continue  # skip link-local
-            if not ipaddress.IPv4Address(ip).is_private:
                 continue
-            mask_hex = None
-            try:
-                ifconfig_out = subprocess.check_output(
-                    ["ifconfig", iface], text=True, stderr=subprocess.DEVNULL
-                )
-                for token in ifconfig_out.split():
-                    if token.startswith("0x") and len(token) == 10:
-                        mask_hex = token
-                        break
-            except Exception:
-                pass
-            if mask_hex:
-                mask_int = int(mask_hex, 16)
-                mask_str = str(ipaddress.IPv4Address(mask_int))
-                net = ipaddress.IPv4Network(f"{ip}/{mask_str}", strict=False)
+            if mask_hex and mask_hex.startswith("0x"):
+                try:
+                    mask_int = int(mask_hex, 16)
+                    mask_str = str(ipaddress.IPv4Address(mask_int))
+                except Exception:
+                    mask_str = "255.255.255.0"
             else:
-                net = ipaddress.IPv4Network(f"{ip}/24", strict=False)
+                mask_str = "255.255.255.0"
+            try:
+                net = ipaddress.IPv4Network(f"{ip}/{mask_str}", strict=False)
+            except Exception:
+                continue
             if net.prefixlen > 24:
-                continue  # avoid huge scans
+                continue
             nets.add(net)
-        except Exception:
-            continue
     return nets
 
 
