@@ -300,6 +300,11 @@ class API:
                 instance = new_instances[0]
                 shard_assignments = instance.shard_assignments
                 node_ids = list(shard_assignments.node_to_runner.keys())
+                
+                logger.info(
+                    f"Placement preview: model={model_meta.model_id}, "
+                    f"nodes_in_instance={len(node_ids)}, node_ids={node_ids}"
+                )
 
                 memory_delta_by_node: dict[str, int] = {}
                 if node_ids:
@@ -340,6 +345,11 @@ class API:
                             
                             # EXPLICITLY ensure 0 is stored as integer 0, not float or None
                             memory_delta_by_node[str(node_id)] = int(node_bytes) if node_bytes is not None else 0
+                            
+                        # Log final memory_delta_by_node for debugging
+                        logger.info(
+                            f"Final memory_delta_by_node: {memory_delta_by_node}"
+                        )
                     else:
                         per_node = total_bytes // len(node_ids)
                         remainder = total_bytes % len(node_ids)
