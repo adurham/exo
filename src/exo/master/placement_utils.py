@@ -296,9 +296,19 @@ def get_shard_assignments_for_pipeline_parallel(
         fastest_capacity = ranked_capacities[0]
         fastest_node = node_id_to_node[fastest_capacity.node_id]
         fastest_available_ram = fastest_node.node_profile.memory.ram_available.in_bytes
+        fastest_total_ram = fastest_node.node_profile.memory.ram_total.in_bytes
         model_storage_bytes = model_meta.storage_size.in_bytes
         
-        if fastest_available_ram >= model_storage_bytes:
+        logger.info(
+            f"Greedy check: fastest node {fastest_capacity.node_id} has "
+            f"{fastest_available_ram / (1024**3):.2f} GB available RAM, "
+            f"{fastest_total_ram / (1024**3):.2f} GB total RAM, "
+            f"model needs {model_storage_bytes / (1024**3):.2f} GB"
+        )
+        
+        # Use total RAM instead of available RAM for the check, since we want to know if the node
+        # CAN hold the model (even if some RAM is currently used)
+        if fastest_total_ram >= model_storage_bytes:
             # Fastest node can hold entire model - give it all layers
             fastest_index = node_id_to_index[fastest_capacity.node_id]
             desired_layers[fastest_index] = total_layers
@@ -306,7 +316,7 @@ def get_shard_assignments_for_pipeline_parallel(
             
             logger.info(
                 f"Fastest node {fastest_capacity.node_id} can hold entire model "
-                f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_available_ram / (1024**3):.2f} GB available) - "
+                f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_total_ram / (1024**3):.2f} GB total RAM) - "
                 f"assigning all {total_layers} layers to fastest node (greedy allocation)"
             )
         else:
