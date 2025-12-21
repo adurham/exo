@@ -3,11 +3,14 @@ import sys
 import ipaddress
 import os
 from collections.abc import Generator
+from dataclasses import dataclass
+from math import floor
 from typing import TypeGuard, cast
 
 from loguru import logger
 from pydantic import BaseModel
 
+from exo.shared.constants import LB_MEMBW_GBPS
 from exo.shared.topology import Topology
 from exo.shared.types.common import Host, NodeId
 from exo.shared.types.memory import Memory
@@ -46,6 +49,97 @@ def narrow_all_nodes(nodes: list[NodeInfo]) -> TypeGuard[list[NodeWithProfile]]:
     return all(node.node_profile is not None for node in nodes)
 
 
+def _normalize_chip_id(chip_id: str) -> str:
+    return " ".join(chip_id.replace("Apple", "").strip().split())
+
+
+def estimated_memory_bandwidth_gbps(*, chip_id: str) -> float:
+    """Return an estimated SoC memory bandwidth in GB/s.
+
+    We do not currently measure memory bandwidth directly. Instead, we use a
+    conservative chip-string heuristic derived from Apple Silicon specs.
+
+    Unknown chips fall back to the lower bound used elsewhere in the codebase.
+    """
+
+    normalized = _normalize_chip_id(chip_id).lower()
+
+    # Keep this table intentionally small and conservative: it only needs to be
+    # good enough to order common Apple Silicon parts for sharding decisions.
+    # Values are approximate peak unified-memory bandwidths (GB/s).
+    chip_to_gbps: dict[str, float] = {
+        "m1": 68.0,
+        "m1 pro": 200.0,
+        "m1 max": 400.0,
+        "m1 ultra": 800.0,
+        "m2": 100.0,
+        "m2 pro": 200.0,
+        "m2 max": 400.0,
+        "m2 ultra": 800.0,
+        "m3": 100.0,
+        "m3 pro": 150.0,
+        "m3 max": 300.0,
+        "m3 ultra": 800.0,
+        # Default placeholders for newer chips; kept conservative.
+        "m4": 120.0,
+        "m4 pro": 250.0,
+        "m4 max": 400.0,
+    }
+
+    # Match longest keys first to avoid "m1" catching "m1 max".
+    for key in sorted(chip_to_gbps.keys(), key=len, reverse=True):
+        if key in normalized:
+            return chip_to_gbps[key]
+
+    return float(LB_MEMBW_GBPS)
+
+
+@dataclass(frozen=True, slots=True)
+class _PipelineNodeCapacity:
+    node_id: NodeId
+    rank_index: int
+    max_layers_by_memory: int
+    greedy_weight: float
+
+
+def _pipeline_node_capacities(
+    *,
+    model_meta: ModelMetadata,
+    selected_cycle: list[NodeWithProfile],
+) -> list[_PipelineNodeCapacity]:
+    total_layers = model_meta.n_layers
+    if total_layers <= 0:
+        raise ValueError("Model must have at least 1 layer")
+
+    bytes_per_layer = model_meta.storage_size.in_bytes / total_layers
+    if bytes_per_layer <= 0:
+        # Extremely defensive: avoid division-by-zero / negative caps.
+        bytes_per_layer = 1.0
+
+    capacities: list[_PipelineNodeCapacity] = []
+    for i, node in enumerate(selected_cycle):
+        available_bytes = node.node_profile.memory.ram_available.in_bytes
+        max_layers = int(floor(available_bytes / bytes_per_layer))
+        max_layers = max(1, min(total_layers, max_layers))
+
+        membw = estimated_memory_bandwidth_gbps(chip_id=node.node_profile.chip_id)
+        # Weight "largest and fastest": prefer high bandwidth, then larger machines.
+        # Use ram_total (hardware size) rather than ram_available for the weight,
+        # while still enforcing ram_available as a hard cap via max_layers.
+        greedy_weight = membw * max(1, node.node_profile.memory.ram_total.in_bytes)
+
+        capacities.append(
+            _PipelineNodeCapacity(
+                node_id=node.node_id,
+                rank_index=i,
+                max_layers_by_memory=max_layers,
+                greedy_weight=greedy_weight,
+            )
+        )
+
+    return capacities
+
+
 def filter_cycles_by_memory(
     cycles: list[list[NodeInfo]], required_memory: Memory
 ) -> list[list[NodeInfo]]:
@@ -71,28 +165,73 @@ def get_shard_assignments_for_pipeline_parallel(
     model_meta: ModelMetadata,
     selected_cycle: list[NodeWithProfile],
 ):
-    cycle_memory = sum(
-        (node.node_profile.memory.ram_available for node in selected_cycle),
-        start=Memory(),
-    )
     total_layers = model_meta.n_layers
     world_size = len(selected_cycle)
     runner_to_shard: dict[RunnerId, ShardMetadata] = {}
     node_to_runner: dict[NodeId, RunnerId] = {}
 
+    if total_layers < world_size:
+        raise ValueError(
+            f"Pipeline sharding requires n_layers >= world_size, got {total_layers=} {world_size=}"
+        )
+
+    capacities = _pipeline_node_capacities(model_meta=model_meta, selected_cycle=selected_cycle)
+    if sum(c.max_layers_by_memory for c in capacities) < total_layers:
+        # This should be rare given we pre-filter cycles by total memory, but
+        # storage size vs runtime memory footprint is approximate.
+        logger.warning(
+            "Insufficient per-node memory caps for pipeline sharding; falling back to "
+            "RAM-proportional assignment"
+        )
+        cycle_memory = sum(
+            (node.node_profile.memory.ram_available for node in selected_cycle),
+            start=Memory(),
+        )
+        desired_layers: list[int] = []
+        layers_assigned = 0
+        for i, node in enumerate(selected_cycle):
+            if i == world_size - 1:
+                node_layers = total_layers - layers_assigned
+            else:
+                node_layers = round(
+                    total_layers
+                    * (
+                        node.node_profile.memory.ram_available.in_bytes
+                        / cycle_memory.in_bytes
+                    )
+                )
+                node_layers = max(1, node_layers)
+            desired_layers.append(node_layers)
+            layers_assigned += node_layers
+    else:
+        # Greedy allocation:
+        # - Give every node 1 layer to ensure participation
+        # - Allocate all remaining layers to the highest (bandwidth × size) nodes,
+        #   respecting each node's memory-derived cap.
+        desired_layers = [1 for _ in range(world_size)]
+        remaining = total_layers - world_size
+
+        ranked = sorted(
+            capacities,
+            key=lambda c: (c.greedy_weight, c.max_layers_by_memory, str(c.node_id)),
+            reverse=True,
+        )
+
+        for c in ranked:
+            if remaining <= 0:
+                break
+            headroom = c.max_layers_by_memory - desired_layers[c.rank_index]
+            if headroom <= 0:
+                continue
+            take = min(remaining, headroom)
+            desired_layers[c.rank_index] += take
+            remaining -= take
+
+        assert remaining == 0, "Allocation should exhaust all layers when caps permit"
+
     layers_assigned = 0
     for i, node in enumerate(selected_cycle):
-        if i == len(selected_cycle) - 1:
-            node_layers = total_layers - layers_assigned
-        else:
-            node_layers = round(
-                total_layers
-                * (
-                    node.node_profile.memory.ram_available.in_bytes
-                    / cycle_memory.in_bytes
-                )
-            )
-            node_layers = max(1, node_layers)
+        node_layers = desired_layers[i]
 
         runner_id = RunnerId()
 
@@ -108,6 +247,10 @@ def get_shard_assignments_for_pipeline_parallel(
         runner_to_shard[runner_id] = shard
         node_to_runner[node.node_id] = runner_id
         layers_assigned += node_layers
+
+    assert layers_assigned == total_layers, (
+        "Pipeline sharding must assign all layers exactly once"
+    )
 
     shard_assignments = ShardAssignments(
         model_id=model_meta.model_id,
