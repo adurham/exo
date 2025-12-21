@@ -280,7 +280,7 @@ def get_shard_assignments_for_pipeline_parallel(
                 take = min(remaining, 1)
                 desired_layers[node_index] += take
                 remaining -= take
-        else:
+    else:
         # Greedy allocation: fill fastest node first, then 2nd fastest, then 3rd, etc.
         # - Fill each node to capacity before moving to the next
         # - Cap each node at its available memory limit
