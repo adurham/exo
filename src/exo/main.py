@@ -413,7 +413,7 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_env_seeds())
 
     local_ips = _local_ipv4s()
-    seeds.extend(_thunderbolt_seed_partners(local_ips))
+    seeds.extend(_thunderbolt_aggressive_seeds(local_ips))
 
     seeds = _dedupe_preserve_order(seeds)
     force_master = any(ip.endswith(".1") and ip.split(".")[2] in {"201", "202"} for ip in local_ips)
@@ -475,26 +475,14 @@ def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     return ordered
 
 
-def _thunderbolt_seed_partners(local_ips: set[str]) -> list[str]:
-    """For Thunderbolt /24 links, dial the partner by flipping host .1<->.2 on 192.168.20x.*"""
+def _thunderbolt_aggressive_seeds(local_ips: set[str]) -> list[str]:
+    """Aggressively dial both ends (.1 and .2) of all 192.168.20x.* /24 thunderbolt links."""
     seeds: list[str] = []
-    for ip in local_ips:
-        parts = ip.split(".")
-        if len(parts) != 4:
-            continue
-        try:
-            third = int(parts[2])
-            last = int(parts[3])
-        except ValueError:
-            continue
-        if third not in {201, 202, 203, 204}:
-            continue
-        if last == 1:
-            partner_last = 2
-        elif last == 2:
-            partner_last = 1
-        else:
-            continue
-        partner = f"{parts[0]}.{parts[1]}.{third}.{partner_last}:{PEER_LISTEN_PORT}"
-        seeds.append(partner)
+    tb_subnets = {201, 202, 203, 204}
+    for subnet in tb_subnets:
+        for host in (1, 2):
+            ip = f"192.168.{subnet}.{host}"
+            if ip in local_ips:
+                continue
+            seeds.append(f"{ip}:{PEER_LISTEN_PORT}")
     return seeds
