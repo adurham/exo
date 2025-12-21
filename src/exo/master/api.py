@@ -310,13 +310,21 @@ class API:
                         bytes_per_layer = total_bytes / total_layers
                         
                         for node_id in node_ids:
-                            runner_id = shard_assignments.node_to_runner[node_id]
+                            runner_id = shard_assignments.node_to_runner.get(node_id)
+                            if runner_id is None:
+                                # Node is in instance but has no runner (shouldn't happen, but handle gracefully)
+                                memory_delta_by_node[str(node_id)] = 0
+                                continue
+                                
                             shard_meta = shard_assignments.runner_to_shard.get(runner_id)
                             
                             if shard_meta is not None:
                                 if isinstance(shard_meta, PipelineShardMetadata):
                                     layers_per_node = shard_meta.end_layer - shard_meta.start_layer
                                     node_bytes = int(layers_per_node * bytes_per_layer)
+                                    # Explicitly set to 0 if no layers assigned (KV cache only)
+                                    if layers_per_node == 0:
+                                        node_bytes = 0
                                 else:
                                     node_bytes = total_bytes // len(node_ids)
                             else:
