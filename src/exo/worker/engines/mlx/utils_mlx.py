@@ -145,7 +145,8 @@ def mlx_distributed_init(
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
-            group = mx.distributed.init(backend="jaccl", strict=True)
+            # Use 'ring' backend - MLX will use the MLX_IBV_DEVICES env var for RDMA connectivity
+            group = mx.distributed.init(backend="ring", strict=True)
 
     logger.info(f"Rank {rank} mlx distributed initialization complete")
 
