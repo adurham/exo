@@ -12,6 +12,7 @@ from exo.shared.types.commands import PlaceInstance
 from exo.shared.types.common import CommandId, NodeId
 from exo.shared.types.events import InstanceCreated, InstanceDeleted
 from exo.shared.types.memory import Memory
+from exo.shared.types.multiaddr import Multiaddr
 from exo.shared.types.models import ModelId, ModelMetadata
 from exo.shared.types.profiling import NetworkInterfaceInfo, NodePerformanceProfile
 from exo.shared.types.topology import Connection, NodeInfo
@@ -347,6 +348,14 @@ def test_tensor_rdma_backend_connectivity_matrix(
     conn_c_b = create_connection(node_id_c, node_id_b)
     conn_a_c = create_connection(node_id_a, node_id_c)
 
+    # Add an IPv6 connection in parallel; RDMA selection must ignore it and use IPv4 only.
+    conn_b_a_ipv6 = Connection(
+        local_node_id=node_id_b,
+        send_back_node_id=node_id_a,
+        send_back_multiaddr=Multiaddr(address="/ip6/fe80::1/tcp/4242"),
+        connection_profile=None,
+    )
+
     assert conn_a_b.send_back_multiaddr is not None
     assert conn_b_c.send_back_multiaddr is not None
     assert conn_c_a.send_back_multiaddr is not None
@@ -368,6 +377,10 @@ def test_tensor_rdma_backend_connectivity_matrix(
             NetworkInterfaceInfo(
                 name="en4",
                 ip_address=conn_b_a.send_back_multiaddr.ip_address,
+            ),
+            NetworkInterfaceInfo(
+                name="en4",
+                ip_address="fe80::c51:b94f:7b98:eb57%en4",
             ),
             ethernet_interface,
         ],
@@ -419,6 +432,7 @@ def test_tensor_rdma_backend_connectivity_matrix(
     topology.add_connection(conn_b_a)
     topology.add_connection(conn_c_b)
     topology.add_connection(conn_a_c)
+    topology.add_connection(conn_b_a_ipv6)
 
     cic = PlaceInstance(
         sharding=Sharding.Tensor,
