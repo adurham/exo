@@ -238,13 +238,17 @@ function toggleNodeDetails(nodeId: string): void {
 			const memoryDelta = apiPreview.memory_delta_by_node;
 			console.log('API Preview memory_delta_by_node:', memoryDelta);
 			placementNodes = nodeArray.map((n, i) => {
-				const deltaBytes = memoryDelta[n.id] ?? 0;
-				console.log(`Node ${n.id}: deltaBytes=${deltaBytes}, isKVCache=${deltaBytes === 0 && n.id in memoryDelta}`);
+				const deltaBytesRaw = memoryDelta[n.id] ?? 0;
+				// CRITICAL: Ensure we're comparing to number 0, not string or undefined
+				const deltaBytes = typeof deltaBytesRaw === 'number' ? deltaBytesRaw : parseInt(String(deltaBytesRaw), 10) || 0;
+				console.log(`Node ${n.id}: deltaBytesRaw=${deltaBytesRaw}, deltaBytes=${deltaBytes}, type=${typeof deltaBytesRaw}`);
 				const modelUsageGB = deltaBytes / (1024 * 1024 * 1024);
 				// Node is "used" if it's in the instance (even with 0 layers for KV cache)
 				const isUsed = n.id in memoryDelta;
 				// Node has 0 layers if it's in the instance but has no memory delta (used for KV cache)
+				// Use strict equality and ensure we're comparing numbers
 				const isKVCache = isUsed && deltaBytes === 0;
+				console.log(`Node ${n.id}: isUsed=${isUsed}, isKVCache=${isKVCache}`);
 				const angle = numNodes === 1 ? 0 : (i / numNodes) * Math.PI * 2 - Math.PI / 2;
 				const safeTotal = Math.max(n.totalGB, 0.001);
 				const currentPercent = clampPercent((n.usedGB / safeTotal) * 100);
