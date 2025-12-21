@@ -525,9 +525,13 @@ def _seeds_from_subnets(
 ) -> list[str]:
     seeds: list[str] = []
     for net in subnets:
+        added = 0
         for host in net.hosts():
             host_str = str(host)
             if host_str in local_ips:
                 continue
             seeds.append(f"{host_str}:{PEER_LISTEN_PORT}")
+            added += 1
+            if added >= 32:
+                break  # avoid massive dial lists on large subnets
     return seeds
