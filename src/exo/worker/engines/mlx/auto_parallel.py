@@ -138,10 +138,6 @@ class PipelineLastLayer(CustomMlxLayer):
 
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
-        # Store actual output before any send operations
-        # (send returns a dependency, not the actual output)
-        actual_output = output
-
         if self.r != self.s - 1 and not self.is_singleton:
             # Send output to next rank in pipeline
             send_result = mx.distributed.send(
@@ -150,15 +146,24 @@ class PipelineLastLayer(CustomMlxLayer):
             if cache is not None:
                 # This change happened upstream - check out mlx github somewhere??
                 cache.keys = mx.depends(cache.keys, send_result)  # type: ignore[reportUnknownMemberType]
-
-        # All ranks participate in all_gather to get final output from last rank
-        # Use actual_output (not send dependency) so all_gather has the real values
-        if not self.is_singleton:
-            gathered = mx.distributed.all_gather(actual_output, group=self.group)
-            # Extract the last rank's output (the final output we need)
-            # all_gather concatenates in rank order: [rank0, rank1, ..., rankN-1]
-            # We want the output from rank s-1 (last rank), which is at the end
-            return gathered[-actual_output.shape[0]:]
+            # Non-last ranks: need to receive final output from last rank
+            # The send creates a dependency that ensures pipeline ordering
+            # We'll participate in all_gather but only use the last rank's output
+            if not self.is_singleton:
+                # Ensure send completes before all_gather by using the output (not send_result)
+                # all_gather will wait for all ranks, including the last rank to finish processing
+                gathered = mx.distributed.all_gather(output, group=self.group)
+                # all_gather concatenates along first dim: [rank0, rank1, ..., rankN-1]
+                # Extract only the last rank's output (the final output we need)
+                return gathered[-output.shape[0]:]
+        else:
+            # Last rank: produce final output and participate in all_gather to broadcast it
+            if not self.is_singleton:
+                # Broadcast final output to all ranks via all_gather
+                # This ensures all ranks get the final output for next token generation
+                gathered = mx.distributed.all_gather(output, group=self.group)
+                # Return our output (last seq_len elements from gathered array)
+                return gathered[-output.shape[0]:]
         
         return output
 
