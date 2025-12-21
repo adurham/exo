@@ -413,12 +413,10 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_env_seeds())
 
     local_ips = _local_ipv4s()
-    profile = _detect_profile(local_ips)
-    if profile:
-        seeds.extend(profile.seeds)
+    seeds.extend(_thunderbolt_seed_partners(local_ips))
 
     seeds = _dedupe_preserve_order(seeds)
-    force_master = profile.force_master if profile else False
+    force_master = any(ip.endswith(".1") and ip.split(".")[2] in {"201", "202"} for ip in local_ips)
 
     return args.model_copy(
         update={
@@ -467,55 +465,6 @@ def _local_ipv4s() -> set[str]:
 
 
 @dataclass(frozen=True)
-class HostProfile:
-    name: str
-    local_ips: set[str]
-    seeds: tuple[str, ...]
-    force_master: bool
-
-
-HOST_PROFILES: tuple[HostProfile, ...] = (
-    HostProfile(
-        name="macstudio-m4",
-        local_ips={"192.168.201.1", "192.168.202.1"},
-        seeds=(
-            f"192.168.201.2:{PEER_LISTEN_PORT}",
-            f"192.168.202.2:{PEER_LISTEN_PORT}",
-        ),
-        force_master=True,
-    ),
-    HostProfile(
-        name="macbook-m4",
-        local_ips={"192.168.201.2", "192.168.204.2"},
-        seeds=(
-            f"192.168.201.1:{PEER_LISTEN_PORT}",
-            f"192.168.202.2:{PEER_LISTEN_PORT}",
-        ),
-        force_master=False,
-    ),
-    HostProfile(
-        name="work-macbook-m4",
-        local_ips={"192.168.202.2", "192.168.204.1"},
-        seeds=(
-            f"192.168.202.1:{PEER_LISTEN_PORT}",
-            f"192.168.201.2:{PEER_LISTEN_PORT}",
-        ),
-        force_master=False,
-    ),
-)
-
-
-def _detect_profile(local_ips: set[str]) -> HostProfile | None:
-    best: HostProfile | None = None
-    best_score = 0
-    for profile in HOST_PROFILES:
-        score = len(profile.local_ips & local_ips)
-        if score > best_score:
-            best = profile
-            best_score = score
-    return best
-
-
 def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -525,3 +474,28 @@ def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
         seen.add(item)
         ordered.append(item)
     return ordered
+
+
+def _thunderbolt_seed_partners(local_ips: set[str]) -> list[str]:
+    """For Thunderbolt /24 links, dial the partner by flipping host .1<->.2 on 192.168.20x.*"""
+    seeds: list[str] = []
+    for ip in local_ips:
+        parts = ip.split(".")
+        if len(parts) != 4:
+            continue
+        try:
+            third = int(parts[2])
+            last = int(parts[3])
+        except ValueError:
+            continue
+        if third not in {201, 202, 203, 204}:
+            continue
+        if last == 1:
+            partner_last = 2
+        elif last == 2:
+            partner_last = 1
+        else:
+            continue
+        partner = f"{parts[0]}.{parts[1]}.{third}.{partner_last}:{PEER_LISTEN_PORT}"
+        seeds.append(partner)
+    return seeds
