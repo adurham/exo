@@ -138,32 +138,27 @@ class PipelineLastLayer(CustomMlxLayer):
 
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
+        # Store actual output before any send operations
+        # (send returns a dependency, not the actual output)
+        actual_output = output
+
         if self.r != self.s - 1 and not self.is_singleton:
             # Send output to next rank in pipeline
-            # Store the actual output before sending (send returns a dependency)
-            actual_output = output
             send_result = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
             if cache is not None:
                 # This change happened upstream - check out mlx github somewhere??
                 cache.keys = mx.depends(cache.keys, send_result)  # type: ignore[reportUnknownMemberType]
-            # Non-last ranks: participate in all_gather to receive final output from last rank
-            # Use the actual layer output (not the send dependency) for all_gather
-            if not self.is_singleton:
-                # all_gather collects outputs from all ranks
-                # We use actual_output (our intermediate output) so all_gather has consistent shapes
-                gathered = mx.distributed.all_gather(actual_output, group=self.group)
-                # Extract the last rank's output (the final output we need)
-                # all_gather concatenates in rank order, so last rank's output is at the end
-                return gathered[-actual_output.shape[0]:]
-        else:
-            # Last rank: produce final output and broadcast to all ranks via all_gather
-            if not self.is_singleton:
-                # Broadcast final output to all ranks so they can use it for next token
-                gathered = mx.distributed.all_gather(output, group=self.group)
-                # Return our output (the last seq_len elements from the gathered array)
-                return gathered[-output.shape[0]:]
+
+        # All ranks participate in all_gather to get final output from last rank
+        # Use actual_output (not send dependency) so all_gather has the real values
+        if not self.is_singleton:
+            gathered = mx.distributed.all_gather(actual_output, group=self.group)
+            # Extract the last rank's output (the final output we need)
+            # all_gather concatenates in rank order: [rank0, rank1, ..., rankN-1]
+            # We want the output from rank s-1 (last rank), which is at the end
+            return gathered[-actual_output.shape[0]:]
         
         return output
 
