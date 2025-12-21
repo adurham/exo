@@ -307,6 +307,8 @@ class AppStore {
 	messages = $state<Message[]>([]);
 	currentResponse = $state('');
 	isLoading = $state(false);
+	currentCommandId = $state<string | null>(null);
+	private currentAbortController: AbortController | null = null;
 	
 	// Performance metrics
 	ttftMs = $state<number | null>(null);  // Time to first token in ms
@@ -936,6 +938,11 @@ class AppStore {
 				return;
 			}
 			
+			// Create AbortController for cancellation
+			this.currentAbortController = new AbortController();
+			const abortSignal = this.currentAbortController.signal;
+			this.currentCommandId = null;
+			
 			const response = await fetch('/v1/chat/completions', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -943,7 +950,8 @@ class AppStore {
 					model: modelToUse,
 					messages: apiMessages,
 					stream: true
-				})
+				}),
+				signal: abortSignal
 			});
 			
 			if (!response.ok) {
@@ -981,6 +989,10 @@ class AppStore {
 					if (trimmed.startsWith('data: ')) {
 						try {
 							const json = JSON.parse(trimmed.slice(6));
+							// Extract command_id from first chunk if not already set
+							if (!this.currentCommandId && json.id) {
+								this.currentCommandId = json.id;
+							}
 							const delta = json.choices?.[0]?.delta?.content;
 							if (delta) {
 								fullContent += delta;
@@ -1001,10 +1013,16 @@ class AppStore {
 			this.updateActiveConversation();
 			
 		} catch (error) {
-			assistantMessage.content = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			if (error instanceof Error && error.name === 'AbortError') {
+				assistantMessage.content = 'Request cancelled';
+			} else {
+				assistantMessage.content = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			}
 			this.updateActiveConversation();
 		} finally {
 			this.isLoading = false;
+			this.currentAbortController = null;
+			this.currentCommandId = null;
 		}
 	}
 
@@ -1175,6 +1193,11 @@ class AppStore {
 			const conversationModelInfo = this.buildConversationModelInfo(modelToUse);
 			this.applyConversationModelInfo(conversationModelInfo);
 
+			// Create AbortController for cancellation
+			this.currentAbortController = new AbortController();
+			const abortSignal = this.currentAbortController.signal;
+			this.currentCommandId = null;
+
 			// Start timing for TTFT measurement
 			const requestStartTime = performance.now();
 			let firstTokenTime: number | null = null;
@@ -1190,7 +1213,8 @@ class AppStore {
 					messages: apiMessages,
 					temperature: 0.7,
 					stream: true
-				})
+				}),
+				signal: abortSignal
 			});
 
 			if (!response.ok) {
@@ -1227,6 +1251,10 @@ class AppStore {
 
 						try {
 							const parsed = JSON.parse(data);
+							// Extract command_id from first chunk if not already set
+							if (!this.currentCommandId && parsed.id) {
+								this.currentCommandId = parsed.id;
+							}
 							const tokenContent = parsed.choices?.[0]?.delta?.content;
 							if (tokenContent) {
 								// Track first token for TTFT
@@ -1306,16 +1334,26 @@ class AppStore {
 			this.persistActiveConversation();
 			
 		} catch (error) {
-			console.error('Error sending message:', error);
-			// Update the assistant message with error
-			const idx = this.messages.findIndex(m => m.id === assistantMessage.id);
-			if (idx !== -1) {
-				this.messages[idx].content = `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`;
+			if (error instanceof Error && error.name === 'AbortError') {
+				// Request was cancelled
+				const idx = this.messages.findIndex(m => m.id === assistantMessage.id);
+				if (idx !== -1) {
+					this.messages[idx].content = 'Request cancelled';
+				}
+			} else {
+				console.error('Error sending message:', error);
+				// Update the assistant message with error
+				const idx = this.messages.findIndex(m => m.id === assistantMessage.id);
+				if (idx !== -1) {
+					this.messages[idx].content = `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`;
+				}
 			}
 			this.persistActiveConversation();
 		} finally {
 			this.isLoading = false;
 			this.currentResponse = '';
+			this.currentAbortController = null;
+			this.currentCommandId = null;
 			this.updateActiveConversation();
 		}
 	}
@@ -1332,6 +1370,34 @@ class AppStore {
 		// Clear performance stats
 		this.ttftMs = null;
 		this.tps = null;
+	}
+
+	/**
+	 * Cancel the current chat completion request
+	 */
+	async cancelCurrentRequest(): Promise<void> {
+		if (!this.isLoading) return;
+
+		// Abort the fetch request
+		if (this.currentAbortController) {
+			this.currentAbortController.abort();
+			this.currentAbortController = null;
+		}
+
+		// Call the cancel endpoint if we have a command_id
+		if (this.currentCommandId) {
+			try {
+				await fetch(`/v1/chat/completions/${this.currentCommandId}/cancel`, {
+					method: 'POST'
+				});
+			} catch (error) {
+				console.error('Failed to cancel request:', error);
+			}
+			this.currentCommandId = null;
+		}
+
+		this.isLoading = false;
+		this.currentResponse = '';
 	}
 
 	/**
@@ -1353,6 +1419,7 @@ export const isLoading = () => appStore.isLoading;
 export const ttftMs = () => appStore.ttftMs;
 export const tps = () => appStore.tps;
 export const totalTokens = () => appStore.totalTokens;
+export const cancelCurrentRequest = () => appStore.cancelCurrentRequest();
 export const topologyData = () => appStore.topologyData;
 export const instances = () => appStore.instances;
 export const runners = () => appStore.runners;

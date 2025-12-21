@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { isLoading, sendMessage, selectedChatModel, setSelectedChatModel, instances, ttftMs, tps, totalTokens } from '$lib/stores/app.svelte';
+	import { isLoading, sendMessage, selectedChatModel, setSelectedChatModel, instances, ttftMs, tps, totalTokens, cancelCurrentRequest } from '$lib/stores/app.svelte';
 	import ChatAttachments from './ChatAttachments.svelte';
 	import type { ChatUploadedFile } from '$lib/types/files';
 	import { processUploadedFiles, getAcceptString } from '$lib/types/files';
@@ -358,6 +358,22 @@
 				class="flex-1 resize-none bg-transparent text-foreground placeholder:text-exo-light-gray/60 placeholder:text-sm placeholder:tracking-[0.15em] placeholder:leading-7 focus:outline-none focus:ring-0 focus:border-none disabled:opacity-50 text-sm leading-7 font-mono"
 				style="min-height: 28px; max-height: 150px;"
 			></textarea>
+			
+			<!-- Stop button (shown when loading) -->
+			{#if loading}
+				<button
+					type="button"
+					onclick={async () => {
+						await cancelCurrentRequest();
+					}}
+					class="flex items-center justify-center w-8 h-8 rounded text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-all flex-shrink-0 cursor-pointer"
+					title="Stop generation"
+				>
+					<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+						<rect x="6" y="6" width="12" height="12" rx="1"/>
+					</svg>
+				</button>
+			{/if}
 			
 			<button
 				type="submit"

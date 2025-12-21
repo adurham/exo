@@ -36,6 +36,7 @@ from exo.shared.types.api import (
 )
 from exo.shared.types.chunks import TokenChunk
 from exo.shared.types.commands import (
+    CancelTask,
     ChatCompletion,
     Command,
     CreateInstance,
@@ -163,6 +164,7 @@ class API:
         self.app.get("/models")(self.get_models)
         self.app.get("/v1/models")(self.get_models)
         self.app.post("/v1/chat/completions")(self.chat_completions)
+        self.app.post("/v1/chat/completions/{command_id}/cancel")(self.cancel_chat_completion)
         self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(lambda: self._event_log)
 
@@ -473,6 +475,29 @@ class API:
             self._generate_chat_stream(command.command_id),
             media_type="text/event-stream",
         )
+
+    async def cancel_chat_completion(self, command_id: str):
+        """Cancel a running chat completion task."""
+        from exo.shared.types.common import CommandId
+
+        target_command_id = CommandId(command_id)
+
+        if target_command_id not in self._chat_completion_queues:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No active chat completion found for command_id {command_id}",
+            )
+
+        # Close the queue to stop streaming
+        queue_sender = self._chat_completion_queues[target_command_id]
+        await queue_sender.aclose()
+        del self._chat_completion_queues[target_command_id]
+
+        # Send cancel command to worker
+        command = CancelTask(target_command_id=target_command_id)
+        await self._send(command)
+
+        return {"message": "Chat completion cancelled", "command_id": command_id}
 
     def _calculate_total_available_memory(self) -> Memory:
         """Calculate total available memory across all nodes in bytes."""
