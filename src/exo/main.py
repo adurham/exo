@@ -5,6 +5,7 @@ including routing, worker operations, master election, and API services.
 """
 
 import argparse
+import ipaddress
 import multiprocessing as mp
 import os
 import signal
@@ -413,10 +414,10 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_env_seeds())
 
     local_ips = _local_ipv4s()
-    seeds.extend(_thunderbolt_aggressive_seeds(local_ips))
+    subnets = _thunderbolt_subnets(local_ips)
+    seeds.extend(_seeds_from_subnets(subnets, local_ips))
 
     seeds = _dedupe_preserve_order(seeds)
-    force_master = any(ip.endswith(".1") and ip.split(".")[2] in {"201", "202"} for ip in local_ips)
 
     return args.model_copy(
         update={
@@ -424,7 +425,7 @@ def apply_hostname_overrides(args: Args) -> Args:
             "host": BIND_HOST,
             "discovery_port": PEER_LISTEN_PORT,
             "seeds": seeds,
-            "force_master": force_master,
+            "force_master": args.force_master,  # no IP-based forcing
         },
         deep=True,
     )
@@ -475,14 +476,58 @@ def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     return ordered
 
 
-def _thunderbolt_aggressive_seeds(local_ips: set[str]) -> list[str]:
-    """Aggressively dial both ends (.1 and .2) of all 192.168.20x.* /24 thunderbolt links."""
-    seeds: list[str] = []
-    tb_subnets = {201, 202, 203, 204}
-    for subnet in tb_subnets:
-        for host in (1, 2):
-            ip = f"192.168.{subnet}.{host}"
-            if ip in local_ips:
+def _thunderbolt_subnets(local_ips: set[str]) -> set[ipaddress.IPv4Network]:
+    """Infer Thunderbolt subnets from local interface addresses; no hardcoded IPs."""
+    nets: set[ipaddress.IPv4Network] = set()
+    try:
+        iface_list = subprocess.check_output(["ifconfig", "-l"], text=True).strip()
+    except Exception:
+        iface_list = ""
+    for iface in iface_list.split():
+        try:
+            ip = (
+                subprocess.check_output(["ipconfig", "getifaddr", iface], text=True)
+                .strip()
+            )
+            if not ip:
                 continue
-            seeds.append(f"{ip}:{PEER_LISTEN_PORT}")
+            if ip.startswith("169.254."):
+                continue  # skip link-local
+            if not ipaddress.IPv4Address(ip).is_private:
+                continue
+            mask_hex = None
+            try:
+                ifconfig_out = subprocess.check_output(
+                    ["ifconfig", iface], text=True, stderr=subprocess.DEVNULL
+                )
+                for token in ifconfig_out.split():
+                    if token.startswith("0x") and len(token) == 10:
+                        mask_hex = token
+                        break
+            except Exception:
+                pass
+            if mask_hex:
+                mask_int = int(mask_hex, 16)
+                mask_str = str(ipaddress.IPv4Address(mask_int))
+                net = ipaddress.IPv4Network(f"{ip}/{mask_str}", strict=False)
+            else:
+                net = ipaddress.IPv4Network(f"{ip}/24", strict=False)
+            if net.prefixlen > 24:
+                continue  # avoid huge scans
+            nets.add(net)
+        except Exception:
+            continue
+    return nets
+
+
+def _seeds_from_subnets(
+    subnets: Iterable[ipaddress.IPv4Network], local_ips: set[str]
+) -> list[str]:
+    seeds: list[str] = []
+    for net in subnets:
+        for host in net.hosts():
+            host_str = str(host)
+            if host_str in local_ips:
+                continue
+            seeds.append(f"{host_str}:{PEER_LISTEN_PORT}")
     return seeds
