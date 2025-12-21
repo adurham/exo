@@ -2,6 +2,7 @@ use crate::ext::MultiaddrExt;
 use crate::keep_alive;
 use delegate::delegate;
 use either::Either;
+use std::env;
 use futures::FutureExt;
 use futures_timer::Delay;
 use libp2p::core::transport::PortUse;
@@ -23,6 +24,55 @@ use std::time::Duration;
 use util::wakerdeque::WakerDeque;
 
 const RETRY_CONNECT_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone)]
+struct AllowedSubnets {
+    nets: Vec<(IpAddr, u8)>,
+}
+
+impl AllowedSubnets {
+    fn from_env() -> Self {
+        let raw = env::var("EXO_TB_SUBNETS").unwrap_or_default();
+        let nets = raw
+            .split(',')
+            .filter_map(|s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    return None;
+                }
+                let (addr_str, prefix_str) = s.split_once('/')?;
+                let addr: IpAddr = addr_str.parse().ok()?;
+                let prefix: u8 = prefix_str.parse().ok()?;
+                if prefix > 30 {
+                    return None;
+                }
+                Some((addr, prefix))
+            })
+            .collect();
+        Self { nets }
+    }
+
+    fn contains(&self, ip: IpAddr) -> bool {
+        if self.nets.is_empty() {
+            return true;
+        }
+        self.nets.iter().any(|(addr, prefix)| ip_in_prefix(ip, *addr, *prefix))
+    }
+}
+
+fn ip_in_prefix(ip: IpAddr, network: IpAddr, prefix: u8) -> bool {
+    match (ip, network) {
+        (IpAddr::V4(ip), IpAddr::V4(net)) => {
+            let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+            (u32::from(ip) & mask) == (u32::from(net) & mask)
+        }
+        (IpAddr::V6(ip), IpAddr::V6(net)) => {
+            let mask = if prefix == 0 { 0 } else { u128::MAX << (128 - prefix) };
+            (u128::from(ip) & mask) == (u128::from(net) & mask)
+        }
+        _ => false,
+    }
+}
 
 mod managed {
     use libp2p::swarm::NetworkBehaviour;
@@ -105,6 +155,7 @@ pub struct Behaviour {
     // state-tracking for managed behaviors & mDNS-discovered peers
     managed: managed::Behaviour,
     mdns_discovered: HashMap<PeerId, BTreeSet<Multiaddr>>,
+    allowed_subnets: AllowedSubnets,
 
     retry_delay: Delay, // retry interval
 
@@ -117,6 +168,7 @@ impl Behaviour {
         Ok(Self {
             managed: managed::Behaviour::new(keypair)?,
             mdns_discovered: HashMap::new(),
+            allowed_subnets: AllowedSubnets::from_env(),
             retry_delay: Delay::new(RETRY_CONNECT_INTERVAL),
             pending_events: WakerDeque::new(),
         })
@@ -138,6 +190,11 @@ impl Behaviour {
 
     fn handle_mdns_discovered(&mut self, peers: Vec<(PeerId, Multiaddr)>) {
         for (p, ma) in peers {
+            if let Some((ip, _)) = ma.try_to_tcp_addr() {
+                if !self.allowed_subnets.contains(ip) {
+                    continue;
+                }
+            }
             self.dial(p, ma.clone()); // always connect
 
             // get peer's multi-addresses or insert if missing
@@ -154,17 +211,10 @@ impl Behaviour {
 
     fn handle_mdns_expired(&mut self, peers: Vec<(PeerId, Multiaddr)>) {
         for (p, ma) in peers {
-            // at this point, we *must* have the peer
-            let mas = self
-                .mdns_discovered
-                .get_mut(&p)
-                .expect("nonexistent peer cannot expire");
-
-            // at this point, we *must* have the multiaddress
-            let was_present = mas.remove(&ma);
-            assert!(was_present, "nonexistent multiaddress cannot expire");
-
-            // if empty, remove the peer-id entirely
+            let Some(mas) = self.mdns_discovered.get_mut(&p) else {
+                continue;
+            };
+            let _ = mas.remove(&ma);
             if mas.is_empty() {
                 self.mdns_discovered.remove(&p);
             }

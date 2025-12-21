@@ -415,7 +415,8 @@ def apply_hostname_overrides(args: Args) -> Args:
 
     local_ips = _local_ipv4s()
     subnets = _thunderbolt_subnets(local_ips)
-    seeds.extend(_seeds_from_subnets(subnets, local_ips))
+    if subnets:
+        os.environ["EXO_TB_SUBNETS"] = ",".join(str(net) for net in subnets)
 
     seeds = _dedupe_preserve_order(seeds)
 
