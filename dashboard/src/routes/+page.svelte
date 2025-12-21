@@ -46,8 +46,6 @@ const debugEnabled = $derived(debugMode());
 	type InstanceMeta = 'MlxRing' | 'MlxIbv' | 'MlxJaccl';
 	
 	let selectedInstanceType = $state<InstanceMeta>('MlxRing');
-	let selectedMinNodes = $state<number>(1);
-	let minNodesInitialized = $state(false);
 	let launchingModelId = $state<string | null>(null);
 let instanceDownloadExpandedNodes = $state<Set<string>>(new Set());
 	
@@ -55,9 +53,6 @@ let instanceDownloadExpandedNodes = $state<Set<string>>(new Set());
 	let isModelDropdownOpen = $state(false);
 	let modelDropdownSearch = $state('');
 	
-	// Slider dragging state
-	let isDraggingSlider = $state(false);
-	let sliderTrackElement: HTMLDivElement | null = $state(null);
 	
 	// Instances container ref for scrolling
 	let instancesContainerRef: HTMLDivElement | null = $state(null);
@@ -192,8 +187,8 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 				p.memory_delta_by_node !== null
 		);
 		
-		// Check if any preview has node count >= selectedMinNodes
-		return matchingPreviews.some((p: PlacementPreview) => getPreviewNodeCount(p) >= selectedMinNodes);
+		// Always check if any preview exists (using all available nodes)
+		return matchingPreviews.length > 0;
 	}
 	
 	// Helper to get model size in GB (from megabytes)
@@ -314,8 +309,9 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 				instanceData = preview.instance;
 			} else {
 				// Fallback: GET placement from API
+				// Always use all available nodes - backend will use total_nodes automatically
 				const placementResponse = await fetch(
-					`/instance/placement?model_id=${encodeURIComponent(modelId)}&sharding=${selectedSharding}&instance_meta=${selectedInstanceType}&min_nodes=${selectedMinNodes}`
+					`/instance/placement?model_id=${encodeURIComponent(modelId)}&sharding=${selectedSharding}&instance_meta=${selectedInstanceType}`
 				);
 				
 				if (!placementResponse.ok) {
@@ -921,69 +917,6 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 		clearChat();
 	}
 
-	// Slider drag handlers
-	function handleSliderDrag(clientX: number) {
-		if (!sliderTrackElement || availableMinNodes <= 1) return;
-		
-		const rect = sliderTrackElement.getBoundingClientRect();
-		const percentage = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-		const rawValue = Math.round(percentage * (availableMinNodes - 1)) + 1;
-		const clampedValue = Math.max(1, Math.min(availableMinNodes, rawValue));
-		
-		// Find nearest valid value
-		const validCounts = validMinNodeCounts();
-		if (validCounts.has(clampedValue)) {
-			selectedMinNodes = clampedValue;
-		} else {
-			// Find nearest valid value
-			let nearest = clampedValue;
-			let minDist = Infinity;
-			for (const v of validCounts) {
-				const dist = Math.abs(v - clampedValue);
-				if (dist < minDist) {
-					minDist = dist;
-					nearest = v;
-				}
-			}
-			if (validCounts.size > 0) {
-				selectedMinNodes = nearest;
-			}
-		}
-	}
-
-	function handleSliderMouseDown(event: MouseEvent) {
-		isDraggingSlider = true;
-		handleSliderDrag(event.clientX);
-	}
-
-	function handleSliderMouseMove(event: MouseEvent) {
-		if (isDraggingSlider) {
-			handleSliderDrag(event.clientX);
-		}
-	}
-
-	function handleSliderMouseUp() {
-		isDraggingSlider = false;
-	}
-
-	// Handle touch events for mobile
-	function handleSliderTouchStart(event: TouchEvent) {
-		isDraggingSlider = true;
-		if (event.touches.length > 0) {
-			handleSliderDrag(event.touches[0].clientX);
-		}
-	}
-
-	function handleSliderTouchMove(event: TouchEvent) {
-		if (isDraggingSlider && event.touches.length > 0) {
-			event.preventDefault();
-			handleSliderDrag(event.touches[0].clientX);
-		}
-	}
-
-	function handleSliderTouchEnd() {
-		isDraggingSlider = false;
-	}
 
 	const nodeCount = $derived(data ? Object.keys(data.nodes).length : 0);
 	const instanceCount = $derived(Object.keys(instanceData).length);
@@ -995,37 +928,6 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 		return Object.keys(preview.memory_delta_by_node).length;
 	}
 	
-	// Available min nodes options based on topology (like old dashboard)
-	const availableMinNodes = $derived(Math.max(1, nodeCount));
-	
-	// Compute which min node values have valid previews for the current model/sharding/instance type
-	// A minNodes value N is valid if there exists a placement with nodeCount >= N
-	// Note: previewsData already contains previews for the selected model (fetched via API)
-	const validMinNodeCounts = $derived(() => {
-		if (!selectedModelId || previewsData.length === 0) {
-			// If no model selected or no previews, allow all node counts (UI shows all as clickable)
-			return new Set(Array.from({ length: availableMinNodes }, (_, i) => i + 1));
-		}
-		
-		// Find the max node count among valid placements for this model/sharding/instance
-		// (model_id filter not needed since previewsData is already for selected model)
-		let maxValidNodes = 0;
-		for (const preview of previewsData) {
-			if (preview.sharding !== selectedSharding) continue;
-			if (!matchesSelectedRuntime(preview.instance_meta)) continue;
-			if (preview.error !== null) continue;
-			if (!preview.memory_delta_by_node) continue;
-			
-			const previewNodes = getPreviewNodeCount(preview);
-			if (previewNodes > maxValidNodes) {
-				maxValidNodes = previewNodes;
-			}
-		}
-		
-		// All values from 1 to maxValidNodes are valid (since there's a placement with >= that many nodes)
-		if (maxValidNodes === 0) return new Set<number>();
-		return new Set(Array.from({ length: maxValidNodes }, (_, i) => i + 1));
-	});
 	
 	// Get ALL filtered previews based on current settings (matching minimum nodes)
 	// Note: previewsData already contains previews for the selected model (fetched via API)
@@ -1041,40 +943,14 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 			p.memory_delta_by_node !== null
 		);
 		
-		// Filter to previews with node count >= selectedMinNodes, sorted by node count (ascending)
+		// Always use previews with all available nodes (greedy allocation)
+		// Sort by node count descending to prefer using all nodes
 		return matchingPreviews
-			.filter((p: PlacementPreview) => getPreviewNodeCount(p) >= selectedMinNodes)
-			.sort((a: PlacementPreview, b: PlacementPreview) => getPreviewNodeCount(a) - getPreviewNodeCount(b));
+			.sort((a: PlacementPreview, b: PlacementPreview) => getPreviewNodeCount(b) - getPreviewNodeCount(a));
 	});
 	
 	// Get the first filtered preview (for launch function compatibility)
 	const filteredPreview = $derived(() => filteredPreviews()[0] ?? null);
-	
-	// Auto-update selectedMinNodes when node count changes (default to 1 = show all placements)
-	$effect(() => {
-		const maxNodes = availableMinNodes;
-		if (!minNodesInitialized && maxNodes > 0) {
-			// On initial load, default to 1 (minimum) to show all valid placements
-			selectedMinNodes = 1;
-			minNodesInitialized = true;
-		} else if (selectedMinNodes > maxNodes) {
-			// If current selection exceeds available nodes, cap it
-			selectedMinNodes = maxNodes;
-		}
-	});
-	
-	// Auto-adjust selectedMinNodes to a valid value when it becomes invalid
-	$effect(() => {
-		const valid = validMinNodeCounts();
-		if (valid.size > 0 && !valid.has(selectedMinNodes)) {
-			// Find the smallest valid count >= current selection, or the largest valid count
-			const validArray = Array.from(valid).sort((a, b) => a - b);
-			const nextValid = validArray.find(n => n >= selectedMinNodes) ?? validArray[validArray.length - 1];
-			if (nextValid !== undefined) {
-				selectedMinNodes = nextValid;
-			}
-		}
-	});
 	
 	// Calculate total memory usage across all nodes
 	const clusterMemory = $derived(() => {
@@ -1090,10 +966,6 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 
 <!-- Global event listeners for slider dragging -->
 <svelte:window 
-	onmousemove={handleSliderMouseMove}
-	onmouseup={handleSliderMouseUp}
-	ontouchmove={handleSliderTouchMove}
-	ontouchend={handleSliderTouchEnd}
 />
 
 <div class="relative h-screen w-full flex flex-col bg-exo-dark-gray overflow-hidden">
@@ -1494,55 +1366,6 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 								</div>
 							</div>
 							
-							<!-- Minimum Nodes (discrete slider with drag support) -->
-							<div>
-								<div class="text-xs text-white/70 font-mono mb-2">Minimum Nodes:</div>
-								<!-- Discrete slider track with drag support -->
-								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div 
-									bind:this={sliderTrackElement}
-									class="relative h-16 cursor-pointer select-none px-2 pr-6"
-									onmousedown={handleSliderMouseDown}
-									ontouchstart={handleSliderTouchStart}
-								>
-									<!-- Track background - extends full width to align with edge dots -->
-									<div class="absolute top-6 left-0 right-0 h-2 bg-exo-medium-gray/50 rounded-full"></div>
-									<!-- Active track (fills up to selected) -->
-									{#if availableMinNodes > 1}
-										<div 
-											class="absolute top-6 left-0 h-2 bg-white/30 rounded-full transition-all pointer-events-none"
-											style="width: {((selectedMinNodes - 1) / (availableMinNodes - 1)) * 100}%"
-										></div>
-									{/if}
-									<!-- Dots and labels for each node count -->
-									{#each Array.from({ length: availableMinNodes }, (_, i) => i + 1) as n}
-										{@const isValid = validMinNodeCounts().has(n)}
-										{@const isSelected = selectedMinNodes === n}
-										{@const position = availableMinNodes > 1 ? ((n - 1) / (availableMinNodes - 1)) * 100 : 50}
-										<div
-											class="absolute flex flex-col items-center pointer-events-none"
-											style="left: {position}%; top: 0; transform: translateX(-50%);"
-										>
-											<!-- Dot -->
-											<span 
-												class="rounded-full transition-all {isSelected 
-													? 'w-6 h-6 bg-exo-yellow shadow-[0_0_10px_rgba(255,215,0,0.6)]' 
-													: isValid 
-														? 'w-4 h-4 bg-exo-light-gray/70 mt-1' 
-														: 'w-3 h-3 bg-exo-medium-gray/50 mt-1.5'}"
-											></span>
-											<!-- Number label below dot -->
-											<span 
-												class="text-sm font-mono mt-1.5 tabular-nums transition-colors {isSelected 
-													? 'text-exo-yellow font-bold' 
-													: isValid 
-														? 'text-white/70' 
-														: 'text-white/30'}"
-											>{n}</span>
-										</div>
-									{/each}
-								</div>
-							</div>
 						</div>
 						
 						<!-- Selected Model Preview -->
