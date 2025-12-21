@@ -161,18 +161,22 @@ def test_get_smallest_cycles(
 
 
 @pytest.mark.parametrize(
-    "available_memory,total_layers,expected_layers",
+    "chip_ids,available_memory_kb,total_layers,expected_layers",
     [
-        ((500, 500, 1000), 12, (3, 3, 6)),
-        ((500, 500, 500), 12, (4, 4, 4)),
-        ((312, 518, 1024), 12, (2, 3, 7)),
+        # Greedy toward higher memory bandwidth:
+        # - everyone gets at least 1 layer
+        # - remaining layers go to the fastest + largest machines (within memory caps)
+        (("M1", "M2", "M3 Ultra"), (800, 800, 800), 12, (1, 2, 9)),
+        # Fastest node is memory-capped, so the next-fastest gets the remainder.
+        (("M1", "M2", "M3 Ultra"), (1200, 1200, 200), 12, (1, 9, 2)),
     ],
 )
 def test_get_shard_assignments(
     topology: Topology,
     create_node: Callable[[int, NodeId | None], NodeInfo],
     create_connection: Callable[[NodeId, NodeId], Connection],
-    available_memory: tuple[int, int, int],
+    chip_ids: tuple[str, str, str],
+    available_memory_kb: tuple[int, int, int],
     total_layers: int,
     expected_layers: tuple[int, int, int],
 ):
@@ -181,9 +185,22 @@ def test_get_shard_assignments(
     node_b_id = NodeId()
     node_c_id = NodeId()
 
-    node_a = create_node(available_memory[0] * 1024, node_a_id)
-    node_b = create_node(available_memory[1] * 1024, node_b_id)
-    node_c = create_node(available_memory[2] * 1024, node_c_id)
+    node_a = create_node(available_memory_kb[0] * 1024, node_a_id)
+    node_b = create_node(available_memory_kb[1] * 1024, node_b_id)
+    node_c = create_node(available_memory_kb[2] * 1024, node_c_id)
+
+    assert node_a.node_profile is not None
+    assert node_b.node_profile is not None
+    assert node_c.node_profile is not None
+
+    node_a.node_profile.chip_id = chip_ids[0]
+    node_b.node_profile.chip_id = chip_ids[1]
+    node_c.node_profile.chip_id = chip_ids[2]
+
+    # Make "largest" correlate with the provided memory numbers for determinism.
+    node_a.node_profile.memory.ram_total = Memory.from_bytes(available_memory_kb[0] * 1024)
+    node_b.node_profile.memory.ram_total = Memory.from_bytes(available_memory_kb[1] * 1024)
+    node_c.node_profile.memory.ram_total = Memory.from_bytes(available_memory_kb[2] * 1024)
 
     topology.add_node(node_a)
     topology.add_node(node_b)
@@ -300,11 +317,11 @@ def test_get_mlx_ibv_coordinators(
         network_interfaces=[
             NetworkInterfaceInfo(
                 name="en3",
-                ip_address=conn_a_b.send_back_multiaddr.ip_address,
+                ip_address=conn_b_a.send_back_multiaddr.ip_address,
             ),
             NetworkInterfaceInfo(
                 name="en4",
-                ip_address=conn_a_c.send_back_multiaddr.ip_address,
+                ip_address=conn_c_a.send_back_multiaddr.ip_address,
             ),
         ],
         system=node_a.node_profile.system,
@@ -317,11 +334,11 @@ def test_get_mlx_ibv_coordinators(
         network_interfaces=[
             NetworkInterfaceInfo(
                 name="en3",
-                ip_address=conn_b_a.send_back_multiaddr.ip_address,
+                ip_address=conn_a_b.send_back_multiaddr.ip_address,
             ),
             NetworkInterfaceInfo(
                 name="en4",
-                ip_address=conn_b_c.send_back_multiaddr.ip_address,
+                ip_address=conn_c_b.send_back_multiaddr.ip_address,
             ),
         ],
         system=node_b.node_profile.system,
@@ -334,11 +351,11 @@ def test_get_mlx_ibv_coordinators(
         network_interfaces=[
             NetworkInterfaceInfo(
                 name="en3",
-                ip_address=conn_c_b.send_back_multiaddr.ip_address,
+                ip_address=conn_a_c.send_back_multiaddr.ip_address,
             ),
             NetworkInterfaceInfo(
                 name="en4",
-                ip_address=conn_c_a.send_back_multiaddr.ip_address,
+                ip_address=conn_b_c.send_back_multiaddr.ip_address,
             ),
         ],
         system=node_c.node_profile.system,
