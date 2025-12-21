@@ -253,6 +253,10 @@ function toggleNodeDetails(nodeId: string): void {
 				const safeTotal = Math.max(n.totalGB, 0.001);
 				const currentPercent = clampPercent((n.usedGB / safeTotal) * 100);
 				const newPercent = clampPercent(((n.usedGB + modelUsageGB) / safeTotal) * 100);
+				// Calculate model allocation percentage: what % of the model is on this node
+				const modelAllocationPercent = estimatedMemory > 0 
+					? clampPercent((modelUsageGB / estimatedMemory) * 100)
+					: 0;
 				const screenHeight = iconSize * 0.58;
 				
 				return {
@@ -264,6 +268,7 @@ function toggleNodeDetails(nodeId: string): void {
 					modelUsageGB,
 					currentPercent,
 					newPercent,
+					modelAllocationPercent,
 					isUsed,
 					isKVCache,
 					x: centerX + Math.cos(angle) * radius,
@@ -629,7 +634,7 @@ function toggleNodeDetails(nodeId: string): void {
 								font-family="SF Mono, Monaco, monospace"
 								fill={node.isUsed ? (node.newPercent > 90 ? '#f87171' : '#FFD700') : '#4B5563'}
 							>
-								{node.isKVCache ? 'KV Cache' : `${node.newPercent.toFixed(0)}%`}
+								{node.isKVCache ? 'KV Cache' : `${node.modelAllocationPercent.toFixed(0)}%`}
 							</text>
 						</g>
 					{/each}
