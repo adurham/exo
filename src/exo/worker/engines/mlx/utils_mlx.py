@@ -145,9 +145,11 @@ def mlx_distributed_init(
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
-            # Use 'any' backend - MLX will auto-detect the appropriate backend based on
-            # MLX_IBV_DEVICES and MLX_IBV_COORDINATOR env vars for RDMA connectivity
-            group = mx.distributed.init(backend="any", strict=True)
+            # For RDMA/InfiniBand, use 'any' backend with strict=False
+            # This allows MLX to try all available backends and use RDMA if supported
+            # strict=False allows fallback to singleton group if distributed isn't available
+            # (though for multi-node instances, distributed should be available)
+            group = mx.distributed.init(backend="any", strict=False)
 
     logger.info(f"Rank {rank} mlx distributed initialization complete")
 
