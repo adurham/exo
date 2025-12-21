@@ -140,16 +140,43 @@ def mlx_distributed_init(
 
             ibv_coordinator = ibv_coordinators[bound_instance.bound_node_id]
 
+            world_size = bound_instance.bound_shard.world_size
             logger.info(f"rank {rank} MLX_IBV_DEVICES: {ibv_devices_json}")
             logger.info(f"rank {rank} MLX_IBV_COORDINATOR: {ibv_coordinator}")
+            logger.info(f"rank {rank} Setting environment variables: MLX_RANK={rank}, MLX_WORLD_SIZE={world_size}")
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
+            os.environ["MLX_WORLD_SIZE"] = str(world_size)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
+            
+            # Verify environment variables are set
+            logger.info(
+                f"rank {rank} Environment check: MLX_RANK={os.environ.get('MLX_RANK')}, "
+                f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
+                f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
+            )
+            
             # For RDMA/InfiniBand, use 'any' backend with strict=False
             # This allows MLX to try all available backends and use RDMA if supported
             # strict=False allows fallback to singleton group if distributed isn't available
             # (though for multi-node instances, distributed should be available)
+            logger.info(f"rank {rank} Calling mx.distributed.init(backend='any', strict=False)")
             group = mx.distributed.init(backend="any", strict=False)
+            
+            # CRITICAL: Verify MLX assigned the correct rank
+            mlx_actual_rank = group.rank()
+            mlx_group_size = group.size()
+            logger.info(
+                f"rank {rank} MLX init result: group.rank()={mlx_actual_rank}, "
+                f"group.size()={mlx_group_size}, expected_rank={rank}, expected_world_size={world_size}"
+            )
+            
+            if mlx_actual_rank != rank:
+                logger.error(
+                    f"RANK MISMATCH in mlx_distributed_init! "
+                    f"Expected rank={rank} but MLX assigned rank={mlx_actual_rank}. "
+                    f"This will break pipeline parallelism!"
+                )
 
     logger.info(f"Rank {rank} mlx distributed initialization complete")
 
