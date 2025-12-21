@@ -310,14 +310,19 @@ def get_shard_assignments_for_pipeline_parallel(
         # CAN hold the model (even if some RAM is currently used)
         if fastest_total_ram >= model_storage_bytes:
             # Fastest node can hold entire model - give it all layers
+            # EXPLICITLY set all other nodes to 0 layers
             fastest_index = node_id_to_index[fastest_capacity.node_id]
-            desired_layers[fastest_index] = total_layers
+            desired_layers = [0 for _ in range(world_size)]  # Reset to all zeros
+            desired_layers[fastest_index] = total_layers  # Assign all layers to fastest
             remaining = 0
             
             logger.info(
-                f"Fastest node {fastest_capacity.node_id} can hold entire model "
+                f"✓ GREEDY ALLOCATION: Fastest node {fastest_capacity.node_id} can hold entire model "
                 f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_total_ram / (1024**3):.2f} GB total RAM) - "
-                f"assigning all {total_layers} layers to fastest node (greedy allocation)"
+                f"assigning ALL {total_layers} layers to fastest node, other nodes get 0 layers (KV cache only)"
+            )
+            logger.info(
+                f"✓ Layer assignment: {[(sorted_cycle[i].node_id, desired_layers[i]) for i in range(world_size)]}"
             )
         else:
             # Fastest node cannot hold all layers - distribute greedily

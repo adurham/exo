@@ -325,6 +325,10 @@ class API:
                                     # Explicitly set to 0 if no layers assigned (KV cache only)
                                     if layers_per_node == 0:
                                         node_bytes = 0
+                                    logger.info(
+                                        f"Node {node_id}: {layers_per_node} layers, "
+                                        f"{node_bytes / (1024**3):.2f} GB (KV cache: {layers_per_node == 0})"
+                                    )
                                 else:
                                     node_bytes = total_bytes // len(node_ids)
                             else:
