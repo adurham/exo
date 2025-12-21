@@ -13,9 +13,9 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from exo.shared.constants import EXO_MODELS_DIR
+from exo.shared.topology import Topology
 from exo.shared.types.common import NodeId
 from exo.shared.types.multiaddr import Multiaddr
-from exo.shared.types.topology import Topology
 from exo.worker.download.download_utils import calc_hash
 
 
