@@ -464,7 +464,6 @@ def _local_ipv4s() -> set[str]:
     return ips
 
 
-@dataclass(frozen=True)
 def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
