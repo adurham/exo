@@ -236,8 +236,10 @@ function toggleNodeDetails(nodeId: string): void {
 		if (hasApiPreview && apiPreview.memory_delta_by_node) {
 			// Use API placement data
 			const memoryDelta = apiPreview.memory_delta_by_node;
+			console.log('API Preview memory_delta_by_node:', memoryDelta);
 			placementNodes = nodeArray.map((n, i) => {
 				const deltaBytes = memoryDelta[n.id] ?? 0;
+				console.log(`Node ${n.id}: deltaBytes=${deltaBytes}, isKVCache=${deltaBytes === 0 && n.id in memoryDelta}`);
 				const modelUsageGB = deltaBytes / (1024 * 1024 * 1024);
 				// Node is "used" if it's in the instance (even with 0 layers for KV cache)
 				const isUsed = n.id in memoryDelta;
