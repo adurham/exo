@@ -76,9 +76,13 @@ def get_network_interfaces() -> list[NetworkInterfaceInfo]:
     for iface, services in psutil.net_if_addrs().items():
         for service in services:
             match service.family:
-                case socket.AF_INET | socket.AF_INET6:
+                case socket.AF_INET:
                     interfaces_info.append(
-                        NetworkInterfaceInfo(name=iface, ip_address=service.address)
+                        NetworkInterfaceInfo(
+                            name=iface,
+                            ip_address=service.address,
+                            netmask=service.netmask,
+                        )
                     )
                 case _:
                     pass

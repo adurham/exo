@@ -50,6 +50,7 @@ class SystemPerformanceProfile(CamelCaseModel):
 class NetworkInterfaceInfo(CamelCaseModel):
     name: str
     ip_address: str
+    netmask: str | None = None
 
 
 class NodePerformanceProfile(CamelCaseModel):
