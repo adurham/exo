@@ -163,13 +163,25 @@ def mlx_distributed_init(
             logger.info(f"rank {rank} Calling mx.distributed.init(backend='any', strict=False)")
             group = mx.distributed.init(backend="any", strict=False)
             
-            # CRITICAL: Verify MLX assigned the correct rank
+            # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
             mlx_actual_rank = group.rank()
             mlx_group_size = group.size()
             logger.info(
                 f"rank {rank} MLX init result: group.rank()={mlx_actual_rank}, "
                 f"group.size()={mlx_group_size}, expected_rank={rank}, expected_world_size={world_size}"
             )
+            
+            # CRITICAL: For multi-node instances, we MUST have a distributed group
+            if mlx_group_size == 1 and world_size > 1:
+                raise RuntimeError(
+                    f"Rank {rank}: MLX distributed initialization failed! "
+                    f"Got singleton group (size=1) but expected distributed group (world_size={world_size}). "
+                    f"Environment was: MLX_RANK={os.environ.get('MLX_RANK')}, "
+                    f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
+                    f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
+                    f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}. "
+                    f"RDMA backend may not be working correctly on this system."
+                )
             
             if mlx_actual_rank != rank:
                 logger.error(
