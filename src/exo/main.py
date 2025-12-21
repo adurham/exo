@@ -428,13 +428,17 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_hosts_from_subnets(subnets, local_ips))
     seeds = _dedupe_preserve_order(seeds)
 
+    force_master = args.force_master or any(
+        ip in {"192.168.201.1", "192.168.202.1"} for ip in local_ips
+    )
+
     return args.model_copy(
         update={
             "use_rdma": True,
             "host": BIND_HOST,
             "discovery_port": PEER_LISTEN_PORT,
             "seeds": seeds,
-            "force_master": args.force_master,  # no IP-based forcing
+            "force_master": force_master,
         },
         deep=True,
     )
