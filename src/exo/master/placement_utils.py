@@ -157,6 +157,8 @@ def _pipeline_node_capacities(
         available_bytes = node.node_profile.memory.ram_available.in_bytes
         
         max_layers_by_available = int(floor(available_bytes / bytes_per_layer))
+        # Cap at total_layers (can't assign more layers than the model has)
+        # But for greedy allocation, we want to know actual capacity, so we'll use min(total_layers, capacity)
         max_layers = max(0, min(total_layers, max_layers_by_available))
 
         membw = estimated_memory_bandwidth_gbps(chip_id=node.node_profile.chip_id)
@@ -238,40 +240,16 @@ def get_shard_assignments_for_pipeline_parallel(
         # This should be rare given we pre-filter cycles by total memory, but
         # storage size vs runtime memory footprint is approximate.
         logger.warning(
-            "Insufficient per-node memory caps for pipeline sharding; falling back to "
-            "RAM-proportional assignment"
+            "Insufficient per-node memory caps for pipeline sharding; using greedy allocation"
         )
-        cycle_memory = sum(
-            (node.node_profile.memory.ram_available for node in sorted_cycle),
-            start=Memory(),
-        )
-        desired_layers: list[int] = []
-        layers_assigned = 0
-        for i, node in enumerate(sorted_cycle):
-            if i == world_size - 1:
-                node_layers = total_layers - layers_assigned
-            else:
-                node_layers = round(
-                    total_layers
-                    * (
-                        node.node_profile.memory.ram_available.in_bytes
-                        / cycle_memory.in_bytes
-                    )
-                )
-                node_layers = max(0, node_layers)
-            desired_layers.append(node_layers)
-            layers_assigned += node_layers
-    else:
-        # Greedy allocation: fill fastest node first, then 2nd fastest, then 3rd, etc.
-        # - Fill each node to capacity before moving to the next
-        # - Cap each node at its available memory limit
-        # - All nodes are included in the instance (even with 0 layers) for KV cache handling
+        # Even in fallback, use greedy allocation: fastest node first
         desired_layers = [0 for _ in range(world_size)]
         remaining = total_layers
-
+        
         node_id_to_index = {node.node_id: i for i, node in enumerate(sorted_cycle)}
         
         # Greedily fill nodes in order of speed (fastest first)
+        # Use max_layers_by_memory as capacity, even if it's less than total_layers
         for c in ranked_capacities:
             if remaining <= 0:
                 break
@@ -287,6 +265,51 @@ def get_shard_assignments_for_pipeline_parallel(
             take = min(remaining, headroom)
             desired_layers[node_index] += take
             remaining -= take
+        
+        # If we still have layers remaining, distribute to fastest nodes first
+        if remaining > 0:
+            for c in ranked_capacities:
+                if remaining <= 0:
+                    break
+                node_index = node_id_to_index[c.node_id]
+                # Give at least 1 layer to fastest nodes first
+                take = min(remaining, 1)
+                desired_layers[node_index] += take
+                remaining -= take
+    else:
+        # Greedy allocation: fill fastest node first, then 2nd fastest, then 3rd, etc.
+        # - Fill each node to capacity before moving to the next
+        # - Cap each node at its available memory limit
+        # - All nodes are included in the instance (even with 0 layers) for KV cache handling
+        desired_layers = [0 for _ in range(world_size)]
+        remaining = total_layers
+
+        node_id_to_index = {node.node_id: i for i, node in enumerate(sorted_cycle)}
+        
+        # Greedily fill nodes in order of speed (fastest first)
+        # Fastest node gets ALL layers it can hold before any other node gets any
+        for c in ranked_capacities:
+            if remaining <= 0:
+                break
+            if c.max_layers_by_memory <= 0:
+                continue
+            
+            node_index = node_id_to_index[c.node_id]
+            headroom = c.max_layers_by_memory - desired_layers[node_index]
+            if headroom <= 0:
+                continue
+            
+            # Take as many layers as this node can hold, up to remaining
+            # Fastest node (first in ranked_capacities) gets ALL remaining layers if it can hold them
+            take = min(remaining, headroom)
+            desired_layers[node_index] += take
+            remaining -= take
+            
+            logger.info(
+                f"Greedy allocation: node {c.node_id} (membw={c.membw_gbps:.1f} GB/s, "
+                f"ram={c.ram_total_bytes / (1024**3):.1f} GB) gets {take} layers "
+                f"(total: {desired_layers[node_index]}, remaining: {remaining})"
+            )
 
         # If we still have layers remaining after filling nodes sequentially,
         # only distribute to slower nodes if faster nodes are at capacity
