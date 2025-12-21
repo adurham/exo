@@ -393,11 +393,11 @@ class Args(CamelCaseModel):
         )
 
         args = parser.parse_args()
-        return cls(**vars(args))  # pyright: ignore[reportAny] - We are intentionally validating here, we can't do it statically
+        return cls(**vars(args))  # pyright: ignore[reportAny] - runtime validation
 
 
 def apply_hostname_overrides(args: Args) -> Args:
-    hostname = socket.gethostname()
+    hostname = socket.gethostname().split(".", 1)[0]
     seeds = list(args.seeds or [])
 
     seeds_by_hostname: dict[str, tuple[str, ...]] = {

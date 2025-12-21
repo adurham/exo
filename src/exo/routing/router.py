@@ -231,8 +231,10 @@ class Router:
         """Dial seed peers to bootstrap beyond mDNS."""
         for seed in seeds:
             addr = self._to_multiaddr(seed)
+            logger.info(f"Dialing seed {seed} as {addr}")
             try:
-                await self._net.dial_multiaddr(addr)
+                dialed = await self._net.dial_multiaddr(addr)
+                logger.info(f"Dial success={dialed} for seed {seed} as {addr}")
             except Exception as exc:  # pragma: no cover - networking failures surface at runtime
                 logger.warning(f"Failed to dial seed {seed} as {addr}: {exc}")
 
