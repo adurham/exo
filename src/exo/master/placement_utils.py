@@ -308,7 +308,11 @@ def get_shard_assignments_for_pipeline_parallel(
         
         # Use total RAM instead of available RAM for the check, since we want to know if the node
         # CAN hold the model (even if some RAM is currently used)
-        if fastest_total_ram >= model_storage_bytes:
+        # Also use greedy allocation for small models (< 10GB) on large nodes (> 64GB)
+        is_small_model = model_storage_bytes < 10 * (1024**3)  # < 10GB
+        is_large_node = fastest_total_ram > 64 * (1024**3)  # > 64GB
+        
+        if fastest_total_ram >= model_storage_bytes or (is_small_model and is_large_node):
             # Fastest node can hold entire model - give it all layers
             # EXPLICITLY set all other nodes to 0 layers
             fastest_index = node_id_to_index[fastest_capacity.node_id]
