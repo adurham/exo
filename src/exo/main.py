@@ -425,6 +425,7 @@ def apply_hostname_overrides(args: Args) -> Args:
     else:
         logger.warning("No Thunderbolt subnets detected; mDNS not filtered")
 
+    seeds.extend(_hosts_from_subnets(subnets, local_ips))
     seeds = _dedupe_preserve_order(seeds)
 
     return args.model_copy(
@@ -556,6 +557,23 @@ def _fallback_subnets_from_ips(local_ips: set[str]) -> set[ipaddress.IPv4Network
         except Exception:
             continue
     return nets
+
+
+def _hosts_from_subnets(
+    subnets: Iterable[ipaddress.IPv4Network], local_ips: set[str], max_hosts_per_net: int = 8
+) -> list[str]:
+    seeds: list[str] = []
+    for net in subnets:
+        count = 0
+        for host in net.hosts():
+            host_str = str(host)
+            if host_str in local_ips:
+                continue
+            seeds.append(f"{host_str}:{PEER_LISTEN_PORT}")
+            count += 1
+            if count >= max_hosts_per_net:
+                break
+    return seeds
 
 
 def _seeds_from_subnets(
