@@ -212,22 +212,19 @@ def get_shard_assignments_for_pipeline_parallel(
 
     capacities = _pipeline_node_capacities(model_meta=model_meta, selected_cycle=selected_cycle)
     
+    node_id_to_node = {node.node_id: node for node in selected_cycle}
+    
     ranked_capacities = sorted(
         capacities,
         key=lambda c: (c.membw_gbps, c.ram_total_bytes, str(c.node_id)),
         reverse=True,
     )
     
-    node_id_to_capacity = {c.node_id: c for c in capacities}
-    sorted_cycle = sorted(
-        selected_cycle,
-        key=lambda node: (
-            node_id_to_capacity[node.node_id].membw_gbps,
-            node_id_to_capacity[node.node_id].ram_total_bytes,
-            str(node.node_id),
-        ),
-        reverse=True,
-    )
+    sorted_cycle = [
+        node_id_to_node[c.node_id]
+        for c in ranked_capacities
+        if c.node_id in node_id_to_node
+    ]
     
     if sum(c.max_layers_by_memory for c in capacities) < total_layers:
         # This should be rare given we pre-filter cycles by total memory, but
