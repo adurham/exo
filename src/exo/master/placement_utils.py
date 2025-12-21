@@ -335,8 +335,10 @@ def get_shard_assignments_for_pipeline_parallel(
             
             logger.info(
                 f"✓ GREEDY ALLOCATION: Fastest node {fastest_capacity.node_id} can hold entire model "
-                f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_total_ram / (1024**3):.2f} GB total RAM) - "
-                f"assigning ALL {total_layers} layers to fastest node, other nodes get 0 layers (KV cache only)"
+                f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_total_ram / (1024**3):.2f} GB total RAM, "
+                f"with 10% buffer: {fastest_ram_with_buffer / (1024**3):.2f} GB) - "
+                f"assigning {layers_to_assign} layers to fastest node (capped at 90% capacity), "
+                f"remaining {remaining} layers to other nodes"
             )
             logger.info(
                 f"✓ Layer assignment: {[(sorted_cycle[i].node_id, desired_layers[i]) for i in range(world_size)]}"
