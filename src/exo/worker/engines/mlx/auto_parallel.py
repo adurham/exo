@@ -163,13 +163,19 @@ def pipeline_auto_parallel(
     Returns:
     The parallelized model
     """
+    start_layer, end_layer = model_shard_meta.start_layer, model_shard_meta.end_layer
+    device_rank, world_size = model_shard_meta.device_rank, model_shard_meta.world_size
+
+    # Handle nodes with 0 layers (KV cache only) - skip layer processing
+    if start_layer == end_layer:
+        # This node has no layers to process, only contributes to KV cache
+        # Return model as-is without layer modifications
+        return model
+
     inner_model_instance: nn.Module = _inner_model(model)
 
     # Handle both model.layers and model.h cases
     layers: list[_LayerCallable] = _get_layers(inner_model_instance)
-
-    start_layer, end_layer = model_shard_meta.start_layer, model_shard_meta.end_layer
-    device_rank, world_size = model_shard_meta.device_rank, model_shard_meta.world_size
 
     layers = layers[start_layer:end_layer]
     layers[0] = PipelineFirstLayer(layers[0], device_rank, group=group)
