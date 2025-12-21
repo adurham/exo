@@ -348,16 +348,30 @@ def _get_mlx_rdma_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> list[N
     if allowed is not None:
         thunderbolt_names = thunderbolt_names & set(allowed)
 
-    thunderbolt_interfaces: list[NetworkInterfaceInfo] = []
+    all_candidates: list[NetworkInterfaceInfo] = []
     for interface in node_info.node_profile.network_interfaces:
         if interface.name not in thunderbolt_names:
             continue
         if not _is_ipv4_address(interface.ip_address):
             continue
-        thunderbolt_interfaces.append(interface)
+        all_candidates.append(interface)
 
-    thunderbolt_interfaces.sort(key=lambda iface: (iface.name, iface.ip_address))
-    return thunderbolt_interfaces
+    # Auto-restrict to the "active" Thunderbolt links when possible:
+    # if we can identify MTU/up state, prefer the interfaces that look like the
+    # dedicated RDMA links (typically MTU 9000 and up).
+    preferred_candidates = [
+        interface
+        for interface in all_candidates
+        if (interface.is_up is not False)
+        and (
+            interface.maximum_transmission_unit is None
+            or interface.maximum_transmission_unit >= 9000
+        )
+    ]
+    candidates = preferred_candidates if preferred_candidates else all_candidates
+
+    candidates.sort(key=lambda iface: (iface.name, iface.ip_address))
+    return candidates
 
 
 def _ipv4_interface_network(interface: NetworkInterfaceInfo) -> ipaddress.IPv4Network | None:
@@ -414,6 +428,14 @@ def _get_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> set[str]:
     """
     if node_info.node_profile is None:
         return set()
+
+    thunderbolt_from_profile = {
+        interface.name
+        for interface in node_info.node_profile.network_interfaces
+        if interface.is_thunderbolt is True
+    }
+    if thunderbolt_from_profile:
+        return thunderbolt_from_profile
     
     # Try system-based detection first (works for local interfaces)
     # Note: This only works if we're running on the same machine as the node

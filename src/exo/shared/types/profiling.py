@@ -51,6 +51,9 @@ class NetworkInterfaceInfo(CamelCaseModel):
     name: str
     ip_address: str
     netmask: str | None = None
+    is_thunderbolt: bool | None = None
+    is_up: bool | None = None
+    maximum_transmission_unit: int | None = None
 
 
 class NodePerformanceProfile(CamelCaseModel):
