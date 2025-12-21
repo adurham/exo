@@ -25,3 +25,4 @@ target/
 dashboard/build/
 dashboard/node_modules/
 dashboard/.svelte-kit/
+dashboard/package-lock.json
