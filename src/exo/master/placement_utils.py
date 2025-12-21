@@ -156,7 +156,10 @@ def _pipeline_node_capacities(
     for i, node in enumerate(selected_cycle):
         available_bytes = node.node_profile.memory.ram_available.in_bytes
         
-        max_layers_by_available = int(floor(available_bytes / bytes_per_layer))
+        # Apply 10% buffer to leave headroom for system processes, KV cache, etc.
+        available_bytes_with_buffer = available_bytes * 0.9
+        
+        max_layers_by_available = int(floor(available_bytes_with_buffer / bytes_per_layer))
         # Cap at total_layers (can't assign more layers than the model has)
         # But for greedy allocation, we want to know actual capacity, so we'll use min(total_layers, capacity)
         max_layers = max(0, min(total_layers, max_layers_by_available))
@@ -306,19 +309,29 @@ def get_shard_assignments_for_pipeline_parallel(
             f"model needs {model_storage_bytes / (1024**3):.2f} GB"
         )
         
-        # Use total RAM instead of available RAM for the check, since we want to know if the node
+        # Apply 10% buffer to prevent pushing nodes to their absolute limit
+        # Use 90% of total RAM to leave headroom for system processes, KV cache, etc.
+        fastest_ram_with_buffer = fastest_total_ram * 0.9
+        
+        # Use total RAM (with buffer) instead of available RAM for the check, since we want to know if the node
         # CAN hold the model (even if some RAM is currently used)
         # Also use greedy allocation for small models (< 10GB) on large nodes (> 64GB)
         is_small_model = model_storage_bytes < 10 * (1024**3)  # < 10GB
         is_large_node = fastest_total_ram > 64 * (1024**3)  # > 64GB
         
-        if fastest_total_ram >= model_storage_bytes or (is_small_model and is_large_node):
-            # Fastest node can hold entire model - give it all layers
-            # EXPLICITLY set all other nodes to 0 layers
+        if fastest_ram_with_buffer >= model_storage_bytes or (is_small_model and is_large_node):
+            # Fastest node can hold entire model (with 10% buffer) - give it all layers
+            # But cap at 90% of what it can actually hold to leave headroom
             fastest_index = node_id_to_index[fastest_capacity.node_id]
             desired_layers = [0 for _ in range(world_size)]  # Reset to all zeros
-            desired_layers[fastest_index] = total_layers  # Assign all layers to fastest
-            remaining = 0
+            
+            # Calculate max layers with 10% buffer
+            bytes_per_layer = model_storage_bytes / total_layers if total_layers > 0 else 0
+            max_layers_with_buffer = int((fastest_ram_with_buffer / bytes_per_layer)) if bytes_per_layer > 0 else total_layers
+            layers_to_assign = min(total_layers, max_layers_with_buffer)
+            
+            desired_layers[fastest_index] = layers_to_assign
+            remaining = total_layers - layers_to_assign
             
             logger.info(
                 f"✓ GREEDY ALLOCATION: Fastest node {fastest_capacity.node_id} can hold entire model "
@@ -331,7 +344,7 @@ def get_shard_assignments_for_pipeline_parallel(
         else:
             # Fastest node cannot hold all layers - distribute greedily
             # Greedily fill nodes in order of speed (fastest first)
-            # Fastest node gets ALL layers it can hold before any other node gets any
+            # Fastest node gets ALL layers it can hold (with 10% buffer) before any other node gets any
             for c in ranked_capacities:
                 if remaining <= 0:
                     break
@@ -339,6 +352,7 @@ def get_shard_assignments_for_pipeline_parallel(
                     continue
                 
                 node_index = node_id_to_index[c.node_id]
+                # max_layers_by_memory already has 10% buffer applied in _pipeline_node_capacities
                 headroom = c.max_layers_by_memory - desired_layers[node_index]
                 if headroom <= 0:
                     continue
