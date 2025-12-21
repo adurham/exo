@@ -1,10 +1,9 @@
 """Peer-to-peer file transfer service for downloading model files from cluster nodes."""
 
 import asyncio
-import hashlib
+import socket
 from pathlib import Path
 from collections.abc import Callable
-from typing import Literal
 
 import aiofiles
 import aiofiles.os as aios
@@ -29,21 +28,39 @@ class FileAvailability(BaseModel):
     has_file: bool
     file_hash: str | None = None
     file_size: int | None = None
+    port: int = 8080  # Port where the peer file service is running
+
+
+def find_available_port(start_port: int = 8080, max_attempts: int = 10) -> int:
+    """Find an available port starting from start_port."""
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("", port))
+                return port
+            except OSError:
+                continue
+    raise OSError(f"Could not find an available port in range {start_port}-{start_port + max_attempts - 1}")
 
 
 class PeerFileService:
     """Service for checking and downloading files from peer nodes."""
 
-    def __init__(self, node_id: NodeId, topology: Topology, port: int = 8080):
+    def __init__(self, node_id: NodeId, topology: Topology, port: int | None = None):
         self.node_id = node_id
         self.topology = topology
-        self.port = port
+        self._port = port
+        self.port: int = 0  # Will be set when server starts
         self._server: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
 
     async def start_server(self) -> None:
         """Start the HTTP server to serve files to peers."""
+        # Find an available port
+        start_port = self._port if self._port is not None else 8080
+        self.port = find_available_port(start_port)
+        
         app = web.Application()
         app.router.add_get("/file/check/{model_id:.*}/{file_path:.*}", self._handle_check_file)
         app.router.add_get("/file/download/{model_id:.*}/{file_path:.*}", self._handle_download_file)
@@ -141,20 +158,29 @@ class PeerFileService:
                 # Extract IP from multiaddr
                 ip = multiaddr.ip_address
                 
-                # Try to connect to peer's file service (assume same port)
-                url = f"http://{ip}:{self.port}/file/check/{model_id}/{file_path}"
+                # Try common ports (8080, 8081, 8082, etc.) since each node may use a different port
+                # Start with our port, then try nearby ports
+                ports_to_try = [self.port] + [p for p in range(8080, 8090) if p != self.port]
                 
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            if data.get("has_file"):
-                                return FileAvailability(
-                                    node_id=peer_id,
-                                    has_file=True,
-                                    file_hash=data.get("file_hash"),
-                                    file_size=data.get("file_size"),
-                                )
+                for port in ports_to_try:
+                    url = f"http://{ip}:{port}/file/check/{model_id}/{file_path}"
+                    
+                    try:
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                            async with session.get(url) as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    if data.get("has_file"):
+                                        return FileAvailability(
+                                            node_id=peer_id,
+                                            has_file=True,
+                                            file_hash=data.get("file_hash"),
+                                            file_size=data.get("file_size"),
+                                            port=port,
+                                        )
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        # Try next port
+                        continue
             except Exception as e:
                 logger.debug(f"Failed to check peer {peer_id} for file {file_path}: {e}")
                 continue
@@ -170,12 +196,15 @@ class PeerFileService:
         target_path: Path,
         expected_hash: str | None = None,
         on_progress: Callable[[int, int, bool], None] | None = None,
+        peer_port: int | None = None,
     ) -> Path:
         """Download a file from a peer node with hash verification."""
         # Extract IP from multiaddr
         ip = peer_multiaddr.ip_address
         
-        url = f"http://{ip}:{self.port}/file/download/{model_id}/{file_path}"
+        # Use provided port or try common ports
+        port = peer_port if peer_port is not None else self.port
+        url = f"http://{ip}:{port}/file/download/{model_id}/{file_path}"
         
         partial_path = target_path.with_suffix(target_path.suffix + ".partial")
         await aios.makedirs(partial_path.parent, exist_ok=True)

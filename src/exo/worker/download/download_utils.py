@@ -389,6 +389,7 @@ async def _download_file(
                             target_path,
                             expected_hash=availability.file_hash,
                             on_progress=on_progress,
+                            peer_port=availability.port,
                         )
                         logger.info(f"Successfully downloaded {path} from peer {availability.node_id}")
                         return target_path
