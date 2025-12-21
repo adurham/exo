@@ -262,39 +262,59 @@ def get_shard_assignments_for_pipeline_parallel(
             desired_layers.append(node_layers)
             layers_assigned += node_layers
     else:
-        # Greedy allocation prioritizing fastest chip first, then largest RAM:
-        # - Allocate layers proportionally based on (bandwidth × ram_total) weight
+        # Greedy allocation: fill fastest node first, then 2nd fastest, then 3rd, etc.
+        # - Fill each node to capacity before moving to the next
         # - Cap each node at its available memory limit
-        # - Allow 0 layers for slower nodes (for KV cache handling).
-        total_weight = sum(
-            c.membw_gbps * c.ram_total_bytes for c in ranked_capacities if c.max_layers_by_memory > 0
-        )
-
+        # - All nodes are included in the instance (even with 0 layers) for KV cache handling
         desired_layers = [0 for _ in range(world_size)]
         remaining = total_layers
 
         node_id_to_index = {node.node_id: i for i, node in enumerate(sorted_cycle)}
         
+        # Greedily fill nodes in order of speed (fastest first)
         for c in ranked_capacities:
             if remaining <= 0:
                 break
             if c.max_layers_by_memory <= 0:
                 continue
             
-            weight = c.membw_gbps * c.ram_total_bytes
-            if total_weight > 0:
-                proportional_share = (weight / total_weight) * total_layers
-            else:
-                proportional_share = 0
-            
             node_index = node_id_to_index[c.node_id]
             headroom = c.max_layers_by_memory - desired_layers[node_index]
-            take = min(remaining, max(0, int(round(proportional_share))))
-            take = min(take, headroom)
+            if headroom <= 0:
+                continue
             
+            # Take as many layers as this node can hold, up to remaining
+            take = min(remaining, headroom)
             desired_layers[node_index] += take
             remaining -= take
 
+        if remaining > 0:
+            # If we still have layers remaining after filling all nodes to capacity,
+            # distribute them proportionally based on remaining headroom
+            total_headroom = sum(
+                c.max_layers_by_memory - desired_layers[node_id_to_index[c.node_id]]
+                for c in ranked_capacities
+                if c.max_layers_by_memory > desired_layers[node_id_to_index[c.node_id]]
+            )
+            
+            if total_headroom > 0:
+                for c in ranked_capacities:
+                    if remaining <= 0:
+                        break
+                    node_index = node_id_to_index[c.node_id]
+                    headroom = c.max_layers_by_memory - desired_layers[node_index]
+                    if headroom <= 0:
+                        continue
+                    
+                    # Proportional share of remaining layers based on headroom
+                    proportional_share = (headroom / total_headroom) * remaining
+                    take = min(remaining, max(1, int(round(proportional_share))))
+                    take = min(take, headroom)
+                    
+                    desired_layers[node_index] += take
+                    remaining -= take
+
+        # Final pass: distribute any remaining layers to nodes with capacity
         if remaining > 0:
             for c in ranked_capacities:
                 if remaining <= 0:
