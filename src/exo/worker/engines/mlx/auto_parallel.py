@@ -130,6 +130,8 @@ class PipelineLastLayer(CustomMlxLayer):
         self.is_singleton = group.size() == 1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        from exo.worker.runner.bootstrap import logger
+        
         cache = self.original_layer_signature.bind_partial(
             x, *args, **kwargs
         ).arguments.get("cache", None)
@@ -137,11 +139,25 @@ class PipelineLastLayer(CustomMlxLayer):
         assert cache is None or issubclass(type(cache), _BaseCache)  # type: ignore
 
         output: mx.array = self.original_layer(x, *args, **kwargs)
+        
+        # Verify group rank matches our device rank
+        mlx_group_rank = self.group.rank()
+        if mlx_group_rank != self.r:
+            logger.error(
+                f"PipelineLastLayer: Rank mismatch! device_rank={self.r} but "
+                f"group.rank()={mlx_group_rank}"
+            )
 
-        if self.r != self.s - 1 and not self.is_singleton:
+        is_last_rank = self.r == self.s - 1
+        
+        if not is_last_rank and not self.is_singleton:
             # Send output to next rank in pipeline
+            next_rank = (self.r + 1) % self.s
+            logger.debug(
+                f"Rank {self.r}: Sending output shape {output.shape} to rank {next_rank}"
+            )
             send_result = mx.distributed.send(
-                output, (self.r + 1) % self.s, group=self.group
+                output, next_rank, group=self.group
             )
             if cache is not None:
                 # This change happened upstream - check out mlx github somewhere??
@@ -150,20 +166,39 @@ class PipelineLastLayer(CustomMlxLayer):
             # The send creates a dependency that ensures pipeline ordering
             # We'll participate in all_gather but only use the last rank's output
             if not self.is_singleton:
+                logger.debug(
+                    f"Rank {self.r}: Participating in all_gather (expecting final output from rank {self.s - 1})"
+                )
                 # Ensure send completes before all_gather by using the output (not send_result)
                 # all_gather will wait for all ranks, including the last rank to finish processing
                 gathered = mx.distributed.all_gather(output, group=self.group)
+                logger.debug(
+                    f"Rank {self.r}: all_gather returned shape {gathered.shape}, "
+                    f"extracting last {output.shape[0]} elements"
+                )
                 # all_gather concatenates along first dim: [rank0, rank1, ..., rankN-1]
                 # Extract only the last rank's output (the final output we need)
-                return gathered[-output.shape[0]:]
+                final_output = gathered[-output.shape[0]:]
+                logger.debug(f"Rank {self.r}: Returning final output shape {final_output.shape}")
+                return final_output
         else:
             # Last rank: produce final output and participate in all_gather to broadcast it
             if not self.is_singleton:
+                logger.debug(
+                    f"Rank {self.r} (LAST): Producing final output shape {output.shape}, "
+                    f"broadcasting via all_gather"
+                )
                 # Broadcast final output to all ranks via all_gather
                 # This ensures all ranks get the final output for next token generation
                 gathered = mx.distributed.all_gather(output, group=self.group)
+                logger.debug(
+                    f"Rank {self.r} (LAST): all_gather returned shape {gathered.shape}, "
+                    f"extracting last {output.shape[0]} elements"
+                )
                 # Return our output (last seq_len elements from gathered array)
-                return gathered[-output.shape[0]:]
+                final_output = gathered[-output.shape[0]:]
+                logger.debug(f"Rank {self.r} (LAST): Returning final output shape {final_output.shape}")
+                return final_output
         
         return output
 
@@ -224,8 +259,23 @@ def pipeline_auto_parallel(
     Returns:
     The parallelized model
     """
+    from exo.worker.runner.bootstrap import logger
+    
     start_layer, end_layer = model_shard_meta.start_layer, model_shard_meta.end_layer
     device_rank, world_size = model_shard_meta.device_rank, model_shard_meta.world_size
+    mlx_group_rank = group.rank()
+    
+    # CRITICAL: Verify MLX group rank matches our device_rank
+    if mlx_group_rank != device_rank:
+        logger.error(
+            f"RANK MISMATCH! device_rank={device_rank} but group.rank()={mlx_group_rank}. "
+            f"This will cause incorrect pipeline communication!"
+        )
+    else:
+        logger.info(
+            f"Pipeline setup: device_rank={device_rank}, group.rank()={mlx_group_rank}, "
+            f"world_size={world_size}, layers=[{start_layer}, {end_layer})"
+        )
 
     inner_model_instance: nn.Module = _inner_model(model)
 
@@ -237,8 +287,13 @@ def pipeline_auto_parallel(
         # This node has no layers to process, only contributes to KV cache
         # Create a single pass-through layer that handles receive/send but doesn't process
         layers = [PipelinePassThroughLayer(device_rank, world_size, group=group)]
+        logger.info(f"Rank {device_rank}: Using pass-through layer (0 layers, KV cache only)")
     else:
         layers = layers[start_layer:end_layer]
+        logger.info(
+            f"Rank {device_rank}: Processing layers {start_layer}-{end_layer} "
+            f"({len(layers)} layers)"
+        )
         layers[0] = PipelineFirstLayer(layers[0], device_rank, group=group)
         layers[-1] = PipelineLastLayer(
             layers[-1],
