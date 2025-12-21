@@ -16,6 +16,7 @@ use libp2p::swarm::SwarmEvent;
 use libp2p::{gossipsub, mdns, Multiaddr};
 use networking::discovery;
 use networking::swarm::create_swarm;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::{PyModule, PyModuleMethods as _};
 use pyo3::types::PyBytes;
 use pyo3::{Bound, Py, PyErr, PyResult, PyTraverseError, PyVisit, Python, pymethods};
@@ -220,7 +221,7 @@ async fn networking_task(
                         // attempt to parse and dial multiaddr, returning success boolean
                         let result = addr
                             .parse::<Multiaddr>()
-                            .map_err(PyErr::from)
+                            .map_err(|e| PyErr::new::<PyValueError, _>(e.to_string()))
                             .and_then(|addr| swarm.dial(addr).map(|_| true).pyerr());
 
                         if let Err(e) = result_tx.send(result) {
