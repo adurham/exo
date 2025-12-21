@@ -65,9 +65,11 @@ class PipelineFirstLayer(CustomMlxLayer):
         super().__init__(original_layer)
         self.r: int = r
         self.group = group
+        # Check if group is singleton (size == 1) - distributed operations will fail
+        self.is_singleton = group.size() == 1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        if self.r != 0:
+        if self.r != 0 and not self.is_singleton:
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
         return self.original_layer(x, *args, **kwargs)
 
@@ -85,6 +87,8 @@ class PipelineLastLayer(CustomMlxLayer):
         self.s: int = s
         self.group = group
         self.original_layer_signature = signature(self.original_layer.__call__)
+        # Check if group is singleton (size == 1) - distributed operations will fail
+        self.is_singleton = group.size() == 1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         cache = self.original_layer_signature.bind_partial(
@@ -95,7 +99,7 @@ class PipelineLastLayer(CustomMlxLayer):
 
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
-        if self.r != self.s - 1:
+        if self.r != self.s - 1 and not self.is_singleton:
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
@@ -103,7 +107,8 @@ class PipelineLastLayer(CustomMlxLayer):
                 # This change happened upstream - check out mlx github somewhere??
                 cache.keys = mx.depends(cache.keys, output)  # type: ignore[reportUnknownMemberType]
 
-        output = mx.distributed.all_gather(output, group=self.group)[-output.shape[0] :]
+        if not self.is_singleton:
+            output = mx.distributed.all_gather(output, group=self.group)[-output.shape[0] :]
         return output
 
 
