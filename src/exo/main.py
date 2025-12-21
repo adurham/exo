@@ -9,6 +9,7 @@ import multiprocessing as mp
 import os
 import signal
 import socket
+import subprocess
 from dataclasses import dataclass, field
 from typing import Iterable, Self
 
@@ -442,6 +443,20 @@ def _env_seeds() -> list[str]:
 
 def _local_ipv4s() -> set[str]:
     ips: set[str] = set()
+    try:
+        iface_list = subprocess.check_output(["ifconfig", "-l"], text=True).strip()
+        for iface in iface_list.split():
+            try:
+                ip = subprocess.check_output(
+                    ["ipconfig", "getifaddr", iface], text=True
+                ).strip()
+                if ip:
+                    ips.add(ip)
+            except subprocess.CalledProcessError:
+                continue
+    except Exception:
+        pass
+
     for host in (socket.gethostname(), None, "localhost"):
         try:
             for info in socket.getaddrinfo(host, None, family=socket.AF_INET):
