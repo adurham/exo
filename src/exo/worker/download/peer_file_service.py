@@ -8,6 +8,7 @@ from typing import Literal
 
 import aiofiles
 import aiofiles.os as aios
+from aiohttp import web
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -37,19 +38,19 @@ class PeerFileService:
         self.node_id = node_id
         self.topology = topology
         self.port = port
-        self._server: aiohttp.web.Application | None = None
-        self._runner: aiohttp.web.AppRunner | None = None
-        self._site: aiohttp.web.TCPSite | None = None
+        self._server: web.Application | None = None
+        self._runner: web.AppRunner | None = None
+        self._site: web.TCPSite | None = None
 
     async def start_server(self) -> None:
         """Start the HTTP server to serve files to peers."""
-        app = aiohttp.web.Application()
+        app = web.Application()
         app.router.add_get("/file/check/{model_id:.*}/{file_path:.*}", self._handle_check_file)
         app.router.add_get("/file/download/{model_id:.*}/{file_path:.*}", self._handle_download_file)
 
-        self._runner = aiohttp.web.AppRunner(app)
+        self._runner = web.AppRunner(app)
         await self._runner.setup()
-        self._site = aiohttp.web.TCPSite(self._runner, "0.0.0.0", self.port)
+        self._site = web.TCPSite(self._runner, "0.0.0.0", self.port)
         await self._site.start()
         logger.info(f"Peer file service started on port {self.port}")
 
@@ -61,7 +62,7 @@ class PeerFileService:
             await self._runner.cleanup()
         logger.info("Peer file service stopped")
 
-    async def _handle_check_file(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
+    async def _handle_check_file(self, request: web.Request) -> web.Response:
         """Handle file existence check request."""
         model_id = request.match_info["model_id"]
         file_path = request.match_info["file_path"]
@@ -69,7 +70,7 @@ class PeerFileService:
         target_path = EXO_MODELS_DIR / model_id.replace("/", "--") / file_path
         
         if not await aios.path.exists(target_path):
-            return aiohttp.web.json_response({
+            return web.json_response({
                 "has_file": False,
                 "file_hash": None,
                 "file_size": None,
@@ -80,20 +81,20 @@ class PeerFileService:
             # Calculate hash (use sha256 for consistency with download verification)
             file_hash = await calc_hash(target_path, hash_type="sha256")
             
-            return aiohttp.web.json_response({
+            return web.json_response({
                 "has_file": True,
                 "file_hash": file_hash,
                 "file_size": file_size,
             })
         except Exception as e:
             logger.error(f"Error checking file {target_path}: {e}")
-            return aiohttp.web.json_response({
+            return web.json_response({
                 "has_file": False,
                 "file_hash": None,
                 "file_size": None,
             }, status=500)
 
-    async def _handle_download_file(self, request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
+    async def _handle_download_file(self, request: web.Request) -> web.StreamResponse:
         """Handle file download request."""
         model_id = request.match_info["model_id"]
         file_path = request.match_info["file_path"]
@@ -101,9 +102,9 @@ class PeerFileService:
         target_path = EXO_MODELS_DIR / model_id.replace("/", "--") / file_path
         
         if not await aios.path.exists(target_path):
-            return aiohttp.web.Response(status=404, text="File not found")
+            return web.Response(status=404, text="File not found")
         
-        response = aiohttp.web.StreamResponse()
+        response = web.StreamResponse()
         response.headers["Content-Type"] = "application/octet-stream"
         file_size = (await aios.stat(target_path)).st_size
         response.headers["Content-Length"] = str(file_size)
@@ -117,7 +118,7 @@ class PeerFileService:
             return response
         except Exception as e:
             logger.error(f"Error serving file {target_path}: {e}")
-            return aiohttp.web.Response(status=500, text=f"Error serving file: {e}")
+            return web.Response(status=500, text=f"Error serving file: {e}")
 
     async def check_peer_has_file(
         self, 
