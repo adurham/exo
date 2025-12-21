@@ -246,18 +246,18 @@ def get_shard_assignments_for_pipeline_parallel(
             start=Memory(),
         )
         desired_layers: list[int] = []
-    layers_assigned = 0
+        layers_assigned = 0
         for i, node in enumerate(sorted_cycle):
             if i == world_size - 1:
-            node_layers = total_layers - layers_assigned
-        else:
-            node_layers = round(
-                total_layers
-                * (
-                    node.node_profile.memory.ram_available.in_bytes
-                    / cycle_memory.in_bytes
+                node_layers = total_layers - layers_assigned
+            else:
+                node_layers = round(
+                    total_layers
+                    * (
+                        node.node_profile.memory.ram_available.in_bytes
+                        / cycle_memory.in_bytes
+                    )
                 )
-            )
                 node_layers = max(0, node_layers)
             desired_layers.append(node_layers)
             layers_assigned += node_layers
