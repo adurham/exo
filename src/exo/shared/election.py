@@ -99,22 +99,36 @@ class Election:
         
         Called when node performance profile is measured to ensure
         election messages include current hardware capabilities.
-        Triggers a new election if hardware info changed from default values.
+        Triggers a new election if hardware info changed from default values
+        or if this node now has better hardware than before.
+        This allows nodes with superior hardware to assert themselves as master,
+        even if they didn't win the initial election.
         """
         old_membw = self.membw_gbps
         old_ram = self.ram_total_bytes
         self.membw_gbps = membw_gbps
         self.ram_total_bytes = ram_total_bytes
         
+        should_trigger_election = False
         if (old_membw == 0.0 and old_ram == 0) and (membw_gbps > 0.0 or ram_total_bytes > 0):
-            logger.info("Hardware info updated, triggering new election")
-            if self._tg is not None:
-                self.clock += 1
-                candidates: list[ElectionMessage] = []
-                self._candidates = candidates
-                self._tg.start_soon(
-                    self._campaign, candidates, DEFAULT_ELECTION_TIMEOUT
-                )
+            logger.info(
+                f"Hardware info updated from default: {membw_gbps} GB/s, {ram_total_bytes} bytes, triggering new election"
+            )
+            should_trigger_election = True
+        elif (membw_gbps > old_membw) or (membw_gbps == old_membw and ram_total_bytes > old_ram):
+            logger.info(
+                f"Hardware info improved: {membw_gbps} GB/s, {ram_total_bytes} bytes, triggering new election"
+            )
+            should_trigger_election = True
+        
+        if should_trigger_election and self._tg is not None:
+            self.clock += 1
+            logger.info(f"Starting new election round {self.clock} with hardware priority")
+            candidates: list[ElectionMessage] = []
+            self._candidates = candidates
+            self._tg.start_soon(
+                self._campaign, candidates, DEFAULT_ELECTION_TIMEOUT
+            )
 
     async def run(self):
         logger.info("Starting Election")
