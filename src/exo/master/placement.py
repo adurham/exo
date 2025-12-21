@@ -12,6 +12,7 @@ from exo.master.placement_utils import (
     get_mlx_ibv_devices_matrix,
     get_shard_assignments,
     get_smallest_cycles,
+    rotate_cycle_to_best_rank_0_node,
 )
 from exo.shared.topology import Topology
 from exo.shared.types.commands import (
@@ -94,6 +95,9 @@ def place_instance(
             start=Memory(),
         ),
     )
+
+    # Ensure the fastest + largest machine becomes device_rank=0 (and RDMA rank 0).
+    selected_cycle = rotate_cycle_to_best_rank_0_node(selected_cycle)
 
     shard_assignments = get_shard_assignments(
         command.model_meta, selected_cycle, command.sharding
