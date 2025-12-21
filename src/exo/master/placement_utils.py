@@ -134,7 +134,8 @@ class _PipelineNodeCapacity:
     node_id: NodeId
     rank_index: int
     max_layers_by_memory: int
-    greedy_weight: float
+    membw_gbps: float
+    ram_total_bytes: int
 
 
 def _pipeline_node_capacities(
@@ -155,20 +156,18 @@ def _pipeline_node_capacities(
     for i, node in enumerate(selected_cycle):
         available_bytes = node.node_profile.memory.ram_available.in_bytes
         max_layers = int(floor(available_bytes / bytes_per_layer))
-        max_layers = max(1, min(total_layers, max_layers))
+        max_layers = max(0, min(total_layers, max_layers))
 
         membw = estimated_memory_bandwidth_gbps(chip_id=node.node_profile.chip_id)
-        # Weight "largest and fastest": prefer high bandwidth, then larger machines.
-        # Use ram_total (hardware size) rather than ram_available for the weight,
-        # while still enforcing ram_available as a hard cap via max_layers.
-        greedy_weight = membw * max(1, node.node_profile.memory.ram_total.in_bytes)
+        ram_total = node.node_profile.memory.ram_total.in_bytes
 
         capacities.append(
             _PipelineNodeCapacity(
                 node_id=node.node_id,
                 rank_index=i,
                 max_layers_by_memory=max_layers,
-                greedy_weight=greedy_weight,
+                membw_gbps=membw,
+                ram_total_bytes=ram_total,
             )
         )
 
@@ -235,20 +234,20 @@ def get_shard_assignments_for_pipeline_parallel(
                         / cycle_memory.in_bytes
                     )
                 )
-                node_layers = max(1, node_layers)
+                node_layers = max(0, node_layers)
             desired_layers.append(node_layers)
             layers_assigned += node_layers
     else:
-        # Greedy allocation:
-        # - Give every node 1 layer to ensure participation
-        # - Allocate all remaining layers to the highest (bandwidth × size) nodes,
+        # Greedy allocation prioritizing fastest chip first, then largest RAM:
+        # - Allocate layers to nodes sorted by (bandwidth, ram_total) descending,
         #   respecting each node's memory-derived cap.
-        desired_layers = [1 for _ in range(world_size)]
-        remaining = total_layers - world_size
+        # - Allow 0 layers for slower nodes (for KV cache handling).
+        desired_layers = [0 for _ in range(world_size)]
+        remaining = total_layers
 
         ranked = sorted(
             capacities,
-            key=lambda c: (c.greedy_weight, c.max_layers_by_memory, str(c.node_id)),
+            key=lambda c: (c.membw_gbps, c.ram_total_bytes, str(c.node_id)),
             reverse=True,
         )
 
