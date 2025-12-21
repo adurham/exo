@@ -991,8 +991,8 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 	// Helper to get the number of nodes in a placement preview
 	function getPreviewNodeCount(preview: PlacementPreview): number {
 		if (!preview.memory_delta_by_node) return 0;
-		// Count nodes that have non-zero memory delta (i.e. nodes actually used)
-		return Object.entries(preview.memory_delta_by_node).filter(([_, delta]) => delta > 0).length;
+		// Count all nodes in the instance (including those with 0 layers for KV cache)
+		return Object.keys(preview.memory_delta_by_node).length;
 	}
 	
 	// Available min nodes options based on topology (like old dashboard)

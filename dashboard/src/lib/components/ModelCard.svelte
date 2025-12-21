@@ -238,7 +238,8 @@ function toggleNodeDetails(nodeId: string): void {
 			placementNodes = nodeArray.map((n, i) => {
 				const deltaBytes = memoryDelta[n.id] ?? 0;
 				const modelUsageGB = deltaBytes / (1024 * 1024 * 1024);
-				const isUsed = deltaBytes > 0;
+				// Node is "used" if it's in the instance (even with 0 layers for KV cache)
+				const isUsed = n.id in memoryDelta;
 				const angle = numNodes === 1 ? 0 : (i / numNodes) * Math.PI * 2 - Math.PI / 2;
 				const safeTotal = Math.max(n.totalGB, 0.001);
 				const currentPercent = clampPercent((n.usedGB / safeTotal) * 100);

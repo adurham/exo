@@ -239,16 +239,12 @@ class API:
             raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
 
         instance_combinations: list[tuple[Sharding, InstanceMeta, int]] = []
+        total_nodes = len(list(self.state.topology.list_nodes()))
         for sharding in (Sharding.Pipeline, Sharding.Tensor):
             for instance_meta in (InstanceMeta.MlxRing, InstanceMeta.MlxJaccl):
-                instance_combinations.extend(
-                    [
-                        (sharding, instance_meta, i)
-                        for i in range(
-                            1, len(list(self.state.topology.list_nodes())) + 1
-                        )
-                    ]
-                )
+                # Only generate one preview per (sharding, instance_meta) combination
+                # Use max min_nodes to get the greedy allocation across all nodes
+                instance_combinations.append((sharding, instance_meta, total_nodes))
         # TODO: PDD
         # instance_combinations.append((Sharding.PrefillDecodeDisaggregation, InstanceMeta.MlxRing, 1))
 
