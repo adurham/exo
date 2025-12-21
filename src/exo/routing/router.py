@@ -229,7 +229,11 @@ class Router:
 
     async def connect_seeds(self, seeds: Iterable[str]) -> None:
         """Dial seed peers to bootstrap beyond mDNS."""
+        seen: set[str] = set()
         for seed in seeds:
+            if seed in seen:
+                continue
+            seen.add(seed)
             addr = self._to_multiaddr(seed)
             logger.info(f"Dialing seed {seed} as {addr}")
             try:

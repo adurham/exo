@@ -6,10 +6,11 @@ including routing, worker operations, master election, and API services.
 
 import argparse
 import multiprocessing as mp
+import os
 import signal
 import socket
 from dataclasses import dataclass, field
-from typing import Self
+from typing import Iterable, Self
 
 import anyio
 from anyio.abc import TaskGroup
@@ -100,7 +101,10 @@ class Node:
         await router.register_topic(topics.ELECTION_MESSAGES)
         await router.register_topic(topics.CONNECTION_MESSAGES)
         if args.seeds:
+            logger.info(f"Connecting seeds for hostname {socket.gethostname()}: {args.seeds}")
             await router.connect_seeds(args.seeds)
+        else:
+            logger.info(f"No seeds configured for hostname {socket.gethostname()}; relying on mDNS")
 
         logger.info(f"Starting node {node_id}")
         if args.spawn_api:
@@ -391,31 +395,29 @@ class Args(CamelCaseModel):
             dest="api_port",
             default=52415,
         )
+        parser.add_argument(
+            "--seed",
+            action="append",
+            dest="seeds",
+            default=None,
+            help="Seed peer as host:port or multiaddr (can be passed multiple times)",
+        )
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - runtime validation
 
 
 def apply_hostname_overrides(args: Args) -> Args:
-    hostname = socket.gethostname().split(".", 1)[0]
     seeds = list(args.seeds or [])
+    seeds.extend(_env_seeds())
 
-    seeds_by_hostname: dict[str, tuple[str, ...]] = {
-        "macstudio-m4": (
-            f"192.168.201.2:{PEER_LISTEN_PORT}",
-            f"192.168.202.2:{PEER_LISTEN_PORT}",
-        ),
-        "macbook-m4": (
-            f"192.168.201.1:{PEER_LISTEN_PORT}",
-            f"192.168.204.2:{PEER_LISTEN_PORT}",
-        ),
-        "work-macbook-m4": (
-            f"192.168.202.1:{PEER_LISTEN_PORT}",
-            f"192.168.204.1:{PEER_LISTEN_PORT}",
-        ),
-    }
+    local_ips = _local_ipv4s()
+    profile = _detect_profile(local_ips)
+    if profile:
+        seeds.extend(profile.seeds)
 
-    seeds.extend(seeds_by_hostname.get(hostname, ()))
+    seeds = _dedupe_preserve_order(seeds)
+    force_master = profile.force_master if profile else False
 
     return args.model_copy(
         update={
@@ -423,6 +425,88 @@ def apply_hostname_overrides(args: Args) -> Args:
             "host": BIND_HOST,
             "discovery_port": PEER_LISTEN_PORT,
             "seeds": seeds,
+            "force_master": force_master,
         },
         deep=True,
     )
+
+
+def _env_seeds() -> list[str]:
+    env = os.environ.get("EXO_SEEDS", "")
+    tokens = []
+    for token in env.replace(",", " ").split():
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def _local_ipv4s() -> set[str]:
+    ips: set[str] = set()
+    for host in (socket.gethostname(), None, "localhost"):
+        try:
+            for info in socket.getaddrinfo(host, None, family=socket.AF_INET):
+                ips.add(info[4][0])
+        except OSError:
+            continue
+    return ips
+
+
+@dataclass(frozen=True)
+class HostProfile:
+    name: str
+    local_ips: set[str]
+    seeds: tuple[str, ...]
+    force_master: bool
+
+
+HOST_PROFILES: tuple[HostProfile, ...] = (
+    HostProfile(
+        name="macstudio-m4",
+        local_ips={"192.168.201.1", "192.168.202.1"},
+        seeds=(
+            f"192.168.201.2:{PEER_LISTEN_PORT}",
+            f"192.168.202.2:{PEER_LISTEN_PORT}",
+        ),
+        force_master=True,
+    ),
+    HostProfile(
+        name="macbook-m4",
+        local_ips={"192.168.201.2", "192.168.204.2"},
+        seeds=(
+            f"192.168.201.1:{PEER_LISTEN_PORT}",
+            f"192.168.202.2:{PEER_LISTEN_PORT}",
+        ),
+        force_master=False,
+    ),
+    HostProfile(
+        name="work-macbook-m4",
+        local_ips={"192.168.202.2", "192.168.204.1"},
+        seeds=(
+            f"192.168.202.1:{PEER_LISTEN_PORT}",
+            f"192.168.201.2:{PEER_LISTEN_PORT}",
+        ),
+        force_master=False,
+    ),
+)
+
+
+def _detect_profile(local_ips: set[str]) -> HostProfile | None:
+    best: HostProfile | None = None
+    best_score = 0
+    for profile in HOST_PROFILES:
+        score = len(profile.local_ips & local_ips)
+        if score > best_score:
+            best = profile
+            best_score = score
+    return best
+
+
+def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
