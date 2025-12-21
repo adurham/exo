@@ -94,6 +94,41 @@ def estimated_memory_bandwidth_gbps(*, chip_id: str) -> float:
     return float(LB_MEMBW_GBPS)
 
 
+def rotate_cycle_to_best_rank_0_node(cycle: list[NodeInfo]) -> list[NodeInfo]:
+    """Rotate a directed cycle so the strongest node becomes rank 0.
+
+    In pipeline sharding, `selected_cycle[0]` becomes `device_rank=0` and receives the
+    first layer range (i.e. `start_layer=0`). Additionally, for MLX RDMA the rank-0
+    node is used as the coordinator root. Topology cycle enumeration can start at any
+    node, so we rotate deterministically to prefer the best machine first.
+
+    Ranking heuristic:
+    - Prefer higher estimated unified-memory bandwidth (chip class proxy for speed)
+    - Then prefer higher total RAM (machine capacity proxy)
+    - Then prefer higher currently-available RAM (tie-breaker)
+    """
+
+    if len(cycle) <= 1:
+        return list(cycle)
+
+    if not narrow_all_nodes(cycle):
+        return list(cycle)
+
+    typed_cycle = cast(list[NodeWithProfile], cycle)
+
+    def priority_key(node: NodeWithProfile) -> tuple[float, int, int, str]:
+        membw = estimated_memory_bandwidth_gbps(chip_id=node.node_profile.chip_id)
+        ram_total = node.node_profile.memory.ram_total.in_bytes
+        ram_available = node.node_profile.memory.ram_available.in_bytes
+        return (membw, ram_total, ram_available, str(node.node_id))
+
+    best_node_id = max(typed_cycle, key=priority_key).node_id
+    best_index = next(
+        i for i, node in enumerate(typed_cycle) if node.node_id == best_node_id
+    )
+    return list(cycle[best_index:]) + list(cycle[:best_index])
+
+
 @dataclass(frozen=True, slots=True)
 class _PipelineNodeCapacity:
     node_id: NodeId

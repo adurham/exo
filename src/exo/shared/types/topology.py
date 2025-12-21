@@ -34,4 +34,8 @@ class Connection(CamelCaseModel):
         )
 
     def is_thunderbolt(self) -> bool:
-        return str(self.send_back_multiaddr.ipv4_address).startswith("169.254")
+        # Thunderbolt link-local is only meaningful for IPv4 (169.254/16). IPv6
+        # multiaddrs may exist in the topology graph and should never raise here.
+        if self.send_back_multiaddr.address_type != "ip4":
+            return False
+        return str(self.send_back_multiaddr.ip_address).startswith("169.254")

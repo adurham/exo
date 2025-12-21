@@ -124,6 +124,58 @@ def test_get_instance_placements_create_instance(
     assert shards_sorted[-1].end_layer == total_layers
 
 
+def test_placement_rotates_cycle_to_start_with_fastest_largest_node(
+    topology: Topology,
+    model_meta: ModelMetadata,
+    create_node: Callable[[int, NodeId | None], NodeInfo],
+    create_connection: Callable[[NodeId, NodeId], Connection],
+):
+    # Arrange a 3-node directed cycle where node_c is the "Mac Studio":
+    # fastest chip + most RAM. We expect it to become rank 0 (start_layer=0).
+    model_meta.n_layers = 12
+    model_meta.storage_size.in_bytes = 1500
+
+    cic = place_instance_command(model_meta)
+
+    node_id_a = NodeId()
+    node_id_b = NodeId()
+    node_id_c = NodeId()
+
+    node_a = create_node(500, node_id_a)
+    node_b = create_node(500, node_id_b)
+    node_c = create_node(500, node_id_c)
+
+    assert node_a.node_profile is not None
+    assert node_b.node_profile is not None
+    assert node_c.node_profile is not None
+
+    node_a.node_profile.chip_id = "M2"
+    node_a.node_profile.memory.ram_total = Memory.from_gb(16)
+
+    node_b.node_profile.chip_id = "M2"
+    node_b.node_profile.memory.ram_total = Memory.from_gb(32)
+
+    node_c.node_profile.chip_id = "M3 Ultra"
+    node_c.node_profile.memory.ram_total = Memory.from_gb(128)
+
+    topology.add_node(node_a)
+    topology.add_node(node_b)
+    topology.add_node(node_c)
+
+    topology.add_connection(create_connection(node_id_a, node_id_b))
+    topology.add_connection(create_connection(node_id_b, node_id_c))
+    topology.add_connection(create_connection(node_id_c, node_id_a))
+
+    # Act
+    placements = place_instance(cic, topology, {})
+
+    # Assert
+    instance = placements[list(placements.keys())[0]]
+    runner_id_c = instance.shard_assignments.node_to_runner[node_id_c]
+    shard_c = instance.shard_assignments.runner_to_shard[runner_id_c]
+    assert shard_c.start_layer == 0
+
+
 def test_get_instance_placements_one_node_exact_fit(
     create_node: Callable[[int, NodeId | None], NodeInfo],
 ) -> None:
