@@ -167,11 +167,15 @@ class API:
         self.app.get("/events")(lambda: self._event_log)
 
     async def place_instance(self, payload: PlaceInstanceParams):
+        # Always use all available nodes - override min_nodes from payload
+        total_nodes = len(list(self.state.topology.list_nodes()))
+        min_nodes_to_use = total_nodes if total_nodes > 0 else payload.min_nodes
+        
         command = PlaceInstance(
             model_meta=await resolve_model_meta(payload.model_id),
             sharding=payload.sharding,
             instance_meta=payload.instance_meta,
-            min_nodes=payload.min_nodes,
+            min_nodes=min_nodes_to_use,
         )
         await self._send(command)
 
