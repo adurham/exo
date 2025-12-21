@@ -686,7 +686,9 @@ def _is_ipv4_address(ip_address: str) -> bool:
 
 
 def _to_rdma_interface_name(interface_name: str) -> str:
-    return interface_name if interface_name.startswith("rdma_") else f"rdma_{interface_name}"
+    # MLX on macOS expects actual interface names (e.g., "en1", "en2") without the "rdma_" prefix
+    # Remove the prefix if it exists, otherwise return as-is
+    return interface_name.removeprefix("rdma_")
 
 
 def _get_mlx_rdma_allowed_interface_names() -> frozenset[str] | None:
