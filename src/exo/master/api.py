@@ -20,6 +20,7 @@ from exo.shared.election import ElectionMessage
 from exo.shared.logging import InterceptLogger
 from exo.shared.models.model_cards import MODEL_CARDS
 from exo.shared.models.model_meta import get_model_meta
+from exo.shared.types.worker.shards import PipelineShardMetadata
 from exo.shared.types.api import (
     ChatCompletionMessage,
     ChatCompletionResponse,
@@ -307,11 +308,31 @@ class API:
                 memory_delta_by_node: dict[str, int] = {}
                 if node_ids:
                     total_bytes = model_meta.storage_size.in_bytes
-                    per_node = total_bytes // len(node_ids)
-                    remainder = total_bytes % len(node_ids)
-                    for index, node_id in enumerate(sorted(node_ids, key=str)):
-                        extra = 1 if index < remainder else 0
-                        memory_delta_by_node[str(node_id)] = per_node + extra
+                    total_layers = model_meta.n_layers
+                    
+                    if total_layers > 0:
+                        bytes_per_layer = total_bytes / total_layers
+                        
+                        for node_id in node_ids:
+                            runner_id = shard_assignments.node_to_runner[node_id]
+                            shard_meta = shard_assignments.runner_to_shard.get(runner_id)
+                            
+                            if shard_meta is not None:
+                                if isinstance(shard_meta, PipelineShardMetadata):
+                                    layers_per_node = shard_meta.end_layer - shard_meta.start_layer
+                                    node_bytes = int(layers_per_node * bytes_per_layer)
+                                else:
+                                    node_bytes = total_bytes // len(node_ids)
+                            else:
+                                node_bytes = 0
+                            
+                            memory_delta_by_node[str(node_id)] = node_bytes
+                    else:
+                        per_node = total_bytes // len(node_ids)
+                        remainder = total_bytes % len(node_ids)
+                        for index, node_id in enumerate(sorted(node_ids, key=str)):
+                            extra = 1 if index < remainder else 0
+                            memory_delta_by_node[str(node_id)] = per_node + extra
 
                 if (
                     card.model_id,
