@@ -196,9 +196,13 @@ class API:
         model_id: str,
         sharding: Sharding = Sharding.Pipeline,
         instance_meta: InstanceMeta = InstanceMeta.MlxRing,
-        min_nodes: int = 1,
+        min_nodes: int | None = None,
     ) -> Instance:
         model_meta = await resolve_model_meta(model_id)
+        
+        # Always use all available nodes if min_nodes not specified
+        if min_nodes is None:
+            min_nodes = len(list(self.state.topology.list_nodes()))
 
         try:
             placements = get_instance_placements(
