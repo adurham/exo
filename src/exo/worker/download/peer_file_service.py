@@ -29,6 +29,7 @@ class FileAvailability(BaseModel):
     file_hash: str | None = None
     file_size: int | None = None
     port: int = 8080  # Port where the peer file service is running
+    ip_address: str | None = None  # IP address of the peer (discovered during check)
 
 
 def find_available_port(start_port: int = 8080, max_attempts: int = 10) -> int:
@@ -144,11 +145,32 @@ class PeerFileService:
         prefer_thunderbolt: bool = True
     ) -> FileAvailability | None:
         """Check if any peer node has the file, preferring Thunderbolt connections."""
-        # Get all connected nodes
+        # Get all connected nodes - check both directions
         peers = []
+        seen_peers = set()
         for conn in self.topology.list_connections():
+            peer_id = None
+            peer_multiaddr = None
+            is_tb = False
+            
+            # Connection from us to peer
             if conn.local_node_id == self.node_id:
-                peers.append((conn.send_back_node_id, conn.send_back_multiaddr, conn.is_thunderbolt()))
+                peer_id = conn.send_back_node_id
+                peer_multiaddr = conn.send_back_multiaddr
+                is_tb = conn.is_thunderbolt()
+            # Connection from peer to us (reverse direction)
+            elif conn.send_back_node_id == self.node_id:
+                peer_id = conn.local_node_id
+                # For reverse connections, try to find the forward connection via out_edges
+                for out_peer_id, out_conn in self.topology.out_edges(self.node_id):
+                    if out_peer_id == conn.local_node_id:
+                        peer_multiaddr = out_conn.send_back_multiaddr
+                        is_tb = out_conn.is_thunderbolt()
+                        break
+            
+            if peer_id and peer_id not in seen_peers and peer_multiaddr:
+                peers.append((peer_id, peer_multiaddr, is_tb))
+                seen_peers.add(peer_id)
         
         # Sort: Thunderbolt first, then others
         peers.sort(key=lambda x: (not x[2], str(x[0])))
@@ -166,20 +188,27 @@ class PeerFileService:
                     url = f"http://{ip}:{port}/file/check/{model_id}/{file_path}"
                     
                     try:
-                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                        # Increased timeout to 5 seconds for file checks
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
                             async with session.get(url) as response:
                                 if response.status == 200:
                                     data = await response.json()
                                     if data.get("has_file"):
+                                        logger.info(
+                                            f"Found {file_path} on peer {peer_id} at {ip}:{port} "
+                                            f"(Thunderbolt: {is_thunderbolt})"
+                                        )
                                         return FileAvailability(
                                             node_id=peer_id,
                                             has_file=True,
                                             file_hash=data.get("file_hash"),
                                             file_size=data.get("file_size"),
                                             port=port,
+                                            ip_address=ip,
                                         )
-                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                         # Try next port
+                        logger.debug(f"Failed to check {url}: {e}")
                         continue
             except Exception as e:
                 logger.debug(f"Failed to check peer {peer_id} for file {file_path}: {e}")

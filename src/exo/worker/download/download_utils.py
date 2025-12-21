@@ -368,22 +368,41 @@ async def _download_file(
                 logger.info(
                     f"Found file {path} on peer {availability.node_id}, downloading from peer"
                 )
-                # Find the connection for this peer
-                peer_conn = None
-                for conn in peer_file_service.topology.list_connections():
-                    if (
-                        conn.local_node_id == peer_file_service.node_id
-                        and conn.send_back_node_id == availability.node_id
-                    ):
-                        peer_conn = conn
-                        break
+                # Construct multiaddr from the IP we discovered during check
+                from exo.shared.types.multiaddr import Multiaddr
                 
-                if peer_conn:
+                peer_multiaddr = None
+                if availability.ip_address:
+                    # Use the IP we discovered during the check
+                    peer_multiaddr = Multiaddr(address=f"/ip4/{availability.ip_address}/tcp/{availability.port}")
+                else:
+                    # Fallback: try to find connection to get multiaddr
+                    for conn in peer_file_service.topology.list_connections():
+                        if (
+                            conn.local_node_id == peer_file_service.node_id
+                            and conn.send_back_node_id == availability.node_id
+                        ):
+                            peer_multiaddr = conn.send_back_multiaddr
+                            break
+                        elif (
+                            conn.local_node_id == availability.node_id
+                            and conn.send_back_node_id == peer_file_service.node_id
+                        ):
+                            # Reverse connection - try to find forward connection via out_edges
+                            for out_peer_id, out_conn in peer_file_service.topology.out_edges(peer_file_service.node_id):
+                                if out_peer_id == availability.node_id:
+                                    peer_multiaddr = out_conn.send_back_multiaddr
+                                    break
+                            if peer_multiaddr:
+                                break
+                
+                # If we have a multiaddr, try downloading
+                if peer_multiaddr:
                     target_path = target_dir / path
                     try:
                         await peer_file_service.download_from_peer(
                             availability.node_id,
-                            peer_conn.send_back_multiaddr,
+                            peer_multiaddr,
                             repo_id,
                             path,
                             target_path,
@@ -398,6 +417,11 @@ async def _download_file(
                             f"Failed to download {path} from peer {availability.node_id}: {e}, "
                             "falling back to Hugging Face"
                         )
+                else:
+                    logger.warning(
+                        f"Could not determine address for peer {availability.node_id} for {path}, "
+                        "falling back to Hugging Face"
+                    )
         except Exception as e:
             logger.debug(f"Error checking peers for {path}: {e}, falling back to Hugging Face")
     

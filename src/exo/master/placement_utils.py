@@ -94,6 +94,45 @@ def estimated_memory_bandwidth_gbps(*, chip_id: str) -> float:
     return float(LB_MEMBW_GBPS)
 
 
+def calculate_usable_memory_with_buffer(
+    *, available_bytes: int, total_bytes: int | None = None
+) -> int:
+    """Calculate usable memory with a buffer that ensures minimum absolute free space.
+    
+    Uses both a percentage cap (90%) and a minimum absolute free space requirement (12GB)
+    to ensure larger nodes have proportionally more free space while still maintaining
+    reasonable headroom on smaller nodes.
+    
+    Args:
+        available_bytes: Currently available memory in bytes
+        total_bytes: Total memory in bytes (optional, used for percentage cap)
+    
+    Returns:
+        Usable memory in bytes after applying buffer constraints
+    """
+    # Minimum absolute free space: 12GB for system processes, KV cache, etc.
+    min_free_bytes = 12 * (1024**3)
+    
+    # Percentage cap: don't use more than 90% of total memory
+    max_usage_percentage = 0.9
+    
+    # Calculate usable memory with absolute minimum free space constraint
+    usable_with_min_free = max(0, available_bytes - min_free_bytes)
+    
+    # Calculate usable memory with percentage cap (if total_bytes is provided)
+    if total_bytes is not None:
+        max_usable_by_percentage = int(total_bytes * max_usage_percentage)
+        # For percentage cap, we need to consider how much is already used
+        used_bytes = total_bytes - available_bytes
+        usable_with_percentage = max(0, max_usable_by_percentage - used_bytes)
+        
+        # Take the minimum of both constraints to satisfy both
+        return min(usable_with_min_free, usable_with_percentage)
+    else:
+        # If no total_bytes, just apply minimum free space constraint
+        return usable_with_min_free
+
+
 def rotate_cycle_to_best_rank_0_node(cycle: list[NodeInfo]) -> list[NodeInfo]:
     """Rotate a directed cycle so the strongest node becomes rank 0.
 
@@ -155,9 +194,14 @@ def _pipeline_node_capacities(
     capacities: list[_PipelineNodeCapacity] = []
     for i, node in enumerate(selected_cycle):
         available_bytes = node.node_profile.memory.ram_available.in_bytes
+        total_bytes = node.node_profile.memory.ram_total.in_bytes
         
-        # Apply 10% buffer to leave headroom for system processes, KV cache, etc.
-        available_bytes_with_buffer = available_bytes * 0.9
+        # Calculate usable memory with buffer that ensures minimum absolute free space
+        # while capping at 90% of total memory
+        available_bytes_with_buffer = calculate_usable_memory_with_buffer(
+            available_bytes=available_bytes,
+            total_bytes=total_bytes,
+        )
         
         max_layers_by_available = int(floor(available_bytes_with_buffer / bytes_per_layer))
         # Cap at total_layers (can't assign more layers than the model has)
@@ -309,25 +353,30 @@ def get_shard_assignments_for_pipeline_parallel(
             f"model needs {model_storage_bytes / (1024**3):.2f} GB"
         )
         
-        # Apply 10% buffer to prevent pushing nodes to their absolute limit
-        # Use 90% of total RAM to leave headroom for system processes, KV cache, etc.
-        fastest_ram_with_buffer = fastest_total_ram * 0.9
+        # Calculate maximum usable memory based on total capacity (assuming node is empty)
+        # This ensures we check if the node CAN hold the model even if some RAM is currently used
+        max_usable_ram = calculate_usable_memory_with_buffer(
+            available_bytes=fastest_total_ram,
+            total_bytes=fastest_total_ram,
+        )
         
-        # Use total RAM (with buffer) instead of available RAM for the check, since we want to know if the node
-        # CAN hold the model (even if some RAM is currently used)
         # Also use greedy allocation for small models (< 10GB) on large nodes (> 64GB)
         is_small_model = model_storage_bytes < 10 * (1024**3)  # < 10GB
         is_large_node = fastest_total_ram > 64 * (1024**3)  # > 64GB
         
-        if fastest_ram_with_buffer >= model_storage_bytes or (is_small_model and is_large_node):
-            # Fastest node can hold entire model (with 10% buffer) - give it all layers
-            # But cap at 90% of what it can actually hold to leave headroom
+        if max_usable_ram >= model_storage_bytes or (is_small_model and is_large_node):
+            # Fastest node can hold entire model (with buffer) - give it all layers
+            # Use the actual available memory with buffer for layer calculation
             fastest_index = node_id_to_index[fastest_capacity.node_id]
             desired_layers = [0 for _ in range(world_size)]  # Reset to all zeros
             
-            # Calculate max layers with 10% buffer
+            # Calculate max layers based on available memory with buffer
+            available_with_buffer = calculate_usable_memory_with_buffer(
+                available_bytes=fastest_available_ram,
+                total_bytes=fastest_total_ram,
+            )
             bytes_per_layer = model_storage_bytes / total_layers if total_layers > 0 else 0
-            max_layers_with_buffer = int((fastest_ram_with_buffer / bytes_per_layer)) if bytes_per_layer > 0 else total_layers
+            max_layers_with_buffer = int((available_with_buffer / bytes_per_layer)) if bytes_per_layer > 0 else total_layers
             layers_to_assign = min(total_layers, max_layers_with_buffer)
             
             desired_layers[fastest_index] = layers_to_assign
@@ -336,8 +385,9 @@ def get_shard_assignments_for_pipeline_parallel(
             logger.info(
                 f"✓ GREEDY ALLOCATION: Fastest node {fastest_capacity.node_id} can hold entire model "
                 f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_total_ram / (1024**3):.2f} GB total RAM, "
-                f"with 10% buffer: {fastest_ram_with_buffer / (1024**3):.2f} GB) - "
-                f"assigning {layers_to_assign} layers to fastest node (capped at 90% capacity), "
+                f"max usable: {max_usable_ram / (1024**3):.2f} GB, "
+                f"available with buffer: {available_with_buffer / (1024**3):.2f} GB) - "
+                f"assigning {layers_to_assign} layers to fastest node, "
                 f"remaining {remaining} layers to other nodes"
             )
             logger.info(
