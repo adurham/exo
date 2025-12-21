@@ -528,7 +528,7 @@ def _thunderbolt_subnets() -> set[ipaddress.IPv4Network]:
                 net = ipaddress.IPv4Network(f"{ip}/{mask_str}", strict=False)
             except Exception:
                 continue
-            if net.prefixlen > 24:
+            if net.prefixlen > 30:
                 continue
             nets.add(net)
     return nets
