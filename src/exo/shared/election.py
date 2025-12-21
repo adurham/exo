@@ -99,9 +99,22 @@ class Election:
         
         Called when node performance profile is measured to ensure
         election messages include current hardware capabilities.
+        Triggers a new election if hardware info changed from default values.
         """
+        old_membw = self.membw_gbps
+        old_ram = self.ram_total_bytes
         self.membw_gbps = membw_gbps
         self.ram_total_bytes = ram_total_bytes
+        
+        if (old_membw == 0.0 and old_ram == 0) and (membw_gbps > 0.0 or ram_total_bytes > 0):
+            logger.info("Hardware info updated, triggering new election")
+            if self._tg is not None:
+                self.clock += 1
+                candidates: list[ElectionMessage] = []
+                self._candidates = candidates
+                self._tg.start_soon(
+                    self._campaign, candidates, DEFAULT_ELECTION_TIMEOUT
+                )
 
     async def run(self):
         logger.info("Starting Election")

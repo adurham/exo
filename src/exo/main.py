@@ -23,6 +23,8 @@ from exo.utils.channels import Receiver, channel
 from exo.utils.pydantic_ext import CamelCaseModel
 from exo.worker.download.impl_shard_downloader import exo_shard_downloader
 from exo.worker.main import Worker
+from exo.worker.utils.profile import get_memory_profile
+from exo.worker.utils.system_info import get_model_and_chip
 
 
 # I marked this as a dataclass as I want trivial constructors.
@@ -81,6 +83,15 @@ class Node:
             command_receiver=router.receiver(topics.COMMANDS),
         )
 
+        model_id, chip_id = await get_model_and_chip()
+        memory_profile = get_memory_profile()
+        membw = estimated_memory_bandwidth_gbps(chip_id=chip_id)
+        ram_total = memory_profile.ram_total.in_bytes
+        
+        logger.info(
+            f"Node hardware: {chip_id}, {membw} GB/s, {ram_total} bytes RAM"
+        )
+        
         er_send, er_recv = channel[ElectionResult]()
         election = Election(
             node_id,
@@ -93,6 +104,8 @@ class Node:
             connection_message_receiver=router.receiver(topics.CONNECTION_MESSAGES),
             command_receiver=router.receiver(topics.COMMANDS),
             election_result_sender=er_send,
+            membw_gbps=membw,
+            ram_total_bytes=ram_total,
         )
 
         return cls(router, worker, election, er_recv, master, api, node_id)
