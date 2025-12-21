@@ -290,18 +290,24 @@ def get_shard_assignments_for_pipeline_parallel(
 
         node_id_to_index = {node.node_id: i for i, node in enumerate(sorted_cycle)}
         
-        # CRITICAL: If the fastest node can hold ALL layers, give it ALL layers
+        # CRITICAL: If the fastest node can hold the entire model, give it ALL layers
         # This ensures small models are concentrated on the fastest node
+        # Check by comparing model storage size directly to available RAM (more reliable than layer count)
         fastest_capacity = ranked_capacities[0]
-        if fastest_capacity.max_layers_by_memory >= total_layers:
+        fastest_node = node_id_to_node[fastest_capacity.node_id]
+        fastest_available_ram = fastest_node.node_profile.memory.ram_available.in_bytes
+        model_storage_bytes = model_meta.storage_size.in_bytes
+        
+        if fastest_available_ram >= model_storage_bytes:
             # Fastest node can hold entire model - give it all layers
             fastest_index = node_id_to_index[fastest_capacity.node_id]
             desired_layers[fastest_index] = total_layers
             remaining = 0
             
             logger.info(
-                f"Fastest node {fastest_capacity.node_id} can hold all {total_layers} layers - "
-                f"assigning entire model to fastest node (greedy allocation)"
+                f"Fastest node {fastest_capacity.node_id} can hold entire model "
+                f"({model_storage_bytes / (1024**3):.2f} GB in {fastest_available_ram / (1024**3):.2f} GB available) - "
+                f"assigning all {total_layers} layers to fastest node (greedy allocation)"
             )
         else:
             # Fastest node cannot hold all layers - distribute greedily
