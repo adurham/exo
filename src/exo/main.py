@@ -535,6 +535,8 @@ def _thunderbolt_subnets() -> set[ipaddress.IPv4Network]:
                 continue
             if net.prefixlen > 30:
                 continue
+            if not _is_tb_subnet(net):
+                continue
             nets.add(net)
     if not nets:
         logger.warning("ifconfig parsing found no TB subnets")
@@ -553,7 +555,10 @@ def _fallback_subnets_from_ips(local_ips: set[str]) -> set[ipaddress.IPv4Network
                 continue
             if ip.startswith("169.254."):
                 continue
-            nets.add(ipaddress.IPv4Network(f"{ip}/30", strict=False))
+            net = ipaddress.IPv4Network(f"{ip}/30", strict=False)
+            if not _is_tb_subnet(net):
+                continue
+            nets.add(net)
         except Exception:
             continue
     return nets
@@ -574,6 +579,15 @@ def _hosts_from_subnets(
             if count >= max_hosts_per_net:
                 break
     return seeds
+
+
+def _is_tb_subnet(net: ipaddress.IPv4Network) -> bool:
+    if net.version != 4:
+        return False
+    parts = str(net.network_address).split(".")
+    if len(parts) != 4:
+        return False
+    return parts[0] == "192" and parts[1] == "168" and parts[2] in {"201", "202", "203", "204"}
 
 
 def _seeds_from_subnets(
