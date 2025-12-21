@@ -141,7 +141,7 @@ class Node:
         er_send, er_recv = channel[ElectionResult]()
         election = Election(
             node_id,
-            seniority=1_000_000 if args.force_master else 0,
+            seniority=1_000_000 if args.force_master else (-1_000_000 if args.force_worker else 0),
             election_message_sender=router.sender(topics.ELECTION_MESSAGES),
             election_message_receiver=router.receiver(topics.ELECTION_MESSAGES),
             connection_message_receiver=router.receiver(topics.CONNECTION_MESSAGES),
@@ -338,6 +338,7 @@ class Args(CamelCaseModel):
 
     verbosity: int = 0
     force_master: bool = False
+    force_worker: bool = False
     spawn_api: bool = False
     api_port: PositiveInt = 52415
     tb_only: bool = False
@@ -404,6 +405,11 @@ class Args(CamelCaseModel):
             default=None,
             help="Seed peer as host:port or multiaddr (can be passed multiple times)",
         )
+        parser.add_argument(
+            "--force-worker",
+            action="store_true",
+            dest="force_worker",
+        )
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - runtime validation
@@ -428,9 +434,7 @@ def apply_hostname_overrides(args: Args) -> Args:
     seeds.extend(_hosts_from_subnets(subnets, local_ips))
     seeds = _dedupe_preserve_order(seeds)
 
-    force_master = args.force_master or any(
-        ip in {"192.168.201.1", "192.168.202.1"} for ip in local_ips
-    )
+    force_master = args.force_master
 
     return args.model_copy(
         update={
@@ -439,6 +443,7 @@ def apply_hostname_overrides(args: Args) -> Args:
             "discovery_port": PEER_LISTEN_PORT,
             "seeds": seeds,
             "force_master": force_master,
+            "force_worker": args.force_worker,
         },
         deep=True,
     )

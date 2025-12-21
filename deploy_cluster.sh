@@ -20,6 +20,10 @@ failed_nodes=()
 deploy_node() {
   local node="$1"
   local build_dashboard=0
+  local force_arg="--force-worker"
+  if [[ "$node" == "${NODES[0]}" ]]; then
+    force_arg="--force-master"
+  fi
   for dnode in "${DASHBOARD_NODES[@]}"; do
     if [[ "$dnode" == "$node" ]]; then
       build_dashboard=1
@@ -30,7 +34,7 @@ deploy_node() {
   echo "🔌 Connecting to ${node}..."
 
   if ssh "${SSH_OPTS[@]}" "$node" \
-    "REMOTE_REPO_DIR='${REMOTE_REPO_DIR}' LOG_FILE='${LOG_FILE}' REPO_URL='${REPO_URL}' BRANCH='${BRANCH}' BUILD_DASHBOARD='${build_dashboard}' bash -s" <<'EOF'
+    "REMOTE_REPO_DIR='${REMOTE_REPO_DIR}' LOG_FILE='${LOG_FILE}' REPO_URL='${REPO_URL}' BRANCH='${BRANCH}' BUILD_DASHBOARD='${build_dashboard}' FORCE_ARG='${force_arg}' bash -s" <<'EOF'
 set -euo pipefail
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
@@ -80,7 +84,7 @@ pkill -f 'uv run exo' || true
 sleep 1
 
 echo "   🚀 Starting Exo..."
-EXO_USE_RDMA=1 RUST_BACKTRACE=1 nohup uv run exo > "${LOG_FILE}" 2>&1 < /dev/null &
+EXO_USE_RDMA=1 RUST_BACKTRACE=1 nohup uv run exo ${FORCE_ARG} > "${LOG_FILE}" 2>&1 < /dev/null &
 
 for attempt in {1..6}; do
   sleep 2
