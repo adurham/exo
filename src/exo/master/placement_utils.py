@@ -224,8 +224,18 @@ def get_mlx_ibv_devices_matrix(
             if i == j:
                 continue
 
-            # Find the IP J uses to talk to I, filtering for Thunderbolt if needed
-            connection_ips = list(_find_connection_ip(node_j, node_i, cycle_digraph, get_thunderbolt))
+            # Find the IP J uses to talk to I
+            # Note: we pass get_thunderbolt=False here and filter manually because
+            # we need to check if the IP is on node_i's Thunderbolt interfaces
+            all_connection_ips = list(_find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False))
+            connection_ips = []
+            for conn_ip in all_connection_ips:
+                if get_thunderbolt:
+                    # Check if the connection IP is on a Thunderbolt interface of node_i
+                    if _is_ip_on_thunderbolt_interface(conn_ip, node_i):
+                        connection_ips.append(conn_ip)
+                else:
+                    connection_ips.append(conn_ip)
             interface_found = False
             for connection_ip in connection_ips:
                 # This is a local IP on I, which is attached to an interface: find that interface
@@ -267,8 +277,11 @@ def _find_connection_ip(
 ) -> Generator[str]:
     """Find all IP addresses that connect node i to node j.
     
+    The connection IP is the IP address that node_j should use to connect to node_i,
+    so it will be on node_i's interfaces.
+    
     If thunderbolt_only is True, only returns IPs from connections where the IP
-    is on a Thunderbolt interface (en2-en7) of node_j.
+    is on a Thunderbolt interface of node_i (the target node).
     """
     for connection in cycle_digraph.list_connections():
         if (
@@ -277,8 +290,9 @@ def _find_connection_ip(
         ):
             connection_ip = connection.send_back_multiaddr.ip_address
             if thunderbolt_only:
-                # Check if the connection IP is on a Thunderbolt interface of node_j
-                if not _is_ip_on_thunderbolt_interface(connection_ip, node_j):
+                # Check if the connection IP is on a Thunderbolt interface of node_i
+                # (the target node where the IP should be located)
+                if not _is_ip_on_thunderbolt_interface(connection_ip, node_i):
                     continue
             yield connection_ip
 
@@ -432,8 +446,19 @@ def get_mlx_ibv_coordinators(
         if n.node_id == rank_0_node.node_id:
             return "0.0.0.0"
 
-        for ip in _find_connection_ip(n, rank_0_node, cycle_digraph, get_thunderbolt):
-            return ip
+        # Find connection IPs, filtering for Thunderbolt if needed
+        all_connection_ips = list(_find_connection_ip(n, rank_0_node, cycle_digraph, thunderbolt_only=False))
+        connection_ips = []
+        for conn_ip in all_connection_ips:
+            if get_thunderbolt:
+                # Check if the connection IP is on a Thunderbolt interface of rank_0_node
+                if _is_ip_on_thunderbolt_interface(conn_ip, rank_0_node):
+                    connection_ips.append(conn_ip)
+            else:
+                connection_ips.append(conn_ip)
+        
+        if connection_ips:
+            return connection_ips[0]
 
         connection_type = "Thunderbolt" if get_thunderbolt else "any"
         logger.warning(
