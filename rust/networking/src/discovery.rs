@@ -23,7 +23,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use util::wakerdeque::WakerDeque;
 
-const RETRY_CONNECT_INTERVAL: Duration = Duration::from_secs(5);
+const RETRY_CONNECT_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 struct AllowedSubnets {
@@ -194,6 +194,9 @@ impl Behaviour {
                 if !self.allowed_subnets.contains(ip) {
                     continue;
                 }
+            } else {
+                // if not TCP addr, skip
+                continue;
             }
             self.dial(p, ma.clone()); // always connect
 
