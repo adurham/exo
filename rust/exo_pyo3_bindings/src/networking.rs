@@ -7,7 +7,7 @@
 
 use crate::r#const::MPSC_CHANNEL_SIZE;
 use crate::ext::{ByteArrayExt as _, FutureExt, PyErrExt as _};
-use crate::ext::{ResultExt as _, TokioMpscReceiverExt as _, TokioMpscSenderExt as _};
+use crate::ext::{ResultExt as _, TokioMpscReceiverExt as _, TokioMpscSenderExt as _, TokioRuntimeExt};
 use crate::pyclass;
 use crate::pylibp2p::ident::{PyKeypair, PyPeerId};
 use libp2p::futures::StreamExt as _;
@@ -346,21 +346,25 @@ impl PyNetworkingHandle {
     fn py_new(identity: Bound<'_, PyKeypair>) -> PyResult<Self> {
         use pyo3_async_runtimes::tokio::get_runtime;
 
+        // get Python reference for spawn_with_scope
+        let py = identity.py();
+
         // create communication channels
         let (to_task_tx, to_task_rx) = mpsc::channel(MPSC_CHANNEL_SIZE);
         let (connection_update_tx, connection_update_rx) = mpsc::channel(MPSC_CHANNEL_SIZE);
         let (gossipsub_message_tx, gossipsub_message_rx) = mpsc::channel(MPSC_CHANNEL_SIZE);
 
         // get identity
-        let identity = identity.borrow().0.clone();
+        let identity_keypair = identity.borrow().0.clone();
 
         // create networking swarm (within tokio context!! or it crashes)
         let swarm = get_runtime()
-            .block_on(async { create_swarm(identity) })
+            .block_on(async { create_swarm(identity_keypair) })
             .pyerr()?;
 
-        // spawn tokio task running the networking logic
-        get_runtime().spawn(async move {
+        // spawn tokio task running the networking logic with Python scope initialized
+        // This ensures Python is properly initialized for async callbacks in tokio worker threads
+        _ = get_runtime().spawn_with_scope(py, async move {
             networking_task(
                 swarm,
                 to_task_rx,
@@ -368,7 +372,7 @@ impl PyNetworkingHandle {
                 gossipsub_message_tx,
             )
             .await;
-        });
+        }).pyerr()?;
         Ok(Self::new(
             to_task_tx,
             connection_update_rx,

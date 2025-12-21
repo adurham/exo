@@ -114,6 +114,9 @@ def place_instance(
     # TODO: Single node instances
     match command.instance_meta:
         case InstanceMeta.MlxJaccl:
+            # MLX RDMA requires Thunderbolt connections (detected by interface name, not IP range)
+            # The get_mlx_ibv_devices_matrix function will validate that all connections
+            # use IPs on Thunderbolt interfaces (en2-en7)
             mlx_ibv_devices = get_mlx_ibv_devices_matrix(
                 selected_cycle,
                 cycle_digraph,

@@ -8,6 +8,42 @@ from anyio import run_process
 from exo.shared.types.profiling import NetworkInterfaceInfo
 
 
+def _get_thunderbolt_interfaces() -> set[str]:
+    """
+    Detects Thunderbolt network interfaces using networksetup.
+    
+    Returns a set of interface names (e.g., {'en2', 'en3'}) that are Thunderbolt interfaces.
+    """
+    if sys.platform != "darwin":
+        return set()
+    
+    try:
+        process = run_process(["networksetup", "-listallhardwareports"], check=True)
+    except CalledProcessError:
+        return set()
+    
+    output = process.stdout.decode("utf-8", errors="replace")
+    thunderbolt_interfaces: set[str] = set()
+    
+    lines = output.split("\n")
+    current_hw_port: str | None = None
+    current_device: str | None = None
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith("Hardware Port:"):
+            current_hw_port = line.split(":", 1)[1].strip()
+            current_device = None
+        elif line.startswith("Device:"):
+            current_device = line.split(":", 1)[1].strip()
+            # Check if this hardware port is a Thunderbolt interface
+            if current_hw_port and current_device:
+                if current_hw_port.startswith("Thunderbolt") or current_hw_port == "Thunderbolt Bridge":
+                    thunderbolt_interfaces.add(current_device)
+    
+    return thunderbolt_interfaces
+
+
 async def get_friendly_name() -> str:
     """
     Asynchronously gets the 'Computer Name' (friendly name) of a Mac.

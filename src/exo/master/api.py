@@ -461,11 +461,20 @@ class API:
             tg.start_soon(self._applystate)
             tg.start_soon(self._pause_on_new_election)
             print_startup_banner(self.port)
-            await serve(
-                cast(ASGIFramework, self.app),
-                cfg,
-                shutdown_trigger=lambda: anyio.sleep_forever(),
-            )
+            try:
+                await serve(
+                    cast(ASGIFramework, self.app),
+                    cfg,
+                    shutdown_trigger=lambda: anyio.sleep_forever(),
+                )
+            except OSError as exc:
+                if exc.errno == 48 or "Address already in use" in str(exc):
+                    logger.error(
+                        f"Port {self.port} is already in use. "
+                        f"Another process may be using this port, or a previous EXO instance may not have shut down cleanly. "
+                        f"Please choose a different port with --api-port or stop the process using port {self.port}."
+                    )
+                raise
 
         self.command_sender.close()
         self.global_event_receiver.close()
