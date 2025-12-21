@@ -211,6 +211,24 @@ def get_shard_assignments_for_pipeline_parallel(
         )
 
     capacities = _pipeline_node_capacities(model_meta=model_meta, selected_cycle=selected_cycle)
+    
+    ranked_capacities = sorted(
+        capacities,
+        key=lambda c: (c.membw_gbps, c.ram_total_bytes, str(c.node_id)),
+        reverse=True,
+    )
+    
+    node_id_to_capacity = {c.node_id: c for c in capacities}
+    sorted_cycle = sorted(
+        selected_cycle,
+        key=lambda node: (
+            node_id_to_capacity[node.node_id].membw_gbps,
+            node_id_to_capacity[node.node_id].ram_total_bytes,
+            str(node.node_id),
+        ),
+        reverse=True,
+    )
+    
     if sum(c.max_layers_by_memory for c in capacities) < total_layers:
         # This should be rare given we pre-filter cycles by total memory, but
         # storage size vs runtime memory footprint is approximate.
@@ -219,12 +237,12 @@ def get_shard_assignments_for_pipeline_parallel(
             "RAM-proportional assignment"
         )
         cycle_memory = sum(
-            (node.node_profile.memory.ram_available for node in selected_cycle),
+            (node.node_profile.memory.ram_available for node in sorted_cycle),
             start=Memory(),
         )
         desired_layers: list[int] = []
         layers_assigned = 0
-        for i, node in enumerate(selected_cycle):
+        for i, node in enumerate(sorted_cycle):
             if i == world_size - 1:
                 node_layers = total_layers - layers_assigned
             else:
@@ -243,20 +261,16 @@ def get_shard_assignments_for_pipeline_parallel(
         # - Allocate layers proportionally based on (bandwidth × ram_total) weight
         # - Cap each node at its available memory limit
         # - Allow 0 layers for slower nodes (for KV cache handling).
-        ranked = sorted(
-            capacities,
-            key=lambda c: (c.membw_gbps, c.ram_total_bytes, str(c.node_id)),
-            reverse=True,
-        )
-
         total_weight = sum(
-            c.membw_gbps * c.ram_total_bytes for c in ranked if c.max_layers_by_memory > 0
+            c.membw_gbps * c.ram_total_bytes for c in ranked_capacities if c.max_layers_by_memory > 0
         )
 
         desired_layers = [0 for _ in range(world_size)]
         remaining = total_layers
 
-        for c in ranked:
+        node_id_to_index = {node.node_id: i for i, node in enumerate(sorted_cycle)}
+        
+        for c in ranked_capacities:
             if remaining <= 0:
                 break
             if c.max_layers_by_memory <= 0:
@@ -268,28 +282,30 @@ def get_shard_assignments_for_pipeline_parallel(
             else:
                 proportional_share = 0
             
-            headroom = c.max_layers_by_memory - desired_layers[c.rank_index]
+            node_index = node_id_to_index[c.node_id]
+            headroom = c.max_layers_by_memory - desired_layers[node_index]
             take = min(remaining, max(0, int(round(proportional_share))))
             take = min(take, headroom)
             
-            desired_layers[c.rank_index] += take
+            desired_layers[node_index] += take
             remaining -= take
 
         if remaining > 0:
-            for c in ranked:
+            for c in ranked_capacities:
                 if remaining <= 0:
                     break
-                headroom = c.max_layers_by_memory - desired_layers[c.rank_index]
+                node_index = node_id_to_index[c.node_id]
+                headroom = c.max_layers_by_memory - desired_layers[node_index]
                 if headroom <= 0:
                     continue
                 take = min(remaining, headroom)
-                desired_layers[c.rank_index] += take
+                desired_layers[node_index] += take
                 remaining -= take
 
         assert remaining == 0, "Allocation should exhaust all layers when caps permit"
 
     layers_assigned = 0
-    for i, node in enumerate(selected_cycle):
+    for i, node in enumerate(sorted_cycle):
         node_layers = desired_layers[i]
 
         runner_id = RunnerId()
