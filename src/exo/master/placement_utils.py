@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import ipaddress
 from collections.abc import Generator
 from typing import TypeGuard, cast
 
@@ -18,6 +19,17 @@ from exo.shared.types.worker.shards import (
     Sharding,
     ShardMetadata,
     TensorShardMetadata,
+)
+
+_THUNDERBOLT_INTERFACE_NAME_GUESS: frozenset[str] = frozenset(
+    {
+        "en2",
+        "en3",
+        "en4",
+        "en5",
+        "en6",
+        "en7",
+    }
 )
 
 
@@ -253,7 +265,11 @@ def get_mlx_ibv_devices_matrix(
                     thunderbolt_interfaces = _get_thunderbolt_interfaces_for_node(node_i)
                     for iface in node_i.node_profile.network_interfaces:
                         if iface.name in thunderbolt_interfaces:
-                            available_ips.append(f"{iface.name}:{iface.ip_address}")
+                            if not _is_ipv4_address(iface.ip_address):
+                                continue
+                            available_ips.append(
+                                f"{_to_rdma_interface_name(iface.name)}:{iface.ip_address}"
+                            )
                 
                 connection_type = "Thunderbolt" if get_thunderbolt else "any"
                 logger.error(
@@ -289,12 +305,26 @@ def _find_connection_ip(
             and connection.send_back_node_id == node_j.node_id
         ):
             connection_ip = connection.send_back_multiaddr.ip_address
+            if not _is_ipv4_address(connection_ip):
+                continue
             if thunderbolt_only:
                 # Check if the connection IP is on a Thunderbolt interface of node_i
                 # (the target node where the IP should be located)
                 if not _is_ip_on_thunderbolt_interface(connection_ip, node_i):
                     continue
             yield connection_ip
+
+
+def _is_ipv4_address(ip_address: str) -> bool:
+    normalized_ip = ip_address.split("%", 1)[0].strip()
+    try:
+        return ipaddress.ip_address(normalized_ip).version == 4
+    except ValueError:
+        return False
+
+
+def _to_rdma_interface_name(interface_name: str) -> str:
+    return interface_name if interface_name.startswith("rdma_") else f"rdma_{interface_name}"
 
 
 def _get_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> set[str]:
@@ -325,6 +355,18 @@ def _get_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> set[str]:
     if thunderbolt_interfaces:
         logger.debug(f"Detected Thunderbolt interfaces via system query: {thunderbolt_interfaces}")
         return thunderbolt_interfaces
+
+    heuristic_thunderbolt_interfaces = {
+        interface_name
+        for interface_name in profile_interface_names
+        if interface_name in _THUNDERBOLT_INTERFACE_NAME_GUESS
+    }
+    if heuristic_thunderbolt_interfaces:
+        logger.debug(
+            "Falling back to name-based Thunderbolt interface detection: "
+            f"{heuristic_thunderbolt_interfaces}"
+        )
+        return heuristic_thunderbolt_interfaces
     
     # If system detection didn't find any (e.g., remote node or detection failed),
     # we cannot reliably determine Thunderbolt interfaces without type info in profile
@@ -382,6 +424,8 @@ def _is_ip_on_thunderbolt_interface(
     node_info: NodeInfo,
 ) -> bool:
     """Check if an IP address is assigned to a Thunderbolt interface on the given node."""
+    if not _is_ipv4_address(ip_address):
+        return False
     if node_info.node_profile is None:
         return False
     
@@ -390,6 +434,8 @@ def _is_ip_on_thunderbolt_interface(
     
     for interface in node_info.node_profile.network_interfaces:
         if interface.name not in thunderbolt_interfaces:
+            continue
+        if not _is_ipv4_address(interface.ip_address):
             continue
         if interface.ip_address == ip_address:
             return True
@@ -401,6 +447,8 @@ def _find_interface_name_for_ip(
     ip_address: str,
     node_info: NodeInfo,
 ) -> str | None:
+    if not _is_ipv4_address(ip_address):
+        return None
     if node_info.node_profile is None:
         return None
 
@@ -413,11 +461,13 @@ def _find_interface_name_for_ip(
         if interface.name not in thunderbolt_interfaces:
             continue
         logger.info(f" | {interface.name}: {interface.ip_address}")
+        if not _is_ipv4_address(interface.ip_address):
+            continue
         if interface.ip_address != ip_address:
             continue
 
         logger.info("Found")
-        return f"rdma_{interface.name}"
+        return _to_rdma_interface_name(interface.name)
 
     return None
 
