@@ -155,8 +155,9 @@ def _pipeline_node_capacities(
     capacities: list[_PipelineNodeCapacity] = []
     for i, node in enumerate(selected_cycle):
         available_bytes = node.node_profile.memory.ram_available.in_bytes
-        max_layers = int(floor(available_bytes / bytes_per_layer))
-        max_layers = max(0, min(total_layers, max_layers))
+        
+        max_layers_by_available = int(floor(available_bytes / bytes_per_layer))
+        max_layers = max(0, min(total_layers, max_layers_by_available))
 
         membw = estimated_memory_bandwidth_gbps(chip_id=node.node_profile.chip_id)
         ram_total = node.node_profile.memory.ram_total.in_bytes
@@ -239,27 +240,51 @@ def get_shard_assignments_for_pipeline_parallel(
             layers_assigned += node_layers
     else:
         # Greedy allocation prioritizing fastest chip first, then largest RAM:
-        # - Allocate layers to nodes sorted by (bandwidth, ram_total) descending,
-        #   respecting each node's memory-derived cap.
+        # - Allocate layers proportionally based on (bandwidth × ram_total) weight
+        # - Cap each node at its available memory limit
         # - Allow 0 layers for slower nodes (for KV cache handling).
-        desired_layers = [0 for _ in range(world_size)]
-        remaining = total_layers
-
         ranked = sorted(
             capacities,
             key=lambda c: (c.membw_gbps, c.ram_total_bytes, str(c.node_id)),
             reverse=True,
         )
 
+        total_weight = sum(
+            c.membw_gbps * c.ram_total_bytes for c in ranked if c.max_layers_by_memory > 0
+        )
+
+        desired_layers = [0 for _ in range(world_size)]
+        remaining = total_layers
+
         for c in ranked:
             if remaining <= 0:
                 break
-            headroom = c.max_layers_by_memory - desired_layers[c.rank_index]
-            if headroom <= 0:
+            if c.max_layers_by_memory <= 0:
                 continue
-            take = min(remaining, headroom)
+            
+            weight = c.membw_gbps * c.ram_total_bytes
+            if total_weight > 0:
+                proportional_share = (weight / total_weight) * total_layers
+            else:
+                proportional_share = 0
+            
+            headroom = c.max_layers_by_memory - desired_layers[c.rank_index]
+            take = min(remaining, max(0, int(round(proportional_share))))
+            take = min(take, headroom)
+            
             desired_layers[c.rank_index] += take
             remaining -= take
+
+        if remaining > 0:
+            for c in ranked:
+                if remaining <= 0:
+                    break
+                headroom = c.max_layers_by_memory - desired_layers[c.rank_index]
+                if headroom <= 0:
+                    continue
+                take = min(remaining, headroom)
+                desired_layers[c.rank_index] += take
+                remaining -= take
 
         assert remaining == 0, "Allocation should exhaust all layers when caps permit"
 
@@ -473,7 +498,7 @@ def _find_connection_ip(
     thunderbolt_only: bool = False,
 ) -> Generator[str]:
     """Find all IP addresses that connect node i to node j.
-    
+
     The connection IP is the IP address that node_j should use to connect to node_i,
     so it will be on node_i's interfaces.
     
@@ -758,7 +783,7 @@ def get_mlx_ibv_coordinators(
     """
     rank_0_node = selected_cycle[0]
     logger.info(f"Selecting coordinator from rank 0 node: {rank_0_node.node_id}")
-    
+
     def get_ip_for_node(n: NodeInfo) -> str:
         if n.node_id == rank_0_node.node_id:
             return "0.0.0.0"
