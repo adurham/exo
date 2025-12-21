@@ -1,6 +1,6 @@
 import asyncio
 from pathlib import Path
-from typing import AsyncIterator, Callable
+from typing import TYPE_CHECKING, AsyncIterator, Callable
 
 from exo.shared.models.model_cards import MODEL_CARDS
 from exo.shared.models.model_meta import get_model_meta
@@ -11,10 +11,16 @@ from exo.shared.types.worker.shards import (
 from exo.worker.download.download_utils import RepoDownloadProgress, download_shard
 from exo.worker.download.shard_downloader import ShardDownloader
 
+if TYPE_CHECKING:
+    from exo.worker.download.peer_file_service import PeerFileService
 
-def exo_shard_downloader(max_parallel_downloads: int = 8) -> ShardDownloader:
+
+def exo_shard_downloader(
+    max_parallel_downloads: int = 8,
+    peer_file_service: "PeerFileService | None" = None,
+) -> ShardDownloader:
     return SingletonShardDownloader(
-        CachedShardDownloader(ResumableShardDownloader(max_parallel_downloads))
+        CachedShardDownloader(ResumableShardDownloader(max_parallel_downloads, peer_file_service))
     )
 
 
@@ -110,8 +116,13 @@ class CachedShardDownloader(ShardDownloader):
 
 
 class ResumableShardDownloader(ShardDownloader):
-    def __init__(self, max_parallel_downloads: int = 8):
+    def __init__(
+        self, 
+        max_parallel_downloads: int = 8,
+        peer_file_service: "PeerFileService | None" = None,
+    ):
         self.max_parallel_downloads = max_parallel_downloads
+        self.peer_file_service = peer_file_service
         self.on_progress_callbacks: list[
             Callable[[ShardMetadata, RepoDownloadProgress], None]
         ] = []
@@ -137,6 +148,7 @@ class ResumableShardDownloader(ShardDownloader):
             self.on_progress_wrapper,
             max_parallel_downloads=self.max_parallel_downloads,
             allow_patterns=allow_patterns,
+            peer_file_service=self.peer_file_service,
         )
         return target_dir
 

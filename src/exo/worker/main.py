@@ -86,6 +86,7 @@ class Worker:
         self.download_status: dict[ShardMetadata, DownloadProgress] = {}
         self.runners: dict[RunnerId, RunnerSupervisor] = {}
         self._tg: TaskGroup | None = None
+        self._peer_file_service: "PeerFileService | None" = None
 
         self._nack_cancel_scope: CancelScope | None = None
         self._nack_attempts: int = 0
@@ -124,6 +125,22 @@ class Worker:
 
         async with create_task_group() as tg:
             self._tg = tg
+            # Start peer file service for P2P downloads
+            # Import here to avoid circular dependency
+            from exo.worker.download.peer_file_service import PeerFileService
+            self._peer_file_service = PeerFileService(
+                node_id=self.node_id,
+                topology=self.state.topology,
+                port=8080,
+            )
+            await self._peer_file_service.start_server()
+            # Update shard downloader with peer service
+            # Unwrap SingletonShardDownloader -> CachedShardDownloader -> ResumableShardDownloader
+            if hasattr(self.shard_downloader, 'shard_downloader'):
+                cached = self.shard_downloader.shard_downloader
+                if hasattr(cached, 'shard_downloader'):
+                    cached.shard_downloader.peer_file_service = self._peer_file_service
+            
             tg.start_soon(self.plan_step)
             tg.start_soon(start_polling_node_metrics, resource_monitor_callback)
 
@@ -135,6 +152,8 @@ class Worker:
             tg.start_soon(self._poll_connection_updates)
 
         # Actual shutdown code - waits for all tasks to complete before executing.
+        if self._peer_file_service:
+            await self._peer_file_service.stop_server()
         self.local_event_sender.close()
         self.command_sender.close()
         for runner in self.runners.values():

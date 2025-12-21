@@ -6,7 +6,7 @@ import time
 import traceback
 from datetime import timedelta
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 from urllib.parse import urljoin
 
 import aiofiles
@@ -32,6 +32,9 @@ from exo.worker.download.huggingface_utils import (
     get_auth_headers,
     get_hf_endpoint,
 )
+
+if TYPE_CHECKING:
+    from exo.worker.download.peer_file_service import PeerFileService
 
 
 class ModelSafetensorsIndexMetadata(BaseModel):
@@ -324,12 +327,13 @@ async def download_file_with_retry(
     path: str,
     target_dir: Path,
     on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
+    peer_file_service: "PeerFileService | None" = None,
 ) -> Path:
     n_attempts = 30
     for attempt in range(n_attempts):
         try:
             return await _download_file(
-                repo_id, revision, path, target_dir, on_progress
+                repo_id, revision, path, target_dir, on_progress, peer_file_service
             )
         except Exception as e:
             if isinstance(e, FileNotFoundError) or attempt == n_attempts - 1:
@@ -350,10 +354,53 @@ async def _download_file(
     path: str,
     target_dir: Path,
     on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
+    peer_file_service: "PeerFileService | None" = None,
 ) -> Path:
     if await aios.path.exists(target_dir / path):
         return target_dir / path
     await aios.makedirs((target_dir / path).parent, exist_ok=True)
+    
+    # First, try to get file from peer if peer service is available
+    if peer_file_service:
+        try:
+            availability = await peer_file_service.check_peer_has_file(repo_id, path)
+            if availability and availability.has_file:
+                logger.info(
+                    f"Found file {path} on peer {availability.node_id}, downloading from peer"
+                )
+                # Find the connection for this peer
+                peer_conn = None
+                for conn in peer_file_service.topology.list_connections():
+                    if (
+                        conn.local_node_id == peer_file_service.node_id
+                        and conn.send_back_node_id == availability.node_id
+                    ):
+                        peer_conn = conn
+                        break
+                
+                if peer_conn:
+                    target_path = target_dir / path
+                    try:
+                        await peer_file_service.download_from_peer(
+                            availability.node_id,
+                            peer_conn.send_back_multiaddr,
+                            repo_id,
+                            path,
+                            target_path,
+                            expected_hash=availability.file_hash,
+                            on_progress=on_progress,
+                        )
+                        logger.info(f"Successfully downloaded {path} from peer {availability.node_id}")
+                        return target_path
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to download {path} from peer {availability.node_id}: {e}, "
+                            "falling back to Hugging Face"
+                        )
+        except Exception as e:
+            logger.debug(f"Error checking peers for {path}: {e}, falling back to Hugging Face")
+    
+    # Fall back to Hugging Face
     length, etag = await file_meta(repo_id, revision, path)
     remote_hash = etag[:-5] if etag.endswith("-gzip") else etag
     partial_path = target_dir / f"{path}.partial"
@@ -534,6 +581,7 @@ async def download_shard(
     max_parallel_downloads: int = 8,
     skip_download: bool = False,
     allow_patterns: list[str] | None = None,
+    peer_file_service: "PeerFileService | None" = None,
 ) -> tuple[Path, RepoDownloadProgress]:
     if not skip_download:
         logger.info(f"Downloading {shard.model_meta.model_id=}")
@@ -647,6 +695,7 @@ async def download_shard(
                 lambda curr_bytes, total_bytes, is_renamed: on_progress_wrapper(
                     file, curr_bytes, total_bytes, is_renamed
                 ),
+                peer_file_service=peer_file_service,
             )
 
     if not skip_download:
