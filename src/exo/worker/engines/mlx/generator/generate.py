@@ -64,7 +64,7 @@ def warmup_inference(
         model=model,
     )
 
-    logger.info("Generating warmup tokens")
+    logger.debug("Generating warmup tokens")
     for _r in stream_generate(
         model=model,
         tokenizer=tokenizer,
@@ -76,10 +76,10 @@ def warmup_inference(
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
-        logger.info("Generated warmup token: " + str(_r.text))
+        logger.debug("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
 
-    logger.info("Generated ALL warmup tokens")
+    logger.debug("Generated ALL warmup tokens")
     mx_barrier()
 
     return tokens_generated
@@ -113,7 +113,7 @@ def mlx_generate(
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
-        logger.info(out.text)
+        logger.debug(out.text)
         if out.finish_reason is not None and out.finish_reason not in get_args(
             FinishReason
         ):
