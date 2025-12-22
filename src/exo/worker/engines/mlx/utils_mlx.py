@@ -154,6 +154,47 @@ def mlx_distributed_init(
                 file_content = f.read()
             logger.info(f"rank {rank} Devices file content: {file_content}")
             
+            # CRITICAL: Verify all RDMA devices in the matrix actually exist on this system
+            # MLX will fail if it tries to use a device that doesn't exist
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["ibv_devices"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    available_devices = set()
+                    for line in result.stdout.split("\n"):
+                        if line.strip() and not line.startswith("device") and not line.startswith("------"):
+                            parts = line.split()
+                            if parts:
+                                available_devices.add(parts[0])
+                    logger.info(f"rank {rank} Available RDMA devices: {sorted(available_devices)}")
+                    
+                    # Check all devices in the matrix
+                    missing_devices = []
+                    for i, row in enumerate(ibv_devices):
+                        for j, device_name in enumerate(row):
+                            if device_name is not None and device_name not in available_devices:
+                                missing_devices.append(f"matrix[{i}][{j}]={device_name}")
+                    
+                    if missing_devices:
+                        raise RuntimeError(
+                            f"Rank {rank}: RDMA devices file references devices that don't exist on this system: {', '.join(missing_devices)}. "
+                            f"Available devices: {sorted(available_devices)}. "
+                            f"This will cause MLX to fail to initialize RDMA."
+                        )
+                else:
+                    logger.warning(f"rank {rank} Could not run 'ibv_devices' to verify devices (return code {result.returncode})")
+            except FileNotFoundError:
+                logger.warning(f"rank {rank} 'ibv_devices' command not found, skipping device verification")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"rank {rank} 'ibv_devices' command timed out, skipping device verification")
+            except Exception as e:
+                logger.warning(f"rank {rank} Error checking RDMA devices: {e}, continuing anyway")
+            
             # CRITICAL: Clear any conflicting environment variables that might cause MLX to use non-RDMA backends
             # Remove MLX_HOSTFILE if it exists - this would cause MLX to prefer 'ring' backend
             if "MLX_HOSTFILE" in os.environ:
