@@ -167,10 +167,14 @@ def mlx_distributed_init(
                 if result.returncode == 0:
                     available_devices = set()
                     for line in result.stdout.split("\n"):
-                        if line.strip() and not line.startswith("device") and not line.startswith("------"):
-                            parts = line.split()
-                            if parts:
-                                available_devices.add(parts[0])
+                        line = line.strip()
+                        # Skip empty lines, headers, and separator lines
+                        if not line or line.startswith("device") or line.startswith("------"):
+                            continue
+                        # Parse device name from line (first column)
+                        parts = line.split()
+                        if parts and parts[0].startswith("rdma_"):
+                            available_devices.add(parts[0])
                     logger.info(f"rank {rank} Available RDMA devices: {sorted(available_devices)}")
                     
                     # Check all devices in the matrix
