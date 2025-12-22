@@ -1,10 +1,13 @@
 import argparse
-import multiprocessing as mp
 import os
 import signal
 from dataclasses import dataclass, field
 from typing import Self
 
+# Import logging module FIRST to apply multiprocessing patch before multiprocessing is imported
+from exo.shared.logging import logger_cleanup, logger_setup  # noqa: E402
+
+import multiprocessing as mp
 import anyio
 from anyio.abc import TaskGroup
 from loguru import logger
@@ -17,7 +20,6 @@ from exo.master.placement_utils import estimated_memory_bandwidth_gbps
 from exo.routing.router import Router, get_node_id_keypair
 from exo.shared.constants import EXO_LOG
 from exo.shared.election import Election, ElectionResult
-from exo.shared.logging import logger_cleanup, logger_setup
 from exo.shared.types.common import NodeId, SessionId
 from exo.shared.types.events import NodePerformanceMeasured
 from exo.utils.channels import Receiver, channel
@@ -239,18 +241,7 @@ class Node:
 def main():
     args = Args.parse()
 
-    # Patch multiprocessing to handle BrokenPipeError when flushing stdout/stderr
-    # This happens when stdout/stderr are redirected to /dev/null
-    # MUST be done BEFORE set_start_method
-    import multiprocessing.util
-    original_flush = multiprocessing.util._flush_std_streams
-    def patched_flush_std_streams():
-        try:
-            original_flush()
-        except (BrokenPipeError, OSError):
-            pass
-    multiprocessing.util._flush_std_streams = patched_flush_std_streams
-    
+    # Patch is already applied at import time in exo.shared.logging
     mp.set_start_method("spawn")
     
     # TODO: Refactor the current verbosity system

@@ -129,25 +129,17 @@ else
     echo "Warning: npm not found, skipping dashboard build (using existing build if available)"
 fi
 
-# Run exo in background with sudo (logging to ~/.exo/exo.log per node)
-echo "Starting exo in background with sudo..."
-# Preserve PATH and HOME when running with sudo, and run from the correct directory
-# Redirect stdout/stderr to log file instead of /dev/null to avoid BrokenPipeError
-# Use sudo -n (non-interactive) to avoid password prompts, or fall back to regular sudo
+# Run exo in background (logging to ~/.exo/exo.log per node)
+# Note: We don't need sudo for exo itself, only for purge (which we do above)
+echo "Starting exo in background..."
 LOG_FILE="$HOME/.exo/exo.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-# Try non-interactive sudo first, fall back to regular sudo if needed
-SUDO_CMD="sudo -n"
-if ! $SUDO_CMD -E true 2>/dev/null; then
-    SUDO_CMD="sudo"
-    echo "Warning: Passwordless sudo not configured, sudo may prompt for password"
-fi
-
+# Run exo as the current user (not root) to avoid sudo authentication issues
 if [ -n "$UV_BIN" ]; then
-    nohup $SUDO_CMD -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && $UV_BIN run exo" >> "$LOG_FILE" 2>&1 &
+    nohup bash -c "cd $HOME/repos/exo && $UV_BIN run exo" >> "$LOG_FILE" 2>&1 &
 else
-    nohup $SUDO_CMD -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && uv run exo" >> "$LOG_FILE" 2>&1 &
+    nohup bash -c "cd $HOME/repos/exo && uv run exo" >> "$LOG_FILE" 2>&1 &
 fi
 echo "Exo started with PID: $!"
 echo "Logs are being written to $LOG_FILE on this node"
