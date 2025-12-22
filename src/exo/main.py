@@ -114,8 +114,14 @@ class Node:
     async def run(self):
         # Flush any stale resources on startup
         import sys
-        sys.stdout.flush()
-        sys.stderr.flush()
+        try:
+            sys.stdout.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        try:
+            sys.stderr.flush()
+        except (BrokenPipeError, OSError):
+            pass
         async with self._tg as tg:
             signal.signal(signal.SIGINT, lambda _, __: self.shutdown())
             signal.signal(signal.SIGTERM, lambda _, __: self.shutdown())

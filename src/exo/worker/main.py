@@ -100,8 +100,14 @@ class Worker:
         logger.info("Starting Worker")
         # Flush any stale resources on startup
         import sys
-        sys.stdout.flush()
-        sys.stderr.flush()
+        try:
+            sys.stdout.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        try:
+            sys.stderr.flush()
+        except (BrokenPipeError, OSError):
+            pass
 
         # TODO: CLEANUP HEADER
         async def resource_monitor_callback(
