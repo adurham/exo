@@ -14,7 +14,7 @@ prefix_output() {
 # Deploy to all nodes in parallel, prefixing each line with node name
 for node in "${NODES[@]}"; do
     echo "[$node] Deploying..."
-    ssh "$node" "cd ~/repos/exo/ && bash deploy.sh" 2>&1 | prefix_output "$node" &
+    ssh "$node" "cd ~/repos/exo/ && git fetch && git reset --hard origin/new_main && bash deploy.sh" 2>&1 | prefix_output "$node" &
 done
 
 # Wait for all background jobs to complete
