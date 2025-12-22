@@ -726,25 +726,16 @@ def _is_thunderbolt_interface_name(interface_name: str) -> bool:
     
     Thunderbolt interfaces on macOS are typically en2-en7.
     We explicitly exclude en0 (Ethernet), en1 (Wi-Fi), and other non-Thunderbolt interfaces.
+    
+    This function uses the same heuristic as _THUNDERBOLT_INTERFACE_NAME_GUESS
+    to ensure consistency across the codebase.
     """
     # Remove rdma_ prefix if present for checking
     base_name = interface_name.removeprefix("rdma_")
     
-    # Thunderbolt interfaces are typically en2-en7 on macOS
-    # en0 is usually Ethernet, en1 is usually Wi-Fi
-    if base_name.startswith("en"):
-        try:
-            # Extract the number after "en"
-            num_str = base_name[2:]
-            if num_str.isdigit():
-                num = int(num_str)
-                # Thunderbolt interfaces are typically en2-en7
-                # This is a conservative range - adjust if needed
-                return 2 <= num <= 7
-        except (ValueError, IndexError):
-            pass
-    
-    return False
+    # Use the same constant that's used elsewhere in the codebase
+    # This ensures consistency - if we update the constant, this function stays in sync
+    return base_name in _THUNDERBOLT_INTERFACE_NAME_GUESS
 
 
 def _to_rdma_interface_name(interface_name: str) -> str:
