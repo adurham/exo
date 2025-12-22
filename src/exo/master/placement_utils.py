@@ -628,6 +628,7 @@ def get_mlx_ibv_devices_matrix(
             # Prefer deterministic profile-based matching:
             # find a Thunderbolt IPv4 interface on node_i whose subnet contains an IPv4
             # address on node_j (supports /30 and other non-/24 masks).
+            # This works for point-to-point links where both nodes have IPs in the same subnet.
             interface_name = _find_mlx_rdma_interface_for_peer(node_i, node_j)
             if interface_name is not None:
                 # CRITICAL: Validate that the interface is actually Thunderbolt
@@ -639,6 +640,10 @@ def get_mlx_ibv_devices_matrix(
                         f"Only Thunderbolt interfaces are allowed for MLX RDMA."
                     )
                 matrix[i][j] = interface_name
+                logger.info(
+                    f"Matched interface {interface_name} on {node_i.node_id} for connection to {node_j.node_id} "
+                    f"via subnet matching"
+                )
                 continue
 
             # Fallback: match via topology "send_back_multiaddr" addresses if we cannot
@@ -923,9 +928,18 @@ def _find_mlx_rdma_interface_for_peer(
     node_local: NodeInfo,
     node_peer: NodeInfo,
 ) -> str | None:
+    """Find the Thunderbolt interface on node_local that connects to node_peer.
+    
+    This works by finding interfaces on both nodes that are in the same subnet.
+    For point-to-point links (e.g., /30 subnets), both nodes will have IPs in the same subnet.
+    """
     local_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_local)
     peer_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_peer)
     if not local_ifaces or not peer_ifaces:
+        logger.debug(
+            f"Subnet matching: {node_local.node_id} has {len(local_ifaces)} interfaces, "
+            f"{node_peer.node_id} has {len(peer_ifaces)} interfaces"
+        )
         return None
 
     peer_ipv4_addresses = [
@@ -934,6 +948,7 @@ def _find_mlx_rdma_interface_for_peer(
         if _is_ipv4_address(peer_iface.ip_address)
     ]
 
+    # Try matching: find a local interface whose subnet contains a peer IP
     for local_iface in local_ifaces:
         local_network = _ipv4_interface_network(local_iface)
         if local_network is None:
@@ -950,10 +965,33 @@ def _find_mlx_rdma_interface_for_peer(
                 )
                 return _to_rdma_interface_name(local_iface.name, node_local)
 
+    # Also try reverse: find a peer interface whose subnet contains a local IP
+    # This handles cases where the netmask might be missing on one side
+    local_ipv4_addresses = [
+        ipaddress.ip_address(local_iface.ip_address)
+        for local_iface in local_ifaces
+        if _is_ipv4_address(local_iface.ip_address)
+    ]
+    for peer_iface in peer_ifaces:
+        peer_network = _ipv4_interface_network(peer_iface)
+        if peer_network is None:
+            continue
+        for local_ip in local_ipv4_addresses:
+            if local_ip in peer_network:
+                # Found a match via reverse subnet check - use the local interface
+                # that has an IP in the peer's subnet
+                for local_iface in local_ifaces:
+                    if ipaddress.ip_address(local_iface.ip_address) == local_ip:
+                        logger.info(
+                            f"Matched {node_local.node_id} interface {local_iface.name} "
+                            f"(IP {local_ip} in peer network {peer_network}) to peer {node_peer.node_id}"
+                        )
+                        return _to_rdma_interface_name(local_iface.name, node_local)
+
     logger.debug(
         f"Subnet matching failed: {node_local.node_id} has {len(local_ifaces)} interfaces, "
         f"{node_peer.node_id} has {len(peer_ifaces)} interfaces, "
-        f"but no peer IPs matched any local network"
+        f"but no peer IPs matched any local network (and vice versa)"
     )
     return None
 
