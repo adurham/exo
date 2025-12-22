@@ -34,9 +34,9 @@ else
     echo "Warning: npm not found, skipping dashboard build (using existing build if available)"
 fi
 
-# Run exo in background with verbose logging to file (but not console)
+# Run exo in background (logging to ~/.exo/exo.log per node)
 echo "Starting exo in background..."
-nohup uv run exo -v > /dev/null 2>&1 &
+nohup uv run exo > /dev/null 2>&1 &
 echo "Exo started with PID: $!"
-echo "Logs are being written to ~/.exo/exo.log"
+echo "Logs are being written to ~/.exo/exo.log on this node"
 
