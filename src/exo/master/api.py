@@ -561,18 +561,43 @@ class API:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
                     continue
-                self.event_buffer.ingest(f_event.origin_idx, f_event.event)
-                for idx, event in self.event_buffer.drain_indexed():
-                    self._event_log.append(event)
-                    self.state = apply(self.state, IndexedEvent(event=event, idx=idx))
-                    if (
-                        isinstance(event, ChunkGenerated)
-                        and event.command_id in self._chat_completion_queues
-                    ):
-                        assert isinstance(event.chunk, TokenChunk)
-                        await self._chat_completion_queues[event.command_id].send(
-                            event.chunk
+                
+                # For ChunkGenerated events, process immediately to enable streaming
+                # Don't wait for event ordering - tokens need to be streamed as soon as they're generated
+                if isinstance(f_event.event, ChunkGenerated):
+                    chunk_event = f_event.event
+                    if chunk_event.command_id in self._chat_completion_queues:
+                        assert isinstance(chunk_event.chunk, TokenChunk)
+                        # Send chunk immediately to stream
+                        await self._chat_completion_queues[chunk_event.command_id].send(
+                            chunk_event.chunk
                         )
+                        # Still process through normal event flow for state management
+                        self.event_buffer.ingest(f_event.origin_idx, f_event.event)
+                        for idx, event in self.event_buffer.drain_indexed():
+                            self._event_log.append(event)
+                            self.state = apply(self.state, IndexedEvent(event=event, idx=idx))
+                    else:
+                        # Not a streaming request, process normally
+                        self.event_buffer.ingest(f_event.origin_idx, f_event.event)
+                        for idx, event in self.event_buffer.drain_indexed():
+                            self._event_log.append(event)
+                            self.state = apply(self.state, IndexedEvent(event=event, idx=idx))
+                else:
+                    # Non-ChunkGenerated events: process normally through buffer
+                    self.event_buffer.ingest(f_event.origin_idx, f_event.event)
+                    for idx, event in self.event_buffer.drain_indexed():
+                        self._event_log.append(event)
+                        self.state = apply(self.state, IndexedEvent(event=event, idx=idx))
+                        # Handle ChunkGenerated from buffer (shouldn't happen if above works, but keep for safety)
+                        if (
+                            isinstance(event, ChunkGenerated)
+                            and event.command_id in self._chat_completion_queues
+                        ):
+                            assert isinstance(event.chunk, TokenChunk)
+                            await self._chat_completion_queues[event.command_id].send(
+                                event.chunk
+                            )
 
     async def _pause_on_new_election(self):
         with self.election_receiver as ems:
