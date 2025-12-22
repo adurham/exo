@@ -13,7 +13,7 @@ cd ~/repos/exo/
 
 # Kill any existing exo processes
 echo "Stopping any existing exo processes..."
-pkill -f "exo -v" || pkill -f "uv run exo" || echo "No existing exo processes found"
+pkill -f "uv run exo" || pkill -f "exo" || echo "No existing exo processes found"
 sleep 2
 
 # Reset and pull latest
