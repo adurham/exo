@@ -84,8 +84,6 @@ def warmup_inference(
         kv_bits=KV_BITS,
     )
     logger.info("Created stream_generate iterator, starting iteration")
-    finish_reason_seen = False
-    iterator_exhausted = False
     try:
         for _r in iterator:
             tokens_generated += 1
@@ -94,47 +92,15 @@ def warmup_inference(
                 f"Generated warmup token #{tokens_generated}: '{_r.text}' "
                 f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s)"
             )
-            if _r.finish_reason is not None:
-                finish_reason_seen = True
-                logger.info(
-                    f"Token #{tokens_generated} has finish_reason={_r.finish_reason}, "
-                    f"but continuing warmup to ensure all ranks synchronize"
-                )
-            # Continue until we've generated max_tokens
-            # Don't break early - we need all ranks to generate the same number of tokens
-            # to ensure they all reach the barrier together
+            # Stop when we've generated max_tokens
             if tokens_generated >= 50:
-                logger.info(f"Reached max_tokens limit ({tokens_generated}), continuing to exhaust iterator")
-                # Don't break - continue to exhaust the iterator to ensure synchronization
+                logger.info(f"Reached max_tokens limit ({tokens_generated}), exiting loop")
+                break
     except StopIteration:
-        iterator_exhausted = True
         logger.info(f"Iterator exhausted (StopIteration) after {tokens_generated} tokens")
     except Exception as e:
         logger.error(f"Error during warmup token generation: {e}", exc_info=True)
         raise
-    finally:
-        # Ensure iterator is exhausted even if we break early
-        # This is critical for synchronization - all ranks must exhaust their iterators
-        # before reaching the barrier
-        if not iterator_exhausted:
-            logger.info("Iterator not exhausted, attempting to exhaust it")
-            try:
-                # Try to exhaust the iterator
-                for _ in iterator:
-                    tokens_generated += 1
-                    if tokens_generated >= 50:
-                        break
-            except StopIteration:
-                iterator_exhausted = True
-                logger.info(f"Iterator exhausted in finally block after {tokens_generated} tokens")
-    
-    # If we saw a finish_reason but didn't generate max_tokens, the iterator may have stopped
-    # but other ranks might still be waiting. We need to ensure all ranks exit together.
-    if finish_reason_seen and tokens_generated < 50 and not iterator_exhausted:
-        logger.warning(
-            f"Finished early with {tokens_generated} tokens (finish_reason seen, iterator not exhausted). "
-            f"Other ranks may still be waiting in stream_generate."
-        )
 
     logger.info(f"Exited stream_generate loop after {tokens_generated} tokens")
     generation_time = time.time() - warmup_start_time
