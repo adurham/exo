@@ -43,8 +43,11 @@ def warmup_inference(
     tokenizer: TokenizerWrapper,
     sampler: Callable[[mx.array], mx.array],
 ) -> int:
+    import time
+    
     content = "Prompt to warm up the inference engine. Repeat this."
 
+    logger.info("Starting warmup: applying chat template")
     warmup_prompt = apply_chat_template(
         tokenizer=tokenizer,
         chat_task_data=ChatCompletionTaskParams(
@@ -57,30 +60,53 @@ def warmup_inference(
             ],
         ),
     )
+    logger.info(f"Warmup prompt created (length: {len(warmup_prompt)})")
 
     tokens_generated = 0
 
+    logger.info("Creating KV cache for warmup")
     cache = make_kv_cache(
         model=model,
     )
+    logger.info("KV cache created, starting token generation")
 
-    logger.debug("Generating warmup tokens")
-    for _r in stream_generate(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=warmup_prompt,
-        max_tokens=50,
-        sampler=sampler,
-        prompt_cache=cache,
-        prefill_step_size=65536,
-        kv_group_size=KV_GROUP_SIZE,
-        kv_bits=KV_BITS,
-    ):
-        logger.debug("Generated warmup token: " + str(_r.text))
-        tokens_generated += 1
+    warmup_start_time = time.time()
+    logger.info("Generating warmup tokens (max 50)")
+    try:
+        for _r in stream_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=warmup_prompt,
+            max_tokens=50,
+            sampler=sampler,
+            prompt_cache=cache,
+            prefill_step_size=65536,
+            kv_group_size=KV_GROUP_SIZE,
+            kv_bits=KV_BITS,
+        ):
+            tokens_generated += 1
+            elapsed = time.time() - warmup_start_time
+            logger.info(
+                f"Generated warmup token #{tokens_generated}: '{_r.text}' "
+                f"(elapsed: {elapsed:.2f}s)"
+            )
+    except Exception as e:
+        logger.error(f"Error during warmup token generation: {e}", exc_info=True)
+        raise
 
-    logger.debug("Generated ALL warmup tokens")
+    generation_time = time.time() - warmup_start_time
+    logger.info(
+        f"Generated ALL {tokens_generated} warmup tokens in {generation_time:.2f}s, "
+        f"waiting for barrier"
+    )
+    
+    barrier_start_time = time.time()
     mx_barrier()
+    barrier_time = time.time() - barrier_start_time
+    logger.info(f"Warmup barrier completed in {barrier_time:.2f}s")
+
+    total_time = time.time() - warmup_start_time
+    logger.info(f"Warmup completed: {tokens_generated} tokens in {total_time:.2f}s total")
 
     return tokens_generated
 
