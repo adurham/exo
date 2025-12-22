@@ -162,29 +162,36 @@ def test_mlx_rdma(
     # Hardcode known devices for testing (from actual system configuration)
     matrix = [[None for _ in range(world_size)] for _ in range(world_size)]
     
-    # Known devices per rank (from actual system configuration):
-    # Rank 0 (macstudio-m4): rdma_en2, rdma_en3 (active)
-    # Rank 1 (macbook-m4): rdma_en1 (active)
-    # Rank 2 (work-macbook-m4): rdma_en1, rdma_en2, rdma_en3 (if active)
-    known_devices = {
-        0: "rdma_en2",  # Studio uses rdma_en2
-        1: "rdma_en1",  # MacBook M4 Max uses rdma_en1
-        2: "rdma_en1",  # MacBook M4 Pro uses rdma_en1 (if active)
+    # Known device mappings based on actual network topology:
+    # Rank 0 (macstudio-m4): 
+    #   - en2 (192.168.201.1) connects to rank 1 (MacBook M4 Max)
+    #   - en3 (192.168.202.1) connects to rank 2 (MacBook M4 Pro)
+    # Rank 1 (macbook-m4):
+    #   - en1 (192.168.201.2) connects to rank 0 (Studio)
+    #   - en2 (192.168.203.1) connects to rank 2 (MacBook M4 Pro)
+    # Rank 2 (work-macbook-m4):
+    #   - en1 (192.168.202.2) connects to rank 0 (Studio)
+    #   - en2 (192.168.203.2) connects to rank 1 (MacBook M4 Max)
+    device_matrix = {
+        (0, 1): "rdma_en2",  # Studio en2 -> MacBook M4 Max
+        (0, 2): "rdma_en3",  # Studio en3 -> MacBook M4 Pro
+        (1, 0): "rdma_en1",  # MacBook M4 Max en1 -> Studio
+        (1, 2): "rdma_en2",  # MacBook M4 Max en2 -> MacBook M4 Pro
+        (2, 0): "rdma_en1",  # MacBook M4 Pro en1 -> Studio
+        (2, 1): "rdma_en2",  # MacBook M4 Pro en2 -> MacBook M4 Max
     }
     
     # Fill in matrix: matrix[i][j] = device on node i that connects to node j
     for i in range(world_size):
         for j in range(world_size):
             if i != j:
-                # Use the known device for node i
-                # If we don't know it, use the current node's first active device
-                device = known_devices.get(i, active_ports[0])
+                # Use the known device mapping, or fall back to first active port
+                device = device_matrix.get((i, j), active_ports[0] if active_ports else None)
                 matrix[i][j] = device
     
     print(f"  Matrix for rank {rank}:")
     for i, row in enumerate(matrix):
-        if i == rank:
-            print(f"    Row {i}: {row}")
+        print(f"    Row {i}: {row}")
     
     with open(devices_file, "w") as f:
         json.dump(matrix, f)
@@ -203,7 +210,8 @@ def test_mlx_rdma(
     devices_file_str = str(devices_file.relative_to(Path.cwd())) if devices_file.is_relative_to(Path.cwd()) else str(devices_file)
     os.environ["MLX_IBV_DEVICES"] = devices_file_str
     os.environ["MLX_RANK"] = str(rank)
-    os.environ["MLX_IBV_COORDINATOR"] = f"{coordinator_ip}:{coordinator_port}"
+    # CRITICAL: MLX uses MLX_JACCL_COORDINATOR, not MLX_IBV_COORDINATOR
+    os.environ["MLX_JACCL_COORDINATOR"] = f"{coordinator_ip}:{coordinator_port}"
     os.environ["MLX_WORLD_SIZE"] = str(world_size)
     
     # Ensure MLX_HOSTFILE is NOT set
@@ -212,7 +220,7 @@ def test_mlx_rdma(
     
     print(f"  MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}")
     print(f"  MLX_RANK={os.environ.get('MLX_RANK')}")
-    print(f"  MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}")
+    print(f"  MLX_JACCL_COORDINATOR={os.environ.get('MLX_JACCL_COORDINATOR')}")
     print(f"  MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}")
     print(f"  MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}")
     

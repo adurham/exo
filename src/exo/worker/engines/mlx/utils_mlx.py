@@ -151,7 +151,7 @@ def mlx_distributed_init(
 
             world_size = bound_instance.bound_shard.world_size
             logger.info(f"rank {rank} MLX_IBV_DEVICES: {ibv_devices_json}")
-            logger.info(f"rank {rank} MLX_IBV_COORDINATOR: {ibv_coordinator}")
+            logger.info(f"rank {rank} MLX_JACCL_COORDINATOR: {ibv_coordinator}")
             logger.info(f"rank {rank} World size: {world_size}, Device rank: {rank}")
             
             # Verify the devices file exists and is readable
@@ -224,7 +224,8 @@ def mlx_distributed_init(
             # Use relative path - MLX may need it relative to current working directory
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
-            os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
+            # CRITICAL: MLX uses MLX_JACCL_COORDINATOR, not MLX_IBV_COORDINATOR
+            os.environ["MLX_JACCL_COORDINATOR"] = ibv_coordinator
             os.environ["MLX_WORLD_SIZE"] = str(world_size)
             
             # Log final environment state
@@ -232,7 +233,7 @@ def mlx_distributed_init(
                 f"rank {rank} Final environment: "
                 f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
                 f"MLX_RANK={os.environ.get('MLX_RANK')}, "
-                f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                f"MLX_JACCL_COORDINATOR={os.environ.get('MLX_JACCL_COORDINATOR')}, "
                 f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
                 f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}"
             )
@@ -240,7 +241,7 @@ def mlx_distributed_init(
             # For RDMA/InfiniBand, we MUST use RDMA - no fallback to 'any' backend
             # MLX requires MLX_IBV_DEVICES to be set for RDMA, and will use RDMA when:
             # - MLX_IBV_DEVICES is set (file path to JSON matrix)
-            # - MLX_IBV_COORDINATOR is set (IP:PORT of rank 0)
+            # - MLX_JACCL_COORDINATOR is set (IP:PORT of rank 0)
             # - MLX_WORLD_SIZE is set (number of ranks)
             # - MLX_HOSTFILE is NOT set (would cause ring backend)
             # - backend="any" (MLX doesn't have a separate "rdma" backend name)
@@ -262,7 +263,7 @@ def mlx_distributed_init(
                     f"rank {rank} MLX distributed.init failed with: {error_msg}. "
                     f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
                     f"MLX_RANK={os.environ.get('MLX_RANK')}, "
-                    f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                    f"MLX_JACCL_COORDINATOR={os.environ.get('MLX_JACCL_COORDINATOR')}, "
                     f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
                     f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}. "
                     f"Devices file exists: {os.path.exists(devices_file_abs)}, "
@@ -280,7 +281,7 @@ def mlx_distributed_init(
                     f"but expected distributed RDMA group (world_size={world_size}). "
                     f"This means MLX did not use RDMA despite environment being set correctly. "
                     f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
-                    f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                    f"MLX_JACCL_COORDINATOR={os.environ.get('MLX_JACCL_COORDINATOR')}, "
                     f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
                     f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}. "
                     f"RDMA must be working for this instance type. Check RDMA configuration and network connectivity."
@@ -303,7 +304,7 @@ def mlx_distributed_init(
                     f"Got singleton group (size=1) but expected distributed group (world_size={world_size}). "
                     f"Environment was: MLX_RANK={os.environ.get('MLX_RANK')}, "
                     f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
-                    f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}. "
+                    f"MLX_JACCL_COORDINATOR={os.environ.get('MLX_JACCL_COORDINATOR')}. "
                     f"RDMA backend may not be working correctly on this system."
                 )
             
