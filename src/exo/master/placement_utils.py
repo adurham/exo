@@ -619,34 +619,23 @@ def get_mlx_ibv_devices_matrix(
 
     # MLX RDMA requires Thunderbolt connections - restrict candidate interfaces to TB.
     logger.info("MLX RDMA selecting RDMA interfaces over Thunderbolt (IPv4 only)")
+    logger.info("Testing connectivity between Thunderbolt interfaces using ping")
 
     for i, node_i in enumerate(selected_cycle):
         for j, node_j in enumerate(selected_cycle):
             if i == j:
                 continue
 
-            # Hardcoded topology mapping for 3-node setup:
-            # Node A (macstudio) -> Node B (macbook): uses 192.168.203.1 (on A) through 192.168.203.2 (on B)
-            # Node A (macstudio) -> Node C (work-macbook): uses 192.168.202.1 (on A) through 192.168.202.2 (on C)
-            # Node B (macbook) -> Node C (work-macbook): uses 192.168.201.1 (on B) through 192.168.201.2 (on C)
-            # Node B -> Node A: uses 192.168.203.2 (on B) through 192.168.203.1 (on A)
-            # Node C -> Node A: uses 192.168.202.2 (on C) through 192.168.202.1 (on A)
-            # Node C -> Node B: uses 192.168.201.2 (on C) through 192.168.201.1 (on B)
-            interface_name = _get_hardcoded_thunderbolt_interface(node_i, node_j)
+            # Find Thunderbolt interface on node_i that can ping node_j's Thunderbolt interfaces
+            interface_name = _find_thunderbolt_interface_by_ping(node_i, node_j)
             if interface_name is not None:
                 matrix[i][j] = interface_name
                 logger.info(
-                    f"Using hardcoded interface {interface_name} on {node_i.node_id} for connection to {node_j.node_id}"
+                    f"Found working interface {interface_name} on {node_i.node_id} for connection to {node_j.node_id} via ping test"
                 )
                 continue
-            else:
-                logger.debug(
-                    f"Hardcoded function returned None for {node_i.node_id} -> {node_j.node_id}. "
-                    f"Local IPs: {[iface.ip_address for iface in _get_mlx_rdma_thunderbolt_interfaces_for_node(node_i)]}, "
-                    f"Peer IPs: {[iface.ip_address for iface in _get_mlx_rdma_thunderbolt_interfaces_for_node(node_j)]}"
-                )
 
-            # Fallback to subnet matching if hardcoded mapping doesn't apply
+            # Fallback to subnet matching if ping test doesn't find a connection
             interface_name = _find_mlx_rdma_interface_for_peer(node_i, node_j)
             if interface_name is not None:
                 # CRITICAL: Validate that the interface is actually Thunderbolt
@@ -958,6 +947,78 @@ def _ipv4_interface_network(interface: NetworkInterfaceInfo) -> ipaddress.IPv4Ne
         )
     except (ValueError, AttributeError):
         return None
+
+
+def _find_thunderbolt_interface_by_ping(
+    node_local: NodeInfo,
+    node_peer: NodeInfo,
+) -> str | None:
+    """Find Thunderbolt interface on node_local that can ping node_peer's Thunderbolt interfaces.
+    
+    Tests connectivity by pinging from each Thunderbolt interface on node_local
+    to each Thunderbolt interface on node_peer. Returns the first interface that
+    successfully pings any peer interface.
+    
+    Returns the RDMA interface name (e.g., "rdma_en2") or None if no connectivity found.
+    """
+    local_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_local)
+    peer_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_peer)
+    
+    if not local_ifaces or not peer_ifaces:
+        logger.debug(
+            f"No Thunderbolt interfaces found: local={len(local_ifaces) if local_ifaces else 0}, "
+            f"peer={len(peer_ifaces) if peer_ifaces else 0}"
+        )
+        return None
+    
+    logger.debug(
+        f"Testing ping connectivity from {node_local.node_id} to {node_peer.node_id}. "
+        f"Local interfaces: {[(iface.name, iface.ip_address) for iface in local_ifaces]}, "
+        f"Peer interfaces: {[(iface.name, iface.ip_address) for iface in peer_ifaces]}"
+    )
+    
+    # Test each local interface against each peer interface
+    for local_iface in local_ifaces:
+        local_ip = local_iface.ip_address
+        if not _is_ipv4_address(local_ip):
+            continue
+            
+        for peer_iface in peer_ifaces:
+            peer_ip = peer_iface.ip_address
+            if not _is_ipv4_address(peer_ip):
+                continue
+            
+            # Ping test: use ping with count=1 and timeout=1 second
+            # On macOS, use -c for count, -W for timeout (in milliseconds), and -S for source interface
+            try:
+                result = subprocess.run(
+                    ["ping", "-c", "1", "-W", "1000", "-S", local_ip, peer_ip],
+                    capture_output=True,
+                    timeout=2,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    logger.info(
+                        f"Ping successful: {local_iface.name} ({local_ip}) -> {peer_iface.name} ({peer_ip})"
+                    )
+                    return _to_rdma_interface_name(local_iface.name, node_local)
+                else:
+                    logger.debug(
+                        f"Ping failed: {local_iface.name} ({local_ip}) -> {peer_iface.name} ({peer_ip}): {result.stderr[:100] if result.stderr else 'no error message'}"
+                    )
+            except subprocess.TimeoutExpired:
+                logger.debug(
+                    f"Ping timeout: {local_iface.name} ({local_ip}) -> {peer_iface.name} ({peer_ip})"
+                )
+            except Exception as e:
+                logger.debug(
+                    f"Ping error: {local_iface.name} ({local_ip}) -> {peer_iface.name} ({peer_ip}): {e}"
+                )
+    
+    logger.warning(
+        f"No ping connectivity found from {node_local.node_id} to {node_peer.node_id}"
+    )
+    return None
 
 
 def _get_hardcoded_thunderbolt_interface(
