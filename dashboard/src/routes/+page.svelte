@@ -170,9 +170,8 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 	}
 	
 	const matchesSelectedRuntime = (runtime: InstanceMeta): boolean =>
-		selectedInstanceType === 'MlxRing'
-			? runtime === 'MlxRing'
-			: runtime === 'MlxIbv' || runtime === 'MlxJaccl';
+		// Only match MLX RDMA (MlxJaccl)
+		runtime === 'MlxJaccl';
 
 	// Helper to check if a model can be launched (has valid placement with >= minNodes)
 	function canModelFit(modelId: string): boolean {
