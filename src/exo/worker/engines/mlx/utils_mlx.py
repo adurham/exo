@@ -166,12 +166,18 @@ def mlx_distributed_init(
                 f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
             )
             
-            # For RDMA/InfiniBand, use 'any' backend with strict=False
-            # This allows MLX to try all available backends and use RDMA if supported
+            # For RDMA/InfiniBand, try 'jaccl' backend first (explicit RDMA backend)
+            # If that fails, fall back to 'any' backend
             # strict=False allows fallback to singleton group if distributed isn't available
             # (though for multi-node instances, distributed should be available)
-            logger.info(f"rank {rank} Calling mx.distributed.init(backend='any', strict=False)")
-            group = mx.distributed.init(backend="any", strict=False)
+            logger.info(f"rank {rank} Calling mx.distributed.init(backend='jaccl', strict=False)")
+            try:
+                group = mx.distributed.init(backend="jaccl", strict=False)
+                logger.info(f"rank {rank} Successfully initialized with 'jaccl' backend")
+            except RuntimeError as e:
+                logger.warning(f"rank {rank} 'jaccl' backend failed: {e}. Trying 'any' backend...")
+                group = mx.distributed.init(backend="any", strict=False)
+                logger.info(f"rank {rank} Initialized with 'any' backend")
             
             # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
             mlx_actual_rank = group.rank()
