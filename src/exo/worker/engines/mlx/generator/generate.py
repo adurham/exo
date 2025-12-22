@@ -106,12 +106,22 @@ def warmup_inference(
     logger.info("Created stream_generate iterator, starting iteration")
     
     token_times = []
+    last_log_time = warmup_start_time
     try:
         for _r in iterator:
             tokens_generated += 1
             token_time = time.time()
             elapsed = token_time - warmup_start_time
+            time_since_last_log = token_time - last_log_time
             token_times.append(token_time)
+            
+            # Log every token, and also log memory every 10 tokens
+            logger.info(
+                f"Generated warmup token #{tokens_generated}: '{_r.text}' "
+                f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s, "
+                f"time_since_last: {time_since_last_log:.2f}s)"
+            )
+            last_log_time = token_time
             
             # Log memory every 10 tokens
             if psutil is not None and tokens_generated % 10 == 0:
@@ -126,10 +136,6 @@ def warmup_inference(
                         f"Token #{tokens_generated} SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
                     )
             
-            logger.info(
-                f"Generated warmup token #{tokens_generated}: '{_r.text}' "
-                f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s)"
-            )
             # Stop when we've generated max_tokens
             if tokens_generated >= 50:
                 logger.info(f"Reached max_tokens limit ({tokens_generated}), exiting loop")
