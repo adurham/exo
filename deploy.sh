@@ -133,12 +133,21 @@ fi
 echo "Starting exo in background with sudo..."
 # Preserve PATH and HOME when running with sudo, and run from the correct directory
 # Redirect stdout/stderr to log file instead of /dev/null to avoid BrokenPipeError
+# Use sudo -n (non-interactive) to avoid password prompts, or fall back to regular sudo
 LOG_FILE="$HOME/.exo/exo.log"
 mkdir -p "$(dirname "$LOG_FILE")"
+
+# Try non-interactive sudo first, fall back to regular sudo if needed
+SUDO_CMD="sudo -n"
+if ! $SUDO_CMD -E true 2>/dev/null; then
+    SUDO_CMD="sudo"
+    echo "Warning: Passwordless sudo not configured, sudo may prompt for password"
+fi
+
 if [ -n "$UV_BIN" ]; then
-    nohup sudo -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && $UV_BIN run exo" >> "$LOG_FILE" 2>&1 &
+    nohup $SUDO_CMD -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && $UV_BIN run exo" >> "$LOG_FILE" 2>&1 &
 else
-    nohup sudo -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && uv run exo" >> "$LOG_FILE" 2>&1 &
+    nohup $SUDO_CMD -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && uv run exo" >> "$LOG_FILE" 2>&1 &
 fi
 echo "Exo started with PID: $!"
 echo "Logs are being written to $LOG_FILE on this node"
