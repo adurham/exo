@@ -45,7 +45,7 @@ const debugEnabled = $derived(debugMode());
 	let selectedSharding = $state<'Pipeline' | 'Tensor'>('Pipeline');
 	type InstanceMeta = 'MlxRing' | 'MlxIbv' | 'MlxJaccl';
 	
-	let selectedInstanceType = $state<InstanceMeta>('MlxRing');
+	let selectedInstanceType = $state<InstanceMeta>('MlxJaccl');
 	let launchingModelId = $state<string | null>(null);
 let instanceDownloadExpandedNodes = $state<Set<string>>(new Set());
 	
