@@ -16,7 +16,7 @@ for node in "${NODES[@]}"; do
     echo "========================================="
     echo "Deploying to $node..."
     echo "========================================="
-    ssh "$node" "cd ~/repos/exo/ && git pull && bash deploy.sh" 2>&1 | prefix_output "$node" &
+    ssh "$node" "cd ~/repos/exo/ && bash deploy.sh" 2>&1 | prefix_output "$node" &
 done
 
 # Wait for all background jobs to complete
