@@ -884,7 +884,7 @@ def _get_mlx_rdma_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> list[N
     # The MTU/up filtering was too aggressive and excluded valid interfaces.
     # Return all candidates, sorted for consistency.
     all_candidates.sort(key=lambda iface: (iface.name, iface.ip_address))
-    logger.debug(
+    logger.info(
         f"Node {node_info.node_id} has {len(all_candidates)} Thunderbolt interfaces: "
         f"{[(iface.name, iface.ip_address) for iface in all_candidates]}"
     )
