@@ -161,9 +161,11 @@ def mlx_distributed_init(
                 del os.environ["MLX_HOSTFILE"]
             
             # Set RDMA-specific environment variables
+            # MLX_WORLD_SIZE is required for RDMA initialization
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
+            os.environ["MLX_WORLD_SIZE"] = str(world_size)
             
             # Log final environment state
             logger.info(
@@ -171,6 +173,7 @@ def mlx_distributed_init(
                 f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
                 f"MLX_RANK={os.environ.get('MLX_RANK')}, "
                 f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
                 f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}"
             )
             
