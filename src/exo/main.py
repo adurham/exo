@@ -257,13 +257,22 @@ def main():
         logger.info("EXO Shutdown complete, flushing logs and cleaning up")
         # Flush all log handlers
         import sys
-        for handler in logger._core.handlers.values():
-            try:
-                handler._sink.flush()
-            except Exception:
-                pass
-        sys.stdout.flush()
-        sys.stderr.flush()
+        try:
+            for handler in logger._core.handlers.values():
+                try:
+                    handler._sink.flush()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            sys.stdout.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        try:
+            sys.stderr.flush()
+        except (BrokenPipeError, OSError):
+            pass
         logger_cleanup()
 
 
