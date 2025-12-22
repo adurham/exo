@@ -194,14 +194,18 @@ def mlx_distributed_init(
                         f"rank {rank} 'jaccl' backend name not available, but MLX_IBV_DEVICES is set "
                         f"and MLX_HOSTFILE is not set - this should force RDMA with 'any' backend"
                     )
-                    group = mx.distributed.init(backend="any", strict=False)
+                    # Use strict=True to fail fast if RDMA can't be initialized
+                    # This prevents silent fallback to singleton groups
+                    group = mx.distributed.init(backend="any", strict=True)
+                    logger.info(f"rank {rank} Successfully initialized with 'any' backend (should be RDMA)")
                     # Verify it actually used RDMA by checking if we got a distributed group
                     if group.size() == 1 and world_size > 1:
                         logger.error(
                             f"rank {rank} MLX created singleton group despite MLX_IBV_DEVICES being set. "
                             f"This suggests RDMA backend is not working. "
                             f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
-                            f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
+                            f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                            f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}"
                         )
                 else:
                     # Re-raise if it's a different error
