@@ -107,8 +107,11 @@ def warmup_inference(
     
     token_times = []
     last_log_time = warmup_start_time
+    iteration_count = 0
     try:
         for _r in iterator:
+            iteration_count += 1
+            logger.debug(f"Iteration #{iteration_count}: received from stream_generate")
             tokens_generated += 1
             token_time = time.time()
             elapsed = token_time - warmup_start_time
@@ -146,7 +149,7 @@ def warmup_inference(
         logger.error(f"Error during warmup token generation: {e}", exc_info=True)
         raise
 
-    logger.info(f"Exited stream_generate loop after {tokens_generated} tokens")
+    logger.info(f"Exited stream_generate loop after {tokens_generated} tokens (total iterations: {iteration_count})")
     generation_time = time.time() - warmup_start_time
     
     # Calculate token generation rate
