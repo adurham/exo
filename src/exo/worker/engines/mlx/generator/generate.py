@@ -83,15 +83,14 @@ def warmup_inference(
     if psutil is not None:
         process = psutil.Process(os.getpid())
         mem_info = process.memory_info()
-        swap_info = process.memory_full_info() if hasattr(process, 'memory_full_info') else None
+        swap_info = psutil.swap_memory()
         logger.info(
             f"Pre-warmup memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB, "
-            f"VMS={mem_info.vms / 1024 / 1024 / 1024:.2f}GB"
+            f"VMS={mem_info.vms / 1024 / 1024 / 1024:.2f}GB. "
+            f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
         )
-        if swap_info:
-            logger.info(
-                f"Pre-warmup swap: {swap_info.swap / 1024 / 1024 / 1024:.2f}GB"
-            )
+        if swap_info.used > 0:
+            logger.warning("SWAP DETECTED before warmup! This can severely impact performance.")
     
     iterator = stream_generate(
         model=model,
@@ -117,13 +116,14 @@ def warmup_inference(
             # Log memory every 10 tokens
             if psutil is not None and tokens_generated % 10 == 0:
                 mem_info = process.memory_info()
-                swap_info = process.memory_full_info() if hasattr(process, 'memory_full_info') else None
+                swap_info = psutil.swap_memory()
                 logger.info(
-                    f"Token #{tokens_generated} memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB"
+                    f"Token #{tokens_generated} memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB. "
+                    f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
                 )
-                if swap_info and swap_info.swap > 0:
+                if swap_info.used > 0:
                     logger.warning(
-                        f"Token #{tokens_generated} SWAP USAGE DETECTED: {swap_info.swap / 1024 / 1024 / 1024:.2f}GB"
+                        f"Token #{tokens_generated} SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
                     )
             
             logger.info(
@@ -156,13 +156,14 @@ def warmup_inference(
     # Log memory before barrier
     if psutil is not None:
         mem_info = process.memory_info()
-        swap_info = process.memory_full_info() if hasattr(process, 'memory_full_info') else None
+        swap_info = psutil.swap_memory()
         logger.info(
-            f"Pre-barrier memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB"
+            f"Pre-barrier memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB. "
+            f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
         )
-        if swap_info and swap_info.swap > 0:
+        if swap_info.used > 0:
             logger.warning(
-                f"Pre-barrier SWAP USAGE DETECTED: {swap_info.swap / 1024 / 1024 / 1024:.2f}GB"
+                f"Pre-barrier SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
             )
     
     barrier_start_time = time.time()
