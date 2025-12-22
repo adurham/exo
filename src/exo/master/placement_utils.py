@@ -879,22 +879,16 @@ def _get_mlx_rdma_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> list[N
             continue
         all_candidates.append(interface)
 
-    # Auto-restrict to the "active" Thunderbolt links when possible:
-    # if we can identify MTU/up state, prefer the interfaces that look like the
-    # dedicated RDMA links (typically MTU 9000 and up).
-    preferred_candidates = [
-        interface
-        for interface in all_candidates
-        if (interface.is_up is not False)
-        and (
-            interface.maximum_transmission_unit is None
-            or interface.maximum_transmission_unit >= 9000
-        )
-    ]
-    candidates = preferred_candidates if preferred_candidates else all_candidates
-
-    candidates.sort(key=lambda iface: (iface.name, iface.ip_address))
-    return candidates
+    # For MLX RDMA, we need ALL Thunderbolt interfaces, not just "preferred" ones.
+    # Each node may have multiple Thunderbolt interfaces for different connections.
+    # The MTU/up filtering was too aggressive and excluded valid interfaces.
+    # Return all candidates, sorted for consistency.
+    all_candidates.sort(key=lambda iface: (iface.name, iface.ip_address))
+    logger.debug(
+        f"Node {node_info.node_id} has {len(all_candidates)} Thunderbolt interfaces: "
+        f"{[(iface.name, iface.ip_address) for iface in all_candidates]}"
+    )
+    return all_candidates
 
 
 def _ipv4_interface_network(interface: NetworkInterfaceInfo) -> ipaddress.IPv4Network | None:
