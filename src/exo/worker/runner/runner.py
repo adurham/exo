@@ -239,6 +239,33 @@ def main(
             )
         )
     finally:
+        # Cleanup GPU resources before exiting
+        logger.info("Runner cleaning up GPU resources")
+        try:
+            # Delete model references to free GPU memory
+            if 'model' in locals():
+                del model
+            if 'tokenizer' in locals():
+                del tokenizer
+            if 'sampler' in locals():
+                del sampler
+            
+            # Force garbage collection to free MLX arrays
+            import gc
+            gc.collect()
+            
+            # Try to clear MLX caches if possible
+            try:
+                import mlx.core as mx
+                # Clear any cached computations
+                mx.clear_cache()
+            except Exception:
+                pass  # mx.clear_cache() might not exist
+            
+            logger.info("Runner GPU cleanup complete")
+        except Exception as e:
+            logger.warning(f"Error during GPU cleanup: {e}")
+        
         event_sender.close()
         task_receiver.close()
         event_sender.join()

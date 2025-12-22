@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+sleep 10
+
 NODES=("macstudio-m4" "macbook-m4" "work-macbook-m4")
 
 # Function to prefix output with node name
