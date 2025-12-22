@@ -41,9 +41,9 @@ fi
 
 # Purge memory caches to free up RAM (macOS specific)
 echo "Purging memory caches..."
-# Try purge first (may require special permissions)
+# Use sudo purge to force memory reclamation
 if command -v purge &> /dev/null; then
-    purge 2>&1 | grep -v "Operation not permitted" || true
+    sudo purge 2>&1 || echo "Warning: sudo purge failed (may require password or sudo access)"
 fi
 
 # Force memory pressure to reclaim inactive memory by allocating and freeing
