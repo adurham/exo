@@ -187,12 +187,16 @@ def mlx_distributed_init(
                             available_devices.add(parts[0])
                     logger.info(f"rank {rank} Available RDMA devices: {sorted(available_devices)}")
                     
-                    # Check all devices in the matrix
+                    # CRITICAL: Only check devices in THIS node's row (matrix[rank][*])
+                    # The matrix is from the perspective of each node - matrix[i][j] is the interface
+                    # on node i that connects to node j. We should only validate the devices
+                    # that THIS node (rank) will use, not devices from other nodes' rows.
                     missing_devices = []
-                    for i, row in enumerate(ibv_devices):
+                    if rank < len(ibv_devices):
+                        row = ibv_devices[rank]
                         for j, device_name in enumerate(row):
                             if device_name is not None and device_name not in available_devices:
-                                missing_devices.append(f"matrix[{i}][{j}]={device_name}")
+                                missing_devices.append(f"matrix[{rank}][{j}]={device_name}")
                     
                     if missing_devices:
                         raise RuntimeError(
