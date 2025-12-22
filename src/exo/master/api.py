@@ -416,8 +416,16 @@ class API:
             logger.info(f"API: Created streaming queue for command_id={command_id}")
 
             is_thinking = False
+            logger.info(f"API: Starting to consume chunks for command_id={command_id}")
+            chunk_count = 0
             with recv as token_chunks:
                 async for chunk in token_chunks:
+                    chunk_count += 1
+                    logger.info(
+                        f"API: Received chunk #{chunk_count} for command_id={command_id}, "
+                        f"text='{chunk.text[:50] if chunk.text else 'N/A'}', "
+                        f"finish_reason={chunk.finish_reason}"
+                    )
                     if HIDE_THINKING:
                         if chunk.text == "<think>":
                             is_thinking = True
@@ -428,9 +436,12 @@ class API:
                     )
                     if not (is_thinking and HIDE_THINKING):
                         logger.debug(f"chunk_response: {chunk_response}")
-                        yield f"data: {chunk_response.model_dump_json()}\n\n"
+                        response_str = f"data: {chunk_response.model_dump_json()}\n\n"
+                        logger.info(f"API: Yielding chunk #{chunk_count} for command_id={command_id}")
+                        yield response_str
 
                     if chunk.finish_reason is not None:
+                        logger.info(f"API: Finished streaming for command_id={command_id}, total chunks={chunk_count}")
                         yield "data: [DONE]\n\n"
                         break
 
