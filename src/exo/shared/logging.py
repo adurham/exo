@@ -51,10 +51,12 @@ def logger_setup(log_file: Path | None, verbosity: int = 0):
             enqueue=True,
         )
     if log_file:
+        # File handler level depends on verbosity: DEBUG if verbose, INFO otherwise
+        file_level = "DEBUG" if verbosity > 0 else "INFO"
         logger.add(
             log_file,
             format="[ {time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} ] {message}",
-            level="INFO",
+            level=file_level,
             colorize=False,
             enqueue=True,
             rotation="1 week",
