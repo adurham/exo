@@ -603,11 +603,11 @@ def get_mlx_ibv_devices_matrix(
             if interface_name is not None:
                 # CRITICAL: Validate that the interface is actually Thunderbolt
                 # This is a safety check - _find_mlx_rdma_interface_for_peer should only return Thunderbolt
-                if not _is_thunderbolt_interface_name(interface_name):
+                if not _is_thunderbolt_interface_name(interface_name, node_i):
                     raise ValueError(
                         f"Interface '{interface_name}' returned by _find_mlx_rdma_interface_for_peer "
-                        f"is not a Thunderbolt interface. Only Thunderbolt interfaces (en2-en7) "
-                        f"are allowed for MLX RDMA."
+                        f"is not a Thunderbolt interface according to node profile. "
+                        f"Only Thunderbolt interfaces are allowed for MLX RDMA."
                     )
                 matrix[i][j] = interface_name
                 continue
@@ -626,10 +626,10 @@ def get_mlx_ibv_devices_matrix(
                 if interface_name := _find_interface_name_for_ip(connection_ip, node_i):
                     # CRITICAL: Validate that the interface is actually Thunderbolt
                     # _find_interface_name_for_ip should only return Thunderbolt, but verify
-                    if not _is_thunderbolt_interface_name(interface_name):
+                    if not _is_thunderbolt_interface_name(interface_name, node_i):
                         logger.error(
                             f"Interface '{interface_name}' found for IP {connection_ip} on {node_i.node_id} "
-                            f"is not a Thunderbolt interface. Skipping."
+                            f"is not a Thunderbolt interface according to node profile. Skipping."
                         )
                         continue
                     matrix[i][j] = interface_name
@@ -647,7 +647,7 @@ def get_mlx_ibv_devices_matrix(
                             if not _is_ipv4_address(iface.ip_address):
                                 continue
                             available_ips.append(
-                                f"{_to_rdma_interface_name(iface.name)}:{iface.ip_address}"
+                                f"{_to_rdma_interface_name(iface.name, node_i)}:{iface.ip_address}"
                             )
                 
                 logger.error(
@@ -665,18 +665,13 @@ def get_mlx_ibv_devices_matrix(
     for i, row in enumerate(matrix):
         for j, interface_name in enumerate(row):
             if interface_name is not None:
-                if not _is_thunderbolt_interface_name(interface_name):
+                node_i = selected_cycle[i]
+                if not _is_thunderbolt_interface_name(interface_name, node_i):
                     raise ValueError(
                         f"Matrix[{i}][{j}] contains non-Thunderbolt interface '{interface_name}'. "
-                        f"Only Thunderbolt interfaces (en2-en7) are allowed for MLX RDMA. "
-                        f"This is a critical error - MLX RDMA traffic must only use Thunderbolt interfaces."
-                    )
-                # Also verify the base interface name (without rdma_ prefix) is Thunderbolt
-                base_name = interface_name.removeprefix("rdma_")
-                if not _is_thunderbolt_interface_name(base_name):
-                    raise ValueError(
-                        f"Matrix[{i}][{j}] contains interface '{interface_name}' with base name '{base_name}' "
-                        f"that is not Thunderbolt. Only Thunderbolt interfaces (en2-en7) are allowed."
+                        f"Only Thunderbolt interfaces are allowed for MLX RDMA. "
+                        f"This is a critical error - MLX RDMA traffic must only use Thunderbolt interfaces. "
+                        f"Node: {node_i.node_id}"
                     )
 
     logger.info("MLX RDMA devices matrix validation passed - all interfaces are Thunderbolt")
@@ -721,38 +716,59 @@ def _is_ipv4_address(ip_address: str) -> bool:
         return False
 
 
-def _is_thunderbolt_interface_name(interface_name: str) -> bool:
+def _is_thunderbolt_interface_name(interface_name: str, node_info: NodeInfo | None = None) -> bool:
     """Check if an interface name is a Thunderbolt interface.
     
-    Thunderbolt interfaces on macOS are typically en2-en7.
-    We explicitly exclude en0 (Ethernet), en1 (Wi-Fi), and other non-Thunderbolt interfaces.
+    This function first checks the node profile's is_thunderbolt field if available,
+    which is the most reliable method. Falls back to name-based heuristics if profile
+    data is not available.
     
-    This function uses the same heuristic as _THUNDERBOLT_INTERFACE_NAME_GUESS
-    to ensure consistency across the codebase.
+    Args:
+        interface_name: The interface name to check (e.g., "en1", "rdma_en2")
+        node_info: Optional node info to check the profile's is_thunderbolt field
+    
+    Returns:
+        True if the interface is Thunderbolt, False otherwise
     """
     # Remove rdma_ prefix if present for checking
     base_name = interface_name.removeprefix("rdma_")
     
-    # Use the same constant that's used elsewhere in the codebase
-    # This ensures consistency - if we update the constant, this function stays in sync
+    # First, try to use the profile's is_thunderbolt field if available
+    # This is the most reliable method as it uses actual system detection
+    if node_info and node_info.node_profile:
+        for interface in node_info.node_profile.network_interfaces:
+            if interface.name == base_name:
+                if interface.is_thunderbolt is True:
+                    return True
+                elif interface.is_thunderbolt is False:
+                    return False
+                # If is_thunderbolt is None, fall through to heuristic check
+    
+    # Fallback: Use name-based heuristic (en2-en7)
+    # Note: Some Macs have Thunderbolt on en1, so this is not perfect
+    # but it's better than nothing when profile data is unavailable
     return base_name in _THUNDERBOLT_INTERFACE_NAME_GUESS
 
 
-def _to_rdma_interface_name(interface_name: str) -> str:
+def _to_rdma_interface_name(interface_name: str, node_info: NodeInfo | None = None) -> str:
     """Convert an interface name to RDMA device name format.
     
-    CRITICAL: Only Thunderbolt interfaces (en2-en7) are allowed for MLX RDMA.
+    CRITICAL: Only Thunderbolt interfaces are allowed for MLX RDMA.
     This function will raise ValueError if a non-Thunderbolt interface is provided.
+    
+    Args:
+        interface_name: The interface name to convert (e.g., "en1", "en2")
+        node_info: Optional node info to validate against profile's is_thunderbolt field
     """
     # Validate that this is a Thunderbolt interface
-    if not _is_thunderbolt_interface_name(interface_name):
+    if not _is_thunderbolt_interface_name(interface_name, node_info):
         raise ValueError(
             f"Interface '{interface_name}' is not a Thunderbolt interface. "
-            f"Only Thunderbolt interfaces (en2-en7) can be used for MLX RDMA. "
-            f"Non-Thunderbolt interfaces (e.g., en0=Ethernet, en1=Wi-Fi) are not allowed."
+            f"Only Thunderbolt interfaces can be used for MLX RDMA. "
+            f"Non-Thunderbolt interfaces (e.g., en0=Ethernet, en1=Wi-Fi on some systems) are not allowed."
         )
     
-    # RDMA devices on macOS are named with "rdma_" prefix (e.g., "rdma_en2", "rdma_en3")
+    # RDMA devices on macOS are named with "rdma_" prefix (e.g., "rdma_en1", "rdma_en2")
     # as shown by `ibv_devices` command. Add the prefix if not present.
     return interface_name if interface_name.startswith("rdma_") else f"rdma_{interface_name}"
 
@@ -835,7 +851,7 @@ def _find_mlx_rdma_interface_for_peer(
             continue
         for peer_ip in peer_ipv4_addresses:
             if peer_ip in local_network:
-                return _to_rdma_interface_name(local_iface.name)
+                return _to_rdma_interface_name(local_iface.name, node_local)
 
     return None
 
@@ -987,7 +1003,7 @@ def _find_interface_name_for_ip(
             continue
 
         logger.info("Found")
-        return _to_rdma_interface_name(interface.name)
+        return _to_rdma_interface_name(interface.name, node_info)
 
     return None
 
