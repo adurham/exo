@@ -85,21 +85,40 @@ def warmup_inference(
             kv_bits=KV_BITS,
         )
         logger.info("Created stream_generate iterator, starting iteration")
-        for _r in iterator:
-            tokens_generated += 1
-            elapsed = time.time() - warmup_start_time
-            logger.info(
-                f"Generated warmup token #{tokens_generated}: '{_r.text}' "
-                f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s)"
-            )
-            if _r.finish_reason is not None:
+        finish_reason_seen = False
+        iterator_exhausted = False
+        try:
+            for _r in iterator:
+                tokens_generated += 1
+                elapsed = time.time() - warmup_start_time
                 logger.info(
-                    f"Token #{tokens_generated} has finish_reason={_r.finish_reason}, "
-                    f"but continuing warmup to ensure all ranks synchronize"
+                    f"Generated warmup token #{tokens_generated}: '{_r.text}' "
+                    f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s)"
                 )
-    except Exception as e:
-        logger.error(f"Error during warmup token generation: {e}", exc_info=True)
-        raise
+                if _r.finish_reason is not None:
+                    finish_reason_seen = True
+                    logger.info(
+                        f"Token #{tokens_generated} has finish_reason={_r.finish_reason}, "
+                        f"but continuing warmup to ensure all ranks synchronize"
+                    )
+                # Continue until we've generated max_tokens or hit the limit
+                if tokens_generated >= 50:
+                    logger.info(f"Reached max_tokens limit ({tokens_generated}), exiting loop")
+                    break
+        except StopIteration:
+            iterator_exhausted = True
+            logger.info("Iterator exhausted (StopIteration)")
+        except Exception as e:
+            logger.error(f"Error during warmup token generation: {e}", exc_info=True)
+            raise
+        
+        # If we saw a finish_reason but didn't generate max_tokens, the iterator may have stopped
+        # but other ranks might still be waiting. We need to ensure all ranks exit together.
+        if finish_reason_seen and tokens_generated < 50 and not iterator_exhausted:
+            logger.warning(
+                f"Finished early with {tokens_generated} tokens (finish_reason seen, iterator not exhausted). "
+                f"Other ranks may still be waiting in stream_generate."
+            )
 
     logger.info(f"Exited stream_generate loop after {tokens_generated} tokens")
     generation_time = time.time() - warmup_start_time
