@@ -37,6 +37,7 @@ export interface NodeInfo {
 		memory?: {
 			ram_usage: number;
 			ram_total: number;
+			ram_available?: number;
 		};
 		temp?: {
 			gpu_temp_avg: number;
