@@ -22,18 +22,32 @@ def entrypoint(
     event_sender: MpSender[Event],
     task_receiver: MpReceiver[Task],
 ) -> None:
-    if (
-        isinstance(bound_instance.instance, MlxJacclInstance)
-        and len(bound_instance.instance.ibv_devices) >= 2
-    ):
-        os.environ["MLX_METAL_FAST_SYNCH"] = "1"
+    try:
+        if (
+            isinstance(bound_instance.instance, MlxJacclInstance)
+            and len(bound_instance.instance.ibv_devices) >= 2
+        ):
+            os.environ["MLX_METAL_FAST_SYNCH"] = "1"
 
-    global logger
-    verbosity = int(os.getenv("EXO_VERBOSITY", "0"))
-    logger_setup(EXO_LOG, verbosity)
-    logger = loguru.logger
+        global logger
+        verbosity = int(os.getenv("EXO_VERBOSITY", "0"))
+        logger_setup(EXO_LOG, verbosity)
+        logger = loguru.logger
+        logger.info("Runner bootstrap: logging configured")
 
-    # Import main after setting global logger - this lets us just import logger from this module
-    from exo.worker.runner.runner import main
+        # Import main after setting global logger - this lets us just import logger from this module
+        from exo.worker.runner.runner import main
 
-    main(bound_instance, event_sender, task_receiver)
+        logger.info("Runner bootstrap: calling main()")
+        main(bound_instance, event_sender, task_receiver)
+    except Exception as e:
+        # Try to log the error if logger is available
+        try:
+            logger.error(f"Runner bootstrap error: {e}", exc_info=True)
+        except:
+            # Fallback to stderr if logger isn't set up
+            import sys
+            import traceback
+            print(f"Runner bootstrap error: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+        raise

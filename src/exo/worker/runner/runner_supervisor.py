@@ -88,8 +88,16 @@ class RunnerSupervisor:
         self.runner_process.start()
         logger.info(
             f"RunnerSupervisor.run: Runner process started for runner {self.bound_instance.bound_runner_id}, "
-            f"creating task group for event forwarding"
+            f"PID={self.runner_process.pid}, creating task group for event forwarding"
         )
+        # Give the process a moment to start and potentially crash
+        await anyio.sleep(0.5)
+        if not self.runner_process.is_alive():
+            exit_code = self.runner_process.exitcode
+            logger.error(
+                f"RunnerSupervisor.run: Runner process {self.bound_instance.bound_runner_id} "
+                f"exited immediately with code {exit_code}. Starting event forwarding to capture any error messages."
+            )
         async with create_task_group() as tg:
             self._tg = tg
             tg.start_soon(self._forward_events)
