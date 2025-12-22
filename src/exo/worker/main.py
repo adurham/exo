@@ -15,6 +15,7 @@ from exo.shared.types.events import (
     EventId,
     ForwarderEvent,
     IndexedEvent,
+    InstanceCreated,
     NodeDownloadProgress,
     NodeMemoryMeasured,
     NodePerformanceMeasured,
