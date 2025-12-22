@@ -112,8 +112,13 @@ class Node:
         return cls(router, worker, election, er_recv, master, api, node_id)
 
     async def run(self):
+        # Flush any stale resources on startup
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
         async with self._tg as tg:
             signal.signal(signal.SIGINT, lambda _, __: self.shutdown())
+            signal.signal(signal.SIGTERM, lambda _, __: self.shutdown())
             tg.start_soon(self.router.run)
             tg.start_soon(self.worker.run)
             tg.start_soon(self.election.run)
@@ -173,7 +178,10 @@ class Node:
                     logger.info(
                         f"Node {result.session_id.master_node_id} elected master - demoting self"
                     )
-                    await self.master.shutdown()
+                    try:
+                        await self.master.shutdown()
+                    except Exception as e:
+                        logger.warning(f"Error shutting down master: {e}")
                     self.master = None
                 else:
                     logger.info(
@@ -182,7 +190,10 @@ class Node:
                 if result.is_new_master:
                     await anyio.sleep(0)
                     if self.worker:
-                        self.worker.shutdown()
+                        try:
+                            self.worker.shutdown()
+                        except Exception as e:
+                            logger.warning(f"Error shutting down worker: {e}")
                         # TODO: add profiling etc to resource monitor
                         self.worker = Worker(
                             self.node_id,

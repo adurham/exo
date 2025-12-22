@@ -98,6 +98,10 @@ class Worker:
 
     async def run(self):
         logger.info("Starting Worker")
+        # Flush any stale resources on startup
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         # TODO: CLEANUP HEADER
         async def resource_monitor_callback(
