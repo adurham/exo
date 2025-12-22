@@ -100,16 +100,33 @@ def warmup_inference(
                     f"Token #{tokens_generated} has finish_reason={_r.finish_reason}, "
                     f"but continuing warmup to ensure all ranks synchronize"
                 )
-            # Continue until we've generated max_tokens or hit the limit
+            # Continue until we've generated max_tokens
+            # Don't break early - we need all ranks to generate the same number of tokens
+            # to ensure they all reach the barrier together
             if tokens_generated >= 50:
-                logger.info(f"Reached max_tokens limit ({tokens_generated}), exiting loop")
-                break
+                logger.info(f"Reached max_tokens limit ({tokens_generated}), continuing to exhaust iterator")
+                # Don't break - continue to exhaust the iterator to ensure synchronization
     except StopIteration:
         iterator_exhausted = True
-        logger.info("Iterator exhausted (StopIteration)")
+        logger.info(f"Iterator exhausted (StopIteration) after {tokens_generated} tokens")
     except Exception as e:
         logger.error(f"Error during warmup token generation: {e}", exc_info=True)
         raise
+    finally:
+        # Ensure iterator is exhausted even if we break early
+        # This is critical for synchronization - all ranks must exhaust their iterators
+        # before reaching the barrier
+        if not iterator_exhausted:
+            logger.info("Iterator not exhausted, attempting to exhaust it")
+            try:
+                # Try to exhaust the iterator
+                for _ in iterator:
+                    tokens_generated += 1
+                    if tokens_generated >= 50:
+                        break
+            except StopIteration:
+                iterator_exhausted = True
+                logger.info(f"Iterator exhausted in finally block after {tokens_generated} tokens")
     
     # If we saw a finish_reason but didn't generate max_tokens, the iterator may have stopped
     # but other ranks might still be waiting. We need to ensure all ranks exit together.
