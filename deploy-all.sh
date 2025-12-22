@@ -2,16 +2,21 @@
 set -e
 
 NODES=("macstudio-m4" "macbook-m4" "work-macbook-m4")
-LOG_DIR="$HOME/.exo/deploy-logs"
-mkdir -p "$LOG_DIR"
 
-# Deploy to all nodes in parallel, each logging to its own file
+# Function to prefix output with node name
+prefix_output() {
+    local node=$1
+    while IFS= read -r line; do
+        echo "[$node] $line"
+    done
+}
+
+# Deploy to all nodes in parallel, prefixing each line with node name
 for node in "${NODES[@]}"; do
-    log_file="$LOG_DIR/deploy-${node}-$(date +%Y%m%d-%H%M%S).log"
     echo "========================================="
-    echo "Deploying to $node (log: $log_file)..."
+    echo "Deploying to $node..."
     echo "========================================="
-    ssh "$node" "cd ~/repos/exo/ && git pull && bash deploy.sh" > "$log_file" 2>&1 &
+    ssh "$node" "cd ~/repos/exo/ && git pull && bash deploy.sh" 2>&1 | prefix_output "$node" &
 done
 
 # Wait for all background jobs to complete
@@ -20,6 +25,5 @@ wait
 echo ""
 echo "========================================="
 echo "Deployment to all nodes complete!"
-echo "Logs saved to: $LOG_DIR"
 echo "========================================="
 
