@@ -39,6 +39,15 @@ if pgrep -f "exo" > /dev/null 2>&1; then
     sleep 2
 fi
 
+# Purge memory caches to free up RAM (macOS specific)
+echo "Purging memory caches..."
+if command -v purge &> /dev/null; then
+    sudo purge 2>/dev/null || echo "Note: Could not purge memory (may require sudo)"
+else
+    echo "Note: purge command not available"
+fi
+sleep 2
+
 # Reset to clean state and pull latest
 echo "Resetting to clean state..."
 git reset --hard HEAD
