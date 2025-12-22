@@ -162,23 +162,24 @@ def test_mlx_rdma(
     # Hardcode known devices for testing (from actual system configuration)
     matrix = [[None for _ in range(world_size)] for _ in range(world_size)]
     
-    # Known device mappings based on actual network topology:
-    # Rank 0 (macstudio-m4): 
+    # Known device mappings based on actual network topology (FULL MESH):
+    # Rank 0 (macstudio-m4):
     #   - en2 (192.168.201.1) connects to rank 1 (MacBook M4 Max)
     #   - en3 (192.168.202.1) connects to rank 2 (MacBook M4 Pro)
     # Rank 1 (macbook-m4):
     #   - en1 (192.168.201.2) connects to rank 0 (Studio)
-    #   - en2 (192.168.203.1) connects to rank 2 (MacBook M4 Pro)
+    #   - en2 (192.168.203.1) connects to rank 2 (MacBook M4 Pro) - when connected
     # Rank 2 (work-macbook-m4):
     #   - en1 (192.168.202.2) connects to rank 0 (Studio)
-    #   - en2 (192.168.203.2) connects to rank 1 (MacBook M4 Max)
+    #   - en2 (192.168.203.2) connects to rank 1 (MacBook M4 Max) - when connected
+    # Note: If Rank 1 and Rank 2 aren't directly connected, use None for (1,2) and (2,1)
     device_matrix = {
         (0, 1): "rdma_en2",  # Studio en2 -> MacBook M4 Max
         (0, 2): "rdma_en3",  # Studio en3 -> MacBook M4 Pro
         (1, 0): "rdma_en1",  # MacBook M4 Max en1 -> Studio
-        (1, 2): "rdma_en2",  # MacBook M4 Max en2 -> MacBook M4 Pro
+        (1, 2): "rdma_en2",  # MacBook M4 Max en2 -> MacBook M4 Pro (192.168.203.x)
         (2, 0): "rdma_en1",  # MacBook M4 Pro en1 -> Studio
-        (2, 1): "rdma_en2",  # MacBook M4 Pro en2 -> MacBook M4 Max
+        (2, 1): "rdma_en2",  # MacBook M4 Pro en2 -> MacBook M4 Max (192.168.203.x)
     }
     
     # Fill in matrix: matrix[i][j] = device on node i that connects to node j
