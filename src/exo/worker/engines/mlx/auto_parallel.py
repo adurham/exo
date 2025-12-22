@@ -72,18 +72,18 @@ class PipelineFirstLayer(CustomMlxLayer):
         from exo.worker.runner.bootstrap import logger
         
         mlx_group_rank = self.group.rank()
-        logger.debug(
+        logger.info(
             f"PipelineFirstLayer[rank={self.r}]: Input shape={x.shape}, "
             f"group_rank={mlx_group_rank}, group_size={self.group.size()}, singleton={self.is_singleton}"
         )
         
         if self.r != 0 and not self.is_singleton:
-            logger.debug(f"PipelineFirstLayer[rank={self.r}]: Receiving from rank {self.r - 1}")
+            logger.info(f"PipelineFirstLayer[rank={self.r}]: Receiving from rank {self.r - 1}")
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
-            logger.debug(f"PipelineFirstLayer[rank={self.r}]: Received shape={x.shape}")
+            logger.info(f"PipelineFirstLayer[rank={self.r}]: Received shape={x.shape}")
         
         output = self.original_layer(x, *args, **kwargs)
-        logger.debug(f"PipelineFirstLayer[rank={self.r}]: Output shape={output.shape}")
+        logger.info(f"PipelineFirstLayer[rank={self.r}]: Output shape={output.shape}")
         return output
 
 
@@ -182,7 +182,7 @@ class PipelineLastLayer(CustomMlxLayer):
         if not is_last_rank and not self.is_singleton:
             # Send output to next rank in pipeline
             next_rank = (self.r + 1) % self.s
-            logger.debug(
+            logger.info(
                 f"Rank {self.r}: Sending output shape {output.shape} to rank {next_rank}"
             )
             send_result = mx.distributed.send(
@@ -195,21 +195,21 @@ class PipelineLastLayer(CustomMlxLayer):
             # Other ranks can return immediately after sending
             if self.r == 0:
                 # Rank 0 needs to receive final output from last rank for sampling
-                logger.debug(
+                logger.info(
                     f"Rank {self.r}: Receiving final output from rank {self.s - 1} for sampling"
                 )
                 final_output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
-                logger.debug(f"Rank {self.r}: Received final output shape {final_output.shape}")
+                logger.info(f"Rank {self.r}: Received final output shape {final_output.shape}")
                 return final_output
             else:
                 # Non-rank-0, non-last ranks: just return dummy output (won't be used)
                 # The send dependency ensures pipeline ordering
-                logger.debug(f"Rank {self.r}: Returning after send (output not needed for sampling)")
+                logger.info(f"Rank {self.r}: Returning after send (output not needed for sampling)")
                 return output
         else:
             # Last rank: send final output to rank 0 for sampling
             if not self.is_singleton:
-                logger.debug(
+                logger.info(
                     f"Rank {self.r} (LAST): Producing final output shape {output.shape}, "
                     f"sending to rank 0 for sampling"
                 )
@@ -218,7 +218,7 @@ class PipelineLastLayer(CustomMlxLayer):
                 if cache is not None:
                     cache.keys = mx.depends(cache.keys, send_result)  # type: ignore[reportUnknownMemberType]
                 # Last rank returns its own output
-                logger.debug(f"Rank {self.r} (LAST): Returning final output shape {output.shape}")
+                logger.info(f"Rank {self.r} (LAST): Returning final output shape {output.shape}")
                 return output
         
         return output
