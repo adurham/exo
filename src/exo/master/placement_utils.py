@@ -102,11 +102,11 @@ def calculate_usable_memory_with_buffer(
     Uses both a percentage cap (90%) and a minimum absolute free space requirement (12GB)
     to ensure larger nodes have proportionally more free space while still maintaining
     reasonable headroom on smaller nodes.
-    
+
     Args:
         available_bytes: Currently available memory in bytes
         total_bytes: Total memory in bytes (optional, used for percentage cap)
-    
+
     Returns:
         Usable memory in bytes after applying buffer constraints
     """
@@ -944,6 +944,17 @@ def get_mlx_ibv_coordinators(
 
     def get_ip_for_node(n: NodeInfo) -> str:
         if n.node_id == rank_0_node.node_id:
+            # For rank 0, use the first available Thunderbolt IP instead of 0.0.0.0
+            # This ensures we're using Thunderbolt interfaces only as required
+            rank_0_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(rank_0_node)
+            if rank_0_ifaces:
+                # Use the first Thunderbolt interface IP
+                for iface in rank_0_ifaces:
+                    if _is_ipv4_address(iface.ip_address):
+                        logger.info(f"Rank 0 coordinator using Thunderbolt IP: {iface.ip_address}")
+                        return iface.ip_address
+            # Fallback to 0.0.0.0 if no Thunderbolt IP found (shouldn't happen)
+            logger.warning("Rank 0: No Thunderbolt IP found, using 0.0.0.0")
             return "0.0.0.0"
 
         # Prefer subnet-based selection: choose the rank-0 IPv4 on a Thunderbolt interface
