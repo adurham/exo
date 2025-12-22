@@ -11,6 +11,11 @@ export PATH="$HOME/.local/bin:$PATH"
 
 cd ~/repos/exo/
 
+# Kill any existing exo processes
+echo "Stopping any existing exo processes..."
+pkill -f "exo -v" || pkill -f "uv run exo" || echo "No existing exo processes found"
+sleep 2
+
 # Reset and pull latest
 git reset --hard origin/new_main
 git fetch
