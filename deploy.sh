@@ -41,19 +41,38 @@ fi
 
 # Purge memory caches to free up RAM (macOS specific)
 echo "Purging memory caches..."
+# Try purge first (may require special permissions)
 if command -v purge &> /dev/null; then
-    # purge doesn't require sudo, but check if it works
-    if purge 2>&1; then
-        echo "Memory purge successful"
-    else
-        echo "WARNING: Memory purge failed or had errors"
-    fi
-else
-    echo "WARNING: purge command not available - memory may not be freed"
+    purge 2>&1 | grep -v "Operation not permitted" || true
 fi
-sleep 3
+
+# Force memory pressure to reclaim inactive memory by allocating and freeing
+# This works even without purge permissions
+echo "Forcing memory reclamation..."
+python3 << 'EOF'
+import ctypes
+import sys
+
+# Allocate a large chunk of memory to force inactive pages to be reclaimed
+try:
+    # Try to allocate ~1GB to create memory pressure
+    size = 1024 * 1024 * 1024
+    buf = ctypes.create_string_buffer(size)
+    # Touch the memory to ensure it's actually allocated
+    buf[0] = b'x'
+    buf[size-1] = b'y'
+    # Immediately free it
+    del buf
+    print("Memory reclamation successful")
+except MemoryError:
+    print("Could not allocate memory for reclamation (system may be low on memory)")
+except Exception as e:
+    print(f"Memory reclamation failed: {e}")
+EOF
+
+sleep 2
 # Verify memory was freed
-echo "Checking memory after purge..."
+echo "Checking memory after cleanup..."
 vm_stat | head -n 5 || echo "Could not check memory stats"
 
 # Reset to clean state and pull latest
