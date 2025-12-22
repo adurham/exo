@@ -49,21 +49,36 @@ fi
 # Force memory pressure to reclaim inactive memory by allocating and freeing
 # This works even without purge permissions
 echo "Forcing memory reclamation..."
-python3 << 'EOF'
-import ctypes
-import sys
+# Use the exo venv python if available, otherwise system python
+PYTHON_BIN="python3"
+if [ -f "$HOME/repos/exo/.venv/bin/python3" ]; then
+    PYTHON_BIN="$HOME/repos/exo/.venv/bin/python3"
+fi
 
-# Allocate a large chunk of memory to force inactive pages to be reclaimed
+$PYTHON_BIN << 'EOF'
+import ctypes
+import gc
+
+# Allocate multiple chunks to create memory pressure and force inactive page reclamation
+bufs = []
 try:
-    # Try to allocate ~1GB to create memory pressure
-    size = 1024 * 1024 * 1024
-    buf = ctypes.create_string_buffer(size)
-    # Touch the memory to ensure it's actually allocated
-    buf[0] = b'x'
-    buf[size-1] = b'y'
-    # Immediately free it
-    del buf
-    print("Memory reclamation successful")
+    # Try to allocate several large chunks (5GB total) to create pressure
+    for i in range(5):
+        try:
+            size = 1024 * 1024 * 1024  # 1GB per chunk
+            buf = ctypes.create_string_buffer(size)
+            # Touch memory to ensure allocation
+            buf[0] = b'x'
+            buf[size-1] = b'y'
+            bufs.append(buf)
+        except MemoryError:
+            # If we can't allocate more, that's fine - we've created pressure
+            break
+    
+    # Immediately free all buffers to reclaim memory
+    del bufs
+    gc.collect()
+    print(f"Memory reclamation successful (allocated {len(bufs) if 'bufs' in locals() else 0} chunks)")
 except MemoryError:
     print("Could not allocate memory for reclamation (system may be low on memory)")
 except Exception as e:
