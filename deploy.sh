@@ -6,8 +6,20 @@ if [ -f "$HOME/.local/bin/env" ]; then
     source "$HOME/.local/bin/env"
 fi
 
-# Add common paths
+# Add common paths (ensure uv is available)
 export PATH="$HOME/.local/bin:$PATH"
+
+# Verify uv is available, if not try to find it
+if ! command -v uv &> /dev/null; then
+    # Try common locations
+    if [ -f "$HOME/.cargo/bin/uv" ]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+    if ! command -v uv &> /dev/null; then
+        echo "ERROR: uv not found in PATH. Please install uv or ensure it's in PATH."
+        exit 1
+    fi
+fi
 
 cd ~/repos/exo/
 
