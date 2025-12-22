@@ -16,10 +16,12 @@ echo "Stopping any existing exo processes..."
 pkill -f "uv run exo" || pkill -f "exo" || echo "No existing exo processes found"
 sleep 2
 
-# Reset and pull latest
-git reset --hard origin/new_main
+# Reset to clean state and pull latest
+echo "Resetting to clean state..."
+git reset --hard HEAD
+git clean -fd
 git fetch
-git pull
+git reset --hard origin/new_main
 
 # Build dashboard if npm is available, otherwise skip
 if command -v npm &> /dev/null; then
@@ -32,8 +34,9 @@ else
     echo "Warning: npm not found, skipping dashboard build (using existing build if available)"
 fi
 
-# Run exo in background
+# Run exo in background with verbose logging to file (but not console)
 echo "Starting exo in background..."
-nohup uv run exo > /dev/null 2>&1 &
+nohup uv run exo -v > /dev/null 2>&1 &
 echo "Exo started with PID: $!"
+echo "Logs are being written to ~/.exo/exo.log"
 
