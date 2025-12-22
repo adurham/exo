@@ -393,6 +393,35 @@ def get_shard_assignments_for_pipeline_parallel(
             logger.info(
                 f"✓ Layer assignment: {[(sorted_cycle[i].node_id, desired_layers[i]) for i in range(world_size)]}"
             )
+            
+            # Distribute remaining layers to other nodes if fastest node couldn't hold all layers
+            if remaining > 0:
+                logger.info(
+                    f"Distributing {remaining} remaining layers to other nodes"
+                )
+                for c in ranked_capacities:
+                    if remaining <= 0:
+                        break
+                    node_index = node_id_to_index[c.node_id]
+                    # Skip the fastest node (already assigned)
+                    if node_index == fastest_index:
+                        continue
+                    if c.max_layers_by_memory <= 0:
+                        continue
+                    
+                    headroom = c.max_layers_by_memory - desired_layers[node_index]
+                    if headroom <= 0:
+                        continue
+                    
+                    take = min(remaining, headroom)
+                    desired_layers[node_index] += take
+                    remaining -= take
+                    
+                    logger.info(
+                        f"Remaining allocation: node {c.node_id} (membw={c.membw_gbps:.1f} GB/s, "
+                        f"ram={c.ram_total_bytes / (1024**3):.1f} GB, capacity={c.max_layers_by_memory}) "
+                        f"gets {take} layers (total: {desired_layers[node_index]}, remaining: {remaining})"
+                    )
         else:
             # Fastest node cannot hold all layers - distribute greedily
             # Greedily fill nodes in order of speed (fastest first)
