@@ -23,6 +23,17 @@ def entrypoint(
     task_receiver: MpReceiver[Task],
 ) -> None:
     try:
+        # Patch multiprocessing to handle BrokenPipeError when flushing stdout/stderr
+        # This must be done early, before any multiprocessing operations
+        import multiprocessing.util
+        original_flush = multiprocessing.util._flush_std_streams
+        def patched_flush_std_streams():
+            try:
+                original_flush()
+            except (BrokenPipeError, OSError):
+                pass
+        multiprocessing.util._flush_std_streams = patched_flush_std_streams
+        
         if (
             isinstance(bound_instance.instance, MlxJacclInstance)
             and len(bound_instance.instance.ibv_devices) >= 2
