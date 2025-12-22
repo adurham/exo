@@ -158,20 +158,28 @@ def test_mlx_rdma(
     
     # CRITICAL: MLX needs the FULL matrix with ALL rows filled in
     # Each node must know what devices ALL other nodes are using
-    # For testing, we'll use the first active device on each node
-    # In real usage, this would be the actual matrix from placement
+    # For testing, we need to know what devices each node uses
+    # Hardcode known devices for testing (from actual system configuration)
     matrix = [[None for _ in range(world_size)] for _ in range(world_size)]
     
-    # Fill in ALL rows, not just the current rank's row
-    # For testing, assume each node uses its first active device for all connections
-    # In reality, we'd need to know what devices each node has, but for testing
-    # we'll use the current node's device for all connections
+    # Known devices per rank (from actual system configuration):
+    # Rank 0 (macstudio-m4): rdma_en2, rdma_en3 (active)
+    # Rank 1 (macbook-m4): rdma_en1 (active)
+    # Rank 2 (work-macbook-m4): rdma_en1, rdma_en2, rdma_en3 (if active)
+    known_devices = {
+        0: "rdma_en2",  # Studio uses rdma_en2
+        1: "rdma_en1",  # MacBook M4 Max uses rdma_en1
+        2: "rdma_en1",  # MacBook M4 Pro uses rdma_en1 (if active)
+    }
+    
+    # Fill in matrix: matrix[i][j] = device on node i that connects to node j
     for i in range(world_size):
         for j in range(world_size):
             if i != j:
-                # Use first ACTIVE device on this node for all connections
-                # In a real setup, each node would use its own device
-                matrix[i][j] = active_ports[0]
+                # Use the known device for node i
+                # If we don't know it, use the current node's first active device
+                device = known_devices.get(i, active_ports[0])
+                matrix[i][j] = device
     
     print(f"  Matrix for rank {rank}:")
     for i, row in enumerate(matrix):
