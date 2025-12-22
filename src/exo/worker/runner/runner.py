@@ -89,15 +89,37 @@ def main(
                             )
                         )
 
-                        model, tokenizer, sampler = initialize_mlx(bound_instance)
+                        try:
+                            model, tokenizer, sampler = initialize_mlx(bound_instance)
 
-                        current_status = RunnerLoaded()
-                        logger.info("runner loaded")
-                        event_sender.send(
-                            RunnerStatusUpdated(
-                                runner_id=runner_id, runner_status=current_status
+                            current_status = RunnerLoaded()
+                            logger.info("runner loaded")
+                            event_sender.send(
+                                RunnerStatusUpdated(
+                                    runner_id=runner_id, runner_status=current_status
+                                )
                             )
-                        )
+                            event_sender.send(
+                                TaskStatusUpdated(
+                                    task_id=task.task_id, task_status=TaskStatus.Complete
+                                )
+                            )
+                        except Exception as e:
+                            logger.opt(exception=e).error(
+                                f"LoadModel failed for runner {runner_id}: {e}"
+                            )
+                            current_status = RunnerFailed(error_message=str(e))
+                            event_sender.send(
+                                RunnerStatusUpdated(
+                                    runner_id=runner_id, runner_status=current_status
+                                )
+                            )
+                            event_sender.send(
+                                TaskStatusUpdated(
+                                    task_id=task.task_id, task_status=TaskStatus.Failed
+                                )
+                            )
+                            raise
                     case StartWarmup() if isinstance(current_status, RunnerLoaded):
                         assert model
                         assert tokenizer
