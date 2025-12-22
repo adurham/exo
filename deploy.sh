@@ -32,7 +32,8 @@ else
     echo "Warning: npm not found, skipping dashboard build (using existing build if available)"
 fi
 
-# Run exo
-echo "Starting exo..."
-uv run exo -v
+# Run exo in background
+echo "Starting exo in background..."
+nohup uv run exo > /dev/null 2>&1 &
+echo "Exo started with PID: $!"
 
