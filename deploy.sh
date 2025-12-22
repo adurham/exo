@@ -10,15 +10,22 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 
 # Verify uv is available, if not try to find it
+UV_BIN=""
 if ! command -v uv &> /dev/null; then
     # Try common locations
-    if [ -f "$HOME/.cargo/bin/uv" ]; then
+    if [ -f "$HOME/.local/bin/uv" ]; then
+        UV_BIN="$HOME/.local/bin/uv"
+        export PATH="$HOME/.local/bin:$PATH"
+    elif [ -f "$HOME/.cargo/bin/uv" ]; then
+        UV_BIN="$HOME/.cargo/bin/uv"
         export PATH="$HOME/.cargo/bin:$PATH"
     fi
-    if ! command -v uv &> /dev/null; then
+    if [ -z "$UV_BIN" ] && ! command -v uv &> /dev/null; then
         echo "ERROR: uv not found in PATH. Please install uv or ensure it's in PATH."
         exit 1
     fi
+else
+    UV_BIN=$(command -v uv)
 fi
 
 cd ~/repos/exo/
@@ -124,7 +131,12 @@ fi
 
 # Run exo in background with sudo (logging to ~/.exo/exo.log per node)
 echo "Starting exo in background with sudo..."
-nohup sudo uv run exo > /dev/null 2>&1 &
+# Preserve PATH and use the same uv binary when running with sudo
+if [ -n "$UV_BIN" ]; then
+    nohup sudo env PATH="$PATH" "$UV_BIN" run exo > /dev/null 2>&1 &
+else
+    nohup sudo env PATH="$PATH" uv run exo > /dev/null 2>&1 &
+fi
 echo "Exo started with PID: $!"
 echo "Logs are being written to ~/.exo/exo.log on this node"
 
