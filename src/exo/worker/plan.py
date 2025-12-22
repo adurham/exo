@@ -82,23 +82,41 @@ def _create_runner(
     runners: Mapping[RunnerId, RunnerSupervisor],
     instances: Mapping[InstanceId, Instance],
 ) -> CreateRunner | None:
+    from loguru import logger
+    
     for instance in instances.values():
         runner_id = instance.shard_assignments.node_to_runner.get(node_id, None)
         if runner_id is None:
+            logger.debug(
+                f"_create_runner: Instance {instance.instance_id} has no runner for node {node_id}. "
+                f"node_to_runner: {instance.shard_assignments.node_to_runner}"
+            )
             continue
 
         if runner_id in runners:
+            logger.debug(
+                f"_create_runner: Runner {runner_id} already exists in runners for instance {instance.instance_id}"
+            )
             continue
 
         shard = instance.shard(runner_id)
         assert shard is not None
 
+        logger.info(
+            f"_create_runner: Creating runner {runner_id} for instance {instance.instance_id} on node {node_id}"
+        )
         return CreateRunner(
             instance_id=instance.instance_id,
             bound_instance=BoundInstance(
                 instance=instance, bound_runner_id=runner_id, bound_node_id=node_id
             ),
         )
+    
+    logger.debug(
+        f"_create_runner: No runner to create. instances={list(instances.keys())}, "
+        f"runners={list(runners.keys())}, node_id={node_id}"
+    )
+    return None
 
 
 def _model_needs_download(
