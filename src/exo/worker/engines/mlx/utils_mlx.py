@@ -233,7 +233,21 @@ def mlx_distributed_init(
             # When these conditions are met, MLX's "any" backend will use RDMA.
             # We verify RDMA is actually being used by checking group.size() == world_size.
             logger.info(f"rank {rank} Initializing MLX distributed with RDMA (backend='any' with MLX_IBV_DEVICES set)")
-            group = mx.distributed.init(backend="any", strict=True)
+            try:
+                group = mx.distributed.init(backend="any", strict=True)
+            except RuntimeError as e:
+                error_msg = str(e)
+                logger.error(
+                    f"rank {rank} MLX distributed.init failed with: {error_msg}. "
+                    f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
+                    f"MLX_RANK={os.environ.get('MLX_RANK')}, "
+                    f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                    f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
+                    f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}. "
+                    f"Devices file exists: {os.path.exists(devices_file)}, "
+                    f"Devices file content: {file_content[:200] if len(file_content) > 200 else file_content}"
+                )
+                raise
             
             # CRITICAL: Verify RDMA is actually being used
             # If we get a singleton group, RDMA failed and we must fail immediately
