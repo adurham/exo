@@ -132,11 +132,14 @@ fi
 # Run exo in background with sudo (logging to ~/.exo/exo.log per node)
 echo "Starting exo in background with sudo..."
 # Preserve PATH and HOME when running with sudo, and run from the correct directory
+# Redirect stdout/stderr to log file instead of /dev/null to avoid BrokenPipeError
+LOG_FILE="$HOME/.exo/exo.log"
+mkdir -p "$(dirname "$LOG_FILE")"
 if [ -n "$UV_BIN" ]; then
-    nohup sudo -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && $UV_BIN run exo" > /dev/null 2>&1 &
+    nohup sudo -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && $UV_BIN run exo" >> "$LOG_FILE" 2>&1 &
 else
-    nohup sudo -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && uv run exo" > /dev/null 2>&1 &
+    nohup sudo -E env PATH="$PATH" HOME="$HOME" bash -c "cd $HOME/repos/exo && uv run exo" >> "$LOG_FILE" 2>&1 &
 fi
 echo "Exo started with PID: $!"
-echo "Logs are being written to ~/.exo/exo.log on this node"
+echo "Logs are being written to $LOG_FILE on this node"
 
