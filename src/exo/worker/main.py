@@ -153,12 +153,25 @@ class Worker:
             tg.start_soon(self._poll_connection_updates)
 
         # Actual shutdown code - waits for all tasks to complete before executing.
+        logger.info("Worker shutdown: stopping services and cleaning up resources")
         if self._peer_file_service:
             await self._peer_file_service.stop_server()
-        self.local_event_sender.close()
-        self.command_sender.close()
+        # Flush and close all channels
+        try:
+            self.local_event_sender.close()
+        except Exception as e:
+            logger.warning(f"Error closing local_event_sender: {e}")
+        try:
+            self.command_sender.close()
+        except Exception as e:
+            logger.warning(f"Error closing command_sender: {e}")
+        # Shutdown all runners
         for runner in self.runners.values():
-            runner.shutdown()
+            try:
+                runner.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down runner: {e}")
+        logger.info("Worker shutdown complete")
 
     async def _event_applier(self):
         with self.global_event_receiver as events:

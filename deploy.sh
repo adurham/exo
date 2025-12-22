@@ -25,18 +25,32 @@ cd ~/repos/exo/
 
 # Kill any existing exo processes and all Python processes related to exo
 echo "Stopping any existing exo processes..."
+# Kill by process name patterns
 pkill -9 -f "uv run exo" 2>/dev/null || true
 pkill -9 -f "exo" 2>/dev/null || true
 pkill -9 -f "python.*exo" 2>/dev/null || true
 pkill -9 -f "python.*spawn_main" 2>/dev/null || true
 pkill -9 -f "python.*multiprocessing" 2>/dev/null || true
+# Kill by PID if we can find them
+for pid in $(pgrep -f "exo|spawn_main" 2>/dev/null); do
+    kill -9 "$pid" 2>/dev/null || true
+done
+# Kill any Python processes in the exo directory
+for pid in $(ps aux | grep -E "python.*exo|python.*\.venv.*exo" | grep -v grep | awk '{print $2}'); do
+    kill -9 "$pid" 2>/dev/null || true
+done
 echo "Waiting for processes to terminate..."
 sleep 3
 # Verify processes are killed
-if pgrep -f "exo" > /dev/null 2>&1; then
+if pgrep -f "exo|spawn_main" > /dev/null 2>&1; then
     echo "WARNING: Some exo processes are still running, force killing..."
-    pkill -9 -f "exo" 2>/dev/null || true
+    pkill -9 -f "exo|spawn_main" 2>/dev/null || true
     sleep 2
+    # Final check - if still running, try to kill by working directory
+    for pid in $(lsof +D ~/repos/exo 2>/dev/null | grep -E "python|exo" | awk '{print $2}' | sort -u); do
+        kill -9 "$pid" 2>/dev/null || true
+    done
+    sleep 1
 fi
 
 # Purge memory caches to free up RAM (macOS specific)
@@ -108,9 +122,9 @@ else
     echo "Warning: npm not found, skipping dashboard build (using existing build if available)"
 fi
 
-# Run exo in background (logging to ~/.exo/exo.log per node)
-echo "Starting exo in background..."
-nohup uv run exo > /dev/null 2>&1 &
+# Run exo in background with sudo (logging to ~/.exo/exo.log per node)
+echo "Starting exo in background with sudo..."
+nohup sudo uv run exo > /dev/null 2>&1 &
 echo "Exo started with PID: $!"
 echo "Logs are being written to ~/.exo/exo.log on this node"
 

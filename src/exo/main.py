@@ -130,6 +130,7 @@ class Node:
             import sys
 
             sys.exit(1)
+        logger.info("Node shutdown initiated, canceling all tasks")
         self._tg.cancel_scope.cancel()
 
     async def _elect_loop(self):
@@ -227,10 +228,26 @@ def main():
     os.environ["EXO_VERBOSITY"] = str(args.verbosity)
     logger.info("Starting EXO")
 
-    node = anyio.run(Node.create, args)
-    anyio.run(node.run)
-    logger.info("EXO Shutdown complete")
-    logger_cleanup()
+    try:
+        node = anyio.run(Node.create, args)
+        anyio.run(node.run)
+    except KeyboardInterrupt:
+        logger.info("EXO interrupted by user")
+    except Exception as e:
+        logger.opt(exception=e).error("EXO crashed with exception")
+        raise
+    finally:
+        logger.info("EXO Shutdown complete, flushing logs and cleaning up")
+        # Flush all log handlers
+        import sys
+        for handler in logger._core.handlers.values():
+            try:
+                handler._sink.flush()
+            except Exception:
+                pass
+        sys.stdout.flush()
+        sys.stderr.flush()
+        logger_cleanup()
 
 
 class Args(CamelCaseModel):
