@@ -655,7 +655,7 @@ def get_mlx_ibv_devices_matrix(
             connection_ips = list(
                 _find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False)
             )
-            logger.debug(
+            logger.info(
                 f"Looking for connection IPs on {node_i.node_id} for connection to {node_j.node_id}: "
                 f"found {connection_ips}"
             )
