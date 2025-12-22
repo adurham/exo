@@ -128,6 +128,11 @@ def main(
                                 runner_id=runner_id, runner_status=RunnerReady()
                             )
                         )
+                        event_sender.send(
+                            TaskStatusUpdated(
+                                task_id=task.task_id, task_status=TaskStatus.Complete
+                            )
+                        )
                     case ChatCompletion(
                         task_params=task_params, command_id=command_id
                     ) if isinstance(current_status, RunnerReady):
