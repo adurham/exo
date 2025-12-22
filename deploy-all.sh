@@ -13,9 +13,7 @@ prefix_output() {
 
 # Deploy to all nodes in parallel, prefixing each line with node name
 for node in "${NODES[@]}"; do
-    echo "========================================="
-    echo "Deploying to $node..."
-    echo "========================================="
+    echo "[$node] Deploying..."
     ssh "$node" "cd ~/repos/exo/ && bash deploy.sh" 2>&1 | prefix_output "$node" &
 done
 
@@ -23,7 +21,5 @@ done
 wait
 
 echo ""
-echo "========================================="
 echo "Deployment to all nodes complete!"
-echo "========================================="
 
