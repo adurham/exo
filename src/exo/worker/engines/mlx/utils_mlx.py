@@ -244,7 +244,13 @@ def mlx_distributed_init(
             # When these conditions are met, MLX's "any" backend will use RDMA.
             # We verify RDMA is actually being used by checking group.size() == world_size.
             logger.info(f"rank {rank} Initializing MLX distributed with RDMA (backend='any' with MLX_IBV_DEVICES set)")
+            
+            # Check if distributed is available before trying to initialize
+            is_available = mx.distributed.is_available()
+            logger.info(f"rank {rank} mx.distributed.is_available() = {is_available}")
+            
             try:
+                # Try with strict=True first - this will fail fast if RDMA can't be initialized
                 group = mx.distributed.init(backend="any", strict=True)
             except RuntimeError as e:
                 error_msg = str(e)
