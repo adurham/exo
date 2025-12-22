@@ -143,13 +143,34 @@ def mlx_distributed_init(
             world_size = bound_instance.bound_shard.world_size
             logger.info(f"rank {rank} MLX_IBV_DEVICES: {ibv_devices_json}")
             logger.info(f"rank {rank} MLX_IBV_COORDINATOR: {ibv_coordinator}")
+            logger.info(f"rank {rank} World size: {world_size}, Device rank: {rank}")
+            
+            # Verify the devices file exists and is readable
+            if not os.path.exists(devices_file):
+                raise FileNotFoundError(f"RDMA devices file not found: {devices_file}")
+            
+            # Read back the file to verify it was written correctly
+            with open(devices_file, "r") as f:
+                file_content = f.read()
+            logger.info(f"rank {rank} Devices file content: {file_content}")
+            
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
+            
+            # Log final environment state
+            logger.info(
+                f"rank {rank} Final environment: "
+                f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
+                f"MLX_RANK={os.environ.get('MLX_RANK')}, "
+                f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
+            )
+            
             # For RDMA/InfiniBand, use 'any' backend with strict=False
             # This allows MLX to try all available backends and use RDMA if supported
             # strict=False allows fallback to singleton group if distributed isn't available
             # (though for multi-node instances, distributed should be available)
+            logger.info(f"rank {rank} Calling mx.distributed.init(backend='any', strict=False)")
             group = mx.distributed.init(backend="any", strict=False)
             
             # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
