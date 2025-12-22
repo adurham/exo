@@ -1341,28 +1341,12 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 							<div>
 								<div class="text-xs text-white/70 font-mono mb-2">Instance Type:</div>
 								<div class="flex gap-2">
-									<button 
-										onclick={() => selectedInstanceType = 'MlxRing'}
-										class="flex items-center gap-2 py-2 px-4 text-sm font-mono border rounded transition-all duration-200 cursor-pointer {selectedInstanceType === 'MlxRing' ? 'bg-transparent text-exo-yellow border-exo-yellow' : 'bg-transparent text-white/70 border-exo-medium-gray/50 hover:border-exo-yellow/50'}"
-									>
-										<span class="w-4 h-4 rounded-full border-2 flex items-center justify-center {selectedInstanceType === 'MlxRing' ? 'border-exo-yellow' : 'border-exo-medium-gray'}">
-											{#if selectedInstanceType === 'MlxRing'}
-												<span class="w-2 h-2 rounded-full bg-exo-yellow"></span>
-											{/if}
-										</span>
-										MLX Ring
-									</button>
-									<button 
-										onclick={() => selectedInstanceType = 'MlxIbv'}
-										class="flex items-center gap-2 py-2 px-4 text-sm font-mono border rounded transition-all duration-200 cursor-pointer {selectedInstanceType === 'MlxIbv' ? 'bg-transparent text-exo-yellow border-exo-yellow' : 'bg-transparent text-white/70 border-exo-medium-gray/50 hover:border-exo-yellow/50'}"
-									>
-										<span class="w-4 h-4 rounded-full border-2 flex items-center justify-center {selectedInstanceType === 'MlxIbv' ? 'border-exo-yellow' : 'border-exo-medium-gray'}">
-											{#if selectedInstanceType === 'MlxIbv'}
-												<span class="w-2 h-2 rounded-full bg-exo-yellow"></span>
-											{/if}
+									<div class="flex items-center gap-2 py-2 px-4 text-sm font-mono border border-exo-yellow text-exo-yellow">
+										<span class="w-4 h-4 rounded-full border-2 border-exo-yellow flex items-center justify-center">
+											<span class="w-2 h-2 rounded-full bg-exo-yellow"></span>
 										</span>
 										MLX RDMA
-									</button>
+									</div>
 								</div>
 							</div>
 							
