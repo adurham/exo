@@ -62,7 +62,6 @@ class RunnerSupervisor:
                 bound_instance,
                 ev_send,
                 task_recv,
-                logger,
             ),
             daemon=True,
         )

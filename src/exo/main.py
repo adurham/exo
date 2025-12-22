@@ -1,5 +1,6 @@
 import argparse
 import multiprocessing as mp
+import os
 import signal
 from dataclasses import dataclass, field
 from typing import Self
@@ -223,6 +224,7 @@ def main():
     mp.set_start_method("spawn")
     # TODO: Refactor the current verbosity system
     logger_setup(EXO_LOG, args.verbosity)
+    os.environ["EXO_VERBOSITY"] = str(args.verbosity)
     logger.info("Starting EXO")
 
     node = anyio.run(Node.create, args)
