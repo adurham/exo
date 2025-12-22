@@ -23,10 +23,21 @@ fi
 
 cd ~/repos/exo/
 
-# Kill any existing exo processes
+# Kill any existing exo processes and all Python processes related to exo
 echo "Stopping any existing exo processes..."
-pkill -f "uv run exo" || pkill -f "exo" || echo "No existing exo processes found"
-sleep 2
+pkill -9 -f "uv run exo" 2>/dev/null || true
+pkill -9 -f "exo" 2>/dev/null || true
+pkill -9 -f "python.*exo" 2>/dev/null || true
+pkill -9 -f "python.*spawn_main" 2>/dev/null || true
+pkill -9 -f "python.*multiprocessing" 2>/dev/null || true
+echo "Waiting for processes to terminate..."
+sleep 3
+# Verify processes are killed
+if pgrep -f "exo" > /dev/null 2>&1; then
+    echo "WARNING: Some exo processes are still running, force killing..."
+    pkill -9 -f "exo" 2>/dev/null || true
+    sleep 2
+fi
 
 # Reset to clean state and pull latest
 echo "Resetting to clean state..."
