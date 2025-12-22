@@ -191,43 +191,35 @@ class PipelineLastLayer(CustomMlxLayer):
             if cache is not None:
                 # This change happened upstream - check out mlx github somewhere??
                 cache.keys = mx.depends(cache.keys, send_result)  # type: ignore[reportUnknownMemberType]
-            # Non-last ranks: need to receive final output from last rank
-            # The send creates a dependency that ensures pipeline ordering
-            # We'll participate in all_gather but only use the last rank's output
-            if not self.is_singleton:
+            # Non-last ranks: Only rank 0 needs the final output for sampling
+            # Other ranks can return immediately after sending
+            if self.r == 0:
+                # Rank 0 needs to receive final output from last rank for sampling
                 logger.debug(
-                    f"Rank {self.r}: Participating in all_gather (expecting final output from rank {self.s - 1})"
+                    f"Rank {self.r}: Receiving final output from rank {self.s - 1} for sampling"
                 )
-                # Ensure send completes before all_gather by using the output (not send_result)
-                # all_gather will wait for all ranks, including the last rank to finish processing
-                gathered = mx.distributed.all_gather(output, group=self.group)
-                logger.debug(
-                    f"Rank {self.r}: all_gather returned shape {gathered.shape}, "
-                    f"extracting last {output.shape[0]} elements"
-                )
-                # all_gather concatenates along first dim: [rank0, rank1, ..., rankN-1]
-                # Extract only the last rank's output (the final output we need)
-                final_output = gathered[-output.shape[0]:]
-                logger.debug(f"Rank {self.r}: Returning final output shape {final_output.shape}")
+                final_output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
+                logger.debug(f"Rank {self.r}: Received final output shape {final_output.shape}")
                 return final_output
+            else:
+                # Non-rank-0, non-last ranks: just return dummy output (won't be used)
+                # The send dependency ensures pipeline ordering
+                logger.debug(f"Rank {self.r}: Returning after send (output not needed for sampling)")
+                return output
         else:
-            # Last rank: produce final output and participate in all_gather to broadcast it
+            # Last rank: send final output to rank 0 for sampling
             if not self.is_singleton:
                 logger.debug(
                     f"Rank {self.r} (LAST): Producing final output shape {output.shape}, "
-                    f"broadcasting via all_gather"
+                    f"sending to rank 0 for sampling"
                 )
-                # Broadcast final output to all ranks via all_gather
-                # This ensures all ranks get the final output for next token generation
-                gathered = mx.distributed.all_gather(output, group=self.group)
-                logger.debug(
-                    f"Rank {self.r} (LAST): all_gather returned shape {gathered.shape}, "
-                    f"extracting last {output.shape[0]} elements"
-                )
-                # Return our output (last seq_len elements from gathered array)
-                final_output = gathered[-output.shape[0]:]
-                logger.debug(f"Rank {self.r} (LAST): Returning final output shape {final_output.shape}")
-                return final_output
+                # Send final output to rank 0
+                send_result = mx.distributed.send(output, 0, group=self.group)
+                if cache is not None:
+                    cache.keys = mx.depends(cache.keys, send_result)  # type: ignore[reportUnknownMemberType]
+                # Last rank returns its own output
+                logger.debug(f"Rank {self.r} (LAST): Returning final output shape {output.shape}")
+                return output
         
         return output
 
