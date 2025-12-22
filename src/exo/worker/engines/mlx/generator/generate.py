@@ -73,7 +73,7 @@ def warmup_inference(
     warmup_start_time = time.time()
     logger.info("Generating warmup tokens (max 50)")
     try:
-        for _r in stream_generate(
+        iterator = stream_generate(
             model=model,
             tokenizer=tokenizer,
             prompt=warmup_prompt,
@@ -83,17 +83,25 @@ def warmup_inference(
             prefill_step_size=65536,
             kv_group_size=KV_GROUP_SIZE,
             kv_bits=KV_BITS,
-        ):
+        )
+        logger.info("Created stream_generate iterator, starting iteration")
+        for _r in iterator:
             tokens_generated += 1
             elapsed = time.time() - warmup_start_time
             logger.info(
                 f"Generated warmup token #{tokens_generated}: '{_r.text}' "
-                f"(elapsed: {elapsed:.2f}s)"
+                f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s)"
             )
+            if _r.finish_reason is not None:
+                logger.info(
+                    f"Token #{tokens_generated} has finish_reason={_r.finish_reason}, "
+                    f"but continuing warmup to ensure all ranks synchronize"
+                )
     except Exception as e:
         logger.error(f"Error during warmup token generation: {e}", exc_info=True)
         raise
 
+    logger.info(f"Exited stream_generate loop after {tokens_generated} tokens")
     generation_time = time.time() - warmup_start_time
     logger.info(
         f"Generated ALL {tokens_generated} warmup tokens in {generation_time:.2f}s, "
