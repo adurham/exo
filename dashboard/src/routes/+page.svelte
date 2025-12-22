@@ -199,10 +199,18 @@ function toggleInstanceDownloadDetails(nodeId: string): void {
 	}
 	
 	// Calculate available memory in the cluster (in GB)
+	// Use ram_available directly from API (includes reclaimable compressed memory on macOS)
+	// Fall back to calculating from ram_total - ram_usage if ram_available not available
 	const availableMemoryGB = $derived(() => {
 		if (!data) return 0;
 		return Object.values(data.nodes).reduce((acc, n) => {
 			const total = n.macmon_info?.memory?.ram_total ?? n.system_info?.memory ?? 0;
+			// Try to get ram_available directly, fall back to calculated value
+			const ramAvailable = n.macmon_info?.memory?.ram_available;
+			if (ramAvailable !== undefined && ramAvailable !== null) {
+				return acc + ramAvailable;
+			}
+			// Fallback: calculate from total - used
 			const used = n.macmon_info?.memory?.ram_usage ?? 0;
 			return acc + (total - used);
 		}, 0) / (1024 * 1024 * 1024);

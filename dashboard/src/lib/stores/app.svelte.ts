@@ -203,6 +203,8 @@ function transformTopology(raw: RawTopology, profiles?: RawNodeProfiles): Topolo
 		const profile = { ...(node.nodeProfile ?? {}), ...(mergedProfile ?? {}) };
 		const ramTotal = profile?.memory?.ramTotal?.inBytes ?? 0;
 		const ramAvailable = profile?.memory?.ramAvailable?.inBytes ?? 0;
+		// Use ramAvailable directly (includes reclaimable compressed memory on macOS)
+		// Calculate ramUsage for display, but use ramAvailable for actual availability
 		const ramUsage = Math.max(ramTotal - ramAvailable, 0);
 
 		const networkInterfaces = (profile?.networkInterfaces || []).map((iface) => {
@@ -249,7 +251,8 @@ function transformTopology(raw: RawTopology, profiles?: RawNodeProfiles): Topolo
 			macmon_info: {
 				memory: {
 					ram_usage: ramUsage,
-					ram_total: ramTotal
+					ram_total: ramTotal,
+					ram_available: ramAvailable
 				},
 				temp: profile?.system?.temp !== undefined ? { gpu_temp_avg: profile.system.temp } : undefined,
 				gpu_usage: profile?.system?.gpuUsage !== undefined ? [0, profile.system.gpuUsage] : undefined,
