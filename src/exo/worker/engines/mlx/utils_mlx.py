@@ -154,6 +154,13 @@ def mlx_distributed_init(
                 file_content = f.read()
             logger.info(f"rank {rank} Devices file content: {file_content}")
             
+            # CRITICAL: Clear any conflicting environment variables that might cause MLX to use non-RDMA backends
+            # Remove MLX_HOSTFILE if it exists - this would cause MLX to prefer 'ring' backend
+            if "MLX_HOSTFILE" in os.environ:
+                logger.warning(f"rank {rank} Removing MLX_HOSTFILE to ensure RDMA backend is used")
+                del os.environ["MLX_HOSTFILE"]
+            
+            # Set RDMA-specific environment variables
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
@@ -163,20 +170,36 @@ def mlx_distributed_init(
                 f"rank {rank} Final environment: "
                 f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
                 f"MLX_RANK={os.environ.get('MLX_RANK')}, "
-                f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
+                f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}"
             )
             
-            # For RDMA/InfiniBand, try 'jaccl' backend first (explicit RDMA backend)
-            # If jaccl is not available, fall back to 'any' which should auto-detect RDMA
-            # when MLX_IBV_DEVICES and MLX_IBV_COORDINATOR are set
-            logger.info(f"rank {rank} Calling mx.distributed.init(backend='jaccl', strict=False)")
+            # For RDMA/InfiniBand, we MUST use RDMA - not auto-detection
+            # Try 'jaccl' backend first (explicit RDMA backend)
+            # If jaccl is not available as a backend name, use 'any' but ensure RDMA is forced
+            # by having ONLY MLX_IBV_DEVICES set (no MLX_HOSTFILE)
+            logger.info(f"rank {rank} Calling mx.distributed.init(backend='jaccl', strict=False) for explicit RDMA")
             try:
                 group = mx.distributed.init(backend="jaccl", strict=False)
-                logger.info(f"rank {rank} Successfully initialized with 'jaccl' backend")
+                logger.info(f"rank {rank} Successfully initialized with 'jaccl' backend (RDMA)")
             except (ValueError, RuntimeError) as e:
-                if "jaccl" in str(e).lower() or "valid values" in str(e).lower():
-                    logger.info(f"rank {rank} 'jaccl' backend not available, using 'any' backend (will auto-detect RDMA)")
+                error_msg = str(e).lower()
+                if "jaccl" in error_msg or "valid values" in error_msg:
+                    # jaccl not available as backend name, but MLX should use RDMA when MLX_IBV_DEVICES is set
+                    # and MLX_HOSTFILE is NOT set - this forces RDMA usage
+                    logger.info(
+                        f"rank {rank} 'jaccl' backend name not available, but MLX_IBV_DEVICES is set "
+                        f"and MLX_HOSTFILE is not set - this should force RDMA with 'any' backend"
+                    )
                     group = mx.distributed.init(backend="any", strict=False)
+                    # Verify it actually used RDMA by checking if we got a distributed group
+                    if group.size() == 1 and world_size > 1:
+                        logger.error(
+                            f"rank {rank} MLX created singleton group despite MLX_IBV_DEVICES being set. "
+                            f"This suggests RDMA backend is not working. "
+                            f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
+                            f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
+                        )
                 else:
                     # Re-raise if it's a different error
                     raise
