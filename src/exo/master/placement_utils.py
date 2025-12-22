@@ -679,14 +679,39 @@ def get_mlx_ibv_devices_matrix(
                                 f"{_to_rdma_interface_name(iface.name, node_i)}:{iface.ip_address}"
                             )
                 
+                # Log detailed debugging info
                 logger.error(
                     f"Failed to find interface name between {node_i.node_id} and {node_j.node_id}. "
                     f"Searched Thunderbolt connection IPs: {connection_ips}. "
                     f"Available RDMA interfaces on {node_i.node_id}: {available_ips or 'none'}"
                 )
+                
+                # Try to find why _find_mlx_rdma_interface_for_peer failed
+                local_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_i)
+                peer_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_j)
+                logger.error(
+                    f"Debug: node_i ({node_i.node_id}) has {len(local_ifaces)} Thunderbolt interfaces, "
+                    f"node_j ({node_j.node_id}) has {len(peer_ifaces)} Thunderbolt interfaces"
+                )
+                if local_ifaces:
+                    for iface in local_ifaces:
+                        network = _ipv4_interface_network(iface)
+                        logger.error(
+                            f"  node_i interface {iface.name}: IP={iface.ip_address}, "
+                            f"netmask={iface.netmask}, network={network}"
+                        )
+                if peer_ifaces:
+                    for iface in peer_ifaces:
+                        network = _ipv4_interface_network(iface)
+                        logger.error(
+                            f"  node_j interface {iface.name}: IP={iface.ip_address}, "
+                            f"netmask={iface.netmask}, network={network}"
+                        )
+                
                 raise ValueError(
                     f"Current ibv backend requires all-to-all rdma connections over Thunderbolt. "
-                    f"Could not match Thunderbolt connection IPs {connection_ips} to any RDMA interface on node {node_i.node_id}"
+                    f"Could not match Thunderbolt connection IPs {connection_ips} to any RDMA interface on node {node_i.node_id}. "
+                    f"Available interfaces: {available_ips}"
                 )
 
     # CRITICAL: Final validation - ensure ALL interfaces in the matrix are Thunderbolt
@@ -848,14 +873,27 @@ def _get_mlx_rdma_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> list[N
 def _ipv4_interface_network(interface: NetworkInterfaceInfo) -> ipaddress.IPv4Network | None:
     if not _is_ipv4_address(interface.ip_address):
         return None
-    if interface.netmask is None or not _is_ipv4_address(interface.netmask):
+    if interface.netmask is None:
         return None
+    
+    # Convert netmask to CIDR notation if it's in IP address format
     try:
+        if _is_ipv4_address(interface.netmask):
+            # Netmask is in IP format (e.g., "255.255.255.252"), convert to CIDR
+            netmask_ip = ipaddress.ip_address(interface.netmask)
+            # Count leading ones in the netmask to get CIDR prefix length
+            netmask_int = int(netmask_ip)
+            prefix_len = bin(netmask_int).count("1")
+            cidr = f"/{prefix_len}"
+        else:
+            # Assume it's already in CIDR format (e.g., "/30")
+            cidr = interface.netmask if interface.netmask.startswith("/") else f"/{interface.netmask}"
+        
         return ipaddress.ip_network(
-            f"{interface.ip_address}/{interface.netmask}",
+            f"{interface.ip_address}{cidr}",
             strict=False,
         )
-    except ValueError:
+    except (ValueError, AttributeError):
         return None
 
 
@@ -877,11 +915,24 @@ def _find_mlx_rdma_interface_for_peer(
     for local_iface in local_ifaces:
         local_network = _ipv4_interface_network(local_iface)
         if local_network is None:
+            logger.debug(
+                f"Could not calculate network for {node_local.node_id} interface "
+                f"{local_iface.name} (IP={local_iface.ip_address}, netmask={local_iface.netmask})"
+            )
             continue
         for peer_ip in peer_ipv4_addresses:
             if peer_ip in local_network:
+                logger.info(
+                    f"Matched {node_local.node_id} interface {local_iface.name} "
+                    f"(network {local_network}) to peer {node_peer.node_id} IP {peer_ip}"
+                )
                 return _to_rdma_interface_name(local_iface.name, node_local)
 
+    logger.debug(
+        f"Subnet matching failed: {node_local.node_id} has {len(local_ifaces)} interfaces, "
+        f"{node_peer.node_id} has {len(peer_ifaces)} interfaces, "
+        f"but no peer IPs matched any local network"
+    )
     return None
 
 def _get_thunderbolt_interfaces_for_node(node_info: NodeInfo) -> set[str]:
