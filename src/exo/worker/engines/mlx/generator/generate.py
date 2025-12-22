@@ -111,7 +111,7 @@ def warmup_inference(
     try:
         for _r in iterator:
             iteration_count += 1
-            logger.debug(f"Iteration #{iteration_count}: received from stream_generate")
+            logger.info(f"Iteration #{iteration_count}: received from stream_generate (text='{_r.text if hasattr(_r, 'text') else 'N/A'}', finish_reason={_r.finish_reason if hasattr(_r, 'finish_reason') else 'N/A'})")
             tokens_generated += 1
             token_time = time.time()
             elapsed = token_time - warmup_start_time
@@ -119,11 +119,19 @@ def warmup_inference(
             token_times.append(token_time)
             
             # Log every token, and also log memory every 10 tokens
-            logger.info(
-                f"Generated warmup token #{tokens_generated}: '{_r.text}' "
-                f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s, "
-                f"time_since_last: {time_since_last_log:.2f}s)"
-            )
+            # Only log token text if it exists (Rank 0 will have text, other ranks may not)
+            if hasattr(_r, 'text') and _r.text:
+                logger.info(
+                    f"Generated warmup token #{tokens_generated}: '{_r.text}' "
+                    f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s, "
+                    f"time_since_last: {time_since_last_log:.2f}s)"
+                )
+            else:
+                logger.info(
+                    f"Processed warmup activation #{tokens_generated} "
+                    f"(no token text, finish_reason={_r.finish_reason if hasattr(_r, 'finish_reason') else 'N/A'}, elapsed: {elapsed:.2f}s, "
+                    f"time_since_last: {time_since_last_log:.2f}s)"
+                )
             last_log_time = token_time
             
             # Log memory every 10 tokens
