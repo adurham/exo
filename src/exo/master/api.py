@@ -413,6 +413,7 @@ class API:
 
         try:
             self._chat_completion_queues[command_id], recv = channel[TokenChunk]()
+            logger.info(f"API: Created streaming queue for command_id={command_id}")
 
             is_thinking = False
             with recv as token_chunks:
@@ -559,6 +560,15 @@ class API:
     async def _applystate(self):
         with self.global_event_receiver as events:
             async for f_event in events:
+                # Log ChunkGenerated events to debug streaming
+                if isinstance(f_event.event, ChunkGenerated):
+                    logger.info(
+                        f"API received ChunkGenerated: origin={f_event.origin}, "
+                        f"master_node_id={self.session_id.master_node_id}, "
+                        f"command_id={f_event.event.command_id}, "
+                        f"queues={list(self._chat_completion_queues.keys())}"
+                    )
+                
                 if f_event.origin != self.session_id.master_node_id:
                     continue
                 
@@ -566,8 +576,13 @@ class API:
                 # Don't wait for event ordering - tokens need to be streamed as soon as they're generated
                 if isinstance(f_event.event, ChunkGenerated):
                     chunk_event = f_event.event
+                    logger.info(
+                        f"API processing ChunkGenerated: command_id={chunk_event.command_id}, "
+                        f"text='{chunk_event.chunk.text[:50] if chunk_event.chunk.text else 'N/A'}'"
+                    )
                     if chunk_event.command_id in self._chat_completion_queues:
                         assert isinstance(chunk_event.chunk, TokenChunk)
+                        logger.info(f"API sending chunk to stream for command_id={chunk_event.command_id}")
                         # Send chunk immediately to stream
                         await self._chat_completion_queues[chunk_event.command_id].send(
                             chunk_event.chunk
@@ -578,6 +593,10 @@ class API:
                             self._event_log.append(event)
                             self.state = apply(self.state, IndexedEvent(event=event, idx=idx))
                     else:
+                        logger.warning(
+                            f"API: ChunkGenerated for command_id={chunk_event.command_id} "
+                            f"but queue not found. Available queues: {list(self._chat_completion_queues.keys())}"
+                        )
                         # Not a streaming request, process normally
                         self.event_buffer.ingest(f_event.origin_idx, f_event.event)
                         for idx, event in self.event_buffer.drain_indexed():
