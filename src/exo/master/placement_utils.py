@@ -625,10 +625,22 @@ def get_mlx_ibv_devices_matrix(
             if i == j:
                 continue
 
-            # Prefer deterministic profile-based matching:
-            # find a Thunderbolt IPv4 interface on node_i whose subnet contains an IPv4
-            # address on node_j (supports /30 and other non-/24 masks).
-            # This works for point-to-point links where both nodes have IPs in the same subnet.
+            # Hardcoded topology mapping for 3-node setup:
+            # Node A (macstudio) -> Node B (macbook): uses 192.168.203.1 (en2 on A) through 192.168.203.2 (en1 on B)
+            # Node A (macstudio) -> Node C (work-macbook): uses 192.168.202.1 (en3 on A) through 192.168.202.2 (en2 on C)
+            # Node B (macbook) -> Node C (work-macbook): uses 192.168.201.1 (en1 on B) through 192.168.201.2 (en2 on C)
+            # Node B -> Node A: uses 192.168.203.2 (en1 on B) through 192.168.203.1 (en2 on A)
+            # Node C -> Node A: uses 192.168.202.2 (en2 on C) through 192.168.202.1 (en3 on A)
+            # Node C -> Node B: uses 192.168.201.2 (en2 on C) through 192.168.201.1 (en1 on B)
+            interface_name = _get_hardcoded_thunderbolt_interface(node_i, node_j)
+            if interface_name is not None:
+                matrix[i][j] = interface_name
+                logger.info(
+                    f"Using hardcoded interface {interface_name} on {node_i.node_id} for connection to {node_j.node_id}"
+                )
+                continue
+
+            # Fallback to subnet matching if hardcoded mapping doesn't apply
             interface_name = _find_mlx_rdma_interface_for_peer(node_i, node_j)
             if interface_name is not None:
                 # CRITICAL: Validate that the interface is actually Thunderbolt
@@ -652,18 +664,28 @@ def get_mlx_ibv_devices_matrix(
             # _find_connection_ip(node_i, node_j) finds connections FROM node_i TO node_j,
             # which gives us the IP on node_j. But we need the IP on node_i.
             # So we look for connections FROM node_j TO node_i, which gives us the IP on node_i.
+            # Filter for Thunderbolt connections by checking if the connection itself is Thunderbolt
             connection_ips = list(
-                _find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False)
+                _find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=True)
             )
             logger.info(
-                f"Looking for connection IPs on {node_i.node_id} for connection to {node_j.node_id}: "
+                f"Looking for Thunderbolt connection IPs on {node_i.node_id} for connection to {node_j.node_id}: "
                 f"found {connection_ips}"
             )
-            connection_ips = [
-                ip
-                for ip in connection_ips
-                if _is_ip_on_thunderbolt_interface(ip, node_i)
-            ]
+            # Also try without thunderbolt_only filter in case the connection's is_thunderbolt() check fails
+            # but the IP is actually on a Thunderbolt interface (when the interface is in the profile)
+            if not connection_ips:
+                all_connection_ips = list(
+                    _find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False)
+                )
+                logger.debug(
+                    f"Thunderbolt-only search found nothing, checking all {len(all_connection_ips)} connections"
+                )
+                connection_ips = [
+                    ip
+                    for ip in all_connection_ips
+                    if _is_ip_on_thunderbolt_interface(ip, node_i)
+                ]
             for connection_ip in connection_ips:
                 if interface_name := _find_interface_name_for_ip(connection_ip, node_i):
                     # CRITICAL: Validate that the interface is actually Thunderbolt
@@ -780,9 +802,23 @@ def _find_connection_ip(
             if thunderbolt_only:
                 # Check if the connection IP is on a Thunderbolt interface of node_i
                 # (the target node where the IP should be located)
-                is_tb = _is_ip_on_thunderbolt_interface(connection_ip, node_i)
+                # First check if the connection itself is marked as Thunderbolt (link-local 169.254.x.x)
+                # If not, check if the IP is in the known Thunderbolt IP ranges:
+                # - 192.168.201.x: A->B (or B->C depending on setup)
+                # - 192.168.202.x: A->C
+                # - 192.168.203.x: A->B (or B->C depending on setup)
+                # Or if it's on a Thunderbolt interface in the node profile
+                is_tb_connection = connection.is_thunderbolt()
+                is_tb_ip_range = (
+                    connection_ip.startswith("192.168.201.")
+                    or connection_ip.startswith("192.168.202.")
+                    or connection_ip.startswith("192.168.203.")
+                )
+                is_tb_in_profile = _is_ip_on_thunderbolt_interface(connection_ip, node_i)
+                is_tb = is_tb_connection or is_tb_ip_range or is_tb_in_profile
                 logger.debug(
-                    f"Connection IP {connection_ip} is on Thunderbolt interface: {is_tb}"
+                    f"Connection IP {connection_ip}: is_thunderbolt()={is_tb_connection}, "
+                    f"in_tb_range={is_tb_ip_range}, in_profile={is_tb_in_profile}, final={is_tb}"
                 )
                 if not is_tb:
                     continue
@@ -916,6 +952,110 @@ def _ipv4_interface_network(interface: NetworkInterfaceInfo) -> ipaddress.IPv4Ne
         )
     except (ValueError, AttributeError):
         return None
+
+
+def _get_hardcoded_thunderbolt_interface(
+    node_local: NodeInfo,
+    node_peer: NodeInfo,
+) -> str | None:
+    """Get the hardcoded Thunderbolt interface for the known 3-node topology.
+    
+    This is a fork-specific hardcoded mapping for the static IP setup:
+    - Node A (macstudio) -> Node B (macbook): en2 (192.168.203.1)
+    - Node A (macstudio) -> Node C (work-macbook): en3 (192.168.202.1)
+    - Node B (macbook) -> Node C (work-macbook): en1 (192.168.201.1)
+    - Node B (macbook) -> Node A (macstudio): en1 (192.168.203.2 -> connects to 192.168.203.1 on A's en2)
+    - Node C (work-macbook) -> Node A (macstudio): en2 (192.168.202.2 -> connects to 192.168.202.1 on A's en3)
+    - Node C (work-macbook) -> Node B (macbook): en2 (192.168.201.2 -> connects to 192.168.201.1 on B's en1)
+    
+    Returns the interface name on node_local that connects to node_peer, or None if not in the hardcoded topology.
+    """
+    # Map node IDs to their known interfaces based on IP addresses
+    # We identify nodes by checking which interfaces/IPs they have in their profile
+    
+    local_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_local)
+    peer_ifaces = _get_mlx_rdma_thunderbolt_interfaces_for_node(node_peer)
+    
+    if not local_ifaces or not peer_ifaces:
+        return None
+    
+    # Identify nodes by their IP addresses
+    local_ips = {iface.ip_address for iface in local_ifaces}
+    peer_ips = {iface.ip_address for iface in peer_ifaces}
+    
+    # Node A (macstudio) has 192.168.202.1 and 192.168.203.1
+    # Node B (macbook) has 192.168.201.2 and 192.168.203.2
+    # Node C (work-macbook) has 192.168.201.2 and 192.168.202.2
+    
+    is_node_a = "192.168.202.1" in local_ips or "192.168.203.1" in local_ips
+    is_node_b = "192.168.203.2" in local_ips or "192.168.201.1" in local_ips
+    is_node_c = "192.168.202.2" in local_ips or ("192.168.201.2" in local_ips and "192.168.202.2" in local_ips)
+    
+    is_peer_a = "192.168.202.1" in peer_ips or "192.168.203.1" in peer_ips
+    is_peer_b = "192.168.203.2" in peer_ips or "192.168.201.1" in peer_ips
+    is_peer_c = "192.168.202.2" in peer_ips or ("192.168.201.2" in peer_ips and "192.168.202.2" in peer_ips)
+    
+    # A->B: use en2 (192.168.203.1)
+    if is_node_a and is_peer_b:
+        for iface in local_ifaces:
+            if iface.ip_address == "192.168.203.1":
+                return _to_rdma_interface_name(iface.name, node_local)
+        # Fallback: if interface not found, try to find en2
+        for iface in local_ifaces:
+            if iface.name == "en2":
+                return _to_rdma_interface_name(iface.name, node_local)
+    
+    # A->C: use en3 (192.168.202.1)
+    if is_node_a and is_peer_c:
+        for iface in local_ifaces:
+            if iface.ip_address == "192.168.202.1":
+                return _to_rdma_interface_name(iface.name, node_local)
+        # Fallback: if interface not found, try to find en3
+        for iface in local_ifaces:
+            if iface.name == "en3":
+                return _to_rdma_interface_name(iface.name, node_local)
+    
+    # B->A: use en1 (connects to A's en2 at 192.168.203.1)
+    if is_node_b and is_peer_a:
+        for iface in local_ifaces:
+            if iface.ip_address == "192.168.203.2":
+                return _to_rdma_interface_name(iface.name, node_local)
+        # Fallback: if interface not found, try to find en1
+        for iface in local_ifaces:
+            if iface.name == "en1":
+                return _to_rdma_interface_name(iface.name, node_local)
+    
+    # B->C: use en1 (192.168.201.1)
+    if is_node_b and is_peer_c:
+        for iface in local_ifaces:
+            if iface.ip_address == "192.168.201.1":
+                return _to_rdma_interface_name(iface.name, node_local)
+        # Fallback: if interface not found, try to find en1
+        for iface in local_ifaces:
+            if iface.name == "en1":
+                return _to_rdma_interface_name(iface.name, node_local)
+    
+    # C->A: use en2 (connects to A's en3 at 192.168.202.1)
+    if is_node_c and is_peer_a:
+        for iface in local_ifaces:
+            if iface.ip_address == "192.168.202.2":
+                return _to_rdma_interface_name(iface.name, node_local)
+        # Fallback: if interface not found, try to find en2
+        for iface in local_ifaces:
+            if iface.name == "en2":
+                return _to_rdma_interface_name(iface.name, node_local)
+    
+    # C->B: use en2 (connects to B's en1 at 192.168.201.1)
+    if is_node_c and is_peer_b:
+        for iface in local_ifaces:
+            if iface.ip_address == "192.168.201.2":
+                return _to_rdma_interface_name(iface.name, node_local)
+        # Fallback: if interface not found, try to find en2
+        for iface in local_ifaces:
+            if iface.name == "en2":
+                return _to_rdma_interface_name(iface.name, node_local)
+    
+    return None
 
 
 def _find_mlx_rdma_interface_for_peer(
