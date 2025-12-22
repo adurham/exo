@@ -83,7 +83,14 @@ class RunnerSupervisor:
         return self
 
     async def run(self):
+        logger.info(
+            f"RunnerSupervisor.run: Starting runner process for runner {self.runner_id}"
+        )
         self.runner_process.start()
+        logger.info(
+            f"RunnerSupervisor.run: Runner process started for runner {self.runner_id}, "
+            f"creating task group for event forwarding"
+        )
         async with create_task_group() as tg:
             self._tg = tg
             tg.start_soon(self._forward_events)

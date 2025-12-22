@@ -365,13 +365,26 @@ class Worker:
 
     def _create_supervisor(self, task: CreateRunner) -> RunnerSupervisor:
         """Creates and stores a new AssignedRunner with initial downloading status."""
+        logger.info(
+            f"_create_supervisor: Creating supervisor for runner {task.bound_instance.bound_runner_id} "
+            f"on instance {task.bound_instance.instance.instance_id}"
+        )
         runner = RunnerSupervisor.create(
             bound_instance=task.bound_instance,
             event_sender=self.event_sender.clone(),
         )
+        logger.info(
+            f"_create_supervisor: Supervisor created, storing runner {task.bound_instance.bound_runner_id}"
+        )
         self.runners[task.bound_instance.bound_runner_id] = runner
         assert self._tg
+        logger.info(
+            f"_create_supervisor: Starting runner.run() task for runner {task.bound_instance.bound_runner_id}"
+        )
         self._tg.start_soon(runner.run)
+        logger.info(
+            f"_create_supervisor: Runner.run() task started for runner {task.bound_instance.bound_runner_id}"
+        )
         return runner
 
     def _handle_shard_download_process(
