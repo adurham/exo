@@ -239,9 +239,9 @@ class Node:
 def main():
     args = Args.parse()
 
-    mp.set_start_method("spawn")
     # Patch multiprocessing to handle BrokenPipeError when flushing stdout/stderr
     # This happens when stdout/stderr are redirected to /dev/null
+    # MUST be done BEFORE set_start_method
     import multiprocessing.util
     original_flush = multiprocessing.util._flush_std_streams
     def patched_flush_std_streams():
@@ -250,6 +250,8 @@ def main():
         except (BrokenPipeError, OSError):
             pass
     multiprocessing.util._flush_std_streams = patched_flush_std_streams
+    
+    mp.set_start_method("spawn")
     
     # TODO: Refactor the current verbosity system
     logger_setup(EXO_LOG, args.verbosity)
