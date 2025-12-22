@@ -18,7 +18,7 @@ echo "=========================================="
 echo ""
 
 ssh "${HOSTNAME}" "cd /Users/adam.durham/repos/exo && \
-    uv run python -c \"
+    .venv/bin/python -c \"
 import mlx.core as mx
 import subprocess
 import sys

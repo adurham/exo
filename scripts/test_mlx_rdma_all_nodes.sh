@@ -35,7 +35,7 @@ for node_config in "${NODES[@]}"; do
     
     (
         ssh "${hostname}" "cd /Users/adam.durham/repos/exo && \
-            uv run python scripts/test_mlx_rdma.py \
+            .venv/bin/python scripts/test_mlx_rdma.py \
                 --rank ${rank} \
                 --world-size ${WORLD_SIZE} \
                 --coordinator-ip ${RANK_0_IP} \
