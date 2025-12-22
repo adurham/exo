@@ -601,6 +601,14 @@ def get_mlx_ibv_devices_matrix(
             # address on node_j (supports /30 and other non-/24 masks).
             interface_name = _find_mlx_rdma_interface_for_peer(node_i, node_j)
             if interface_name is not None:
+                # CRITICAL: Validate that the interface is actually Thunderbolt
+                # This is a safety check - _find_mlx_rdma_interface_for_peer should only return Thunderbolt
+                if not _is_thunderbolt_interface_name(interface_name):
+                    raise ValueError(
+                        f"Interface '{interface_name}' returned by _find_mlx_rdma_interface_for_peer "
+                        f"is not a Thunderbolt interface. Only Thunderbolt interfaces (en2-en7) "
+                        f"are allowed for MLX RDMA."
+                    )
                 matrix[i][j] = interface_name
                 continue
 
@@ -616,6 +624,14 @@ def get_mlx_ibv_devices_matrix(
             ]
             for connection_ip in connection_ips:
                 if interface_name := _find_interface_name_for_ip(connection_ip, node_i):
+                    # CRITICAL: Validate that the interface is actually Thunderbolt
+                    # _find_interface_name_for_ip should only return Thunderbolt, but verify
+                    if not _is_thunderbolt_interface_name(interface_name):
+                        logger.error(
+                            f"Interface '{interface_name}' found for IP {connection_ip} on {node_i.node_id} "
+                            f"is not a Thunderbolt interface. Skipping."
+                        )
+                        continue
                     matrix[i][j] = interface_name
                     logger.info(
                         f"Interface name for {connection_ip} on {node_i.node_id}: {interface_name}"
@@ -644,6 +660,26 @@ def get_mlx_ibv_devices_matrix(
                     f"Could not match Thunderbolt connection IPs {connection_ips} to any RDMA interface on node {node_i.node_id}"
                 )
 
+    # CRITICAL: Final validation - ensure ALL interfaces in the matrix are Thunderbolt
+    # This is a safety net to catch any non-Thunderbolt interfaces that might have slipped through
+    for i, row in enumerate(matrix):
+        for j, interface_name in enumerate(row):
+            if interface_name is not None:
+                if not _is_thunderbolt_interface_name(interface_name):
+                    raise ValueError(
+                        f"Matrix[{i}][{j}] contains non-Thunderbolt interface '{interface_name}'. "
+                        f"Only Thunderbolt interfaces (en2-en7) are allowed for MLX RDMA. "
+                        f"This is a critical error - MLX RDMA traffic must only use Thunderbolt interfaces."
+                    )
+                # Also verify the base interface name (without rdma_ prefix) is Thunderbolt
+                base_name = interface_name.removeprefix("rdma_")
+                if not _is_thunderbolt_interface_name(base_name):
+                    raise ValueError(
+                        f"Matrix[{i}][{j}] contains interface '{interface_name}' with base name '{base_name}' "
+                        f"that is not Thunderbolt. Only Thunderbolt interfaces (en2-en7) are allowed."
+                    )
+
+    logger.info("MLX RDMA devices matrix validation passed - all interfaces are Thunderbolt")
     return matrix
 
 
@@ -685,8 +721,47 @@ def _is_ipv4_address(ip_address: str) -> bool:
         return False
 
 
+def _is_thunderbolt_interface_name(interface_name: str) -> bool:
+    """Check if an interface name is a Thunderbolt interface.
+    
+    Thunderbolt interfaces on macOS are typically en2-en7.
+    We explicitly exclude en0 (Ethernet), en1 (Wi-Fi), and other non-Thunderbolt interfaces.
+    """
+    # Remove rdma_ prefix if present for checking
+    base_name = interface_name.removeprefix("rdma_")
+    
+    # Thunderbolt interfaces are typically en2-en7 on macOS
+    # en0 is usually Ethernet, en1 is usually Wi-Fi
+    if base_name.startswith("en"):
+        try:
+            # Extract the number after "en"
+            num_str = base_name[2:]
+            if num_str.isdigit():
+                num = int(num_str)
+                # Thunderbolt interfaces are typically en2-en7
+                # This is a conservative range - adjust if needed
+                return 2 <= num <= 7
+        except (ValueError, IndexError):
+            pass
+    
+    return False
+
+
 def _to_rdma_interface_name(interface_name: str) -> str:
-    # RDMA devices on macOS are named with "rdma_" prefix (e.g., "rdma_en1", "rdma_en2")
+    """Convert an interface name to RDMA device name format.
+    
+    CRITICAL: Only Thunderbolt interfaces (en2-en7) are allowed for MLX RDMA.
+    This function will raise ValueError if a non-Thunderbolt interface is provided.
+    """
+    # Validate that this is a Thunderbolt interface
+    if not _is_thunderbolt_interface_name(interface_name):
+        raise ValueError(
+            f"Interface '{interface_name}' is not a Thunderbolt interface. "
+            f"Only Thunderbolt interfaces (en2-en7) can be used for MLX RDMA. "
+            f"Non-Thunderbolt interfaces (e.g., en0=Ethernet, en1=Wi-Fi) are not allowed."
+        )
+    
+    # RDMA devices on macOS are named with "rdma_" prefix (e.g., "rdma_en2", "rdma_en3")
     # as shown by `ibv_devices` command. Add the prefix if not present.
     return interface_name if interface_name.startswith("rdma_") else f"rdma_{interface_name}"
 
