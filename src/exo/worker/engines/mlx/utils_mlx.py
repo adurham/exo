@@ -177,39 +177,34 @@ def mlx_distributed_init(
                 f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}"
             )
             
-            # For RDMA/InfiniBand, we MUST use RDMA - not auto-detection
-            # Try 'jaccl' backend first (explicit RDMA backend)
-            # If jaccl is not available as a backend name, use 'any' but ensure RDMA is forced
-            # by having ONLY MLX_IBV_DEVICES set (no MLX_HOSTFILE)
-            logger.info(f"rank {rank} Calling mx.distributed.init(backend='jaccl', strict=False) for explicit RDMA")
-            try:
-                group = mx.distributed.init(backend="jaccl", strict=False)
-                logger.info(f"rank {rank} Successfully initialized with 'jaccl' backend (RDMA)")
-            except (ValueError, RuntimeError) as e:
-                error_msg = str(e).lower()
-                if "jaccl" in error_msg or "valid values" in error_msg:
-                    # jaccl not available as backend name, but MLX should use RDMA when MLX_IBV_DEVICES is set
-                    # and MLX_HOSTFILE is NOT set - this forces RDMA usage
-                    logger.info(
-                        f"rank {rank} 'jaccl' backend name not available, but MLX_IBV_DEVICES is set "
-                        f"and MLX_HOSTFILE is not set - this should force RDMA with 'any' backend"
-                    )
-                    # Use strict=True to fail fast if RDMA can't be initialized
-                    # This prevents silent fallback to singleton groups
-                    group = mx.distributed.init(backend="any", strict=True)
-                    logger.info(f"rank {rank} Successfully initialized with 'any' backend (should be RDMA)")
-                    # Verify it actually used RDMA by checking if we got a distributed group
-                    if group.size() == 1 and world_size > 1:
-                        logger.error(
-                            f"rank {rank} MLX created singleton group despite MLX_IBV_DEVICES being set. "
-                            f"This suggests RDMA backend is not working. "
-                            f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
-                            f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
-                            f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}"
-                        )
-                else:
-                    # Re-raise if it's a different error
-                    raise
+            # For RDMA/InfiniBand, we MUST use RDMA - no fallback to 'any' backend
+            # MLX requires MLX_IBV_DEVICES to be set for RDMA, and will use RDMA when:
+            # - MLX_IBV_DEVICES is set (file path to JSON matrix)
+            # - MLX_IBV_COORDINATOR is set (IP:PORT of rank 0)
+            # - MLX_WORLD_SIZE is set (number of ranks)
+            # - MLX_HOSTFILE is NOT set (would cause ring backend)
+            # - backend="any" (MLX doesn't have a separate "rdma" backend name)
+            # 
+            # When these conditions are met, MLX's "any" backend will use RDMA.
+            # We verify RDMA is actually being used by checking group.size() == world_size.
+            logger.info(f"rank {rank} Initializing MLX distributed with RDMA (backend='any' with MLX_IBV_DEVICES set)")
+            group = mx.distributed.init(backend="any", strict=True)
+            
+            # CRITICAL: Verify RDMA is actually being used
+            # If we get a singleton group, RDMA failed and we must fail immediately
+            if group.size() == 1 and world_size > 1:
+                raise RuntimeError(
+                    f"Rank {rank}: RDMA initialization FAILED! Got singleton group (size=1) "
+                    f"but expected distributed RDMA group (world_size={world_size}). "
+                    f"This means MLX did not use RDMA despite environment being set correctly. "
+                    f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
+                    f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
+                    f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
+                    f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}. "
+                    f"RDMA must be working for this instance type. Check RDMA configuration and network connectivity."
+                )
+            
+            logger.info(f"rank {rank} Successfully initialized RDMA distributed group (size={group.size()}, expected {world_size})")
             
             # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
             mlx_actual_rank = group.rank()
