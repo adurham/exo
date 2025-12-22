@@ -125,29 +125,16 @@ def warmup_inference(
     logger.info(f"[RANK {rank}] ========== ENTERING ITERATOR LOOP ==========")
     
     # In pipeline parallelism, stream_generate only yields on Rank 0.
-    # Non-rank-0 ranks need to manually drive the iterator to participate in forward passes.
-    # We'll use next() with a sentinel to handle the case where non-rank-0 ranks don't get results.
+    # Non-rank-0 ranks participate in forward passes through pipeline communication,
+    # but the iterator never yields for them. So we only iterate on Rank 0.
     max_iterations = 50
-    iterator_exhausted = False
     
-    try:
-        while tokens_generated < max_iterations and not iterator_exhausted:
-            iteration_count += 1
-            iteration_start_time = time.time()
-            time_since_last_iter = iteration_start_time - last_iteration_time
-            
-            logger.info(
-                f"[RANK {rank}] Attempting iteration #{iteration_count} "
-                f"(tokens_generated={tokens_generated}/{max_iterations}, "
-                f"time_since_last={time_since_last_iter:.3f}s)"
-            )
-            
-            try:
-                # Try to get next result from iterator
-                # On Rank 0, this will yield a result
-                # On non-rank-0 ranks, this will block until Rank 0's iteration completes
-                # but may not yield a result (depending on mlx_lm implementation)
-                _r = next(iterator)
+    if rank == 0:
+        # Rank 0: iterate through the stream_generate results
+        logger.info(f"[RANK {rank}] Rank 0: iterating through stream_generate results")
+        try:
+            for _r in iterator:
+                iteration_count += 1
                 iteration_time = time.time()
                 time_since_last_iter = iteration_time - last_iteration_time
                 last_iteration_time = iteration_time
@@ -173,8 +160,7 @@ def warmup_inference(
                 time_since_last_log = token_time - last_log_time
                 token_times.append(token_time)
                 
-                # Log every token, and also log memory every 10 tokens
-                # Only log token text if it exists (Rank 0 will have text, other ranks may not)
+                # Log every token
                 if has_text:
                     logger.info(
                         f"[RANK {rank}] Generated warmup token #{tokens_generated}: '{_r.text}' "
@@ -189,42 +175,45 @@ def warmup_inference(
                     )
                 last_log_time = token_time
                 
-            except StopIteration:
-                logger.info(f"[RANK {rank}] Iterator exhausted (StopIteration) at iteration #{iteration_count}")
-                iterator_exhausted = True
-                break
-            except Exception as e:
-                logger.error(f"[RANK {rank}] Error getting next iteration: {e}", exc_info=True)
-                raise
-            
-            # Log if we're taking too long between iterations
-            if time_since_last_iter > 1.0:
-                logger.warning(
-                    f"[RANK {rank}] WARNING: Long delay between iterations! "
-                    f"{time_since_last_iter:.2f}s since last iteration"
-                )
-            
-            # Log memory every 10 tokens
-            if psutil is not None and tokens_generated % 10 == 0:
-                mem_info = process.memory_info()
-                swap_info = psutil.swap_memory()
-                logger.info(
-                    f"[RANK {rank}] Token #{tokens_generated} memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB. "
-                    f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
-                )
-                if swap_info.used > 0:
+                # Log if we're taking too long between iterations
+                if time_since_last_iter > 1.0:
                     logger.warning(
-                        f"[RANK {rank}] Token #{tokens_generated} SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
+                        f"[RANK {rank}] WARNING: Long delay between iterations! "
+                        f"{time_since_last_iter:.2f}s since last iteration"
                     )
-            
-            # Stop when we've generated max_tokens
-            if tokens_generated >= max_iterations:
-                logger.info(f"[RANK {rank}] Reached max_tokens limit ({tokens_generated}), exiting loop")
-                break
                 
-    except Exception as e:
-        logger.error(f"[RANK {rank}] Error during warmup token generation: {e}", exc_info=True)
-        raise
+                # Log memory every 10 tokens
+                if psutil is not None and tokens_generated % 10 == 0:
+                    mem_info = process.memory_info()
+                    swap_info = psutil.swap_memory()
+                    logger.info(
+                        f"[RANK {rank}] Token #{tokens_generated} memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB. "
+                        f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
+                    )
+                    if swap_info.used > 0:
+                        logger.warning(
+                            f"[RANK {rank}] Token #{tokens_generated} SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
+                        )
+                
+                # Stop when we've generated max_tokens
+                if tokens_generated >= max_iterations:
+                    logger.info(f"[RANK {rank}] Reached max_tokens limit ({tokens_generated}), exiting loop")
+                    break
+        except StopIteration:
+            logger.info(f"[RANK {rank}] Iterator exhausted (StopIteration) after {tokens_generated} tokens")
+        except Exception as e:
+            logger.error(f"[RANK {rank}] Error during warmup token generation: {e}", exc_info=True)
+            raise
+    else:
+        # Non-rank-0 ranks: don't iterate (iterator never yields for us)
+        # The forward passes will happen through Rank 0's iterations via pipeline communication
+        logger.info(
+            f"[RANK {rank}] Non-rank-0: skipping iteration loop "
+            f"(will participate in forward passes via pipeline communication)"
+        )
+        # We still need to wait for Rank 0 to complete, which happens at the barrier
+        # But we can't iterate because next(iterator) would block forever
+        tokens_generated = 0  # We don't count tokens on non-rank-0 ranks
 
     logger.info(f"[RANK {rank}] ========== EXITED ITERATOR LOOP ==========")
     logger.info(f"[RANK {rank}] Exited stream_generate loop after {tokens_generated} tokens (total iterations: {iteration_count})")
