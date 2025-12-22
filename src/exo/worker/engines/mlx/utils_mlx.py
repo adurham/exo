@@ -132,7 +132,6 @@ def mlx_distributed_init(
             ibv_devices=ibv_devices, ibv_coordinators=ibv_coordinators
         ):
             # Use RDMA connectivity matrix
-            # Try both file path and JSON content - MLX may need one or the other
             devices_file = os.path.abspath(f"./hosts_{rank}.json")
             ibv_devices_json = json.dumps(ibv_devices)
 
@@ -142,69 +141,16 @@ def mlx_distributed_init(
             ibv_coordinator = ibv_coordinators[bound_instance.bound_node_id]
 
             world_size = bound_instance.bound_shard.world_size
-            logger.info(f"rank {rank} MLX_IBV_DEVICES content: {ibv_devices_json}")
+            logger.info(f"rank {rank} MLX_IBV_DEVICES: {ibv_devices_json}")
             logger.info(f"rank {rank} MLX_IBV_COORDINATOR: {ibv_coordinator}")
-            logger.info(f"rank {rank} Setting environment variables: MLX_RANK={rank}, MLX_WORLD_SIZE={world_size}")
-            
-            # Try setting MLX_IBV_DEVICES to the JSON content directly first
-            # If that doesn't work, MLX might need the file path
-            os.environ["MLX_IBV_DEVICES"] = ibv_devices_json
+            os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
-            os.environ["MLX_WORLD_SIZE"] = str(world_size)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
-            
-            # Verify environment variables are set
-            logger.info(
-                f"rank {rank} Environment check: MLX_RANK={os.environ.get('MLX_RANK')}, "
-                f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
-                f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')[:100]}..., "
-                f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
-            )
-            
-            # MLX distributed requires all nodes to initialize simultaneously
-            # Rank 0 (coordinator) should start first, then other ranks connect
-            # Add a small delay for non-rank-0 nodes to allow coordinator to start
-            import time
-            if rank > 0:
-                delay_seconds = rank * 0.5  # Stagger connections: rank 1 waits 0.5s, rank 2 waits 1.0s
-                logger.info(f"rank {rank} Waiting {delay_seconds}s for coordinator (rank 0) to start...")
-                time.sleep(delay_seconds)
-            
-            # Try with strict=True first to see the actual error if RDMA fails
-            # If that fails, fall back to strict=False but we'll catch singleton groups
-            logger.info(f"rank {rank} Calling mx.distributed.init(backend='any', strict=True)")
-            max_retries = 3
-            retry_delay = 1.0
-            
-            for attempt in range(max_retries):
-                try:
-                    group = mx.distributed.init(backend="any", strict=True)
-                    break  # Success
-                except RuntimeError as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(
-                            f"rank {rank} Attempt {attempt + 1}/{max_retries} failed: {e}. "
-                            f"Retrying in {retry_delay}s..."
-                        )
-                        time.sleep(retry_delay)
-                    else:
-                        logger.warning(
-                            f"rank {rank} All {max_retries} attempts with JSON content failed: {e}. "
-                            f"Trying with file path instead..."
-                        )
-                        # Try with file path instead
-                        os.environ["MLX_IBV_DEVICES"] = devices_file
-                        logger.info(f"rank {rank} Retrying with MLX_IBV_DEVICES={devices_file}")
-                        try:
-                            group = mx.distributed.init(backend="any", strict=True)
-                            break  # Success with file path
-                        except RuntimeError as e2:
-                            logger.warning(
-                                f"rank {rank} mx.distributed.init with file path also failed: {e2}. "
-                                f"Falling back to strict=False..."
-                            )
-                            group = mx.distributed.init(backend="any", strict=False)
-                            break  # Fallback to singleton (will be caught below)
+            # For RDMA/InfiniBand, use 'any' backend with strict=False
+            # This allows MLX to try all available backends and use RDMA if supported
+            # strict=False allows fallback to singleton group if distributed isn't available
+            # (though for multi-node instances, distributed should be available)
+            group = mx.distributed.init(backend="any", strict=False)
             
             # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
             mlx_actual_rank = group.rank()
@@ -220,7 +166,6 @@ def mlx_distributed_init(
                     f"Rank {rank}: MLX distributed initialization failed! "
                     f"Got singleton group (size=1) but expected distributed group (world_size={world_size}). "
                     f"Environment was: MLX_RANK={os.environ.get('MLX_RANK')}, "
-                    f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
                     f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
                     f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}. "
                     f"RDMA backend may not be working correctly on this system."
