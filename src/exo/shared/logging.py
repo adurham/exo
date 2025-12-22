@@ -6,6 +6,22 @@ from hypercorn import Config
 from hypercorn.logging import Logger as HypercornLogger
 from loguru import logger
 
+# Patch multiprocessing to handle BrokenPipeError when flushing stdout/stderr
+# This must be done at import time, before any multiprocessing operations
+# This happens when stdout/stderr are redirected to /dev/null or closed
+try:
+    import multiprocessing.util
+    original_flush = multiprocessing.util._flush_std_streams
+    def patched_flush_std_streams():
+        try:
+            original_flush()
+        except (BrokenPipeError, OSError):
+            pass
+    multiprocessing.util._flush_std_streams = patched_flush_std_streams
+except Exception:
+    # If patching fails, continue anyway - this is a best-effort fix
+    pass
+
 
 class InterceptLogger(HypercornLogger):
     def __init__(self, config: Config):
