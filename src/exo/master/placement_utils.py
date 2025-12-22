@@ -626,12 +626,12 @@ def get_mlx_ibv_devices_matrix(
                 continue
 
             # Hardcoded topology mapping for 3-node setup:
-            # Node A (macstudio) -> Node B (macbook): uses 192.168.203.1 (en2 on A) through 192.168.203.2 (en1 on B)
-            # Node A (macstudio) -> Node C (work-macbook): uses 192.168.202.1 (en3 on A) through 192.168.202.2 (en2 on C)
-            # Node B (macbook) -> Node C (work-macbook): uses 192.168.201.1 (en1 on B) through 192.168.201.2 (en2 on C)
-            # Node B -> Node A: uses 192.168.203.2 (en1 on B) through 192.168.203.1 (en2 on A)
-            # Node C -> Node A: uses 192.168.202.2 (en2 on C) through 192.168.202.1 (en3 on A)
-            # Node C -> Node B: uses 192.168.201.2 (en2 on C) through 192.168.201.1 (en1 on B)
+            # Node A (macstudio) -> Node B (macbook): uses 192.168.203.1 (on A) through 192.168.203.2 (on B)
+            # Node A (macstudio) -> Node C (work-macbook): uses 192.168.202.1 (on A) through 192.168.202.2 (on C)
+            # Node B (macbook) -> Node C (work-macbook): uses 192.168.201.1 (on B) through 192.168.201.2 (on C)
+            # Node B -> Node A: uses 192.168.203.2 (on B) through 192.168.203.1 (on A)
+            # Node C -> Node A: uses 192.168.202.2 (on C) through 192.168.202.1 (on A)
+            # Node C -> Node B: uses 192.168.201.2 (on C) through 192.168.201.1 (on B)
             interface_name = _get_hardcoded_thunderbolt_interface(node_i, node_j)
             if interface_name is not None:
                 matrix[i][j] = interface_name
@@ -639,6 +639,12 @@ def get_mlx_ibv_devices_matrix(
                     f"Using hardcoded interface {interface_name} on {node_i.node_id} for connection to {node_j.node_id}"
                 )
                 continue
+            else:
+                logger.debug(
+                    f"Hardcoded function returned None for {node_i.node_id} -> {node_j.node_id}. "
+                    f"Local IPs: {[iface.ip_address for iface in _get_mlx_rdma_thunderbolt_interfaces_for_node(node_i)]}, "
+                    f"Peer IPs: {[iface.ip_address for iface in _get_mlx_rdma_thunderbolt_interfaces_for_node(node_j)]}"
+                )
 
             # Fallback to subnet matching if hardcoded mapping doesn't apply
             interface_name = _find_mlx_rdma_interface_for_peer(node_i, node_j)
@@ -981,10 +987,17 @@ def _get_hardcoded_thunderbolt_interface(
     local_ips = {iface.ip_address for iface in local_ifaces}
     peer_ips = {iface.ip_address for iface in peer_ifaces}
     
-    # Node A (macstudio) has 192.168.202.1 and 192.168.203.1
-    # Node B (macbook) has 192.168.201.1 and 192.168.203.2
-    # Node C (work-macbook) has 192.168.201.2 and 192.168.202.2
+    # Based on actual logs:
+    # Node A (macstudio): has 192.168.202.1 and 192.168.204.1 (but should have 192.168.203.1)
+    # Node B (macbook): has 192.168.202.2 and 192.168.203.2 (but should have 192.168.201.1)
+    # Node C (work-macbook): has 192.168.204.2 and 192.168.203.1 (but should have 192.168.201.2 and 192.168.202.2)
     
+    # Expected topology:
+    # A->B: A has 192.168.203.1, B has 192.168.203.2
+    # A->C: A has 192.168.202.1, C has 192.168.202.2
+    # B->C: B has 192.168.201.1, C has 192.168.201.2
+    
+    # Identify nodes by checking for the expected IPs (even if not all are present)
     is_node_a = "192.168.202.1" in local_ips or "192.168.203.1" in local_ips
     is_node_b = "192.168.203.2" in local_ips or "192.168.201.1" in local_ips
     is_node_c = "192.168.202.2" in local_ips or "192.168.201.2" in local_ips
@@ -993,37 +1006,37 @@ def _get_hardcoded_thunderbolt_interface(
     is_peer_b = "192.168.203.2" in peer_ips or "192.168.201.1" in peer_ips
     is_peer_c = "192.168.202.2" in peer_ips or "192.168.201.2" in peer_ips
     
-    # A->B: find interface with IP 192.168.203.1
+    # A->B: find interface with IP 192.168.203.1 on Node A
     if is_node_a and is_peer_b:
         for iface in local_ifaces:
             if iface.ip_address == "192.168.203.1":
                 return _to_rdma_interface_name(iface.name, node_local)
     
-    # A->C: find interface with IP 192.168.202.1
+    # A->C: find interface with IP 192.168.202.1 on Node A
     if is_node_a and is_peer_c:
         for iface in local_ifaces:
             if iface.ip_address == "192.168.202.1":
                 return _to_rdma_interface_name(iface.name, node_local)
     
-    # B->A: find interface with IP 192.168.203.2
+    # B->A: find interface with IP 192.168.203.2 on Node B
     if is_node_b and is_peer_a:
         for iface in local_ifaces:
             if iface.ip_address == "192.168.203.2":
                 return _to_rdma_interface_name(iface.name, node_local)
     
-    # B->C: find interface with IP 192.168.201.1
+    # B->C: find interface with IP 192.168.201.1 on Node B
     if is_node_b and is_peer_c:
         for iface in local_ifaces:
             if iface.ip_address == "192.168.201.1":
                 return _to_rdma_interface_name(iface.name, node_local)
     
-    # C->A: find interface with IP 192.168.202.2
+    # C->A: find interface with IP 192.168.202.2 on Node C
     if is_node_c and is_peer_a:
         for iface in local_ifaces:
             if iface.ip_address == "192.168.202.2":
                 return _to_rdma_interface_name(iface.name, node_local)
     
-    # C->B: find interface with IP 192.168.201.2
+    # C->B: find interface with IP 192.168.201.2 on Node C
     if is_node_c and is_peer_b:
         for iface in local_ifaces:
             if iface.ip_address == "192.168.201.2":
