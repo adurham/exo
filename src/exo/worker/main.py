@@ -163,7 +163,14 @@ class Worker:
         with self.global_event_receiver as events:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
+                    logger.debug(
+                        f"Worker skipping event from {f_event.origin} (expected {self.session_id.master_node_id})"
+                    )
                     continue
+                logger.debug(
+                    f"Worker received event {f_event.event.__class__.__name__} "
+                    f"(idx={f_event.origin_idx}, event_id={f_event.event.event_id})"
+                )
                 self.event_buffer.ingest(f_event.origin_idx, f_event.event)
                 event_id = f_event.event.event_id
                 if event_id in self.out_for_delivery:
@@ -173,6 +180,10 @@ class Worker:
                 indexed_events = self.event_buffer.drain_indexed()
                 if indexed_events:
                     self._nack_attempts = 0
+                    logger.debug(
+                        f"Worker applying {len(indexed_events)} indexed events "
+                        f"(last_applied_idx={self.state.last_event_applied_idx})"
+                    )
 
                 if not indexed_events and (
                     self._nack_cancel_scope is None
@@ -180,6 +191,9 @@ class Worker:
                 ):
                     assert self._tg
                     # Request the next index.
+                    logger.debug(
+                        f"Worker requesting events from index {self.state.last_event_applied_idx + 1}"
+                    )
                     self._tg.start_soon(
                         self._nack_request, self.state.last_event_applied_idx + 1
                     )
@@ -188,6 +202,10 @@ class Worker:
                     self._nack_cancel_scope.cancel()
 
                 for idx, event in indexed_events:
+                    if isinstance(event, InstanceCreated):
+                        logger.info(
+                            f"Worker applying InstanceCreated: instance_id={event.instance.instance_id}"
+                        )
                     self.state = apply(self.state, IndexedEvent(idx=idx, event=event))
 
     async def plan_step(self):
