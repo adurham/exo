@@ -49,10 +49,22 @@ def warmup_inference(
     sampler: Callable[[mx.array], mx.array],
 ) -> int:
     import time
+    import os
+    
+    # Get rank info for logging
+    try:
+        import mlx.core as mx
+        rank = mx.distributed.rank() if mx.distributed.is_available() else -1
+        world_size = mx.distributed.size() if mx.distributed.is_available() else -1
+        logger.info(f"[RANK {rank}/{world_size}] ========== WARMUP STARTING ==========")
+    except:
+        logger.info("[RANK UNKNOWN] ========== WARMUP STARTING ==========")
+        rank = -1
+        world_size = -1
     
     content = "Prompt to warm up the inference engine. Repeat this."
 
-    logger.info("Starting warmup: applying chat template")
+    logger.info(f"[RANK {rank}] Starting warmup: applying chat template")
     warmup_prompt = apply_chat_template(
         tokenizer=tokenizer,
         chat_task_data=ChatCompletionTaskParams(
@@ -65,33 +77,33 @@ def warmup_inference(
             ],
         ),
     )
-    logger.info(f"Warmup prompt created (length: {len(warmup_prompt)})")
+    logger.info(f"[RANK {rank}] Warmup prompt created (length: {len(warmup_prompt)})")
 
     tokens_generated = 0
 
-    logger.info("Creating KV cache for warmup")
+    logger.info(f"[RANK {rank}] Creating KV cache for warmup")
     cache = make_kv_cache(
         model=model,
     )
-    logger.info("KV cache created, starting token generation")
+    logger.info(f"[RANK {rank}] KV cache created, starting token generation")
 
     warmup_start_time = time.time()
-    logger.info("Generating warmup tokens (max 50)")
+    logger.info(f"[RANK {rank}] Generating warmup tokens (max 50)")
     
     # Log memory and performance info before warmup
-    import os
     if psutil is not None:
         process = psutil.Process(os.getpid())
         mem_info = process.memory_info()
         swap_info = psutil.swap_memory()
         logger.info(
-            f"Pre-warmup memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB, "
+            f"[RANK {rank}] Pre-warmup memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB, "
             f"VMS={mem_info.vms / 1024 / 1024 / 1024:.2f}GB. "
             f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
         )
         if swap_info.used > 0:
-            logger.warning("SWAP DETECTED before warmup! This can severely impact performance.")
+            logger.warning(f"[RANK {rank}] SWAP DETECTED before warmup! This can severely impact performance.")
     
+    logger.info(f"[RANK {rank}] Creating stream_generate iterator...")
     iterator = stream_generate(
         model=model,
         tokenizer=tokenizer,
@@ -103,36 +115,64 @@ def warmup_inference(
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     )
-    logger.info("Created stream_generate iterator, starting iteration")
+    logger.info(f"[RANK {rank}] Created stream_generate iterator, starting iteration loop")
     
     token_times = []
     last_log_time = warmup_start_time
     iteration_count = 0
+    last_iteration_time = warmup_start_time
+    
+    logger.info(f"[RANK {rank}] ========== ENTERING ITERATOR LOOP ==========")
     try:
         for _r in iterator:
             iteration_count += 1
-            logger.info(f"Iteration #{iteration_count}: received from stream_generate (text='{_r.text if hasattr(_r, 'text') else 'N/A'}', finish_reason={_r.finish_reason if hasattr(_r, 'finish_reason') else 'N/A'})")
+            iteration_time = time.time()
+            time_since_last_iter = iteration_time - last_iteration_time
+            last_iteration_time = iteration_time
+            
+            # Log every iteration with full details
+            has_text = hasattr(_r, 'text') and _r.text
+            finish_reason = _r.finish_reason if hasattr(_r, 'finish_reason') else 'N/A'
+            text_preview = _r.text[:50] if has_text else 'N/A'
+            
+            logger.info(
+                f"[RANK {rank}] ========== ITERATION #{iteration_count} =========="
+            )
+            logger.info(
+                f"[RANK {rank}] Iteration #{iteration_count} details: "
+                f"text='{text_preview}', finish_reason={finish_reason}, "
+                f"time_since_last={time_since_last_iter:.3f}s, "
+                f"elapsed={iteration_time - warmup_start_time:.2f}s"
+            )
+            
             tokens_generated += 1
-            token_time = time.time()
+            token_time = iteration_time
             elapsed = token_time - warmup_start_time
             time_since_last_log = token_time - last_log_time
             token_times.append(token_time)
             
             # Log every token, and also log memory every 10 tokens
             # Only log token text if it exists (Rank 0 will have text, other ranks may not)
-            if hasattr(_r, 'text') and _r.text:
+            if has_text:
                 logger.info(
-                    f"Generated warmup token #{tokens_generated}: '{_r.text}' "
+                    f"[RANK {rank}] Generated warmup token #{tokens_generated}: '{_r.text}' "
                     f"(finish_reason={_r.finish_reason}, elapsed: {elapsed:.2f}s, "
                     f"time_since_last: {time_since_last_log:.2f}s)"
                 )
             else:
                 logger.info(
-                    f"Processed warmup activation #{tokens_generated} "
-                    f"(no token text, finish_reason={_r.finish_reason if hasattr(_r, 'finish_reason') else 'N/A'}, elapsed: {elapsed:.2f}s, "
+                    f"[RANK {rank}] Processed warmup activation #{tokens_generated} "
+                    f"(no token text, finish_reason={finish_reason}, elapsed: {elapsed:.2f}s, "
                     f"time_since_last: {time_since_last_log:.2f}s)"
                 )
             last_log_time = token_time
+            
+            # Log if we're taking too long between iterations
+            if time_since_last_iter > 1.0:
+                logger.warning(
+                    f"[RANK {rank}] WARNING: Long delay between iterations! "
+                    f"{time_since_last_iter:.2f}s since last iteration"
+                )
             
             # Log memory every 10 tokens
             if psutil is not None and tokens_generated % 10 == 0:
@@ -149,24 +189,25 @@ def warmup_inference(
             
             # Stop when we've generated max_tokens
             if tokens_generated >= 50:
-                logger.info(f"Reached max_tokens limit ({tokens_generated}), exiting loop")
+                logger.info(f"[RANK {rank}] Reached max_tokens limit ({tokens_generated}), exiting loop")
                 break
     except StopIteration:
-        logger.info(f"Iterator exhausted (StopIteration) after {tokens_generated} tokens")
+        logger.info(f"[RANK {rank}] Iterator exhausted (StopIteration) after {tokens_generated} tokens")
     except Exception as e:
-        logger.error(f"Error during warmup token generation: {e}", exc_info=True)
+        logger.error(f"[RANK {rank}] Error during warmup token generation: {e}", exc_info=True)
         raise
 
-    logger.info(f"Exited stream_generate loop after {tokens_generated} tokens (total iterations: {iteration_count})")
+    logger.info(f"[RANK {rank}] ========== EXITED ITERATOR LOOP ==========")
+    logger.info(f"[RANK {rank}] Exited stream_generate loop after {tokens_generated} tokens (total iterations: {iteration_count})")
     generation_time = time.time() - warmup_start_time
     
     # Calculate token generation rate
     if len(token_times) > 1:
         avg_token_time = sum(token_times[i] - token_times[i-1] for i in range(1, len(token_times))) / (len(token_times) - 1)
-        logger.info(f"Average time per token: {avg_token_time:.3f}s ({1/avg_token_time:.2f} tokens/sec)")
+        logger.info(f"[RANK {rank}] Average time per token: {avg_token_time:.3f}s ({1/avg_token_time:.2f} tokens/sec)")
     
     logger.info(
-        f"Generated ALL {tokens_generated} warmup tokens in {generation_time:.2f}s, "
+        f"[RANK {rank}] Generated ALL {tokens_generated} warmup tokens in {generation_time:.2f}s, "
         f"waiting for barrier"
     )
     
@@ -175,22 +216,29 @@ def warmup_inference(
         mem_info = process.memory_info()
         swap_info = psutil.swap_memory()
         logger.info(
-            f"Pre-barrier memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB. "
+            f"[RANK {rank}] Pre-barrier memory: RSS={mem_info.rss / 1024 / 1024 / 1024:.2f}GB. "
             f"Swap used: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
         )
         if swap_info.used > 0:
             logger.warning(
-                f"Pre-barrier SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
+                f"[RANK {rank}] Pre-barrier SWAP USAGE DETECTED: {swap_info.used / 1024 / 1024 / 1024:.2f}GB"
             )
     
     barrier_start_time = time.time()
-    logger.info(f"Entering barrier at {barrier_start_time:.2f}")
-    mx_barrier()
-    barrier_time = time.time() - barrier_start_time
-    logger.info(f"Warmup barrier completed in {barrier_time:.2f}s")
+    logger.info(f"[RANK {rank}] ========== ENTERING BARRIER ==========")
+    logger.info(f"[RANK {rank}] Entering barrier at {barrier_start_time:.2f}")
+    try:
+        mx_barrier()
+        barrier_time = time.time() - barrier_start_time
+        logger.info(f"[RANK {rank}] ========== EXITED BARRIER ==========")
+        logger.info(f"[RANK {rank}] Warmup barrier completed in {barrier_time:.2f}s")
+    except Exception as e:
+        logger.error(f"[RANK {rank}] ERROR in barrier: {e}", exc_info=True)
+        raise
 
     total_time = time.time() - warmup_start_time
-    logger.info(f"Warmup completed: {tokens_generated} tokens in {total_time:.2f}s total")
+    logger.info(f"[RANK {rank}] ========== WARMUP COMPLETED ==========")
+    logger.info(f"[RANK {rank}] Warmup completed: {tokens_generated} tokens in {total_time:.2f}s total")
 
     return tokens_generated
 
