@@ -161,27 +161,50 @@ def mlx_distributed_init(
                 f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}"
             )
             
+            # MLX distributed requires all nodes to initialize simultaneously
+            # Rank 0 (coordinator) should start first, then other ranks connect
+            # Add a small delay for non-rank-0 nodes to allow coordinator to start
+            import time
+            if rank > 0:
+                delay_seconds = rank * 0.5  # Stagger connections: rank 1 waits 0.5s, rank 2 waits 1.0s
+                logger.info(f"rank {rank} Waiting {delay_seconds}s for coordinator (rank 0) to start...")
+                time.sleep(delay_seconds)
+            
             # Try with strict=True first to see the actual error if RDMA fails
             # If that fails, fall back to strict=False but we'll catch singleton groups
             logger.info(f"rank {rank} Calling mx.distributed.init(backend='any', strict=True)")
-            try:
-                group = mx.distributed.init(backend="any", strict=True)
-            except RuntimeError as e:
-                logger.warning(
-                    f"rank {rank} mx.distributed.init(backend='any', strict=True) failed: {e}. "
-                    f"Trying with file path instead of JSON content..."
-                )
-                # Try with file path instead
-                os.environ["MLX_IBV_DEVICES"] = devices_file
-                logger.info(f"rank {rank} Retrying with MLX_IBV_DEVICES={devices_file}")
+            max_retries = 3
+            retry_delay = 1.0
+            
+            for attempt in range(max_retries):
                 try:
                     group = mx.distributed.init(backend="any", strict=True)
-                except RuntimeError as e2:
-                    logger.warning(
-                        f"rank {rank} mx.distributed.init with file path also failed: {e2}. "
-                        f"Falling back to strict=False..."
-                    )
-                    group = mx.distributed.init(backend="any", strict=False)
+                    break  # Success
+                except RuntimeError as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"rank {rank} Attempt {attempt + 1}/{max_retries} failed: {e}. "
+                            f"Retrying in {retry_delay}s..."
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(
+                            f"rank {rank} All {max_retries} attempts with JSON content failed: {e}. "
+                            f"Trying with file path instead..."
+                        )
+                        # Try with file path instead
+                        os.environ["MLX_IBV_DEVICES"] = devices_file
+                        logger.info(f"rank {rank} Retrying with MLX_IBV_DEVICES={devices_file}")
+                        try:
+                            group = mx.distributed.init(backend="any", strict=True)
+                            break  # Success with file path
+                        except RuntimeError as e2:
+                            logger.warning(
+                                f"rank {rank} mx.distributed.init with file path also failed: {e2}. "
+                                f"Falling back to strict=False..."
+                            )
+                            group = mx.distributed.init(backend="any", strict=False)
+                            break  # Fallback to singleton (will be caught below)
             
             # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
             mlx_actual_rank = group.rank()
