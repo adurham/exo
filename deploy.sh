@@ -42,11 +42,19 @@ fi
 # Purge memory caches to free up RAM (macOS specific)
 echo "Purging memory caches..."
 if command -v purge &> /dev/null; then
-    sudo purge 2>/dev/null || echo "Note: Could not purge memory (may require sudo)"
+    # purge doesn't require sudo, but check if it works
+    if purge 2>&1; then
+        echo "Memory purge successful"
+    else
+        echo "WARNING: Memory purge failed or had errors"
+    fi
 else
-    echo "Note: purge command not available"
+    echo "WARNING: purge command not available - memory may not be freed"
 fi
-sleep 2
+sleep 3
+# Verify memory was freed
+echo "Checking memory after purge..."
+vm_stat | head -n 5 || echo "Could not check memory stats"
 
 # Reset to clean state and pull latest
 echo "Resetting to clean state..."
