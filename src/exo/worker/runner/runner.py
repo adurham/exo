@@ -145,16 +145,20 @@ def main(
                         )
                         current_status = RunnerReady()
                         logger.info("runner ready")
-                        event_sender.send(
-                            RunnerStatusUpdated(
-                                runner_id=runner_id, runner_status=RunnerReady()
-                            )
+                        runner_ready_event = RunnerStatusUpdated(
+                            runner_id=runner_id, runner_status=RunnerReady()
                         )
-                        event_sender.send(
-                            TaskStatusUpdated(
-                                task_id=task.task_id, task_status=TaskStatus.Complete
-                            )
+                        logger.info(
+                            f"Sending RunnerStatusUpdated to Ready for runner {runner_id}"
                         )
+                        event_sender.send(runner_ready_event)
+                        task_complete_event = TaskStatusUpdated(
+                            task_id=task.task_id, task_status=TaskStatus.Complete
+                        )
+                        logger.info(
+                            f"Sending TaskStatusUpdated to Complete for task {task.task_id}"
+                        )
+                        event_sender.send(task_complete_event)
                     case ChatCompletion(
                         task_params=task_params, command_id=command_id
                     ) if isinstance(current_status, RunnerReady):

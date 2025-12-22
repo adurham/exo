@@ -135,9 +135,15 @@ class RunnerSupervisor:
                 async for event in events:
                     if isinstance(event, RunnerStatusUpdated):
                         self.status = event.runner_status
+                        logger.info(
+                            f"RunnerSupervisor received RunnerStatusUpdated: {event.runner_status.__class__.__name__} for runner {event.runner_id}"
+                        )
                     if isinstance(event, TaskAcknowledged):
                         self.pending.pop(event.task_id).set()
                         continue
+                    logger.debug(
+                        f"RunnerSupervisor forwarding event: {event.__class__.__name__}"
+                    )
                     await self._event_sender.send(event)
             except (ClosedResourceError, BrokenResourceError) as e:
                 await self._check_runner(e)
