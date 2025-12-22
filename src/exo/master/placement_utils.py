@@ -643,8 +643,16 @@ def get_mlx_ibv_devices_matrix(
 
             # Fallback: match via topology "send_back_multiaddr" addresses if we cannot
             # compute subnets from profiles (e.g., missing netmask).
+            # We need the IP on node_i that node_j uses to connect to node_i.
+            # _find_connection_ip(node_i, node_j) finds connections FROM node_i TO node_j,
+            # which gives us the IP on node_j. But we need the IP on node_i.
+            # So we look for connections FROM node_j TO node_i, which gives us the IP on node_i.
             connection_ips = list(
                 _find_connection_ip(node_j, node_i, cycle_digraph, thunderbolt_only=False)
+            )
+            logger.debug(
+                f"Looking for connection IPs on {node_i.node_id} for connection to {node_j.node_id}: "
+                f"found {connection_ips}"
             )
             connection_ips = [
                 ip
@@ -746,18 +754,32 @@ def _find_connection_ip(
     If thunderbolt_only is True, only returns IPs from connections where the IP
     is on a Thunderbolt interface of node_i (the target node).
     """
-    for connection in cycle_digraph.list_connections():
+    all_connections = list(cycle_digraph.list_connections())
+    logger.debug(
+        f"_find_connection_ip: Looking for connection from {node_i.node_id} to {node_j.node_id}. "
+        f"Total connections in topology: {len(all_connections)}"
+    )
+    for connection in all_connections:
         if (
             connection.local_node_id == node_i.node_id
             and connection.send_back_node_id == node_j.node_id
         ):
             connection_ip = connection.send_back_multiaddr.ip_address
+            logger.debug(
+                f"Found connection from {node_i.node_id} to {node_j.node_id}: "
+                f"IP={connection_ip}, thunderbolt_only={thunderbolt_only}"
+            )
             if not _is_ipv4_address(connection_ip):
+                logger.debug(f"Skipping non-IPv4 address: {connection_ip}")
                 continue
             if thunderbolt_only:
                 # Check if the connection IP is on a Thunderbolt interface of node_i
                 # (the target node where the IP should be located)
-                if not _is_ip_on_thunderbolt_interface(connection_ip, node_i):
+                is_tb = _is_ip_on_thunderbolt_interface(connection_ip, node_i)
+                logger.debug(
+                    f"Connection IP {connection_ip} is on Thunderbolt interface: {is_tb}"
+                )
+                if not is_tb:
                     continue
             yield connection_ip
 
