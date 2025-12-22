@@ -132,11 +132,20 @@ def mlx_distributed_init(
             ibv_devices=ibv_devices, ibv_coordinators=ibv_coordinators
         ):
             # Use RDMA connectivity matrix
-            devices_file = os.path.abspath(f"./hosts_{rank}.json")
+            # MLX may require the devices file to be in the current working directory
+            # Use a relative path to ensure it's accessible from the process's working directory
+            devices_file = f"./hosts_{rank}.json"
+            devices_file_abs = os.path.abspath(devices_file)
             ibv_devices_json = json.dumps(ibv_devices)
 
-            with open(devices_file, "w") as f:
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(devices_file_abs) or ".", exist_ok=True)
+            
+            with open(devices_file_abs, "w") as f:
                 _ = f.write(ibv_devices_json)
+            
+            # MLX may need the relative path, not absolute
+            # Try relative path first, fall back to absolute if needed
 
             ibv_coordinator = ibv_coordinators[bound_instance.bound_node_id]
 
@@ -146,13 +155,14 @@ def mlx_distributed_init(
             logger.info(f"rank {rank} World size: {world_size}, Device rank: {rank}")
             
             # Verify the devices file exists and is readable
-            if not os.path.exists(devices_file):
-                raise FileNotFoundError(f"RDMA devices file not found: {devices_file}")
+            if not os.path.exists(devices_file_abs):
+                raise FileNotFoundError(f"RDMA devices file not found: {devices_file_abs}")
             
             # Read back the file to verify it was written correctly
-            with open(devices_file, "r") as f:
+            with open(devices_file_abs, "r") as f:
                 file_content = f.read()
             logger.info(f"rank {rank} Devices file content: {file_content}")
+            logger.info(f"rank {rank} Devices file path (relative): {devices_file}, (absolute): {devices_file_abs}, (cwd): {os.getcwd()}")
             
             # CRITICAL: Verify all RDMA devices in the matrix actually exist on this system
             # MLX will fail if it tries to use a device that doesn't exist
@@ -207,6 +217,7 @@ def mlx_distributed_init(
             
             # Set RDMA-specific environment variables
             # MLX_WORLD_SIZE is required for RDMA initialization
+            # Use relative path - MLX may need it relative to current working directory
             os.environ["MLX_IBV_DEVICES"] = devices_file
             os.environ["MLX_RANK"] = str(rank)
             os.environ["MLX_IBV_COORDINATOR"] = ibv_coordinator
@@ -244,7 +255,9 @@ def mlx_distributed_init(
                     f"MLX_IBV_COORDINATOR={os.environ.get('MLX_IBV_COORDINATOR')}, "
                     f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
                     f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}. "
-                    f"Devices file exists: {os.path.exists(devices_file)}, "
+                    f"Devices file exists: {os.path.exists(devices_file_abs)}, "
+                    f"Devices file path: {devices_file} (abs: {devices_file_abs}), "
+                    f"Current working directory: {os.getcwd()}, "
                     f"Devices file content: {file_content[:200] if len(file_content) > 200 else file_content}"
                 )
                 raise
