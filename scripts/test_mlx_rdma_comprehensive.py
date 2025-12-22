@@ -156,13 +156,21 @@ def test_mlx_rdma(
         print("  ✗ No active ports available - cannot create matrix!")
         return False
     
-    # For testing, use first ACTIVE device for all connections from this node
+    # CRITICAL: MLX needs the FULL matrix with ALL rows filled in
+    # Each node must know what devices ALL other nodes are using
+    # For testing, we'll use the first active device on each node
     # In real usage, this would be the actual matrix from placement
     matrix = [[None for _ in range(world_size)] for _ in range(world_size)]
+    
+    # Fill in ALL rows, not just the current rank's row
+    # For testing, assume each node uses its first active device for all connections
+    # In reality, we'd need to know what devices each node has, but for testing
+    # we'll use the current node's device for all connections
     for i in range(world_size):
         for j in range(world_size):
-            if i != j and i == rank:
-                # Use first ACTIVE device on this node (not just any available device)
+            if i != j:
+                # Use first ACTIVE device on this node for all connections
+                # In a real setup, each node would use its own device
                 matrix[i][j] = active_ports[0]
     
     print(f"  Matrix for rank {rank}:")
