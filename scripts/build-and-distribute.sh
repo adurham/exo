@@ -17,12 +17,18 @@ echo "========================================="
 cd "$(dirname "$0")/.."
 REPO_ROOT=$(pwd)
 
-# Build the project locally with uv sync (this builds Rust components)
-echo "Building exo with uv sync..."
-uv sync 2>&1 | tail -100
+# Ensure we're using Rust nightly
+echo "Setting Rust toolchain to nightly..."
+rustup default nightly 2>&1 | grep -v "info:" || true
 
-# Find the built Rust extension module
-PYO3_LIB=$(find .venv -name "*exo_pyo3*.so" -o -name "*exo_pyo3*.dylib" 2>/dev/null | head -1)
+# Build the Rust components directly with cargo
+echo "Building Rust bindings with cargo..."
+cd rust/exo_pyo3_bindings
+cargo build --release 2>&1 | tail -50
+cd ../..
+
+# Find the built Rust extension module in target directory
+PYO3_LIB=$(find target/release -name "*exo_pyo3*.so" -o -name "*exo_pyo3*.dylib" 2>/dev/null | head -1)
 if [ -z "$PYO3_LIB" ]; then
     echo "❌ ERROR: Could not find built Rust extension module"
     echo "Trying to locate in different paths..."
