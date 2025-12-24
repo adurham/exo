@@ -19,8 +19,7 @@ from exo.shared.logging import logger_cleanup, logger_setup
 from exo.shared.static_config import (
     get_master_url,
     get_static_config,
-    get_current_worker_config,
-    is_worker_node,
+    get_worker_config_by_node_id,
 )
 from exo.shared.types.common import NodeId, SessionId
 from exo.worker.download.impl_shard_downloader import exo_shard_downloader
@@ -66,18 +65,11 @@ async def main() -> None:
         logger.error(f"CRITICAL: {e}")
         # Continue anyway but log the error
 
-    # Verify we're on a worker node
-    hostname = socket.gethostname()
-    if not is_worker_node():
-        logger.warning(
-            f"Current hostname ({hostname}) does not match any worker node hostname. "
-            "Continuing anyway..."
-        )
-
-    # Get worker config for this node
-    worker_config = get_current_worker_config()
+    # Get worker config for this node - use node_id from args instead of hostname
+    # (hostname case may differ, so we use explicit node_id)
+    worker_config = get_worker_config_by_node_id(args.node_id)
     if worker_config is None:
-        logger.error(f"Could not find worker config for hostname {hostname}")
+        logger.error(f"Could not find worker config for node_id {args.node_id}")
         sys.exit(1)
 
     # Get Master URL
