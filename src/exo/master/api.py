@@ -113,14 +113,20 @@ class API:
         self._setup_cors()
         self._setup_routes()
 
-        self.app.mount(
-            "/",
-            StaticFiles(
-                directory=find_dashboard(),
-                html=True,
-            ),
-            name="dashboard",
-        )
+        # Mount dashboard if available (optional for static setup)
+        try:
+            dashboard_dir = find_dashboard()
+            self.app.mount(
+                "/",
+                StaticFiles(
+                    directory=dashboard_dir,
+                    html=True,
+                ),
+                name="dashboard",
+            )
+        except FileNotFoundError:
+            # Dashboard not available - API will still work, just no web UI
+            logger.warning("Dashboard not found - web UI will not be available. API endpoints are still functional.")
 
         self._chat_completion_queues: dict[CommandId, Sender[TokenChunk]] = {}
         self._tg: TaskGroup | None = None
