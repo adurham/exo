@@ -55,7 +55,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     # Setup logging
-    logger_setup(EXO_LOG, level=args.log_level)
+    logger_setup(EXO_LOG, verbosity=0 if args.log_level == "INFO" else 1 if args.log_level == "DEBUG" else -1)
     logger.info("Starting Exo Master (Static Cluster Mode)")
 
     # Flush RAM on startup and verify zero swap

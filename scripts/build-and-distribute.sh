@@ -61,16 +61,26 @@ echo "✅ Found Rust extension: $PYO3_LIB"
 SITE_PACKAGES=$(dirname "$PYO3_LIB")
 echo "✅ Site-packages: $SITE_PACKAGES"
 
-# Create a temporary directory for distribution
+# Create a temporary directory for distribution - copy entire exo_pyo3_bindings directory
 DIST_DIR="/tmp/exo-build-$$"
-mkdir -p "$DIST_DIR/exo_pyo3_bindings"
+mkdir -p "$DIST_DIR"
 
-# Copy the Rust extension and any related files
-cp "$PYO3_LIB" "$DIST_DIR/exo_pyo3_bindings/"
-# Copy any .pyi stub files if they exist
-find "$SITE_PACKAGES/exo_pyo3_bindings" -name "*.pyi" -exec cp {} "$DIST_DIR/exo_pyo3_bindings/" \; 2>/dev/null || true
-# Copy __init__.py if it exists
-find "$SITE_PACKAGES/exo_pyo3_bindings" -name "__init__.py" -exec cp {} "$DIST_DIR/exo_pyo3_bindings/" \; 2>/dev/null || true
+# Copy the entire exo_pyo3_bindings directory structure
+cp -r "$SITE_PACKAGES/exo_pyo3_bindings" "$DIST_DIR/" 2>/dev/null || {
+    echo "⚠️  Could not copy entire directory, copying files individually..."
+    mkdir -p "$DIST_DIR/exo_pyo3_bindings"
+    cp "$PYO3_LIB" "$DIST_DIR/exo_pyo3_bindings/"
+    # Ensure the .so file has the correct name that Python expects
+    # Python expects exo_pyo3_bindings.cpython-313-darwin.so or similar
+    if [[ "$PYO3_LIB" != *"exo_pyo3_bindings.cpython"* ]]; then
+        # Rename to match Python's expected naming
+        cp "$PYO3_LIB" "$DIST_DIR/exo_pyo3_bindings/exo_pyo3_bindings.cpython-313-darwin.so"
+    fi
+    # Copy any .pyi stub files if they exist
+    find "$SITE_PACKAGES/exo_pyo3_bindings" -name "*.pyi" -exec cp {} "$DIST_DIR/exo_pyo3_bindings/" \; 2>/dev/null || true
+    # Copy __init__.py if it exists
+    find "$SITE_PACKAGES/exo_pyo3_bindings" -name "__init__.py" -exec cp {} "$DIST_DIR/exo_pyo3_bindings/" \; 2>/dev/null || true
+}
 
 echo ""
 echo "========================================="
@@ -96,6 +106,9 @@ distribute_to_node() {
     ssh $SSH_OPTS "$node" "mkdir -p $REPO_PATH/.venv/lib/python3.13/site-packages/exo_pyo3_bindings" 2>&1
     
     # Copy the Rust extension and files to remote node
+    # Ensure the directory exists
+    ssh $SSH_OPTS "$node" "mkdir -p $REPO_PATH/.venv/lib/python3.13/site-packages/exo_pyo3_bindings" 2>&1
+    # Copy all files from the distribution directory
     scp $SSH_OPTS -r "$DIST_DIR/exo_pyo3_bindings/"* "$node:$REPO_PATH/.venv/lib/python3.13/site-packages/exo_pyo3_bindings/" 2>&1
     
     echo "✅ [$node] Rust bindings distributed to .venv/lib/python3.13/site-packages/exo_pyo3_bindings/"
