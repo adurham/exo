@@ -1,9 +1,10 @@
 #!/bin/bash
 set -e
 
-# Static cluster configuration
-MASTER_NODE="adams-macbook-pro-m1"
-WORKER_NODES=("adams-mac-studio-m4" "adams-macbook-pro-m4" "adams-work-macbook-pro-m4")
+# Static cluster configuration - using Tailscale IPs
+MASTER_NODE="100.67.156.10"
+WORKER_NODES=("100.93.253.67" "100.80.147.125" "100.82.48.77")
+WORKER_HOSTNAMES=("adams-mac-studio-m4" "adams-macbook-pro-m4" "adams-work-macbook-pro-m4")
 MASTER_API_URL="http://100.67.156.10:52415"
 MODEL_PATH="\$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit"
 
