@@ -101,6 +101,21 @@ echo "========================================="
 echo "Deploying Static 4-Node MLX RDMA Cluster"
 echo "========================================="
 echo ""
+echo "NOTE: Make sure to run scripts/build-and-distribute.sh first"
+echo "      to pre-build and distribute Rust components to all nodes"
+echo ""
+
+# Ask user if they want to skip build/distribution (for faster re-deployments)
+SKIP_BUILD="${SKIP_BUILD:-no}"
+if [ "$SKIP_BUILD" != "yes" ]; then
+    read -p "Have you run build-and-distribute.sh? (yes/no): " confirm
+    if [ "$confirm" != "yes" ]; then
+        echo "Please run: ./scripts/build-and-distribute.sh"
+        exit 1
+    fi
+fi
+echo ""
+
 
 # Step 1: Verify model exists on all worker nodes
 echo "Step 1: Verifying model location on worker nodes..."
