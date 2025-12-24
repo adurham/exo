@@ -111,7 +111,7 @@ async def main() -> None:
     )
 
     # Print startup banner
-    print_startup_banner()
+    print_startup_banner(args.api_port)
 
     # Setup signal handlers for graceful shutdown
     shutdown_event = anyio.Event()
