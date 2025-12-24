@@ -3,6 +3,8 @@
         self.app.get("/events")(lambda: self._event_log)
         # Add endpoint for workers to send events via HTTP
         self.app.post("/events")(self.receive_event)
+        # Add endpoint for workers to send events via HTTP
+        self.app.post("/events")(self.receive_event)
         
         # Add endpoint for workers to send events via HTTP
         self.app.post("/events")(self.receive_event)
