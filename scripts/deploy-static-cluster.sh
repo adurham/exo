@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Add SSH options for Tailscale IPs
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
 # Static cluster configuration - using Tailscale IPs
 MASTER_NODE="100.67.156.10"
 WORKER_NODES=("100.93.253.67" "100.80.147.125" "100.82.48.77")
@@ -19,7 +22,7 @@ prefix_output() {
 # Function to check swap usage on a node
 check_swap() {
     local node=$1
-    ssh "$node" "vm_stat | grep 'Swap' | awk '{print \$3}' | sed 's/\\.//'" 2>/dev/null || echo "0"
+    ssh $SSH_OPTS "$node" "vm_stat | grep 'Swap' | awk '{print \$3}' | sed 's/\\.//'" 2>/dev/null || echo "0"
 }
 
 # Function to verify zero swap usage
@@ -38,7 +41,7 @@ verify_zero_swap() {
 verify_model() {
     local node=$1
     # Use HOME variable expansion in the SSH command
-    if ssh "$node" "test -d \$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit" 2>/dev/null; then
+    if ssh $SSH_OPTS "$node" "test -d \$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit" 2>/dev/null; then
         echo "✅ Model found at \$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit on $node"
         return 0
     else
@@ -118,14 +121,14 @@ echo ""
 echo "Step 3: Stopping any existing exo processes..."
 for node in "$MASTER_NODE" "${WORKER_NODES[@]}"; do
     echo "[$node] Stopping existing processes..."
-    ssh "$node" "pkill -9 -f 'exo.*master_app' 2>/dev/null || true; pkill -9 -f 'exo.*worker_app' 2>/dev/null || true; pkill -9 -f 'uv run.*master_app' 2>/dev/null || true; pkill -9 -f 'uv run.*worker_app' 2>/dev/null || true" 2>&1 | prefix_output "$node" || true
+    ssh $SSH_OPTS "$node" "pkill -9 -f 'exo.*master_app' 2>/dev/null || true; pkill -9 -f 'exo.*worker_app' 2>/dev/null || true; pkill -9 -f 'uv run.*master_app' 2>/dev/null || true; pkill -9 -f 'uv run.*worker_app' 2>/dev/null || true" 2>&1 | prefix_output "$node" || true
 done
 sleep 2
 echo ""
 
 # Step 4: Start Master
 echo "Step 4: Starting Master on $MASTER_NODE..."
-ssh "$MASTER_NODE" "cd ~/repos/exo && nohup uv run python -m exo.master_app > ~/.exo/master.log 2>&1 &" 2>&1 | prefix_output "$MASTER_NODE" || true
+ssh $SSH_OPTS "$MASTER_NODE" "cd ~/repos/exo && nohup uv run python -m exo.master_app > ~/.exo/master.log 2>&1 &" 2>&1 | prefix_output "$MASTER_NODE" || true
 sleep 3
 
 # Wait for Master to be ready
@@ -154,7 +157,7 @@ echo ""
 echo "Step 5: Starting Workers on all worker nodes..."
 for node in "${WORKER_NODES[@]}"; do
     echo "[$node] Starting Worker..."
-    ssh "$node" "cd ~/repos/exo && nohup uv run python -m exo.worker_app > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
+    ssh $SSH_OPTS "$node" "cd ~/repos/exo && nohup uv run python -m exo.worker_app > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
 done
 sleep 5
 echo ""
