@@ -43,6 +43,12 @@ async def main() -> None:
         help="Master URL (default: from static config)",
     )
     parser.add_argument(
+        "--node-id",
+        type=NodeId,
+        required=True,
+        help="NodeId of this worker (e.g., 'static-worker-0-adams-mac-studio-m4')",
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",

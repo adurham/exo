@@ -8,6 +8,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 MASTER_NODE="100.67.156.10"
 WORKER_NODES=("100.93.253.67" "100.80.147.125" "100.82.48.77")
 WORKER_HOSTNAMES=("adams-mac-studio-m4" "adams-macbook-pro-m4" "adams-work-macbook-pro-m4")
+WORKER_NODE_IDS=("static-worker-0-adams-mac-studio-m4" "static-worker-1-adams-macbook-pro-m4" "static-worker-2-adams-work-macbook-pro-m4")
 MASTER_API_URL="http://100.67.156.10:52415"
 MODEL_PATH="\$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit"
 
@@ -186,9 +187,11 @@ echo ""
 
 # Step 5: Start Workers
 echo "Step 5: Starting Workers on all worker nodes..."
-for node in "${WORKER_NODES[@]}"; do
-    echo "[$node] Starting Worker..."
-    ssh $SSH_OPTS "$node" "cd ~/repos/exo && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && nohup bash -c 'uv run python -m exo.worker_app' > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
+for i in "${!WORKER_NODES[@]}"; do
+    node="${WORKER_NODES[$i]}"
+    node_id="${WORKER_NODE_IDS[$i]}"
+    echo "[$node] Starting Worker with node_id=$node_id..."
+    ssh $SSH_OPTS "$node" "cd ~/repos/exo && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && nohup bash -c 'uv run python -m exo.worker_app --node-id $node_id' > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
 done
 sleep 5
 echo ""
