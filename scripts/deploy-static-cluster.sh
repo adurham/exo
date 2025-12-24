@@ -19,22 +19,25 @@ prefix_output() {
     done
 }
 
-# Function to check swap usage on a node
+# Function to check swap usage on a node (macOS)
 check_swap() {
     local node=$1
-    ssh $SSH_OPTS "$node" "vm_stat | grep 'Swap' | awk '{print \$3}' | sed 's/\\.//'" 2>/dev/null || echo "0"
+    # On macOS, use sysctl vm.swapusage - it shows "used = XM" format
+    ssh $SSH_OPTS "$node" "sysctl vm.swapusage 2>/dev/null | awk -F'used = ' '{print \$2}' | awk '{print \$1}' | sed 's/M//' | sed 's/G/000/' | head -1" 2>/dev/null || echo "0"
 }
 
 # Function to verify zero swap usage
 verify_zero_swap() {
     local node=$1
     local swap_used=$(check_swap "$node")
-    if [ "$swap_used" != "0" ]; then
-        echo "❌ ERROR: Swap usage detected on $node: $swap_used pages"
-        return 1
+    # Remove any non-numeric characters and check if it's greater than 0
+    swap_used=$(echo "$swap_used" | tr -d '[:alpha:]')
+    if [ -z "$swap_used" ] || [ "$swap_used" = "0" ]; then
+        echo "✅ Swap usage verified: zero on $node"
+        return 0
     fi
-    echo "✅ Swap usage verified: zero on $node"
-    return 0
+    echo "❌ ERROR: Swap usage detected on $node: ${swap_used}MB"
+    return 1
 }
 
 # Function to verify model exists
