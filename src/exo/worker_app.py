@@ -102,8 +102,8 @@ async def main() -> None:
         master_url=master_url,  # HTTP URL for Master communication
     )
 
-    # Print startup banner
-    print_startup_banner()
+    # Print startup banner (workers don't have a port, use 0)
+    print_startup_banner(0)
 
     # Setup signal handlers for graceful shutdown
     shutdown_event = anyio.Event()
