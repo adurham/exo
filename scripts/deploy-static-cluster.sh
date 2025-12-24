@@ -5,7 +5,7 @@ set -e
 MASTER_NODE="adams-macbook-pro-m1"
 WORKER_NODES=("adams-mac-studio-m4" "adams-macbook-pro-m4" "adams-work-macbook-pro-m4")
 MASTER_API_URL="http://100.67.156.10:52415"
-MODEL_PATH="~/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit"
+MODEL_PATH="\$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit"
 
 # Function to prefix output with node name
 prefix_output() {
@@ -36,11 +36,12 @@ verify_zero_swap() {
 # Function to verify model exists
 verify_model() {
     local node=$1
+    local expanded_path=$(ssh "$node" "echo $MODEL_PATH" 2>/dev/null)
     if ssh "$node" "test -d $MODEL_PATH" 2>/dev/null; then
-        echo "✅ Model found at $MODEL_PATH on $node"
+        echo "✅ Model found at $expanded_path on $node"
         return 0
     else
-        echo "❌ ERROR: Model not found at $MODEL_PATH on $node"
+        echo "❌ ERROR: Model not found at $expanded_path on $node"
         return 1
     fi
 }
