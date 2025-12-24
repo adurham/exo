@@ -6,7 +6,8 @@ from anyio import CancelScope, create_task_group, current_time, fail_after
 from anyio.abc import TaskGroup
 from loguru import logger
 
-from exo.routing.connection_message import ConnectionMessage, ConnectionMessageType
+# ConnectionMessage stub import (not used in static setup)
+from exo.routing import ConnectionMessage, ConnectionMessageType
 from exo.shared.apply import apply
 from exo.shared.types.commands import ForwarderCommand, RequestEventLog
 from exo.shared.types.common import NodeId, SessionId
@@ -62,12 +63,13 @@ class Worker:
         session_id: SessionId,
         shard_downloader: ShardDownloader,
         *,
-        connection_message_receiver: Receiver[ConnectionMessage],
-        global_event_receiver: Receiver[ForwarderEvent],
-        local_event_sender: Sender[ForwarderEvent],
+        connection_message_receiver: Receiver[ConnectionMessage] | None = None,
+        global_event_receiver: Receiver[ForwarderEvent] | None = None,
+        local_event_sender: Sender[ForwarderEvent] | None = None,
         # This is for requesting updates. It doesn't need to be a general command sender right now,
         # but I think it's the correct way to be thinking about commands
-        command_sender: Sender[ForwarderCommand],
+        command_sender: Sender[ForwarderCommand] | None = None,
+        master_url: str | None = None,  # HTTP URL for Master communication (for simplified mode)
     ):
         self.node_id: NodeId = node_id
         self.session_id: SessionId = session_id
@@ -82,12 +84,15 @@ class Worker:
         self.connection_message_receiver = connection_message_receiver
         self.event_buffer = OrderedBuffer[Event]()
         self.out_for_delivery: dict[EventId, ForwarderEvent] = {}
+        
+        # HTTP client for Master communication (simplified mode)
+        self.master_url = master_url
 
         self.state: State = State()
         self.download_status: dict[ShardMetadata, DownloadProgress] = {}
         self.runners: dict[RunnerId, RunnerSupervisor] = {}
         self._tg: TaskGroup | None = None
-        self._peer_file_service: "PeerFileService | None" = None
+        # PeerFileService removed for static setup (models pre-downloaded)
 
         self._nack_cancel_scope: CancelScope | None = None
         self._nack_attempts: int = 0
@@ -136,45 +141,37 @@ class Worker:
 
         async with create_task_group() as tg:
             self._tg = tg
-            # Start peer file service for P2P downloads
-            # Import here to avoid circular dependency
-            from exo.worker.download.peer_file_service import PeerFileService
-            self._peer_file_service = PeerFileService(
-                node_id=self.node_id,
-                topology=self.state.topology,
-                port=8080,
-            )
-            await self._peer_file_service.start_server()
-            # Update shard downloader with peer service
-            # Unwrap SingletonShardDownloader -> CachedShardDownloader -> ResumableShardDownloader
-            if hasattr(self.shard_downloader, 'shard_downloader'):
-                cached = self.shard_downloader.shard_downloader
-                if hasattr(cached, 'shard_downloader'):
-                    cached.shard_downloader.peer_file_service = self._peer_file_service
+            # Peer file service removed for static setup (models are pre-downloaded)
+            # P2P file sharing not needed
             
             tg.start_soon(self.plan_step)
             tg.start_soon(start_polling_node_metrics, resource_monitor_callback)
 
             tg.start_soon(start_polling_memory_metrics, memory_monitor_callback)
-            tg.start_soon(self._connection_message_event_writer)
-            tg.start_soon(self._resend_out_for_delivery)
-            tg.start_soon(self._event_applier)
-            tg.start_soon(self._forward_events)
-            tg.start_soon(self._poll_connection_updates)
+            if self.connection_message_receiver:
+                tg.start_soon(self._connection_message_event_writer)
+            if self.global_event_receiver:
+                tg.start_soon(self._resend_out_for_delivery)
+                tg.start_soon(self._event_applier)
+            if self.local_event_sender:
+                tg.start_soon(self._forward_events)
+            if self.connection_message_receiver:
+                tg.start_soon(self._poll_connection_updates)
 
         # Actual shutdown code - waits for all tasks to complete before executing.
         logger.info("Worker shutdown: stopping services and cleaning up resources")
-        if self._peer_file_service:
-            await self._peer_file_service.stop_server()
+        # Peer file service removed for static setup
         # Flush and close all channels
-        try:
-            self.local_event_sender.close()
-        except Exception as e:
-            logger.warning(f"Error closing local_event_sender: {e}")
-        try:
-            self.command_sender.close()
-        except Exception as e:
-            logger.warning(f"Error closing command_sender: {e}")
+        if self.local_event_sender:
+            try:
+                self.local_event_sender.close()
+            except Exception as e:
+                logger.warning(f"Error closing local_event_sender: {e}")
+        if self.command_sender:
+            try:
+                self.command_sender.close()
+            except Exception as e:
+                logger.warning(f"Error closing command_sender: {e}")
         # Shutdown all runners
         for runner in self.runners.values():
             try:
@@ -184,6 +181,8 @@ class Worker:
         logger.info("Worker shutdown complete")
 
     async def _event_applier(self):
+        if self.global_event_receiver is None:
+            return
         with self.global_event_receiver as events:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
@@ -317,6 +316,8 @@ class Worker:
         return instance.shard_assignments.node_to_runner[self.node_id]
 
     async def _connection_message_event_writer(self):
+        if self.connection_message_receiver is None:
+            return
         with self.connection_message_receiver as connection_messages:
             async for msg in connection_messages:
                 await self.event_sender.send(
@@ -366,12 +367,13 @@ class Worker:
                 logger.info(
                     f"Nack attempt {self._nack_attempts}: Requesting Event Log from {since_idx}"
                 )
-                await self.command_sender.send(
-                    ForwarderCommand(
-                        origin=self.node_id,
-                        command=RequestEventLog(since_idx=since_idx),
+                if self.command_sender:
+                    await self.command_sender.send(
+                        ForwarderCommand(
+                            origin=self.node_id,
+                            command=RequestEventLog(since_idx=since_idx),
+                        )
                     )
-                )
             finally:
                 if self._nack_cancel_scope is scope:
                     self._nack_cancel_scope = None
@@ -379,6 +381,8 @@ class Worker:
     async def _resend_out_for_delivery(self) -> None:
         # This can also be massively tightened, we should check events are at least a certain age before resending.
         # Exponential backoff would also certainly help here.
+        if self.local_event_sender is None:
+            return
         while True:
             await anyio.sleep(1 + random())
             for event in self.out_for_delivery.copy().values():
@@ -469,6 +473,8 @@ class Worker:
         self._tg.start_soon(self.shard_downloader.ensure_shard, task.shard_metadata)
 
     async def _forward_events(self) -> None:
+        if self.local_event_sender is None:
+            return
         with self.event_receiver as events:
             async for event in events:
                 fe = ForwarderEvent(

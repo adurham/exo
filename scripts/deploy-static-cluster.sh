@@ -1,0 +1,221 @@
+#!/bin/bash
+set -e
+
+# Static cluster configuration
+MASTER_NODE="adams-macbook-pro-m1"
+WORKER_NODES=("adams-mac-studio-m4" "adams-macbook-pro-m4" "adams-work-macbook-pro-m4")
+MASTER_API_URL="http://100.67.156.10:52415"
+MODEL_PATH="~/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit"
+
+# Function to prefix output with node name
+prefix_output() {
+    local node=$1
+    while IFS= read -r line; do
+        echo "[$node] $line"
+    done
+}
+
+# Function to check swap usage on a node
+check_swap() {
+    local node=$1
+    ssh "$node" "vm_stat | grep 'Swap' | awk '{print \$3}' | sed 's/\\.//'" 2>/dev/null || echo "0"
+}
+
+# Function to verify zero swap usage
+verify_zero_swap() {
+    local node=$1
+    local swap_used=$(check_swap "$node")
+    if [ "$swap_used" != "0" ]; then
+        echo "❌ ERROR: Swap usage detected on $node: $swap_used pages"
+        return 1
+    fi
+    echo "✅ Swap usage verified: zero on $node"
+    return 0
+}
+
+# Function to verify model exists
+verify_model() {
+    local node=$1
+    if ssh "$node" "test -d $MODEL_PATH" 2>/dev/null; then
+        echo "✅ Model found at $MODEL_PATH on $node"
+        return 0
+    else
+        echo "❌ ERROR: Model not found at $MODEL_PATH on $node"
+        return 1
+    fi
+}
+
+# Function to check if Master API is responding
+check_master_api() {
+    local response=$(curl -s --max-time 5 "$MASTER_API_URL/state" 2>/dev/null || echo "")
+    if [ -z "$response" ]; then
+        return 1
+    fi
+    return 0
+}
+
+# Function to check if all workers are registered
+check_workers_registered() {
+    local expected_workers=3
+    local response=$(curl -s --max-time 5 "$MASTER_API_URL/state" 2>/dev/null || echo "")
+    if [ -z "$response" ]; then
+        return 1
+    fi
+    # Count worker nodes in topology (excluding master)
+    local worker_count=$(echo "$response" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    nodes = data.get('topology', {}).get('nodes', [])
+    # Workers are nodes with 'static-worker' in node_id
+    workers = [n for n in nodes if 'static-worker' in str(n.get('nodeId', ''))]
+    print(len(workers))
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+    if [ "$worker_count" -ge "$expected_workers" ]; then
+        return 0
+    fi
+    return 1
+}
+
+echo "========================================="
+echo "Deploying Static 4-Node MLX RDMA Cluster"
+echo "========================================="
+echo ""
+
+# Step 1: Verify model exists on all worker nodes
+echo "Step 1: Verifying model location on worker nodes..."
+model_ok=true
+for node in "${WORKER_NODES[@]}"; do
+    if ! verify_model "$node"; then
+        model_ok=false
+    fi
+done
+if [ "$model_ok" = false ]; then
+    echo "❌ ERROR: Model verification failed. Please ensure model exists on all worker nodes."
+    exit 1
+fi
+echo ""
+
+# Step 2: Check swap usage on all nodes (must be zero)
+echo "Step 2: Checking swap usage on all nodes..."
+swap_ok=true
+for node in "$MASTER_NODE" "${WORKER_NODES[@]}"; do
+    if ! verify_zero_swap "$node"; then
+        swap_ok=false
+    fi
+done
+if [ "$swap_ok" = false ]; then
+    echo "❌ ERROR: Swap usage detected. This will kill performance. Please free up memory."
+    exit 1
+fi
+echo ""
+
+# Step 3: Kill any existing exo processes
+echo "Step 3: Stopping any existing exo processes..."
+for node in "$MASTER_NODE" "${WORKER_NODES[@]}"; do
+    echo "[$node] Stopping existing processes..."
+    ssh "$node" "pkill -9 -f 'exo.*master_app' 2>/dev/null || true; pkill -9 -f 'exo.*worker_app' 2>/dev/null || true; pkill -9 -f 'uv run.*master_app' 2>/dev/null || true; pkill -9 -f 'uv run.*worker_app' 2>/dev/null || true" 2>&1 | prefix_output "$node" || true
+done
+sleep 2
+echo ""
+
+# Step 4: Start Master
+echo "Step 4: Starting Master on $MASTER_NODE..."
+ssh "$MASTER_NODE" "cd ~/repos/exo && nohup uv run python -m exo.master_app > ~/.exo/master.log 2>&1 &" 2>&1 | prefix_output "$MASTER_NODE" || true
+sleep 3
+
+# Wait for Master to be ready
+echo "Waiting for Master API to be ready..."
+MAX_WAIT=30
+ELAPSED=0
+INTERVAL=1
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    if check_master_api; then
+        echo "✅ Master API is ready"
+        break
+    fi
+    echo "Waiting for Master API... ($ELAPSED/$MAX_WAIT seconds)"
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
+
+if ! check_master_api; then
+    echo "❌ ERROR: Master API did not become ready within $MAX_WAIT seconds"
+    echo "Check logs: ssh $MASTER_NODE 'tail -n 50 ~/.exo/master.log'"
+    exit 1
+fi
+echo ""
+
+# Step 5: Start Workers
+echo "Step 5: Starting Workers on all worker nodes..."
+for node in "${WORKER_NODES[@]}"; do
+    echo "[$node] Starting Worker..."
+    ssh "$node" "cd ~/repos/exo && nohup uv run python -m exo.worker_app > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
+done
+sleep 5
+echo ""
+
+# Step 6: Verify all workers are registered
+echo "Step 6: Verifying all workers are registered with Master..."
+MAX_WAIT=60
+ELAPSED=0
+INTERVAL=2
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    if check_workers_registered; then
+        echo "✅ All workers are registered!"
+        break
+    fi
+    echo "Waiting for workers to register... ($ELAPSED/$MAX_WAIT seconds)"
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
+
+if ! check_workers_registered; then
+    echo "❌ ERROR: Not all workers registered within $MAX_WAIT seconds"
+    echo "Checking current status..."
+    curl -s "$MASTER_API_URL/state" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    nodes = data.get('topology', {}).get('nodes', [])
+    print(f'Registered nodes: {len(nodes)}')
+    for n in nodes:
+        node_id = str(n.get('nodeId', 'unknown'))
+        print(f'  - {node_id[:50]}...')
+except Exception as e:
+    print(f'Error: {e}')
+" 2>/dev/null || echo "Could not check node status"
+    exit 1
+fi
+echo ""
+
+# Step 7: Final swap check
+echo "Step 7: Final swap usage check..."
+swap_ok=true
+for node in "$MASTER_NODE" "${WORKER_NODES[@]}"; do
+    if ! verify_zero_swap "$node"; then
+        swap_ok=false
+    fi
+done
+if [ "$swap_ok" = false ]; then
+    echo "❌ WARNING: Swap usage detected after deployment. Performance may be degraded."
+    # Don't exit, just warn
+fi
+echo ""
+
+echo "========================================="
+echo "✅ Deployment Complete!"
+echo "========================================="
+echo "Master API: $MASTER_API_URL"
+echo "Workers: ${WORKER_NODES[*]}"
+echo ""
+echo "To check logs:"
+echo "  Master: ssh $MASTER_NODE 'tail -f ~/.exo/master.log'"
+echo "  Worker: ssh <worker-node> 'tail -f ~/.exo/worker.log'"
+echo ""
+echo "To check status:"
+echo "  curl $MASTER_API_URL/state"
+echo ""
+

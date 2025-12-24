@@ -11,6 +11,8 @@ from exo.master.placement import (
     place_instance,
 )
 from exo.shared.apply import apply
+from exo.shared.static_config import create_static_topology
+from exo.shared.topology import Topology
 from exo.shared.types.commands import (
     ChatCompletion,
     CreateInstance,
@@ -50,15 +52,27 @@ class Master:
         node_id: NodeId,
         session_id: SessionId,
         *,
-        command_receiver: Receiver[ForwarderCommand],
+        command_receiver: Receiver[ForwarderCommand] | None = None,
         # Receiving indexed events from the forwarder to be applied to state
         # Ideally these would be WorkerForwarderEvents but type system says no :(
-        local_event_receiver: Receiver[ForwarderEvent],
+        local_event_receiver: Receiver[ForwarderEvent] | None = None,
         # Send events to the forwarder to be indexed (usually from command processing)
         # Ideally these would be MasterForwarderEvents but type system says no :(
-        global_event_sender: Sender[ForwarderEvent],
+        global_event_sender: Sender[ForwarderEvent] | None = None,
+        initial_topology: Topology | None = None,
     ):
-        self.state = State()
+        # Initialize state with static topology if provided, otherwise empty topology
+        if initial_topology is not None:
+            self.state = State(topology=initial_topology)
+        else:
+            # For backward compatibility, use static topology if available
+            try:
+                static_topology = create_static_topology()
+                self.state = State(topology=static_topology)
+                logger.info("Initialized Master state with static topology")
+            except Exception as e:
+                logger.warning(f"Failed to create static topology, using empty: {e}")
+                self.state = State()
         self._tg: TaskGroup = anyio.create_task_group()
         self.node_id = node_id
         self.session_id = session_id
@@ -69,8 +83,9 @@ class Master:
         send, recv = channel[Event]()
         self.event_sender: Sender[Event] = send
         self._loopback_event_receiver: Receiver[Event] = recv
-        self._loopback_event_sender: Sender[ForwarderEvent] = (
-            local_event_receiver.clone_sender()
+        # Only create loopback sender if local_event_receiver is provided
+        self._loopback_event_sender: Sender[ForwarderEvent] | None = (
+            local_event_receiver.clone_sender() if local_event_receiver else None
         )
         self._multi_buffer = MultiSourceBuffer[NodeId, Event]()
         # TODO: not have this
@@ -80,14 +95,21 @@ class Master:
         logger.info("Starting Master")
 
         async with self._tg as tg:
-            tg.start_soon(self._event_processor)
-            tg.start_soon(self._command_processor)
-            tg.start_soon(self._loopback_processor)
+            if self.local_event_receiver:
+                tg.start_soon(self._event_processor)
+            if self.command_receiver:
+                tg.start_soon(self._command_processor)
+            if self._loopback_event_sender:
+                tg.start_soon(self._loopback_processor)
             tg.start_soon(self._plan)
-        self.global_event_sender.close()
-        self.local_event_receiver.close()
-        self.command_receiver.close()
-        self._loopback_event_sender.close()
+        if self.global_event_sender:
+            self.global_event_sender.close()
+        if self.local_event_receiver:
+            self.local_event_receiver.close()
+        if self.command_receiver:
+            self.command_receiver.close()
+        if self._loopback_event_sender:
+            self._loopback_event_sender.close()
         self._loopback_event_receiver.close()
 
     async def shutdown(self):
@@ -95,6 +117,8 @@ class Master:
         self._tg.cancel_scope.cancel()
 
     async def _command_processor(self) -> None:
+        if self.command_receiver is None:
+            return
         with self.command_receiver as commands:
             async for forwarder_command in commands:
                 try:
@@ -221,6 +245,8 @@ class Master:
             await anyio.sleep(10)
 
     async def _event_processor(self) -> None:
+        if self.local_event_receiver is None:
+            return
         with self.local_event_receiver as local_events:
             async for local_event in local_events:
                 # Discard all events not from our session
@@ -244,6 +270,8 @@ class Master:
     async def _loopback_processor(self) -> None:
         # this would ideally not be necessary.
         # this is WAY less hacky than how I was working around this before
+        if self._loopback_event_sender is None:
+            return
         local_index = 0
         with self._loopback_event_receiver as events:
             async for event in events:
@@ -260,6 +288,8 @@ class Master:
     # This function is re-entrant, take care!
     async def _send_event(self, event: IndexedEvent):
         # Convenience method since this line is ugly
+        if self.global_event_sender is None:
+            return
         await self.global_event_sender.send(
             ForwarderEvent(
                 origin=self.node_id,

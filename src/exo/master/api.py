@@ -96,8 +96,8 @@ class API:
         # Ideally this would be a MasterForwarderEvent but type system says no :(
         global_event_receiver: Receiver[ForwarderEvent],
         command_sender: Sender[ForwarderCommand],
-        # This lets us pause the API if an election is running
-        election_receiver: Receiver[ElectionMessage],
+        # Election receiver is optional (not used in static setup)
+        election_receiver: Receiver[ElectionMessage] | None = None,
     ) -> None:
         self.state = State()
         self._event_log: list[Event] = []
@@ -107,11 +107,7 @@ class API:
         self.event_buffer: OrderedBuffer[Event] = OrderedBuffer[Event]()
         self.node_id: NodeId = node_id
         self.session_id: SessionId = session_id
-        self.last_completed_election: int = 0
         self.port = port
-
-        self.paused: bool = False
-        self.paused_ev: anyio.Event = anyio.Event()
 
         self.app = FastAPI()
         self._setup_cors()
@@ -135,14 +131,10 @@ class API:
         self.session_id = new_session_id
         self.event_buffer = OrderedBuffer[Event]()
         self._chat_completion_queues = {}
-        self.unpause(result_clock)
 
     def unpause(self, result_clock: int):
-        logger.info("Unpausing API")
-        self.last_completed_election = result_clock
-        self.paused = False
-        self.paused_ev.set()
-        self.paused_ev = anyio.Event()
+        """No-op in static setup (no elections)."""
+        pass
 
     def _setup_cors(self) -> None:
         self.app.add_middleware(
@@ -548,7 +540,7 @@ class API:
             self._tg = tg
             logger.info("Starting API")
             tg.start_soon(self._applystate)
-            tg.start_soon(self._pause_on_new_election)
+            # No election pausing in static setup
             print_startup_banner(self.port)
             try:
                 await serve(
@@ -629,15 +621,8 @@ class API:
                                 event.chunk
                             )
 
-    async def _pause_on_new_election(self):
-        with self.election_receiver as ems:
-            async for message in ems:
-                if message.clock > self.last_completed_election:
-                    self.paused = True
-
     async def _send(self, command: Command):
-        while self.paused:
-            await self.paused_ev.wait()
+        # No pausing in static setup (no elections)
         await self.command_sender.send(
             ForwarderCommand(origin=self.node_id, command=command)
         )

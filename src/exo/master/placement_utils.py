@@ -11,6 +11,11 @@ from loguru import logger
 from pydantic import BaseModel
 
 from exo.shared.constants import LB_MEMBW_GBPS
+from exo.shared.static_config import (
+    get_static_config,
+    get_thunderbolt_ip_for_peer,
+    get_worker_config_by_node_id,
+)
 from exo.shared.topology import Topology
 from exo.shared.types.common import Host, NodeId
 from exo.shared.types.memory import Memory
@@ -625,6 +630,20 @@ def get_mlx_ibv_devices_matrix(
         for j, node_j in enumerate(selected_cycle):
             if i == j:
                 continue
+
+            # First, try static config Thunderbolt IPs (for static setup)
+            static_ip = get_thunderbolt_ip_for_peer(node_i.node_id, node_j.node_id)
+            if static_ip:
+                logger.info(
+                    f"Using static Thunderbolt IP {static_ip} for connection from {node_i.node_id} to {node_j.node_id}"
+                )
+                interface_name = _find_interface_name_for_ip(static_ip, node_i)
+                if interface_name is not None:
+                    matrix[i][j] = interface_name
+                    logger.info(
+                        f"Found interface {interface_name} for static IP {static_ip} on {node_i.node_id}"
+                    )
+                    continue
 
             # Find Thunderbolt interface on node_i that can ping node_j's Thunderbolt interfaces
             interface_name = _find_thunderbolt_interface_by_ping(node_i, node_j)

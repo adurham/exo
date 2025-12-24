@@ -6,7 +6,7 @@ import pytest
 from loguru import logger
 
 from exo.master.main import Master
-from exo.routing.router import get_node_id_keypair
+from exo.routing import get_node_id_keypair
 from exo.shared.types.api import ChatCompletionMessage, ChatCompletionTaskParams
 from exo.shared.types.commands import (
     ChatCompletion,
