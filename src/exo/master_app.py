@@ -109,6 +109,8 @@ async def main() -> None:
         command_sender=command_send,  # Send commands to Master
         election_receiver=election_recv,  # No elections, but API expects this channel
     )
+    # Set master reference in API so it can access master's state
+    api._master_ref = master
 
     # Print startup banner
     print_startup_banner(args.api_port)

@@ -87,6 +87,7 @@ class Worker:
         
         # HTTP client for Master communication (simplified mode)
         self.master_url = master_url
+        self._master_http_client = None
 
         self.state: State = State()
         self.download_status: dict[ShardMetadata, DownloadProgress] = {}
@@ -118,26 +119,42 @@ class Worker:
         async def resource_monitor_callback(
             node_performance_profile: NodePerformanceProfile,
         ) -> None:
-            await self.event_sender.send(
-                NodePerformanceMeasured(
-                    node_id=self.node_id,
-                    node_profile=node_performance_profile,
-                    when=str(datetime.now(tz=timezone.utc)),
-                ),
+            event = NodePerformanceMeasured(
+                node_id=self.node_id,
+                node_profile=node_performance_profile,
+                when=str(datetime.now(tz=timezone.utc)),
             )
+            # Send via HTTP if master_url is set, otherwise use channel
+            if self.master_url and self._master_http_client:
+                await self._master_http_client.send_event(event)
+            else:
+                await self.event_sender.send(event)
 
         async def memory_monitor_callback(
             memory_profile: MemoryPerformanceProfile,
         ) -> None:
-            await self.event_sender.send(
-                NodeMemoryMeasured(
-                    node_id=self.node_id,
-                    memory=memory_profile,
-                    when=str(datetime.now(tz=timezone.utc)),
-                )
+            event = NodeMemoryMeasured(
+                node_id=self.node_id,
+                memory=memory_profile,
+                when=str(datetime.now(tz=timezone.utc)),
             )
+            # Send via HTTP if master_url is set, otherwise use channel
+            if self.master_url and self._master_http_client:
+                await self._master_http_client.send_event(event)
+            else:
+                await self.event_sender.send(event)
 
         # END CLEANUP
+        
+        # Initialize HTTP client for Master communication if master_url is provided
+        from exo.worker.http_client import MasterHTTPClient
+        if self.master_url:
+            self._master_http_client = MasterHTTPClient(
+                master_url=self.master_url,
+                node_id=self.node_id,
+                session_id=self.session_id,
+            )
+            await self._master_http_client.__aenter__()
 
         async with create_task_group() as tg:
             self._tg = tg
@@ -160,6 +177,10 @@ class Worker:
 
         # Actual shutdown code - waits for all tasks to complete before executing.
         logger.info("Worker shutdown: stopping services and cleaning up resources")
+        
+        # Clean up HTTP client
+        if self._master_http_client:
+            await self._master_http_client.__aexit__(None, None, None)
         # Peer file service removed for static setup
         # Flush and close all channels
         if self.local_event_sender:
