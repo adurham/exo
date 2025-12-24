@@ -17,14 +17,23 @@ echo "========================================="
 cd "$(dirname "$0")/.."
 REPO_ROOT=$(pwd)
 
+# Check for rustup (needed for nightly toolchain)
+if ! command -v rustup &> /dev/null; then
+    echo "❌ ERROR: rustup not found. Please install rustup:"
+    echo "   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    echo "   rustup default nightly"
+    exit 1
+fi
+
 # Ensure we're using Rust nightly
 echo "Setting Rust toolchain to nightly..."
+rustup default nightly 2>&1 | grep -v "info:" || rustup toolchain install nightly 2>&1 | grep -v "info:" || true
 rustup default nightly 2>&1 | grep -v "info:" || true
 
 # Build the Rust components directly with cargo
 echo "Building Rust bindings with cargo..."
 cd rust/exo_pyo3_bindings
-cargo build --release 2>&1 | tail -50
+cargo +nightly build --release 2>&1 | tail -50
 cd ../..
 
 # Find the built Rust extension module in target directory
