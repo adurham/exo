@@ -6,7 +6,7 @@
 
 MASTER_API_URL="${MASTER_API_URL:-http://100.67.156.10:52415}"
 MODEL_ID="${MODEL_ID:-mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit}"
-NODES=("adams-macbook-pro-m1" "adams-mac-studio-m4" "adams-macbook-pro-m4" "adams-work-macbook-pro-m4")
+NODES=("100.67.156.10" "100.93.253.67" "100.80.147.125" "100.82.48.77")
 
 MIN_TPS=5.0
 CHECK_INTERVAL=5  # seconds between checks

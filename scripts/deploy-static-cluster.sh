@@ -37,12 +37,12 @@ verify_zero_swap() {
 # Function to verify model exists
 verify_model() {
     local node=$1
-    local expanded_path=$(ssh "$node" "echo $MODEL_PATH" 2>/dev/null)
-    if ssh "$node" "test -d $MODEL_PATH" 2>/dev/null; then
-        echo "✅ Model found at $expanded_path on $node"
+    # Use HOME variable expansion in the SSH command
+    if ssh "$node" "test -d \$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit" 2>/dev/null; then
+        echo "✅ Model found at \$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit on $node"
         return 0
     else
-        echo "❌ ERROR: Model not found at $expanded_path on $node"
+        echo "❌ ERROR: Model not found at \$HOME/.exo/models/mlx-community--Qwen3-235B-A22B-Instruct-2507-4bit on $node"
         return 1
     fi
 }
