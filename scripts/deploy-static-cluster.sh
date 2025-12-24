@@ -33,20 +33,22 @@ verify_zero_swap() {
     local swap_used_str=$(check_swap "$node")
     # Convert to numeric value using bc (handles "0.00" format)
     local swap_used=$(echo "$swap_used_str" | bc 2>/dev/null || echo "0")
-    # Check if swap_used is greater than 0 (using bc for floating point comparison)
+    # Allow up to 1MB swap (essentially zero, macOS may report tiny amounts)
+    local swap_threshold=1.0
+    # Check if swap_used is greater than threshold (using bc for floating point comparison)
     if command -v bc &> /dev/null; then
-        if [ "$(echo "$swap_used <= 0" | bc 2>/dev/null)" = "1" ]; then
-            echo "✅ Swap usage verified: zero on $node"
+        if [ "$(echo "$swap_used <= $swap_threshold" | bc 2>/dev/null)" = "1" ]; then
+            echo "✅ Swap usage verified: ${swap_used_str}MB on $node (below ${swap_threshold}MB threshold)"
             return 0
         fi
     else
-        # Fallback: check if it's "0" or empty
+        # Fallback: check if it's "0" or empty or very small
         if [ -z "$swap_used_str" ] || [ "$swap_used_str" = "0" ] || [ "$swap_used_str" = "0.00" ]; then
             echo "✅ Swap usage verified: zero on $node"
             return 0
         fi
     fi
-    echo "❌ ERROR: Swap usage detected on $node: ${swap_used_str}MB"
+    echo "❌ ERROR: Swap usage detected on $node: ${swap_used_str}MB (threshold: ${swap_threshold}MB)"
     return 1
 }
 

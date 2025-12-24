@@ -36,13 +36,23 @@ cd rust/exo_pyo3_bindings
 cargo +nightly build --release 2>&1 | tail -50
 cd ../..
 
-# Find the built Rust extension module in target directory
-PYO3_LIB=$(find target/release -name "*exo_pyo3*.so" -o -name "*exo_pyo3*.dylib" 2>/dev/null | head -1)
+# Build with uv sync to ensure it's properly installed in .venv
+echo "Building with uv sync to install in .venv..."
+export PATH="$HOME/.cargo/bin:$PATH"
+uv sync 2>&1 | tail -50
+
+# Find the installed Rust extension module in .venv
+PYO3_LIB=$(find .venv/lib -name "*exo_pyo3*.so" -o -name "*exo_pyo3*.dylib" 2>/dev/null | head -1)
 if [ -z "$PYO3_LIB" ]; then
-    echo "❌ ERROR: Could not find built Rust extension module"
-    echo "Trying to locate in different paths..."
-    find . -name "*exo_pyo3*" -type f 2>/dev/null | head -20
-    exit 1
+    echo "❌ ERROR: Could not find built Rust extension module in .venv"
+    echo "Trying to locate in target directory..."
+    PYO3_LIB=$(find target/release -name "libexo_pyo3_bindings.dylib" 2>/dev/null | head -1)
+    if [ -z "$PYO3_LIB" ]; then
+        echo "Could not find Rust extension module anywhere"
+        find . -name "*exo_pyo3*" -type f 2>/dev/null | head -20
+        exit 1
+    fi
+    echo "⚠️  Found in target directory, but should be in .venv - will copy manually"
 fi
 
 echo "✅ Found Rust extension: $PYO3_LIB"
