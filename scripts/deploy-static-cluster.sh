@@ -141,8 +141,8 @@ echo ""
 
 # Step 4: Start Master
 echo "Step 4: Starting Master on $MASTER_NODE..."
-# Try to find uv in common locations
-ssh $SSH_OPTS "$MASTER_NODE" "cd ~/repos/exo && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && nohup uv run python -m exo.master_app > ~/.exo/master.log 2>&1 &" 2>&1 | prefix_output "$MASTER_NODE" || true
+# Use explicit uv path (macOS Homebrew location)
+ssh $SSH_OPTS "$MASTER_NODE" "cd ~/repos/exo && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && nohup bash -c 'uv run python -m exo.master_app' > ~/.exo/master.log 2>&1 &" 2>&1 | prefix_output "$MASTER_NODE" || true
 sleep 3
 
 # Wait for Master to be ready
@@ -171,7 +171,7 @@ echo ""
 echo "Step 5: Starting Workers on all worker nodes..."
 for node in "${WORKER_NODES[@]}"; do
     echo "[$node] Starting Worker..."
-    ssh $SSH_OPTS "$node" "cd ~/repos/exo && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && nohup uv run python -m exo.worker_app > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
+    ssh $SSH_OPTS "$node" "cd ~/repos/exo && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && nohup bash -c 'uv run python -m exo.worker_app' > ~/.exo/worker.log 2>&1 &" 2>&1 | prefix_output "$node" || true
 done
 sleep 5
 echo ""
