@@ -435,10 +435,18 @@ def get_shard_assignments_for_pipeline_parallel(
         )
         
         # Also use greedy allocation for small models (< 10GB) on large nodes (> 64GB)
+        # BUT: For pipeline parallelism with RDMA, we want to distribute across nodes for better TPS
+        # Only use single-node allocation for very small models (< 10GB) or if world_size is 1
         is_small_model = model_storage_bytes < 10 * (1024**3)  # < 10GB
         is_large_node = fastest_total_ram > 64 * (1024**3)  # > 64GB
         
-        if max_usable_ram >= model_storage_bytes or (is_small_model and is_large_node):
+        # Force pipeline parallelism (distribute layers) when:
+        # - world_size > 1 (multiple nodes available)
+        # - model is >= 10GB (large enough to benefit from distribution)
+        # This ensures RDMA pipeline parallelism is used for performance (5+ TPS requirement)
+        should_force_pipeline = world_size > 1 and model_storage_bytes >= 10 * (1024**3)
+        
+        if (max_usable_ram >= model_storage_bytes or (is_small_model and is_large_node)) and not should_force_pipeline:
             # Fastest node can hold entire model (with buffer) - give it all layers
             # Use the actual available memory with buffer for layer calculation
             fastest_index = node_id_to_index[fastest_capacity.node_id]
