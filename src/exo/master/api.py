@@ -188,11 +188,19 @@ class API:
                 await self._send(delete_command)
                 logger.info(f"Sent delete command for instance {instance_id}")
             
-            # Wait a bit for deletion to process (instances are deleted asynchronously)
-            # We'll let the placement logic handle the transition, but we need to wait
-            # for the state to update. The new instance creation will happen after deletion.
+            # Wait for deletion to complete by polling state (up to 30 seconds)
+            # This ensures memory is freed before creating new instance
             import asyncio
-            await asyncio.sleep(2)  # Give deletion commands time to process
+            max_wait = 30
+            waited = 0
+            while waited < max_wait and len(self._state.instances) > 0:
+                await asyncio.sleep(1)
+                waited += 1
+                if len(self._state.instances) == 0:
+                    logger.info(f"All instances deleted after {waited}s, proceeding with new instance creation")
+                    break
+            if len(self._state.instances) > 0:
+                logger.warning(f"Some instances still exist after {waited}s wait, proceeding anyway")
         
         # Always use all available nodes - override min_nodes from payload
         total_nodes = len(list(self._state.topology.list_nodes()))
