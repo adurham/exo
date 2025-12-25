@@ -288,7 +288,8 @@ def is_master_node() -> bool:
     """Check if current node is the master node."""
     hostname = get_current_hostname()
     config = get_static_config()
-    return hostname == config.master.hostname
+    # Case-insensitive comparison since macOS hostnames can differ in case
+    return hostname.lower() == config.master.hostname.lower()
 
 
 def is_worker_node() -> bool:
