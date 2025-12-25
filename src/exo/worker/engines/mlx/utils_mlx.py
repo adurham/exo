@@ -251,15 +251,15 @@ def mlx_distributed_init(
                     del os.environ[var]
             
             # Use ring backend (TCP/IP) instead of RDMA
-            # Create hostfile for ring backend
+            # For MlxJacclInstance, we need to convert ibv_coordinators to hosts format
+            # Extract IP addresses from coordinators (format: "IP:PORT")
             hosts = []
-            for node_id, runner_id in bound_instance.instance.shard_assignments.node_to_runner.items():
-                # Find the host for this node
-                for host_info in bound_instance.instance.hosts:
-                    # Match by checking if this host corresponds to the node
-                    # For simplicity, we'll use the hosts from the instance
-                    hosts.append(host_info)
-                    break
+            for node_id, coordinator in ibv_coordinators.items():
+                # Extract IP from "IP:PORT" format
+                ip = coordinator.split(":")[0]
+                # Use default port 52414 for ring backend
+                port = 52414
+                hosts.append(Host(ip=ip, port=port))
             
             if hosts:
                 hostfile = f"./hosts_{rank}.json"
@@ -267,7 +267,9 @@ def mlx_distributed_init(
                 with open(hostfile, "w") as f:
                     _ = f.write(hosts_json)
                 os.environ["MLX_HOSTFILE"] = hostfile
-                logger.info(f"rank {rank} Using TCP/IP ring backend with hostfile: {hostfile}")
+                os.environ["MLX_RANK"] = str(rank)
+                os.environ["MLX_RING_VERBOSE"] = "1"
+                logger.info(f"rank {rank} Using TCP/IP ring backend with hostfile: {hostfile}, hosts: {hosts_json}")
             
             # Check if distributed is available before trying to initialize
             is_available = mx.distributed.is_available()
@@ -292,21 +294,20 @@ def mlx_distributed_init(
                 )
                 raise
             
-            # CRITICAL: Verify RDMA is actually being used
-            # If we get a singleton group, RDMA failed and we must fail immediately
+            # Verify TCP/IP ring backend is working
+            # If we get a singleton group, TCP/IP failed and we must fail immediately
             if group.size() == 1 and world_size > 1:
                 raise RuntimeError(
-                    f"Rank {rank}: RDMA initialization FAILED! Got singleton group (size=1) "
-                    f"but expected distributed RDMA group (world_size={world_size}). "
-                    f"This means MLX did not use RDMA despite environment being set correctly. "
-                    f"Environment: MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES')}, "
-                    f"MLX_JACCL_COORDINATOR={os.environ.get('MLX_JACCL_COORDINATOR')}, "
-                    f"MLX_WORLD_SIZE={os.environ.get('MLX_WORLD_SIZE')}, "
-                    f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}. "
-                    f"RDMA must be working for this instance type. Check RDMA configuration and network connectivity."
+                    f"Rank {rank}: TCP/IP ring initialization FAILED! Got singleton group (size=1) "
+                    f"but expected distributed group (world_size={world_size}). "
+                    f"This means MLX did not use ring backend despite environment being set correctly. "
+                    f"Environment: MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}, "
+                    f"MLX_RANK={os.environ.get('MLX_RANK')}, "
+                    f"MLX_IBV_DEVICES={os.environ.get('MLX_IBV_DEVICES', 'NOT SET')}. "
+                    f"Check network connectivity and hostfile configuration."
                 )
             
-            logger.info(f"rank {rank} Successfully initialized RDMA distributed group (size={group.size()}, expected {world_size})")
+            logger.info(f"rank {rank} Successfully initialized TCP/IP ring distributed group (size={group.size()}, expected {world_size})")
             
             # CRITICAL: Verify MLX assigned the correct rank and created a distributed group
             mlx_actual_rank = group.rank()
