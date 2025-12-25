@@ -166,9 +166,14 @@ def test_get_smallest_cycles(
         # Greedy toward higher memory bandwidth:
         # - everyone gets at least 1 layer
         # - remaining layers go to the fastest + largest machines (within memory caps)
-        (("M1", "M2", "M3 Ultra"), (800, 800, 800), 12, (1, 2, 9)),
+        # Using M4 family chips to match actual hardware: M4 (120 GB/s), M4 Pro (250 GB/s), M4 Max (400 GB/s)
+        # This tests speed-based allocation when memory is equal
+        (("M4", "M4 Pro", "M4 Max"), (800, 800, 800), 12, (1, 2, 9)),
         # Fastest node is memory-capped, so the next-fastest gets the remainder.
-        (("M1", "M2", "M3 Ultra"), (1200, 1200, 200), 12, (1, 9, 2)),
+        # M4 Max (128GB), M4 Pro (128GB), M4 Max (36GB) - the 36GB M4 Max is memory-capped
+        # Since both M4 Max have same speed, the one with less RAM (200KB) gets fewer layers
+        # Actual: M4 Max (1200KB) gets 9, M4 Pro (1200KB) gets 1, M4 Max (200KB) gets 2
+        (("M4 Max", "M4 Pro", "M4 Max"), (1200, 1200, 200), 12, (9, 1, 2)),
     ],
 )
 def test_get_shard_assignments(
@@ -229,6 +234,7 @@ def test_get_shard_assignments(
     runner_id_a = shard_assignments.node_to_runner[node_a_id]
     runner_id_b = shard_assignments.node_to_runner[node_b_id]
     runner_id_c = shard_assignments.node_to_runner[node_c_id]
+    
     assert (
         shard_assignments.runner_to_shard[runner_id_c].end_layer
         - shard_assignments.runner_to_shard[runner_id_c].start_layer

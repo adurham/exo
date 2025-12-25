@@ -63,7 +63,7 @@ async def get_friendly_name() -> str:
 
     try:
         process = await run_process(["scutil", "--get", "ComputerName"])
-    except CalledProcessError:
+    except subprocess.CalledProcessError:
         return hostname
 
     return process.stdout.decode("utf-8", errors="replace").strip() or hostname
@@ -121,7 +121,7 @@ async def get_model_and_chip() -> tuple[str, str]:
                 "SPHardwareDataType",
             ]
         )
-    except CalledProcessError:
+    except subprocess.CalledProcessError:
         return (model, chip)
 
     # less interested in errors here because this value should be hard coded

@@ -7,6 +7,14 @@ lint:
 test:
     uv run pytest src
 
+test-deployed:
+    #!/usr/bin/env bash
+    # Run integration tests against deployed nodes
+    # Usage: just test-deployed [API_URL]
+    API_URL="${1:-http://100.93.253.67:52415}"
+    echo "Running integration tests against deployed cluster at $API_URL"
+    EXO_API_URL="$API_URL" uv run pytest src/exo/tests/test_deployed_integration.py -v -s
+
 check:
     uv run basedpyright --project pyproject.toml
 

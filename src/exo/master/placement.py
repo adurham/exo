@@ -55,16 +55,21 @@ def place_instance(
     current_instances: Mapping[InstanceId, Instance],
 ) -> dict[InstanceId, Instance]:
     all_nodes = list(topology.list_nodes())
-
+    all_connections = list(topology.list_connections())
+    
+    logger.info(f"Placement: topology has {len(all_nodes)} nodes and {len(all_connections)} connections")
     logger.info("finding cycles:")
     cycles = topology.get_cycles()
+    logger.info(f"Found {len(cycles)} cycles")
     singleton_cycles = [[node] for node in all_nodes]
     candidate_cycles = list(
         filter(lambda it: len(it) >= command.min_nodes, cycles + singleton_cycles)
     )
+    logger.info(f"After filtering by min_nodes={command.min_nodes}: {len(candidate_cycles)} candidate cycles")
     cycles_with_sufficient_memory = filter_cycles_by_memory(
         candidate_cycles, command.model_meta.storage_size
     )
+    logger.info(f"After filtering by memory (required={command.model_meta.storage_size.in_bytes / (1024**3):.2f}GB): {len(cycles_with_sufficient_memory)} cycles")
     if not cycles_with_sufficient_memory:
         raise ValueError("No cycles found with sufficient memory")
 

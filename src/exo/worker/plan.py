@@ -201,7 +201,8 @@ def _ready_to_warmup(
         assert device_rank < world_size
         assert device_rank >= 0
 
-        # Rank != n-1
+        # Rank != n-1 (accepting ranks - all layers before the last)
+        # These can start warmup when all runners are Loaded or WarmingUp
         accepting_ranks_ready = device_rank != world_size - 1 and all(
             isinstance(
                 all_runners.get(global_runner_id, None),
@@ -210,11 +211,26 @@ def _ready_to_warmup(
             for global_runner_id in shard_assignments.runner_to_shard
         )
 
-        # Rank = n-1
-        connecting_rank_ready = device_rank == world_size - 1 and all(
-            isinstance(all_runners.get(global_runner_id, None), RunnerWarmingUp)
-            for global_runner_id in shard_assignments.runner_to_shard
-            if global_runner_id != runner_id
+        # Rank = n-1 (connecting rank - the last rank that closes the pipeline)
+        # This rank should start warmup only after all other ranks are already WarmingUp
+        # Exception: If this is NOT rank 0 (i.e., device_rank != 0), allow initial warmup when all are Loaded
+        # This handles the case where world_size=2 and rank 1 is both the connecting rank and a non-zero rank
+        connecting_rank_ready = device_rank == world_size - 1 and (
+            # Case 1: All other runners are already WarmingUp (normal case)
+            all(
+                isinstance(all_runners.get(global_runner_id, None), RunnerWarmingUp)
+                for global_runner_id in shard_assignments.runner_to_shard
+                if global_runner_id != runner_id
+            )
+            # Case 2: Initial warmup for non-zero connecting rank - all runners are Loaded
+            # Rank 0 should never use this path (it should wait for others to warmup first)
+            or (device_rank != 0 and all(
+                isinstance(
+                    all_runners.get(global_runner_id, None),
+                    RunnerLoaded,
+                )
+                for global_runner_id in shard_assignments.runner_to_shard
+            ))
         )
 
         if is_runner_loaded and (accepting_ranks_ready or connecting_rank_ready):

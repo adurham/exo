@@ -83,7 +83,7 @@ def apply(state: State, event: IndexedEvent) -> State:
         )
     assert state.last_event_applied_idx == event.idx - 1
     new_state: State = event_apply(event.event, state)
-    return new_state.model_copy(update={"last_event_applied_idx": event.idx})
+    return new_state.model_copy(update={"last_event_applied_idx": max(state.last_event_applied_idx + 1, event.idx)})
 
 
 def apply_node_download_progress(event: NodeDownloadProgress, state: State) -> State:
@@ -188,7 +188,9 @@ def apply_runner_deleted(event: RunnerDeleted, state: State) -> State:
 
 
 def apply_node_timed_out(event: NodeTimedOut, state: State) -> State:
-    topology = copy.copy(state.topology)
+    # Properly copy topology using snapshot mechanism
+    topology = state.topology.to_snapshot()
+    topology = type(state.topology).from_snapshot(topology)
     state.topology.remove_node(event.node_id)
     node_profiles = {
         key: value for key, value in state.node_profiles.items() if key != event.node_id
@@ -217,7 +219,9 @@ def apply_node_performance_measured(
         event.node_id: datetime.fromisoformat(event.when),
     }
     state = state.model_copy(update={"node_profiles": new_profiles})
-    topology = copy.copy(state.topology)
+    # Properly copy topology using snapshot mechanism
+    topology = state.topology.to_snapshot()
+    topology = type(state.topology).from_snapshot(topology)
     # TODO: NodeCreated
     if not topology.contains_node(event.node_id):
         topology.add_node(NodeInfo(node_id=event.node_id))
@@ -233,7 +237,9 @@ def apply_node_performance_measured(
 
 def apply_node_memory_measured(event: NodeMemoryMeasured, state: State) -> State:
     existing = state.node_profiles.get(event.node_id)
-    topology = copy.copy(state.topology)
+    # Properly copy topology using snapshot mechanism
+    topology = state.topology.to_snapshot()
+    topology = type(state.topology).from_snapshot(topology)
 
     if existing is None:
         created = NodePerformanceProfile(
@@ -287,19 +293,25 @@ def apply_node_memory_measured(event: NodeMemoryMeasured, state: State) -> State
 
 
 def apply_topology_node_created(event: NodeCreated, state: State) -> State:
-    topology = copy.copy(state.topology)
+    # Properly copy topology using snapshot mechanism
+    topology = state.topology.to_snapshot()
+    topology = type(state.topology).from_snapshot(topology)
     topology.add_node(NodeInfo(node_id=event.node_id))
     return state.model_copy(update={"topology": topology})
 
 
 def apply_topology_edge_created(event: TopologyEdgeCreated, state: State) -> State:
-    topology = copy.copy(state.topology)
+    # Properly copy topology using snapshot mechanism
+    topology = state.topology.to_snapshot()
+    topology = type(state.topology).from_snapshot(topology)
     topology.add_connection(event.edge)
     return state.model_copy(update={"topology": topology})
 
 
 def apply_topology_edge_deleted(event: TopologyEdgeDeleted, state: State) -> State:
-    topology = copy.copy(state.topology)
+    # Properly copy topology using snapshot mechanism
+    topology = state.topology.to_snapshot()
+    topology = type(state.topology).from_snapshot(topology)
     if not topology.contains_connection(event.edge):
         return state
     topology.remove_connection(event.edge)

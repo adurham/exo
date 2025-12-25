@@ -73,7 +73,8 @@ class Master:
             except Exception as e:
                 logger.warning(f"Failed to create static topology, using empty: {e}")
                 self.state = State()
-        self._tg: TaskGroup = anyio.create_task_group()
+        # TaskGroup will be created in run() when in async context
+        self._tg: TaskGroup | None = None
         self.node_id = node_id
         self.session_id = session_id
         self.command_task_mapping: dict[CommandId, TaskId] = {}
@@ -90,10 +91,26 @@ class Master:
         self._multi_buffer = MultiSourceBuffer[NodeId, Event]()
         # TODO: not have this
         self._event_log: list[Event] = []
+        # Worker client pool for pushing state updates (static setup)
+        self._worker_clients = None
 
     async def run(self):
         logger.info("Starting Master")
-
+        
+        # Initialize worker client pool for static setup (skip in tests)
+        import os
+        if not os.environ.get("EXO_TESTS"):
+            from exo.master.worker_client import WorkerClientPool
+            from exo.shared.static_config import get_static_config
+            self._worker_clients = WorkerClientPool()
+            config = get_static_config()
+            for worker in config.workers:
+                worker_url = f"http://{worker.tailscale_ip}:8080"  # Workers listen on port 8080
+                await self._worker_clients.add_worker(worker.node_id, worker_url)
+            logger.info(f"Initialized worker client pool with {len(config.workers)} workers")
+        
+        # Create task group in async context
+        self._tg = anyio.create_task_group()
         async with self._tg as tg:
             if self.local_event_receiver:
                 tg.start_soon(self._event_processor)
@@ -111,10 +128,14 @@ class Master:
         if self._loopback_event_sender:
             self._loopback_event_sender.close()
         self._loopback_event_receiver.close()
+        # Close worker clients
+        if self._worker_clients:
+            await self._worker_clients.close_all()
 
     async def shutdown(self):
         logger.info("Stopping Master")
-        self._tg.cancel_scope.cancel()
+        if self._tg and hasattr(self._tg, 'cancel_scope') and self._tg.cancel_scope:
+            self._tg.cancel_scope.cancel()
 
     async def _command_processor(self) -> None:
         if self.command_receiver is None:
@@ -215,8 +236,17 @@ class Master:
                                 await self._send_event(
                                     IndexedEvent(idx=i, event=self._event_log[i])
                                 )
+                    # Apply events directly to state (for static setup without Router/loopback)
                     for event in generated_events:
+                        indexed = IndexedEvent(event=event, idx=len(self._event_log))
+                        self.state = apply(self.state, indexed)
+                        event._master_time_stamp = datetime.now(tz=timezone.utc)  # pyright: ignore[reportPrivateUsage]
+                        self._event_log.append(event)
                         await self.event_sender.send(event)
+                    
+                    # Push state update to all workers after applying events
+                    if self._worker_clients and generated_events:
+                        await self._worker_clients.push_state_to_all(self.state)
                 except ValueError as e:
                     logger.opt(exception=e).warning("Error in command processor")
 
@@ -266,6 +296,10 @@ class Master:
 
                     self._event_log.append(event)
                     await self._send_event(indexed)
+                
+                # Push state update to all workers after applying event
+                if self._worker_clients:
+                    await self._worker_clients.push_state_to_all(self.state)
 
     async def _loopback_processor(self) -> None:
         # this would ideally not be necessary.

@@ -88,6 +88,10 @@ class Worker:
         # HTTP client for Master communication (simplified mode)
         self.master_url = master_url
         self._master_http_client = None
+        
+        # HTTP server for receiving state updates from Master (push-based)
+        self._state_server = None
+        self._state_server_port = 8080
 
         self.state: State = State()
         self.download_status: dict[ShardMetadata, DownloadProgress] = {}
@@ -155,6 +159,13 @@ class Worker:
                 session_id=self.session_id,
             )
             await self._master_http_client.__aenter__()
+        
+        # Start HTTP server for receiving state updates from Master (push-based)
+        if self.master_url:
+            from exo.worker.state_server import WorkerStateServer
+            self._state_server = WorkerStateServer(port=self._state_server_port)
+            self._state_server.set_state_update_callback(self._handle_state_update)
+            await self._state_server.start_server()
 
         async with create_task_group() as tg:
             self._tg = tg
@@ -163,8 +174,8 @@ class Worker:
             
             tg.start_soon(self.plan_step)
             tg.start_soon(start_polling_node_metrics, resource_monitor_callback)
-
             tg.start_soon(start_polling_memory_metrics, memory_monitor_callback)
+            # State updates are now pushed from master (no polling needed)
             if self.connection_message_receiver:
                 tg.start_soon(self._connection_message_event_writer)
             if self.global_event_receiver:
@@ -181,6 +192,9 @@ class Worker:
         # Clean up HTTP client
         if self._master_http_client:
             await self._master_http_client.__aexit__(None, None, None)
+        # Clean up state server
+        if self._state_server:
+            await self._state_server.stop_server()
         # Peer file service removed for static setup
         # Flush and close all channels
         if self.local_event_sender:
@@ -251,6 +265,11 @@ class Worker:
                             f"Worker applying InstanceCreated: instance_id={event.instance.instance_id}"
                         )
                     self.state = apply(self.state, IndexedEvent(idx=idx, event=event))
+
+    async def _handle_state_update(self, master_state: State) -> None:
+        """Handle state update pushed from Master."""
+        logger.info(f"Received state update from master (last_idx: {master_state.last_event_applied_idx}, instances: {len(master_state.instances)})")
+        self.state = master_state
 
     async def plan_step(self):
         while True:

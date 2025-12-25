@@ -63,12 +63,16 @@ async def test_master():
             )
         return all_events
 
+    from exo.shared.topology import Topology
+    # Use empty topology for this test (not static topology)
+    empty_topology = Topology()
     master = Master(
         node_id,
         session_id,
         global_event_sender=ge_sender,
         local_event_receiver=le_receiver,
         command_receiver=co_receiver,
+        initial_topology=empty_topology,
     )
     logger.info("run the master")
     async with anyio.create_task_group() as tg:

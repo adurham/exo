@@ -5,7 +5,7 @@ from typing import cast
 import anyio
 from anyio import create_task_group
 from anyio.abc import TaskGroup
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -133,11 +133,6 @@ class API:
         self._chat_completion_queues: dict[CommandId, Sender[TokenChunk]] = {}
         self._tg: TaskGroup | None = None
 
-    @property
-    def _state(self) -> State:
-        """Get the current state, preferring master's state if available."""
-        return self._master_ref.state if self._master_ref else self.state
-
     def reset(self, new_session_id: SessionId, result_clock: int):
         logger.info("Resetting API State")
         self.state = State()
@@ -170,14 +165,14 @@ class API:
         self.app.get("/v1/models")(self.get_models)
         self.app.post("/v1/chat/completions")(self.chat_completions)
         self.app.post("/v1/chat/completions/{command_id}/cancel")(self.cancel_chat_completion)
-        self.app.get("/state")(lambda: self._state)
+        self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(lambda: self._event_log)
         # Add endpoint for workers to send events via HTTP
         self.app.post("/events")(self.receive_event)
 
     async def place_instance(self, payload: PlaceInstanceParams):
         # Always use all available nodes - override min_nodes from payload
-        total_nodes = len(list(self._state.topology.list_nodes()))
+        total_nodes = len(list(self.state.topology.list_nodes()))
         min_nodes_to_use = total_nodes if total_nodes > 0 else payload.min_nodes
         
         command = PlaceInstance(
@@ -215,7 +210,7 @@ class API:
         
         # Always use all available nodes if min_nodes not specified
         if min_nodes is None:
-            min_nodes = len(list(self._state.topology.list_nodes()))
+            min_nodes = len(list(self.state.topology.list_nodes()))
 
         try:
             placements = get_instance_placements(
@@ -225,13 +220,13 @@ class API:
                     instance_meta=instance_meta,
                     min_nodes=min_nodes,
                 ),
-                topology=self._state.topology,
-                current_instances=self._state.instances,
+                topology=self.state.topology,
+                current_instances=self.state.instances,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        current_ids = set(self._state.instances.keys())
+        current_ids = set(self.state.instances.keys())
         new_ids = [
             instance_id for instance_id in placements if instance_id not in current_ids
         ]
@@ -248,7 +243,7 @@ class API:
     ) -> PlacementPreviewResponse:
         seen: set[tuple[ModelId, Sharding, InstanceMeta, int]] = set()
         previews: list[PlacementPreview] = []
-        if len(list(self._state.topology.list_nodes())) == 0:
+        if len(list(self.state.topology.list_nodes())) == 0:
             return PlacementPreviewResponse(previews=[])
 
         cards = [card for card in MODEL_CARDS.values() if card.short_id == model_id]
@@ -256,7 +251,7 @@ class API:
             raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
 
         instance_combinations: list[tuple[Sharding, InstanceMeta, int]] = []
-        total_nodes = len(list(self._state.topology.list_nodes()))
+        total_nodes = len(list(self.state.topology.list_nodes()))
         for sharding in (Sharding.Pipeline, Sharding.Tensor):
             for instance_meta in (InstanceMeta.MlxRing, InstanceMeta.MlxJaccl):
                 # Only generate one preview per (sharding, instance_meta) combination
@@ -276,8 +271,8 @@ class API:
                             instance_meta=instance_meta,
                             min_nodes=min_nodes,
                         ),
-                        topology=self._state.topology,
-                        current_instances=self._state.instances,
+                        topology=self.state.topology,
+                        current_instances=self.state.instances,
                     )
                 except ValueError as exc:
                     if (card.model_id, sharding, instance_meta, 0) not in seen:
@@ -293,7 +288,7 @@ class API:
                     seen.add((card.model_id, sharding, instance_meta, 0))
                     continue
 
-                current_ids = set(self._state.instances.keys())
+                current_ids = set(self.state.instances.keys())
                 new_instances = [
                     instance
                     for instance_id, instance in placements.items()
@@ -395,12 +390,12 @@ class API:
         return PlacementPreviewResponse(previews=previews)
 
     def get_instance(self, instance_id: InstanceId) -> Instance:
-        if instance_id not in self._state.instances:
+        if instance_id not in self.state.instances:
             raise HTTPException(status_code=404, detail="Instance not found")
-        return self._state.instances[instance_id]
+        return self.state.instances[instance_id]
 
     async def delete_instance(self, instance_id: InstanceId) -> DeleteInstanceResponse:
-        if instance_id not in self._state.instances:
+        if instance_id not in self.state.instances:
             raise HTTPException(status_code=404, detail="Instance not found")
 
         command = DeleteInstance(
@@ -479,7 +474,7 @@ class API:
 
         if not any(
             instance.shard_assignments.model_id == payload.model
-            for instance in self._state.instances.values()
+            for instance in self.state.instances.values()
         ):
             await self._trigger_notify_user_to_download_model(payload.model)
             raise HTTPException(
@@ -522,7 +517,7 @@ class API:
         """Calculate total available memory across all nodes in bytes."""
         total_available = Memory()
 
-        for node in self._state.topology.list_nodes():
+        for node in self.state.topology.list_nodes():
             if node.node_profile is not None:
                 total_available += node.node_profile.memory.ram_available
 
@@ -575,14 +570,13 @@ class API:
         self.command_sender.close()
         self.global_event_receiver.close()
     
-    async def receive_event(self, request: Request):
+    async def receive_event(self, event_data: dict):
         """Receive an event from a worker via HTTP."""
         from exo.shared.types.events import ForwarderEvent, IndexedEvent
         from exo.shared.apply import apply
         
         try:
             # Parse the event from the request body
-            event_data = await request.json()
             forwarder_event = ForwarderEvent.model_validate(event_data)
             
             # Apply the event to Master's state directly
