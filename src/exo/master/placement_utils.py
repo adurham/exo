@@ -446,6 +446,13 @@ def get_shard_assignments_for_pipeline_parallel(
         # This ensures RDMA pipeline parallelism is used for performance (5+ TPS requirement)
         should_force_pipeline = world_size > 1 and model_storage_bytes >= 10 * (1024**3)
         
+        if should_force_pipeline:
+            logger.info(
+                f"⚠ FORCING PIPELINE PARALLELISM: Model {model_storage_bytes / (1024**3):.2f} GB >= 10GB "
+                f"with world_size={world_size} - distributing layers across nodes for RDMA performance"
+            )
+            # Skip single-node greedy allocation, go directly to distributed allocation below
+        
         if (max_usable_ram >= model_storage_bytes or (is_small_model and is_large_node)) and not should_force_pipeline:
             # Fastest node can hold entire model (with buffer) - give it all layers
             # Use the actual available memory with buffer for layer calculation
