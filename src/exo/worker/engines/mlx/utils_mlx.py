@@ -238,25 +238,44 @@ def mlx_distributed_init(
                 f"MLX_HOSTFILE={os.environ.get('MLX_HOSTFILE', 'NOT SET')}"
             )
             
-            # For RDMA/InfiniBand, we MUST use RDMA - no fallback to 'any' backend
-            # MLX requires MLX_IBV_DEVICES to be set for RDMA, and will use RDMA when:
-            # - MLX_IBV_DEVICES is set (file path to JSON matrix)
-            # - MLX_JACCL_COORDINATOR is set (IP:PORT of rank 0)
-            # - MLX_WORLD_SIZE is set (number of ranks)
-            # - MLX_HOSTFILE is NOT set (would cause ring backend)
-            # - backend="any" (MLX doesn't have a separate "rdma" backend name)
-            # 
-            # When these conditions are met, MLX's "any" backend will use RDMA.
-            # We verify RDMA is actually being used by checking group.size() == world_size.
-            logger.info(f"rank {rank} Initializing MLX distributed with RDMA (backend='any' with MLX_IBV_DEVICES set)")
+            # TEMPORARY: Force TCP/IP (ring) backend instead of RDMA for testing
+            # To use RDMA, we would set MLX_IBV_DEVICES and use backend="any"
+            # For TCP/IP testing, we unset RDMA env vars and use backend="ring"
+            logger.warning(f"rank {rank} TEMPORARILY FORCING TCP/IP (ring) backend instead of RDMA for testing")
+            
+            # Unset RDMA-specific environment variables to force TCP/IP
+            rdma_vars_to_unset = ["MLX_IBV_DEVICES", "MLX_JACCL_COORDINATOR"]
+            for var in rdma_vars_to_unset:
+                if var in os.environ:
+                    logger.info(f"rank {rank} Unsetting {var} to force TCP/IP backend")
+                    del os.environ[var]
+            
+            # Use ring backend (TCP/IP) instead of RDMA
+            # Create hostfile for ring backend
+            hosts = []
+            for node_id, runner_id in bound_instance.instance.shard_assignments.node_to_runner.items():
+                # Find the host for this node
+                for host_info in bound_instance.instance.hosts:
+                    # Match by checking if this host corresponds to the node
+                    # For simplicity, we'll use the hosts from the instance
+                    hosts.append(host_info)
+                    break
+            
+            if hosts:
+                hostfile = f"./hosts_{rank}.json"
+                hosts_json = HostList.from_hosts(hosts).model_dump_json()
+                with open(hostfile, "w") as f:
+                    _ = f.write(hosts_json)
+                os.environ["MLX_HOSTFILE"] = hostfile
+                logger.info(f"rank {rank} Using TCP/IP ring backend with hostfile: {hostfile}")
             
             # Check if distributed is available before trying to initialize
             is_available = mx.distributed.is_available()
             logger.info(f"rank {rank} mx.distributed.is_available() = {is_available}")
             
             try:
-                # Try with strict=True first - this will fail fast if RDMA can't be initialized
-                group = mx.distributed.init(backend="any", strict=True)
+                # Use ring backend (TCP/IP) instead of RDMA
+                group = mx.distributed.init(backend="ring", strict=True)
             except RuntimeError as e:
                 error_msg = str(e)
                 logger.error(
