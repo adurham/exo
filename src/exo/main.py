@@ -31,7 +31,16 @@ def main() -> None:
             # Run as Worker - need to get node_id from hostname
             config = get_static_config()
             hostname = get_current_hostname()
+            # Try case-insensitive lookup since hostnames might differ in case
             worker_config = get_worker_config_by_hostname(hostname)
+            if worker_config is None:
+                # Try case-insensitive match
+                config = get_static_config()
+                hostname_lower = hostname.lower()
+                for worker in config.workers:
+                    if worker.hostname.lower() == hostname_lower:
+                        worker_config = worker
+                        break
             
             if worker_config is None:
                 print(f"Error: Could not find worker config for hostname {hostname}", file=sys.stderr)
