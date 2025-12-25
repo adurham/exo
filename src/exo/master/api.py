@@ -176,6 +176,24 @@ class API:
         self.app.post("/events")(self.receive_event)
 
     async def place_instance(self, payload: PlaceInstanceParams):
+        # CRITICAL: Only allow one instance at a time
+        # Delete all existing instances first before creating a new one
+        existing_instances = list(self._state.instances.keys())
+        if existing_instances:
+            logger.info(f"Deleting {len(existing_instances)} existing instance(s) before creating new one")
+            for instance_id in existing_instances:
+                delete_command = DeleteInstance(
+                    instance_id=instance_id,
+                )
+                await self._send(delete_command)
+                logger.info(f"Sent delete command for instance {instance_id}")
+            
+            # Wait a bit for deletion to process (instances are deleted asynchronously)
+            # We'll let the placement logic handle the transition, but we need to wait
+            # for the state to update. The new instance creation will happen after deletion.
+            import asyncio
+            await asyncio.sleep(2)  # Give deletion commands time to process
+        
         # Always use all available nodes - override min_nodes from payload
         total_nodes = len(list(self._state.topology.list_nodes()))
         min_nodes_to_use = total_nodes if total_nodes > 0 else payload.min_nodes
