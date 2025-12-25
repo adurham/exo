@@ -451,9 +451,56 @@ def get_shard_assignments_for_pipeline_parallel(
                 f"⚠ FORCING PIPELINE PARALLELISM: Model {model_storage_bytes / (1024**3):.2f} GB >= 10GB "
                 f"with world_size={world_size} - distributing layers across nodes for RDMA performance"
             )
-            # Skip single-node greedy allocation, go directly to distributed allocation below
+            # Force proportional allocation based on memory capacity when pipeline parallelism is required
+            # This ensures layers are distributed across nodes for better TPS
+            desired_layers = [0 for _ in range(world_size)]
+            remaining = total_layers
+            
+            # Ensure each node gets at least 1 layer
+            for i in range(min(world_size, total_layers)):
+                desired_layers[i] = 1
+                remaining -= 1
+            
+            # Distribute remaining layers proportionally based on memory capacity
+            if remaining > 0:
+                total_capacity = sum(c.max_layers_by_memory for c in ranked_capacities)
+                if total_capacity > 0:
+                    for c in ranked_capacities:
+                        node_index = node_id_to_index[c.node_id]
+                        # Calculate proportional share based on capacity
+                        proportional_share = int((c.max_layers_by_memory / total_capacity) * remaining)
+                        # But don't exceed the node's capacity
+                        headroom = c.max_layers_by_memory - desired_layers[node_index]
+                        take = min(proportional_share, headroom, remaining)
+                        desired_layers[node_index] += take
+                        remaining -= take
+                        if take > 0:
+                            logger.info(
+                                f"Pipeline allocation: node {c.node_id} (capacity={c.max_layers_by_memory}) "
+                                f"gets {take} additional layers (total: {desired_layers[node_index]}, remaining: {remaining})"
+                            )
+            
+            # If still remaining, distribute to nodes with capacity
+            if remaining > 0:
+                for c in ranked_capacities:
+                    if remaining <= 0:
+                        break
+                    node_index = node_id_to_index[c.node_id]
+                    headroom = c.max_layers_by_memory - desired_layers[node_index]
+                    if headroom > 0:
+                        take = min(remaining, headroom)
+                        desired_layers[node_index] += take
+                        remaining -= take
+                        logger.info(
+                            f"Remaining pipeline allocation: node {c.node_id} gets {take} layers "
+                            f"(total: {desired_layers[node_index]}, remaining: {remaining})"
+                        )
+            
+            logger.info(
+                f"✓ Pipeline layer assignment: {[(sorted_cycle[i].node_id, desired_layers[i]) for i in range(world_size)]}"
+            )
         
-        if (max_usable_ram >= model_storage_bytes or (is_small_model and is_large_node)) and not should_force_pipeline:
+        elif (max_usable_ram >= model_storage_bytes or (is_small_model and is_large_node)):
             # Fastest node can hold entire model (with buffer) - give it all layers
             # Use the actual available memory with buffer for layer calculation
             fastest_index = node_id_to_index[fastest_capacity.node_id]
