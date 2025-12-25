@@ -68,7 +68,8 @@ def main() -> None:
             
             # Last resort: allow explicit node-id via environment variable
             if worker_config is None:
-                node_id_env = sys.environ.get("EXO_NODE_ID")
+                import os
+                node_id_env = os.environ.get("EXO_NODE_ID")
                 if node_id_env:
                     from exo.shared.types.common import NodeId
                     node_id = NodeId(node_id_env)
