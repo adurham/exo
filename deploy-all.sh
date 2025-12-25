@@ -33,7 +33,7 @@ check_nodes_connected() {
 # Deploy to all nodes in parallel, prefixing each line with node name
 for node in "${NODES[@]}"; do
     echo "[$node] Deploying..."
-    ssh "$node" "cd ~/repos/exo/ && git fetch && git reset --hard origin/new_main && bash deploy.sh" 2>&1 | prefix_output "$node" &
+    ssh "$node" "cd ~/repos/exo/ && git fetch && git reset --hard origin/static-4node-master-worker-separation && bash deploy.sh" 2>&1 | prefix_output "$node" &
 done
 
 # Wait for all background jobs to complete

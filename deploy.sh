@@ -115,8 +115,11 @@ vm_stat | head -n 5 || echo "Could not check memory stats"
 echo "Resetting to clean state..."
 git reset --hard HEAD
 git clean -fd
+# Remove Python cache to ensure fresh code is loaded
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+find . -type f -name "*.pyc" -delete 2>/dev/null || true
 git fetch
-git reset --hard origin/new_main
+git reset --hard origin/static-4node-master-worker-separation
 
 # Build dashboard if npm is available, otherwise skip
 if command -v npm &> /dev/null; then
