@@ -28,22 +28,61 @@ def main() -> None:
             from exo.master_app import main as master_main
             anyio.run(master_main)
         else:
-            # Run as Worker - need to get node_id from hostname
+            # Run as Worker - need to get node_id from hostname or Tailscale IP
             config = get_static_config()
             hostname = get_current_hostname()
-            # Try case-insensitive lookup since hostnames might differ in case
-            worker_config = get_worker_config_by_hostname(hostname)
-            if worker_config is None:
-                # Try case-insensitive match
-                config = get_static_config()
-                hostname_lower = hostname.lower()
-                for worker in config.workers:
-                    if worker.hostname.lower() == hostname_lower:
-                        worker_config = worker
-                        break
             
+            # Try case-insensitive hostname match first
+            hostname_lower = hostname.lower()
+            worker_config = None
+            for worker in config.workers:
+                if worker.hostname.lower() == hostname_lower:
+                    worker_config = worker
+                    break
+            
+            # If hostname doesn't match, try matching by Tailscale IP (100.x.x.x)
+            if worker_config is None:
+                try:
+                    import socket
+                    import subprocess
+                    # Try to get Tailscale IP by checking network interfaces
+                    # Look for IP in 100.x.x.x range (Tailscale uses 100.x.x.x)
+                    result = subprocess.run(
+                        ["ifconfig"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0:
+                        # Find all 100.x.x.x IPs
+                        import re
+                        tailscale_ips = re.findall(r'inet (100\.\d+\.\d+\.\d+)', result.stdout)
+                        if tailscale_ips:
+                            # Match by Tailscale IP
+                            for worker in config.workers:
+                                if worker.tailscale_ip in tailscale_ips:
+                                    worker_config = worker
+                                    break
+                except Exception:
+                    pass
+            
+            # Last resort: allow explicit node-id via environment variable
+            if worker_config is None:
+                node_id_env = sys.environ.get("EXO_NODE_ID")
+                if node_id_env:
+                    from exo.shared.types.common import NodeId
+                    node_id = NodeId(node_id_env)
+                    for worker in config.workers:
+                        if worker.node_id == node_id:
+                            worker_config = worker
+                            break
+            
+            # Last resort: if we have exactly 3 workers and we can identify by process count/index
+            # This is a fallback - ideally hostname should match
             if worker_config is None:
                 print(f"Error: Could not find worker config for hostname {hostname}", file=sys.stderr)
+                print(f"Available worker hostnames: {[w.hostname for w in config.workers]}", file=sys.stderr)
+                print(f"Tip: Set EXO_NODE_ID environment variable to specify node_id explicitly", file=sys.stderr)
                 sys.exit(1)
             
             # Import and call worker_main with node_id
