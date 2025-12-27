@@ -29,10 +29,19 @@ class WorkerHTTPClient:
             raise RuntimeError("HTTP client not initialized. Use as async context manager.")
         
         try:
-            # Serialize state using BOTH by_alias=True AND mode='json'
-            # - by_alias=True: Preserves TaggedModel's custom discriminator format
-            # - mode='json': Properly serializes datetime objects to ISO strings
-            state_dict = state.model_dump(by_alias=True, mode='json')
+            # Serialize state to dict using by_alias=True to preserve TaggedModel format
+            # We can't use mode='json' as it breaks TaggedModel's nested discriminator structure
+            # Instead, we'll use a custom JSON encoder to handle datetime objects
+            import json
+            from datetime import datetime
+            
+            class DateTimeEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, datetime):
+                        return obj.isoformat()
+                    return super().default(obj)
+            
+            state_dict = state.model_dump(by_alias=True)
             instance_count = len(state.instances)
             runner_count = len(state.runners)
             
@@ -41,9 +50,13 @@ class WorkerHTTPClient:
                 f"{instance_count} instances, {runner_count} runners"
             )
             
+            # Use custom encoder that handles datetime → ISO string conversion
+            json_str = json.dumps(state_dict, cls=DateTimeEncoder)
+            
             async with self._session.post(
                 f"{self.worker_url}/state/update",
-                json=state_dict,
+                data=json_str,
+                headers={"Content-Type": "application/json"},
             ) as response:
                 response.raise_for_status()
                 logger.info(
