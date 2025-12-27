@@ -89,6 +89,9 @@ class Worker:
         self.master_url = master_url
         self._master_http_client = None
         
+        # HTTP event client for sending events to Master (bidirectional communication)
+        self._master_event_client = None
+        
         # HTTP server for receiving state updates from Master (push-based)
         self._state_server = None
         self._state_server_port = 8080
@@ -160,6 +163,16 @@ class Worker:
             )
             await self._master_http_client.__aenter__()
         
+        # Start HTTP event client for sending events to Master (bidirectional)
+        if self.master_url:
+            from exo.worker.event_client import MasterEventClient
+            self._master_event_client = MasterEventClient(
+                master_url=self.master_url,
+                node_id=self.node_id,
+                session_id=self.session_id,
+            )
+            await self._master_event_client.__aenter__()
+        
         # Start HTTP server for receiving state updates from Master (push-based)
         if self.master_url:
             from exo.worker.state_server import WorkerStateServer
@@ -192,6 +205,9 @@ class Worker:
         # Clean up HTTP client
         if self._master_http_client:
             await self._master_http_client.__aexit__(None, None, None)
+        # Clean up event client
+        if self._master_event_client:
+            await self._master_event_client.__aexit__(None, None, None)
         # Clean up state server
         if self._state_server:
             await self._state_server.stop_server()
