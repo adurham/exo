@@ -20,3 +20,6 @@ touch src/exo/generated/__init__.py
 echo "✓ Proto generation complete"
 echo "Generated files in src/exo/generated/"
 ls -la src/exo/generated/
+
+# Fix the import in cluster_pb2_grpc.py to use absolute import
+sed -i '' 's/^import cluster_pb2 as cluster__pb2$/from exo.generated import cluster_pb2 as cluster__pb2/' src/exo/generated/cluster_pb2_grpc.py
