@@ -112,6 +112,10 @@ class Master:
                     logger.info(f"Adding worker {worker.node_id} at {worker_url}")
                     await self._worker_clients.add_worker(worker.node_id, worker_url)
                 logger.info(f"✓ Initialized worker client pool with {len(config.workers)} workers")
+                # Push initial state to all workers to sync any existing instances/runners
+                logger.info("Pushing initial state to all workers...")
+                await self._worker_clients.push_state_to_all(self.state)
+                logger.info("✓ Initial state push complete")
             except Exception as e:
                 logger.error(f"✗ Failed to initialize worker client pool: {e}", exc_info=True)
                 self._worker_clients = None
