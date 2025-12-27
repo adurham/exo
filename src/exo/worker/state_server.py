@@ -36,12 +36,26 @@ class WorkerStateServer:
             
             master_state = State.model_validate(state_dict)
             
+            # Log state update details
+            instance_count = len(master_state.instances)
+            runner_count = len(master_state.runners)
+            task_count = len(master_state.tasks)
+            logger.info(
+                f"Worker state server received state update: "
+                f"{instance_count} instances, {runner_count} runners, {task_count} tasks"
+            )
+            if instance_count > 0:
+                instance_ids = list(master_state.instances.keys())
+                logger.info(f"Instances in state update: {instance_ids}")
+            
             if self._state_update_callback:
                 await self._state_update_callback(master_state)
             
             return web.json_response({"status": "ok"})
         except Exception as e:
             logger.error(f"Error handling state update: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return web.json_response({"error": str(e)}, status=500)
     
     async def start_server(self) -> None:
@@ -61,7 +75,8 @@ class WorkerStateServer:
         
         self._site = web.TCPSite(self._runner, "0.0.0.0", self.port)
         await self._site.start()
-        logger.info(f"Worker state server started on port {self.port}")
+        logger.info(f"Worker state server LISTENING on 0.0.0.0:{self.port} (accessible from any interface)")
+        logger.info(f"State update endpoint: POST http://0.0.0.0:{self.port}/state/update")
     
     async def stop_server(self) -> None:
         """Stop the HTTP server."""

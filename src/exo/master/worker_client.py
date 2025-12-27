@@ -31,14 +31,31 @@ class WorkerHTTPClient:
         try:
             # Serialize state to dict (State uses camelCase aliases)
             state_dict = state.model_dump(mode="json")
+            instance_count = len(state.instances)
+            runner_count = len(state.runners)
+            
+            logger.info(
+                f"Pushing state to {self.worker_url}: "
+                f"{instance_count} instances, {runner_count} runners"
+            )
+            
             async with self._session.post(
                 f"{self.worker_url}/state/update",
                 json=state_dict,
             ) as response:
                 response.raise_for_status()
-                logger.debug(f"Pushed state update to worker {self.worker_url}: {response.status}")
+                logger.info(
+                    f"✓ Successfully pushed state to {self.worker_url} "
+                    f"(status {response.status})"
+                )
         except aiohttp.ClientError as e:
-            logger.warning(f"Failed to push state update to worker {self.worker_url}: {e}")
+            logger.error(
+                f"✗ Failed to push state to {self.worker_url}: {e.__class__.__name__}: {e}"
+            )
+        except Exception as e:
+            logger.error(
+                f"✗ Unexpected error pushing state to {self.worker_url}: {e.__class__.__name__}: {e}"
+            )
 
 
 class WorkerClientPool:
