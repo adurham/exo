@@ -166,15 +166,15 @@ class Worker:
             )
             await self._master_http_client.__aenter__()
         
-        # Start HTTP event client for sending events to Master (bidirectional)
+        # Start gRPC client for bidirectional communication with Master
         if self.master_url:
-            from exo.worker.event_client import MasterEventClient
-            self._master_event_client = MasterEventClient(
+            from exo.worker.grpc_client import WorkerGrpcClient
+            self._master_grpc_client = WorkerGrpcClient(
                 master_url=self.master_url,
                 node_id=self.node_id,
                 session_id=self.session_id,
             )
-            await self._master_event_client.__aenter__()
+            await self._master_grpc_client.__aenter__()
         
         # Start HTTP server for receiving state updates from Master (push-based)
         if self.master_url:
