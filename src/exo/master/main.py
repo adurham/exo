@@ -122,6 +122,18 @@ class Master:
         else:
             logger.info("Skipping worker client pool initialization (EXO_TESTS is set)")
         
+        # Start gRPC server for bidirectional communication with workers
+        if not os.environ.get("EXO_TESTS"):
+            logger.info("Starting gRPC server for cluster communication...")
+            try:
+                from exo.master.grpc_server import serve_grpc
+                import asyncio
+                # Start gRPC server in background
+                asyncio.create_task(serve_grpc(self, port=50051))
+                logger.info("✓ gRPC server started on port 50051")
+            except Exception as e:
+                logger.error(f"✗ Failed to start gRPC server: {e}", exc_info=True)
+        
         # Create task group in async context
         self._tg = anyio.create_task_group()
         async with self._tg as tg:

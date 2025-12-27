@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package exo.cluster;
+
+// Wrapper for JSON-serialized events (preserves Pydantic structure)
+message EventMessage {
+  string event_json = 1;  // JSON-serialized Event from Pydantic
+  string origin_node_id = 2;
+  int32 origin_idx = 3;
+}
+
+// Wrapper for JSON-serialized state
+message StateMessage {
+  string state_json = 1;  // JSON-serialized State from Pydantic
+}
+
+// Wrapper for JSON-serialized commands
+message CommandMessage {
+  string command_json = 1;  // JSON-serialized Command from Pydantic
+  string origin_node_id = 2;
+}
+
+// Empty response
+message Empty {}
+
+// Health check
+message HealthCheckRequest {}
+message HealthCheckResponse {
+  string status = 1;
+}
+
+// Master service - workers connect to this
+service MasterService {
+  // Bidirectional event streaming
+  rpc StreamEvents(stream EventMessage) returns (stream EventMessage);
+  
+  // Worker requests current state
+  rpc GetState(Empty) returns (StateMessage);
+  
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Worker service - master and other workers connect to this
+service WorkerService {
+  // Receive state updates from master
+  rpc UpdateState(StateMessage) returns (Empty);
+  
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}

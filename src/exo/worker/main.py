@@ -89,6 +89,9 @@ class Worker:
         self.master_url = master_url
         self._master_http_client = None
         
+        # gRPC client for bidirectional communication with Master
+        self._master_grpc_client = None
+        
         # HTTP event client for sending events to Master (bidirectional communication)
         self._master_event_client = None
         
@@ -205,6 +208,9 @@ class Worker:
         # Clean up HTTP client
         if self._master_http_client:
             await self._master_http_client.__aexit__(None, None, None)
+        # Clean up gRPC client
+        if self._master_grpc_client:
+            await self._master_grpc_client.__aexit__(None, None, None)
         # Clean up event client
         if self._master_event_client:
             await self._master_event_client.__aexit__(None, None, None)
@@ -529,9 +535,19 @@ class Worker:
         self._tg.start_soon(self.shard_downloader.ensure_shard, task.shard_metadata)
 
     async def _forward_events(self) -> None:
-        """Forward local events via HTTP if master event client is available, otherwise via channel."""
+        """Forward local events via gRPC if gRPC client is available, otherwise via HTTP or channel."""
+        # If we have gRPC client (static setup with gRPC), use that
+        if self._master_grpc_client is not None:
+            with self.event_receiver as events:
+                async for event in events:
+                    logger.info(
+                        f"Forwarding {event.__class__.__name__} to master via gRPC "
+                        f"(event_id={event.event_id})"
+                    )
+                    await self._master_grpc_client.send_event(event)
+            return
         # If we have HTTP event client (static setup), use that instead
-        if self._master_event_client is not None:
+        elif self._master_event_client is not None:
             with self.event_receiver as events:
                 async for event in events:
                     logger.info(
