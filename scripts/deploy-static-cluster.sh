@@ -152,7 +152,10 @@ echo ""
 echo "Step 3: Stopping any existing exo processes..."
 for node in "$MASTER_NODE" "${WORKER_NODES[@]}"; do
     echo "[$node] Stopping existing processes..."
-    ssh $SSH_OPTS "$node" "pkill -9 -f 'exo.*master_app' 2>/dev/null || true; pkill -9 -f 'exo.*worker_app' 2>/dev/null || true; pkill -9 -f 'uv run.*master_app' 2>/dev/null || true; pkill -9 -f 'uv run.*worker_app' 2>/dev/null || true" 2>&1 | prefix_output "$node" || true
+    # Use pgrep to find processes and kill them with -9 for forceful termination
+    ssh $SSH_OPTS "$node" "pgrep -f 'python.*exo.*app' | xargs -r kill -9 2>/dev/null || true" 2>&1 | prefix_output "$node" || true
+    # Wait a moment for processes to die
+    ssh $SSH_OPTS "$node" "sleep 1" 2>/dev/null || true
 done
 sleep 2
 echo ""
