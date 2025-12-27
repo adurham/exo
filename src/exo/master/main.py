@@ -140,7 +140,7 @@ class Master:
             try:
                 from exo.shared.types.commands import CreateInstance
                 from exo.shared.types.state import Instance
-                from exo.shared.shard_metadata import infer_shard_metadata
+                from exo.inference.shard import infer_shard_metadata
                 
                 model_id = "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit"
                 shard_metadata = infer_shard_metadata(model_id)
