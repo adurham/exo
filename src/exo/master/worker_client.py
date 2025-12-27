@@ -29,8 +29,9 @@ class WorkerHTTPClient:
             raise RuntimeError("HTTP client not initialized. Use as async context manager.")
         
         try:
-            # Serialize state to dict (State uses camelCase aliases)
-            state_dict = state.model_dump(mode="json")
+            # Serialize state to dict using by_alias=True to preserve TaggedModel format
+            # Note: Do NOT use mode='json' as it conflicts with TaggedModel's custom serializer
+            state_dict = state.model_dump(by_alias=True)
             instance_count = len(state.instances)
             runner_count = len(state.runners)
             
