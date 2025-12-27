@@ -100,14 +100,23 @@ class Master:
         # Initialize worker client pool for static setup (skip in tests)
         import os
         if not os.environ.get("EXO_TESTS"):
-            from exo.master.worker_client import WorkerClientPool
-            from exo.shared.static_config import get_static_config
-            self._worker_clients = WorkerClientPool()
-            config = get_static_config()
-            for worker in config.workers:
-                worker_url = f"http://{worker.tailscale_ip}:8080"  # Workers listen on port 8080
-                await self._worker_clients.add_worker(worker.node_id, worker_url)
-            logger.info(f"Initialized worker client pool with {len(config.workers)} workers")
+            logger.info("Initializing worker client pool for static cluster setup...")
+            try:
+                from exo.master.worker_client import WorkerClientPool
+                from exo.shared.static_config import get_static_config
+                self._worker_clients = WorkerClientPool()
+                config = get_static_config()
+                logger.info(f"Found {len(config.workers)} workers in static config")
+                for worker in config.workers:
+                    worker_url = f"http://{worker.tailscale_ip}:8080"  # Workers listen on port 8080
+                    logger.info(f"Adding worker {worker.node_id} at {worker_url}")
+                    await self._worker_clients.add_worker(worker.node_id, worker_url)
+                logger.info(f"✓ Initialized worker client pool with {len(config.workers)} workers")
+            except Exception as e:
+                logger.error(f"✗ Failed to initialize worker client pool: {e}", exc_info=True)
+                self._worker_clients = None
+        else:
+            logger.info("Skipping worker client pool initialization (EXO_TESTS is set)")
         
         # Create task group in async context
         self._tg = anyio.create_task_group()
