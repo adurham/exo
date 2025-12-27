@@ -30,6 +30,15 @@ echo "Setting Rust toolchain to nightly..."
 rustup default nightly 2>&1 | grep -v "info:" || rustup toolchain install nightly 2>&1 | grep -v "info:" || true
 rustup default nightly 2>&1 | grep -v "info:" || true
 
+# Generate protobuf files
+echo "Generating protobuf files..."
+bash scripts/generate-proto.sh 2>&1 | tail -20
+if [ ! -f "src/exo/generated/cluster_pb2.py" ]; then
+    echo "❌ ERROR: Failed to generate protobuf files"
+    exit 1
+fi
+echo "✅ Protobuf files generated"
+
 # Build the Rust components directly with cargo
 echo "Building Rust bindings with cargo..."
 cd rust/exo_pyo3_bindings
@@ -92,7 +101,7 @@ distribute_to_node() {
     local node=$1
     local node_type=$2
     
-    echo "[$node] Distributing Rust bindings to $node_type node..."
+    echo "[$node] Distributing Rust bindings and protobuf files to $node_type node..."
     
     # Find the site-packages directory on remote node
     local remote_site_packages=$(ssh $SSH_OPTS "$node" "cd $REPO_PATH && export PATH=\"/opt/homebrew/bin:\$HOME/.local/bin:\$PATH\" && uv pip list --format json 2>/dev/null | python3 -c 'import sys, json; pkgs=json.load(sys.stdin); print([p[\"location\"] for p in pkgs if p[\"name\"]==\"exo\"][0] if any(p[\"name\"]==\"exo\" for p in pkgs) else \"\")' 2>/dev/null || echo ''" 2>&1)
@@ -112,6 +121,12 @@ distribute_to_node() {
     scp $SSH_OPTS -r "$DIST_DIR/exo_pyo3_bindings/"* "$node:$REPO_PATH/.venv/lib/python3.13/site-packages/exo_pyo3_bindings/" 2>&1
     
     echo "✅ [$node] Rust bindings distributed to .venv/lib/python3.13/site-packages/exo_pyo3_bindings/"
+    
+    # Distribute protobuf files
+    echo "[$node] Distributing protobuf files..."
+    ssh $SSH_OPTS "$node" "mkdir -p $REPO_PATH/src/exo/generated" 2>&1
+    scp $SSH_OPTS "$REPO_ROOT/src/exo/generated/"* "$node:$REPO_PATH/src/exo/generated/" 2>&1
+    echo "✅ [$node] Protobuf files distributed to src/exo/generated/"
 }
 
 # Distribute to master
