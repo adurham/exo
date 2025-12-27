@@ -134,32 +134,6 @@ class Master:
             except Exception as e:
                 logger.error(f"✗ Failed to start gRPC server: {e}", exc_info=True)
         
-        # Create instance for Qwen3-235B model on startup
-        if not os.environ.get("EXO_TESTS"):
-            logger.info("Creating Qwen3-235B model instance on startup...")
-            try:
-                from exo.shared.types.commands import CreateInstance
-                from exo.shared.types.state import Instance
-                from exo.inference.shard import infer_shard_metadata
-                
-                model_id = "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit"
-                shard_metadata = infer_shard_metadata(model_id)
-                
-                instance = Instance(
-                    instance_id="qwen3-235b-default",
-                    model_id=model_id,
-                    shard_metadata=shard_metadata,
-                )
-                
-                create_cmd = CreateInstance(instance=instance)
-                
-                # Send command to create the instance
-                if self.command_sender:
-                    await self.command_sender.send(create_cmd)
-                    logger.info(f"✓ Created instance for {model_id}")
-            except Exception as e:
-                logger.error(f"✗ Failed to create model instance: {e}", exc_info=True)
-        
         # Create task group in async context
         self._tg = anyio.create_task_group()
         async with self._tg as tg:
