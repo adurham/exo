@@ -529,7 +529,18 @@ class Worker:
         self._tg.start_soon(self.shard_downloader.ensure_shard, task.shard_metadata)
 
     async def _forward_events(self) -> None:
-        if self.local_event_sender is None:
+        """Forward local events via HTTP if master event client is available, otherwise via channel."""
+        # If we have HTTP event client (static setup), use that instead
+        if self._master_event_client is not None:
+            with self.event_receiver as events:
+                async for event in events:
+                    logger.info(
+                        f"Forwarding {event.__class__.__name__} to master via HTTP "
+                        f"(event_id={event.event_id})"
+                    )
+                    await self._master_event_client.send_event(event)
+            return
+        elif self.local_event_sender is None:
             return
         with self.event_receiver as events:
             async for event in events:
