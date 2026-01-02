@@ -51,7 +51,7 @@ from exo.worker.download.download_utils import (
 from exo.worker.download.shard_downloader import RepoDownloadProgress, ShardDownloader
 from exo.worker.plan import plan
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
-from exo.worker.utils import start_polling_memory_metrics, start_polling_node_metrics
+from exo.worker.utils import start_polling_memory_metrics, start_polling_node_metrics, ThrashingMonitor
 from exo.worker.utils.net_profile import check_reachable
 
 
@@ -94,6 +94,7 @@ class Worker:
         self._nack_cap_seconds: float = 10.0
 
         self.event_sender, self.event_receiver = channel[Event]()
+        self.thrashing_monitor = ThrashingMonitor()
 
     async def run(self):
         logger.info("Starting Worker")
@@ -128,6 +129,7 @@ class Worker:
             tg.start_soon(self.plan_step)
             tg.start_soon(start_polling_node_metrics, resource_monitor_callback)
 
+            tg.start_soon(self.thrashing_monitor.start)
             tg.start_soon(start_polling_memory_metrics, memory_monitor_callback)
             tg.start_soon(self._emit_existing_download_progress)
             tg.start_soon(self._connection_message_event_writer)
@@ -417,6 +419,21 @@ class Worker:
             # TODO: EdgeDeleted
             edges = set(self.state.topology.list_connections())
             conns = await check_reachable(self.state.topology, self.node_id)
+            for nid in conns:
+                node_profile = self.state.topology.get_node_profile(nid)
+                if not node_profile:
+                    continue
+
+                thunderbolt_ips = {
+                    iface.ip_address
+                    for iface in node_profile.network_interfaces
+                    if getattr(iface, "is_thunderbolt", False)
+                }
+
+                reachable_thunderbolt_ips = conns[nid].intersection(thunderbolt_ips)
+
+                if reachable_thunderbolt_ips:
+                    conns[nid] = reachable_thunderbolt_ips
             for nid in conns:
                 for ip in conns[nid]:
                     if "127.0.0.1" in ip or "localhost" in ip:

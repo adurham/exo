@@ -49,6 +49,44 @@ def get_smallest_cycles(cycles: list[list[NodeInfo]]) -> list[list[NodeInfo]]:
     return [cycle for cycle in cycles if len(cycle) == min_nodes]
 
 
+def sort_cycle_by_speed_and_capacity(cycle: list[NodeInfo]) -> list[NodeInfo]:
+    """
+    Sort the cycle to prioritize higher performance nodes (Speed > Capacity):
+    1. Mac Studio (Hub/Coordinator) - implied highest bandwidth
+    2. Max chips
+    3. Pro chips
+    4. Base chips / Others
+    Tie-breaking by RAM capacity (descending).
+    """
+    def priority_key(node: NodeInfo):
+        profile = node.node_profile
+        if not profile:
+            return (-1, 0)
+        
+        # Chip/Model Priority (High number = High priority)
+        chip_score = 0
+        model_id = (profile.model_id or "").lower()
+        chip_id = (profile.chip_id or "").lower()
+        
+        if "mac studio" in model_id:
+            chip_score = 4
+        elif "max" in chip_id or "max" in model_id:
+            chip_score = 3
+        elif "pro" in chip_id or "pro" in model_id:
+            chip_score = 2
+        elif "apple" in chip_id:
+            chip_score = 1
+            
+        memory_mb = profile.memory.ram_available.in_mb
+        
+        # Sort Descending (higher score/memory first)
+        return (-chip_score, -memory_mb)
+
+    sorted_cycle = sorted(cycle, key=priority_key)
+    logger.info(f"Sorted cycle for placement: {[n.node_id for n in sorted_cycle]}")
+    return sorted_cycle
+
+
 def get_shard_assignments_for_pipeline_parallel(
     model_meta: ModelMetadata,
     selected_cycle: list[NodeWithProfile],
@@ -215,7 +253,8 @@ def get_mlx_ibv_devices_matrix(
                 continue
 
             # Find the IP J uses to talk to I
-            for connection_ip, _ in _find_connection_ip(node_j, node_i, cycle_digraph):
+            connection_ip = _find_ip_prioritised(node_j, node_i, cycle_digraph)
+            if connection_ip:
                 # This is a local IP on I, which is attached to an interface: find that interface
                 if interface_name := _find_rdma_interface_name_for_ip(
                     connection_ip, node_i
@@ -224,14 +263,15 @@ def get_mlx_ibv_devices_matrix(
                     logger.info(
                         f"Interface name for {connection_ip} on {node_i.node_id}: {interface_name}"
                     )
-                    break
-            else:
-                logger.warning(
-                    f"Failed to find interface name between {node_i.node_id} and {node_j.node_id}"
-                )
-                raise ValueError(
-                    "Current ibv backend requires all-to-all rdma connections"
-                )
+                    continue
+            
+            logger.warning(
+                f"Failed to find interface name between {node_i.node_id} and {node_j.node_id}"
+            )
+            # If we are strictly enforcing P2P isolation, this failure is correct/expected if no TB link exists.
+            raise ValueError(
+                "Current ibv backend requires all-to-all rdma connections"
+            )
 
     return matrix
 
@@ -257,16 +297,24 @@ def _find_rdma_interface_name_for_ip(
     if node_info.node_profile is None:
         return None
 
-    logger.info(f"Searching {node_info.node_id} for ip {ip_address}:")
+    logger.warning(f"Searching {node_info.node_id} for ip {ip_address}:")
     for interface in node_info.node_profile.network_interfaces:
-        if interface.name not in ["en2", "en3", "en4", "en5", "en6", "en7"]:
+        if not interface.is_thunderbolt and interface.name not in [
+            "en1",
+            "en2",
+            "en3",
+            "en4",
+            "en5",
+            "en6",
+            "en7",
+        ]:
             continue
-        logger.info(f" | {interface.name}: {interface.ip_address}")
+        # logger.warning(f" | {interface.name}: {interface.ip_address} (TB={interface.is_thunderbolt})")
         if interface.ip_address != ip_address:
             continue
 
-        logger.info("Found")
-        return f"rdma_{interface.name}"
+        # logger.warning(f"Found {interface.name}")
+        return interface.name
 
     return None
 
@@ -289,6 +337,13 @@ def _find_interface_name_for_ip(
 def _find_ip_prioritised(
     node: NodeInfo, other_node: NodeInfo, cycle_digraph: Topology
 ) -> str | None:
+    # 0. Check for direct subnet match (Triangle Topology optimization)
+    # This takes precedence over known connections in the cycle_digraph because
+    # the Master might not know about the direct link between two workers.
+    direct_ip = _find_common_subnet_ip(node, other_node)
+    if direct_ip:
+        return direct_ip
+
     # TODO: Actually prioritize in the correct Ethernet > Wifi > Non-TB > TB order.
     """Find an IP address between nodes with prioritization.
 
@@ -309,16 +364,6 @@ def _find_ip_prioritised(
     en1_ip = iface_map.get("en1")
     if en1_ip:
         return en1_ip
-
-    non_thunderbolt_ip = next(
-        (ip for (ip, is_thunderbolt) in ips if not is_thunderbolt), None
-    )
-
-    if non_thunderbolt_ip:
-        return non_thunderbolt_ip
-
-    if ips:
-        return ips[0][0]
 
     return None
 
@@ -403,3 +448,42 @@ def get_mlx_jaccl_coordinators(
     return {
         n.node_id: f"{get_ip_for_node(n)}:{coordinator_port}" for n in selected_cycle
     }
+
+
+def _is_same_subnet(ip1: str, ip2: str) -> bool:
+    """Check if two IPs are in the same /24 subnet (IPv4)."""
+    if "." not in ip1 or "." not in ip2:
+        return False
+    parts1 = ip1.split(".")
+    parts2 = ip2.split(".")
+    if len(parts1) != 4 or len(parts2) != 4:
+        return False
+    return parts1[:3] == parts2[:3]
+
+
+def _find_common_subnet_ip(node: NodeInfo, other_node: NodeInfo) -> str | None:
+    """Find a target IP on other_node that shares a subnet with node.
+    
+    This is critical for Triangle Topologies where two workers share a direct link (subnet C)
+    that the Master (on subnet A/B) cannot see/route.
+    """
+    if not node.node_profile or not other_node.node_profile:
+        return None
+
+    # Pass 1: Prioritize Thunderbolt interfaces
+    # We want to use the high-speed p2p links if available
+    for my_iface in node.node_profile.network_interfaces:
+        if not my_iface.ip_address or my_iface.ip_address.startswith("127."):
+            continue
+        if not my_iface.is_thunderbolt:
+            continue
+
+        for other_iface in other_node.node_profile.network_interfaces:
+            if not other_iface.ip_address or not other_iface.is_thunderbolt:
+                continue
+            
+            if _is_same_subnet(my_iface.ip_address, other_iface.ip_address):
+                logger.info(f"Found Thunderbolt link between {node.node_id} and {other_node.node_id} on subnet {my_iface.ip_address.rsplit('.', 1)[0]}: {other_iface.ip_address}")
+                return other_iface.ip_address
+
+    return None

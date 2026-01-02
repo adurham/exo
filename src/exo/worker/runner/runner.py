@@ -58,7 +58,8 @@ def main(
     try:
         logger.info("hello from the runner")
         if getattr(shard_metadata, "immediate_exception", False):
-            raise Exception("Fake exception - runner failed to spin up.")
+             raise RuntimeError("Immediate exception requested by shard metadata")
+
         if timeout := getattr(shard_metadata, "should_timeout", 0):
             time.sleep(timeout)
 

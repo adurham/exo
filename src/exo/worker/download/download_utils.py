@@ -612,9 +612,9 @@ async def download_shard(
             ),
         )
 
-    for file in filtered_file_list:
+    async def check_file_status(file: FileListEntry) -> tuple[str, RepoFileDownloadProgress]:
         downloaded_bytes = await get_downloaded_size(target_dir / file.path)
-        file_progress[file.path] = RepoFileDownloadProgress(
+        progress = RepoFileDownloadProgress(
             repo_id=str(shard.model_meta.model_id),
             repo_revision=revision,
             file_path=file.path,
@@ -626,6 +626,12 @@ async def download_shard(
             status="complete" if downloaded_bytes == file.size else "not_started",
             start_time=time.time(),
         )
+        return file.path, progress
+
+    # Run checks concurrently to avoid slow sequential startup
+    check_results = await asyncio.gather(*[check_file_status(file) for file in filtered_file_list])
+    for path, progress in check_results:
+        file_progress[path] = progress
 
     semaphore = asyncio.Semaphore(max_parallel_downloads)
 

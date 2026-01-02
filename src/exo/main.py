@@ -22,6 +22,7 @@ from exo.utils.channels import Receiver, channel
 from exo.utils.pydantic_ext import CamelCaseModel
 from exo.worker.download.impl_shard_downloader import exo_shard_downloader
 from exo.worker.main import Worker
+from exo.worker.utils.system_info import get_model_and_chip
 
 
 # I marked this as a dataclass as I want trivial constructors.
@@ -81,10 +82,13 @@ class Node:
         )
 
         er_send, er_recv = channel[ElectionResult]()
+        
+        model, _ = await get_model_and_chip()
+        
         election = Election(
             node_id,
             # If someone manages to assemble 1 MILLION devices into an exo cluster then. well done. good job champ.
-            seniority=1_000_000 if args.force_master else 0,
+            seniority=1_000_000 if args.force_master else (100 if "Mac Studio" in model else 0),
             # nb: this DOES feedback right now. i have thoughts on how to address this,
             # but ultimately it seems not worth the complexity
             election_message_sender=router.sender(topics.ELECTION_MESSAGES),

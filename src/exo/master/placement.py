@@ -12,6 +12,8 @@ from exo.master.placement_utils import (
     get_mlx_ring_hosts_by_node,
     get_shard_assignments,
     get_smallest_cycles,
+    get_smallest_cycles,
+    sort_cycle_by_speed_and_capacity,
 )
 from exo.shared.topology import Topology
 from exo.shared.types.commands import (
@@ -118,6 +120,11 @@ def place_instance(
         ),
     )
 
+    # Sort cycle to prioritize Mac Studio (Hub) as Coordinator (Rank 0)
+    # and then by performance (Speed > Capacity) to ensure deterministic
+    # Rank 1 (Max) and Rank 2 (Pro) assignment.
+    selected_cycle = sort_cycle_by_speed_and_capacity(selected_cycle)
+
     shard_assignments = get_shard_assignments(
         command.model_meta, selected_cycle, command.sharding
     )
@@ -131,8 +138,8 @@ def place_instance(
         logger.warning(
             "You have likely selected ibv for a single node instance; falling back to MlxRing"
         )
-
         command.instance_meta = InstanceMeta.MlxRing
+
 
     # TODO: Single node instances
     match command.instance_meta:
