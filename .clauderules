@@ -56,6 +56,12 @@ You have access to all modern Python features from Python 3.13, 3.12, 3.11...
 
 If you spot a rule violation within code that you've not been asked to work on directly, inform the user rather than patching it ad-hoc.
 
+## 10. Deployment
+
+* **NEVER** deploy code yourself.
+* Always ask the user to deploy code.
+* If you need to verify changes on a remote, ask the user to sync/deploy first.
+
 ---
 
 ### One-Sentence Summary

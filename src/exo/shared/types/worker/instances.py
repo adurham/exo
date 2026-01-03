@@ -30,7 +30,9 @@ class MlxRingInstance(BaseInstance):
 
 
 class MlxJacclInstance(BaseInstance):
-    ibv_devices: list[list[str | None]]
+    # ibv_devices maps NodeId to the list of interfaces that node uses to reach other ranks
+    # ibv_devices[node_id][j] = interface name on node_id to connect to rank j (or None if self)
+    ibv_devices: dict[NodeId, list[str | None]]
     jaccl_coordinators: dict[NodeId, str]
 
 

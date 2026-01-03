@@ -105,13 +105,12 @@ def get_shard_assignments_for_pipeline_parallel(
         if i == len(selected_cycle) - 1:
             node_layers = total_layers - layers_assigned
         else:
-            node_layers = round(
-                total_layers
-                * (
-                    node.node_profile.memory.ram_available.in_bytes
-                    / cycle_memory.in_bytes
-                )
+            ratio = (
+                node.node_profile.memory.ram_available.in_bytes
+                / cycle_memory.in_bytes
             )
+            node_layers = round(total_layers * ratio)
+
             node_layers = max(1, node_layers)
 
         runner_id = RunnerId()
@@ -235,19 +234,17 @@ def get_hosts_from_subgraph(cycle_digraph: Topology) -> list[Host]:
 def get_mlx_ibv_devices_matrix(
     selected_cycle: list[NodeInfo],
     cycle_digraph: Topology,
-) -> list[list[str | None]]:
-    """Build connectivity matrix mapping device i to device j via RDMA interface names.
+) -> dict[NodeId, list[str | None]]:
+    """Build per-node connectivity mapping for RDMA interface names.
 
-    The matrix element [i][j] contains the interface name on device i that connects
-    to device j, or None if no connection exists or no interface name is found.
-    Diagonal elements are always None.
+    Returns a dict where ibv_devices[node_id][j] is the interface name on node_id
+    that connects to the node at rank j, or None if j == node_id's rank.
     """
     num_nodes = len(selected_cycle)
-    matrix: list[list[str | None]] = [
-        [None for _ in range(num_nodes)] for _ in range(num_nodes)
-    ]
+    ibv_devices: dict[NodeId, list[str | None]] = {}
 
     for i, node_i in enumerate(selected_cycle):
+        row: list[str | None] = [None for _ in range(num_nodes)]
         for j, node_j in enumerate(selected_cycle):
             if i == j:
                 continue
@@ -259,12 +256,12 @@ def get_mlx_ibv_devices_matrix(
                 if interface_name := _find_rdma_interface_name_for_ip(
                     connection_ip, node_i
                 ):
-                    matrix[i][j] = interface_name
+                    row[j] = interface_name
                     logger.info(
                         f"Interface name for {connection_ip} on {node_i.node_id}: {interface_name}"
                     )
                     continue
-            
+
             logger.warning(
                 f"Failed to find interface name between {node_i.node_id} and {node_j.node_id}"
             )
@@ -273,7 +270,9 @@ def get_mlx_ibv_devices_matrix(
                 "Current ibv backend requires all-to-all rdma connections"
             )
 
-    return matrix
+        ibv_devices[node_i.node_id] = row
+
+    return ibv_devices
 
 
 def _find_connection_ip(
@@ -310,11 +309,12 @@ def _find_rdma_interface_name_for_ip(
         ]:
             continue
         # logger.warning(f" | {interface.name}: {interface.ip_address} (TB={interface.is_thunderbolt})")
-        if interface.ip_address != ip_address:
+        if not _is_same_subnet(interface.ip_address, ip_address):
             continue
 
         # logger.warning(f"Found {interface.name}")
-        return interface.name
+        # IBV device names are prefixed with 'rdma_' (e.g., rdma_en2 for interface en2)
+        return f"rdma_{interface.name}"
 
     return None
 
@@ -395,7 +395,14 @@ def get_mlx_ring_hosts_by_node(
 
         for idx, other_node in enumerate(selected_cycle):
             if idx == rank:
-                hosts_for_node.append(Host(ip="0.0.0.0", port=ephemeral_port))
+                # User requirement: Do not use 0.0.0.0. Bind to specific Thunderbolt IP.
+                tb_ip = "0.0.0.0"
+                if node.node_profile:
+                    for iface in node.node_profile.network_interfaces:
+                        if iface.is_thunderbolt and iface.ip_address:
+                             tb_ip = iface.ip_address
+                             break
+                hosts_for_node.append(Host(ip=tb_ip, port=ephemeral_port))
                 continue
 
             if idx not in {left_rank, right_rank}:
@@ -426,28 +433,40 @@ def get_mlx_jaccl_coordinators(
 ) -> dict[NodeId, str]:
     """Get the coordinator addresses for MLX Jaccl (rank 0 device).
 
-    Select an IP address that each node can reach for the rank 0 node. Returns
-    address in format "X.X.X.X:PORT" per node.
+    All nodes connect to the SAME coordinator IP on the rank 0 node.
+    In /30 TB topologies, we use the LAN (en0) IP since it's reachable by all peers.
     """
     rank_0_node = selected_cycle[0]
     logger.debug(f"Selecting coordinator from rank 0 node: {rank_0_node.node_id}")
 
-    def get_ip_for_node(n: NodeInfo) -> str:
-        if n.node_id == rank_0_node.node_id:
-            return "0.0.0.0"
+    # Find a LAN IP (en0) on rank 0 that all peers can reach
+    coordinator_ip: str | None = None
+    if rank_0_node.node_profile:
+        for iface in rank_0_node.node_profile.network_interfaces:
+            # Prefer en0 (WiFi on MacBook, Ethernet on Mac Studio)
+            if iface.name == "en0" and iface.ip_address:
+                coordinator_ip = iface.ip_address
+                break
 
-        ip = _find_ip_prioritised(n, rank_0_node, cycle_digraph)
-        if ip:
-            return ip
+    # Fallback: use first non-TB, non-loopback IP
+    if coordinator_ip is None and rank_0_node.node_profile:
+        for iface in rank_0_node.node_profile.network_interfaces:
+            if (
+                not iface.is_thunderbolt
+                and iface.ip_address
+                and not iface.ip_address.startswith("127.")
+            ):
+                coordinator_ip = iface.ip_address
+                break
 
-        logger.warning(
-            f"Failed to find directly connected ip between {n.node_id} and {rank_0_node.node_id}"
-        )
-        raise ValueError("Current ibv backend requires all-to-all rdma connections")
+    if coordinator_ip is None:
+        raise ValueError("Could not find a suitable coordinator IP for rank 0")
 
-    return {
-        n.node_id: f"{get_ip_for_node(n)}:{coordinator_port}" for n in selected_cycle
-    }
+    coordinator_addr = f"{coordinator_ip}:{coordinator_port}"
+    logger.info(f"Jaccl coordinator address for all ranks: {coordinator_addr}")
+
+    # All nodes use the same coordinator address
+    return {n.node_id: coordinator_addr for n in selected_cycle}
 
 
 def _is_same_subnet(ip1: str, ip2: str) -> bool:

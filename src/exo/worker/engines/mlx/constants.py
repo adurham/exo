@@ -13,3 +13,5 @@ KV_CACHE_BITS: int | None = None
 
 # TODO: We should really make this opt-in, but Kimi requires trust_remote_code=True
 TRUST_REMOTE_CODE: bool = True
+
+PREFILL_STEP_SIZE: int = 512

@@ -169,9 +169,6 @@ class MpReceiver[T]:
     _state: MpState[T] = field()
 
     def receive_nowait(self) -> T:
-        if self._state.closed.is_set():
-            raise ClosedResourceError
-
         try:
             item = self._state.buffer.get(block=False)
             if isinstance(item, _MpEndOfStream):
@@ -179,9 +176,11 @@ class MpReceiver[T]:
                 raise EndOfStream
             return item
         except Empty:
+            if self._state.closed.is_set():
+                raise ClosedResourceError
             raise WouldBlock from None
         except ValueError as e:
-            print("Unreachable code path - let me know!")
+            # The queue is closed
             raise ClosedResourceError from e
 
     def receive(self) -> T:

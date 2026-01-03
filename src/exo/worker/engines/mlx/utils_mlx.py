@@ -134,11 +134,30 @@ def mlx_distributed_init(
             case MlxJacclInstance(
                 ibv_devices=ibv_devices, jaccl_coordinators=jaccl_coordinators
             ):
-                # Use RDMA connectivity matrix
+                # Rebuild full NxN matrix from per-node rows
+                # Each node's row is indexed by device_rank (0, 1, 2, ...)
+                shard_assignments = bound_instance.instance.shard_assignments
+
+                # Build list of (node_id, runner_id, device_rank) sorted by rank
+                nodes_by_rank: list[tuple[str, str, int]] = []
+                for node_id, runner_id in shard_assignments.node_to_runner.items():
+                    shard = shard_assignments.runner_to_shard[runner_id]
+                    nodes_by_rank.append((node_id, runner_id, shard.device_rank))
+                nodes_by_rank.sort(key=lambda x: x[2])
+
+                # Build full matrix: matrix[i] = ibv_devices[node_at_rank_i]
+                full_matrix: list[list[str]] = []
+                for node_id, _, _ in nodes_by_rank:
+                    row = ibv_devices[node_id]
+                    # Keep None for self (diagonal) entries - jaccl expects empty string for self
+                    # Convert None to empty string, keep device names as-is
+                    sanitized_row = [d if d is not None else "" for d in row]
+                    full_matrix.append(sanitized_row)
+
                 coordination_file = (
                     f"./hosts_{bound_instance.instance.instance_id}_{rank}.json"
                 )
-                ibv_devices_json = json.dumps(ibv_devices)
+                ibv_devices_json = json.dumps(full_matrix)
 
                 with open(coordination_file, "w") as f:
                     _ = f.write(ibv_devices_json)
@@ -150,7 +169,15 @@ def mlx_distributed_init(
                 os.environ["MLX_IBV_DEVICES"] = coordination_file
                 os.environ["MLX_RANK"] = str(rank)
                 os.environ["MLX_JACCL_COORDINATOR"] = jaccl_coordinator
-                group = mx.distributed.init(backend="jaccl", strict=True)
+                os.environ["MLX_JACCL_VERBOSE"] = "1"  # Enable verbose jaccl debugging
+
+                logger.info(f"rank {rank} calling mx.distributed.init(backend='jaccl', strict=True)")
+                try:
+                    group = mx.distributed.init(backend="jaccl", strict=True)
+                    logger.info(f"rank {rank} mx.distributed.init completed successfully")
+                except Exception as e:
+                    logger.exception(f"rank {rank} mx.distributed.init FAILED with exception: {e}")
+                    raise
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
 

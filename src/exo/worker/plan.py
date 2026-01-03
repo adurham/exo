@@ -2,6 +2,8 @@
 
 from collections.abc import Mapping, Sequence
 
+from loguru import logger
+
 from exo.shared.types.common import NodeId
 from exo.shared.types.models import ModelId
 from exo.shared.types.tasks import (
@@ -51,7 +53,7 @@ def plan(
     tasks: Mapping[TaskId, Task],
 ) -> Task | None:
     # Python short circuiting OR logic should evaluate these sequentially.
-    return (
+    res = (
         _kill_runner(runners, all_runners, instances)
         or _create_runner(node_id, runners, instances)
         or _model_needs_download(runners, download_status)
@@ -60,6 +62,9 @@ def plan(
         or _ready_to_warmup(runners, all_runners)
         or _pending_tasks(runners, tasks, all_runners)
     )
+    if isinstance(res, Shutdown):
+        logger.warning(f"PLAN: Scheduled Shutdown: {res}")
+    return res
 
 
 def _kill_runner(
@@ -70,6 +75,7 @@ def _kill_runner(
     for runner in runners.values():
         runner_id = runner.bound_instance.bound_runner_id
         if (instance_id := runner.bound_instance.instance.instance_id) not in instances:
+            logger.warning(f"KILL: Runner {runner_id} killed. Instance {instance_id} missing from {list(instances.keys())}")
             return Shutdown(instance_id=instance_id, runner_id=runner_id)
 
         for (
@@ -79,6 +85,7 @@ def _kill_runner(
                 continue
 
             if isinstance(all_runners.get(global_runner_id, None), RunnerFailed):
+                logger.warning(f"KILL: Runner {runner_id} killed. Peer {global_runner_id} failed. Status: {all_runners.get(global_runner_id)}")
                 return Shutdown(
                     instance_id=instance_id,
                     runner_id=runner_id,

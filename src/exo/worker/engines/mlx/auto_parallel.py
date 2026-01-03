@@ -68,7 +68,9 @@ class PipelineFirstLayer(CustomMlxLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
+            print(f"[PipelineFirstLayer] rank={self.r} recv_like from rank={self.r - 1}, x.shape={x.shape}", flush=True)
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+            print(f"[PipelineFirstLayer] rank={self.r} recv_like DONE", flush=True)
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -96,14 +98,18 @@ class PipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self.r != self.s - 1:
+            print(f"[PipelineLastLayer] rank={self.r} send to rank={(self.r + 1) % self.s}, output.shape={output.shape}", flush=True)
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
+            print(f"[PipelineLastLayer] rank={self.r} send DONE", flush=True)
             if cache is not None:
                 # This change happened upstream - check out mlx github somewhere??
                 cache.keys = mx.depends(cache.keys, output)  # type: ignore[reportUnknownMemberType]
 
+        print(f"[PipelineLastLayer] rank={self.r} all_gather, output.shape={output.shape}", flush=True)
         output = mx.distributed.all_gather(output, group=self.group)[-output.shape[0] :]
+        print(f"[PipelineLastLayer] rank={self.r} all_gather DONE, output.shape={output.shape}", flush=True)
         return output
 
 
@@ -370,11 +376,17 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
 
 
 class ShardedQwenMoE(CustomMlxLayer):
+    _call_count: int = 0
+    
     def __init__(self, layer: _LayerCallable):
         super().__init__(layer)
         self.sharding_group: mx.distributed.Group | None = None
 
     def __call__(self, x: mx.array) -> mx.array:
+        ShardedQwenMoE._call_count += 1
+        call_id = ShardedQwenMoE._call_count
+        if call_id % 100 == 1:  # Log every 100th call to avoid spam
+            print(f"[ShardedQwenMoE] call #{call_id}, x.shape={x.shape}", flush=True)
         if self.sharding_group is not None:
             x = sum_gradients(self.sharding_group)(x)
         y = self.original_layer.__call__(x)

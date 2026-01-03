@@ -12,7 +12,12 @@ from exo.shared.types.worker.runner_response import (
     GenerationResponse,
 )
 from exo.worker.engines.mlx import Model
-from exo.worker.engines.mlx.constants import KV_BITS, KV_GROUP_SIZE, MAX_TOKENS
+from exo.worker.engines.mlx.constants import (
+    KV_BITS,
+    KV_GROUP_SIZE,
+    MAX_TOKENS,
+    PREFILL_STEP_SIZE,
+)
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     make_kv_cache,
@@ -69,10 +74,10 @@ def warmup_inference(
         model=model,
         tokenizer=tokenizer,
         prompt=warmup_prompt,
-        max_tokens=50,
+        max_tokens=20,
         sampler=sampler,
         prompt_cache=cache,
-        prefill_step_size=65536,
+        prefill_step_size=PREFILL_STEP_SIZE,
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
@@ -109,7 +114,7 @@ def mlx_generate(
         max_tokens=max_tokens,
         sampler=sampler,
         prompt_cache=caches,
-        prefill_step_size=65536,
+        prefill_step_size=PREFILL_STEP_SIZE,
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
