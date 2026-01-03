@@ -17,9 +17,9 @@ echo "📍 Deploying on $(hostname)..."
 if [ -d "$REPO_DIR" ]; then
     cd "$REPO_DIR" || exit
     echo "⬇️ Pulling latest code..."
-    # Safety: Discard local changes so the pull always succeeds
-    git reset --hard 
-    git pull origin main
+    git fetch --all
+    git reset --hard origin/local_mac_cluster  # <--- Force it to match your branch
+    git checkout local_mac_cluster             # <--- Switch to your branch
 else
     echo "❌ Error: Directory $REPO_DIR not found on $(hostname)!"
     exit 1
