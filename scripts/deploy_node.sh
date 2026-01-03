@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-REPO_DIR="$HOME/exo" 
+REPO_DIR="$HOME/repos/exo" 
 BRANCH="local_mac_cluster"
 
 # --- 1. SET ENVIRONMENT ---
