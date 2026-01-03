@@ -1,14 +1,11 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-# IMPORTANT: Run 'hostname' in your Mac terminal to verify this exact name
-HEAD_HOSTNAME="macstudio-m4" 
-# Verify this path matches where you cloned the repo on your Macs
-REPO_DIR="$HOME/repos/exo" 
+REPO_DIR="$HOME/exo" 
+BRANCH="local_mac_cluster"
 
 # --- 1. SET ENVIRONMENT ---
-# SSH sessions are "non-interactive" and don't load your .zshrc by default.
-# We force-load the path so 'uv', 'python', and 'git' work.
+# Force path to ensure 'uv' and 'python' are found
 export PATH=$PATH:/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin
 
 echo "📍 Deploying on $(hostname)..."
@@ -16,10 +13,19 @@ echo "📍 Deploying on $(hostname)..."
 # --- 2. UPDATE CODE ---
 if [ -d "$REPO_DIR" ]; then
     cd "$REPO_DIR" || exit
-    echo "⬇️ Pulling latest code..."
-    git fetch --all
-    git reset --hard origin/local_mac_cluster  # <--- Force it to match your branch
-    git checkout local_mac_cluster             # <--- Switch to your branch
+    
+    # --- CRITICAL FIX: POINT TO YOUR FORK ---
+    # Your logs showed the Macs are pulling from 'exo-explore/exo'.
+    # This command forces them to pull from YOUR fork so they find the branch.
+    git remote set-url origin https://github.com/adurham/exo.git || true
+    
+    echo "⬇️ Pulling branch: $BRANCH..."
+    git fetch origin
+    
+    # Force the local state to match your remote branch exactly
+    git reset --hard "origin/$BRANCH"
+    git checkout "$BRANCH"
+    git pull origin "$BRANCH"
 else
     echo "❌ Error: Directory $REPO_DIR not found on $(hostname)!"
     exit 1
@@ -27,25 +33,16 @@ fi
 
 # --- 3. UPDATE DEPENDENCIES ---
 echo "📦 Syncing dependencies..."
-# If uv asks for confirmation, this flag skips it
 uv sync --frozen 
 
 # --- 4. RESTART EXO ---
 echo "🛑 Killing existing Exo processes..."
-# '|| true' prevents the script from crashing if no exo process is running
 pkill -f "exo" || true 
 sleep 2
 
 echo "🚀 Starting Exo..."
 
-# Logic to decide if this is the Head node or a Worker
-# Note: 'nohup' keeps the process alive after SSH disconnects
-if [[ "$(hostname)" == "$HEAD_HOSTNAME" ]]; then
-    echo "   -> Starting as HEAD node"
-    nohup exo start > exo.log 2>&1 &
-else
-    echo "   -> Starting as WORKER node"
-    nohup exo start --worker > exo.log 2>&1 &
-fi
+# Unified start command - relies on your code/config to determine Head vs Worker
+nohup exo start > exo.log 2>&1 &
 
 echo "✅ Deployment complete for $(hostname)."
