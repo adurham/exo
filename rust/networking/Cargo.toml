@@ -42,3 +42,4 @@ log = { workspace = true }
 
 # networking
 libp2p = { workspace = true, features = ["full"] }
+if-addrs = "0.10"

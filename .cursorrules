@@ -5,7 +5,7 @@
    - `uv run <command>`
    - `uv pip install ...`
    - `uv sync`
-2. **Virtual Environment**: NEVER access `.venv` directly (e.g., `.venv/bin/python` or `.venv/bin/pip`). Let `uv` manage the environment.
+4. **Pyenv**: Do NOT use `pyenv` or `pyenv` managed interpreters directly. Rely on `uv` to manage Python versions and environments.
 
 ## Cluster Configuration
 We are running a 3-node cluster:
@@ -26,3 +26,6 @@ You MUST prioritize direct links (Network C) for worker-to-worker communication 
 1. **No Hardcoded Limits**: Do NOT hardcode memory caps or node-specific logic (e.g. checking hostname) in the source code.
 2. **Full Utilization**: The user prefers to utilize full system resources. Do not artificially cap memory unless explicitly instructed via configuration.
 3. **No Auto-Instances**: Do NOT attempt to create instances or trigger model loads (via API or CLI) yourself. The user will handle this manual step.
+
+## Deployment Rules
+1. **Strict No-Deploy**: Do NOT run `deploy_workers.sh` or any deployment commands yourself. Do NOT suggest running deployment commands. The user will handle all deployment actions.

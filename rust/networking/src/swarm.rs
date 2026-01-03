@@ -23,8 +23,26 @@ pub fn create_swarm(keypair: identity::Keypair) -> alias::AnyResult<Swarm> {
         .with_behaviour(Behaviour::new)?
         .build();
 
-    // Listen on all interfaces and whatever port the OS assigns
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    // Listen on all interfaces on a FIXED port to allow static peering/blind dialing
+    // Port 56789 is chosen as the standard Exo P2P port.
+    swarm.listen_on("/ip4/0.0.0.0/tcp/56789".parse()?)?;
+
+    // Manually add Thunderbolt IPs to external addresses to force advertisement
+    // This overcomes the issue where mDNS only broadcasts the default route (WiFi) IP.
+    if let Ok(ifaces) = if_addrs::get_if_addrs() {
+        for iface in ifaces {
+            let ip_str = iface.addr.ip().to_string();
+            if ip_str.starts_with("192.168.2") { // Match 201, 202, 205, etc.
+                log::info!("RUST: Explicitly announcing Thunderbolt IP: {}", ip_str);
+                // Advertise the FIXED port
+                let addr_str = format!("/ip4/{}/tcp/56789", ip_str);
+                if let Ok(addr) = addr_str.parse() {
+                    swarm.add_external_address(addr);
+                }
+            }
+        }
+    }
+
     Ok(swarm)
 }
 

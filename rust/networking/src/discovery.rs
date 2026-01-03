@@ -138,6 +138,15 @@ impl Behaviour {
 
     fn handle_mdns_discovered(&mut self, peers: Vec<(PeerId, Multiaddr)>) {
         for (p, ma) in peers {
+            let addr_str = ma.to_string();
+            log::info!("RUST: Discovered peer {} at {}", p, addr_str);
+            
+            // Filter out WiFi subnet to force Thunderbolt
+            if addr_str.contains("/192.168.86.") {
+                log::info!("RUST: Ignoring WiFi address {} for peer {}", addr_str, p);
+                continue;
+            }
+
             self.dial(p, ma.clone()); // always connect
 
             // get peer's multi-addresses or insert if missing
@@ -369,6 +378,27 @@ impl NetworkBehaviour for Behaviour {
                     self.dial(p, ma)
                 }
             }
+            
+            // STATIC THUNDERBOLT DISCOVERY (Blind Dial)
+            // mDNS fails to propagate across the Thunderbolt bridge properly.
+            // We force-dial the known static topology IPs to guarantee mesh formation.
+            let static_tb_ips = vec![
+                "192.168.201.1", "192.168.201.2",
+                "192.168.202.1", "192.168.202.2",
+                "192.168.205.1", "192.168.205.2",
+            ];
+            
+            for ip in static_tb_ips {
+                let addr_str = format!("/ip4/{}/tcp/56789", ip);
+                if let Ok(addr) = addr_str.parse() {
+                     // We use unknown_peer_id() because we don't know who is at which IP,
+                     // but we know *someone* should be there listening on 56789.
+                     self.pending_events.push_back(ToSwarm::Dial {
+                        opts: DialOpts::unknown_peer_id().address(addr).build(),
+                    });
+                }
+            }
+
             self.retry_delay.reset(RETRY_CONNECT_INTERVAL) // reset timeout
         }
 

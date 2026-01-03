@@ -1,0 +1,36 @@
+name: Deploy to Home Cluster
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows you to manually trigger it from GitHub UI
+
+jobs:
+  deploy:
+    # This must match the label you saw in your screenshot (exo-deployer)
+    runs-on: [self-hosted, exo-deployer] 
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Deploy to All Nodes
+        run: |
+          # --- CONFIGURATION ---
+          # Add the IP addresses of your 3 Macs here
+          NODES=("192.168.86.100" "192.168.86.101" "192.168.86.103")
+          
+          # The user you use to SSH into the Macs
+          SSH_USER="adam.durham" 
+          
+          # --- DEPLOY LOOP ---
+          for NODE in "${NODES[@]}"; do
+            echo "------------------------------------------------"
+            echo "📡 Connecting to $NODE..."
+            
+            # This magic command reads the local script and executes it remotely
+            # 'bash -s' allows us to run a script without copying the file over first
+            ssh -o StrictHostKeyChecking=no "$SSH_USER@$NODE" 'bash -s' < scripts/deploy_node.sh
+            
+          done

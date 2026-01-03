@@ -8,6 +8,13 @@ HOSTS=(
     "work-macbook-m4"
 )
 
+# ... (omitting intermediate lines for brevity if tool supports it, otherwise I need to be careful with ReplaceFileContent.
+# Actually ReplaceFileContent works by matching exact lines. I should do two replaces or one big one if they are close.
+# They are far apart (lines 6-8 vs 82-87). I should use two chunks since I have MultiReplaceFileContent available? 
+# No, I only have `replace_file_content` which is single chunk. I need to make two calls or use `multi_replace_file_content` if available.
+# Checking tools... `multi_replace_file_content` IS available. I will use that.
+
+
 # Target Directory on Remote Hosts
 REMOTE_DIR="~/repos/exo/"
 
@@ -25,7 +32,15 @@ EXCLUDES=(
     "--exclude=.vscode"
     "--exclude=.DS_Store"
     "--exclude=node_modules"
+    "--exclude=extern/mlx/build"
+    "--exclude=extern/mlx/dist"
+    "--exclude=extern/mlx/fixed_dist"
 )
+
+echo "Using Remote Source Build (User Request)"
+# Ensure pyproject.toml points to source path
+# Note: Using #* for BSD sed compatibility (0 or more hashes)
+sed -i '' "s|^#* *mlx = .*|mlx = { path = \"extern/mlx\", editable = true }|" pyproject.toml
 
 echo "Deploying to worker nodes..."
 
@@ -45,21 +60,28 @@ for HOST in "${HOSTS[@]}"; do
 done
 
 echo "Configuring System Limits (requires sudo)..."
+pids=()
 for HOST in "${HOSTS[@]}"; do
-    echo "========================================"
-    echo "Configuring ${HOST}..."
-    
-    # Calculate tiered limit: 85% for >64GB (Studio), 80% for others (MacBooks)
-    # The Studio needs more headroom because it acts as the Hub (Network Buffers) + File Cache for the massive shard
-    ssh -t "${HOST}" "\
-        RAM_BYTES=\$(sysctl -n hw.memsize); \
-        RAM_GB=\$(( \$RAM_BYTES / 1024 / 1024 / 1024 )); \
-        if [ \"\$RAM_GB\" -gt 64 ]; then PERCENT=95; else PERCENT=80; fi; \
-        LIMIT_MB=\$(( \$RAM_BYTES / 1024 / 1024 * \$PERCENT / 100 )); \
-        echo \"[Setup] Node RAM: \${RAM_GB} GB. Using \${PERCENT}% Limit. Setting GPU Wired Limit to \${LIMIT_MB} MB\"; \
-        sudo sysctl iogpu.wired_limit_mb=\$LIMIT_MB || echo \"[Warning] Failed to set GPU limit. Ensure you have sudo privileges.\"; \
-        echo \"[Setup] Enabling IP Forwarding for Cluster Routing...\"; \
-        sudo sysctl -w net.inet.ip.forwarding=1 || echo \"[Warning] Failed to enable IP forwarding.\""
+    (
+        echo "========================================"
+        echo "Configuring ${HOST}..."
+        
+        # Calculate tiered limit: 85% for >64GB (Studio), 80% for others (MacBooks)
+        # The Studio needs more headroom because it acts as the Hub (Network Buffers) + File Cache for the massive shard
+        ssh -t "${HOST}" "\
+            RAM_BYTES=\$(sysctl -n hw.memsize); \
+            RAM_GB=\$(( \$RAM_BYTES / 1024 / 1024 / 1024 )); \
+            if [ \"\$RAM_GB\" -gt 64 ]; then PERCENT=90; else PERCENT=60; fi; \
+            LIMIT_MB=\$(( \$RAM_BYTES / 1024 / 1024 * \$PERCENT / 100 )); \
+            echo \"[Setup] Node RAM: \${RAM_GB} GB. Using \${PERCENT}% Limit. Setting GPU Wired Limit to \${LIMIT_MB} MB\"; \
+            sudo sysctl iogpu.wired_limit_mb=\$LIMIT_MB || echo \"[Warning] Failed to set GPU limit. Ensure you have sudo privileges.\"; \
+            echo \"[Setup] Enabling IP Forwarding for Cluster Routing...\"; \
+            sudo sysctl -w net.inet.ip.forwarding=1 || echo \"[Warning] Failed to enable IP forwarding.\""
+    ) &
+    pids+=($!)
+done
+for pid in "${pids[@]}"; do
+    wait "$pid"
 done
 
 # Thunderbolt/RDMA Connectivity Pre-checks
@@ -115,6 +137,39 @@ for HOST in "${HOSTS[@]}"; do
 done
 
 echo ""
+echo "Building dependencies and verifying source install..."
+pids=()
+for HOST in "${HOSTS[@]}"; do
+    (
+        echo "========================================"
+        echo "Building on ${HOST}..."
+        echo "========================================"
+        # Use explicit incremental build to avoid recompiling when nothing changes.
+        # 1. uv sync creates/updates the venv.
+        # 2. We use the venv python to run setup.py build_ext --inplace (incremental).
+        # 3. We install editable link without forcing reinstall.
+        # 4. We build the dashboard here (once) ONLY if it doesn't exist.
+        ssh -t "${HOST}" "source ~/.zprofile; source ~/.zshrc; cd ~/repos/exo; \
+            if command -v ccache >/dev/null 2>&1; then export CC='ccache clang'; export CXX='ccache clang++'; export CCACHE_SLOPPINESS=pch_defines,time_macros; fi; \
+            if command -v ninja >/dev/null 2>&1; then export CMAKE_GENERATOR='Ninja'; fi; \
+            uv python install 3.13 && uv sync --python 3.13 && \
+            export CMAKE_BUILD_PARALLEL_LEVEL=`sysctl -n hw.logicalcpu` && \
+            cd extern/mlx && ../../.venv/bin/python3 setup.py build_ext --inplace && cd ../.. && \
+            uv pip install -e extern/mlx --no-deps && \
+            if [ ! -d 'dashboard/build' ]; then \
+                echo 'Building Dashboard...'; \
+                cd dashboard && npm install && npm run build; \
+            else \
+                echo 'Skipping Dashboard Build (found dashboard/build). Rm it to rebuild.'; \
+            fi"
+    ) &
+    pids+=($!)
+done
+for pid in "${pids[@]}"; do
+    wait "$pid"
+done
+
+echo ""
 echo "Starting services on all nodes in parallel..."
 
 for HOST in "${HOSTS[@]}"; do
@@ -140,7 +195,20 @@ for HOST in "${HOSTS[@]}"; do
 #!/bin/zsh
 source ~/.zprofile
 source ~/.zshrc
-cd ~/repos/exo/dashboard && npm install && npm run build && cd .. && uv run exo -vv > /tmp/exo.log 2>&1
+echo "----------------------------------------" >> ~/repos/exo/exo.log
+echo "Restarting EXO at $(date)" >> ~/repos/exo/exo.log
+echo "----------------------------------------" >> ~/repos/exo/exo.log
+
+# Optimization: Parallel build and Ccache
+export CMAKE_BUILD_PARALLEL_LEVEL=$(sysctl -n hw.logicalcpu)
+if command -v ccache &> /dev/null; then
+  export CC="ccache clang"
+  export CXX="ccache clang++"
+  export CCACHE_SLOPPINESS=pch_defines,time_macros
+fi
+
+python3 -c "import mlx.core; print(f'Loaded MLX from: {mlx.core.__file__}')" >> ~/repos/exo/exo.log 2>&1
+cd ~/repos/exo && uv run exo -vv >> ~/repos/exo/exo.log 2>&1
 EOF
     
     ssh "${HOST}" "chmod +x /tmp/exo_startup.sh; pkill -9 -f 'uv run exo' || true; pkill -9 -f 'python.*exo' || true; screen -S exo -X quit || true; screen -wipe || true; screen -dmS exo /tmp/exo_startup.sh" &
