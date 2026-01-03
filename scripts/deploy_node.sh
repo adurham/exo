@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
+HEAD_HOSTNAME="Adams-Mac-Studio-M4"
+# FIX: Updated to the correct path you found
 REPO_DIR="$HOME/repos/exo" 
 BRANCH="local_mac_cluster"
 
 # --- 1. SET ENVIRONMENT ---
-# Force path to ensure 'uv' and 'python' are found
 export PATH=$PATH:/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin
 
 echo "📍 Deploying on $(hostname)..."
@@ -14,15 +15,11 @@ echo "📍 Deploying on $(hostname)..."
 if [ -d "$REPO_DIR" ]; then
     cd "$REPO_DIR" || exit
     
-    # --- CRITICAL FIX: POINT TO YOUR FORK ---
-    # Your logs showed the Macs are pulling from 'exo-explore/exo'.
-    # This command forces them to pull from YOUR fork so they find the branch.
+    # Point to your fork to ensure we find the branch
     git remote set-url origin https://github.com/adurham/exo.git || true
     
     echo "⬇️ Pulling branch: $BRANCH..."
     git fetch origin
-    
-    # Force the local state to match your remote branch exactly
     git reset --hard "origin/$BRANCH"
     git checkout "$BRANCH"
     git pull origin "$BRANCH"
@@ -42,7 +39,7 @@ sleep 2
 
 echo "🚀 Starting Exo..."
 
-# Unified start command - relies on your code/config to determine Head vs Worker
-nohup exo start > exo.log 2>&1 &
+# FIX: Use 'uv run' so it finds the binary inside the virtualenv
+nohup uv run exo > exo.log 2>&1 &
 
 echo "✅ Deployment complete for $(hostname)."
