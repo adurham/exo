@@ -379,23 +379,39 @@ impl NetworkBehaviour for Behaviour {
                 }
             }
             
-            // STATIC THUNDERBOLT DISCOVERY (Blind Dial)
-            // mDNS fails to propagate across the Thunderbolt bridge properly.
-            // We force-dial the known static topology IPs to guarantee mesh formation.
+            // STATIC THUNDERBOLT DISCOVERY (Blind Dial) - SUBNET AWARE
+            // We only dial neighbors that share a subnet with our local interfaces.
+            // This implicitly handles the ring topology without requiring OS-level static routing.
             let static_tb_ips = vec![
                 "192.168.201.1", "192.168.201.2",
                 "192.168.202.1", "192.168.202.2",
                 "192.168.205.1", "192.168.205.2",
             ];
             
+            // Get local IPs to check reachability
+            let mut local_subnets = Vec::new();
+            if let Ok(ifaces) = if_addrs::get_if_addrs() {
+                for iface in ifaces {
+                     let ip_str = iface.addr.ip().to_string();
+                     // Capture the "192.168.XXX." prefix
+                     if let Some((prefix, _)) = ip_str.rsplit_once('.') {
+                         local_subnets.push(prefix.to_string());
+                     }
+                }
+            }
+
             for ip in static_tb_ips {
-                let addr_str = format!("/ip4/{}/tcp/56789", ip);
-                if let Ok(addr) = addr_str.parse() {
-                     // We use unknown_peer_id() because we don't know who is at which IP,
-                     // but we know *someone* should be there listening on 56789.
-                     self.pending_events.push_back(ToSwarm::Dial {
-                        opts: DialOpts::unknown_peer_id().address(addr).build(),
-                    });
+                // Only dial if we have a local interface on the same subnet
+                let should_dial = local_subnets.iter().any(|prefix| ip.starts_with(prefix));
+                
+                if should_dial {
+                    let addr_str = format!("/ip4/{}/tcp/56789", ip);
+                    log::info!("RUST: Blind Dialing Neighbor: {}", addr_str);
+                    if let Ok(addr) = addr_str.parse() {
+                         self.pending_events.push_back(ToSwarm::Dial {
+                            opts: DialOpts::unknown_peer_id().address(addr).build(),
+                        });
+                    }
                 }
             }
 

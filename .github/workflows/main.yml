@@ -4,13 +4,11 @@ on:
   push:
     branches:
       - local_mac_cluster
-  workflow_dispatch: # Allows you to manually trigger it from GitHub UI
+  workflow_dispatch:
 
 jobs:
   deploy:
-    # This must match the label you saw in your screenshot (exo-deployer)
-    runs-on: [self-hosted, exo-deployer] 
-    
+    runs-on: [self-hosted, exo-deployer]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -18,19 +16,63 @@ jobs:
       - name: Deploy to All Nodes
         run: |
           # --- CONFIGURATION ---
-          # Add the IP addresses of your 3 Macs here
           NODES=("192.168.86.100" "192.168.86.101" "192.168.86.103")
+          SSH_USER="adam.durham"
           
-          # The user you use to SSH into the Macs
-          SSH_USER="adam.durham" 
-          
-          # --- DEPLOY LOOP ---
           for NODE in "${NODES[@]}"; do
             echo "------------------------------------------------"
             echo "📡 Connecting to $NODE..."
-            
-            # This magic command reads the local script and executes it remotely
-            # 'bash -s' allows us to run a script without copying the file over first
             ssh -o StrictHostKeyChecking=no "$SSH_USER@$NODE" 'bash -s' < scripts/deploy_node.sh
-            
           done
+
+      # --- NEW STEP 1: Verify UI is Up ---
+      - name: 🏥 Health Check (Head Node UI)
+        run: |
+          HEAD_IP="192.168.86.100"
+          PORT="52415"
+          MAX_RETRIES=30  # 30 * 5s = 2.5 minutes timeout
+          
+          echo "⏳ Waiting for Exo UI to respond at http://$HEAD_IP:$PORT..."
+          
+          count=0
+          # Loop until '200 OK' is found
+          until curl -s --head --request GET "http://$HEAD_IP:$PORT" | grep "200 OK" > /dev/null; do
+            if [ $count -eq $MAX_RETRIES ]; then
+              echo "❌ Timeout: Web UI never came online."
+              exit 1
+            fi
+            printf "."
+            sleep 5
+            count=$((count+1))
+          done
+          
+          echo ""
+          echo "✅ Head Node UI is Online!"
+
+      # --- NEW STEP 2: Verify All Nodes Connected ---
+      - name: 🕵️ Verify Cluster Topology (Api Check)
+        run: |
+          HEAD_IP="192.168.86.100"
+          PORT="52415"
+          EXPECTED_NODES=3
+          
+          echo "🔍 Querying API for connected devices..."
+          
+          # Fetch the raw JSON from the API
+          API_RESPONSE=$(curl -s "http://$HEAD_IP:$PORT/api/devices")
+          
+          # Debug: Print it so you can see what happened if it fails
+          echo "Raw API Response: $API_RESPONSE"
+          
+          # Parse the JSON to count the devices list
+          NODE_COUNT=$(echo "$API_RESPONSE" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('devices', [])))")
+          
+          echo "📊 Active Nodes Found: $NODE_COUNT"
+          
+          if [ "$NODE_COUNT" -lt "$EXPECTED_NODES" ]; then
+            echo "⚠️ Warning: Expected $EXPECTED_NODES nodes but only found $NODE_COUNT."
+            # Uncomment the next line to FAIL the build if a node is missing
+            # exit 1 
+          else
+            echo "✅ Full Cluster is Healthy!"
+          fi
