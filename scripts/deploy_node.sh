@@ -39,6 +39,12 @@ sleep 2
 
 echo "🚀 Starting Exo..."
 
+# Build dashboard if missing
+if [ ! -d "dashboard/build" ]; then
+    echo "📦 Building Dashboard..."
+    cd dashboard && npm install && npm run build && cd ..
+fi
+
 # FIX: Use 'uv run' so it finds the binary inside the virtualenv
 nohup uv run exo > exo.log 2>&1 &
 
