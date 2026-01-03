@@ -1,0 +1,63 @@
+name: 🔍 Fetch Cluster Logs
+
+on:
+  workflow_dispatch: # Allows you to manually click "Run workflow"
+    inputs:
+      lines:
+        description: 'Number of log lines to fetch'
+        required: true
+        default: '200'
+      system_stats:
+        description: 'Fetch system stats (RAM/Disk/Thermals)?'
+        type: boolean
+        required: true
+        default: true
+
+jobs:
+  scrape-logs:
+    runs-on: [self-hosted, exo-deployer]
+    steps:
+      - name: 🕵️ Scrape All Nodes
+        run: |
+          # --- CONFIGURATION ---
+          NODES=("192.168.86.100" "192.168.86.101" "192.168.86.103")
+          SSH_USER="adam.durham"
+          LINES="${{ github.event.inputs.lines }}"
+          FETCH_SYS="${{ github.event.inputs.system_stats }}"
+          
+          for NODE in "${NODES[@]}"; do
+            echo "#######################################################"
+            echo "📡 LOGS FROM NODE: $NODE"
+            echo "#######################################################"
+            
+            ssh -o StrictHostKeyChecking=no "$SSH_USER@$NODE" "bash -s" <<EOF
+              echo "--- 🕒 TIMESTAMP: \$(date) ---"
+              echo ""
+              
+              if [ "$FETCH_SYS" == "true" ]; then
+                echo "--- 🖥️ SYSTEM VITAL SIGNS ---"
+                echo "Uptime: \$(uptime)"
+                echo "Memory Pressure:" 
+                memory_pressure || echo "  (Command not found)"
+                echo "Disk Space:"
+                df -h / | tail -n 1
+                echo "Top 5 CPU Processes:"
+                ps -Ao user,%cpu,comm | sort -k2 -r | head -n 6
+                echo ""
+              fi
+
+              echo "--- 📜 EXO APPLICATION LOG (Last $LINES lines) ---"
+              # Check both locations just in case
+              if [ -f ~/repos/exo/exo.log ]; then
+                 tail -n $LINES ~/repos/exo/exo.log
+              elif [ -f ~/exo/exo.log ]; then
+                 tail -n $LINES ~/exo/exo.log
+              else
+                 echo "❌ ERROR: exo.log not found in ~/repos/exo or ~/exo"
+              fi
+              echo ""
+              echo "--- END LOGS FOR $NODE ---"
+EOF
+            echo ""
+            echo ""
+          done
