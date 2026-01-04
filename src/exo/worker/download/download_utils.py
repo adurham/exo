@@ -25,6 +25,7 @@ from pydantic import (
 )
 
 from exo.shared.constants import EXO_MODELS_DIR
+from exo.shared.exceptions import ExoDownloadError
 from exo.shared.types.memory import Memory
 from exo.shared.types.worker.downloads import DownloadProgressData
 from exo.shared.types.worker.shards import ShardMetadata
@@ -193,7 +194,7 @@ async def fetch_file_list_with_retry(
             if attempt == n_attempts - 1:
                 raise e
             await asyncio.sleep(min(8, 0.1 * float(2.0 ** int(attempt))))
-    raise Exception(
+    raise ExoDownloadError(
         f"Failed to fetch file list for {repo_id=} {revision=} {path=} {recursive=}"
     )
 
@@ -223,7 +224,7 @@ async def _fetch_file_list(
                     files.extend(subfiles)
             return files
         else:
-            raise Exception(f"Failed to fetch file list: {response.status}")
+            raise ExoDownloadError(f"Failed to fetch file list: {response.status}")
 
 
 async def get_download_headers() -> dict[str, str]:
@@ -326,7 +327,7 @@ async def download_file_with_retry(
             )
             logger.error(traceback.format_exc())
             await asyncio.sleep(min(8, 0.1 * (2.0**attempt)))
-    raise Exception(
+    raise ExoDownloadError(
         f"Failed to download file {repo_id=} {revision=} {path=} {target_dir=}"
     )
 
@@ -380,7 +381,7 @@ async def _download_file(
             await aios.remove(partial_path)
         except Exception as e:
             logger.error(f"Error removing partial file {partial_path}: {e}")
-        raise Exception(
+        raise ExoDownloadError(
             f"Downloaded file {target_dir / path} has hash {final_hash} but remote hash is {remote_hash}"
         )
     await aios.rename(partial_path, target_dir / path)
