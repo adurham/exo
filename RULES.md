@@ -33,10 +33,12 @@ ALWAYS verify changes locally before committing:
 Deployment:
 
 NEVER deploy code manually (e.g., via `scp` or `rsync`).
-ALWAYS deploy via GitHub Actions:
-  1. Verify locally.
-  2. Commit and push changes.
-  3. Wait for the GitHub Action to complete deployment.
+ALWAYS
+- **Deployment & Verification**:
+    - **Mandatory Local Test**: Before pushing ANY code change (especially to runner/engine), you MUST run `uv run exo` locally to verify it starts without crashing.
+    - **Mandatory Cleanup**: Immediately after verification, you MUST kill the local process (`kill <pid>`) to prevent it from interfering with the cluster.
+    - **Deployment Script**: Always use `scripts/deploy_node.sh` which handles env vars and restarts correctly.
+    - **Logs**: check `exo.log` immediately after deployment.
 
 2. Cluster & Networking Topology
 
