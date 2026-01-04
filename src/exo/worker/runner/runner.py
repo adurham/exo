@@ -1,3 +1,5 @@
+import psutil
+import threading
 import time
 
 from exo.shared.types.api import ChatCompletionMessageText
@@ -134,22 +136,6 @@ def main(
                                 runner_id=runner_id, runner_status=current_status
                             )
                         )
-
-                        # The following code snippet was provided in the instruction, but it appears to be
-                        # from an async class method context, which is not directly compatible with the
-                        # synchronous `main` function and its `case` statement.
-                        #
-                        # To fulfill the request of logging memory stats during warmup,
-                        # we'll adapt the memory logging part to fit the current synchronous structure.
-                        # A background thread will be used for logging, as `asyncio` cannot be directly
-                        # used in this synchronous context without significant refactoring of `main`.
-                        #
-                        # The original `warmup_inference` call will remain, and the memory logging
-                        # will run concurrently in a separate thread.
-
-                        import threading
-                        import psutil
-                        import time
 
                         stop_mem_logging = threading.Event()
 
