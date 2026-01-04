@@ -25,7 +25,7 @@ jobs:
             ssh -o StrictHostKeyChecking=no "$SSH_USER@$NODE" 'bash -s' < scripts/deploy_node.sh
           done
 
-      # # --- NEW STEP 1: Verify UI is Up ---
+      # --- NEW STEP 1: Verify UI is Up ---
       # - name: 🏥 Health Check (Head Node UI)
       #   run: |
       #     HEAD_IP="192.168.86.100"
@@ -50,31 +50,31 @@ jobs:
       #     echo ""
       #     echo "✅ Head Node UI is Online!"
 
-      # # --- NEW STEP 2: Verify All Nodes Connected ---
+      # --- NEW STEP 2: Verify All Nodes Connected ---
       # - name: 🕵️ Verify Cluster Topology (Api Check)
-        run: |
-          HEAD_IP="192.168.86.100"
-          SSH_USER="adam.durham"
-          PORT="52415"
-          EXPECTED_NODES=3
+      #   run: |
+      #     HEAD_IP="192.168.86.100"
+      #     SSH_USER="adam.durham"
+      #     PORT="52415"
+      #     EXPECTED_NODES=3
           
-          echo "🔍 Querying API for connected devices..."
+      #     echo "🔍 Querying API for connected devices..."
           
-          # Fetch JSON via SSH
-          API_RESPONSE=$(ssh -o StrictHostKeyChecking=no "$SSH_USER@$HEAD_IP" "curl -s http://localhost:$PORT/state")
+      #     # Fetch JSON via SSH
+      #     API_RESPONSE=$(ssh -o StrictHostKeyChecking=no "$SSH_USER@$HEAD_IP" "curl -s http://localhost:$PORT/state")
           
-          # Debug: Print it so you can see what happened if it fails
-          echo "Raw API Response: $API_RESPONSE"
+      #     # Debug: Print it so you can see what happened if it fails
+      #     echo "Raw API Response: $API_RESPONSE"
           
-          # Parse the JSON to count the devices list
-          NODE_COUNT=$(echo "$API_RESPONSE" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('topology', {}).get('nodes', [])))")
+      #     # Parse the JSON to count the devices list
+      #     NODE_COUNT=$(echo "$API_RESPONSE" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('topology', {}).get('nodes', [])))")
           
-          echo "📊 Active Nodes Found: $NODE_COUNT"
+      #     echo "📊 Active Nodes Found: $NODE_COUNT"
           
-          if [ "$NODE_COUNT" -lt "$EXPECTED_NODES" ]; then
-            echo "⚠️ Warning: Expected $EXPECTED_NODES nodes but only found $NODE_COUNT."
-            # Uncomment the next line to FAIL the build if a node is missing
-            # exit 1 
-          else
-            echo "✅ Full Cluster is Healthy!"
-          fi
+      #     if [ "$NODE_COUNT" -lt "$EXPECTED_NODES" ]; then
+      #       echo "⚠️ Warning: Expected $EXPECTED_NODES nodes but only found $NODE_COUNT."
+      #       # Uncomment the next line to FAIL the build if a node is missing
+      #       # exit 1 
+      #     else
+      #       echo "✅ Full Cluster is Healthy!"
+      #     fi
