@@ -30,10 +30,10 @@ mod managed {
     use std::io;
     use std::time::Duration;
 
-    const MDNS_RECORD_TTL: Duration = Duration::from_secs(2_500);
-    const MDNS_QUERY_INTERVAL: Duration = Duration::from_secs(1_500);
-    const PING_TIMEOUT: Duration = Duration::from_millis(2_500);
-    const PING_INTERVAL: Duration = Duration::from_millis(2_500);
+    const MDNS_RECORD_TTL: Duration = Duration::from_secs(600); // 10 minutes
+    const MDNS_QUERY_INTERVAL: Duration = Duration::from_secs(30); // 30 seconds for faster discovery
+    const PING_TIMEOUT: Duration = Duration::from_secs(20); // 20s tolerance for slow peers/WiFi
+    const PING_INTERVAL: Duration = Duration::from_secs(10); // 10s heartbeat
 
     #[derive(NetworkBehaviour)]
     pub struct Behaviour {
