@@ -40,15 +40,23 @@ def get_memory_profile() -> MemoryPerformanceProfile:
     """Construct a MemoryPerformanceProfile using psutil"""
     override_memory_env = os.getenv("OVERRIDE_MEMORY_MB")
     wired_limit_pct_env = os.getenv("EXO_WIRED_LIMIT_PCT")
+    scheduler_limit_pct_env = os.getenv("EXO_SCHEDULER_CAPACITY_PCT")
     
     override_memory: int | None = None
     
     if override_memory_env:
         override_memory = Memory.from_mb(int(override_memory_env)).in_bytes
+    elif scheduler_limit_pct_env:
+        try:
+             # Use specific scheduler capacity if set
+             limit_pct = float(scheduler_limit_pct_env)
+             total_phys = psutil.virtual_memory().total
+             override_memory = int(total_phys * limit_pct)
+        except ValueError:
+             pass
     elif wired_limit_pct_env:
         try:
-             # If wired limit percentage is set, we pretend the node has less memory
-             # so the scheduler partitions accordingly.
+             # Fallback to wired limit if scheduler capacity not set
              limit_pct = float(wired_limit_pct_env)
              total_phys = psutil.virtual_memory().total
              override_memory = int(total_phys * limit_pct)
