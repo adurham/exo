@@ -145,6 +145,11 @@ class Worker:
             runner.shutdown()
 
     async def _event_applier(self):
+        # Initial catch-up
+        assert self._tg
+        self._tg.start_soon(
+            self._nack_request, self.state.last_event_applied_idx + 1
+        )
         with self.global_event_receiver as events:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
