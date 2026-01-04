@@ -174,6 +174,10 @@ class API:
         )
         self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(lambda: self._event_log)
+        self.app.get("/api/devices")(self.get_devices)
+
+    def get_devices(self):
+        return {"devices": list(self.state.topology.list_nodes())}
 
     async def place_instance(self, payload: PlaceInstanceParams):
         command = PlaceInstance(
