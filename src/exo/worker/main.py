@@ -95,40 +95,39 @@ class Worker:
 
         self.event_sender, self.event_receiver = channel[Event]()
 
+    async def _resource_monitor_callback(
+        self,
+        node_performance_profile: NodePerformanceProfile,
+    ) -> None:
+        await self.event_sender.send(
+            NodePerformanceMeasured(
+                node_id=self.node_id,
+                node_profile=node_performance_profile,
+                when=str(datetime.now(tz=timezone.utc)),
+            ),
+        )
+
+    async def _memory_monitor_callback(
+        self,
+        memory_profile: MemoryPerformanceProfile,
+    ) -> None:
+        await self.event_sender.send(
+            NodeMemoryMeasured(
+                node_id=self.node_id,
+                memory=memory_profile,
+                when=str(datetime.now(tz=timezone.utc)),
+            )
+        )
+
     async def run(self):
         logger.info("Starting Worker")
-
-        # TODO: CLEANUP HEADER
-        async def resource_monitor_callback(
-            node_performance_profile: NodePerformanceProfile,
-        ) -> None:
-            await self.event_sender.send(
-                NodePerformanceMeasured(
-                    node_id=self.node_id,
-                    node_profile=node_performance_profile,
-                    when=str(datetime.now(tz=timezone.utc)),
-                ),
-            )
-
-        async def memory_monitor_callback(
-            memory_profile: MemoryPerformanceProfile,
-        ) -> None:
-            await self.event_sender.send(
-                NodeMemoryMeasured(
-                    node_id=self.node_id,
-                    memory=memory_profile,
-                    when=str(datetime.now(tz=timezone.utc)),
-                )
-            )
-
-        # END CLEANUP
 
         async with create_task_group() as tg:
             self._tg = tg
             tg.start_soon(self.plan_step)
-            tg.start_soon(start_polling_node_metrics, resource_monitor_callback)
+            tg.start_soon(start_polling_node_metrics, self._resource_monitor_callback)
 
-            tg.start_soon(start_polling_memory_metrics, memory_monitor_callback)
+            tg.start_soon(start_polling_memory_metrics, self._memory_monitor_callback)
             tg.start_soon(self._emit_existing_download_progress)
             tg.start_soon(self._connection_message_event_writer)
             tg.start_soon(self._resend_out_for_delivery)
