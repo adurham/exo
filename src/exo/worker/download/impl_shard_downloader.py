@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 from typing import AsyncIterator, Callable
 
+from aiohttp import ClientError
+from exo.shared.exceptions import ExoDownloadError
 from exo.shared.models.model_cards import MODEL_CARDS
 from exo.shared.models.model_meta import get_model_meta
 from exo.shared.types.worker.shards import (
@@ -161,8 +163,13 @@ class ResumableShardDownloader(ShardDownloader):
         for task in asyncio.as_completed(tasks):
             try:
                 yield await task
-            # TODO: except Exception
-            except Exception as e:
+            except (
+                ExoDownloadError,
+                ClientError,
+                asyncio.TimeoutError,
+                OSError,
+                ValueError,
+            ) as e:
                 print("Error downloading shard:", e)
 
     async def get_shard_download_status_for_shard(
