@@ -29,6 +29,7 @@ pub fn create_swarm(keypair: identity::Keypair) -> alias::AnyResult<Swarm> {
 
     // Manually add Thunderbolt IPs to external addresses to force advertisement
     // This overcomes the issue where mDNS only broadcasts the default route (WiFi) IP.
+    /*
     if let Ok(ifaces) = if_addrs::get_if_addrs() {
         for iface in ifaces {
             let ip_str = iface.addr.ip().to_string();
@@ -42,6 +43,7 @@ pub fn create_swarm(keypair: identity::Keypair) -> alias::AnyResult<Swarm> {
             }
         }
     }
+    */
 
     Ok(swarm)
 }
