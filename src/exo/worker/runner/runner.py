@@ -154,19 +154,34 @@ def main(
                         stop_mem_logging = threading.Event()
 
                         def _log_memory_stats_thread():
+                            proc = psutil.Process()
                             while not stop_mem_logging.is_set():
                                 try:
+                                    # Memory
                                     vm = psutil.virtual_memory()
-                                    # Wired memory is specific to macOS/BSD, handled via getattr to be safe
                                     wired = getattr(vm, 'wired', 0) / (1024**3)
-                                    total = vm.total / (1024**3)
-                                    available = vm.available / (1024**3)
-                                    used = vm.used / (1024**3)
+                                    avail = vm.available / (1024**3)
                                     
-                                    logger.info(f"[MemStats] Total: {total:.1f}GB | Avail: {available:.1f}GB | Used: {used:.1f}GB | Wired: {wired:.1f}GB")
+                                    # Swap
+                                    swap = psutil.swap_memory()
+                                    swap_used = swap.used / (1024**3)
+                                    
+                                    # Process State
+                                    status = proc.status() # 'running', 'sleeping', 'disk-sleep'
+                                    cpu_pct = proc.cpu_percent(interval=None)
+                                    
+                                    # Network
+                                    # Count established TCP connections (approx peer count)
+                                    conns = len([c for c in proc.connections(kind='tcp') if c.status == 'ESTABLISHED'])
+
+                                    logger.info(
+                                        f"[DIAG] Status:{status} | CPU:{cpu_pct:.1f}% | "
+                                        f"MemAvail:{avail:.1f}G | Wired:{wired:.1f}G | Swap:{swap_used:.1f}G | "
+                                        f"NetConns:{conns}"
+                                    )
                                     time.sleep(2)
                                 except Exception as e:
-                                    logger.error(f"Error in memory logging thread: {e}")
+                                    logger.error(f"Error in diagnostics thread: {e}")
                                     break
 
                         mem_logger_thread = threading.Thread(target=_log_memory_stats_thread)
