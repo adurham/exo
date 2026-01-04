@@ -398,6 +398,25 @@ class Worker:
         assert self._tg
         self._tg.start_soon(self.shard_downloader.ensure_shard, task.shard_metadata)
 
+    async def _handle_global_event(self, event: ForwarderEvent):
+        if isinstance(event.event, IndexedEvent):
+            logger.debug(f"Received indexed event: {event.event.idx} (expecting {self.last_event_idx + 1})")
+            if event.event.idx == self.last_event_idx + 1:
+                self.last_event_idx += 1
+                if self.last_event_idx % 100 == 0:
+                    logger.info(f"Processed event {self.last_event_idx}")
+                await self._handle_event(event.event.event)
+            elif event.event.idx > self.last_event_idx + 1:
+                logger.warning(
+                    f"Event gap detected: received {event.event.idx}, expected {self.last_event_idx + 1}"
+                )
+                self._nack_attempts += 1
+                await self._trigger_nack(self.last_event_idx + 1)
+            else:
+                pass
+                # logger.debug(
+                #     f"Duplicate event received: {event.event.idx} (processed up to {self.last_event_idx})"
+                # )
     async def _forward_events(self) -> None:
         with self.event_receiver as events:
             async for event in events:
