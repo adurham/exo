@@ -83,6 +83,8 @@ def warmup_inference(
     ):
         logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
+        # Force distributed synchronization to prevent command queue overflow/desync
+        mx_barrier()
 
     logger.info("Generated ALL warmup tokens")
     mx_barrier()
