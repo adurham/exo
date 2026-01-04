@@ -55,8 +55,8 @@ if [[ "$HOSTNAME" == *"Studio"* ]]; then
     echo "🧠 Configured Wired Memory Limit: 85% (Studio Profile)"
 else
     export EXO_WIRED_LIMIT_PCT=0.80
-    export EXO_SCHEDULER_CAPACITY_PCT=0.60
-    echo "🧠 Configured Wired Memory Limit: 80% (Runtime), 60% (Scheduler) for Headroom"
+    export EXO_SCHEDULER_CAPACITY_PCT=0.50
+    echo "🧠 Configured Wired Memory Limit: 80% (Runtime), 50% (Scheduler) for Headroom"
 fi
 
 # FIX: Use 'uv run' so it finds the binary inside the virtualenv
