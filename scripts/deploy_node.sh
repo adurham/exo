@@ -53,8 +53,8 @@ if [[ "$HOSTNAME" == *"Studio"* ]]; then
     export EXO_WIRED_LIMIT_PCT=0.75
     echo "🧠 Configured Wired Memory Limit: 75% (Studio Profile)"
 else
-    export EXO_WIRED_LIMIT_PCT=0.60
-    echo "🧠 Configured Wired Memory Limit: 60% (Laptop Profile)"
+    export EXO_WIRED_LIMIT_PCT=0.70
+    echo "🧠 Configured Wired Memory Limit: 70% (Laptop Profile)"
 fi
 
 # FIX: Use 'uv run' so it finds the binary inside the virtualenv
