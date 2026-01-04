@@ -34,14 +34,26 @@ async def get_metrics_async() -> Metrics | None:
         return await macmon_get_metrics_async()
 
 
+import psutil
+
 def get_memory_profile() -> MemoryPerformanceProfile:
     """Construct a MemoryPerformanceProfile using psutil"""
     override_memory_env = os.getenv("OVERRIDE_MEMORY_MB")
-    override_memory: int | None = (
-        Memory.from_mb(int(override_memory_env)).in_bytes
-        if override_memory_env
-        else None
-    )
+    wired_limit_pct_env = os.getenv("EXO_WIRED_LIMIT_PCT")
+    
+    override_memory: int | None = None
+    
+    if override_memory_env:
+        override_memory = Memory.from_mb(int(override_memory_env)).in_bytes
+    elif wired_limit_pct_env:
+        try:
+             # If wired limit percentage is set, we pretend the node has less memory
+             # so the scheduler partitions accordingly.
+             limit_pct = float(wired_limit_pct_env)
+             total_phys = psutil.virtual_memory().total
+             override_memory = int(total_phys * limit_pct)
+        except ValueError:
+             pass
 
     profile = MemoryPerformanceProfile.from_psutil(override_memory=override_memory)
 
