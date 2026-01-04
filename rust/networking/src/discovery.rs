@@ -382,6 +382,9 @@ impl NetworkBehaviour for Behaviour {
             // STATIC THUNDERBOLT DISCOVERY (Blind Dial) - SUBNET AWARE
             // We only dial neighbors that share a subnet with our local interfaces.
             // This implicitly handles the ring topology without requiring OS-level static routing.
+            /* 
+            // DISABLE BLIND DIAL ON THUNDERBOLT TO SEPARATE CONTROL/DATA PLANES
+            // Control plane should use mDNS/Tailscale. Data plane (MLX) uses TB via placement_utils.py.
             let static_tb_ips = vec![
                 "192.168.201.1", "192.168.201.2",
                 "192.168.202.1", "192.168.202.2",
@@ -414,6 +417,7 @@ impl NetworkBehaviour for Behaviour {
                     }
                 }
             }
+            */
 
             self.retry_delay.reset(RETRY_CONNECT_INTERVAL) // reset timeout
         }
