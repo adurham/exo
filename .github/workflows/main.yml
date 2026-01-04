@@ -35,8 +35,8 @@ jobs:
           echo "⏳ Waiting for Exo UI to respond at http://$HEAD_IP:$PORT..."
           
           count=0
-          # Loop until '200 OK' is found
-          until curl -s --head --request GET "http://$HEAD_IP:$PORT" | grep "200 OK" > /dev/null; do
+          # Loop until '200' is found (Hypercorn doesn't send reason phrase)
+          until curl -s --head --request GET "http://$HEAD_IP:$PORT" | grep "200" > /dev/null; do
             if [ $count -eq $MAX_RETRIES ]; then
               echo "❌ Timeout: Web UI never came online."
               exit 1
