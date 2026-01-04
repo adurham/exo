@@ -45,6 +45,18 @@ if [ ! -d "dashboard/build" ]; then
     cd dashboard && npm install && npm run build && cd ..
 fi
 
+# --- 5. CONFIGURE MEMORY LIMITS ---
+# Detect host type and set wired memory limit to prevent freezing
+# Studio: 75% | MacBook: 60%
+HOSTNAME=$(hostname)
+if [[ "$HOSTNAME" == *"Studio"* ]]; then
+    export EXO_WIRED_LIMIT_PCT=0.75
+    echo "🧠 Configured Wired Memory Limit: 75% (Studio Profile)"
+else
+    export EXO_WIRED_LIMIT_PCT=0.60
+    echo "🧠 Configured Wired Memory Limit: 60% (Laptop Profile)"
+fi
+
 # FIX: Use 'uv run' so it finds the binary inside the virtualenv
 nohup uv run exo > exo.log 2>&1 &
 
