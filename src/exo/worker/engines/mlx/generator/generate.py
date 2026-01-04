@@ -47,7 +47,6 @@ def warmup_inference(
     model: Model,
     tokenizer: TokenizerWrapper,
     sampler: Callable[[mx.array], mx.array],
-    max_tokens: int = 4,
 ) -> int:
     content = "Prompt to warm up the inference engine. Repeat this."
 
@@ -70,12 +69,12 @@ def warmup_inference(
         model=model,
     )
 
-    logger.info(f"Generating warmup tokens (max={max_tokens})")
+    logger.info("Generating warmup tokens")
     for _r in stream_generate(
         model=model,
         tokenizer=tokenizer,
         prompt=warmup_prompt,
-        max_tokens=max_tokens,
+        max_tokens=20,
         sampler=sampler,
         prompt_cache=cache,
         prefill_step_size=PREFILL_STEP_SIZE,
@@ -84,8 +83,6 @@ def warmup_inference(
     ):
         logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
-        if tokens_generated >= max_tokens:
-            break
 
     logger.info("Generated ALL warmup tokens")
     mx_barrier()
