@@ -141,11 +141,9 @@ impl Behaviour {
             let addr_str = ma.to_string();
             log::info!("RUST: Discovered peer {} at {}", p, addr_str);
             
-            // Filter out WiFi subnet to force Thunderbolt
-            if addr_str.contains("/192.168.86.") {
-                log::info!("RUST: Ignoring WiFi address {} for peer {}", addr_str, p);
-                continue;
-            }
+            // Previously filtered out WiFi to force Thunderbolt. 
+            // Now we WANT WiFi for Control Plane (Split Architecture).
+            // if addr_str.contains("/192.168.86.") { ... } removed.
 
             self.dial(p, ma.clone()); // always connect
 

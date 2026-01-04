@@ -25,25 +25,40 @@ pub fn create_swarm(keypair: identity::Keypair) -> alias::AnyResult<Swarm> {
 
     // Listen on all interfaces on a FIXED port to allow static peering/blind dialing
     // Port 56789 is chosen as the standard Exo P2P port.
-    swarm.listen_on("/ip4/0.0.0.0/tcp/56789".parse()?)?;
-
-    // Manually add Thunderbolt IPs to external addresses to force advertisement
-    // This overcomes the issue where mDNS only broadcasts the default route (WiFi) IP.
-    /*
+    // Listen on explicit interfaces to exclude Thunderbolt (Data Plane)
+    // We bind to 0.0.0.0 only as a fallback if interface discovery fails, 
+    // but prefer binding key interfaces directly to avoid TB usage.
+    let mut bound_any = false;
     if let Ok(ifaces) = if_addrs::get_if_addrs() {
         for iface in ifaces {
             let ip_str = iface.addr.ip().to_string();
-            if ip_str.starts_with("192.168.2") { // Match 201, 202, 205, etc.
-                log::info!("RUST: Explicitly announcing Thunderbolt IP: {}", ip_str);
-                // Advertise the FIXED port
-                let addr_str = format!("/ip4/{}/tcp/56789", ip_str);
-                if let Ok(addr) = addr_str.parse() {
-                    swarm.add_external_address(addr);
-                }
+            
+            // Skip Thunderbolt Subnets (192.168.2xx)
+            if ip_str.starts_with("192.168.2") { 
+                log::info!("RUST: Skipping listener on Thunderbolt IP (Data Plane): {}", ip_str);
+                continue; 
+            }
+
+            // Bind to loopback, standard LAN, and Tailscale
+            // IPv4 only for now to match previous "/ip4/" logic, though libp2p supports v6
+            if iface.addr.ip().is_ipv4() {
+                 let addr_str = format!("/ip4/{}/tcp/56789", ip_str);
+                 if let Ok(addr) = addr_str.parse() {
+                     log::info!("RUST: Control Plane Listening on: {}", addr);
+                     if swarm.listen_on(addr).is_ok() {
+                         bound_any = true;
+                     }
+                 }
             }
         }
     }
-    */
+
+    // Fallback: If we couldn't bind to any specific interface, bind to 0.0.0.0
+    // This ensures we never fail to start, but might accidentally use TB if discovery failed.
+    if !bound_any {
+        log::warn!("RUST: Failed to find specific interfaces, falling back to 0.0.0.0");
+        swarm.listen_on("/ip4/0.0.0.0/tcp/56789".parse()?)?;
+    }
 
     Ok(swarm)
 }
