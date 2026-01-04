@@ -154,7 +154,7 @@ class Worker:
             async for f_event in events:
                 if f_event.origin != self.session_id.master_node_id:
                     continue
-                logger.debug(f"Received forwarder event from {f_event.origin} idx={f_event.origin_idx} type={type(f_event.event)}")
+                logger.info(f"Received forwarder event from {f_event.origin} idx={f_event.origin_idx} type={type(f_event.event)}")
                 self.event_buffer.ingest(f_event.origin_idx, f_event.event)
                 event_id = f_event.event.event_id
                 if event_id in self.out_for_delivery:

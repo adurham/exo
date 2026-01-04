@@ -260,6 +260,8 @@ class Master:
     # This function is re-entrant, take care!
     async def _send_event(self, event: IndexedEvent):
         # Convenience method since this line is ugly
+        if event.idx % 100 == 0:
+            logger.info(f"Sending event {event.idx}")
         await self.global_event_sender.send(
             ForwarderEvent(
                 origin=self.node_id,
