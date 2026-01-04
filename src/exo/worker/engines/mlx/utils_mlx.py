@@ -175,11 +175,11 @@ def initialize_mlx(
 
 
 def load_mlx_items(
-    bound_instance: BoundInstance, group: Group | None
+    bound_instance: BoundInstance, group: Group | None, temperature: float = 0.7
 ) -> tuple[Model, TokenizerWrapper, Callable[[mx.array], mx.array]]:
     # TODO: pass temperature
-    sampler: Callable[[mx.array], mx.array] = make_sampler(temp=0.7)
-    logger.info("Created a sampler")
+    sampler: Callable[[mx.array], mx.array] = make_sampler(temp=temperature)
+    logger.info(f"Created a sampler with temp={temperature}")
 
     if group is None:
         logger.info(f"Single device used for {bound_instance.instance}")

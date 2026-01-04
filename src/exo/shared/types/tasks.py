@@ -37,7 +37,7 @@ class DownloadModel(BaseTask):  # emitted by Worker
 
 
 class LoadModel(BaseTask):  # emitted by Worker
-    pass
+    temperature: float | None = None
 
 
 class ConnectToGroup(BaseTask):  # emitted by Worker
