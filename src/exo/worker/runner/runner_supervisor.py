@@ -14,8 +14,8 @@ from anyio import (
 from anyio.abc import TaskGroup
 from loguru import logger
 
-from exo.shared.types.events import Event, RunnerStatusUpdated, TaskAcknowledged
-from exo.shared.types.tasks import Task, TaskId
+from exo.shared.types.events import Event, RunnerStatusUpdated, TaskAcknowledged, TaskStatusUpdated
+from exo.shared.types.tasks import Task, TaskId, TaskStatus
 from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runners import (
     RunnerFailed,
