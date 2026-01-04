@@ -53,10 +53,14 @@ if [[ "$HOSTNAME" == *"Studio"* ]]; then
     export EXO_WIRED_LIMIT_PCT=0.85
     export EXO_SCHEDULER_CAPACITY_PCT=0.85
     echo "🧠 Configured Wired Memory Limit: 85% (Studio Profile)"
+elif [[ "$HOSTNAME" == "MLHVYY0PWXMN" ]]; then
+    export EXO_WIRED_LIMIT_PCT=0.80
+    export EXO_SCHEDULER_CAPACITY_PCT=0.40
+    echo "🧠 Configured Wired Memory Limit: 80% (Runtime), 40% (Scheduler) for 48GB Node Stability"
 else
     export EXO_WIRED_LIMIT_PCT=0.80
     export EXO_SCHEDULER_CAPACITY_PCT=0.50
-    echo "🧠 Configured Wired Memory Limit: 80% (Runtime), 50% (Scheduler) for Headroom"
+    echo "🧠 Configured Wired Memory Limit: 80% (Runtime), 50% (Scheduler) for 36GB Node"
 fi
 
 # FIX: Use 'uv run' so it finds the binary inside the virtualenv
