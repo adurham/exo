@@ -68,9 +68,11 @@ class Worker:
         # This is for requesting updates. It doesn't need to be a general command sender right now,
         # but I think it's the correct way to be thinking about commands
         command_sender: Sender[ForwarderCommand],
+        default_temperature: float = 0.7,
     ):
         self.node_id: NodeId = node_id
         self.session_id: SessionId = session_id
+        self.default_temperature = default_temperature
 
         self.shard_downloader: ShardDownloader = shard_downloader
         self._pending_downloads: dict[RunnerId, ShardMetadata] = {}
@@ -185,6 +187,7 @@ class Worker:
                 self.state.instances,
                 self.state.runners,
                 self.state.tasks,
+                default_temperature=self.default_temperature,
             )
             if task is None:
                 continue

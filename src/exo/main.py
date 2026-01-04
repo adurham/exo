@@ -70,6 +70,7 @@ class Node:
             global_event_receiver=router.receiver(topics.GLOBAL_EVENTS),
             local_event_sender=router.sender(topics.LOCAL_EVENTS),
             command_sender=router.sender(topics.COMMANDS),
+            default_temperature=args.temperature,
         )
         # We start every node with a master
         master = Master(
@@ -179,6 +180,7 @@ class Node:
                             ),
                             local_event_sender=self.router.sender(topics.LOCAL_EVENTS),
                             command_sender=self.router.sender(topics.COMMANDS),
+                            default_temperature=self.worker.default_temperature,
                         )
                         self._tg.start_soon(self.worker.run)
                     if self.api:
@@ -209,6 +211,7 @@ class Args(CamelCaseModel):
     spawn_api: bool = False
     api_port: PositiveInt = 52415
     tb_only: bool = False
+    temperature: float = 0.7
 
     @classmethod
     def parse(cls) -> Self:
@@ -245,6 +248,13 @@ class Args(CamelCaseModel):
             type=int,
             dest="api_port",
             default=52415,
+        )
+        parser.add_argument(
+            "--temperature",
+            type=float,
+            dest="temperature",
+            default=0.7,
+            help="Default temperature for sampling",
         )
 
         args = parser.parse_args()

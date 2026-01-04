@@ -111,8 +111,11 @@ def main(
                             )
                         )
 
+                        temperature = (
+                            task.temperature if task.temperature is not None else 0.7
+                        )
                         model, tokenizer, sampler = load_mlx_items(
-                            bound_instance, group
+                            bound_instance, group, temperature=temperature
                         )
 
                         current_status = RunnerLoaded()

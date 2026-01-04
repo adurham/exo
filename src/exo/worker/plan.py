@@ -49,6 +49,7 @@ def plan(
     instances: Mapping[InstanceId, Instance],
     all_runners: Mapping[RunnerId, RunnerStatus],  # all global
     tasks: Mapping[TaskId, Task],
+    default_temperature: float = 0.7,
 ) -> Task | None:
     # Python short circuiting OR logic should evaluate these sequentially.
     return (
@@ -56,7 +57,9 @@ def plan(
         or _create_runner(node_id, runners, instances)
         or _model_needs_download(runners, download_status)
         or _init_distributed_backend(runners, all_runners)
-        or _load_model(runners, all_runners, global_download_status)
+        or _load_model(
+            runners, all_runners, global_download_status, default_temperature
+        )
         or _ready_to_warmup(runners, all_runners)
         or _pending_tasks(runners, tasks, all_runners)
     )
@@ -182,6 +185,7 @@ def _load_model(
     runners: Mapping[RunnerId, RunnerSupervisor],
     all_runners: Mapping[RunnerId, RunnerStatus],
     global_download_status: Mapping[NodeId, Sequence[DownloadProgress]],
+    default_temperature: float,
 ) -> LoadModel | None:
     for runner in runners.values():
         instance = runner.bound_instance.instance
@@ -201,7 +205,9 @@ def _load_model(
 
         is_single_node_instance = len(instance.shard_assignments.runner_to_shard) == 1
         if is_single_node_instance and isinstance(runner.status, RunnerIdle):
-            return LoadModel(instance_id=instance.instance_id)
+            return LoadModel(
+                instance_id=instance.instance_id, temperature=default_temperature
+            )
 
         is_runner_waiting = isinstance(runner.status, RunnerConnected)
 
@@ -214,7 +220,9 @@ def _load_model(
         )
 
         if is_runner_waiting and all_ready_for_model:
-            return LoadModel(instance_id=instance.instance_id)
+            return LoadModel(
+                instance_id=instance.instance_id, temperature=default_temperature
+            )
 
     return None
 

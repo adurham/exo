@@ -3,6 +3,7 @@ from typing import Any, Callable, Generator, cast, get_args
 import mlx.core as mx
 from mlx_lm import stream_generate
 from mlx_lm.models.cache import KVCache
+from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 # from exo.engines.mlx.cache import KVPrefixCache
@@ -100,6 +101,9 @@ def mlx_generate(
     )
 
     caches = make_kv_cache(model=model)
+
+    if task.temperature is not None:
+        sampler = make_sampler(temp=task.temperature)
 
     max_tokens = task.max_tokens or MAX_TOKENS
     for out in stream_generate(
