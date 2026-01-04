@@ -12,7 +12,6 @@ from exo.master.placement_utils import (
     get_mlx_ring_hosts_by_node,
     get_shard_assignments,
     get_smallest_cycles,
-    get_smallest_cycles,
     sort_cycle_by_speed_and_capacity,
 )
 from exo.shared.topology import Topology
@@ -56,8 +55,8 @@ def place_instance(
     current_instances: Mapping[InstanceId, Instance],
 ) -> dict[InstanceId, Instance]:
     all_nodes = list(topology.list_nodes())
-
-    logger.info("finding cycles:")
+    
+    logger.debug("finding cycles:")
     cycles = topology.get_cycles()
     singleton_cycles = [[node] for node in all_nodes]
     candidate_cycles = list(
