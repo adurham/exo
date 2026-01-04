@@ -286,41 +286,60 @@ def _find_interface_name_for_ip(
     return None
 
 
+def _find_interface_type_for_ip(
+    ip_address: str,
+    node_info: NodeInfo,
+) -> str | None:
+    """Find the interface type for an IP address on a node."""
+    if node_info.node_profile is None:
+        return None
+
+    for interface in node_info.node_profile.network_interfaces:
+        if interface.ip_address == ip_address:
+            return interface.interface_type
+
+    return None
+
+
 def _find_ip_prioritised(
     node: NodeInfo, other_node: NodeInfo, cycle_digraph: Topology
 ) -> str | None:
-    # TODO: Actually prioritize in the correct Ethernet > Wifi > Non-TB > TB order.
     """Find an IP address between nodes with prioritization.
 
     Priority order:
-    1. en0 (Ethernet on Mac Studio, WiFi on MacBook)
-    2. en1 (WiFi on Mac Studio, Ethernet on MacBook)
-    3. Non-Thunderbolt connections
-    4. Any other IP address
+    1. Thunderbolt
+    2. Ethernet
+    3. WiFi
+    4. Other
     """
     ips = list(_find_connection_ip(node, other_node, cycle_digraph))
-    # We expect a unique iface -> ip mapping
-    iface_map = {_find_interface_name_for_ip(ip, other_node): ip for ip, _ in ips}
 
-    en0_ip = iface_map.get("en0")
-    if en0_ip:
-        return en0_ip
+    # Helper to get priority score (lower is better)
+    def get_priority(ip: str, is_tb_flag: bool) -> int:
+        if is_tb_flag:
+            return 0  # Highest priority: Thunderbolt
 
-    en1_ip = iface_map.get("en1")
-    if en1_ip:
-        return en1_ip
+        interface_type = _find_interface_type_for_ip(ip, other_node)
+        if interface_type == "Thunderbolt":
+            return 0
+        if interface_type == "Ethernet":
+            return 1
+        if interface_type == "WiFi":
+            return 2
 
-    non_thunderbolt_ip = next(
-        (ip for (ip, is_thunderbolt) in ips if not is_thunderbolt), None
-    )
+        # Fallback for old workers or unknown types
+        # Check interface name as fallback
 
-    if non_thunderbolt_ip:
-        return non_thunderbolt_ip
+        return 3
 
-    if ips:
-        return ips[0][0]
+    if not ips:
+        return None
 
-    return None
+    # Sort IPs by priority
+    # ips is list of (ip, is_thunderbolt)
+    ips.sort(key=lambda x: get_priority(x[0], x[1]))
+
+    return ips[0][0]
 
 
 def get_mlx_ring_hosts_by_node(
