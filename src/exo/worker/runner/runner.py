@@ -135,14 +135,57 @@ def main(
                             )
                         )
 
-                        logger.info(f"warming up inference for instance: {instance}")
-                        toks = warmup_inference(
-                            model=model,
-                            tokenizer=tokenizer,
-                            sampler=sampler,
-                            # kv_prefix_cache=kv_prefix_cache,  # supply for warmup-time prefix caching
-                        )
-                        logger.info(f"warmed up by generating {toks} tokens")
+                        # The following code snippet was provided in the instruction, but it appears to be
+                        # from an async class method context, which is not directly compatible with the
+                        # synchronous `main` function and its `case` statement.
+                        #
+                        # To fulfill the request of logging memory stats during warmup,
+                        # we'll adapt the memory logging part to fit the current synchronous structure.
+                        # A background thread will be used for logging, as `asyncio` cannot be directly
+                        # used in this synchronous context without significant refactoring of `main`.
+                        #
+                        # The original `warmup_inference` call will remain, and the memory logging
+                        # will run concurrently in a separate thread.
+
+                        import threading
+                        import psutil
+                        import time
+
+                        stop_mem_logging = threading.Event()
+
+                        def _log_memory_stats_thread():
+                            while not stop_mem_logging.is_set():
+                                try:
+                                    vm = psutil.virtual_memory()
+                                    # Wired memory is specific to macOS/BSD, handled via getattr to be safe
+                                    wired = getattr(vm, 'wired', 0) / (1024**3)
+                                    total = vm.total / (1024**3)
+                                    available = vm.available / (1024**3)
+                                    used = vm.used / (1024**3)
+                                    
+                                    logger.info(f"[MemStats] Total: {total:.1f}GB | Avail: {available:.1f}GB | Used: {used:.1f}GB | Wired: {wired:.1f}GB")
+                                    time.sleep(2)
+                                except Exception as e:
+                                    logger.error(f"Error in memory logging thread: {e}")
+                                    break
+
+                        mem_logger_thread = threading.Thread(target=_log_memory_stats_thread)
+                        mem_logger_thread.daemon = True # Allow main program to exit even if thread is running
+                        mem_logger_thread.start()
+
+                        try:
+                            logger.info(f"warming up inference for instance: {instance}")
+                            toks = warmup_inference(
+                                model=model,
+                                tokenizer=tokenizer,
+                                sampler=sampler,
+                                # kv_prefix_cache=kv_prefix_cache,  # supply for warmup-time prefix caching
+                            )
+                            logger.info(f"warmed up by generating {toks} tokens")
+                        finally:
+                            stop_mem_logging.set()
+                            mem_logger_thread.join(timeout=5) # Wait for thread to finish, with a timeout
+
                         logger.info(
                             f"runner initialized in {time.time() - setup_start_time} seconds"
                         )
