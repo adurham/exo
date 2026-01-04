@@ -1,6 +1,6 @@
 import socket
-import sys
 import subprocess
+import sys
 from functools import lru_cache
 from subprocess import CalledProcessError
 
@@ -36,7 +36,7 @@ def get_macos_interface_map() -> dict[str, str]:
     Parses 'networksetup -listallhardwareports' to map device names (en0) to types (Ethernet).
     Cached to avoid repeated subprocess calls.
     """
-    interface_map = {}
+    interface_map: dict[str, str] = {}
     try:
         # networksetup is available on macOS
         output = subprocess.check_output(

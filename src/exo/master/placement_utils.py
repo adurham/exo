@@ -271,19 +271,6 @@ def _find_rdma_interface_name_for_ip(
     return None
 
 
-def _find_interface_name_for_ip(
-    ip_address: str,
-    node_info: NodeInfo,
-) -> str | None:
-    """Find the interface name for an IP address on a node (any interface)."""
-    if node_info.node_profile is None:
-        return None
-
-    for interface in node_info.node_profile.network_interfaces:
-        if interface.ip_address == ip_address:
-            return interface.name
-
-    return None
 
 
 def _find_interface_type_for_ip(
