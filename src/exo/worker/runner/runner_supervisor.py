@@ -135,8 +135,13 @@ class RunnerSupervisor:
                 async for event in events:
                     if isinstance(event, RunnerStatusUpdated):
                         self.status = event.runner_status
+                    if isinstance(event, TaskStatusUpdated):
+                        if event.task_status == TaskStatus.Complete and event.task_id in self.pending:
+                            self.pending.pop(event.task_id).set()
                     if isinstance(event, TaskAcknowledged):
-                        self.pending.pop(event.task_id).set()
+                        # We don't consider the task finished just because it was acknowledged.
+                        # We wait for TaskStatus.Complete.
+                        pass # self.pending.pop(event.task_id).set()
                         continue
                     await self._event_sender.send(event)
             except (ClosedResourceError, BrokenResourceError) as e:
