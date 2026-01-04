@@ -226,8 +226,6 @@ def load_mlx_items(
             f"Time taken to shard and load model: {(end_time - start_time):.2f}s"
         )
 
-    set_wired_limit_for_model(get_weights_size(bound_instance.bound_shard))
-
     return cast(Model, model), tokenizer, sampler
 
 
@@ -413,6 +411,17 @@ def set_wired_limit_for_model(model_size: Memory):
 
     model_bytes = model_size.in_bytes
     max_rec_size = int(mx.metal.device_info()["max_recommended_working_set_size"])
+    
+    wired_limit_pct = os.getenv("EXO_WIRED_LIMIT_PCT")
+    if wired_limit_pct:
+        try:
+            pct = float(wired_limit_pct)
+            new_limit = int(max_rec_size * pct)
+            logger.info(f"EXO_WIRED_LIMIT_PCT set to {pct}, adjusting wired limit from {max_rec_size} to {new_limit}")
+            max_rec_size = new_limit
+        except ValueError:
+            logger.warning(f"Invalid EXO_WIRED_LIMIT_PCT value: {wired_limit_pct}, ignoring.")
+
     if model_bytes > 0.9 * max_rec_size:
         model_mb = model_bytes // 2**20
         max_rec_mb = max_rec_size // 2**20

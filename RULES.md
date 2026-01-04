@@ -24,6 +24,20 @@ Introduce new dependencies only after explicit approval.
 
 Restrict requests to libraries that are ubiquitous in production environments.
 
+Verification:
+
+ALWAYS verify changes locally before committing:
+  1. Ensure `uv run exo` starts successfully.
+  2. Verify the Web API is responding (health check or dashboard load).
+
+Deployment:
+
+NEVER deploy code manually (e.g., via `scp` or `rsync`).
+ALWAYS deploy via GitHub Actions:
+  1. Verify locally.
+  2. Commit and push changes.
+  3. Wait for the GitHub Action to complete deployment.
+
 2. Cluster & Networking Topology
 
 Architecture: 3-node cluster.

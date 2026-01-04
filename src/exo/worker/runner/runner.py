@@ -38,9 +38,11 @@ from exo.shared.types.worker.runners import (
 from exo.utils.channels import ClosedResourceError, MpReceiver, MpSender
 from exo.worker.engines.mlx.generator.generate import mlx_generate, warmup_inference
 from exo.worker.engines.mlx.utils_mlx import (
+    get_weights_size,
     initialize_mlx,
     load_mlx_items,
     mlx_force_oom,
+    set_wired_limit_for_model,
 )
 from exo.worker.runner.bootstrap import logger
 
@@ -59,6 +61,9 @@ def main(
         logger.info("hello from the runner")
         if getattr(shard_metadata, "immediate_exception", False):
              raise RuntimeError("Immediate exception requested by shard metadata")
+
+        # Set wired limit early to avoid protection domain allocation failures during init
+        set_wired_limit_for_model(get_weights_size(shard_metadata))
 
         if timeout := getattr(shard_metadata, "should_timeout", 0):
             time.sleep(timeout)
