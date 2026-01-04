@@ -2904,6 +2904,7 @@ dependencies = [
  "extend",
  "futures",
  "futures-timer",
+ "if-addrs",
  "impl-trait-for-tuples",
  "keccak-const",
  "libp2p",

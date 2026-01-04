@@ -59,13 +59,13 @@ jobs:
           echo "🔍 Querying API for connected devices..."
           
           # Fetch the raw JSON from the API
-          API_RESPONSE=$(curl -s "http://$HEAD_IP:$PORT/api/devices")
+          API_RESPONSE=$(curl -s "http://$HEAD_IP:$PORT/state")
           
           # Debug: Print it so you can see what happened if it fails
           echo "Raw API Response: $API_RESPONSE"
           
           # Parse the JSON to count the devices list
-          NODE_COUNT=$(echo "$API_RESPONSE" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('devices', [])))")
+          NODE_COUNT=$(echo "$API_RESPONSE" | python3 -c "import sys, json; print(len(json.load(sys.stdin).get('topology', {}).get('nodes', [])))")
           
           echo "📊 Active Nodes Found: $NODE_COUNT"
           

@@ -70,7 +70,6 @@ members = [
 [tool.uv.sources]
 exo_pyo3_bindings = { workspace = true }
 # Using pre-built MLX wheel for jaccl debugging (built locally with Metal Toolchain):
-mlx = { path = "extern/mlx", editable = true }
 # mlx-lm = { path = "/Users/Shared/mlx-lm", editable=true }
 
 [build-system]
