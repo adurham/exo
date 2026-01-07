@@ -102,6 +102,7 @@ class Worker:
 
         self.event_sender, self.event_receiver = channel[Event]()
 
+        self.file_server = FileServer()
         self.peer_locations: dict[ModelId, str] = {}
         self.discovery_start_times: dict[ModelId, float] = {}
         self.runner_failure_history: dict[RunnerId, tuple[float, int]] = {}
