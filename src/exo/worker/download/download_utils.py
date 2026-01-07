@@ -438,6 +438,9 @@ async def _download_file(
                 token = await get_hf_token()
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
+            
+            # Prevent aiohttp/HF from handling compression transparently, which breaks hash check
+            headers["Accept-Encoding"] = "identity"
 
             async with session.get(url, headers=headers) as response:
                 if response.status not in (200, 206):
