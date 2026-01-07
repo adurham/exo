@@ -481,7 +481,7 @@ async def _download_file(
             )
         
         await aios.rename(temp_file_path, target_path)
-        on_progress(0, length, True)
+        on_progress(length, length, True)
     
     if session:
         await _download_impl(session)
