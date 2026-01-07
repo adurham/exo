@@ -136,7 +136,8 @@ def main(
                             model=model,
                             tokenizer=tokenizer,
                             sampler=sampler,
-                            # kv_prefix_cache=kv_prefix_cache,  # supply for warmup-time prefix caching
+                            max_kv_size=instance.config.max_input_tokens,
+                            kv_bits=instance.config.kv_cache_bits,
                         )
                         logger.info(f"warmed up by generating {toks} tokens")
                         logger.info(
@@ -167,6 +168,9 @@ def main(
                             tokenizer=tokenizer,
                             sampler=sampler,
                             task=task_params,
+                            max_kv_size=instance.config.max_input_tokens,
+                            kv_bits=instance.config.kv_cache_bits,
+                            default_max_tokens=instance.config.max_output_tokens,
                         ):
                             match response:
                                 case GenerationResponse():

@@ -33,6 +33,7 @@ from exo.worker.download.huggingface_utils import (
     get_allow_patterns,
     get_auth_headers,
     get_hf_endpoint,
+    get_hf_token,
 )
 
 

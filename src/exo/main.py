@@ -261,3 +261,6 @@ class Args(CamelCaseModel):
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - We are intentionally validating here, we can't do it statically
+
+if __name__ == "__main__":
+    main()

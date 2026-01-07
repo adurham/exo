@@ -48,6 +48,8 @@ def warmup_inference(
     model: Model,
     tokenizer: TokenizerWrapper,
     sampler: Callable[[mx.array], mx.array],
+    max_kv_size: int | None = None,
+    kv_bits: int | None = None,
 ) -> int:
     content = "Prompt to warm up the inference engine. Repeat this."
 
@@ -68,6 +70,8 @@ def warmup_inference(
 
     cache = make_kv_cache(
         model=model,
+        max_kv_size=max_kv_size,
+        kv_bits=kv_bits,
     )
 
     logger.info("Generating warmup tokens")
@@ -128,6 +132,9 @@ def mlx_generate(
     tokenizer: TokenizerWrapper,
     sampler: Callable[[mx.array], mx.array],
     task: ChatCompletionTaskParams,
+    max_kv_size: int | None = None,
+    kv_bits: int | None = None,
+    default_max_tokens: int | None = None,
 ) -> Generator[GenerationResponse]:
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
@@ -141,7 +148,11 @@ def mlx_generate(
         chat_task_data=task,
     )
 
-    caches = make_kv_cache(model=model)
+    caches = make_kv_cache(
+        model=model,
+        max_kv_size=max_kv_size,
+        kv_bits=kv_bits,
+    )
 
     logits_processors: list[Callable[[mx.array, mx.array], mx.array]] = []
     if is_bench:
@@ -149,7 +160,9 @@ def mlx_generate(
         eos_ids = eos_ids_from_tokenizer(tokenizer)
         logits_processors = [ban_token_ids(eos_ids)]
 
-    max_tokens = task.max_tokens or MAX_TOKENS
+    max_tokens = (
+        task.max_tokens or default_max_tokens or MAX_TOKENS
+    )
     for out in stream_generate(
         model=model,
         tokenizer=tokenizer,

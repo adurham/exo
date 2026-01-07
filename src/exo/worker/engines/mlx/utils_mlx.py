@@ -177,8 +177,10 @@ def initialize_mlx(
 def load_mlx_items(
     bound_instance: BoundInstance, group: Group | None
 ) -> tuple[Model, TokenizerWrapper, Callable[[mx.array], mx.array]]:
-    # TODO: pass temperature
-    sampler: Callable[[mx.array], mx.array] = make_sampler(temp=0.7)
+    temp = bound_instance.instance.config.temperature
+    sampler: Callable[[mx.array], mx.array] = make_sampler(
+        temp=temp if temp is not None else 0.7
+    )
     logger.info("Created a sampler")
 
     if group is None:
@@ -353,12 +355,18 @@ class NullKVCache(KVCache):
 
 
 def make_kv_cache(
-    model: Model, max_kv_size: int | None = None, keep: int = 0
+    model: Model,
+    max_kv_size: int | None = None,
+    keep: int = 0,
+    kv_bits: int | None = None,
 ) -> list[KVCache | RotatingKVCache | QuantizedKVCache]:
     assert hasattr(model, "layers")
 
+    # Use provided kv_bits or fall back to global constant
+    bits = kv_bits if kv_bits is not None else KV_CACHE_BITS
+
     if max_kv_size is None:
-        if KV_CACHE_BITS is None:
+        if bits is None:
             logger.info("Using default KV cache")
             cache = []
             for i, _ in enumerate(model.layers):
@@ -369,9 +377,9 @@ def make_kv_cache(
             logger.info("Finished creating KVCache list")
             return cache
         else:
-            logger.info("Using quantized KV cache")
+            logger.info(f"Using quantized KV cache with {bits} bits")
             return [
-                QuantizedKVCache(group_size=CACHE_GROUP_SIZE, bits=KV_CACHE_BITS)
+                QuantizedKVCache(group_size=CACHE_GROUP_SIZE, bits=bits)
                 for _ in model.layers
             ]
     else:

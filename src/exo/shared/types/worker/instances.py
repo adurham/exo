@@ -16,9 +16,18 @@ class InstanceMeta(str, Enum):
     MlxJaccl = "MlxJaccl"
 
 
+
+class InstanceConfig(CamelCaseModel):
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    kv_cache_bits: int | None = None
+
+
 class BaseInstance(TaggedModel):
     instance_id: InstanceId
     shard_assignments: ShardAssignments
+    config: InstanceConfig = InstanceConfig()
 
     def shard(self, runner_id: RunnerId) -> ShardMetadata | None:
         return self.shard_assignments.runner_to_shard.get(runner_id, None)

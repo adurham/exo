@@ -305,9 +305,11 @@ def _find_ip_prioritised(
     
     # Create a map of IP -> is_thunderbolt from the node profile
     ip_to_is_thunderbolt = {}
+    iface_map = {}
     if other_node.node_profile:
         for iface in other_node.node_profile.network_interfaces:
             ip_to_is_thunderbolt[iface.ip_address] = iface.is_thunderbolt
+            iface_map[iface.name] = iface.ip_address
             
     for ip, _ in ips:
         if ip_to_is_thunderbolt.get(ip, False):
