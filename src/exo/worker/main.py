@@ -493,7 +493,7 @@ class Worker:
                     event=event,
                 )
                 logger.debug(
-                    f"Worker published event {self.local_event_index}: {str(event)[:100]}"
+                    f"Worker published event {self.local_event_index}: {event}"
                 )
                 self.local_event_index += 1
                 await self.local_event_sender.send(fe)
