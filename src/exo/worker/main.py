@@ -362,16 +362,45 @@ class Worker:
         model_id = task.shard_metadata.model_meta.model_id
         endpoint = self.peer_locations.get(model_id)
 
-        if not endpoint and model_id not in self.discovery_start_times:
-            # Trigger discovery
-            logger.info(f"Triggering P2P discovery for {model_id}")
-            self.discovery_start_times[model_id] = time.time()
-            self.command_sender.send_nowait(
-                ForwarderCommand(
-                    origin=self.node_id,
-                    command=CheckShardPresent(model_id=str(model_id)),
+        if not endpoint:
+            # Check global state to see if anyone has it or is downloading it
+            has_peer = False
+            for node_downloads in self.state.downloads.values():
+                for download in node_downloads:
+                    if download.shard_metadata.model_meta.model_id == model_id:
+                        if isinstance(download, (DownloadCompleted, DownloadOngoing)):
+                            has_peer = True
+                            break
+                if has_peer:
+                    break
+
+            if has_peer:
+                # Someone has it or is downloading it.
+                # If we don't have an endpoint yet, trigger discovery to find WHO and WHERE.
+                if model_id not in self.discovery_start_times:
+                    logger.info(f"Checking P2P availability for {model_id} (found in global state)")
+                    self.discovery_start_times[model_id] = time.time()
+                    self.command_sender.send_nowait(
+                        ForwarderCommand(
+                            origin=self.node_id,
+                            command=CheckShardPresent(model_id=str(model_id)),
+                        )
+                    )
+                else:
+                    logger.info(f"Waiting for P2P endpoint for {model_id}...")
+                return
+
+            # No one has it in global state.
+            if model_id not in self.discovery_start_times:
+                # Trigger discovery just in case global state is lagging
+                logger.info(f"Triggering P2P discovery for {model_id}")
+                self.discovery_start_times[model_id] = time.time()
+                self.command_sender.send_nowait(
+                    ForwarderCommand(
+                        origin=self.node_id,
+                        command=CheckShardPresent(model_id=str(model_id)),
+                    )
                 )
-            )
 
         if (
             not endpoint
@@ -382,7 +411,17 @@ class Worker:
             return
         
         if not endpoint and model_id in self.discovery_start_times:
-             logger.info(f"P2P discovery timed out for {model_id}, falling back to default")
+            if self.node_id == self.session_id.master_node_id:
+                logger.info(f"P2P discovery timed out for {model_id}, falling back to default")
+            else:
+                logger.info(f"P2P discovery timed out for {model_id}, waiting for coordinator. (Global state is empty)")
+                # We can reset discovery start time so we occasionally re-check if global state remains empty
+                # But primarily we rely on global state updates which will trigger this function via plan() 
+                # effectively we just wait here.
+                # To be safe against state drift, we can allow re-discovery every 10s?
+                if time.time() - self.discovery_start_times[model_id] > 10.0:
+                     del self.discovery_start_times[model_id]
+                return
 
         status = DownloadOngoing(
             node_id=self.node_id,
