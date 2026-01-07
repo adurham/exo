@@ -451,13 +451,15 @@ async def _download_file(
                     logger.error(f"Failed to download {url}: {response.status}")
                     response.raise_for_status()
                 
+                downloaded_so_far = resume_byte_pos
                 async with aiofiles.open(temp_file_path, mode) as f:
                     async for chunk in response.content.iter_chunked(1024 * 1024):
                         if not chunk:
                             break
                         await f.write(chunk)
+                        downloaded_so_far += len(chunk)
                         
-                        on_progress(len(chunk), length, False)
+                        on_progress(downloaded_so_far, length, False)
         
         # Verify ETag if available and not from Peer
         final_hash = None
