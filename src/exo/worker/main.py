@@ -102,9 +102,9 @@ class Worker:
 
         self.event_sender, self.event_receiver = channel[Event]()
 
-        self.file_server = FileServer()
         self.peer_locations: dict[ModelId, str] = {}
         self.discovery_start_times: dict[ModelId, float] = {}
+        self.runner_failure_history: dict[RunnerId, tuple[float, int]] = {}
 
     async def run(self):
         logger.info("Starting Worker")
@@ -200,6 +200,7 @@ class Worker:
                 self.state.instances,
                 self.state.runners,
                 self.state.tasks,
+                self.runner_failure_history,
             )
             if task is None:
                 continue
@@ -254,6 +255,15 @@ class Worker:
                             self._handle_shard_download_process, task, initial_progress
                         )
                 case Shutdown(runner_id=runner_id):
+                    # Track failure history for backoff
+                    now = time.time()
+                    last_time, count = self.runner_failure_history.get(runner_id, (0, 0))
+                    if now - last_time < 300:  # 5 minute window
+                        count += 1
+                    else:
+                        count = 1
+                    self.runner_failure_history[runner_id] = (now, count)
+
                     try:
                         with fail_after(3):
                             await self.runners.pop(runner_id).start_task(task)

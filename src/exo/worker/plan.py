@@ -1,5 +1,5 @@
-# pyright: reportUnusedImport = false
 
+import time
 from collections.abc import Mapping, Sequence
 
 from exo.shared.types.common import NodeId
@@ -49,13 +49,14 @@ def plan(
     instances: Mapping[InstanceId, Instance],
     all_runners: Mapping[RunnerId, RunnerStatus],  # all global
     tasks: Mapping[TaskId, Task],
+    runner_failure_history: Mapping[RunnerId, tuple[float, int]] | None = None,
 ) -> Task | None:
     # Python short circuiting OR logic should evaluate these sequentially.
     return (
         _kill_runner(runners, all_runners, instances)
-        or _create_runner(node_id, runners, instances)
+        or _create_runner(node_id, runners, instances, runner_failure_history)
         or _model_needs_download(runners, download_status)
-        or _init_distributed_backend(runners, all_runners)
+        or _init_distributed_backend(runners, all_runners, download_status)
         or _load_model(runners, all_runners, global_download_status)
         or _ready_to_warmup(runners, all_runners)
         or _pending_tasks(runners, tasks, all_runners)
@@ -89,6 +90,7 @@ def _create_runner(
     node_id: NodeId,
     runners: Mapping[RunnerId, RunnerSupervisor],
     instances: Mapping[InstanceId, Instance],
+    runner_failure_history: Mapping[RunnerId, tuple[float, int]] | None = None,
 ) -> CreateRunner | None:
     for instance in instances.values():
         runner_id = instance.shard_assignments.node_to_runner.get(node_id, None)
@@ -97,6 +99,14 @@ def _create_runner(
 
         if runner_id in runners:
             continue
+
+        if runner_failure_history:
+            last_fail_time, fail_count = runner_failure_history.get(runner_id, (0, 0))
+            if fail_count > 0:
+                # 5, 10, 20, 40, 60
+                backoff_seconds = min(60, 5 * (2 ** (fail_count - 1)))
+                if time.time() - last_fail_time < backoff_seconds:
+                    continue
 
         shard = instance.shard(runner_id)
         assert shard is not None
@@ -131,13 +141,21 @@ def _model_needs_download(
 def _init_distributed_backend(
     runners: Mapping[RunnerId, RunnerSupervisor],
     all_runners: Mapping[RunnerId, RunnerStatus],
+    local_download_status: Mapping[ModelId, DownloadProgress],
 ):
     for runner in runners.values():
         instance = runner.bound_instance.instance
         shard_assignments = instance.shard_assignments
-
         is_single_node_instance = len(shard_assignments.runner_to_shard) == 1
         if is_single_node_instance:
+            continue
+
+        # Don't connect if model isn't downloaded yet. This prevents "jaccl" 
+        # initialization (which binds ports) from conflicting or timing out 
+        # during heavy IO or before files are ready.
+        model_id = runner.bound_instance.bound_shard.model_meta.model_id
+        download_state = local_download_status.get(model_id)
+        if not isinstance(download_state, DownloadCompleted):
             continue
 
         runner_is_idle = isinstance(runner.status, RunnerIdle)
