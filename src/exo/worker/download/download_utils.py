@@ -232,7 +232,7 @@ async def _fetch_file_list(
     }
     if not endpoint:
         # Only use token for HF
-        token = get_hf_token()
+        token = await get_hf_token()
         if token:
             headers["Authorization"] = f"Bearer {token}"
             
@@ -405,7 +405,7 @@ async def _download_file(
             headers["Range"] = f"bytes={resume_byte_pos}-"
         
         if not endpoint:
-            token = get_hf_token()
+            token = await get_hf_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
