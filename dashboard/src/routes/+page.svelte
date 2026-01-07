@@ -34,6 +34,7 @@
 	import HeaderNav from "$lib/components/HeaderNav.svelte";
 	import { fade, fly } from "svelte/transition";
 	import { cubicInOut } from "svelte/easing";
+	import { applyLaunchOptions } from "$lib/utils/launchUtils";
 	import { onMount } from "svelte";
 
 	const chatStarted = $derived(hasStartedChat());
@@ -500,23 +501,12 @@
 			}
 
 			if (instanceData && typeof instanceData === "object") {
-				let configTarget = instanceData;
-				// Handle TaggedModel serialization (wrapped in { "MlxRingInstance": ... })
-				const keys = Object.keys(instanceData);
-				if (
-					keys.length === 1 &&
-					(keys[0] === "MlxRingInstance" ||
-						keys[0] === "MlxJacclInstance")
-				) {
-					configTarget = (instanceData as any)[keys[0]];
-				}
-
-				(configTarget as any).config = {
+				applyLaunchOptions(instanceData, {
 					max_input_tokens: maxInputTokens,
 					max_output_tokens: maxOutputTokens,
 					temperature: temperature,
 					kv_cache_bits: kvCacheBits,
-				};
+				});
 			}
 
 			// POST the instance to create it
