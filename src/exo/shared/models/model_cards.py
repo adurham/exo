@@ -449,12 +449,12 @@ MODEL_CARDS: dict[str, ModelCard] = {
     ),
     "qwen3-235b-a22b-6bit": ModelCard(
         short_id="qwen3-235b-a22b-6bit",
-        model_id=ModelId("mlx-community/qwen3-235b-a22b-2507-6bit"),
+        model_id=ModelId("mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit"),
         name="Qwen3 235B A22B (6-bit)",
         description="""Qwen3 235B (Active 22B) is a large language model trained on the Qwen3 235B dataset.""",
         tags=[],
         metadata=ModelMetadata(
-            model_id=ModelId("mlx-community/qwen3-235b-a22b-2507-6bit"),
+            model_id=ModelId("mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit"),
             pretty_name="Qwen3 235B A22B (6-bit)",
             storage_size=Memory.from_gb(192),
             n_layers=94,
