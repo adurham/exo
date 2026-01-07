@@ -250,7 +250,9 @@ class Worker:
                                 task_id=task.task_id, task_status=TaskStatus.Running
                             )
                         )
-                        self._handle_shard_download_process(task, initial_progress)
+                        self._tg.start_soon(
+                            self._handle_shard_download_process, task, initial_progress
+                        )
                 case Shutdown(runner_id=runner_id):
                     try:
                         with fail_after(3):
@@ -353,16 +355,32 @@ class Worker:
         self._tg.start_soon(runner.run)
         return runner
 
-    def _handle_shard_download_process(
+    async def _handle_shard_download_process(
         self,
         task: DownloadModel,
         initial_progress: RepoDownloadProgress,
     ):
         """Manages the shard download process with progress tracking."""
         model_id = task.shard_metadata.model_meta.model_id
-        endpoint = self.peer_locations.get(model_id)
+        
+        # 1. Immediately report Ongoing to avoid task-loop spam
+        status = DownloadOngoing(
+            node_id=self.node_id,
+            shard_metadata=task.shard_metadata,
+            download_progress=map_repo_download_progress_to_download_progress_data(
+                initial_progress
+            ),
+        )
+        self.download_status[task.shard_metadata.model_meta.model_id] = status
+        self.event_sender.send_nowait(NodeDownloadProgress(download_progress=status))
 
-        if not endpoint:
+        endpoint: str | None = None
+        
+        while True:
+            endpoint = self.peer_locations.get(model_id)
+            if endpoint:
+                break
+
             # Check global state to see if anyone has it or is downloading it
             has_peer = False
             for node_downloads in self.state.downloads.values():
@@ -386,52 +404,43 @@ class Worker:
                             command=CheckShardPresent(model_id=str(model_id)),
                         )
                     )
-                else:
+                elif time.time() - self.discovery_start_times[model_id] > 2.0:
+                    # Retry discovery periodically
                     logger.debug(f"Waiting for P2P endpoint for {model_id}...")
-                return
-
-            # No one has it in global state.
-            if model_id not in self.discovery_start_times:
-                # Trigger discovery just in case global state is lagging
-                logger.debug(f"Triggering P2P discovery for {model_id}")
-                self.discovery_start_times[model_id] = time.time()
-                self.command_sender.send_nowait(
-                    ForwarderCommand(
-                        origin=self.node_id,
-                        command=CheckShardPresent(model_id=str(model_id)),
-                    )
-                )
-
-        if (
-            not endpoint
-            and model_id in self.discovery_start_times
-            and time.time() - self.discovery_start_times[model_id] < 1.0
-        ):
-            # Still waiting for discovery
-            return
-        
-        if not endpoint and model_id in self.discovery_start_times:
-            if self.node_id == self.session_id.master_node_id:
-                logger.debug(f"P2P discovery timed out for {model_id}, falling back to default")
             else:
-                logger.debug(f"P2P discovery timed out for {model_id}, waiting for coordinator. (Global state is empty)")
-                # We can reset discovery start time so we occasionally re-check if global state remains empty
-                # But primarily we rely on global state updates which will trigger this function via plan() 
-                # effectively we just wait here.
-                # To be safe against state drift, we can allow re-discovery every 10s?
-                if time.time() - self.discovery_start_times[model_id] > 10.0:
-                     del self.discovery_start_times[model_id]
-                return
+                # No one has it in global state.
+                if model_id not in self.discovery_start_times:
+                    # Trigger discovery just in case global state is lagging
+                    logger.debug(f"Triggering P2P discovery for {model_id}")
+                    self.discovery_start_times[model_id] = time.time()
+                    self.command_sender.send_nowait(
+                        ForwarderCommand(
+                            origin=self.node_id,
+                            command=CheckShardPresent(model_id=str(model_id)),
+                        )
+                    )
 
-        status = DownloadOngoing(
-            node_id=self.node_id,
-            shard_metadata=task.shard_metadata,
-            download_progress=map_repo_download_progress_to_download_progress_data(
-                initial_progress
-            ),
-        )
-        self.download_status[task.shard_metadata.model_meta.model_id] = status
-        self.event_sender.send_nowait(NodeDownloadProgress(download_progress=status))
+            if (
+                not endpoint
+                and model_id in self.discovery_start_times
+                and time.time() - self.discovery_start_times[model_id] < 1.0
+            ):
+                # Still waiting for discovery
+                pass
+            
+            elif not endpoint and model_id in self.discovery_start_times:
+                if self.node_id == self.session_id.master_node_id:
+                    logger.debug(f"P2P discovery timed out for {model_id}, falling back to default")
+                    endpoint = None
+                    break
+                else:
+                    if time.time() - self.discovery_start_times[model_id] > 10.0:
+                        logger.debug(f"Waiting for coordinator for {model_id}...")
+                        # We can reset discovery start time so we occasionally re-check
+                        del self.discovery_start_times[model_id]
+            
+            await anyio.sleep(1.0)
+
 
         last_progress_time = 0.0
         throttle_interval_secs = 1.0
@@ -472,10 +481,7 @@ class Worker:
                 last_progress_time = current_time()
 
         self.shard_downloader.on_progress(download_progress_callback)
-        assert self._tg
-        self._tg.start_soon(
-            self.shard_downloader.ensure_shard, task.shard_metadata, False, endpoint
-        )
+        await self.shard_downloader.ensure_shard(task.shard_metadata, False, endpoint)
 
     async def _forward_events(self) -> None:
         with self.event_receiver as events:

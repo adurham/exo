@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 import pytest
 from exo.worker.main import Worker
@@ -76,17 +76,14 @@ async def test_coordinator_download_fallback(mock_worker):
     mock_worker.peer_locations = {}
     mock_worker.discovery_start_times = {"model1": 0} 
     
-    # Execution should proceed without needing time manipulation as we set start time to 0
-
-    mock_worker._handle_shard_download_process(task, initial_progress)
+    # This should break loop because node_id == master_node_id and time > 1.0
+    await mock_worker._handle_shard_download_process(task, initial_progress)
     
     # Coordinator should proceed to download (ensure_shard called)
-    mock_worker._tg.start_soon.assert_called_once()
-    # verify arguments passed to start_soon, which calls ensure_shard
-    # start_soon(func, *args)
-    call_args = mock_worker._tg.start_soon.call_args
-    assert call_args[0][0] == mock_worker.shard_downloader.ensure_shard
-    assert call_args[0][3] is None # endpoint is None
+    mock_worker.shard_downloader.ensure_shard.assert_called_once()
+    args = mock_worker.shard_downloader.ensure_shard.call_args
+    assert args[0][0] == task.shard_metadata
+    assert args[0][2] is None # endpoint is None
 
 @pytest.mark.asyncio
 async def test_worker_waits_for_coordinator(mock_worker):
@@ -110,14 +107,25 @@ async def test_worker_waits_for_coordinator(mock_worker):
         status="not_started",
     )
     
-    # Simulate discovery timeout
     mock_worker.peer_locations = {}
     mock_worker.discovery_start_times = {"model1": 0}
+
+    # Patch sleep to verify waiting logic and then break loop
+    async def side_effect_sleep(seconds):
+        # Verify haven't downloaded yet
+        mock_worker.shard_downloader.ensure_shard.assert_not_called()
+        # "Discover" the peer to break the loop
+        mock_worker.peer_locations["model1"] = "http://master:8080"
     
-    mock_worker._handle_shard_download_process(task, initial_progress)
+    with patch("exo.worker.main.anyio.sleep", side_effect=side_effect_sleep) as mock_sleep:
+        await mock_worker._handle_shard_download_process(task, initial_progress)
+        
+    mock_sleep.assert_called()
     
-    # Worker should NOT download (ensure_shard NOT called)
-    mock_worker._tg.start_soon.assert_not_called()
+    # Worker should download from PEER now
+    mock_worker.shard_downloader.ensure_shard.assert_called_once()
+    args = mock_worker.shard_downloader.ensure_shard.call_args
+    assert args[0][2] == "http://master:8080"
 
 @pytest.mark.asyncio
 async def test_worker_p2p_download(mock_worker):
@@ -143,14 +151,12 @@ async def test_worker_p2p_download(mock_worker):
     # Simulate discovery success
     mock_worker.peer_locations = {"model1": "http://peer:8080"}
     
-    mock_worker._handle_shard_download_process(task, initial_progress)
+    await mock_worker._handle_shard_download_process(task, initial_progress)
     
     # Should download via P2P
-    mock_worker._tg.start_soon.assert_called_once()
-    call_args = mock_worker._tg.start_soon.call_args
-    assert call_args[0][0] == mock_worker.shard_downloader.ensure_shard
-    assert call_args[0][3] == "http://peer:8080"
-
+    mock_worker.shard_downloader.ensure_shard.assert_called_once()
+    args = mock_worker.shard_downloader.ensure_shard.call_args
+    assert args[0][2] == "http://peer:8080"
 
 @pytest.mark.asyncio
 async def test_worker_waits_if_peer_in_state(mock_worker):
@@ -195,11 +201,18 @@ async def test_worker_waits_if_peer_in_state(mock_worker):
     mock_worker.peer_locations = {} # Not discovered yet
     mock_worker.discovery_start_times = {}
 
-    mock_worker._handle_shard_download_process(task, initial_progress)
-
+    async def side_effect_sleep(seconds):
+        mock_worker.command_sender.send_nowait.assert_called()
+        # Break loop
+        mock_worker.peer_locations["model1"] = "http://peer:8080"
+    
+    with patch("exo.worker.main.anyio.sleep", side_effect=side_effect_sleep):
+         await mock_worker._handle_shard_download_process(task, initial_progress)
+    
     # Should trigger discovery 
-    mock_worker.command_sender.send_nowait.assert_called_once()
-    # Should NOT start download
-    mock_worker._tg.start_soon.assert_not_called()
+    assert mock_worker.command_sender.send_nowait.called
     # Should mark discovery start
     assert "model1" in mock_worker.discovery_start_times
+    
+    # And eventually download once loop broke
+    mock_worker.shard_downloader.ensure_shard.assert_called_once()
