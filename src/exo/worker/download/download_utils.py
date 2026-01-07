@@ -306,6 +306,7 @@ async def file_meta(
     path: str,
     redirected_location: str | None = None,
     endpoint: str | None = None,
+    session: aiohttp.ClientSession | None = None,
 ) -> tuple[int, str]:
     hf_endpoint = endpoint or get_hf_endpoint()
     url = (
@@ -314,6 +315,31 @@ async def file_meta(
         else f"{hf_endpoint}{redirected_location}"
     )
     headers = await get_download_headers()
+    
+    if session:
+        async with session.head(url, headers=headers) as r:
+            if r.status == 307:
+                # On redirect, only trust Hugging Face's x-linked-* headers.
+                x_linked_size = r.headers.get("x-linked-size")
+                x_linked_etag = r.headers.get("x-linked-etag")
+                if x_linked_size and x_linked_etag:
+                    content_length = int(x_linked_size)
+                    etag = trim_etag(x_linked_etag)
+                    return content_length, etag
+                # Otherwise, follow the redirect to get authoritative size/hash
+                redirected_location = r.headers.get("location")
+                return await file_meta(
+                    repo_id, revision, path, redirected_location, endpoint, session
+                )
+            content_length = int(
+                r.headers.get("x-linked-size") or r.headers.get("content-length") or 0
+            )
+            etag = r.headers.get("x-linked-etag") or r.headers.get("etag")
+            assert content_length > 0, f"No content length for {url}"
+            assert etag is not None, f"No remote hash for {url}"
+            etag = trim_etag(etag)
+            return content_length, etag
+
     async with (
         create_http_session(timeout_profile="short") as session,
         session.head(url, headers=headers) as r,
@@ -348,12 +374,13 @@ async def download_file_with_retry(
     target_dir: Path,
     on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
     endpoint: str | None = None,
+    session: aiohttp.ClientSession | None = None,
 ) -> Path:
     n_attempts = 30
     for attempt in range(n_attempts):
         try:
             return await _download_file(
-                repo_id, revision, path, target_dir, on_progress, endpoint
+                repo_id, revision, path, target_dir, on_progress, endpoint, session
             )
         except Exception as e:
             if isinstance(e, FileNotFoundError) or attempt == n_attempts - 1:
@@ -375,6 +402,7 @@ async def _download_file(
     target_dir: Path,
     on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
     endpoint: str | None = None,
+    session: aiohttp.ClientSession | None = None,
 ) -> Path:
     target_path = target_dir / path
     temp_file_path = target_dir / f"{path}.partial"
@@ -382,7 +410,7 @@ async def _download_file(
     if await aios.path.exists(target_path):
         return target_path
     await aios.makedirs(target_path.parent, exist_ok=True)
-    length, etag = await file_meta(repo_id, revision, path, endpoint=endpoint)
+    length, etag = await file_meta(repo_id, revision, path, endpoint=endpoint, session=session)
     remote_hash = etag[:-5] if etag.endswith("-gzip") else etag
     
     resume_byte_pos = (
@@ -409,7 +437,7 @@ async def _download_file(
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
-        async with aiohttp.ClientSession() as session:
+        async def _download(session: aiohttp.ClientSession):
             async with session.get(url, headers=headers) as response:
                 if response.status not in (200, 206):
                     if response.status == 401:
@@ -426,6 +454,12 @@ async def _download_file(
                         await f.write(chunk)
                         
                         on_progress(len(chunk), length, False)
+        
+        if session:
+            await _download(session)
+        else:
+            async with create_http_session(timeout_profile="long") as session:
+                await _download(session)
                         
     # Verify ETag if available and not from Peer (FileServer doesn't support ETag well yet?)
     # or just trust it for now.
@@ -701,7 +735,7 @@ async def download_shard(
 
     semaphore = asyncio.Semaphore(max_parallel_downloads)
 
-    async def download_with_semaphore(file: FileListEntry):
+    async def download_with_semaphore(session: aiohttp.ClientSession, file: FileListEntry):
         async with semaphore:
             await download_file_with_retry(
                 str(shard.model_meta.model_id),
@@ -712,12 +746,14 @@ async def download_shard(
                     file, curr_bytes, total_bytes, is_renamed
                 ),
                 endpoint=endpoint,
+                session=session,
             )
 
     if not skip_download:
-        await asyncio.gather(
-            *[download_with_semaphore(file) for file in filtered_file_list]
-        )
+        async with create_http_session(timeout_profile="long") as session:
+            await asyncio.gather(
+                *[download_with_semaphore(session, file) for file in filtered_file_list]
+            )
     final_repo_progress = calculate_repo_progress(
         shard, str(shard.model_meta.model_id), revision, file_progress, all_start_time
     )
