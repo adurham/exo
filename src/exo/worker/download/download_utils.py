@@ -240,6 +240,10 @@ async def _fetch_file_list(
         async with aiohttp.ClientSession() as session:
             async with session.get(api_url, params={"recursive": "true"} if recursive else {}, headers=headers) as resp:
                 if resp.status != 200:
+                    if resp.status == 401:
+                        raise Exception(
+                            f"Unauthorized access to {repo_id}. Please set HF_TOKEN environment variable or run `huggingface-cli login`."
+                        )
                     text = await resp.text()
                     logger.error(f"Failed to fetch file list from {api_url}: {resp.status} {text}")
                     resp.raise_for_status()
@@ -408,6 +412,10 @@ async def _download_file(
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 if response.status not in (200, 206):
+                    if response.status == 401:
+                        raise Exception(
+                            f"Unauthorized access to {repo_id}. Please set HF_TOKEN environment variable or run `huggingface-cli login`."
+                        )
                     logger.error(f"Failed to download {url}: {response.status}")
                     response.raise_for_status()
                 
