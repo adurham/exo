@@ -410,34 +410,35 @@ async def _download_file(
     if await aios.path.exists(target_path):
         return target_path
     await aios.makedirs(target_path.parent, exist_ok=True)
-    length, etag = await file_meta(repo_id, revision, path, endpoint=endpoint, session=session)
-    remote_hash = etag[:-5] if etag.endswith("-gzip") else etag
-    
-    resume_byte_pos = (
-        (await aios.stat(temp_file_path)).st_size
-        if (await aios.path.exists(temp_file_path))
-        else 0
-    )
-    
-    mode = "ab" if resume_byte_pos > 0 else "wb"
 
-    if resume_byte_pos != length:
-        hf_endpoint = endpoint or get_hf_endpoint()
-        url = urljoin(f"{hf_endpoint}/{repo_id}/resolve/{revision}/", path)
-        logger.debug(f"Downloading file from {url} (resume={resume_byte_pos})")
+    async def _download_impl(session: aiohttp.ClientSession):
+        length, etag = await file_meta(repo_id, revision, path, endpoint=endpoint, session=session)
+        remote_hash = etag[:-5] if etag.endswith("-gzip") else etag
         
-        headers = {
-            "User-Agent": "Exo/0.0.1",
-        }
-        if resume_byte_pos > 0:
-            headers["Range"] = f"bytes={resume_byte_pos}-"
+        resume_byte_pos = (
+            (await aios.stat(temp_file_path)).st_size
+            if (await aios.path.exists(temp_file_path))
+            else 0
+        )
         
-        if not endpoint:
-            token = await get_hf_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+        mode = "ab" if resume_byte_pos > 0 else "wb"
 
-        async def _download(session: aiohttp.ClientSession):
+        if resume_byte_pos != length:
+            hf_endpoint = endpoint or get_hf_endpoint()
+            url = urljoin(f"{hf_endpoint}/{repo_id}/resolve/{revision}/", path)
+            logger.debug(f"Downloading file from {url} (resume={resume_byte_pos})")
+            
+            headers = {
+                "User-Agent": "Exo/0.0.1",
+            }
+            if resume_byte_pos > 0:
+                headers["Range"] = f"bytes={resume_byte_pos}-"
+            
+            if not endpoint:
+                token = await get_hf_token()
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+
             async with session.get(url, headers=headers) as response:
                 if response.status not in (200, 206):
                     if response.status == 401:
@@ -455,37 +456,35 @@ async def _download_file(
                         
                         on_progress(len(chunk), length, False)
         
-        if session:
-            await _download(session)
+        # Verify ETag if available and not from Peer
+        final_hash = None
+        if endpoint:
+            integrity = True
         else:
-            async with create_http_session(timeout_profile="long") as session:
-                await _download(session)
-                        
-    # Verify ETag if available and not from Peer (FileServer doesn't support ETag well yet?)
-    # or just trust it for now.
-    # verify_etag(etag, temp_file_path) # kept as is
-    
-    # Rename temp file to target file
-    if endpoint:
-        # P2P download: ETag is not a content hash, skip verification
-        integrity = True
-    else:
-        final_hash = await calc_hash(
-            temp_file_path, hash_type="sha256" if len(remote_hash) == 64 else "sha1"
-        )
-        integrity = final_hash == remote_hash
+            final_hash = await calc_hash(
+                temp_file_path, hash_type="sha256" if len(remote_hash) == 64 else "sha1"
+            )
+            integrity = final_hash == remote_hash
 
-    if not integrity:
-        try:
-            await aios.remove(temp_file_path)
-        except Exception as e:
-            logger.error(f"Error removing partial file {temp_file_path}: {e}")
-        raise Exception(
-            f"Downloaded file {target_dir / path} has hash {final_hash} but remote hash is {remote_hash}"
-        )
-    await aios.rename(temp_file_path, target_dir / path)
-    on_progress(length, length, True)
-    return target_dir / path
+        if not integrity:
+            try:
+                await aios.remove(temp_file_path)
+            except Exception as e:
+                logger.error(f"Error removing partial file {temp_file_path}: {e}")
+            raise Exception(
+                f"Downloaded file {target_dir / path} has hash {final_hash} but remote hash is {remote_hash}"
+            )
+        
+        await aios.rename(temp_file_path, target_path)
+        on_progress(0, length, True)
+    
+    if session:
+        await _download_impl(session)
+    else:
+        async with create_http_session(timeout_profile="long") as session:
+            await _download_impl(session)
+
+    return target_path
 
 
 def calculate_repo_progress(
@@ -735,7 +734,7 @@ async def download_shard(
 
     semaphore = asyncio.Semaphore(max_parallel_downloads)
 
-    async def download_with_semaphore(session: aiohttp.ClientSession, file: FileListEntry):
+    async def download_with_semaphore(file: FileListEntry):
         async with semaphore:
             await download_file_with_retry(
                 str(shard.model_meta.model_id),
@@ -746,14 +745,12 @@ async def download_shard(
                     file, curr_bytes, total_bytes, is_renamed
                 ),
                 endpoint=endpoint,
-                session=session,
             )
 
     if not skip_download:
-        async with create_http_session(timeout_profile="long") as session:
-            await asyncio.gather(
-                *[download_with_semaphore(session, file) for file in filtered_file_list]
-            )
+        await asyncio.gather(
+            *[download_with_semaphore(file) for file in filtered_file_list]
+        )
     final_repo_progress = calculate_repo_progress(
         shard, str(shard.model_meta.model_id), revision, file_progress, all_start_time
     )
