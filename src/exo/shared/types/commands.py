@@ -43,6 +43,16 @@ class RequestEventLog(BaseCommand):
     since_idx: int
 
 
+class CheckShardPresent(BaseCommand):
+    model_id: str
+
+
+class ShardPresent(BaseCommand):
+    model_id: str
+    base_url: str
+    request_command_id: CommandId
+
+
 Command = (
     TestCommand
     | RequestEventLog
@@ -51,6 +61,8 @@ Command = (
     | CreateInstance
     | DeleteInstance
     | TaskFinished
+    | CheckShardPresent
+    | ShardPresent
 )
 
 

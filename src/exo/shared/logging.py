@@ -54,7 +54,7 @@ def logger_setup(log_file: Path | None, verbosity: int = 0):
         logger.add(
             log_file,
             format="[ {time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} ] {message}",
-            level="INFO",
+            level="DEBUG",
             colorize=False,
             enqueue=True,
             rotation="1 week",

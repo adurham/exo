@@ -71,6 +71,17 @@ def warmup_inference(
     )
 
     logger.info("Generating warmup tokens")
+    
+    # Test distributed communication before generation
+    logger.info("Testing distributed communication with all_sum...")
+    test_tensor = mx.array([1.0])
+    # Don't pass group yet as we want to test global group if available or just basic comms
+    # Actually we should use the same group as the model if possible, but here we don't have the group object easily accessible
+    # However, mx.distributed.all_sum uses the default group if none specified, which should be fine if init was global
+    test_result = mx.distributed.all_sum(test_tensor) 
+    mx.eval(test_result)
+    logger.info(f"Distributed communication test complete. Result: {test_result}")
+
     for _r in stream_generate(
         model=model,
         tokenizer=tokenizer,

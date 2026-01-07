@@ -163,7 +163,10 @@ async def seed_models(seed_dir: str | Path):
 
 
 async def fetch_file_list_with_cache(
-    repo_id: str, revision: str = "main", recursive: bool = False
+    repo_id: str,
+    revision: str = "main",
+    recursive: bool = False,
+    endpoint: str | None = None,
 ) -> list[FileListEntry]:
     target_dir = (
         (await ensure_models_dir()) / "caches" / str(repo_id).replace("/", "--")
@@ -175,7 +178,13 @@ async def fetch_file_list_with_cache(
     if await aios.path.exists(cache_file):
         async with aiofiles.open(cache_file, "r") as f:
             return TypeAdapter(list[FileListEntry]).validate_json(await f.read())
-    file_list = await fetch_file_list_with_retry(repo_id, revision, recursive=recursive)
+    try:
+        file_list = await fetch_file_list_with_retry(
+            repo_id, revision, recursive=recursive, endpoint=endpoint
+        )
+    except Exception as e:
+        logger.error(f"Error checking cache/fetching file list: {e}. Endpoint: {endpoint}")
+        raise e
     await aios.makedirs(cache_file.parent, exist_ok=True)
     async with aiofiles.open(cache_file, "w") as f:
         await f.write(TypeAdapter(list[FileListEntry]).dump_json(file_list).decode())
@@ -183,12 +192,16 @@ async def fetch_file_list_with_cache(
 
 
 async def fetch_file_list_with_retry(
-    repo_id: str, revision: str = "main", path: str = "", recursive: bool = False
+    repo_id: str,
+    revision: str = "main",
+    path: str = "",
+    recursive: bool = False,
+    endpoint: str | None = None,
 ) -> list[FileListEntry]:
     n_attempts = 30
     for attempt in range(n_attempts):
         try:
-            return await _fetch_file_list(repo_id, revision, path, recursive)
+            return await _fetch_file_list(repo_id, revision, path, recursive, endpoint)
         except Exception as e:
             if attempt == n_attempts - 1:
                 raise e
@@ -199,31 +212,42 @@ async def fetch_file_list_with_retry(
 
 
 async def _fetch_file_list(
-    repo_id: str, revision: str = "main", path: str = "", recursive: bool = False
+    repo_id: str,
+    revision: str = "main",
+    path: str = "",
+    recursive: bool = False,
+    endpoint: str | None = None,
 ) -> list[FileListEntry]:
-    api_url = f"{get_hf_endpoint()}/api/models/{repo_id}/tree/{revision}"
-    url = f"{api_url}/{path}" if path else api_url
+    hf_endpoint = endpoint or get_hf_endpoint()
+    api_url = f"{hf_endpoint}/api/models/{repo_id}/tree/{revision}"
+    if path:
+        api_url += f"/{path}"
 
-    headers = await get_download_headers()
-    async with (
-        create_http_session(timeout_profile="short") as session,
-        session.get(url, headers=headers) as response,
-    ):
-        if response.status == 200:
-            data_json = await response.text()
-            data = TypeAdapter(list[FileListEntry]).validate_json(data_json)
-            files: list[FileListEntry] = []
-            for item in data:
-                if item.type == "file":
-                    files.append(FileListEntry.model_validate(item))
-                elif item.type == "directory" and recursive:
-                    subfiles = await _fetch_file_list(
-                        repo_id, revision, item.path, recursive
-                    )
-                    files.extend(subfiles)
-            return files
-        else:
-            raise Exception(f"Failed to fetch file list: {response.status}")
+    logger.debug(f"Fetching file list from {api_url}")
+    
+    headers = {
+        "User-Agent": "Exo/0.0.1",
+        "Accept": "*/*"
+    }
+    if not endpoint:
+        # Only use token for HF
+        token = get_hf_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, params={"recursive": "true"} if recursive else {}, headers=headers) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error(f"Failed to fetch file list from {api_url}: {resp.status} {text}")
+                    resp.raise_for_status()
+                data = await resp.json()
+    except Exception as e:
+        logger.error(f"Exception fetching file list from {api_url}: {e}")
+        raise e
+
+    return [FileListEntry.model_validate(item) for item in data]
 
 
 async def get_download_headers() -> dict[str, str]:
@@ -272,12 +296,17 @@ async def calc_hash(path: Path, hash_type: Literal["sha1", "sha256"] = "sha1") -
 
 
 async def file_meta(
-    repo_id: str, revision: str, path: str, redirected_location: str | None = None
+    repo_id: str,
+    revision: str,
+    path: str,
+    redirected_location: str | None = None,
+    endpoint: str | None = None,
 ) -> tuple[int, str]:
+    hf_endpoint = endpoint or get_hf_endpoint()
     url = (
-        urljoin(f"{get_hf_endpoint()}/{repo_id}/resolve/{revision}/", path)
+        urljoin(f"{hf_endpoint}/{repo_id}/resolve/{revision}/", path)
         if redirected_location is None
-        else f"{get_hf_endpoint()}{redirected_location}"
+        else f"{hf_endpoint}{redirected_location}"
     )
     headers = await get_download_headers()
     async with (
@@ -294,7 +323,9 @@ async def file_meta(
                 return content_length, etag
             # Otherwise, follow the redirect to get authoritative size/hash
             redirected_location = r.headers.get("location")
-            return await file_meta(repo_id, revision, path, redirected_location)
+            return await file_meta(
+                repo_id, revision, path, redirected_location, endpoint
+            )
         content_length = int(
             r.headers.get("x-linked-size") or r.headers.get("content-length") or 0
         )
@@ -311,12 +342,13 @@ async def download_file_with_retry(
     path: str,
     target_dir: Path,
     on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
+    endpoint: str | None = None,
 ) -> Path:
     n_attempts = 30
     for attempt in range(n_attempts):
         try:
             return await _download_file(
-                repo_id, revision, path, target_dir, on_progress
+                repo_id, revision, path, target_dir, on_progress, endpoint
             )
         except Exception as e:
             if isinstance(e, FileNotFoundError) or attempt == n_attempts - 1:
@@ -337,53 +369,78 @@ async def _download_file(
     path: str,
     target_dir: Path,
     on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
+    endpoint: str | None = None,
 ) -> Path:
-    if await aios.path.exists(target_dir / path):
-        return target_dir / path
-    await aios.makedirs((target_dir / path).parent, exist_ok=True)
-    length, etag = await file_meta(repo_id, revision, path)
-    remote_hash = etag[:-5] if etag.endswith("-gzip") else etag
-    partial_path = target_dir / f"{path}.partial"
-    resume_byte_pos = (
-        (await aios.stat(partial_path)).st_size
-        if (await aios.path.exists(partial_path))
-        else None
-    )
-    if resume_byte_pos != length:
-        url = urljoin(f"{get_hf_endpoint()}/{repo_id}/resolve/{revision}/", path)
-        headers = await get_download_headers()
-        if resume_byte_pos:
-            headers["Range"] = f"bytes={resume_byte_pos}-"
-        n_read = resume_byte_pos or 0
-        async with (
-            create_http_session(timeout_profile="long") as session,
-            session.get(url, headers=headers) as r,
-        ):
-            if r.status == 404:
-                raise FileNotFoundError(f"File not found: {url}")
-            assert r.status in [200, 206], (
-                f"Failed to download {path} from {url}: {r.status}"
-            )
-            async with aiofiles.open(
-                partial_path, "ab" if resume_byte_pos else "wb"
-            ) as f:
-                while chunk := await r.content.read(8 * 1024 * 1024):
-                    n_read = n_read + (await f.write(chunk))
-                    on_progress(n_read, length, False)
+    target_path = target_dir / path
+    temp_file_path = target_dir / f"{path}.partial"
 
-    final_hash = await calc_hash(
-        partial_path, hash_type="sha256" if len(remote_hash) == 64 else "sha1"
+    if await aios.path.exists(target_path):
+        return target_path
+    await aios.makedirs(target_path.parent, exist_ok=True)
+    length, etag = await file_meta(repo_id, revision, path, endpoint=endpoint)
+    remote_hash = etag[:-5] if etag.endswith("-gzip") else etag
+    
+    resume_byte_pos = (
+        (await aios.stat(temp_file_path)).st_size
+        if (await aios.path.exists(temp_file_path))
+        else 0
     )
-    integrity = final_hash == remote_hash
+    
+    mode = "ab" if resume_byte_pos > 0 else "wb"
+
+    if resume_byte_pos != length:
+        hf_endpoint = endpoint or get_hf_endpoint()
+        url = urljoin(f"{hf_endpoint}/{repo_id}/resolve/{revision}/", path)
+        logger.debug(f"Downloading file from {url} (resume={resume_byte_pos})")
+        
+        headers = {
+            "User-Agent": "Exo/0.0.1",
+        }
+        if resume_byte_pos > 0:
+            headers["Range"] = f"bytes={resume_byte_pos}-"
+        
+        if not endpoint:
+            token = get_hf_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status not in (200, 206):
+                    logger.error(f"Failed to download {url}: {response.status}")
+                    response.raise_for_status()
+                
+                async with aiofiles.open(temp_file_path, mode) as f:
+                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                        if not chunk:
+                            break
+                        await f.write(chunk)
+                        
+                        on_progress(len(chunk), length, False)
+                        
+    # Verify ETag if available and not from Peer (FileServer doesn't support ETag well yet?)
+    # or just trust it for now.
+    # verify_etag(etag, temp_file_path) # kept as is
+    
+    # Rename temp file to target file
+    if endpoint:
+        # P2P download: ETag is not a content hash, skip verification
+        integrity = True
+    else:
+        final_hash = await calc_hash(
+            temp_file_path, hash_type="sha256" if len(remote_hash) == 64 else "sha1"
+        )
+        integrity = final_hash == remote_hash
+
     if not integrity:
         try:
-            await aios.remove(partial_path)
+            await aios.remove(temp_file_path)
         except Exception as e:
-            logger.error(f"Error removing partial file {partial_path}: {e}")
+            logger.error(f"Error removing partial file {temp_file_path}: {e}")
         raise Exception(
             f"Downloaded file {target_dir / path} has hash {final_hash} but remote hash is {remote_hash}"
         )
-    await aios.rename(partial_path, target_dir / path)
+    await aios.rename(temp_file_path, target_dir / path)
     on_progress(length, length, True)
     return target_dir / path
 
@@ -438,11 +495,13 @@ def calculate_repo_progress(
     )
 
 
-async def get_weight_map(repo_id: str, revision: str = "main") -> dict[str, str]:
+async def get_weight_map(
+    repo_id: str, revision: str = "main", endpoint: str | None = None
+) -> dict[str, str]:
     target_dir = (await ensure_models_dir()) / str(repo_id).replace("/", "--")
     await aios.makedirs(target_dir, exist_ok=True)
     index_file = await download_file_with_retry(
-        repo_id, revision, "model.safetensors.index.json", target_dir
+        repo_id, revision, "model.safetensors.index.json", target_dir, endpoint=endpoint
     )
     async with aiofiles.open(index_file, "r") as f:
         index_data = ModelSafetensorsIndex.model_validate_json(await f.read())
@@ -526,6 +585,7 @@ async def download_shard(
     max_parallel_downloads: int = 8,
     skip_download: bool = False,
     allow_patterns: list[str] | None = None,
+    endpoint: str | None = None,
 ) -> tuple[Path, RepoDownloadProgress]:
     if not skip_download:
         logger.info(f"Downloading {shard.model_meta.model_id=}")
@@ -554,7 +614,10 @@ async def download_shard(
     # TODO: currently not recursive. Some models might require subdirectories - thus this will need to be changed.
     #  Update: <- This does not seem to be the case. Yay?
     file_list = await fetch_file_list_with_cache(
-        str(shard.model_meta.model_id), revision, recursive=True
+        str(shard.model_meta.model_id),
+        revision,
+        recursive=True,
+        endpoint=endpoint,
     )
     filtered_file_list = list(
         filter_repo_objects(
@@ -639,6 +702,7 @@ async def download_shard(
                 lambda curr_bytes, total_bytes, is_renamed: on_progress_wrapper(
                     file, curr_bytes, total_bytes, is_renamed
                 ),
+                endpoint=endpoint,
             )
 
     if not skip_download:

@@ -53,11 +53,14 @@ class SingletonShardDownloader(ShardDownloader):
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self,
+        shard: ShardMetadata,
+        config_only: bool = False,
+        endpoint: str | None = None,
     ) -> Path:
         if shard not in self.active_downloads:
             self.active_downloads[shard] = asyncio.create_task(
-                self.shard_downloader.ensure_shard(shard, config_only)
+                self.shard_downloader.ensure_shard(shard, config_only, endpoint)
             )
         try:
             return await self.active_downloads[shard]
@@ -88,12 +91,17 @@ class CachedShardDownloader(ShardDownloader):
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self,
+        shard: ShardMetadata,
+        config_only: bool = False,
+        endpoint: str | None = None,
     ) -> Path:
         if (shard.model_meta.model_id, shard) in self.cache:
             return self.cache[(shard.model_meta.model_id, shard)]
 
-        target_dir = await self.shard_downloader.ensure_shard(shard, config_only)
+        target_dir = await self.shard_downloader.ensure_shard(
+            shard, config_only, endpoint
+        )
         self.cache[(shard.model_meta.model_id, shard)] = target_dir
         return target_dir
 
@@ -128,7 +136,10 @@ class ResumableShardDownloader(ShardDownloader):
         self.on_progress_callbacks.append(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self,
+        shard: ShardMetadata,
+        config_only: bool = False,
+        endpoint: str | None = None,
     ) -> Path:
         allow_patterns = ["config.json"] if config_only else None
 
@@ -137,6 +148,7 @@ class ResumableShardDownloader(ShardDownloader):
             self.on_progress_wrapper,
             max_parallel_downloads=self.max_parallel_downloads,
             allow_patterns=allow_patterns,
+            endpoint=endpoint,
         )
         return target_dir
 

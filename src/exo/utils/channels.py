@@ -128,9 +128,12 @@ class MpSender[T]:
         await to_thread.run_sync(self.send, item, limiter=CapacityLimiter(1))
 
     def close(self) -> None:
+        try:
+            self._state.buffer.put(_MpEndOfStream())
+        except (ValueError, AssertionError):
+            pass
         if not self._state.closed.is_set():
             self._state.closed.set()
-        self._state.buffer.put(_MpEndOfStream())
         self._state.buffer.close()
 
     # == unique to Mp channels ==
@@ -169,9 +172,6 @@ class MpReceiver[T]:
     _state: MpState[T] = field()
 
     def receive_nowait(self) -> T:
-        if self._state.closed.is_set():
-            raise ClosedResourceError
-
         try:
             item = self._state.buffer.get(block=False)
             if isinstance(item, _MpEndOfStream):
@@ -179,10 +179,14 @@ class MpReceiver[T]:
                 raise EndOfStream
             return item
         except Empty:
-            raise WouldBlock from None
+            pass
         except ValueError as e:
             print("Unreachable code path - let me know!")
             raise ClosedResourceError from e
+
+        if self._state.closed.is_set():
+            raise ClosedResourceError
+        raise WouldBlock from None
 
     def receive(self) -> T:
         try:

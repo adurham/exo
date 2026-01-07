@@ -22,6 +22,7 @@ from mlx_lm.models.qwen3_moe import Qwen3MoeSparseMoeBlock
 from exo.shared.types.worker.shards import (
     PipelineShardMetadata,
 )
+from exo.worker.runner.bootstrap import logger
 
 
 class _LayerCallable(Protocol):
@@ -216,6 +217,7 @@ def tensor_auto_parallel(
     )
 
     if isinstance(model, LlamaModel):
+        logger.info("Using LlamaShardingStrategy")
         tensor_parallel_sharding_strategy = LlamaShardingStrategy(
             group,
             all_to_sharded_linear,
@@ -224,6 +226,7 @@ def tensor_auto_parallel(
             sharded_to_all_linear_in_place,
         )
     elif isinstance(model, DeepseekV3Model):
+        logger.info("Using DeepSeekShardingStrategy")
         tensor_parallel_sharding_strategy = DeepSeekShardingStrategy(
             group,
             all_to_sharded_linear,
@@ -232,6 +235,7 @@ def tensor_auto_parallel(
             sharded_to_all_linear_in_place,
         )
     elif isinstance(model, Qwen3MoeModel):
+        logger.info("Using QwenShardingStrategy")
         tensor_parallel_sharding_strategy = QwenShardingStrategy(
             group,
             all_to_sharded_linear,
@@ -342,7 +346,10 @@ class ShardedDeepseekV3MoE(CustomMlxLayer):
 class QwenShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(self, model: nn.Module) -> nn.Module:
         model = cast(Qwen3MoeModel, model)
-        for layer in model.layers:
+        logger.info(f"Sharding Qwen3MoeModel with {len(model.layers)} layers")
+        for i, layer in enumerate(model.layers):
+            if i % 10 == 0:
+                logger.info(f"Sharding layer {i}")
             # Shard the self attention
             layer.self_attn.q_proj = self.all_to_sharded_linear(layer.self_attn.q_proj)
             layer.self_attn.k_proj = self.all_to_sharded_linear(layer.self_attn.k_proj)
@@ -365,7 +372,8 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
                 layer.mlp.gate_proj = self.all_to_sharded_linear(layer.mlp.gate_proj)
                 layer.mlp.down_proj = self.sharded_to_all_linear(layer.mlp.down_proj)
                 layer.mlp.up_proj = self.all_to_sharded_linear(layer.mlp.up_proj)
-
+        
+        logger.info("Finished sharding Qwen3MoeModel")
         return model
 
 

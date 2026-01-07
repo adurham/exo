@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import time
 from random import random
 
 import anyio
@@ -8,7 +9,12 @@ from loguru import logger
 
 from exo.routing.connection_message import ConnectionMessage, ConnectionMessageType
 from exo.shared.apply import apply
-from exo.shared.types.commands import ForwarderCommand, RequestEventLog
+from exo.shared.types.commands import (
+    CheckShardPresent,
+    ForwarderCommand,
+    RequestEventLog,
+    ShardPresent,
+)
 from exo.shared.types.common import NodeId, SessionId
 from exo.shared.types.events import (
     Event,
@@ -49,6 +55,7 @@ from exo.worker.download.download_utils import (
     map_repo_download_progress_to_download_progress_data,
 )
 from exo.worker.download.shard_downloader import RepoDownloadProgress, ShardDownloader
+from exo.worker.file_server import FileServer
 from exo.worker.plan import plan
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
 from exo.worker.utils import start_polling_memory_metrics, start_polling_node_metrics
@@ -65,9 +72,8 @@ class Worker:
         connection_message_receiver: Receiver[ConnectionMessage],
         global_event_receiver: Receiver[ForwarderEvent],
         local_event_sender: Sender[ForwarderEvent],
-        # This is for requesting updates. It doesn't need to be a general command sender right now,
-        # but I think it's the correct way to be thinking about commands
         command_sender: Sender[ForwarderCommand],
+        command_receiver: Receiver[ForwarderCommand],
     ):
         self.node_id: NodeId = node_id
         self.session_id: SessionId = session_id
@@ -79,6 +85,7 @@ class Worker:
         self.local_event_sender = local_event_sender
         self.local_event_index = 0
         self.command_sender = command_sender
+        self.command_receiver = command_receiver
         self.connection_message_receiver = connection_message_receiver
         self.event_buffer = OrderedBuffer[Event]()
         self.out_for_delivery: dict[EventId, ForwarderEvent] = {}
@@ -94,6 +101,10 @@ class Worker:
         self._nack_cap_seconds: float = 10.0
 
         self.event_sender, self.event_receiver = channel[Event]()
+
+        self.file_server = FileServer()
+        self.peer_locations: dict[ModelId, str] = {}
+        self.discovery_start_times: dict[ModelId, float] = {}
 
     async def run(self):
         logger.info("Starting Worker")
@@ -135,10 +146,14 @@ class Worker:
             tg.start_soon(self._event_applier)
             tg.start_soon(self._forward_events)
             tg.start_soon(self._poll_connection_updates)
+            tg.start_soon(self.file_server.start)
+            tg.start_soon(self._command_processor)
 
         # Actual shutdown code - waits for all tasks to complete before executing.
         self.local_event_sender.close()
         self.command_sender.close()
+        self.command_receiver.close()
+        await self.file_server.stop()
         for runner in self.runners.values():
             runner.shutdown()
 
@@ -344,6 +359,31 @@ class Worker:
         initial_progress: RepoDownloadProgress,
     ):
         """Manages the shard download process with progress tracking."""
+        model_id = task.shard_metadata.model_meta.model_id
+        endpoint = self.peer_locations.get(model_id)
+
+        if not endpoint and model_id not in self.discovery_start_times:
+            # Trigger discovery
+            logger.info(f"Triggering P2P discovery for {model_id}")
+            self.discovery_start_times[model_id] = time.time()
+            self.command_sender.send_nowait(
+                ForwarderCommand(
+                    origin=self.node_id,
+                    command=CheckShardPresent(model_id=str(model_id)),
+                )
+            )
+
+        if (
+            not endpoint
+            and model_id in self.discovery_start_times
+            and time.time() - self.discovery_start_times[model_id] < 1.0
+        ):
+            # Still waiting for discovery
+            return
+        
+        if not endpoint and model_id in self.discovery_start_times:
+             logger.info(f"P2P discovery timed out for {model_id}, falling back to default")
+
         status = DownloadOngoing(
             node_id=self.node_id,
             shard_metadata=task.shard_metadata,
@@ -394,7 +434,9 @@ class Worker:
 
         self.shard_downloader.on_progress(download_progress_callback)
         assert self._tg
-        self._tg.start_soon(self.shard_downloader.ensure_shard, task.shard_metadata)
+        self._tg.start_soon(
+            self.shard_downloader.ensure_shard, task.shard_metadata, False, endpoint
+        )
 
     async def _forward_events(self) -> None:
         with self.event_receiver as events:
@@ -483,3 +525,60 @@ class Worker:
                 await anyio.sleep(5 * 60)  # 5 minutes
         except Exception as e:
             logger.error(f"Error emitting existing download progress: {e}")
+
+    async def _command_processor(self):
+        with self.command_receiver as commands:
+            async for forwarder_command in commands:
+                command = forwarder_command.command
+                if isinstance(command, CheckShardPresent):
+                    self._handle_check_shard_present(forwarder_command.origin, command)
+                elif isinstance(command, ShardPresent):
+                    self._handle_shard_present(forwarder_command.origin, command)
+
+    def _handle_check_shard_present(self, origin: NodeId, command: CheckShardPresent):
+        if origin == self.node_id:
+            return
+        has_it = self.has_shard(ModelId(command.model_id))
+        logger.debug(f"Received CheckShardPresent from {origin} for {command.model_id}. has_it={has_it}")
+        if has_it:
+            port = self.file_server.port
+            if port == 0:
+                logger.warning("FileServer port is 0, cannot respond to CheckShardPresent")
+                return
+            self.command_sender.send_nowait(
+                ForwarderCommand(
+                    origin=self.node_id,
+                    command=ShardPresent(
+                        model_id=command.model_id,
+                        base_url=f"http://placeholder:{port}",
+                        request_command_id=command.command_id,
+                    ),
+                )
+            )
+
+    def _handle_shard_present(self, origin: NodeId, command: ShardPresent):
+        # find connection to origin
+        best_conn = None
+        for _, conn in self.state.topology.out_edges(self.node_id):
+            if conn.send_back_node_id == origin:
+                if conn.is_thunderbolt():
+                    best_conn = conn
+                    break
+                if best_conn is None:
+                    best_conn = conn
+
+        if best_conn:
+            ip = best_conn.send_back_multiaddr.ip_address or "127.0.0.1"
+            port = command.base_url.split(":")[-1]  # hacky parsing
+            url = f"http://{ip}:{port}"
+            self.peer_locations[ModelId(command.model_id)] = url
+            logger.info(
+                f"Discovered peer for {command.model_id} at {url} (from {origin}). TB={best_conn.is_thunderbolt()}"
+            )
+            return
+
+        logger.warning(f"Received ShardPresent from {origin} but no connection found")
+
+    def has_shard(self, model_id: ModelId) -> bool:
+        status = self.download_status.get(model_id)
+        return status is not None and isinstance(status, DownloadCompleted)

@@ -1,5 +1,6 @@
 import socket
 import sys
+import subprocess
 from subprocess import CalledProcessError
 
 import psutil
@@ -36,18 +37,65 @@ def get_network_interfaces() -> list[NetworkInterfaceInfo]:
     Returns a list of NetworkInterfaceInfo objects.
     """
     interfaces_info: list[NetworkInterfaceInfo] = []
+    thunderbolt_interfaces = get_thunderbolt_interface_names()
 
     for iface, services in psutil.net_if_addrs().items():
         for service in services:
             match service.family:
                 case socket.AF_INET | socket.AF_INET6:
                     interfaces_info.append(
-                        NetworkInterfaceInfo(name=iface, ip_address=service.address)
+                        NetworkInterfaceInfo(
+                            name=iface,
+                            ip_address=service.address,
+                            is_thunderbolt=iface in thunderbolt_interfaces,
+                        )
                     )
                 case _:
                     pass
 
     return interfaces_info
+
+
+def get_thunderbolt_interface_names() -> set[str]:
+    """
+    Parses 'networksetup -listallhardwareports' to find interfaces associated with Thunderbolt.
+    Returns a set of device names (e.g., {'en1', 'bridge0'}).
+    """
+    if sys.platform != "darwin":
+        return set()
+
+    try:
+        # Run the command synchronously since this is called in a blocking context
+        output = subprocess.check_output(
+            ["networksetup", "-listallhardwareports"], text=True
+        )
+    except (CalledProcessError, FileNotFoundError):
+        return set()
+
+    thunderbolt_devices = set()
+    lines = output.splitlines()
+    
+    # Iterate through lines looking for "Hardware Port: ...Thunderbolt..."
+    # The format is:
+    # Hardware Port: Thunderbolt 1
+    # Device: en1
+    # Ethernet Address: ...
+    
+    current_port_is_thunderbolt = False
+    
+    for line in lines:
+        if line.startswith("Hardware Port:"):
+            if "Thunderbolt" in line:
+                current_port_is_thunderbolt = True
+            else:
+                current_port_is_thunderbolt = False
+        elif line.startswith("Device:") and current_port_is_thunderbolt:
+            parts = line.split(": ")
+            if len(parts) > 1:
+                device = parts[1].strip()
+                thunderbolt_devices.add(device)
+
+    return thunderbolt_devices
 
 
 async def get_model_and_chip() -> tuple[str, str]:

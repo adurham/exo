@@ -71,6 +71,7 @@ class Node:
                 global_event_receiver=router.receiver(topics.GLOBAL_EVENTS),
                 local_event_sender=router.sender(topics.LOCAL_EVENTS),
                 command_sender=router.sender(topics.COMMANDS),
+                command_receiver=router.receiver(topics.COMMANDS),
             )
         else:
             worker = None
@@ -184,6 +185,7 @@ class Node:
                             ),
                             local_event_sender=self.router.sender(topics.LOCAL_EVENTS),
                             command_sender=self.router.sender(topics.COMMANDS),
+                            command_receiver=self.router.receiver(topics.COMMANDS),
                         )
                         self._tg.start_soon(self.worker.run)
                     if self.api:

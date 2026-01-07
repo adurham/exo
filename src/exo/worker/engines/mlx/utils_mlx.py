@@ -209,7 +209,9 @@ def shard_and_load(
     group: Group,
 ) -> tuple[nn.Module, TokenizerWrapper]:
     model_path = build_model_path(shard_metadata.model_meta.model_id)
+    logger.info(f"Model path built/verified: {model_path}")
 
+    logger.info(f"Loading model from {model_path} with lazy=True")
     model, _ = load_model(model_path, lazy=True, strict=False)
     logger.debug(model)
     if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
@@ -243,16 +245,28 @@ def shard_and_load(
             logger.info(f"loading model from {model_path} with pipeline parallelism")
             model = pipeline_auto_parallel(model, group, shard_metadata)
 
-    mx.eval(model.parameters())
+    logger.info("Evaluating model parameters...")
+    logger.info("Evaluating model parameters layer by layer...")
+    import gc
+    if hasattr(model, "layers"):
+        for i, layer in enumerate(model.layers):
+            mx.eval(layer.parameters())
+            if i % 10 == 0:
+                gc.collect()
+                logger.debug(f"Evaluated layer {i}")
+    else:
+        mx.eval(model.parameters())
 
-    # TODO: Do we need this?
-    mx.eval(model)
+    # logger.info("Evaluating entire model...")
+    # mx.eval(model)
 
     logger.debug("SHARDED")
     logger.debug(model)
 
     # Synchronize processes before generation to avoid timeout
+    logger.info("Synchronizing processes (mx_barrier)...")
     mx_barrier(group)
+    logger.info("Synchronization complete.")
 
     return model, tokenizer
 
@@ -346,7 +360,14 @@ def make_kv_cache(
     if max_kv_size is None:
         if KV_CACHE_BITS is None:
             logger.info("Using default KV cache")
-            return [KVCache() for _ in model.layers]
+            cache = []
+            for i, _ in enumerate(model.layers):
+                log_every = 50 if len(model.layers) > 10 else 1
+                if i % log_every == 0:
+                    logger.info(f"Creating KVCache for layer {i}...")
+                cache.append(KVCache())
+            logger.info("Finished creating KVCache list")
+            return cache
         else:
             logger.info("Using quantized KV cache")
             return [

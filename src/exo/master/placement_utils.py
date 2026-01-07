@@ -289,18 +289,36 @@ def _find_interface_name_for_ip(
 def _find_ip_prioritised(
     node: NodeInfo, other_node: NodeInfo, cycle_digraph: Topology
 ) -> str | None:
-    # TODO: Actually prioritize in the correct Ethernet > Wifi > Non-TB > TB order.
     """Find an IP address between nodes with prioritization.
 
     Priority order:
-    1. en0 (Ethernet on Mac Studio, WiFi on MacBook)
-    2. en1 (WiFi on Mac Studio, Ethernet on MacBook)
-    3. Non-Thunderbolt connections
+    1. Thunderbolt connections (is_thunderbolt=True)
+    2. en0 (Ethernet on Mac Studio, WiFi on MacBook)
+    3. en1 (WiFi on Mac Studio, Ethernet on MacBook)
     4. Any other IP address
     """
     ips = list(_find_connection_ip(node, other_node, cycle_digraph))
-    # We expect a unique iface -> ip mapping
-    iface_map = {_find_interface_name_for_ip(ip, other_node): ip for ip, _ in ips}
+    
+    # 1. Prioritize Thunderbolt (via is_thunderbolt flag)
+    # We need to find if any of the candidate IPs map to a Thunderbolt interface on `other_node`.
+    # `ips` contains (ip_address, is_thunderbolt_range_check) tuples.
+    
+    # Create a map of IP -> is_thunderbolt from the node profile
+    ip_to_is_thunderbolt = {}
+    if other_node.node_profile:
+        for iface in other_node.node_profile.network_interfaces:
+            ip_to_is_thunderbolt[iface.ip_address] = iface.is_thunderbolt
+            
+    for ip, _ in ips:
+        if ip_to_is_thunderbolt.get(ip, False):
+            return ip
+
+    # 2. Prioritize IP-based Thunderbolt detection (fallback)
+    thunderbolt_ip = next(
+        (ip for (ip, is_thunderbolt) in ips if is_thunderbolt), None
+    )
+    if thunderbolt_ip:
+        return thunderbolt_ip
 
     en0_ip = iface_map.get("en0")
     if en0_ip:
@@ -309,13 +327,6 @@ def _find_ip_prioritised(
     en1_ip = iface_map.get("en1")
     if en1_ip:
         return en1_ip
-
-    non_thunderbolt_ip = next(
-        (ip for (ip, is_thunderbolt) in ips if not is_thunderbolt), None
-    )
-
-    if non_thunderbolt_ip:
-        return non_thunderbolt_ip
 
     if ips:
         return ips[0][0]
