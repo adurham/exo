@@ -24,7 +24,8 @@
 	let showDownloadModal = $state(false);
 	let selectedModelToDownload = $state("");
 	let isDownloadStarting = $state(false);
-	let isDeleting = $state(false);
+	// Track resizing set of models currently being deleted
+	let deletingModels = $state<Set<string>>(new Set());
 	let toastMessage = $state<{
 		message: string;
 		type: "success" | "error";
@@ -76,16 +77,25 @@
 		)
 			return;
 
-		isDeleting = true;
+		const next = new Set(deletingModels);
+		next.add(modelId);
+		deletingModels = next;
+
 		try {
 			await deleteModel(modelId);
 			showToast(`Deletion started for ${modelId}`);
+			// Poll for state updates to remove it from the list once actually gone
 			setTimeout(refreshState, 1000);
+			setTimeout(refreshState, 3000);
 		} catch (e) {
 			showToast(`Failed to delete model: ${e}`, "error");
-		} finally {
-			isDeleting = false;
+			// Remove from deleting set on error so user can try again
+			const nextErr = new Set(deletingModels);
+			nextErr.delete(modelId);
+			deletingModels = nextErr;
 		}
+		// Note: We deliberately don't remove it from 'deletingModels' in success case immediately
+		// so it stays in "Deleting..." state until it disappears from the list or user refreshes.
 	}
 
 	type ModelEntry = {
@@ -592,32 +602,66 @@
 											{pct.toFixed(1)}%
 										</span>
 										{#if model.status === "completed"}
-											<button
-												type="button"
-												class="text-exo-light-gray hover:text-red-400 transition-colors p-1"
-												onclick={(e) => {
-													e.stopPropagation();
-													handleDeleteModel(
-														model.modelId,
-													);
-												}}
-												title="Delete model from all nodes"
-												disabled={isDeleting}
-											>
-												<svg
-													class="w-3.5 h-3.5"
-													fill="none"
-													viewBox="0 0 24 24"
-													stroke="currentColor"
+											{@const isThisDeleting =
+												deletingModels.has(
+													model.modelId,
+												)}
+											{#if isThisDeleting}
+												<div
+													class="flex items-center gap-1.5 px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded"
 												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-													/>
-												</svg>
-											</button>
+													<svg
+														class="animate-spin h-3 w-3 text-red-400"
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+													>
+														<circle
+															class="opacity-25"
+															cx="12"
+															cy="12"
+															r="10"
+															stroke="currentColor"
+															stroke-width="4"
+														></circle>
+														<path
+															class="opacity-75"
+															fill="currentColor"
+															d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+														></path>
+													</svg>
+													<span
+														class="text-[10px] uppercase font-mono text-red-400"
+														>Deleting...</span
+													>
+												</div>
+											{:else}
+												<button
+													type="button"
+													class="text-exo-light-gray hover:text-red-400 transition-colors p-1"
+													onclick={(e) => {
+														e.stopPropagation();
+														handleDeleteModel(
+															model.modelId,
+														);
+													}}
+													title="Delete model from all nodes"
+												>
+													<svg
+														class="w-3.5 h-3.5"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke="currentColor"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															stroke-width="2"
+															d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+														/>
+													</svg>
+												</button>
+											{/if}
 										{/if}
 										<button
 											type="button"
