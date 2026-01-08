@@ -138,11 +138,32 @@ async def ensure_models_dir() -> Path:
     return EXO_MODELS_DIR
 
 
+async def _background_delete(path: Path):
+    try:
+        await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+    except Exception as e:
+        logger.error(f"Error deleting trash directory {path}: {e}")
+
+
 async def delete_model(repo_id: str) -> bool:
-    model_dir = await ensure_models_dir() / repo_id.replace("/", "--")
+    import uuid
+    
+    models_dir = await ensure_models_dir()
+    model_dir = models_dir / repo_id.replace("/", "--")
+    
     if not await aios.path.exists(model_dir):
         return False
-    await asyncio.to_thread(shutil.rmtree, model_dir, ignore_errors=False)
+
+    # Move to trash dir for "instant" deletion
+    trash_dir = models_dir / f".trash_{uuid.uuid4()}_{model_dir.name}"
+    try:
+        await aios.rename(model_dir, trash_dir)
+    except Exception as e:
+        logger.error(f"Failed to move model {repo_id} to trash: {e}")
+        return False
+
+    # Delete in background
+    asyncio.create_task(_background_delete(trash_dir))
     return True
 
 

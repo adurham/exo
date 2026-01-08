@@ -68,4 +68,53 @@ async def test_download_file_reports_cumulative_progress(tmp_path):
             call(200, 200, True),
         ]
         
+        
         on_progress.assert_has_calls(expected_calls)
+
+@pytest.mark.asyncio
+async def test_delete_model_instant_trash(tmp_path):
+    """
+    Verify that delete_model renames the directory immediately (instant for user)
+    and then deletes it in the background.
+    """
+    from exo.worker.download.download_utils import delete_model
+    import shutil
+    import os
+    
+    # Needs to patch ensure_models_dir to use tmp_path
+    with patch("exo.worker.download.download_utils.EXO_MODELS_DIR", tmp_path):
+        # Create a dummy model
+        repo_id = "test/model"
+        model_name = repo_id.replace("/", "--")
+        model_dir = tmp_path / model_name
+        model_dir.mkdir()
+        (model_dir / "weights.bin").write_bytes(b"0" * 1024)
+        
+        assert model_dir.exists()
+        
+        # Call delete_model
+        # We need to verify it returns quickly, but in a unit test checking filesystem state is better
+        result = await delete_model(repo_id)
+        
+        assert result is True
+        assert not model_dir.exists(), "Model directory should be gone immediately (renamed)"
+        
+        # Check that a trash directory exists (briefly) or was deleted
+        # Since the background task runs immediately, it might be gone already or still there.
+        # But we want to ensure the background task was at least scheduled.
+        
+        # Let's wait for background tasks to finish.
+        # Since _background_delete is a fire-and-forget task, we can't await it directly easily without returning it.
+        # But we can wait for the file to disappear.
+        
+        async def wait_for_trash_cleanup():
+            for _ in range(50):
+                trash_dirs = list(tmp_path.glob(f".trash_*_{model_name}"))
+                if not trash_dirs:
+                    return True
+                await asyncio.sleep(0.01)
+            return False
+
+        cleanup_success = await wait_for_trash_cleanup()
+        assert cleanup_success, "Trash directory was not cleaned up in background"
+
