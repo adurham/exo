@@ -82,3 +82,11 @@ pro-tip: Python's type system is quite complex and feature-rich, so reading the 
 *   capitalize the subject line.
 *   do not end the subject line with a period.
 *   separate subject from body with a blank line.
+
+## Feature Request Workflow
+
+*   add tests for all changes since upstream/main.
+    *   make sure they all pass.
+*   make sure exo runs and you can hit localhost:52415.
+*   make sure to stop exo locally.
+*   if all above passes then commit and push.

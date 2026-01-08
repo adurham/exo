@@ -8,7 +8,8 @@ from exo.shared.constants import EXO_MODELS_DIR
 
 
 class FileServer:
-    def __init__(self, port: int = 0):
+    def __init__(self, node_id: str, port: int = 0):
+        self.node_id = node_id
         self.app = web.Application()
         self.runner: Optional[web.AppRunner] = None
         self.site: Optional[web.TCPSite] = None
@@ -18,6 +19,7 @@ class FileServer:
 
     def _setup_routes(self):
         # HF API mimicry
+        self.app.router.add_get("/node_id", self.get_node_id)
         self.app.router.add_get(
             "/api/models/{org}/{model}/tree/{revision}/{path:.*}", self.list_files
         )
@@ -119,3 +121,6 @@ class FileServer:
             return web.Response(headers=headers)
 
         return web.FileResponse(file_path, headers=headers)
+
+    async def get_node_id(self, request: web.Request) -> web.Response:
+        return web.Response(text=self.node_id)

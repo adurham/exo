@@ -62,3 +62,11 @@ If you spot a rule violation within code that you've not been asked to work on d
 ### One-Sentence Summary
 
 Write strictly-typed, pure, self-describing Python that uses Pydantic, well-scoped side-effects, immutable state, approved dependencies, and explicit error handling
+
+## 10. Feature Request Workflow
+
+*   Add tests for all changes since upstream/main.
+    *   Make sure they all pass.
+*   Make sure exo runs and you can hit localhost:52415.
+*   Make sure to stop exo locally.
+*   If all above passes then commit and push.

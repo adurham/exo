@@ -27,6 +27,7 @@ from exo.shared.types.events import (
     ForwarderEvent,
     IndexedEvent,
     InstanceDeleted,
+    NodePerformanceMeasured,
     NodeTimedOut,
     TaskCreated,
     TaskDeleted,
@@ -42,6 +43,7 @@ from exo.shared.types.tasks import (
 from exo.shared.types.worker.instances import InstanceId
 from exo.utils.channels import Receiver, Sender, channel
 from exo.utils.event_buffer import MultiSourceBuffer
+from exo.worker.utils.net_profile import check_reachable
 
 
 class Master:
@@ -212,11 +214,32 @@ class Master:
                         break
 
             # time out dead nodes
-            for node_id, time in self.state.last_seen.items():
-                now = datetime.now(tz=timezone.utc)
-                if now - time > timedelta(seconds=30):
-                    logger.info(f"Manually removing node {node_id} due to inactivity")
-                    await self.event_sender.send(NodeTimedOut(node_id=node_id))
+            stale_nodes = []
+            now = datetime.now(tz=timezone.utc)
+            for node_id, timestamp in self.state.last_seen.items():
+                if now - timestamp > timedelta(seconds=30):
+                    stale_nodes.append(node_id)
+
+            if stale_nodes:
+                logger.info(f"Checking health of nodes: {stale_nodes}")
+                reachable = await check_reachable(self.state.topology, self.node_id)
+                for node_id in stale_nodes:
+                    if node_id in reachable:
+                        logger.info(
+                            f"Node {node_id} is silent but reachable, updating last_seen"
+                        )
+                        # Emulate a heartbeat by re-sending the last known profile
+                        if node_id in self.state.node_profiles:
+                            await self.event_sender.send(
+                                NodePerformanceMeasured(
+                                    node_id=node_id,
+                                    node_profile=self.state.node_profiles[node_id],
+                                    when=str(datetime.now(tz=timezone.utc)),
+                                )
+                            )
+                    else:
+                        logger.info(f"Manually removing node {node_id} due to inactivity")
+                        await self.event_sender.send(NodeTimedOut(node_id=node_id))
 
             await anyio.sleep(10)
 
