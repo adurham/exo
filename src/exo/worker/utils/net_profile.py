@@ -30,7 +30,9 @@ async def check_reachability(
                 body = body[1:-1]
 
             return NodeId(body) or None
-        except OSError:
+        except Exception:
+            # If the probe fails for any reason (connection refused, bad status line, timeout, etc.)
+            # just return None so we don't crash the worker.
             return None
         finally:
             connection.close()
