@@ -2706,7 +2706,7 @@
 														? undefined
 														: val;
 												}}
-												class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-white/80 focus:outline-none focus:border-exo-yellow/50"
+												class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-white/80 placeholder:text-exo-yellow focus:outline-none focus:border-exo-yellow/50"
 											/>
 										</div>
 
@@ -2748,7 +2748,7 @@
 														? `Model Max (${contextLen})`
 														: "Default (Model Max)"}
 													disabled
-													class="w-full bg-exo-black/30 border border-white/5 rounded px-2 py-1.5 text-xs font-mono text-white/50 cursor-not-allowed"
+													class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-exo-yellow cursor-not-allowed"
 												/>
 											{:else}
 												<input
@@ -2766,7 +2766,7 @@
 															? undefined
 															: val;
 													}}
-													class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-white/80 focus:outline-none focus:border-exo-yellow/50"
+													class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-white/80 placeholder:text-exo-yellow focus:outline-none focus:border-exo-yellow/50"
 												/>
 											{/if}
 										</div>
