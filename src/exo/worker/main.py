@@ -642,7 +642,7 @@ class Worker:
         best_conn = None
         for _, conn in self.state.topology.out_edges(self.node_id):
             if conn.send_back_node_id == origin:
-                if conn.is_thunderbolt():
+                if self._is_connection_thunderbolt(conn):
                     best_conn = conn
                     break
                 if best_conn is None:
@@ -654,11 +654,24 @@ class Worker:
             url = f"http://{ip}:{port}"
             self.peer_locations[ModelId(command.model_id)] = url
             logger.info(
-                f"Discovered peer for {command.model_id} at {url} (from {origin}). TB={best_conn.is_thunderbolt()}"
+                f"Discovered peer for {command.model_id} at {url} (from {origin}). TB={self._is_connection_thunderbolt(best_conn)}"
             )
             return
 
         logger.warning(f"Received ShardPresent from {origin} but no connection found")
+
+    def _is_connection_thunderbolt(self, conn: Connection) -> bool:
+        if conn.is_thunderbolt():
+            return True
+        
+        # Fallback: Check node profile for interface metadata
+        profile = self.state.topology.get_node_profile(conn.send_back_node_id)
+        if profile:
+            target_ip = conn.send_back_multiaddr.ip_address
+            for iface in profile.network_interfaces:
+                if iface.ip_address == target_ip and iface.is_thunderbolt:
+                    return True
+        return False
 
     def has_shard(self, model_id: ModelId) -> bool:
         status = self.download_status.get(model_id)

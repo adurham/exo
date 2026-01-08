@@ -453,7 +453,7 @@ async def _download_file(
                 
                 downloaded_so_far = resume_byte_pos
                 async with aiofiles.open(temp_file_path, mode) as f:
-                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                    async for chunk in response.content.iter_chunked(8 * 1024 * 1024):
                         if not chunk:
                             break
                         await f.write(chunk)
@@ -673,9 +673,14 @@ async def download_shard(
     )
     file_progress: dict[str, RepoFileDownloadProgress] = {}
 
+    last_progress_emit_time = 0.0
+
     def on_progress_wrapper(
         file: FileListEntry, curr_bytes: int, total_bytes: int, is_renamed: bool
     ):
+        nonlocal last_progress_emit_time
+        
+        # Always calculate state to keep internal tracking correct
         start_time = (
             file_progress[file.path].start_time
             if file.path in file_progress
@@ -697,6 +702,9 @@ async def download_shard(
             if speed > 0
             else timedelta(seconds=0)
         )
+        
+        is_complete = curr_bytes == total_bytes and is_renamed
+        
         file_progress[file.path] = RepoFileDownloadProgress(
             repo_id=str(shard.model_meta.model_id),
             repo_revision=revision,
@@ -706,21 +714,24 @@ async def download_shard(
             total=Memory.from_bytes(total_bytes),
             speed=speed,
             eta=eta,
-            status="complete"
-            if curr_bytes == total_bytes and is_renamed
-            else "in_progress",
+            status="complete" if is_complete else "in_progress",
             start_time=start_time,
         )
-        on_progress(
-            shard,
-            calculate_repo_progress(
+
+        # Throttle progress updates to ~5Hz (every 200ms), but always emit completion
+        now = time.time()
+        if is_complete or (now - last_progress_emit_time >= 0.2):
+            last_progress_emit_time = now
+            on_progress(
                 shard,
-                str(shard.model_meta.model_id),
-                revision,
-                file_progress,
-                all_start_time,
-            ),
-        )
+                calculate_repo_progress(
+                    shard,
+                    str(shard.model_meta.model_id),
+                    revision,
+                    file_progress,
+                    all_start_time,
+                ),
+            )
 
     for file in filtered_file_list:
         downloaded_bytes = await get_downloaded_size(target_dir / file.path)
