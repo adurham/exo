@@ -179,7 +179,7 @@ class API:
         self.app.delete("/instance/{instance_id}")(self.delete_instance)
         self.app.get("/models")(self.get_models)
         self.app.post("/models/download")(self.start_download_model)
-        self.app.delete("/models/{model_id}")(self.delete_model_command)
+        self.app.delete("/models/{model_id:path}")(self.delete_model_command)
         self.app.get("/v1/models")(self.get_models)
         self.app.post("/v1/chat/completions", response_model=None)(
             self.chat_completions
