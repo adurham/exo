@@ -6,3 +6,4 @@ def test_qwen3_235b_model_id():
     card = MODEL_CARDS["qwen3-235b-a22b-6bit"]
     assert card.model_id == "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit"
     assert card.metadata.model_id == "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit"
+    assert card.metadata.max_sequence_length == 262144

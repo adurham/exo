@@ -55,7 +55,12 @@
 
 	// Instance launch state
 	let models = $state<
-		Array<{ id: string; name?: string; storage_size_megabytes?: number }>
+		Array<{
+			id: string;
+			name?: string;
+			storage_size_megabytes?: number;
+			context_length?: number;
+		}>
 	>([]);
 	let selectedSharding = $state<"Pipeline" | "Tensor">("Pipeline");
 	type InstanceMeta = "MlxRing" | "MlxIbv" | "MlxJaccl";
@@ -83,6 +88,12 @@
 			sharding: selectedSharding,
 			instanceType: selectedInstanceType,
 			minNodes: selectedMinNodes,
+			config: {
+				max_input_tokens: maxInputTokens,
+				max_output_tokens: maxOutputTokens,
+				temperature: temperature,
+				kv_cache_bits: kvCacheBits,
+			},
 		};
 		try {
 			localStorage.setItem(LAUNCH_DEFAULTS_KEY, JSON.stringify(defaults));
@@ -122,6 +133,23 @@
 			selectedMinNodes = defaults.minNodes;
 		}
 
+		// Apply config if present
+		if (defaults.config) {
+			// Don't override maxInputTokens here as we want to default to Model Max
+			// unless explicitly saved? Or maybe we should not save it if it's model max.
+			// For now, let's respect the user's saved choice if it exists, otherwise use defaults.
+			if (defaults.config.max_input_tokens !== undefined) {
+				maxInputTokens = defaults.config.max_input_tokens;
+				useModelMaxInputTokens = false;
+			}
+			if (defaults.config.max_output_tokens !== undefined)
+				maxOutputTokens = defaults.config.max_output_tokens;
+			if (defaults.config.temperature !== undefined)
+				temperature = defaults.config.temperature;
+			if (defaults.config.kv_cache_bits !== undefined)
+				kvCacheBits = defaults.config.kv_cache_bits;
+		}
+
 		// Only apply model if it exists in the available models
 		if (
 			defaults.modelId &&
@@ -141,7 +169,24 @@
 	let maxInputTokens = $state<number | undefined>(undefined);
 	let maxOutputTokens = $state<number | undefined>(undefined);
 	let temperature = $state<number | undefined>(undefined);
-	let kvCacheBits = $state<number | undefined>(undefined);
+	let kvCacheBits = $state<number | undefined>(0);
+	let useModelMaxInputTokens = $state(true);
+
+	// Effect to update maxInputTokens when using model max
+	$effect(() => {
+		if (useModelMaxInputTokens && models.length > 0) {
+			const m = models.find((m) => m.id === selectedPreviewModelId());
+			// Only update if we found a model and it has a context length
+			if (m?.context_length && m.context_length > 0) {
+				maxInputTokens = m.context_length;
+			} else if (useModelMaxInputTokens) {
+				// If model max is selected but unknown/0, we might want to clear it to default
+				// or keep it undefined
+				maxInputTokens = undefined;
+			}
+		}
+	});
+
 	let showAdvancedKey = "exo-show-advanced-launch";
 	let showAdvanced = $state(false);
 
@@ -2668,24 +2713,62 @@
 										<!-- Max Input Tokens (Context) -->
 										<div>
 											<div
-												class="text-[10px] text-white/40 font-mono mb-1.5 uppercase tracking-wider"
+												class="flex justify-between items-center mb-1.5"
 											>
-												Max Input Tokens (Context)
+												<div
+													class="text-[10px] text-white/40 font-mono uppercase tracking-wider"
+												>
+													Max Input Tokens (Context)
+												</div>
+												<button
+													class="text-[10px] font-mono uppercase tracking-wider hover:text-exo-yellow transition-colors {useModelMaxInputTokens
+														? 'text-exo-yellow'
+														: 'text-white/40'}"
+													onclick={() => {
+														useModelMaxInputTokens =
+															!useModelMaxInputTokens;
+													}}
+												>
+													{useModelMaxInputTokens
+														? "USING MODEL MAX"
+														: "CUSTOM"}
+												</button>
 											</div>
-											<input
-												type="number"
-												placeholder="Default"
-												value={maxInputTokens ?? ""}
-												oninput={(e) => {
-													const val = parseInt(
-														e.currentTarget.value,
-													);
-													maxInputTokens = isNaN(val)
-														? undefined
-														: val;
-												}}
-												class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-white/80 focus:outline-none focus:border-exo-yellow/50"
-											/>
+											{#if useModelMaxInputTokens}
+												{@const m = models.find(
+													(m) =>
+														m.id ===
+														selectedModelId,
+												)}
+												{@const contextLen =
+													m?.context_length}
+												<input
+													type="text"
+													value={contextLen
+														? `Model Max (${contextLen})`
+														: "Default (Model Max)"}
+													disabled
+													class="w-full bg-exo-black/30 border border-white/5 rounded px-2 py-1.5 text-xs font-mono text-white/50 cursor-not-allowed"
+												/>
+											{:else}
+												<input
+													type="number"
+													placeholder="Default"
+													value={maxInputTokens ?? ""}
+													oninput={(e) => {
+														const val = parseInt(
+															e.currentTarget
+																.value,
+														);
+														maxInputTokens = isNaN(
+															val,
+														)
+															? undefined
+															: val;
+													}}
+													class="w-full bg-exo-black/30 border border-white/10 rounded px-2 py-1.5 text-xs font-mono text-white/80 focus:outline-none focus:border-exo-yellow/50"
+												/>
+											{/if}
 										</div>
 									</div>
 								{/if}

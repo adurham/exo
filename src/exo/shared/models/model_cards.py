@@ -53,6 +53,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=61,
             hidden_size=7168,
             supports_tensor=True,
+            max_sequence_length=163840,
         ),
     ),
     "deepseek-v3.1-8bit": ModelCard(
@@ -68,6 +69,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=61,
             hidden_size=7168,
             supports_tensor=True,
+            max_sequence_length=163840,
         ),
     ),
     # "deepseek-v3.2": ModelCard(
@@ -141,6 +143,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=61,
             hidden_size=7168,
             supports_tensor=True,
+            max_sequence_length=128000,
         ),
     ),
     "kimi-k2-thinking": ModelCard(
@@ -156,6 +159,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=61,
             hidden_size=7168,
             supports_tensor=True,
+            max_sequence_length=128000,
         ),
     ),
     # llama-3.1
@@ -172,6 +176,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=32,
             hidden_size=4096,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.1-8b-8bit": ModelCard(
@@ -187,6 +192,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=32,
             hidden_size=4096,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.1-8b-bf16": ModelCard(
@@ -202,6 +208,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=32,
             hidden_size=4096,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.1-70b": ModelCard(
@@ -217,6 +224,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=80,
             hidden_size=8192,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     # llama-3.2
@@ -233,6 +241,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=16,
             hidden_size=2048,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.2-3b": ModelCard(
@@ -248,6 +257,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=28,
             hidden_size=3072,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.2-3b-8bit": ModelCard(
@@ -263,6 +273,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=28,
             hidden_size=3072,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     # llama-3.3
@@ -279,6 +290,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=80,
             hidden_size=8192,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.3-70b-8bit": ModelCard(
@@ -294,6 +306,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=80,
             hidden_size=8192,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     "llama-3.3-70b-fp16": ModelCard(
@@ -309,6 +322,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=80,
             hidden_size=8192,
             supports_tensor=True,
+            max_sequence_length=131072,
         ),
     ),
     # qwen3
@@ -445,6 +459,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=94,
             hidden_size=4096,
             supports_tensor=True,
+            max_sequence_length=262144,
         ),
     ),
     "qwen3-235b-a22b-6bit": ModelCard(
@@ -460,6 +475,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=94,
             hidden_size=4096,
             supports_tensor=True,
+            max_sequence_length=262144,
         ),
     ),
     "qwen3-235b-a22b-8bit": ModelCard(
@@ -475,6 +491,7 @@ MODEL_CARDS: dict[str, ModelCard] = {
             n_layers=94,
             hidden_size=4096,
             supports_tensor=True,
+            max_sequence_length=262144,
         ),
     ),
     "qwen3-coder-480b-a35b-4bit": ModelCard(
