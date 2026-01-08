@@ -25,6 +25,19 @@
 	let selectedModelToDownload = $state("");
 	let isDownloadStarting = $state(false);
 	let isDeleting = $state(false);
+	let toastMessage = $state<{
+		message: string;
+		type: "success" | "error";
+	} | null>(null);
+	let toastTimeout: ReturnType<typeof setTimeout>;
+
+	function showToast(message: string, type: "success" | "error" = "success") {
+		toastMessage = { message, type };
+		if (toastTimeout) clearTimeout(toastTimeout);
+		toastTimeout = setTimeout(() => {
+			toastMessage = null;
+		}, 3000);
+	}
 
 	async function fetchAllModels() {
 		try {
@@ -45,10 +58,11 @@
 			await downloadModel(selectedModelToDownload);
 			showDownloadModal = false;
 			selectedModelToDownload = "";
+			showToast(`Download started for ${selectedModelToDownload}`);
 			// Give it a moment to propagate
 			setTimeout(refreshState, 1000);
 		} catch (e) {
-			alert(`Failed to start download: ${e}`);
+			showToast(`Failed to start download: ${e}`, "error");
 		} finally {
 			isDownloadStarting = false;
 		}
@@ -65,9 +79,10 @@
 		isDeleting = true;
 		try {
 			await deleteModel(modelId);
+			showToast(`Deletion started for ${modelId}`);
 			setTimeout(refreshState, 1000);
 		} catch (e) {
-			alert(`Failed to delete model: ${e}`);
+			showToast(`Failed to delete model: ${e}`, "error");
 		} finally {
 			isDeleting = false;
 		}
@@ -810,6 +825,46 @@
 					</div>
 				</div>
 			</div>
+		</div>
+	{/if}
+
+	{#if toastMessage}
+		<div
+			class="fixed bottom-6 right-6 z-50 px-4 py-3 rounded shadow-xl border flex items-center gap-3 animate-slide-up bg-exo-dark-gray text-white {toastMessage.type ===
+			'success'
+				? 'border-exo-yellow/50'
+				: 'border-red-500/50'}"
+		>
+			{#if toastMessage.type === "success"}
+				<svg
+					class="w-5 h-5 text-exo-yellow"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M5 13l4 4L19 7"
+					/>
+				</svg>
+			{:else}
+				<svg
+					class="w-5 h-5 text-red-500"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M6 18L18 6M6 6l12 12"
+					/>
+				</svg>
+			{/if}
+			<span class="font-mono text-sm">{toastMessage.message}</span>
 		</div>
 	{/if}
 </div>
