@@ -467,8 +467,14 @@
 			<button
 				type={loading ? "button" : "submit"}
 				disabled={!canSend && !loading}
-				onclick={loading ? () => stopGeneration() : undefined}
-				class="px-2.5 sm:px-4 py-1.5 sm:py-2 rounded text-xs sm:text-xs tracking-[0.1em] sm:tracking-[0.15em] uppercase font-medium transition-all duration-200 whitespace-nowrap
+				onclick={(e) => {
+					if (loading) {
+						e.preventDefault();
+						e.stopPropagation();
+						stopGeneration();
+					}
+				}}
+				class="px-2.5 sm:px-4 py-1.5 sm:py-2 rounded text-xs sm:text-xs tracking-[0.1em] sm:tracking-[0.15em] uppercase font-medium transition-all duration-200 whitespace-nowrap cursor-pointer z-20
 					{!canSend && !loading
 					? 'bg-exo-medium-gray/50 text-exo-light-gray cursor-not-allowed'
 					: loading
@@ -477,14 +483,16 @@
 				aria-label={loading ? "Stop generation" : "Send message"}
 			>
 				{#if loading}
-					<span class="inline-flex items-center gap-1 sm:gap-2">
+					<span
+						class="inline-flex items-center gap-1 sm:gap-2 pointer-events-none"
+					>
 						<span
 							class="w-2.5 h-2.5 sm:w-3 sm:h-3 border-2 border-white/50 border-t-white rounded-full animate-spin"
 						></span>
 						<span class="hidden sm:inline">STOP</span>
 					</span>
 				{:else}
-					SEND
+					<span class="pointer-events-none">SEND</span>
 				{/if}
 			</button>
 		</div>
