@@ -67,6 +67,10 @@ async def test_handle_device_download_model(mock_worker):
 @pytest.mark.asyncio
 async def test_handle_delete_model(mock_worker):
     """Test handling of DeleteModel command."""
+    from exo.shared.types.events import NodeDownloadRemoved
+    
+    mock_worker.event_sender.send = AsyncMock()
+    
     command = DeleteModel(model_id="test-model")
     mock_worker.download_status = {"test-model": "some_status"}
     
@@ -76,3 +80,11 @@ async def test_handle_delete_model(mock_worker):
     mock_worker.shard_downloader.delete_model.assert_called_once_with("test-model")
     # Verify status cleared
     assert "test-model" not in mock_worker.download_status
+    
+    # Verify event emission
+    mock_worker.event_sender.send.assert_called_once()
+    event = mock_worker.event_sender.send.call_args[0][0]
+    assert isinstance(event, NodeDownloadRemoved)
+    assert event.node_id == mock_worker.node_id
+    assert event.model_id == "test-model"
+

@@ -97,8 +97,15 @@ class NodeMemoryMeasured(BaseEvent):
     memory: MemoryPerformanceProfile
 
 
+
 class NodeDownloadProgress(BaseEvent):
     download_progress: DownloadProgress
+
+
+class NodeDownloadRemoved(BaseEvent):
+    node_id: NodeId
+    model_id: str
+
 
 
 class ChunkGenerated(BaseEvent):
@@ -130,7 +137,9 @@ Event = (
     | NodePerformanceMeasured
     | NodeMemoryMeasured
     | NodeDownloadProgress
+    | NodeDownloadRemoved
     | ChunkGenerated
+
     | TopologyEdgeCreated
     | TopologyEdgeDeleted
 )

@@ -13,6 +13,7 @@ from exo.shared.types.events import (
     InstanceDeleted,
     NodeCreated,
     NodeDownloadProgress,
+    NodeDownloadRemoved,
     NodeMemoryMeasured,
     NodePerformanceMeasured,
     NodeTimedOut,
@@ -55,6 +56,8 @@ def event_apply(event: Event, state: State) -> State:
             return apply_node_performance_measured(event, state)
         case NodeDownloadProgress():
             return apply_node_download_progress(event, state)
+        case NodeDownloadRemoved():
+            return apply_node_download_removed(event, state)
         case NodeMemoryMeasured():
             return apply_node_memory_measured(event, state)
         case RunnerDeleted():
@@ -106,6 +109,27 @@ def apply_node_download_progress(event: NodeDownloadProgress, state: State) -> S
         current.append(dp)
 
     new_downloads: Mapping[NodeId, Sequence[DownloadProgress]] = {
+        **state.downloads,
+        node_id: current,
+    }
+    return state.model_copy(update={"downloads": new_downloads})
+
+    return state.model_copy(update={"downloads": new_downloads})
+
+
+def apply_node_download_removed(event: NodeDownloadRemoved, state: State) -> State:
+    node_id = event.node_id
+    if node_id not in state.downloads:
+        return state
+
+    current = list(state.downloads[node_id])
+    # Filter out shards belonging to the removed model
+    current = [
+        dp for dp in current 
+        if dp.shard_metadata.model_meta.model_id != event.model_id
+    ]
+
+    new_downloads = {
         **state.downloads,
         node_id: current,
     }

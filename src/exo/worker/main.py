@@ -25,6 +25,7 @@ from exo.shared.types.events import (
     ForwarderEvent,
     IndexedEvent,
     NodeDownloadProgress,
+    NodeDownloadRemoved,
     NodeMemoryMeasured,
     NodePerformanceMeasured,
     TaskCreated,
@@ -600,6 +601,9 @@ class Worker:
             await self.shard_downloader.delete_model(command.model_id)
             if command.model_id in self.download_status:
                 del self.download_status[command.model_id]
+            await self.event_sender.send(
+                NodeDownloadRemoved(node_id=self.node_id, model_id=command.model_id)
+            )
         except Exception as e:
             logger.error(f"Failed to delete model {command.model_id}: {e}")
 
