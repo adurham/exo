@@ -1280,6 +1280,8 @@ class AppStore {
 			let firstTokenTime: number | null = null;
 			let tokenCount = 0;
 
+			this.abortController = new AbortController();
+
 			const response = await fetch('/v1/chat/completions', {
 				method: 'POST',
 				headers: {
@@ -1290,7 +1292,8 @@ class AppStore {
 					messages: apiMessages,
 					temperature: 0.7,
 					stream: true
-				})
+				}),
+				signal: this.abortController.signal
 			});
 
 			if (!response.ok) {
