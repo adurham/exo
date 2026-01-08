@@ -13,6 +13,7 @@ from hypercorn.asyncio import serve  # pyright: ignore[reportUnknownVariableType
 from hypercorn.config import Config
 from hypercorn.typing import ASGIFramework
 from loguru import logger
+from pydantic import BaseModel
 from openai_harmony import (  # pyright: ignore[reportMissingTypeStubs]
     HarmonyEncodingName,
     Role,
@@ -53,6 +54,8 @@ from exo.shared.types.commands import (
     ForwarderCommand,
     PlaceInstance,
     TaskFinished,
+    DeviceDownloadModel,
+    DeleteModel as DeleteModelCommand,
 )
 from exo.shared.types.common import CommandId, NodeId, SessionId
 from exo.shared.types.events import ChunkGenerated, Event, ForwarderEvent, IndexedEvent
@@ -93,6 +96,10 @@ async def resolve_model_meta(model_id: str) -> ModelMetadata:
         return model_card.metadata
     else:
         return await get_model_meta(model_id)
+
+
+class DownloadModelRequest(BaseModel):
+    model_id: str
 
 
 class API:
@@ -171,6 +178,8 @@ class API:
         self.app.get("/instance/{instance_id}")(self.get_instance)
         self.app.delete("/instance/{instance_id}")(self.delete_instance)
         self.app.get("/models")(self.get_models)
+        self.app.post("/models/download")(self.start_download_model)
+        self.app.delete("/models/{model_id}")(self.delete_model_command)
         self.app.get("/v1/models")(self.get_models)
         self.app.post("/v1/chat/completions", response_model=None)(
             self.chat_completions
@@ -380,6 +389,20 @@ class API:
             command_id=command.command_id,
             instance_id=instance_id,
         )
+
+    async def start_download_model(self, request: DownloadModelRequest):
+        command = DeviceDownloadModel(
+            model_id=request.model_id,
+        )
+        await self._send(command)
+        return {"status": "ok", "message": f"Download started for {request.model_id}", "command_id": command.command_id}
+
+    async def delete_model_command(self, model_id: str):
+        command = DeleteModelCommand(
+            model_id=model_id,
+        )
+        await self._send(command)
+        return {"status": "ok", "message": f"Deletion started for {model_id}", "command_id": command.command_id}
 
     async def _process_gpt_oss(self, token_chunks: Receiver[TokenChunk]):
         stream = StreamableParser(encoding, role=Role.ASSISTANT)

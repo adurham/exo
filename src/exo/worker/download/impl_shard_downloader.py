@@ -8,7 +8,11 @@ from exo.shared.types.worker.shards import (
     PipelineShardMetadata,
     ShardMetadata,
 )
-from exo.worker.download.download_utils import RepoDownloadProgress, download_shard
+from exo.worker.download.download_utils import (
+    RepoDownloadProgress,
+    delete_model,
+    download_shard,
+)
 from exo.worker.download.shard_downloader import ShardDownloader
 
 
@@ -79,6 +83,9 @@ class SingletonShardDownloader(ShardDownloader):
     ) -> RepoDownloadProgress:
         return await self.shard_downloader.get_shard_download_status_for_shard(shard)
 
+    async def delete_model(self, model_id: str) -> None:
+        await self.shard_downloader.delete_model(model_id)
+
 
 class CachedShardDownloader(ShardDownloader):
     def __init__(self, shard_downloader: ShardDownloader):
@@ -115,6 +122,9 @@ class CachedShardDownloader(ShardDownloader):
         self, shard: ShardMetadata
     ) -> RepoDownloadProgress:
         return await self.shard_downloader.get_shard_download_status_for_shard(shard)
+
+    async def delete_model(self, model_id: str) -> None:
+        await self.shard_downloader.delete_model(model_id)
 
 
 class ResumableShardDownloader(ShardDownloader):
@@ -184,3 +194,6 @@ class ResumableShardDownloader(ShardDownloader):
             shard, self.on_progress_wrapper, skip_download=True
         )
         return progress
+
+    async def delete_model(self, model_id: str) -> None:
+        await delete_model(model_id)

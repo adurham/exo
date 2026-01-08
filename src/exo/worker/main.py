@@ -11,6 +11,9 @@ from exo.routing.connection_message import ConnectionMessage, ConnectionMessageT
 from exo.shared.apply import apply
 from exo.shared.types.commands import (
     CheckShardPresent,
+    BaseCommand,
+    DeleteModel,
+    DeviceDownloadModel,
     ForwarderCommand,
     RequestEventLog,
     ShardPresent,
@@ -582,6 +585,24 @@ class Worker:
         except Exception as e:
             logger.error(f"Error emitting existing download progress: {e}")
 
+    async def _handle_device_download_model(self, command: DeviceDownloadModel):
+        logger.info(f"Received request to download model: {command.model_id}")
+        try:
+            from exo.worker.download.impl_shard_downloader import build_full_shard
+            shard = await build_full_shard(command.model_id)
+            self._tg.start_soon(self.shard_downloader.ensure_shard, shard)
+        except Exception as e:
+            logger.error(f"Failed to start download for {command.model_id}: {e}")
+
+    async def _handle_delete_model(self, command: DeleteModel):
+        logger.info(f"Received request to delete model: {command.model_id}")
+        try:
+            await self.shard_downloader.delete_model(command.model_id)
+            if command.model_id in self.download_status:
+                del self.download_status[command.model_id]
+        except Exception as e:
+            logger.error(f"Failed to delete model {command.model_id}: {e}")
+
     async def _command_processor(self):
         with self.command_receiver as commands:
             async for forwarder_command in commands:
@@ -590,6 +611,10 @@ class Worker:
                     self._handle_check_shard_present(forwarder_command.origin, command)
                 elif isinstance(command, ShardPresent):
                     self._handle_shard_present(forwarder_command.origin, command)
+                elif isinstance(command, DeviceDownloadModel):
+                    await self._handle_device_download_model(command)
+                elif isinstance(command, DeleteModel):
+                    await self._handle_delete_model(command)
 
     def _handle_check_shard_present(self, origin: NodeId, command: CheckShardPresent):
         if origin == self.node_id:

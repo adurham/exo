@@ -54,6 +54,11 @@ class ShardDownloader(ABC):
         self, shard: ShardMetadata
     ) -> RepoDownloadProgress: ...
 
+    @abstractmethod
+    async def delete_model(self, model_id: str) -> None:
+        """Deletes all shards for a given model ID."""
+        pass
+
 
 class NoopShardDownloader(ShardDownloader):
     async def ensure_shard(
@@ -83,6 +88,9 @@ class NoopShardDownloader(ShardDownloader):
         dp = copy(NOOP_DOWNLOAD_PROGRESS)
         dp.shard = shard
         return dp
+
+    async def delete_model(self, model_id: str) -> None:
+        pass
 
 
 NOOP_DOWNLOAD_PROGRESS = RepoDownloadProgress(

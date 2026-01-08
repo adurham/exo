@@ -47,6 +47,14 @@ class CheckShardPresent(BaseCommand):
     model_id: str
 
 
+class DeviceDownloadModel(BaseCommand):
+    model_id: str
+
+
+class DeleteModel(BaseCommand):
+    model_id: str
+
+
 class ShardPresent(BaseCommand):
     model_id: str
     base_url: str
@@ -63,6 +71,8 @@ Command = (
     | TaskFinished
     | CheckShardPresent
     | ShardPresent
+    | DeviceDownloadModel
+    | DeleteModel
 )
 
 

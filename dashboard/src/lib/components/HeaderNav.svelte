@@ -79,7 +79,7 @@
 				<path d="M7 12l5 5 5-5" />
 				<path d="M5 21h14" />
 			</svg>
-			Downloads
+			Downloaded Models
 		</a>
 	</div>
 </header>
