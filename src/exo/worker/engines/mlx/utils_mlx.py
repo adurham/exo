@@ -125,6 +125,15 @@ def mlx_distributed_init(
     rank = bound_instance.bound_shard.device_rank
     logger.info(f"Starting initialization for rank {rank}")
 
+    if mx.metal.is_available():
+        wired_limit_ratio = float(os.environ.get("EXO_MLX_WIRED_LIMIT_RATIO", "0.85"))
+        device_info = mx.metal.device_info()
+        max_rec_size = int(device_info["max_recommended_working_set_size"])
+        limit = int(max_rec_size * wired_limit_ratio)
+        mx.set_wired_limit(limit)
+        logger.info(f"Set MLX wired limit to {limit / 1024**3:.2f} GB ({wired_limit_ratio:.0%} of max recommended)")
+
+
     coordination_file = None
     try:
         # TODO: singleton instances
