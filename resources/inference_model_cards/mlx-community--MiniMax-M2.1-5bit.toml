@@ -1,0 +1,8 @@
+[model]
+id = "mlx-community/MiniMax-M2.1-5bit"
+name = "MiniMax-M2.1-5bit"
+family = "minimax"
+quantization = "5bit"
+supports_tensor = true
+tasks = ["TextGeneration"]
+capabilities = ["text", "thinking"]
