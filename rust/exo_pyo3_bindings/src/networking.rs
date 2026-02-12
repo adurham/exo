@@ -219,7 +219,7 @@ async fn networking_task(
                     Dial { peer_id, addr, result_tx } => {
                         // parse address
                         let Ok(addr) = addr.parse() else {
-                            let _ = result_tx.send(Err(PyRuntimeError::new_err("Invalid multiaddr")));
+                            let _ = result_tx.send(Err("Invalid multiaddr".to_string()));
                             continue;
                         };
 
@@ -540,6 +540,7 @@ impl PyNetworkingHandle {
         rx.allow_threads_py() // allow-threads-aware async call
             .await
             .map_err(|_| PyErr::receiver_channel_closed())?
+            .map_err(PyRuntimeError::new_err)
     }
 
     // ---- Gossipsub message receiver methods ----
