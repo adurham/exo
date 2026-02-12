@@ -41,12 +41,20 @@ _card_cache: dict[ModelId, "ModelCard"] = {}
 
 async def _refresh_card_cache():
     for path in CARD_SEARCH_PATH:
+        logger.info(f"Scanning for model cards in: {path}")
+        if not await aios.path.exists(path):
+            logger.warning(f"Model card path does not exist: {path}")
+            continue
         async for toml_file in path.rglob("*.toml"):
+            logger.info(f"Found model card file: {toml_file}")
             try:
                 card = await ModelCard.load_from_path(toml_file)
                 _card_cache[card.model_id] = card
-            except (ValidationError, TOMLKitError):
-                pass
+                logger.info(f"Loaded model card: {card.model_id}")
+            except (ValidationError, TOMLKitError) as e:
+                logger.error(f"Failed to load model card from {toml_file}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error loading model card from {toml_file}: {e}")
 
 
 def _is_image_card(card: "ModelCard") -> bool:
