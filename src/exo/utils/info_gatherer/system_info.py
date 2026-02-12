@@ -55,7 +55,8 @@ async def _get_interface_types_from_networksetup() -> dict[str, InterfaceType]:
             device = line.split(":", 1)[1].strip()
             # enX is ethernet adapters or thunderbolt - these must be deprioritised
             if device.startswith("en") and device not in ["en0", "en1"]:
-                current_type = "maybe_ethernet"
+                if current_type != "thunderbolt":
+                    current_type = "maybe_ethernet"
             types[device] = current_type
 
     return types

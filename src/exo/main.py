@@ -4,6 +4,10 @@ import multiprocessing as mp
 import os
 import resource
 import signal
+
+# Valid values: "1", "true", "on", "yes", "y"
+# We set this to help debug issues with forking and IBV but it is not recommended for production use
+os.environ["IBV_FORK_SAFE"] = "1"
 from dataclasses import dataclass, field
 from typing import Iterator, Self
 
@@ -345,3 +349,6 @@ class Args(CamelCaseModel):
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - We are intentionally validating here, we can't do it statically
+
+if __name__ == "__main__":
+    main()

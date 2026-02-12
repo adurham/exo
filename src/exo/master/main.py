@@ -370,14 +370,19 @@ class Master:
     async def _event_processor(self) -> None:
         with self.local_event_receiver as local_events:
             async for local_event in local_events:
-                # Discard all events not from our session
-                if local_event.session != self.session_id:
-                    continue
-                self._multi_buffer.ingest(
-                    local_event.origin_idx,
-                    local_event.event,
-                    local_event.origin,
-                )
+                try:
+                    # Discard all events not from our session
+                    if local_event.session != self.session_id:
+                        continue
+
+                    self._multi_buffer.ingest(
+                        local_event.origin_idx,
+                        local_event.event,
+                        local_event.origin,
+                    )
+                except Exception as e:
+                    logger.error(f"Error in Master event processor loop: {e}")
+
                 for event in self._multi_buffer.drain():
                     if isinstance(event, TracesCollected):
                         await self._handle_traces_collected(event)

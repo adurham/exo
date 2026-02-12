@@ -63,8 +63,7 @@ from exo.worker.engines.mlx.auto_parallel import (
 from exo.worker.runner.bootstrap import logger
 
 Group = mx.distributed.Group
-# Needed for 8 bit model
-resource.setrlimit(resource.RLIMIT_NOFILE, (2048, 4096))
+# Removed restrictive setrlimit (2048/4096) to allow higher system limits for RDMA
 
 
 # TODO: Test this
@@ -126,12 +125,12 @@ def mlx_distributed_init(
     logger.info(f"Starting initialization for rank {rank}")
 
     if mx.metal.is_available():
-        wired_limit_ratio = float(os.environ.get("EXO_MLX_WIRED_LIMIT_RATIO", "0.85"))
         device_info = mx.metal.device_info()
         max_rec_size = int(device_info["max_recommended_working_set_size"])
-        limit = int(max_rec_size * wired_limit_ratio)
+        ratio = float(os.getenv("EXO_MLX_WIRED_LIMIT_RATIO", "0.75"))
+        limit = int(max_rec_size * ratio)
         mx.set_wired_limit(limit)
-        logger.info(f"Set MLX wired limit to {limit / 1024**3:.2f} GB ({wired_limit_ratio:.0%} of max recommended)")
+        logger.info(f"Set MLX wired limit to {limit / 1024**3:.2f} GB ({ratio:.0%} of max recommended)")
 
 
     coordination_file = None
@@ -177,11 +176,34 @@ def mlx_distributed_init(
                 logger.info(
                     f"rank {rank} MLX_IBV_DEVICES: {coordination_file} with devices: {jaccl_devices_json}"
                 )
+                try:
+                    with open(coordination_file, "r") as f:
+                        logger.info(f"rank {rank} MLX_IBV_DEVICES content readback: {f.read()}")
+                except Exception as e:
+                    logger.error(f"Failed to read MLX_IBV_DEVICES file: {e}")
+
                 logger.info(f"rank {rank} MLX_JACCL_COORDINATOR: {jaccl_coordinator}")
                 os.environ["MLX_IBV_DEVICES"] = coordination_file
                 os.environ["MLX_RANK"] = str(rank)
                 os.environ["MLX_JACCL_COORDINATOR"] = jaccl_coordinator
-                group = mx.distributed.init(backend="jaccl", strict=True)
+                
+                # Diagnostics
+                try:
+                    import resource
+                    soft, hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+                    logger.info(f"RLIMIT_MEMLOCK: soft={soft}, hard={hard}")
+                    logger.info(f"IBV_FORK_SAFE: {os.environ.get('IBV_FORK_SAFE', 'Not Set')}")
+                except Exception as e:
+                    logger.error(f"Failed to log diagnostics: {e}")
+
+                # Apply wired limit
+                max_rec_size = int(mx.metal.device_info()["max_recommended_working_set_size"])
+                ratio = float(os.getenv("EXO_MLX_WIRED_LIMIT_RATIO", "0.75"))
+                safe_limit = int(max_rec_size * ratio)
+                mx.set_wired_limit(safe_limit)
+                logger.info(f"Set MLX wired limit to {safe_limit / 1e9:.2f} GB ({ratio * 100:.0f}% of max recommended)")
+
+                group = mx.distributed.init(backend="jaccl", strict=False)
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
 

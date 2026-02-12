@@ -330,16 +330,19 @@ class Worker:
     async def _forward_events(self) -> None:
         with self.event_receiver as events:
             async for event in events:
-                idx = next(self.event_index_counter)
-                fe = ForwarderEvent(
-                    origin_idx=idx,
-                    origin=self.node_id,
-                    session=self.session_id,
-                    event=event,
-                )
-                logger.debug(f"Worker published event {idx}: {str(event)[:100]}")
-                await self.local_event_sender.send(fe)
-                self.out_for_delivery[event.event_id] = fe
+                try:
+                    idx = next(self.event_index_counter)
+                    fe = ForwarderEvent(
+                        origin_idx=idx,
+                        origin=self.node_id,
+                        session=self.session_id,
+                        event=event,
+                    )
+                    await self.local_event_sender.send(fe)
+                    self.out_for_delivery[event.event_id] = fe
+                except Exception as e:
+                    logger.error(f"Error forwarding event {type(event).__name__}: {e}")
+                    raise
 
     async def _poll_connection_updates(self):
         while True:
@@ -363,7 +366,7 @@ class Worker:
                     else Multiaddr(address=f"/ip6/{ip}/tcp/52415"),
                 )
                 if edge not in edges:
-                    logger.debug(f"ping discovered {edge=}")
+                    logger.info(f"Ping discovered new edge: {edge} to {nid}. Sending TopologyEdgeCreated.")
                     await self.event_sender.send(
                         TopologyEdgeCreated(
                             conn=Connection(source=self.node_id, sink=nid, edge=edge)

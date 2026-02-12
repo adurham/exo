@@ -323,7 +323,7 @@ class InfoGatherer:
     interface_watcher_interval: float | None = 10
     misc_poll_interval: float | None = 60
     system_profiler_interval: float | None = 5 if IS_DARWIN else None
-    memory_poll_rate: float | None = None if IS_DARWIN else 1
+    memory_poll_rate: float | None = 1
     macmon_interval: float | None = 1 if IS_DARWIN else None
     thunderbolt_bridge_poll_interval: float | None = 10 if IS_DARWIN else None
     _tg: TaskGroup = field(init=False, default_factory=create_task_group)
