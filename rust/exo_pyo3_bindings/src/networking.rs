@@ -144,6 +144,11 @@ enum ToTask {
         data: Vec<u8>,
         result_tx: oneshot::Sender<PyResult<MessageId>>,
     },
+    Dial {
+        peer_id: PyPeerId,
+        addr: String,
+        result_tx: oneshot::Sender<PyResult<()>>,
+    },
 }
 
 #[allow(clippy::enum_glob_use)]
@@ -205,11 +210,24 @@ async fn networking_task(
                             result.pyerr()
                         };
 
-                        // send response oneshot (or exit if connection closed)
                         if let Err(e) = result_tx.send(pyresult) {
                             log::error!("RUST: could not publish gossipsub message since channel already closed: {e:?}");
                             continue;
                         }
+                    }
+                    Dial { peer_id, addr, result_tx } => {
+                        // parse address
+                        let Ok(addr) = addr.parse() else {
+                            let _ = result_tx.send(Err(PyRuntimeError::new_err("Invalid multiaddr")));
+                            continue;
+                        };
+
+                        // dial peer
+                        swarm.behaviour_mut().discovery.dial(peer_id.0, addr);
+
+                        // assume success for now (dialing is async/background in behaviour)
+                        // TODO: tracking actual connection success is hard here without complex feedback loop
+                        let _ = result_tx.send(Ok(()));
                     }
                 }
             }
@@ -501,6 +519,26 @@ impl PyNetworkingHandle {
             .await
             .map_err(|_| PyErr::receiver_channel_closed())??;
         Ok(())
+    }
+
+    /// Dial a peer given their ID and multiaddress.
+    async fn dial(&self, peer_id: PyPeerId, addr: String) -> PyResult<()> {
+        let (tx, rx) = oneshot::channel();
+
+        // send off request to dial
+        self.to_task_tx()
+            .send_py(ToTask::Dial {
+                peer_id,
+                addr,
+                result_tx: tx,
+            })
+            .allow_threads_py() // allow-threads-aware async call
+            .await?;
+
+        // wait for response & return any errors
+        rx.allow_threads_py() // allow-threads-aware async call
+            .await
+            .map_err(|_| PyErr::receiver_channel_closed())?
     }
 
     // ---- Gossipsub message receiver methods ----

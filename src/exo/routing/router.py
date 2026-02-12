@@ -1,6 +1,7 @@
 from copy import copy
 from itertools import count
 from math import inf
+import os
 from os import PathLike
 from pathlib import Path
 from typing import cast
@@ -13,11 +14,11 @@ from anyio import (
     sleep_forever,
 )
 from anyio.abc import TaskGroup
-from exo_pyo3_bindings import (
     AllQueuesFullError,
     Keypair,
     NetworkingHandle,
     NoPeersSubscribedToTopicError,
+    PyPeerId,
 )
 from filelock import FileLock
 from loguru import logger
@@ -145,8 +146,26 @@ class Router:
 
         return recv
 
+    async def dial(self, peer_id: PyPeerId, multiaddr: str):
+        await self._net.dial(peer_id, multiaddr)
+
     async def run(self):
         logger.debug("Starting Router")
+
+        # Bootstrap from environment variables if set
+        discovery_peers = os.environ.get("EXO_DISCOVERY_PEERS", "")
+        if discovery_peers:
+            for peer in discovery_peers.split(","):
+                try:
+                    parts = peer.split("/p2p/")
+                    if len(parts) == 2:
+                        addr = parts[0]
+                        peer_id_str = parts[1]
+                        await self.dial(PyPeerId(peer_id_str), addr)
+                        logger.info(f"Dialed static peer {peer_id_str} at {addr}")
+                except Exception as e:
+                    logger.error(f"Failed to dial static peer {peer}: {e}")
+
         try:
             async with create_task_group() as tg:
                 self._tg = tg
