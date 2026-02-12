@@ -134,7 +134,7 @@ struct PyConnectionUpdate {
 enum ToTask {
     GossipsubSubscribe {
         topic: String,
-        result_tx: oneshot::Sender<PyResult<bool>>,
+        result_tx: oneshot::Sender<Result<bool, String>>,
     },
     GossipsubUnsubscribe {
         topic: String,
@@ -143,7 +143,7 @@ enum ToTask {
     GossipsubPublish {
         topic: String,
         data: Vec<u8>,
-        result_tx: oneshot::Sender<PyResult<MessageId>>,
+        result_tx: oneshot::Sender<Result<MessageId, String>>,
     },
     Dial {
         peer_id: PyPeerId,
@@ -180,10 +180,11 @@ async fn networking_task(
                     GossipsubSubscribe { topic, result_tx } => {
                         // try to subscribe
                         let result = swarm.behaviour_mut()
-                            .gossipsub.subscribe(&IdentTopic::new(topic));
+                            .gossipsub.subscribe(&IdentTopic::new(topic))
+                            .map_err(|e| e.to_string());
 
                         // send response oneshot
-                        if let Err(e) = result_tx.send(result.pyerr()) {
+                        if let Err(e) = result_tx.send(result) {
                             log::error!("RUST: could not subscribe to gossipsub topic since channel already closed: {e:?}");
                             continue;
                         }
@@ -200,18 +201,17 @@ async fn networking_task(
                         }
                     }
                     GossipsubPublish { topic, data, result_tx } => {
-                        // try to publish the data -> catch NoPeersSubscribedToTopic error & convert to correct exception
+                        // try to publish the data -> catch NoPeersSubscribedToTopic error & convert to correct exception string
                         let result = swarm.behaviour_mut().gossipsub.publish(
                             IdentTopic::new(topic), data);
-                        let pyresult: PyResult<MessageId> = if let Err(PublishError::NoPeersSubscribedToTopic) = result {
-                            Err(exception::PyNoPeersSubscribedToTopicError::new_err())
-                        } else if let Err(PublishError::AllQueuesFull(_)) = result {
-                            Err(exception::PyAllQueuesFullError::new_err())
-                        } else {
-                            result.pyerr()
+                        let res = match result {
+                            Ok(mid) => Ok(mid),
+                            Err(PublishError::NoPeersSubscribedToTopic) => Err("NoPeersSubscribedToTopic".to_string()),
+                            Err(PublishError::AllQueuesFull(_)) => Err("AllQueuesFull".to_string()),
+                            Err(e) => Err(e.to_string()),
                         };
 
-                        if let Err(e) = result_tx.send(pyresult) {
+                        if let Err(e) = result_tx.send(res) {
                             log::error!("RUST: could not publish gossipsub message since channel already closed: {e:?}");
                             continue;
                         }
@@ -474,6 +474,7 @@ impl PyNetworkingHandle {
         rx.allow_threads_py() // allow-threads-aware async call
             .await
             .map_err(|_| PyErr::receiver_channel_closed())?
+            .map_err(PyRuntimeError::new_err)
     }
 
     /// Unsubscribes from a `GossipSub` topic.
@@ -514,11 +515,15 @@ impl PyNetworkingHandle {
             .allow_threads_py() // allow-threads-aware async call
             .await?;
 
-        // wait for response & return any errors => ignore messageID for now!!!
-        let _ = rx
-            .allow_threads_py() // allow-threads-aware async call
+        // wait for response & return any errors
+        rx.allow_threads_py() // allow-threads-aware async call
             .await
-            .map_err(|_| PyErr::receiver_channel_closed())??;
+            .map_err(|_| PyErr::receiver_channel_closed())?
+            .map_err(|e| match e.as_str() {
+                "NoPeersSubscribedToTopic" => exception::PyNoPeersSubscribedToTopicError::new_err(),
+                "AllQueuesFull" => exception::PyAllQueuesFullError::new_err(),
+                _ => PyRuntimeError::new_err(e),
+            })?;
         Ok(())
     }
 
