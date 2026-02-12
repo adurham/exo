@@ -44,10 +44,45 @@ echo "Starting Exo with EXO_DISCOVERY_PEERS=$EXO_DISCOVERY_PEERS"
 # Let's run it directly so it can be Ctrl-C'd or managed by the user designated runner.
 # If the user wants background, they can run the script with &
 
+# Build Dashboard (as requested to refresh UI assets)
+if [ -d "dashboard" ]; then
+    echo "Building dashboard..."
+    
+    # Try to load NVM if present
+    export NVM_DIR="$HOME/.nvm"
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+        echo "Loading NVM..."
+        source "$NVM_DIR/nvm.sh"
+    fi
+
+    cd dashboard
+    # Check if npm is available
+    if command -v npm &> /dev/null; then
+        npm install && npm run build
+    else
+        echo "WARNING: npm not found. Skipping dashboard build."
+    fi
+    cd ..
+else
+    echo "WARNING: dashboard directory not found. Skipping build."
+fi
+
 # Activate venv if it exists in the repo
 SOURCE_DIR=$(dirname "$0")
 if [ -d "$SOURCE_DIR/.venv" ]; then
     source "$SOURCE_DIR/.venv/bin/activate"
 fi
 
-python3 -m exo.main
+# Run Exo from source to pick up local changes
+# If uv is available, use it to run python directly
+# FORCE local resources to be used
+export EXO_RESOURCES_DIR="$PWD/resources"
+echo "Using resources from: $EXO_RESOURCES_DIR"
+
+if command -v uv &> /dev/null; then
+  echo "Starting Exo (via uv run python -m exo.main)..."
+  uv run python3 -m exo.main
+else
+  echo "Starting Exo (via python3 -m exo.main)..."
+  python3 -m exo.main
+fi
