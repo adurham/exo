@@ -6,3 +6,4 @@ quantization = "4bit"
 supports_tensor = true
 tasks = ["TextGeneration"]
 capabilities = ["text", "thinking"]
+base_model = "MiniMax M2.1"
