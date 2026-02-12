@@ -148,7 +148,7 @@ enum ToTask {
     Dial {
         peer_id: PyPeerId,
         addr: String,
-        result_tx: oneshot::Sender<PyResult<()>>,
+        result_tx: oneshot::Sender<Result<(), String>>,
     },
 }
 
