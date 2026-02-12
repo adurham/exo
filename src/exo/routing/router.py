@@ -19,7 +19,7 @@ from exo_pyo3_bindings import (
     Keypair,
     NetworkingHandle,
     NoPeersSubscribedToTopicError,
-    PyPeerId,
+    PeerId,
 )
 from filelock import FileLock
 from loguru import logger
@@ -147,7 +147,7 @@ class Router:
 
         return recv
 
-    async def dial(self, peer_id: PyPeerId, multiaddr: str):
+    async def dial(self, peer_id: PeerId, multiaddr: str):
         await self._net.dial(peer_id, multiaddr)
 
     async def run(self):
@@ -162,7 +162,7 @@ class Router:
                     if len(parts) == 2:
                         addr = parts[0]
                         peer_id_str = parts[1]
-                        await self.dial(PyPeerId(peer_id_str), addr)
+                        await self.dial(PeerId.from_base58(peer_id_str), addr)
                         logger.info(f"Dialed static peer {peer_id_str} at {addr}")
                 except Exception as e:
                     logger.error(f"Failed to dial static peer {peer}: {e}")

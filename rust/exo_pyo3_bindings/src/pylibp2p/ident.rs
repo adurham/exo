@@ -131,6 +131,12 @@ impl PyPeerId {
         Ok(Self(PeerId::from_bytes(&bytes).pyerr()?))
     }
 
+    /// Parses a `PeerId` from a base-58 encoded string.
+    #[staticmethod]
+    fn from_base58(s: String) -> PyResult<Self> {
+        s.parse().map(Self).pyerr()
+    }
+
     /// Returns a raw bytes representation of this `PeerId`.
     fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         let bytes = self.0.to_bytes();
