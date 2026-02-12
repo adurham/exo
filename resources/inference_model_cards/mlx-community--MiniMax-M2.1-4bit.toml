@@ -1,0 +1,8 @@
+[model]
+id = "mlx-community/MiniMax-M2.1-4bit"
+name = "MiniMax-M2.1-4bit"
+family = "minimax"
+quantization = "4bit"
+supports_tensor = true
+tasks = ["TextGeneration"]
+capabilities = ["text", "thinking"]
