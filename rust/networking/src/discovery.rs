@@ -122,7 +122,7 @@ impl Behaviour {
         })
     }
 
-    fn dial(&mut self, peer_id: PeerId, addr: Multiaddr) {
+    pub fn dial(&mut self, peer_id: PeerId, addr: Multiaddr) {
         self.pending_events.push_back(ToSwarm::Dial {
             opts: DialOpts::peer_id(peer_id).addresses(vec![addr]).build(),
         })

@@ -22,6 +22,7 @@ use pyo3::{Bound, Py, PyErr, PyResult, PyTraverseError, PyVisit, Python, pymetho
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyclass_enum, gen_stub_pymethods};
 use std::net::IpAddr;
 use tokio::sync::{Mutex, mpsc, oneshot};
+use pyo3::exceptions::PyRuntimeError;
 
 mod exception {
     use pyo3::types::PyTuple;
