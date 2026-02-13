@@ -48,7 +48,7 @@ else
         echo "Preparing $NODE..."
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
         # Clean target directory to force fresh build and reinstall bindings
-        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && rm -rf rust/exo_pyo3_bindings/target && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'"
+        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'"
     done
 
     # 2. Start Exo on each node
@@ -68,7 +68,7 @@ else
     
     # 3. Health Check / Topology Verification
     # We will poll the topology via the first node (assuming it's up) until we see both nodes.
-    MAX_RETRIES=30
+    MAX_RETRIES=90
     RETRY_DELAY=2
     
     # Get the LAN IP for the first node from SSH config (or use known IP for check)
