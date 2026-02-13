@@ -47,7 +47,8 @@ else
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv sync'"
+        # Touch lib.rs to force rebuild of bindings
+        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && touch rust/exo_pyo3_bindings/src/lib.rs && uv sync'"
     done
 
     # 2. Start Exo on each node
