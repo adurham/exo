@@ -54,9 +54,12 @@ else
     # 2. Start Exo on each node
     for NODE in "${NODES[@]}"; do
         echo "Starting Exo on $NODE..."
-        # Use nohup to keep running after disconnection
-        # Executing the script via zsh -l to ensure it picks up the correct IP logic and env
-        ssh "$NODE" "zsh -l -c 'nohup ~/repos/exo/start_cluster.sh > /tmp/exo.log 2>&1 &'"
+        if [ "$NODE" == "macstudio-m4-1" ]; then
+             ssh "$NODE" "PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main > /tmp/exo.log 2>&1 &"
+        else
+             # For other nodes, point to the first node as peer
+             ssh "$NODE" "PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main --discovery-peers /ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID > /tmp/exo.log 2>&1 &"
+        fi
         if [ $? -eq 0 ]; then
             echo "Successfully triggered start on $NODE."
         else
