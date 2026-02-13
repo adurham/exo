@@ -97,6 +97,7 @@ class Worker:
         self.input_chunk_counts: dict[CommandId, int] = {}
 
         self._download_backoff: KeyedBackoff[ModelId] = KeyedBackoff(base=0.5, cap=10.0)
+        self._completion_event = anyio.Event()
 
     async def run(self):
         logger.info("Starting Worker")
@@ -123,6 +124,10 @@ class Worker:
             self.download_command_sender.close()
             for runner in self.runners.values():
                 runner.shutdown()
+            self._completion_event.set()
+
+    async def wait_until_stopped(self):
+        await self._completion_event.wait()
 
     async def _forward_info(self, recv: Receiver[GatheredInfo]):
         with recv as info_stream:

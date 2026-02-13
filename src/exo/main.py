@@ -230,6 +230,7 @@ class Node:
                         self._tg.start_soon(self.download_coordinator.run)
                     if self.worker:
                         self.worker.shutdown()
+                        await self.worker.wait_until_stopped()
                         # TODO: add profiling etc to resource monitor
                         self.worker = Worker(
                             self.node_id,
