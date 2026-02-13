@@ -55,10 +55,10 @@ else
     for NODE in "${NODES[@]}"; do
         echo "Starting Exo on $NODE..."
         if [ "$NODE" == "macstudio-m4-1" ]; then
-             ssh "$NODE" "zsh -l -c 'PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main > /tmp/exo.log 2>&1 &'"
+             ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main > /tmp/exo.log 2>&1 &'"
         else
              # For other nodes, point to the first node as peer
-             ssh "$NODE" "zsh -l -c 'PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main --discovery-peers /ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID > /tmp/exo.log 2>&1 &'"
+             ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main --discovery-peers /ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID > /tmp/exo.log 2>&1 &'"
         fi
         if [ $? -eq 0 ]; then
             echo "Successfully triggered start on $NODE."
