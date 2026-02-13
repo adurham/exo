@@ -48,7 +48,7 @@ else
         echo "Preparing $NODE..."
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
         # Clean target directory to force fresh build and reinstall bindings
-        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'"
+        ssh "$NODE" "zsh -l -c 'pkill -9 -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'"
     done
 
     # 2. Start Exo on each node
@@ -71,7 +71,17 @@ else
     echo -n "Cluster start commands issued. Waiting for cluster to stabilize..."
     for i in {1..90}; do
         response=$(curl -s "http://$M4_1_IP:52415/state")
-        node_count=$(echo "$response" | jq '.topology.nodes | length')
+        if [ -n "$response" ]; then
+            node_count=$(echo "$response" | jq '.topology.nodes | length' 2>/dev/null)
+        else
+            node_count=0
+        fi
+
+        # Default to 0 if jq failed or returned null
+        if [ -z "$node_count" ] || [ "$node_count" == "null" ]; then
+            node_count=0
+        fi
+
         if [ "$node_count" -ge 2 ]; then
             echo "Cluster is HEALTHY! Node count: $node_count"
             exit 0
