@@ -17,6 +17,7 @@ from anyio.abc import TaskGroup
 from exo_pyo3_bindings import (
     ConnectionUpdate,
     ConnectionUpdateType,
+    Keypair,
     PeerId,
     NetworkingHandle,
     NoPeersSubscribedToTopicError,
