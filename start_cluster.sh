@@ -43,12 +43,12 @@ else
     # Define nodes to start (using SSH config aliases)
     NODES=("macstudio-m4-1" "macstudio-m4-2")
 
-    # 1. Kill existing processes, git pull, and force reinstall (rebuilds Rust bindings)
+    # 1. Kill existing processes, git pull, and force reinstall bindings (rebuilds Rust bindings)
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        # Force reinstall to ensure Rust bindings are rebuilt with new features
-        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv pip install --force-reinstall --no-deps -e .'"
+        # Force reinstall of the bindings package explicitly
+        ssh "$NODE" "zsh -l -c 'pkill -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'"
     done
 
     # 2. Start Exo on each node
