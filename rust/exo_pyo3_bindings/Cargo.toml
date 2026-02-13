@@ -26,6 +26,7 @@ networking = { workspace = true }
 
 # interop
 pyo3 = { version = "0.27.1", features = [
+    "extension-module", # Required for building as a Python extension
     # "abi3-py311", # tells pyo3 (and maturin) to build using the stable ABI with minimum Python version 3.11
     "nightly", # enables better-supported GIL integration
     "experimental-async", # async support in #[pyfunction] & #[pymethods]
