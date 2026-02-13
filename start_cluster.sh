@@ -58,9 +58,16 @@ else
     # Check M4-2 IP
     CURRENT_M4_2_TB=$(ssh macstudio-m4-2 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
     if [ "$CURRENT_M4_2_TB" != "$TB_M4_2" ]; then
-        echo "ERROR: macstudio-m4-2 Thunderbolt (en2) IP is '$CURRENT_M4_2_TB', expected '$TB_M4_2'."
-        echo "Potential Fix: ssh macstudio-m4-2 \"sudo networksetup -setmanual 'EXO Thunderbolt 1' $TB_M4_2 255.255.255.0\""
-        exit 1
+        echo "WARNING: macstudio-m4-2 Thunderbolt (en2) IP is '$CURRENT_M4_2_TB', expected '$TB_M4_2'."
+        echo "Attempting to auto-fix..."
+        ssh macstudio-m4-2 "sudo networksetup -setmanual 'EXO Thunderbolt 1' $TB_M4_2 255.255.255.0"
+        sleep 2
+        CURRENT_M4_2_TB=$(ssh macstudio-m4-2 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
+        if [ "$CURRENT_M4_2_TB" != "$TB_M4_2" ]; then
+             echo "ERROR: Failed to set IP. Still '$CURRENT_M4_2_TB'. Please fix manually."
+             exit 1
+        fi
+        echo "Auto-fix successful. IP set to $TB_M4_2."
     fi
 
     # Check Ping
