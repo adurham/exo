@@ -58,7 +58,7 @@ else
              ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main > /tmp/exo.log 2>&1 &'"
         else
              # For other nodes, point to the first node as peer
-             ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main --discovery-peers /ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID > /tmp/exo.log 2>&1 &'"
+             ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && EXO_DISCOVERY_PEERS=/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 nohup uv run python -m exo.main > /tmp/exo.log 2>&1 &'"
         fi
         if [ $? -eq 0 ]; then
             echo "Successfully triggered start on $NODE."
@@ -67,31 +67,17 @@ else
         fi
     done
 
-    echo "Cluster start commands issued. Waiting for cluster to stabilize..."
-    
     # 3. Health Check / Topology Verification
-    # We will poll the topology via the first node (assuming it's up) until we see both nodes.
-    MAX_RETRIES=90
-    RETRY_DELAY=2
-    
-    # Get the LAN IP for the first node from SSH config (or use known IP for check)
-    CHECK_URL="http://192.168.86.201:52415/topology" 
-
-    for ((i=1; i<=MAX_RETRIES; i++)); do
-        # echo "Checking cluster topology ($i/$MAX_RETRIES)..."
-        
-        RESPONSE=$(curl -s "$CHECK_URL")
-        
-        if [ -n "$RESPONSE" ]; then
-            # Check if both M4_1_PEER_ID and M4_2_PEER_ID are present in the response
-            if echo "$RESPONSE" | grep -q "$M4_1_PEER_ID" && echo "$RESPONSE" | grep -q "$M4_2_PEER_ID"; then
-                echo "Cluster is HEALTHY! Both nodes detected."
-                exit 0
-            fi
+    echo -n "Cluster start commands issued. Waiting for cluster to stabilize..."
+    for i in {1..90}; do
+        response=$(curl -s "http://$M4_1_IP:52415/state")
+        node_count=$(echo "$response" | jq '.topology.nodes | length')
+        if [ "$node_count" -ge 2 ]; then
+            echo "Cluster is HEALTHY! Node count: $node_count"
+            exit 0
         fi
-        
-        printf "."
-        sleep $RETRY_DELAY
+        echo -n "."
+        sleep 2
     done
     
     echo ""
