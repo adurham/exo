@@ -429,6 +429,22 @@ def get_mlx_jaccl_coordinators(
 
     def get_ip_for_node(n: NodeId) -> str:
         if n == coordinator:
+            # Use specific IP instead of 0.0.0.0 to avoid potential binding issues
+            network_info = node_network.get(coordinator, NodeNetworkInfo())
+            
+            # Prioritize Ethernet > WiFi > Thunderbolt
+            for iface_type in ["ethernet", "wifi", "thunderbolt"]:
+                for iface in network_info.interfaces:
+                    if iface.interface_type == iface_type and iface.ip_address and ":" not in iface.ip_address: # IPv4
+                         return iface.ip_address
+            return "0.0.0.0"
+            
+            # Prioritize Ethernet > WiFi > Thunderbolt
+            for iface_type in ["ethernet", "wifi", "thunderbolt"]:
+                for iface in network_info.interfaces:
+                    logger.debug(f"Checking iface: {iface}")
+                    if iface.interface_type == iface_type and iface.ip_address and ":" not in iface.ip_address: # IPv4
+                         return iface.ip_address
             return "0.0.0.0"
 
         ip = _find_ip_prioritised(n, coordinator, cycle_digraph, node_network)

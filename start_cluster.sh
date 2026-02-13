@@ -43,6 +43,34 @@ else
     # Define nodes to start (using SSH config aliases)
     NODES=("macstudio-m4-1" "macstudio-m4-2")
 
+    # Thunderbolt Connectivity Check
+    echo "Verifying Thunderbolt Connectivity..."
+    TB_M4_1="192.168.200.1"
+    TB_M4_2="192.168.200.2"
+
+    # Check M4-1 IP
+    CURRENT_M4_1_TB=$(ssh macstudio-m4-1 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
+    if [ "$CURRENT_M4_1_TB" != "$TB_M4_1" ]; then
+        echo "ERROR: macstudio-m4-1 Thunderbolt (en2) IP is '$CURRENT_M4_1_TB', expected '$TB_M4_1'."
+        exit 1
+    fi
+
+    # Check M4-2 IP
+    CURRENT_M4_2_TB=$(ssh macstudio-m4-2 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
+    if [ "$CURRENT_M4_2_TB" != "$TB_M4_2" ]; then
+        echo "ERROR: macstudio-m4-2 Thunderbolt (en2) IP is '$CURRENT_M4_2_TB', expected '$TB_M4_2'."
+        echo "Potential Fix: ssh macstudio-m4-2 \"sudo networksetup -setmanual 'EXO Thunderbolt 1' $TB_M4_2 255.255.255.0\""
+        exit 1
+    fi
+
+    # Check Ping
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then
+        echo "ERROR: macstudio-m4-1 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."
+        exit 1
+    fi
+    echo "Thunderbolt Link Verified ($TB_M4_1 <-> $TB_M4_2)."
+
+
     # 1. Kill existing processes, git pull, and force reinstall bindings (rebuilds Rust bindings)
     # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
