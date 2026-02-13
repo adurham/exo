@@ -337,25 +337,36 @@ def apply_node_gathered_info(event: NodeGatheredInfo, state: State) -> State:
                 event.node_id: NodeThunderboltInfo(interfaces=info.idents),
             }
         case MacThunderboltConnections():
-            conn_map = {
-                tb_ident.domain_uuid: (nid, tb_ident.rdma_interface)
-                for nid in state.node_thunderbolt
-                for tb_ident in state.node_thunderbolt[nid].interfaces
+            update["node_thunderbolt_connections"] = {
+                **state.node_thunderbolt_connections,
+                event.node_id: info.conns,
             }
-            as_rdma_conns = [
-                Connection(
-                    source=event.node_id,
-                    sink=conn_map[tb_conn.sink_uuid][0],
-                    edge=RDMAConnection(
-                        source_rdma_iface=conn_map[tb_conn.source_uuid][1],
-                        sink_rdma_iface=conn_map[tb_conn.sink_uuid][1],
-                    ),
-                )
-                for tb_conn in info.conns
-                if tb_conn.source_uuid in conn_map
-                if tb_conn.sink_uuid in conn_map
-            ]
-            topology.replace_all_out_rdma_connections(event.node_id, as_rdma_conns)
+
+            # Only add RDMA connections if rdma_ctl is enabled
+            rdma_ctl = state.node_rdma_ctl.get(event.node_id)
+            if rdma_ctl and rdma_ctl.enabled:
+                conn_map = {
+                    tb_ident.domain_uuid: (nid, tb_ident.rdma_interface)
+                    for nid in state.node_thunderbolt
+                    for tb_ident in state.node_thunderbolt[nid].interfaces
+                }
+                as_rdma_conns = [
+                    Connection(
+                        source=event.node_id,
+                        sink=conn_map[tb_conn.sink_uuid][0],
+                        edge=RDMAConnection(
+                            source_rdma_iface=conn_map[tb_conn.source_uuid][1],
+                            sink_rdma_iface=conn_map[tb_conn.sink_uuid][1],
+                        ),
+                    )
+                    for tb_conn in info.conns
+                    if tb_conn.source_uuid in conn_map
+                    if tb_conn.sink_uuid in conn_map
+                ]
+                topology.replace_all_out_rdma_connections(event.node_id, as_rdma_conns)
+            else:
+                # If rdma_ctl is disabled or unknown, ensure no RDMA connections exist for this node
+                topology.replace_all_out_rdma_connections(event.node_id, [])
         case ThunderboltBridgeInfo():
             new_tb_bridge: dict[NodeId, ThunderboltBridgeStatus] = {
                 **state.node_thunderbolt_bridge,
@@ -377,6 +388,36 @@ def apply_node_gathered_info(event: NodeGatheredInfo, state: State) -> State:
                 **state.node_rdma_ctl,
                 event.node_id: NodeRdmaCtlStatus(enabled=info.enabled),
             }
+
+            # Re-evaluate RDMA connections if status changed or wasn't tracked
+            old_status = state.node_rdma_ctl.get(event.node_id)
+            if old_status is None or old_status.enabled != info.enabled:
+                if info.enabled:
+                    # RDMA enabled: try to create connections from stored Thunderbolt data
+                    conns = state.node_thunderbolt_connections.get(event.node_id, [])
+                    if conns:
+                        conn_map = {
+                            tb_ident.domain_uuid: (nid, tb_ident.rdma_interface)
+                            for nid in state.node_thunderbolt
+                            for tb_ident in state.node_thunderbolt[nid].interfaces
+                        }
+                        as_rdma_conns = [
+                            Connection(
+                                source=event.node_id,
+                                sink=conn_map[tb_conn.sink_uuid][0],
+                                edge=RDMAConnection(
+                                    source_rdma_iface=conn_map[tb_conn.source_uuid][1],
+                                    sink_rdma_iface=conn_map[tb_conn.sink_uuid][1],
+                                ),
+                            )
+                            for tb_conn in conns
+                            if tb_conn.source_uuid in conn_map
+                            if tb_conn.sink_uuid in conn_map
+                        ]
+                        topology.replace_all_out_rdma_connections(event.node_id, as_rdma_conns)
+                else:
+                    # RDMA disabled: remove all RDMA connections for this node
+                    topology.replace_all_out_rdma_connections(event.node_id, [])
 
     return state.model_copy(update=update)
 
