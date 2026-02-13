@@ -16,8 +16,8 @@ from exo.shared.types.profiling import (
     NodeThunderboltInfo,
     SystemPerformanceProfile,
     ThunderboltBridgeStatus,
-    ThunderboltConnection,
 )
+from exo.shared.types.thunderbolt import ThunderboltConnection
 from exo.shared.types.tasks import Task, TaskId
 from exo.shared.types.worker.downloads import DownloadProgress
 from exo.shared.types.worker.instances import Instance, InstanceId
