@@ -44,14 +44,20 @@ else
     NODES=("macstudio-m4-1" "macstudio-m4-2")
 
     # 1. Kill existing processes, git pull, and force reinstall bindings (rebuilds Rust bindings)
+    # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
+        # Aggressive cleanup: kill by port and name, and remove screen sessions
+        ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
+        ssh "$NODE" "pkill -9 -f 'exo.main' || true"
+        ssh "$NODE" "screen -wipe || true"
+
+        # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        # Clean target directory to force fresh build and reinstall bindings
-        ssh "$NODE" "zsh -l -c 'pkill -9 -f \"exo.main\" || true; cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'"
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
     done
 
-    # 2. Start Exo on each node
+    # 3. Start Exo on each node
     for NODE in "${NODES[@]}"; do
         echo "Starting Exo on $NODE..."
         if [ "$NODE" == "macstudio-m4-1" ]; then
