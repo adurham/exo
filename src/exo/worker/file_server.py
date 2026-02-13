@@ -15,7 +15,7 @@ class FileServer:
     async def start(self):
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
-        self.site = web.TCPSite(self.runner, "0.0.0.0", self.port)
+        self.site = web.TCPSite(self.runner, "0.0.0.0", self.port, reuse_address=True)
         await self.site.start()
         logger.info(f"FileServer started on port {self.port} serving {EXO_MODELS_DIR}")
 
