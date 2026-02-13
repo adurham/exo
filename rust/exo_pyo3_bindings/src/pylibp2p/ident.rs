@@ -133,7 +133,7 @@ impl PyPeerId {
 
     /// Parses a `PeerId` from a base-58 encoded string.
     #[staticmethod]
-    fn from_base58(s: String) -> PyResult<Self> {
+    fn from_base58(s: &str) -> PyResult<Self> {
         s.parse().map(Self).pyerr()
     }
 
