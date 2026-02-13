@@ -61,11 +61,14 @@ class SingletonShardDownloader(ShardDownloader):
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self,
+        shard: ShardMetadata,
+        config_only: bool = False,
+        repo_url: str | None = None,
     ) -> Path:
         if shard not in self.active_downloads:
             self.active_downloads[shard] = asyncio.create_task(
-                self.shard_downloader.ensure_shard(shard, config_only)
+                self.shard_downloader.ensure_shard(shard, config_only, repo_url)
             )
         try:
             return await self.active_downloads[shard]
@@ -101,12 +104,17 @@ class CachedShardDownloader(ShardDownloader):
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self,
+        shard: ShardMetadata,
+        config_only: bool = False,
+        repo_url: str | None = None,
     ) -> Path:
         if (shard.model_card.model_id, shard) in self.cache:
             return self.cache[(shard.model_card.model_id, shard)]
 
-        target_dir = await self.shard_downloader.ensure_shard(shard, config_only)
+        target_dir = await self.shard_downloader.ensure_shard(
+            shard, config_only, repo_url
+        )
         self.cache[(shard.model_card.model_id, shard)] = target_dir
         return target_dir
 
@@ -142,7 +150,10 @@ class ResumableShardDownloader(ShardDownloader):
         self.on_progress_callbacks.append(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self,
+        shard: ShardMetadata,
+        config_only: bool = False,
+        repo_url: str | None = None,
     ) -> Path:
         allow_patterns = ["config.json"] if config_only else None
 
@@ -151,6 +162,7 @@ class ResumableShardDownloader(ShardDownloader):
             self.on_progress_wrapper,
             max_parallel_downloads=self.max_parallel_downloads,
             allow_patterns=allow_patterns,
+            repo_url=repo_url,
             skip_internet=not self.internet_connection,
             on_connection_lost=lambda: self.set_internet_connection(False),
         )

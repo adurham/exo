@@ -37,6 +37,10 @@ from exo.shared.types.worker.runners import (
     RunnerStatus,
     RunnerWarmingUp,
 )
+from exo.shared.constants import EXO_FILE_SERVER_PORT
+from exo.shared.topology import Topology
+from exo.shared.types.profiling import NodeNetworkInfo
+from exo.shared.types.topology import SocketConnection
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
 
 
@@ -48,6 +52,8 @@ def plan(
     instances: Mapping[InstanceId, Instance],
     all_runners: Mapping[RunnerId, RunnerStatus],  # all global
     tasks: Mapping[TaskId, Task],
+    topology: Topology,
+    node_network: Mapping[NodeId, NodeNetworkInfo],
     input_chunk_buffer: Mapping[CommandId, dict[int, str]] | None = None,
     input_chunk_counts: Mapping[CommandId, int] | None = None,
 ) -> Task | None:
@@ -55,7 +61,7 @@ def plan(
     return (
         _kill_runner(runners, all_runners, instances)
         or _create_runner(node_id, runners, instances)
-        or _model_needs_download(node_id, runners, global_download_status)
+        or _model_needs_download(node_id, runners, global_download_status, instances, topology, node_network)
         or _init_distributed_backend(runners, all_runners)
         or _load_model(runners, all_runners, global_download_status)
         or _ready_to_warmup(runners, all_runners)
@@ -114,6 +120,9 @@ def _model_needs_download(
     node_id: NodeId,
     runners: Mapping[RunnerId, RunnerSupervisor],
     global_download_status: Mapping[NodeId, Sequence[DownloadProgress]],
+    instances: Mapping[InstanceId, Instance],
+    topology: Topology,
+    node_network: Mapping[NodeId, NodeNetworkInfo],
 ) -> DownloadModel | None:
     local_downloads = global_download_status.get(node_id, [])
     download_status = {
@@ -121,19 +130,101 @@ def _model_needs_download(
     }
 
     for runner in runners.values():
-        model_id = runner.bound_instance.bound_shard.model_card.model_id
-        if isinstance(runner.status, RunnerIdle) and (
-            model_id not in download_status
-            or not isinstance(
-                download_status[model_id],
-                (DownloadOngoing, DownloadCompleted, DownloadFailed),
-            )
+        shard = runner.bound_instance.bound_shard
+        model_id = shard.model_card.model_id
+        
+        # Check if we already have the model or are downloading it
+        if not isinstance(runner.status, RunnerIdle):
+            continue
+            
+        if model_id in download_status and isinstance(
+            download_status[model_id],
+            (DownloadOngoing, DownloadCompleted, DownloadFailed),
         ):
-            # We don't invalidate download_status randomly in case a file gets deleted on disk
-            return DownloadModel(
+             # We don't invalidate download_status randomly in case a file gets deleted on disk
+             # But if it failed, we might want to retry? For now, logic stays same: if failed, we don't auto-retry immediately here to avoid loops
+             continue
+
+        # Logic for P2P
+        instance = runner.bound_instance.instance
+        if not instance:
+             # Should not happen
+             return DownloadModel(
                 instance_id=runner.bound_instance.instance.instance_id,
-                shard_metadata=runner.bound_instance.bound_shard,
+                shard_metadata=shard,
             )
+
+        # 1. Determine Leader
+        participating_nodes = sorted(instance.shard_assignments.node_to_runner.keys())
+        leader_node_id = participating_nodes[0]
+        
+        # 2. Check if anyone has it
+        peer_with_model: NodeId | None = None
+        for peer_id in participating_nodes:
+            if peer_id == node_id:
+                continue
+            peer_downloads = global_download_status.get(peer_id, [])
+            if any(
+                isinstance(dp, DownloadCompleted) and dp.shard_metadata.model_card.model_id == model_id
+                for dp in peer_downloads
+            ):
+                peer_with_model = peer_id
+                break
+        
+        # 3. Construct repo_url if we found a peer
+        repo_url: str | None = None
+        if peer_with_model:
+            # Find IP of peer
+            # Prefer Thunderbolt > Other
+            # Use topology connections
+            connections = topology.get_all_connections_between(node_id, peer_with_model)
+            best_ip = None
+            
+            # Simple heuristic: look for connections that might be Thunderbolt?
+            # Or just take the first one.
+            # Ideally we check node_network for the interface type of the IPs.
+            
+            # Get peer IPs from node_network
+            peer_network = node_network.get(peer_with_model)
+            peer_thunderbolt_ips = set()
+            if peer_network:
+                 for iface in peer_network.interfaces:
+                      if iface.interface_type == "thunderbolt":
+                           peer_thunderbolt_ips.add(iface.ip_address)
+            
+            # Look for a connection that matches a thunderbolt IP
+            for conn in connections:
+                 if isinstance(conn, SocketConnection):
+                      ip = conn.sink_multiaddr.ip_address
+                      if ip in peer_thunderbolt_ips:
+                           best_ip = ip
+                           break
+                      if not best_ip:
+                           best_ip = ip
+            
+            if best_ip:
+                 repo_url = f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"
+        
+        # 4. Decide action
+        if repo_url:
+             # Download from peer
+             return DownloadModel(
+                instance_id=instance.instance_id,
+                shard_metadata=shard,
+                repo_url=repo_url
+            )
+        
+        if node_id == leader_node_id:
+             # I am leader, and no one else has it -> Download from HF
+             return DownloadModel(
+                instance_id=instance.instance_id,
+                shard_metadata=shard,
+            )
+        else:
+             # I am follower, and leader (or anyone) doesn't have it yet -> Wait
+             continue
+
+    return None
 
 
 def _init_distributed_backend(

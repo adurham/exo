@@ -51,6 +51,9 @@ from exo.worker.plan import plan
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
 
 
+from exo.shared.constants import EXO_FILE_SERVER_PORT
+from exo.worker.file_server import FileServer
+
 class Worker:
     def __init__(
         self,
@@ -79,6 +82,8 @@ class Worker:
         self.state: State = State()
         self.runners: dict[RunnerId, RunnerSupervisor] = {}
         self._tg: TaskGroup = create_task_group()
+        
+        self.file_server = FileServer(port=EXO_FILE_SERVER_PORT)
 
         self._nack_cancel_scope: CancelScope | None = None
         self._nack_attempts: int = 0
@@ -108,9 +113,11 @@ class Worker:
                 tg.start_soon(self._event_applier)
                 tg.start_soon(self._forward_events)
                 tg.start_soon(self._poll_connection_updates)
+                tg.start_soon(self.file_server.start)
         finally:
             # Actual shutdown code - waits for all tasks to complete before executing.
             logger.info("Stopping Worker")
+            await self.file_server.stop()
             self.local_event_sender.close()
             self.command_sender.close()
             self.download_command_sender.close()
@@ -179,6 +186,8 @@ class Worker:
                 self.state.instances,
                 self.state.runners,
                 self.state.tasks,
+                self.state.topology,
+                self.state.node_network,
                 self.input_chunk_buffer,
                 self.input_chunk_counts,
             )
@@ -205,7 +214,7 @@ class Worker:
                             task_id=task.task_id, task_status=TaskStatus.Complete
                         )
                     )
-                case DownloadModel(shard_metadata=shard):
+                case DownloadModel(shard_metadata=shard, repo_url=repo_url):
                     model_id = shard.model_card.model_id
                     self._download_backoff.record_attempt(model_id)
 
@@ -215,6 +224,7 @@ class Worker:
                             command=StartDownload(
                                 target_node_id=self.node_id,
                                 shard_metadata=shard,
+                                repo_url=repo_url,
                             ),
                         )
                     )

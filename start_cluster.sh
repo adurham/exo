@@ -22,8 +22,26 @@ elif [ "$CURRENT_IP" == "$M4_2_IP" ]; then
     # Peer with M4-1
     export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
 else
-    echo "Unknown host IP: $CURRENT_IP. Defaulting to standalone mode or check network settings."
-    # Optional: Exit or continue without peers
+    echo "Unknown host IP: $CURRENT_IP. Assuming remote controller."
+    echo "Attempting to start cluster on known nodes via SSH..."
+
+    # Define nodes to start (using SSH config aliases)
+    NODES=("macstudio-m4-1" "macstudio-m4-2")
+
+    for NODE in "${NODES[@]}"; do
+        echo "Starting Exo on $NODE..."
+        # Use nohup to keep running after disconnection
+        # Assuming standard path ~/repos/exo/start_cluster.sh
+        ssh "$NODE" "nohup ~/repos/exo/start_cluster.sh > /tmp/exo.log 2>&1 &"
+        if [ $? -eq 0 ]; then
+            echo "Successfully triggered start on $NODE."
+        else
+            echo "Failed to start on $NODE."
+        fi
+    done
+
+    echo "Cluster start commands issued. Please verify logs on remote nodes (/tmp/exo.log)."
+    exit 0
 fi
 
 # Check for macmon (required for UI stats)

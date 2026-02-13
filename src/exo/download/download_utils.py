@@ -671,6 +671,99 @@ async def get_downloaded_size(path: Path) -> int:
         return (await aios.stat(partial_path)).st_size
     return 0
 
+async def download_file_from_peer_with_retry(
+    repo_url: str,
+    model_id: ModelId,
+    path: str,
+    target_dir: Path,
+    on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
+    on_connection_lost: Callable[[], None] = lambda: None,
+) -> Path:
+    n_attempts = 3
+    for attempt in range(n_attempts):
+        try:
+            return await _download_file_from_peer(
+                repo_url, model_id, path, target_dir, on_progress
+            )
+        except Exception as e:
+            if attempt == n_attempts - 1:
+                on_connection_lost()
+                raise e
+            logger.error(
+                f"Peer download error on attempt {attempt + 1}/{n_attempts} for {model_id=} {path=} {target_dir=} {repo_url=}: {e}"
+            )
+            logger.error(traceback.format_exc())
+            await asyncio.sleep(2.0**attempt)
+    raise Exception(
+        f"Failed to download file from peer {model_id=} {path=} {target_dir=} {repo_url=}"
+    )
+
+
+async def _download_file_from_peer(
+    repo_url: str,
+    model_id: ModelId,
+    path: str,
+    target_dir: Path,
+    on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
+) -> Path:
+    target_path = target_dir / path
+
+    if await aios.path.exists(target_path):
+        # We assume if it exists locally it's good, similar to _download_file logic for offline
+        # Ideally we would check size against peer, but for now let's trust local if complete?
+        # Only if we can verify against remote (HF) we might delete it.
+        # But here we are downloading from peer.
+        # Let's simple check: if we are downloading from peer, we probably don't have it or it's incomplete.
+        pass
+
+    await aios.makedirs((target_dir / path).parent, exist_ok=True)
+    
+    url = f"{repo_url}/{model_id}/{path}"
+    partial_path = target_dir / f"{path}.partial"
+    
+    resume_byte_pos = (
+        (await aios.stat(partial_path)).st_size
+        if (await aios.path.exists(partial_path))
+        else None
+    )
+
+    headers = {}
+    if resume_byte_pos:
+        headers["Range"] = f"bytes={resume_byte_pos}-"
+    
+    n_read = resume_byte_pos or 0
+
+    async with (
+        create_http_session(timeout_profile="long") as session,
+        session.get(url, headers=headers) as r,
+    ):
+        if r.status == 404:
+             raise FileNotFoundError(f"File not found on peer: {url}")
+        
+        if r.status not in [200, 206]:
+             raise Exception(f"Failed to download {path} from peer {url}: {r.status}")
+             
+        # Content-Length from peer
+        content_length = int(r.headers.get("Content-Length", 0))
+        if r.status == 206:
+             total_length = content_length + n_read
+        else:
+             total_length = content_length
+             if resume_byte_pos and resume_byte_pos > 0:
+                  # Server didn't support range, restart
+                  n_read = 0
+                  resume_byte_pos = 0
+
+        async with aiofiles.open(
+            partial_path, "ab" if resume_byte_pos else "wb"
+        ) as f:
+            while chunk := await r.content.read(8 * 1024 * 1024):
+                n_read += await f.write(chunk)
+                on_progress(n_read, total_length, False)
+
+    await aios.rename(partial_path, target_dir / path)
+    on_progress(n_read, n_read, True)
+    return target_dir / path
 
 async def download_shard(
     shard: ShardMetadata,
@@ -679,6 +772,7 @@ async def download_shard(
     skip_download: bool = False,
     skip_internet: bool = False,
     allow_patterns: list[str] | None = None,
+    repo_url: str | None = None,
     on_connection_lost: Callable[[], None] = lambda: None,
 ) -> tuple[Path, RepoDownloadProgress]:
     if not skip_download:
@@ -805,6 +899,24 @@ async def download_shard(
 
     async def download_with_semaphore(file: FileListEntry) -> None:
         async with semaphore:
+            if repo_url:
+                try:
+                    await download_file_from_peer_with_retry(
+                        repo_url,
+                        shard.model_card.model_id,
+                        file.path,
+                        target_dir,
+                        lambda curr_bytes, total_bytes, is_renamed: schedule_progress(
+                            file, curr_bytes, total_bytes, is_renamed
+                        ),
+                        on_connection_lost=on_connection_lost,
+                    )
+                    return
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to download from peer {repo_url} for {file.path}: {e}. Falling back to HuggingFace."
+                    )
+            
             await download_file_with_retry(
                 shard.model_card.model_id,
                 revision,
