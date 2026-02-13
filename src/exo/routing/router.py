@@ -15,12 +15,13 @@ from anyio import (
 )
 from anyio.abc import TaskGroup
 from exo_pyo3_bindings import (
-    AllQueuesFullError,
-    Keypair,
-    NetworkingHandle,
-    NoPeersSubscribedToTopicError,
+    PyConnectionUpdate,
+    PyConnectionUpdateType,
     PeerId,
+    PyNetworkingHandle,
+    PyNoPeersSubscribedToTopicError,
 )
+import base58
 from filelock import FileLock
 from loguru import logger
 
@@ -162,7 +163,9 @@ class Router:
                     if len(parts) == 2:
                         addr = parts[0]
                         peer_id_str = parts[1]
-                        await self.dial(PeerId.from_base58(peer_id_str), addr)
+                        # Use base58 decode + from_bytes to workaround missing from_base58 in binding
+                        peer_id_bytes = base58.b58decode(peer_id_str)
+                        await self.dial(PeerId.from_bytes(peer_id_bytes), addr)
                         logger.info(f"Dialed static peer {peer_id_str} at {addr}")
                 except Exception as e:
                     logger.error(f"Failed to dial static peer {peer}: {e}")
