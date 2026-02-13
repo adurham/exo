@@ -15,11 +15,11 @@ from anyio import (
 )
 from anyio.abc import TaskGroup
 from exo_pyo3_bindings import (
-    PyConnectionUpdate,
-    PyConnectionUpdateType,
+    ConnectionUpdate,
+    ConnectionUpdateType,
     PeerId,
-    PyNetworkingHandle,
-    PyNoPeersSubscribedToTopicError,
+    NetworkingHandle,
+    NoPeersSubscribedToTopicError,
 )
 import base58
 from filelock import FileLock
