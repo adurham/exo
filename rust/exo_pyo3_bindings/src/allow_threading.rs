@@ -26,8 +26,8 @@ where
 
 impl<F> Future for AllowThreads<F>
 where
-    F: Future + Ungil,
-    F::Output: Ungil,
+    F: Future + Ungil + Send,
+    F::Output: Ungil + Send,
 {
     type Output = F::Output;
 

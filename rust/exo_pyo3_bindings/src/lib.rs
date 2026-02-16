@@ -5,9 +5,9 @@
 //!
 
 // enable Rust-unstable features for convenience
-#![feature(trait_alias)]
-#![feature(tuple_trait)]
-#![feature(unboxed_closures)]
+// #![feature(trait_alias)]
+// #![feature(tuple_trait)]
+// #![feature(unboxed_closures)]
 // #![feature(stmt_expr_attributes)]
 // #![feature(assert_matches)]
 // #![feature(async_fn_in_dyn_trait)]
@@ -37,10 +37,6 @@ pub(crate) mod r#const {
 /// Namespace for all the type/trait aliases used by this crate.
 pub(crate) mod alias {
     use std::error::Error;
-    use std::marker::Tuple;
-
-    pub trait SendFn<Args: Tuple + Send + 'static, Output> =
-        Fn<Args, Output = Output> + Send + 'static;
 
     pub type AnyError = Box<dyn Error + Send + Sync + 'static>;
     pub type AnyResult<T> = Result<T, AnyError>;

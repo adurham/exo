@@ -496,7 +496,14 @@ def _set_layers(model: nn.Module, layers: list[_LayerCallable]) -> None:
 
         # Update DeepSeek V3 specific parameters when layers are shrunk
         if isinstance(
-            model, (DeepseekV3Model, DeepseekV32Model, Glm4MoeModel, KimiK25Model)
+            model,
+            (
+                DeepseekV3Model,
+                DeepseekV32Model,
+                Glm4MoeModel,
+                KimiK25Model,
+                MiniMaxModel,
+            ),
         ) and hasattr(inner_model_instance, "num_layers"):
             logger.info(
                 f"Setting num_layers to {len(layers)} for model {model.model.__class__.__name__}"
