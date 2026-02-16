@@ -44,6 +44,40 @@ from exo.shared.types.topology import SocketConnection
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
 
 
+def _get_best_peer_ip(
+    node_id: NodeId,
+    peer_id: NodeId,
+    topology: Topology,
+    node_network: Mapping[NodeId, NodeNetworkInfo],
+) -> str | None:
+    # Match logic in src/exo/master/placement_utils.py:_find_ip_prioritised
+    connections = topology.get_all_connections_between(node_id, peer_id)
+    ips = [
+        conn.sink_multiaddr.ip_address 
+        for conn in connections 
+        if isinstance(conn, SocketConnection)
+    ]
+    
+    if not ips:
+        return None
+        
+    other_network = node_network.get(peer_id, NodeNetworkInfo())
+    ip_to_type = {
+        iface.ip_address: iface.interface_type for iface in other_network.interfaces
+    }
+    
+    # Priority from placement_utils.py
+    priority = {
+        "ethernet": 0,
+        "wifi": 1,
+        "unknown": 2,
+        "maybe_ethernet": 3,
+        "thunderbolt": 4,
+    }
+    
+    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 2))
+
+
 def plan(
     node_id: NodeId,
     # Runners is expected to be FRESH and so should not come from state
@@ -174,34 +208,7 @@ def _model_needs_download(
         # 3. Construct repo_url if we found a peer
         repo_url: str | None = None
         if peer_with_model:
-            # Find IP of peer
-            # Prefer Thunderbolt > Other
-            # Use topology connections
-            connections = topology.get_all_connections_between(node_id, peer_with_model)
-            best_ip = None
-            
-            # Simple heuristic: look for connections that might be Thunderbolt?
-            # Or just take the first one.
-            # Ideally we check node_network for the interface type of the IPs.
-            
-            # Get peer IPs from node_network
-            peer_network = node_network.get(peer_with_model)
-            peer_thunderbolt_ips = set()
-            if peer_network:
-                 for iface in peer_network.interfaces:
-                      if iface.interface_type == "thunderbolt":
-                           peer_thunderbolt_ips.add(iface.ip_address)
-            
-            # Look for a connection that matches a thunderbolt IP
-            for conn in connections:
-                 if isinstance(conn, SocketConnection):
-                      ip = conn.sink_multiaddr.ip_address
-                      if ip in peer_thunderbolt_ips or ip.startswith("192.168.200."):
-                           best_ip = ip
-                           break
-                      if not best_ip:
-                           best_ip = ip
-            
+            best_ip = _get_best_peer_ip(node_id, peer_with_model, topology, node_network)
             if best_ip:
                  repo_url = f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"
         
