@@ -23,7 +23,7 @@ from exo.shared.types.worker.downloads import (
     DownloadOngoing,
     DownloadProgress,
 )
-from exo.shared.types.worker.instances import BoundInstance, MlxRingInstance, Instance, InstanceId
+from exo.shared.types.worker.instances import BoundInstance, MlxJacclInstance, MlxRingInstance, Instance, InstanceId
 from exo.shared.types.worker.runners import (
     RunnerConnected,
     RunnerConnecting,
@@ -226,6 +226,10 @@ def _model_needs_download(
                 hosts = instance.hosts_by_node.get(peer_with_model)
                 if hosts and len(hosts) > 0:
                     best_ip = hosts[0].ip
+            elif isinstance(instance, MlxJacclInstance):
+                coordinator = instance.jaccl_coordinators.get(peer_with_model)
+                if coordinator:
+                    best_ip = coordinator.split(":")[0]
 
             # 2. Fallback to best peer discovery
             if not best_ip:
