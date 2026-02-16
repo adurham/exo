@@ -85,8 +85,23 @@ else
         # Aggressive cleanup: kill by port and name, and remove screen sessions
         echo "Setting Metal memory limit on $NODE..."
         ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
-        ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
-        ssh "$NODE" "pkill -9 -f 'exo.main' || true"
+        
+        echo "Killing existing Exo processes on $NODE..."
+        # Loop until processes are gone
+        for i in {1..5}; do
+            ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
+            ssh "$NODE" "pkill -9 -f 'exo.main' || true"
+            ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
+            
+            # Check if still running
+            if ssh "$NODE" "pgrep -f 'exo.main'" > /dev/null; then
+                echo "  Processes still running, retrying kill..."
+                sleep 1
+            else
+                break
+            fi
+        done
+        
         ssh "$NODE" "screen -wipe || true"
 
         # Update and Build
