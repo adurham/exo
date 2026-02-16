@@ -91,7 +91,7 @@ else
 
         # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git reset --hard && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
     done
 
     # 3. Start Exo on each node
