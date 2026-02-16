@@ -75,8 +75,7 @@ def _get_best_peer_ip(
         iface.ip_address: iface.interface_type for iface in other_network.interfaces
     }
     
-    # Priority: Subnet > Interface Type
-    # 192.168.200.x is user's explicit Thunderbolt subnet
+    # Priority: Interface Type (Thunderbolt=0)
     priority = {
         "thunderbolt": 0,
         "ethernet": 1,
@@ -86,8 +85,6 @@ def _get_best_peer_ip(
     }
     
     def get_priority(ip: str) -> int:
-        if ip.startswith("192.168.200."):
-            return -1
         return priority.get(ip_to_type.get(ip, "unknown"), 4)
 
     return min(ips, key=get_priority)

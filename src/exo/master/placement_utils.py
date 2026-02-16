@@ -376,8 +376,6 @@ def _find_ip_prioritised(
     }
 
     def get_priority(ip: str) -> int:
-        if ip.startswith("192.168.200."):
-            return -1
         return priority.get(ip_to_type.get(ip, "unknown"), 4)
 
     return min(ips, key=get_priority)
