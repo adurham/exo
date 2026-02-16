@@ -83,13 +83,15 @@ else
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
         # Aggressive cleanup: kill by port and name, and remove screen sessions
+        echo "Setting Metal memory limit on $NODE..."
+        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
         ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
         ssh "$NODE" "pkill -9 -f 'exo.main' || true"
         ssh "$NODE" "screen -wipe || true"
 
         # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
     done
 
     # 3. Start Exo on each node

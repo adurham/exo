@@ -115,6 +115,7 @@ class Worker:
                 tg.start_soon(self._forward_events)
                 tg.start_soon(self._poll_connection_updates)
                 tg.start_soon(self.file_server.start)
+                tg.start_soon(self._log_network_status)
         finally:
             # Actual shutdown code - waits for all tasks to complete before executing.
             logger.info("Stopping Worker")
@@ -125,6 +126,21 @@ class Worker:
             for runner in self.runners.values():
                 runner.shutdown()
             self._completion_event.set()
+
+    async def _log_network_status(self):
+        import subprocess
+        while True:
+            try:
+                # Synchronous run is acceptable for quick ifconfig checks in debug mode
+                res = subprocess.run(["ifconfig", "en2"], capture_output=True, text=True)
+                if res.returncode == 0:
+                    ips = [l.strip() for l in res.stdout.split('\n') if "inet " in l]
+                    logger.info(f"Network Watchdog (en2): {ips}")
+                else:
+                    logger.debug("Network Watchdog: en2 not found or error")
+            except Exception as e:
+                logger.error(f"Network Watchdog Error: {e}")
+            await anyio.sleep(10)
 
     async def wait_until_stopped(self):
         await self._completion_event.wait()
