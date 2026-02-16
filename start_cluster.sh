@@ -79,6 +79,10 @@ else
 
 
     # 1. Kill existing processes, git pull, and force reinstall bindings (rebuilds Rust bindings)
+    # Get local commit hash to enforce consistency
+    LOCAL_COMMIT=$(git rev-parse --short HEAD)
+    echo "Local commit: $LOCAL_COMMIT"
+
     # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
@@ -107,6 +111,15 @@ else
         # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
         ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git reset --hard && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
+
+        # Verify Remote Commit
+        REMOTE_COMMIT=$(ssh "$NODE" "cd ~/repos/exo && git rev-parse --short HEAD")
+        if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
+            echo "CRITICAL ERROR: Node $NODE is on commit $REMOTE_COMMIT, but local is $LOCAL_COMMIT."
+            echo "The cluster is out of sync. Please fix git issues on $NODE and try again."
+            exit 1
+        fi
+        echo "Node $NODE verified on commit $REMOTE_COMMIT."
     done
 
     # 3. Start Exo on each node
