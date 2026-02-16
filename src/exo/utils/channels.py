@@ -184,15 +184,21 @@ class MpReceiver[T]:
             print("Unreachable code path - let me know!")
             raise ClosedResourceError from e
 
-    def receive(self) -> T:
+    def receive(self, timeout: float | None = None) -> T:
         try:
-            return self.receive_nowait()
+            if timeout is not None:
+                item = self._state.buffer.get(block=True, timeout=timeout)
+            else:
+                return self.receive_nowait()
+        except Empty:
+            raise WouldBlock from None
         except WouldBlock:
             item = self._state.buffer.get()
-            if isinstance(item, _MpEndOfStream):
-                self.close()
-                raise EndOfStream from None
-            return item
+        
+        if isinstance(item, _MpEndOfStream):
+            self.close()
+            raise EndOfStream from None
+        return item
 
     async def receive_async(self) -> T:
         return await to_thread.run_sync(

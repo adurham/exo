@@ -273,13 +273,18 @@ def main(
                         assert not isinstance(model, DistributedImageModel)
                         assert tokenizer
 
-                        toks = warmup_inference(
-                            model=model,
-                            tokenizer=tokenizer,
-                            group=group,
-                            # kv_prefix_cache=kv_prefix_cache,  # supply for warmup-time prefix caching
-                        )
-                        logger.info(f"warmed up by generating {toks} tokens")
+                        if os.environ.get("EXO_DISABLE_WARMUP") == "1":
+                            logger.info("Warmup disabled by EXO_DISABLE_WARMUP env var")
+                            toks = 0
+                        else:
+                            toks = warmup_inference(
+                                model=model,
+                                tokenizer=tokenizer,
+                                group=group,
+                                # kv_prefix_cache=kv_prefix_cache,  # supply for warmup-time prefix caching
+                            )
+                            logger.info(f"warmed up by generating {toks} tokens")
+                        
                         logger.info(
                             f"runner initialized in {time.time() - setup_start_time} seconds"
                         )
@@ -304,13 +309,15 @@ def main(
                     if _is_batchable_text_task(task_params) and batch_max_size > 1:
                         start = time.perf_counter()
                         while len(batch) < batch_max_size:
-                            if time.perf_counter() - start >= batch_max_wait_s:
+                            elapsed = time.perf_counter() - start
+                            remaining_time = batch_max_wait_s - elapsed
+                            if remaining_time <= 0:
                                 break
+
                             try:
-                                nxt = tasks.receive_nowait()
+                                nxt = tasks.receive(timeout=remaining_time)
                             except WouldBlock:
-                                time.sleep(0.0005)
-                                continue
+                                break
 
                             if nxt.task_id in seen:
                                 logger.warning("repeat task - potential error")

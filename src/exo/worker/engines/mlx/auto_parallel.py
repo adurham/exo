@@ -49,6 +49,12 @@ if TYPE_CHECKING:
 TimeoutCallback = Callable[[], None]
 
 
+
+from concurrent.futures import ThreadPoolExecutor
+
+_watchdog_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="watchdog")
+
+
 def eval_with_timeout(
     mlx_item: Any,  # pyright: ignore[reportAny]
     timeout_seconds: float = 60.0,
@@ -72,8 +78,7 @@ def eval_with_timeout(
                 on_timeout()
             os._exit(1)
 
-    watchdog_thread = threading.Thread(target=watchdog, daemon=True)
-    watchdog_thread.start()
+    _watchdog_executor.submit(watchdog)
 
     try:
         mx.eval(mlx_item)  # pyright: ignore[reportAny]
