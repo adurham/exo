@@ -349,6 +349,12 @@ def get_eos_token_ids_for_model(model_id: ModelId) -> list[int] | None:
         return [154820, 154827, 154829]
     elif "glm" in model_id_lower:
         return [151336, 151329, 151338]
+    elif "qwen" in model_id_lower:
+        return [151643, 151644, 151645]
+    elif "llama-3" in model_id_lower:
+        return [128001, 128009]
+    elif "phi-3" in model_id_lower:
+        return [32000, 32001, 32007]
     return None
 
 
