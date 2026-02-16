@@ -185,6 +185,7 @@ def mlx_distributed_init(
                 os.environ["MLX_IBV_DEVICES"] = coordination_file
                 os.environ["MLX_RANK"] = str(rank)
                 os.environ["MLX_JACCL_COORDINATOR"] = jaccl_coordinator
+                os.environ["IBV_FORK_SAFE"] = "1"
                 
                 # Diagnostics
                 try:
@@ -192,6 +193,7 @@ def mlx_distributed_init(
                     soft, hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
                     logger.info(f"RLIMIT_MEMLOCK: soft={soft}, hard={hard}")
                     logger.info(f"IBV_FORK_SAFE: {os.environ.get('IBV_FORK_SAFE', 'Not Set')}")
+                    logger.info(f"Connecting to coordinator: {jaccl_coordinator}")
                 except Exception as e:
                     logger.error(f"Failed to log diagnostics: {e}")
 
