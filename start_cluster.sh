@@ -111,6 +111,9 @@ else
         # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
         # FORCE update to origin/main to avoid "Already up to date" issues on stale branches
+        # Ensure Xcode is selected for Metal tools
+        echo "Ensuring Xcode developer directory is set on $NODE..."
+        ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || echo 'Failed to set xcode-select, proceeding anyway...'"
         ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && git submodule update --init --recursive && uv sync'" || { echo "Failed to update/build on $NODE"; exit 1; }
 
         # Verify Remote Commit
