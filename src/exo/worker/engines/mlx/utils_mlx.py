@@ -357,6 +357,8 @@ def get_eos_token_ids_for_model(model_id: ModelId) -> list[int] | None:
         return [128001, 128009]
     elif "phi-3" in model_id_lower:
         return [32000, 32001, 32007]
+    elif "minimax" in model_id_lower:
+        return [200021]
     return None
 
 
