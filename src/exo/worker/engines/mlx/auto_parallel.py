@@ -133,7 +133,9 @@ class PipelineFirstLayer(CustomMlxLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
+            logger.info(f"PipelineFirstLayer: Receiving from {self.r - 1} (is_prefill={self.is_prefill})")
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+            logger.info(f"PipelineFirstLayer: Recv complete")
             if self.is_prefill:
                 # We want to avoid GPU timeout errors by evalling the distributed operation
                 # so that it stays on CPU, which does not have a timeout.
@@ -164,9 +166,11 @@ class PipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self.r != self.s - 1:
+            logger.info(f"PipelineLastLayer: Sending to {(self.r + 1) % self.s} (is_prefill={self.is_prefill})")
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
+            logger.info("PipelineLastLayer: Send complete")
             if cache is not None:
                 cache.keys = mx.depends(cache.keys, output)  # type: ignore[reportUnknownMemberType]
             if self.is_prefill:
@@ -175,9 +179,11 @@ class PipelineLastLayer(CustomMlxLayer):
                     mx.eval(cache.keys)  # type: ignore
 
         if not self.is_prefill:
+            logger.info(f"PipelineLastLayer: AllGather start size={output.shape}")
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
+            logger.info("PipelineLastLayer: AllGather complete")
 
         return output
 
