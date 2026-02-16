@@ -117,9 +117,25 @@ else
         ssh "$NODE" "sudo xcodebuild -runFirstLaunch || echo 'xcodebuild -runFirstLaunch failed or already done'"
         ssh "$NODE" "sudo xcodebuild -downloadComponent MetalToolchain || echo 'Metal Toolchain download failed or already installed'"
         
-        # Ensure 'metal' is in PATH for the build
-        echo "Adding metal to PATH on $NODE..."
-        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && git submodule sync && git submodule update --init --recursive && uv sync'" || { echo "Failed to update/build on $NODE"; exit 1; }
+        # Update and Build Logic
+        echo "Checking MLX submodule status on $NODE..."
+        OLD_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
+        
+        # Pull latest changes
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
+        
+        NEW_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
+        
+        BUILD_CMD="uv sync"
+        if [ "$OLD_MLX" != "$NEW_MLX" ]; then
+            echo "MLX submodule changed on $NODE ($OLD_MLX -> $NEW_MLX). Forcing clean rebuild..."
+            # Remove venv and build artifacts to force fresh compilation
+            BUILD_CMD="rm -rf .venv mlx/build && uv cache clean && uv sync"
+        fi
+
+        # Ensure 'metal' is in PATH and Run Build
+        echo "Running build on $NODE..."
+        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && $BUILD_CMD'" || { echo "Failed to build on $NODE"; exit 1; }
 
         # Verify Remote Commit
         REMOTE_COMMIT=$(ssh "$NODE" "cd ~/repos/exo && git rev-parse --short HEAD")
