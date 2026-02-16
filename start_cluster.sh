@@ -110,7 +110,8 @@ else
 
         # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git reset --hard && git pull && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
+        # FORCE update to origin/main to avoid "Already up to date" issues on stale branches
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
 
         # Verify Remote Commit
         REMOTE_COMMIT=$(ssh "$NODE" "cd ~/repos/exo && git rev-parse --short HEAD")
