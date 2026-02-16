@@ -50,23 +50,33 @@ def _get_best_peer_ip(
     topology: Topology,
     node_network: Mapping[NodeId, NodeNetworkInfo],
 ) -> str | None:
-    # Match logic in src/exo/master/placement_utils.py:_find_ip_prioritised
-    connections = topology.get_all_connections_between(node_id, peer_id)
+    other_network = node_network.get(peer_id, NodeNetworkInfo())
+    
+    # Get all IPv4 addresses from the peer's network info
     ips = [
-        conn.sink_multiaddr.ip_address 
-        for conn in connections 
-        if isinstance(conn, SocketConnection)
+        iface.ip_address 
+        for iface in other_network.interfaces 
+        if iface.ip_address and ":" not in iface.ip_address
     ]
     
     if not ips:
-        return None
+        # Fallback to topology connections if node_network is empty
+        connections = topology.get_all_connections_between(node_id, peer_id)
+        ips = [
+            conn.sink_multiaddr.ip_address 
+            for conn in connections 
+            if isinstance(conn, SocketConnection)
+        ]
         
-    other_network = node_network.get(peer_id, NodeNetworkInfo())
+    if not ips:
+        return None
+
     ip_to_type = {
         iface.ip_address: iface.interface_type for iface in other_network.interfaces
     }
     
-    # Priority from placement_utils.py
+    # Priority: Subnet > Interface Type
+    # 192.168.200.x is user's explicit Thunderbolt subnet
     priority = {
         "thunderbolt": 0,
         "ethernet": 1,
@@ -75,7 +85,12 @@ def _get_best_peer_ip(
         "unknown": 4,
     }
     
-    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 4))
+    def get_priority(ip: str) -> int:
+        if ip.startswith("192.168.200."):
+            return -1
+        return priority.get(ip_to_type.get(ip, "unknown"), 4)
+
+    return min(ips, key=get_priority)
 
 
 def plan(

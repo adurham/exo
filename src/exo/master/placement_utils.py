@@ -345,15 +345,28 @@ def _find_ip_prioritised(
 ) -> str | None:
     """Find an IP address between nodes with prioritization.
 
-    Priority: ethernet > wifi > unknown > thunderbolt
+    Priority: 192.168.200.x > thunderbolt > ethernet > wifi > unknown
     """
-    ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
+    other_network_info = node_network.get(other_node_id, NodeNetworkInfo())
+    
+    # Get all IPv4 addresses from the peer's network info
+    ips = [
+        iface.ip_address 
+        for iface in other_network_info.interfaces 
+        if iface.ip_address and ":" not in iface.ip_address
+    ]
+
+    if not ips:
+        # Fallback to topology connections
+        ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
+
     if not ips:
         return None
-    other_network = node_network.get(other_node_id, NodeNetworkInfo())
+
     ip_to_type = {
-        iface.ip_address: iface.interface_type for iface in other_network.interfaces
+        iface.ip_address: iface.interface_type for iface in other_network_info.interfaces
     }
+    
     priority = {
         "thunderbolt": 0,
         "ethernet": 1,
@@ -361,7 +374,13 @@ def _find_ip_prioritised(
         "wifi": 3,
         "unknown": 4,
     }
-    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 4))
+
+    def get_priority(ip: str) -> int:
+        if ip.startswith("192.168.200."):
+            return -1
+        return priority.get(ip_to_type.get(ip, "unknown"), 4)
+
+    return min(ips, key=get_priority)
 
 
 def get_mlx_ring_hosts_by_node(
