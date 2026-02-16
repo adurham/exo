@@ -127,8 +127,10 @@ else
         NEW_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
         
         BUILD_CMD="uv sync"
-        if [ "$OLD_MLX" != "$NEW_MLX" ]; then
-            echo "MLX submodule changed on $NODE ($OLD_MLX -> $NEW_MLX). Forcing clean rebuild..."
+        if [ "$OLD_MLX" != "$NEW_MLX" ] || [ "$FORCE_REBUILD" == "1" ]; then
+            REASON="MLX submodule changed ($OLD_MLX -> $NEW_MLX)"
+            if [ "$FORCE_REBUILD" == "1" ]; then REASON="FORCE_REBUILD=1 set"; fi
+            echo "Forcing clean rebuild on $NODE (Reason: $REASON)..."
             # Remove venv and build artifacts to force fresh compilation
             BUILD_CMD="rm -rf .venv mlx/build && uv cache clean && uv sync"
         fi
