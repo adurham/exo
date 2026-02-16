@@ -196,7 +196,7 @@ def _model_needs_download(
             for conn in connections:
                  if isinstance(conn, SocketConnection):
                       ip = conn.sink_multiaddr.ip_address
-                      if ip in peer_thunderbolt_ips:
+                      if ip in peer_thunderbolt_ips or ip.startswith("192.168.200."):
                            best_ip = ip
                            break
                       if not best_ip:
