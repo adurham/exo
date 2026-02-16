@@ -68,14 +68,14 @@ def _get_best_peer_ip(
     
     # Priority from placement_utils.py
     priority = {
-        "ethernet": 0,
-        "wifi": 1,
-        "unknown": 2,
-        "maybe_ethernet": 3,
-        "thunderbolt": 4,
+        "thunderbolt": 0,
+        "ethernet": 1,
+        "maybe_ethernet": 2,
+        "wifi": 3,
+        "unknown": 4,
     }
     
-    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 2))
+    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 4))
 
 
 def plan(
