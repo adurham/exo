@@ -334,24 +334,37 @@ def mlx_generate(
     mx_barrier(group)
 
     logger.info(f"Tokenizer EOS IDs: {getattr(tokenizer, 'eos_token_ids', 'Not Set')}")
-    for completion_tokens, out in enumerate(
-        stream_generate(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=last_token,
-            max_tokens=max_tokens,
-            sampler=sampler,
-            logits_processors=logits_processors,
-            prompt_cache=caches,
-            prefill_step_size=1,
-            kv_group_size=KV_GROUP_SIZE,
-            kv_bits=KV_BITS,
-        ),
-        start=1,
-    ):
-        logger.debug(f"Gen token: {out.token} | {out.text}")
-        generated_text_parts.append(out.text)
-        accumulated_text += out.text
+    logger.info("Starting stream_generate loop...")
+    try:
+        for completion_tokens, out in enumerate(
+            stream_generate(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=last_token,
+                max_tokens=max_tokens,
+                sampler=sampler,
+                logits_processors=logits_processors,
+                prompt_cache=caches,
+                prefill_step_size=1,
+                kv_group_size=KV_GROUP_SIZE,
+                kv_bits=KV_BITS,
+            ),
+            start=1,
+        ):
+            logger.info(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
+            generated_text_parts.append(out.text)
+            accumulated_text += out.text
+            
+            # Check for stop tokens manually if needed
+            if out.token in getattr(tokenizer, 'eos_token_ids', []):
+                 logger.info(f"Hit stop token: {out.token}")
+                 break
+                 
+            yield out
+    except Exception as e:
+        logger.error(f"Error in generation loop: {e}")
+        raise e
+    logger.info("Generation loop finished.")
 
         if think_start is not None and out.text == think_start:
             in_thinking = True
