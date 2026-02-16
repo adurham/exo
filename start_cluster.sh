@@ -111,7 +111,7 @@ else
         # Update and Build
         # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
         # FORCE update to origin/main to avoid "Already up to date" issues on stale branches
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && uv pip install --force-reinstall ./rust/exo_pyo3_bindings && uv pip install -e .'" || { echo "Failed to update/build on $NODE"; exit 1; }
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && git submodule update --init --recursive && uv sync'" || { echo "Failed to update/build on $NODE"; exit 1; }
 
         # Verify Remote Commit
         REMOTE_COMMIT=$(ssh "$NODE" "cd ~/repos/exo && git rev-parse --short HEAD")
@@ -179,6 +179,8 @@ if [ ! -f "$MACMON_PATH" ]; then
 else
     echo "macmon detected at $MACMON_PATH"
 fi
+
+export IBV_FORK_SAFE=1
 
 echo "Starting Exo with EXO_DISCOVERY_PEERS=$EXO_DISCOVERY_PEERS"
 
