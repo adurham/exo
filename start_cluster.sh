@@ -117,7 +117,9 @@ else
         ssh "$NODE" "sudo xcodebuild -runFirstLaunch || echo 'xcodebuild -runFirstLaunch failed or already done'"
         ssh "$NODE" "sudo xcodebuild -downloadComponent MetalToolchain || echo 'Metal Toolchain download failed or already installed'"
         
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && git submodule update --init --recursive && uv sync'" || { echo "Failed to update/build on $NODE"; exit 1; }
+        # Ensure 'metal' is in PATH for the build
+        echo "Adding metal to PATH on $NODE..."
+        ssh "$NODE" "export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard origin/main && git submodule update --init --recursive && uv sync'" || { echo "Failed to update/build on $NODE"; exit 1; }
 
         # Verify Remote Commit
         REMOTE_COMMIT=$(ssh "$NODE" "cd ~/repos/exo && git rev-parse --short HEAD")
