@@ -23,7 +23,7 @@ from exo.shared.types.worker.downloads import (
     DownloadOngoing,
     DownloadProgress,
 )
-from exo.shared.types.worker.instances import BoundInstance, Instance, InstanceId
+from exo.shared.types.worker.instances import BoundInstance, MlxRingInstance, Instance, InstanceId
 from exo.shared.types.worker.runners import (
     RunnerConnected,
     RunnerConnecting,
@@ -220,9 +220,19 @@ def _model_needs_download(
         # 3. Construct repo_url if we found a peer
         repo_url: str | None = None
         if peer_with_model:
-            best_ip = _get_best_peer_ip(node_id, peer_with_model, topology, node_network)
+            # 1. Try to use the IP assigned in the instance configuration (Ring)
+            best_ip = None
+            if isinstance(instance, MlxRingInstance):
+                hosts = instance.hosts_by_node.get(peer_with_model)
+                if hosts and len(hosts) > 0:
+                    best_ip = hosts[0].ip
+
+            # 2. Fallback to best peer discovery
+            if not best_ip:
+                best_ip = _get_best_peer_ip(node_id, peer_with_model, topology, node_network)
+
             if best_ip:
-                 repo_url = f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"
+                repo_url = f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"
         
         # 4. Decide action
         if repo_url:
