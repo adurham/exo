@@ -333,6 +333,7 @@ def mlx_generate(
 
     mx_barrier(group)
 
+    logger.info(f"Tokenizer EOS IDs: {getattr(tokenizer, 'eos_token_ids', 'Not Set')}")
     for completion_tokens, out in enumerate(
         stream_generate(
             model=model,
@@ -348,6 +349,7 @@ def mlx_generate(
         ),
         start=1,
     ):
+        logger.debug(f"Gen token: {out.token} | {out.text}")
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
