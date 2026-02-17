@@ -6,6 +6,8 @@ from functools import partial
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from mlx.utils import tree_map
+
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.nn.layers.distributed import (
@@ -312,9 +314,7 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
 
         # Add dependency to last cache entry to ensure distributed ops are evaluated
         if cache is not None:
-            # mx.depends fails with QuantizedKVCache (complex state), so we force eval instead.
-            # This is safe and effective especially with EXO_FAST_SYNCH=off.
-            mx.eval(logits)
+             cache[-1].state = tree_map(lambda x: mx.depends(x, logits), cache[-1].state)
 
         return logits
 
