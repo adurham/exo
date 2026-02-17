@@ -136,8 +136,10 @@ class PipelineFirstLayer(CustomMlxLayer):
             logger.info(f"PipelineFirstLayer: Receiving from {self.r - 1} (is_prefill={self.is_prefill})")
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
             logger.info(f"PipelineFirstLayer: Recv complete")
-            # Always eval to ensure synchronization and prevent command buffer buildup/deadlocks
-            mx.eval(x)
+            if self.is_prefill:
+                # We want to avoid GPU timeout errors by evalling the distributed operation
+                # so that it stays on CPU, which does not have a timeout.
+                mx.eval(x)
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -182,7 +184,6 @@ class PipelineLastLayer(CustomMlxLayer):
                 -output.shape[0] :
             ]
             logger.info("PipelineLastLayer: AllGather complete")
-            mx.eval(output)
 
         return output
 
