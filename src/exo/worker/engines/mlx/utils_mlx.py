@@ -126,7 +126,7 @@ def mlx_distributed_init(
     if mx.metal.is_available():
         device_info = mx.metal.device_info()
         max_rec_size = int(device_info["max_recommended_working_set_size"])
-        ratio = float(os.getenv("EXO_MLX_WIRED_LIMIT_RATIO", "0.75"))
+        ratio = float(os.getenv("EXO_MLX_WIRED_LIMIT_RATIO") or "0.75")
         limit = int(max_rec_size * ratio)
         mx.set_wired_limit(limit)
         logger.info(f"Set MLX wired limit to {limit / 1024**3:.2f} GB ({ratio:.0%} of max recommended)")
