@@ -402,7 +402,7 @@ def mlx_generate(
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
     mx_barrier(group)
-    logger.info("Ready to prefill")
+    logger.debug("Ready to prefill")
 
     # Prefill cache with all tokens except the last one
     prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
@@ -429,8 +429,8 @@ def mlx_generate(
 
     mx_barrier(group)
 
-    logger.info(f"Tokenizer EOS IDs: {getattr(tokenizer, 'eos_token_ids', 'Not Set')}")
-    logger.info("Starting stream_generate loop...")
+    logger.debug(f"Tokenizer EOS IDs: {getattr(tokenizer, 'eos_token_ids', 'Not Set')}")
+    logger.debug("Starting stream_generate loop...")
     for completion_tokens, out in enumerate(
         stream_generate(
             model=model,
@@ -446,13 +446,13 @@ def mlx_generate(
         ),
         start=1,
     ):
-        logger.info(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
+        logger.debug(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
         generated_text_parts.append(out.text)
         accumulated_text += out.text
         
         # Check for stop tokens manually if needed
         if out.token in getattr(tokenizer, 'eos_token_ids', []):
-             logger.info(f"Hit stop token: {out.token}")
+             logger.debug(f"Hit stop token: {out.token}")
 
         if think_start is not None and out.text == think_start:
             in_thinking = True
