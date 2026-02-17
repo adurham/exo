@@ -5,6 +5,7 @@ n_layers = 48
 hidden_size = 2048
 supports_tensor = true
 tasks = ["TextGeneration"]
+quantization = "6bit"
 
 [storage_size]
 in_bytes = 68899327465

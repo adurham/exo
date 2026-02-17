@@ -5,6 +5,7 @@ supports_tensor = true
 tasks = ["TextGeneration"]
 family = "qwen"
 base_model = "Qwen3 Coder Next 80B"
+quantization = "8bit"
 
 [storage_size]
 in_bytes = 89357758772
