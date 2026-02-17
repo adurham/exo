@@ -312,7 +312,9 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
 
         # Add dependency to last cache entry to ensure distributed ops are evaluated
         if cache is not None:
-            cache[-1].state = mx.depends(cache[-1].state, logits)  # type: ignore
+            # mx.depends fails with QuantizedKVCache (complex state), so we force eval instead.
+            # This is safe and effective especially with EXO_FAST_SYNCH=off.
+            mx.eval(logits)
 
         return logits
 
