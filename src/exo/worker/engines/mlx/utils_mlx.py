@@ -199,10 +199,26 @@ def mlx_distributed_init(
 
                 # Apply wired limit
                 max_rec_size = int(mx.metal.device_info()["max_recommended_working_set_size"])
-                ratio = float(os.getenv("EXO_MLX_WIRED_LIMIT_RATIO", "0.75"))
-                safe_limit = int(max_rec_size * ratio)
+                if os.getenv("EXO_MLX_WIRED_LIMIT_RATIO"):
+                    ratio = float(os.environ["EXO_MLX_WIRED_LIMIT_RATIO"])
+                    safe_limit = int(max_rec_size * ratio)
+                    logger.info(f"Using manual MLX wired limit ratio: {ratio} -> {safe_limit / 1e9:.2f} GB")
+                else:
+                    # Dynamic calculation
+                    try:
+                        shard_size = get_weights_size(bound_instance.bound_shard).in_bytes
+                        # Add 30% buffer for KV cache, activations, and scratch
+                        needed = int(shard_size * 1.3)
+                        # Clamp to 85% of system max to leave room for OS/RDMA
+                        system_safe_cap = int(max_rec_size * 0.85)
+                        safe_limit = min(needed, system_safe_cap)
+                        logger.info(f"Dynamic wired limit: Model={shard_size/1e9:.2f}GB, Needed={needed/1e9:.2f}GB, Cap={system_safe_cap/1e9:.2f}GB -> Set={safe_limit/1e9:.2f}GB")
+                    except Exception as e:
+                        logger.error(f"Failed to calculate dynamic wired limit: {e}. Fallback to 0.75 default.")
+                        safe_limit = int(max_rec_size * 0.75)
+
                 mx.set_wired_limit(safe_limit)
-                logger.info(f"Set MLX wired limit to {safe_limit / 1e9:.2f} GB ({ratio * 100:.0f}% of max recommended)")
+                logger.info(f"Set MLX wired limit to {safe_limit / 1e9:.2f} GB")
 
                 group = mx.distributed.init(backend="jaccl", strict=False)
 
