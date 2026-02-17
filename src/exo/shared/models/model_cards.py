@@ -144,10 +144,41 @@ class ModelCard(CamelCaseModel):
             hidden_size=config_data.hidden_size or 0,
             supports_tensor=config_data.supports_tensor,
             tasks=[ModelTask.TextGeneration],
+            family=_infer_family(model_id),
         )
         await mc.save_to_custom_dir()
         _card_cache[model_id] = mc
         return mc
+
+
+def _infer_family(model_id: str) -> str:
+    """Infers the model family from the model ID."""
+    model_id = model_id.lower()
+    if "llama" in model_id:
+        return "llama"
+    elif "qwen" in model_id:
+        return "qwen"
+    elif "deepseek" in model_id:
+        return "deepseek"
+    elif "gemma" in model_id:
+        return "gemma"
+    elif "mistral" in model_id:
+        return "mistral"
+    elif "phi" in model_id:
+        return "phi"
+    elif "glm" in model_id:
+        return "glm"
+    elif "minimax" in model_id:
+        return "minimax"
+    elif "kimi" in model_id or "moonshot" in model_id:
+        return "kimi"
+    elif "step" in model_id:
+        return "step"
+    elif "gpt-oss" in model_id or "gpt" in model_id:
+        return "gpt-oss"
+    elif "flux" in model_id:
+        return "flux"
+    return ""
 
 
 async def delete_custom_card(model_id: ModelId) -> bool:

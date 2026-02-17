@@ -3,6 +3,8 @@ n_layers = 48
 hidden_size = 2048
 supports_tensor = true
 tasks = ["TextGeneration"]
+family = "qwen"
+base_model = "Qwen3 Coder Next 80B"
 
 [storage_size]
 in_bytes = 89357758772

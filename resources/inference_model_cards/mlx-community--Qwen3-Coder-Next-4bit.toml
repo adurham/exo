@@ -1,3 +1,5 @@
+family = "qwen"
+base_model = "Qwen3 Coder Next 80B"
 model_id = "mlx-community/Qwen3-Coder-Next-4bit"
 n_layers = 48
 hidden_size = 2048

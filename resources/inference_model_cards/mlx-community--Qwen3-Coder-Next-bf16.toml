@@ -4,7 +4,7 @@ hidden_size = 2048
 supports_tensor = true
 tasks = ["TextGeneration"]
 family = "qwen"
-base_model = "Qwen3 Coder Next"
+base_model = "Qwen3 Coder Next 80B"
 quantization = "bf16"
 capabilities = ["text", "code"]
 

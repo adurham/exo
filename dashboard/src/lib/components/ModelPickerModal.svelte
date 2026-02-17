@@ -374,6 +374,10 @@
       "llama",
       "flux",
       "qwen-image",
+      "step",
+      "gemma",
+      "mistral",
+      "phi",
     ];
     return Array.from(families).sort((a, b) => {
       const aIdx = familyOrder.indexOf(a);

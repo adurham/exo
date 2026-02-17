@@ -5,7 +5,7 @@ supports_tensor = true
 tasks = ["TextGeneration"]
 family = "minimax"
 quantization = "5bit"
-base_model = "MiniMax M2.5"
+base_model = "MiniMax M2.5 230B"
 capabilities = ["text", "thinking"]
 
 [storage_size]
