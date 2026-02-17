@@ -168,51 +168,6 @@ else
     done
 
 
-    # 3. Start Local Resources (Dashboard & Exo)
-    # Build Dashboard (as requested to refresh UI assets)
-    if [ -d "dashboard" ]; then
-        echo "Checking dashboard..."
-        # Try to load NVM if present
-        export NVM_DIR="$HOME/.nvm"
-        if [ -s "$NVM_DIR/nvm.sh" ]; then
-            # Supress NVM output
-            source "$NVM_DIR/nvm.sh" > /dev/null 2>&1
-        fi
-
-        cd dashboard
-        # Check if npm is available
-        if command -v npm &> /dev/null; then
-            npm install && npm run build
-        else
-            echo "WARNING: npm not found. Skipping dashboard build."
-        fi
-        cd ..
-    else
-        echo "WARNING: dashboard directory not found."
-    fi
-
-    # Activate venv if it exists in the repo
-    SOURCE_DIR=$(dirname "$0")
-    if [ -d "$SOURCE_DIR/.venv" ]; then
-        source "$SOURCE_DIR/.venv/bin/activate"
-    fi
-
-    # Run Exo from source to pick up local changes
-    # FORCE local resources to be used
-    export EXO_RESOURCES_DIR="$PWD/resources"
-    echo "Using resources from: $EXO_RESOURCES_DIR"
-
-    if command -v uv &> /dev/null; then
-      echo "Starting Exo in background (screen session 'exo_local')..."
-      # Kill existing session if present to avoid duplicates
-      screen -X -S exo_local quit > /dev/null 2>&1 || true
-      screen -dmS exo_local uv run exo
-    else
-      echo "Starting Exo in background (screen session 'exo_local')..."
-      screen -X -S exo_local quit > /dev/null 2>&1 || true
-      screen -dmS exo_local python3 -m exo.main
-    fi
-
     # 4. Health Check / Topology Verification
     echo -n "Cluster start commands issued. Waiting for cluster to stabilize..."
     CLUSTER_READY=false
@@ -259,4 +214,4 @@ fi
 
 export IBV_FORK_SAFE=${IBV_FORK_SAFE:-1}
 
-echo "Starting Exo with EXO_DISCOVERY_PEERS=$EXO_DISCOVERY_PEERS"
+
