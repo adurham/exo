@@ -9,9 +9,7 @@ faulthandler.enable()
 if hasattr(signal, "SIGQUIT"):
     faulthandler.register(signal.SIGQUIT)
 
-# Valid values: "1", "true", "on", "yes", "y"
-# We set this to help debug issues with forking and IBV but it is not recommended for production use
-os.environ["IBV_FORK_SAFE"] = "1"
+
 from dataclasses import dataclass, field
 from typing import Iterator, Self
 
@@ -263,7 +261,7 @@ def main():
     target = min(max(soft, 65535), hard)
     resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
 
-    mp.set_start_method("spawn")
+    mp.set_start_method("spawn", force=True)
     # TODO: Refactor the current verbosity system
     logger_setup(EXO_LOG, args.verbosity)
     logger.info("Starting EXO")

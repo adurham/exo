@@ -36,4 +36,6 @@ if __name__ == "__main__":
     if _maybe_run_inline_code(sys.argv):
         sys.exit(0)
     freeze_support()
+    from multiprocessing import set_start_method
+    set_start_method("spawn", force=True)
     main()
