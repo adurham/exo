@@ -3,7 +3,11 @@ import itertools
 import multiprocessing as mp
 import os
 import resource
+import faulthandler
 import signal
+faulthandler.enable()
+if hasattr(signal, "SIGQUIT"):
+    faulthandler.register(signal.SIGQUIT)
 
 # Valid values: "1", "true", "on", "yes", "y"
 # We set this to help debug issues with forking and IBV but it is not recommended for production use
