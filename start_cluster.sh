@@ -123,7 +123,7 @@ else
         OLD_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
         
         # Pull latest changes
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git checkout $CURRENT_BRANCH && git reset --hard origin/$CURRENT_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $CURRENT_BRANCH && git reset --hard origin/$CURRENT_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
         
         NEW_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
         
