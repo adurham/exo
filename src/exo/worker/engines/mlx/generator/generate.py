@@ -401,7 +401,7 @@ DEFAULT_QUANTIZED_KV_START = 5000
 
 def generate_step(
     prompt: mx.array,
-    model: mx.nn.Module,
+    model: nn.Module,
     *,
     max_tokens: int = 256,
     sampler: Optional[Callable[[mx.array], mx.array]] = None,
@@ -544,11 +544,11 @@ def generate_step(
 
 
 def stream_generate(
-    model: mx.nn.Module,
+    model: nn.Module,
     tokenizer: Union[TokenizerWrapper, Any],
     prompt: Union[str, mx.array, List[int]],
     max_tokens: int = 256,
-    draft_model: Optional[mx.nn.Module] = None,
+    draft_model: Optional[nn.Module] = None,
     **kwargs,
 ) -> Generator[GenerationResponse, None, None]:
     
