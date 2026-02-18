@@ -449,8 +449,6 @@ def generate_step(
     )
 
     sampler = sampler or (lambda x: mx.argmax(x, axis=-1))
-
-    def _model_call(input_tokens: mx.array, input_embeddings: Optional[mx.array]):
         if input_embeddings is not None:
             out = model(
                 input_tokens, cache=prompt_cache, input_embeddings=input_embeddings
@@ -458,26 +456,25 @@ def generate_step(
         else:
             out = model(input_tokens, cache=prompt_cache)
         
-        # Debugging logits shape
-        logger.info(f"DEBUG: _model_call raw output shape: {out.shape}")
-        print(f"DEBUG_PRINT: _model_call raw output shape: {out.shape}", flush=True)
         return out
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
         nonlocal tokens
 
         with mx.stream(generation_stream):
-            logger.info("DEBUG: Calling _model_call")
             logits = _model_call(
                 input_tokens=input_tokens[None],
                 input_embeddings=(
                     input_embeddings[None] if input_embeddings is not None else None
                 ),
             )
-            logger.info(f"DEBUG: Returned from _model_call. logits shape: {logits.shape}")
 
-            # Defensive reshaping for 2D logits (Batch, Vocab) -> (Batch, 1, Vocab)
-            if len(logits.shape) == 2:
+            # Robust reshaping for 2D logits
+            # If (Seq, Vocab) where Seq == input_tokens.shape[0], unsqueeze batch dim 0
+            if len(logits.shape) == 2 and logits.shape[0] == input_tokens.shape[0]:
+                logits = logits[None, :, :]
+            # If (Batch, Vocab) where Batch == input_tokens.shape[0] (unlikely for single seq but possible if 1 token), unsqueeze seq dim 1
+            elif len(logits.shape) == 2:
                 logits = logits[:, None, :]
 
             logits = logits[:, -1, :]
