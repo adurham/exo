@@ -164,6 +164,8 @@ class PipelineLastLayer(CustomMlxLayer):
         ).arguments.get("cache", None)
 
         output: mx.array = self.original_layer(x, *args, **kwargs)
+        
+        logger.info(f"Rank {self.group.rank()}: Layer call. is_prefill={self.is_prefill}")
 
         if self.r != self.s - 1:
             logger.info(f"Rank {self.group.rank()}: Sending intermediate output to {(self.r + 1) % self.s}")
