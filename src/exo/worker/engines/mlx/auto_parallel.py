@@ -177,18 +177,9 @@ class PipelineLastLayer(CustomMlxLayer):
                     mx.eval(cache.keys)  # type: ignore
 
         if not self.is_prefill:
-            # Optimization: Use manual broadcast from the last stage instead of all_gather.
-            # all_gather sends data from ALL ranks, but we only need the data from the last stage.
-            # This saves bandwidth and reduces synchronization overhead.
-            src_rank = self.s - 1
-            if self.group.rank() == src_rank:
-                # I am the source (last stage). Send to all others.
-                for i in range(self.s):
-                    if i != src_rank:
-                        mx.distributed.send(output, i, group=self.group)
-            else:
-                # I am a receiver. Receive from source.
-                output = mx.distributed.recv_like(output, src_rank, group=self.group)
+            output = mx.distributed.all_gather(output, group=self.group)[
+                -output.shape[0] :
+            ]
 
         return output
 
