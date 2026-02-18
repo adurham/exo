@@ -460,6 +460,7 @@ def generate_step(
         
         # Debugging logits shape
         logger.info(f"DEBUG: _model_call raw output shape: {out.shape}")
+        print(f"DEBUG_PRINT: _model_call raw output shape: {out.shape}", flush=True)
         return out
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
