@@ -527,9 +527,7 @@ def generate_step(
     n = 0
     while True:
         if n != max_tokens:
-            logger.info(f"DEBUG: calling _step for token {n}")
             next_y, next_logprobs = _step(y)
-            logger.info(f"DEBUG: returned from _step for token {n}")
             mx.async_eval(next_y, next_logprobs)
         if n == 0:
             mx.eval(y)
