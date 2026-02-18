@@ -822,9 +822,9 @@ def mlx_generate(
                 )
 
             usage = Usage(
-                prompt_tokens=int(out.prompt_tokens),
+                prompt_tokens=int(stats.prompt_tokens),
                 completion_tokens=completion_tokens,
-                total_tokens=int(out.prompt_tokens) + completion_tokens,
+                total_tokens=int(stats.prompt_tokens) + completion_tokens,
                 prompt_tokens_details=PromptTokensDetails(
                     cached_tokens=prefix_hit_length
                 ),
@@ -861,21 +861,21 @@ def mlx_generate(
                 ):
                     kv_prefix_cache.update_kv_cache(
                         matched_index,
-                        full_prompt_tokens,
+                        all_prompt_tokens,
                         caches,
                         cache_snapshots,
                         restore_pos=prefix_hit_length,
                     )
                 else:
                     kv_prefix_cache.add_kv_cache(
-                        full_prompt_tokens, caches, cache_snapshots
+                        all_prompt_tokens, caches, cache_snapshots
                     )
 
         yield GenerationResponse(
             text=text,
             token=out.token,
-            logprob=logprob,
-            top_logprobs=top_logprobs,
+            logprob=out.logprob,
+            top_logprobs=out.top_logprobs,
             finish_reason=finish_reason,
             stats=stats,
             usage=usage,
