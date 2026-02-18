@@ -595,7 +595,7 @@ def stream_generate(
             yield GenerationResponse(
                 text=detokenizer.last_segment,
                 token=token,
-                logprob=logprobs,
+                logprob=logprobs[token].item(),
                 stats=GenerationStats(
                     prompt_tps=prompt_tps,
                     generation_tps=(n + 1) / (time.perf_counter() - tic),
