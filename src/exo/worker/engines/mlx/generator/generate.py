@@ -430,7 +430,7 @@ def mlx_generate(
     mx_barrier(group)
 
     logger.debug(f"Tokenizer EOS IDs: {getattr(tokenizer, 'eos_token_ids', 'Not Set')}")
-    logger.debug("Starting stream_generate loop...")
+    logger.info("Starting stream_generate loop...")
     for completion_tokens, out in enumerate(
         stream_generate(
             model=model,
@@ -446,7 +446,7 @@ def mlx_generate(
         ),
         start=1,
     ):
-        logger.debug(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
+        logger.info(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
         generated_text_parts.append(out.text)
         accumulated_text += out.text
         
