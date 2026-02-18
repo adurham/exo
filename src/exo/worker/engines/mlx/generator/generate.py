@@ -554,6 +554,8 @@ def stream_generate(
     prompt: Union[str, mx.array, List[int]],
     max_tokens: int = 256,
     draft_model: Optional[nn.Module] = None,
+    return_logprobs: bool = False,
+    top_logprobs_k: Optional[int] = None,
     **kwargs,
 ) -> Generator[GenerationResponse, None, None]:
     
@@ -585,7 +587,14 @@ def stream_generate(
 
     with wired_limit(model, [generation_stream]):
         tic = time.perf_counter()
-        for n, (token, logprobs, from_draft) in enumerate(token_generator):
+        logprobs = None
+        token = -1 
+        for n, (token_mx, logprobs, from_draft) in enumerate(token_generator):
+            if isinstance(token_mx, mx.array):
+                token = token_mx.item()
+            else:
+                token = token_mx
+             
             if n == 0:
                 prompt_time = time.perf_counter() - tic
                 prompt_tps = prompt.size / prompt_time
@@ -597,10 +606,22 @@ def stream_generate(
             if (n + 1) == max_tokens:
                 break
 
+            # Extract logprobs if requested
+            logprob: float | None = None
+            top_logprobs: list[TopLogprobItem] | None = None
+            if return_logprobs:
+                logprob, top_logprobs = extract_top_logprobs(
+                    logprobs=logprobs,
+                    tokenizer=tokenizer,
+                    top_logprobs=top_logprobs_k or DEFAULT_TOP_LOGPROBS,
+                    selected_token=token.item() if hasattr(token, "item") else token,
+                )
+            
             yield GenerationResponse(
                 text=detokenizer.last_segment,
                 token=token,
-                logprob=logprobs[token].item(),
+                logprob=logprob,
+                top_logprobs=top_logprobs,
                 stats=GenerationStats(
                     prompt_tps=prompt_tps,
                     generation_tps=(n + 1) / (time.perf_counter() - tic),
@@ -621,10 +642,24 @@ def stream_generate(
             generation_tokens=n + 1,
             peak_memory_usage=Memory.from_bytes(peak_mem_bytes)
         )
+        # Re-extract logprobs for final token if needed
+        # Use simple variable names to avoid conflict
+        final_logprob: float | None = None
+        final_top_logprobs: list[TopLogprobItem] | None = None
+        
+        if return_logprobs and logprobs is not None:
+             final_logprob, final_top_logprobs = extract_top_logprobs(
+                logprobs=logprobs,
+                tokenizer=tokenizer,
+                top_logprobs=top_logprobs_k or DEFAULT_TOP_LOGPROBS,
+                selected_token=token.item() if hasattr(token, "item") else token,
+            )
+
         yield GenerationResponse(
             text=detokenizer.last_segment,
             token=token,
-            logprob=logprobs[token].item(),
+            logprob=final_logprob,
+            top_logprobs=final_top_logprobs,
             stats=stats,
             finish_reason=cast(FinishReason, "stop" if token in tokenizer.eos_token_ids else "length"),
             usage=None, 
@@ -731,6 +766,8 @@ def mlx_generate(
             prefill_step_size=1,
             kv_group_size=KV_GROUP_SIZE,
             kv_bits=KV_BITS,
+            return_logprobs=task.logprobs,
+            top_logprobs_k=task.top_logprobs,
         ),
         start=1,
     ):
@@ -769,15 +806,15 @@ def mlx_generate(
                     break
 
         is_done = finish_reason is not None
-
+        
         stats: GenerationStats | None = None
-        if is_done:
+        if is_done and out.stats is not None:
             stats = GenerationStats(
-                prompt_tps=float(prefill_tps or out.prompt_tps),
-                generation_tps=float(out.generation_tps),
-                prompt_tokens=int(prefill_tokens + out.prompt_tokens),
-                generation_tokens=int(out.generation_tokens),
-                peak_memory_usage=Memory.from_gb(out.peak_memory),
+                prompt_tps=float(prefill_tps),
+                generation_tps=float(out.stats.generation_tps),
+                prompt_tokens=int(prefill_tokens + out.stats.prompt_tokens),
+                generation_tokens=int(out.stats.generation_tokens),
+                peak_memory_usage=out.stats.peak_memory_usage,
             )
             if not stop_matched and out.finish_reason not in get_args(FinishReason):
                 logger.warning(
@@ -797,15 +834,8 @@ def mlx_generate(
             )
 
         # Extract logprobs from the full vocabulary logprobs array
-        logprob: float | None = None
-        top_logprobs: list[TopLogprobItem] | None = None
-        if task.logprobs:
-            logprob, top_logprobs = extract_top_logprobs(
-                logprobs=out.logprobs,
-                tokenizer=tokenizer,
-                top_logprobs=task.top_logprobs or DEFAULT_TOP_LOGPROBS,
-                selected_token=out.token,
-            )
+        # Logprobs are now populated inside stream_generate
+        pass
 
         if is_done:
             # Log generation stats
