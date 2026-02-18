@@ -190,6 +190,9 @@ class PipelineLastLayer(CustomMlxLayer):
                 mx.eval(output)
             else:
                 # I am a receiver. Receive from source.
+                # Crucial: We must force any pending sends (e.g. intermediate layer outputs to next rank)
+                # to complete before blocking on this recv, otherwise we deadlock.
+                mx.eval(output)
                 output = mx.distributed.recv_like(output, src_rank, group=self.group)
 
         return output
