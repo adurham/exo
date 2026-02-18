@@ -105,7 +105,7 @@ else
         ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
         
         # Update and Build Logic
-        TARGET_BRANCH="debug-deadlock"
+        TARGET_BRANCH="main"
         ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
         
         echo "Running build on $NODE..."
