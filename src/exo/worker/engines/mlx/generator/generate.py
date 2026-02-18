@@ -452,11 +452,15 @@ def generate_step(
 
     def _model_call(input_tokens: mx.array, input_embeddings: Optional[mx.array]):
         if input_embeddings is not None:
-            return model(
+            out = model(
                 input_tokens, cache=prompt_cache, input_embeddings=input_embeddings
             )
         else:
-            return model(input_tokens, cache=prompt_cache)
+            out = model(input_tokens, cache=prompt_cache)
+        
+        # Debugging logits shape
+        logger.info(f"DEBUG: _model_call raw output shape: {out.shape}")
+        return out
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
         nonlocal tokens
@@ -469,7 +473,11 @@ def generate_step(
                     input_embeddings[None] if input_embeddings is not None else None
                 ),
             )
-            logger.info("DEBUG: Returned from _model_call")
+            logger.info(f"DEBUG: Returned from _model_call. logits shape: {logits.shape}")
+
+            # Defensive reshaping for 2D logits (Batch, Vocab) -> (Batch, 1, Vocab)
+            if len(logits.shape) == 2:
+                logits = logits[:, None, :]
 
             logits = logits[:, -1, :]
 
