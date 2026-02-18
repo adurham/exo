@@ -5,11 +5,11 @@ import os
 import resource
 import faulthandler
 import signal
-# try:
-#     import uvloop
-#     uvloop.install()
-# except ImportError:
-#     pass
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
 
 faulthandler.enable()
 if hasattr(signal, "SIGQUIT"):
