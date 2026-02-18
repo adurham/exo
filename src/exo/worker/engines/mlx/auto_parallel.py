@@ -166,9 +166,15 @@ class PipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self.r != self.s - 1:
+            # logger.info(f"Rank {self.group.rank()}: Sending intermediate output to {(self.r + 1) % self.s}")
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
+            # Force intermediate send to avoid deadlock where Rank 1 waits for this
+            # while Rank 0 waits for Rank 1's final output.
+            mx.eval(output)
+            # logger.info(f"Rank {self.group.rank()}: Sent intermediate output")
+
             if cache is not None:
                 cache.keys = mx.depends(cache.keys, output)  # type: ignore[reportUnknownMemberType]
             if self.is_prefill:
@@ -178,22 +184,22 @@ class PipelineLastLayer(CustomMlxLayer):
 
         if not self.is_prefill:
             # Optimization: Use manual broadcast from the last stage instead of all_gather.
-            # all_gather sends data from ALL ranks, but we only need the data from the last stage.
-            # This saves bandwidth and reduces synchronization overhead.
             src_rank = self.s - 1
             if self.group.rank() == src_rank:
-                # I am the source (last stage). Send to all others.
+                # Source (Last Stage)
+                # logger.info(f"Rank {self.group.rank()}: Broadcasting final output to 0..{self.s-1}")
                 for i in range(self.s):
                     if i != src_rank:
                         mx.distributed.send(output, i, group=self.group)
-                # Force evaluation to ensure sends are dispatched before we might block elsewhere
                 mx.eval(output)
+                # logger.info(f"Rank {self.group.rank()}: Broadcast complete")
             else:
-                # I am a receiver. Receive from source.
-                # Crucial: We must force any pending sends (e.g. intermediate layer outputs to next rank)
-                # to complete before blocking on this recv, otherwise we deadlock.
-                mx.eval(output)
+                # Receiver
+                # logger.info(f"Rank {self.group.rank()}: Waiting for final output from {src_rank}")
+                # Evaluate output (which is the intermediate send tensor) one last time to be sure
+                mx.eval(output) 
                 output = mx.distributed.recv_like(output, src_rank, group=self.group)
+                # logger.info(f"Rank {self.group.rank()}: Received final output")
 
         return output
 
