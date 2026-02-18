@@ -1,9 +1,11 @@
 import time
 from copy import deepcopy
-from typing import Callable, Generator, cast, get_args
+import functools
+from typing import Callable, Generator, cast, get_args, Optional, Tuple, List, Union, Any
 
 import mlx.core as mx
-from mlx_lm.generate import BatchGenerator, stream_generate
+from mlx_lm.generate import BatchGenerator
+from mlx_lm.utils import does_model_support_input_embeddings
 from mlx_lm.models.cache import ArraysCache, RotatingKVCache
 from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
@@ -53,11 +55,58 @@ _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
 
 
+from mlx.utils import tree_reduce
+import contextlib
+
+@contextlib.contextmanager
+def wired_limit(model: mx.nn.Module, streams: Optional[List[mx.Stream]] = None):
+    """
+    A context manager to temporarily change the wired limit.
+
+    Note, the wired limit should not be changed during an async eval.  If an
+    async eval could be running pass in the streams to synchronize with prior
+    to exiting the context manager.
+    """
+    if not mx.metal.is_available():
+        try:
+            yield
+        finally:
+            pass
+    else:
+        model_bytes = tree_reduce(
+            lambda acc, x: acc + x.nbytes if isinstance(x, mx.array) else acc, model, 0
+        )
+        max_rec_size = mx.device_info()["max_recommended_working_set_size"]
+        if model_bytes > 0.9 * max_rec_size:
+            model_mb = model_bytes // 2**20
+            max_rec_mb = max_rec_size // 2**20
+            # logger.warning(...) 
+            pass
+        old_limit = mx.set_wired_limit(max_rec_size)
+        try:
+            yield
+        finally:
+            if streams is not None:
+                for s in streams:
+                    mx.synchronize(s)
+            else:
+                mx.synchronize()
+            mx.set_wired_limit(old_limit)
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int((__import__("os").environ.get(name) or "").strip() or default)
     except Exception:
         return default
+
+
+def maybe_quantize_kv_cache(prompt_cache, quantized_kv_start, kv_group_size, kv_bits):
+    if kv_bits is None:
+        return
+    for e, c in enumerate(prompt_cache):
+        if hasattr(c, "to_quantized") and c.offset >= quantized_kv_start:
+            prompt_cache[e] = c.to_quantized(group_size=kv_group_size, bits=kv_bits)
 
 
 def mlx_batch_generate(
@@ -342,6 +391,239 @@ def extract_top_logprobs(
     return selected_logprob, top_logprob_items
 
 
+    return parser
+
+
+# A stream on the default device just for generation
+generation_stream = mx.new_stream(mx.default_device())
+DEFAULT_QUANTIZED_KV_START = 5000
+
+def generate_step(
+    prompt: mx.array,
+    model: mx.nn.Module,
+    *,
+    max_tokens: int = 256,
+    sampler: Optional[Callable[[mx.array], mx.array]] = None,
+    logits_processors: Optional[List[Callable[[mx.array, mx.array], mx.array]]] = None,
+    max_kv_size: Optional[int] = None,
+    prompt_cache: Optional[Any] = None,
+    prefill_step_size: int = 2048,
+    kv_bits: Optional[int] = None,
+    kv_group_size: int = 64,
+    quantized_kv_start: int = 0,
+    prompt_progress_callback: Optional[Callable[[int, int], None]] = None,
+    input_embeddings: Optional[mx.array] = None,
+) -> Generator[Tuple[mx.array, mx.array], None, None]:
+    
+    if input_embeddings is not None:
+        if not does_model_support_input_embeddings(model):
+            raise ValueError("Model does not support input embeddings.")
+        elif len(prompt) > 0 and len(prompt) != len(input_embeddings):
+            raise ValueError(
+                f"When providing input_embeddings, their sequence length ({len(input_embeddings)}) "
+                f"must match the sequence length of the prompt ({len(prompt)}), or the "
+                "prompt must be empty."
+            )
+    elif len(prompt) == 0:
+        raise ValueError(
+            "Either input_embeddings or prompt (or both) must be provided."
+        )
+
+    tokens = None
+
+    # Create the KV cache for generation
+    if prompt_cache is None:
+        prompt_cache = make_kv_cache(
+            model,
+            max_kv_size=max_kv_size,
+        )
+
+    prompt_progress_callback = prompt_progress_callback or (lambda *_: None)
+
+    quantize_cache_fn = functools.partial(
+        maybe_quantize_kv_cache,
+        quantized_kv_start=quantized_kv_start,
+        kv_group_size=kv_group_size,
+        kv_bits=kv_bits,
+    )
+
+    sampler = sampler or (lambda x: mx.argmax(x, axis=-1))
+
+    def _model_call(input_tokens: mx.array, input_embeddings: Optional[mx.array]):
+        if input_embeddings is not None:
+            return model(
+                input_tokens, cache=prompt_cache, input_embeddings=input_embeddings
+            )
+        else:
+            return model(input_tokens, cache=prompt_cache)
+
+    def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
+        nonlocal tokens
+
+        with mx.stream(generation_stream):
+            logger.info("DEBUG: Calling _model_call")
+            logits = _model_call(
+                input_tokens=input_tokens[None],
+                input_embeddings=(
+                    input_embeddings[None] if input_embeddings is not None else None
+                ),
+            )
+            logger.info("DEBUG: Returned from _model_call")
+
+            logits = logits[:, -1, :]
+
+            if logits_processors and len(input_tokens) > 0:
+                tokens = (
+                    mx.concat([tokens, input_tokens])
+                    if tokens is not None
+                    else input_tokens
+                )
+                for processor in logits_processors:
+                    logits = processor(tokens, logits)
+
+            logger.info("DEBUG: Calling quantize_cache_fn")
+            quantize_cache_fn(prompt_cache)
+            logger.info("DEBUG: Returned from quantize_cache_fn")
+
+            logprobs = logits - mx.logsumexp(logits, keepdims=True)
+            logger.info("DEBUG: Calling sampler")
+            sampled = sampler(logprobs)
+            logger.info("DEBUG: Returned from sampler")
+            return sampled, logprobs.squeeze(0)
+
+    with mx.stream(generation_stream):
+        total_prompt_tokens = (
+            len(input_embeddings) if input_embeddings is not None else len(prompt)
+        )
+        prompt_processed_tokens = 0
+        prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
+        while total_prompt_tokens - prompt_processed_tokens > 1:
+            remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
+            n_to_process = min(prefill_step_size, remaining)
+            _model_call(
+                input_tokens=prompt[:n_to_process][None],
+                input_embeddings=(
+                    input_embeddings[:n_to_process][None]
+                    if input_embeddings is not None
+                    else None
+                ),
+            )
+            quantize_cache_fn(prompt_cache)
+            mx.eval([c.state for c in prompt_cache])
+            prompt_processed_tokens += n_to_process
+            prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
+            prompt = prompt[n_to_process:]
+            input_embeddings = (
+                input_embeddings[n_to_process:]
+                if input_embeddings is not None
+                else input_embeddings
+            )
+            mx.clear_cache()
+
+        y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
+
+    mx.async_eval(y, logprobs)
+    n = 0
+    while True:
+        if n != max_tokens:
+            logger.info(f"DEBUG: calling _step for token {n}")
+            next_y, next_logprobs = _step(y)
+            logger.info(f"DEBUG: returned from _step for token {n}")
+            mx.async_eval(next_y, next_logprobs)
+        if n == 0:
+            mx.eval(y)
+            prompt_progress_callback(total_prompt_tokens, total_prompt_tokens)
+        if n == max_tokens:
+            break
+        yield y.item(), logprobs
+        if n % 256 == 0:
+            mx.clear_cache()
+        y, logprobs = next_y, next_logprobs
+        n += 1
+
+
+def stream_generate(
+    model: mx.nn.Module,
+    tokenizer: Union[TokenizerWrapper, Any],
+    prompt: Union[str, mx.array, List[int]],
+    max_tokens: int = 256,
+    draft_model: Optional[mx.nn.Module] = None,
+    **kwargs,
+) -> Generator[GenerationResponse, None, None]:
+    
+    if not isinstance(tokenizer, TokenizerWrapper):
+        tokenizer = TokenizerWrapper(tokenizer)
+
+    if not isinstance(prompt, mx.array):
+        if isinstance(prompt, str):
+            # Try to infer if special tokens are needed
+            add_special_tokens = tokenizer.bos_token is None or not prompt.startswith(
+                tokenizer.bos_token
+            )
+            prompt = tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
+        prompt = mx.array(prompt)
+
+    detokenizer = tokenizer.detokenizer
+
+    kwargs["max_tokens"] = max_tokens
+
+    if draft_model is None:
+        kwargs.pop("num_draft_tokens", None)
+        token_generator = generate_step(prompt, model, **kwargs)
+        # from_draft always false for non-speculative generation
+        token_generator = (
+            (token, logprobs, False) for token, logprobs in token_generator
+        )
+    else:
+        raise NotImplementedError("Speculative decoding not supported in debug mode")
+
+    with wired_limit(model, [generation_stream]):
+        tic = time.perf_counter()
+        for n, (token, logprobs, from_draft) in enumerate(token_generator):
+            if n == 0:
+                prompt_time = time.perf_counter() - tic
+                prompt_tps = prompt.size / prompt_time
+                tic = time.perf_counter()
+            if token in tokenizer.eos_token_ids:
+                break
+
+            detokenizer.add_token(token)
+            if (n + 1) == max_tokens:
+                break
+
+            yield GenerationResponse(
+                text=detokenizer.last_segment,
+                token=token,
+                logprob=logprobs,
+                stats=GenerationStats(
+                    prompt_tps=prompt_tps,
+                    generation_tps=(n + 1) / (time.perf_counter() - tic),
+                    prompt_tokens=prompt.size,
+                    generation_tokens=n + 1,
+                    peak_memory_usage=Memory.from_bytes(int(mx.get_peak_memory()))
+                ),
+                finish_reason=None,
+                usage=None, 
+            )
+
+        detokenizer.finalize()
+        peak_mem_bytes = int(mx.get_peak_memory())
+        stats = GenerationStats(
+            prompt_tps=prompt_tps,
+            generation_tps=(n + 1) / (time.perf_counter() - tic),
+            prompt_tokens=prompt.size,
+            generation_tokens=n + 1,
+            peak_memory_usage=Memory.from_bytes(peak_mem_bytes)
+        )
+        yield GenerationResponse(
+            text=detokenizer.last_segment,
+            token=token,
+            logprob=logprobs,
+            stats=stats,
+            finish_reason=cast(FinishReason, "stop" if token in tokenizer.eos_token_ids else "length"),
+            usage=None, 
+        )
+
 def mlx_generate(
     model: Model,
     tokenizer: TokenizerWrapper,
@@ -536,9 +818,6 @@ def mlx_generate(
                     tokenizer.encode(
                         "".join(generated_text_parts), add_special_tokens=False
                     )
-                )
-                full_prompt_tokens = mx.concatenate(
-                    [all_prompt_tokens, generated_tokens_array]
                 )
                 if (
                     matched_index is not None
