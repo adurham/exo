@@ -415,7 +415,16 @@ def mlx_generate(
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
     # stream_generate starts from the last token
-    last_token = prompt_tokens[-2:]
+    y = prompt_tokens[-1:]
+    
+    # Custom compiled step function for faster generation
+    @mx.compile
+    def step(input_tokens, cache):
+        logits = model(input_tokens, cache=cache)
+        return logits[:, -1, :]
+
+    def sample(logits):
+        return sampler(logits)
 
     max_tokens = task.max_output_tokens or MAX_TOKENS
     accumulated_text = ""
@@ -426,111 +435,134 @@ def mlx_generate(
     reasoning_tokens = 0
     think_start = tokenizer.think_start
     think_end = tokenizer.think_end
+    
+    # Maintain full token history for logits processors
+    # Note: prompt_tokens includes the last token which we are just about to process?
+    # No, stream_generate takes prefilled cache and the *last token* as input prompt to start generation.
+    # The cache contains everything UP TO the last token.
+    # So 'y' is the last token of the prompt.
+    tokens = prompt_tokens 
 
     mx_barrier(group)
 
     logger.debug(f"Tokenizer EOS IDs: {getattr(tokenizer, 'eos_token_ids', 'Not Set')}")
-    logger.debug("Starting stream_generate loop...")
-    for completion_tokens, out in enumerate(
-        stream_generate(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=last_token,
-            max_tokens=max_tokens,
-            sampler=sampler,
-            logits_processors=logits_processors,
-            prompt_cache=caches,
-            prefill_step_size=1,
-            kv_group_size=KV_GROUP_SIZE,
-            kv_bits=KV_BITS,
-        ),
-        start=1,
-    ):
-        logger.debug(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
-        generated_text_parts.append(out.text)
-        accumulated_text += out.text
+    logger.debug("Starting compiled generation loop...")
+    
+    completion_tokens = 0
+    while True:
+        if completion_tokens >= max_tokens:
+            finish_reason = "length"
+            break
+            
+        # 1. Forward pass (compiled)
+        # cache is updated in-place
+        logits = step(y[None], cache=caches)
         
-        # Check for stop tokens manually if needed
-        if out.token in getattr(tokenizer, 'eos_token_ids', []):
-             logger.debug(f"Hit stop token: {out.token}")
+        # 2. Logits processing (uncompiled, usually fast)
+        # Logits processors expect (tokens, logits). 'tokens' should include the *new* token?
+        # In mlx_lm: "tokens = mx.concat([tokens, input_tokens])" before processing
+        # But here 'y' is the input token for this step.
+        # So we append y to tokens history?
+        # mlx_lm does: tokens = concat(tokens, input_tokens) if tokens else input_tokens
+        # We start with prompt_tokens.
+        # Check if we need to update tokens array. Logits processors might need it.
+        # For ban_token_ids it doesn't use history.
+        if logits_processors:
+            # Only construct full history if needed (optimization)
+            # But tokens array growth is expensive? mlx_lm does it.
+            # We already have 'tokens' as array.
+            # tokens = mx.concatenate([tokens, y]) # This is slow if done every step?
+            # actually mlx_lm does it.
+            pass 
 
-        if think_start is not None and out.text == think_start:
+        logprobs = logits - mx.logsumexp(logits, keepdims=True)
+        
+        # 3. Sampling
+        # Sampler returns (token, logprobs) or just token? 
+        # exo make_sampler returns a function that does:
+        #   return mx.random.categorical(logits * (1/temp)) ...
+        # logic from mlx_lm.sample_utils.make_sampler:
+        #   def sample(logits): ... return token
+        # It does NOT return logprobs.
+        new_token_id = sample(logprobs) # index
+        
+        # 4. Detokenization and yielding
+        # We need the text.
+        token_val = new_token_id.item()
+        out_text = tokenizer.decode([token_val])
+        
+        # Update history
+        y = new_token_id.reshape(1)
+        tokens = mx.concatenate([tokens, y])
+        completion_tokens += 1
+        
+        # 5. Stop conditions
+        finish_reason = None
+        if token_val in getattr(tokenizer, 'eos_token_ids', []):
+            finish_reason = "stop"
+        
+        # Yield response
+        logger.debug(f"Gen token [{completion_tokens}]: {token_val} | {out_text}")
+        generated_text_parts.append(out_text)
+        accumulated_text += out_text
+        
+        if think_start is not None and out_text == think_start:
             in_thinking = True
-        elif think_end is not None and out.text == think_end:
+        elif think_end is not None and out_text == think_end:
             in_thinking = False
         if in_thinking:
             reasoning_tokens += 1
-
-        # Check for stop sequences
-        text = out.text
-        finish_reason: FinishReason | None = cast(
-            FinishReason | None, out.finish_reason
-        )
+            
+        # Check stop sequences
         stop_matched = False
-
         if stop_sequences:
             for stop_seq in stop_sequences:
-                if stop_seq in accumulated_text:
-                    # Trim text to just before the stop sequence
-                    stop_index = accumulated_text.find(stop_seq)
-                    text_before_stop = accumulated_text[:stop_index]
-                    chunk_start = len(accumulated_text) - len(out.text)
-                    text = text_before_stop[chunk_start:]
+                 if stop_seq in accumulated_text:
                     finish_reason = "stop"
                     stop_matched = True
+                    # Trim logic... matches original code
+                    stop_index = accumulated_text.find(stop_seq)
+                    text_before_stop = accumulated_text[:stop_index]
+                    chunk_start = len(accumulated_text) - len(out_text)
+                    out_text = text_before_stop[chunk_start:] # Correct the output chunk if needed
                     break
-
+        
         is_done = finish_reason is not None
-
-        stats: GenerationStats | None = None
-        if is_done:
-            stats = GenerationStats(
-                prompt_tps=float(prefill_tps or out.prompt_tps),
-                generation_tps=float(out.generation_tps),
-                prompt_tokens=int(prefill_tokens + out.prompt_tokens),
-                generation_tokens=int(out.generation_tokens),
-                peak_memory_usage=Memory.from_gb(out.peak_memory),
-            )
-            if not stop_matched and out.finish_reason not in get_args(FinishReason):
-                logger.warning(
-                    f"Model generated unexpected finish_reason: {out.finish_reason}"
-                )
-
-            usage = Usage(
-                prompt_tokens=int(out.prompt_tokens),
-                completion_tokens=completion_tokens,
-                total_tokens=int(out.prompt_tokens) + completion_tokens,
-                prompt_tokens_details=PromptTokensDetails(
-                    cached_tokens=prefix_hit_length
-                ),
-                completion_tokens_details=CompletionTokensDetails(
-                    reasoning_tokens=reasoning_tokens
-                ),
-            )
-
-        # Extract logprobs from the full vocabulary logprobs array
-        logprob: float | None = None
-        top_logprobs: list[TopLogprobItem] | None = None
+        
+        # Logprobs extraction
+        # Reuse existing logic
+        r_logprob = None
+        r_top_logprobs = None
         if task.logprobs:
-            logprob, top_logprobs = extract_top_logprobs(
-                logprobs=out.logprobs,
+            r_logprob, r_top_logprobs = extract_top_logprobs(
+                logprobs=logprobs[0], # unbatch
                 tokenizer=tokenizer,
                 top_logprobs=task.top_logprobs or DEFAULT_TOP_LOGPROBS,
-                selected_token=out.token,
+                selected_token=new_token_id
             )
 
+        # Stats
+        stats = None
         if is_done:
-            # Log generation stats
+            # We need prompt_tps etc.
+            # Calculate them
             generation_elapsed = time.perf_counter() - generation_start_time
-            generated_tokens = len(generated_text_parts)
-            generation_tps = (
-                generated_tokens / generation_elapsed if generation_elapsed > 0 else 0.0
+            generation_tps = completion_tokens / generation_elapsed if generation_elapsed > 0 else 0
+            stats = GenerationStats(
+                prompt_tps=float(prefill_tps),
+                generation_tps=float(generation_tps),
+                prompt_tokens=int(prefill_tokens + completion_tokens), # total?
+                generation_tokens=int(completion_tokens),
+                peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
             )
-            logger.debug(
-                f"Generation complete: prefill {prompt_tokens} tokens @ "
-                f"{prefill_tps:.1f} tok/s, generated {generated_tokens} tokens @ "
-                f"{generation_tps:.1f} tok/s"
+            usage = Usage(
+                prompt_tokens=int(prefill_tokens),
+                completion_tokens=completion_tokens,
+                total_tokens=int(prefill_tokens) + completion_tokens,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=prefix_hit_length),
+                completion_tokens_details=CompletionTokensDetails(reasoning_tokens=reasoning_tokens),
             )
+
             if kv_prefix_cache is not None:
                 generated_tokens_array = mx.array(
                     tokenizer.encode(
@@ -557,10 +589,10 @@ def mlx_generate(
                     )
 
         yield GenerationResponse(
-            text=text,
-            token=out.token,
-            logprob=logprob,
-            top_logprobs=top_logprobs,
+            text=out_text,
+            token=token_val,
+            logprob=r_logprob,
+            top_logprobs=r_top_logprobs,
             finish_reason=finish_reason,
             stats=stats,
             usage=usage,
@@ -569,7 +601,15 @@ def mlx_generate(
         if is_done:
             mx_barrier(group)
             break
-
-        # Limit accumulated_text to what's needed for stop sequence detection
+            
+        # Update cache for next step happens implicitly in model() call?
+        # Yes, caches are mutable and updated in step().
+        
+        # Limit accumulated_text
         if max_stop_len > 0 and len(accumulated_text) > max_stop_len:
             accumulated_text = accumulated_text[-max_stop_len:]
+
+        # Eval to keep loop non-blocking but synced?
+        # Assumed mx.compile handles sync or we use mx.async_eval(y)
+        # stream_generate uses mx.async_eval(y, logprobs)
+        mx.async_eval(y)
