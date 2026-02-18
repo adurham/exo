@@ -619,7 +619,7 @@ def stream_generate(
         yield GenerationResponse(
             text=detokenizer.last_segment,
             token=token,
-            logprob=logprobs,
+            logprob=logprobs[token].item(),
             stats=stats,
             finish_reason=cast(FinishReason, "stop" if token in tokenizer.eos_token_ids else "length"),
             usage=None, 
