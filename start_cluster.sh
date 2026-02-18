@@ -80,30 +80,19 @@ else
     fi
     echo "Thunderbolt Link Verified ($TB_M4_1 <-> $TB_M4_2)."
 
-
-    # 1. Kill existing processes, git pull, and force reinstall bindings (rebuilds Rust bindings)
-    # Get local commit hash to enforce consistency
-    LOCAL_COMMIT=$(git rev-parse --short HEAD)
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    echo "Local commit: $LOCAL_COMMIT on branch $CURRENT_BRANCH"
-
     # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
-        # Aggressive cleanup: kill by port and name, and remove screen sessions
         echo "Setting Metal memory limit on $NODE..."
         ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
         
         echo "Killing existing Exo processes on $NODE..."
-        # Loop until processes are gone
         for i in {1..5}; do
             ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
             ssh "$NODE" "pkill -9 -f 'exo.main' || true"
             ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
             
-            # Check if still running
             if ssh "$NODE" "pgrep -f 'exo.main'" > /dev/null; then
-                echo "  Processes still running, retrying kill..."
                 sleep 1
             else
                 break
@@ -112,83 +101,56 @@ else
         
         ssh "$NODE" "screen -wipe || true"
 
-        # Update and Build
-        # Use zsh -l -c to ensure environment (PATH, etc.) is loaded
-        # FORCE update to origin/main to avoid "Already up to date" issues on stale branches
-        # Ensure Xcode is selected and initialized for Metal tools
-        echo "Ensuring Xcode developer directory is set on $NODE..."
-        ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || echo 'Failed to set xcode-select, proceeding anyway...'"
-        ssh "$NODE" "sudo xcodebuild -runFirstLaunch || echo 'xcodebuild -runFirstLaunch failed or already done'"
-        ssh "$NODE" "sudo xcodebuild -downloadComponent MetalToolchain || echo 'Metal Toolchain download failed or already installed'"
+        echo "Ensuring Xcode developer directory on $NODE..."
+        ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
         
         # Update and Build Logic
-        echo "Checking MLX submodule status on $NODE..."
-        OLD_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
+        TARGET_BRANCH="debug-deadlock"
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
         
-        # Pull latest changes
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $CURRENT_BRANCH && git reset --hard origin/$CURRENT_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
-        
-        NEW_MLX=$(ssh "$NODE" "cd ~/repos/exo && git submodule status mlx" | awk '{print $1}' | sed 's/[+-]//g')
-        
-        BUILD_CMD="uv sync"
-        if [ "$OLD_MLX" != "$NEW_MLX" ] || [ "$FORCE_REBUILD" == "1" ]; then
-            REASON="MLX submodule changed ($OLD_MLX -> $NEW_MLX)"
-            if [ "$FORCE_REBUILD" == "1" ]; then REASON="FORCE_REBUILD=1 set"; fi
-            echo "Forcing clean rebuild on $NODE (Reason: $REASON)..."
-            # Remove venv and build artifacts to force fresh compilation
-            BUILD_CMD="rm -rf .venv mlx/build && uv cache clean && uv sync"
-        fi
-
-        # Ensure 'metal' is in PATH and Run Build
         echo "Running build on $NODE..."
-        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && $BUILD_CMD'" || { echo "Failed to build on $NODE"; exit 1; }
-
-        # Verify Remote Commit
-        REMOTE_COMMIT=$(ssh "$NODE" "cd ~/repos/exo && git rev-parse --short HEAD")
-        if [ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]; then
-            echo "CRITICAL ERROR: Node $NODE is on commit $REMOTE_COMMIT, but local is $LOCAL_COMMIT."
-            echo "The cluster is out of sync. Please fix git issues on $NODE and try again."
-            exit 1
-        fi
-        echo "Node $NODE verified on commit $REMOTE_COMMIT."
+        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to build on $NODE"; exit 1; }
     done
+
+    # 2. Inter-Node Git Sync Check (M4-1 vs M4-2)
+    echo "Verifying commit consistency between nodes..."
+    COMMIT_M4_1=$(ssh macstudio-m4-1 "cd ~/repos/exo && git rev-parse --short HEAD")
+    COMMIT_M4_2=$(ssh macstudio-m4-2 "cd ~/repos/exo && git rev-parse --short HEAD")
+
+    if [ "$COMMIT_M4_1" != "$COMMIT_M4_2" ]; then
+        echo "CRITICAL ERROR: Cluster out of sync!"
+        echo "macstudio-m4-1: $COMMIT_M4_1"
+        echo "macstudio-m4-2: $COMMIT_M4_2"
+        exit 1
+    fi
+    echo "Nodes synchronized on commit $COMMIT_M4_1."
 
     # 3. Start Exo on each node
     for NODE in "${NODES[@]}"; do
         echo "Starting Exo on $NODE..."
         if [ "$NODE" == "macstudio-m4-1" ]; then
              # M4-1 connects to M4-2 via Thunderbolt IP (192.168.200.2)
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-} MLX_JACCL_RING=${MLX_JACCL_RING:-} IBV_FORK_SAFE=${IBV_FORK_SAFE:-1} EXO_MLX_WIRED_LIMIT_RATIO=${EXO_MLX_WIRED_LIMIT_RATIO:-0.87} EXO_BATCH_COMPLETION_SIZE=${EXO_BATCH_COMPLETION_SIZE:-32} EXO_DISCOVERY_PEERS=/ip4/192.168.200.2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
         else
              # M4-2 connects to M4-1 via Thunderbolt IP (192.168.200.1)
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-} MLX_JACCL_RING=${MLX_JACCL_RING:-} IBV_FORK_SAFE=${IBV_FORK_SAFE:-1} EXO_MLX_WIRED_LIMIT_RATIO=${EXO_MLX_WIRED_LIMIT_RATIO:-0.87} EXO_BATCH_COMPLETION_SIZE=${EXO_BATCH_COMPLETION_SIZE:-32} EXO_DISCOVERY_PEERS=/ip4/192.168.200.1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 RUST_BACKTRACE=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
-        fi
-        if [ $? -eq 0 ]; then
-            echo "Successfully triggered start on $NODE."
-        else
-            echo "Failed to trigger start on $NODE."
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
         fi
     done
 
-
     # 4. Health Check / Topology Verification
-    echo -n "Cluster start commands issued. Waiting for cluster to stabilize..."
+    echo -n "Waiting for cluster to stabilize..."
     CLUSTER_READY=false
     for i in {1..90}; do
         response=$(curl -s "http://$M4_1_IP:52415/state")
-        if [ -n "$response" ]; then
-            node_count=$(echo "$response" | jq '.topology.nodes | length' 2>/dev/null)
-        else
-            node_count=0
-        fi
+        node_count=$(echo "$response" | jq '.topology.nodes | length' 2>/dev/null)
 
-        # Default to 0 if jq failed or returned null
+        # Handle null or empty node_count to prevent integer expression errors
         if [ -z "$node_count" ] || [ "$node_count" == "null" ]; then
             node_count=0
         fi
 
         if [ "$node_count" -ge 2 ]; then
-            echo "Cluster is HEALTHY! Node count: $node_count"
+            echo " HEALTHY! (Nodes: $node_count)"
             CLUSTER_READY=true
             break
         fi
@@ -198,23 +160,12 @@ else
     
     if [ "$CLUSTER_READY" = false ]; then
         echo ""
-        echo "TIMEOUT: Cluster did not stabilize within the expected time."
-        echo "Fetching logs from macstudio-m4-1 for debugging:"
-        echo "------------------------------------------------"
+        echo "TIMEOUT: Cluster did not stabilize."
+        echo "Fetching logs from macstudio-m4-1:"
         ssh macstudio-m4-1 "tail -n 20 /tmp/exo.log"
-        echo "------------------------------------------------"
         exit 1
     fi
 fi
 
-# Check for macmon (required for UI stats)
-MACMON_PATH="$HOME/.cargo/bin/macmon"
-if [ ! -f "$MACMON_PATH" ]; then
-    echo "WARNING: macmon binary not found at $MACMON_PATH"
-else
-    echo "macmon detected at $MACMON_PATH"
-fi
-
+# Final environment export
 export IBV_FORK_SAFE=${IBV_FORK_SAFE:-1}
-
-

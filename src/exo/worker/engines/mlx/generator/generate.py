@@ -4,6 +4,7 @@ import functools
 from typing import Callable, Generator, cast, get_args, Optional, Tuple, List, Union, Any
 
 import mlx.core as mx
+import mlx.nn as nn
 from mlx_lm.generate import BatchGenerator
 from mlx_lm.utils import does_model_support_input_embeddings
 from mlx_lm.models.cache import ArraysCache, RotatingKVCache
@@ -59,7 +60,7 @@ from mlx.utils import tree_reduce
 import contextlib
 
 @contextlib.contextmanager
-def wired_limit(model: mx.nn.Module, streams: Optional[List[mx.Stream]] = None):
+def wired_limit(model: nn.Module, streams: Optional[List[mx.Stream]] = None):
     """
     A context manager to temporarily change the wired limit.
 
