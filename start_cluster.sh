@@ -130,10 +130,10 @@ else
         echo "Starting Exo on $NODE..."
         if [ "$NODE" == "macstudio-m4-1" ]; then
              # M4-1 connects to M4-2 via Thunderbolt IP (192.168.200.2)
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
         else
              # M4-2 connects to M4-1 via Thunderbolt IP (192.168.200.1)
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
         fi
     done
 

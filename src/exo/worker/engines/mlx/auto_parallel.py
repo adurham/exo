@@ -186,25 +186,10 @@ class PipelineLastLayer(CustomMlxLayer):
                     mx.eval(cache.keys)  # type: ignore
 
         if not self.is_prefill:
-            # Optimization: Use manual broadcast from the last stage instead of all_gather.
-            src_rank = self.s - 1
-            if self.group.rank() == src_rank:
-                # Source (Last Stage)
-                logger.info(f"Rank {self.group.rank()}: Broadcasting final output to 0..{self.s-1}")
-                for i in range(self.s):
-                    if i != src_rank:
-                        mx.distributed.send(output, i, group=self.group)
-                mx.eval(output)
-                mx.synchronize()
-                logger.info(f"Rank {self.group.rank()}: Broadcast complete")
-            else:
-                # Receiver
-                logger.info(f"Rank {self.group.rank()}: Waiting for final output from {src_rank}")
-                # Evaluate output (which is the intermediate send tensor) one last time to be sure
-                mx.eval(output)
-                mx.synchronize()
-                output = mx.distributed.recv_like(output, src_rank, group=self.group)
-                logger.info(f"Rank {self.group.rank()}: Received final output")
+            # Revert to all_gather to avoid GPU time out on huge models
+            # Manual broadcast's explicit eval() was causing command buffer timeouts on Rank 1
+            outputs = mx.distributed.all_gather(output, group=self.group)
+            output = outputs[-1]
 
         return output
 
