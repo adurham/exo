@@ -1,8 +1,9 @@
 """OpenAI Chat Completions API adapter for converting requests/responses."""
 
+import json
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 from exo.shared.types.api import (
     ChatCompletionChoice,
@@ -180,7 +181,14 @@ async def generate_chat_stream(
                     ],
                     usage=last_usage,
                 )
-                yield f"data: {tool_response.model_dump_json()}\n\n"
+                tool_response_dict = cast(dict[str, Any], json.loads(tool_response.model_dump_json()))
+                if last_usage is not None:
+                    if "usage" not in tool_response_dict or tool_response_dict["usage"] is None:
+                        tool_response_dict["usage"] = json.loads(last_usage.model_dump_json())
+                    tool_response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
+                    tool_response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
+
+                yield f"data: {json.dumps(tool_response_dict, separators=(',', ':'))}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -192,7 +200,14 @@ async def generate_chat_stream(
                     chunk_response = chunk_response.model_copy(
                         update={"usage": last_usage}
                     )
-                yield f"data: {chunk_response.model_dump_json()}\n\n"
+                chunk_response_dict = cast(dict[str, Any], json.loads(chunk_response.model_dump_json()))
+                if chunk.finish_reason is not None and last_usage is not None:
+                    if "usage" not in chunk_response_dict or chunk_response_dict["usage"] is None:
+                        chunk_response_dict["usage"] = json.loads(last_usage.model_dump_json())
+                    chunk_response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
+                    chunk_response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
+
+                yield f"data: {json.dumps(chunk_response_dict, separators=(',', ':'))}\n\n"
 
                 if chunk.finish_reason is not None:
                     yield "data: [DONE]\n\n"
@@ -260,7 +275,7 @@ async def collect_chat_response(
     combined_text = "".join(text_parts)
     assert model is not None
 
-    yield ChatCompletionResponse(
+    response = ChatCompletionResponse(
         id=command_id,
         created=int(time.time()),
         model=model,
@@ -279,5 +294,14 @@ async def collect_chat_response(
             )
         ],
         usage=last_usage,
-    ).model_dump_json()
+    )
+
+    response_dict = cast(dict[str, Any], json.loads(response.model_dump_json()))
+    if last_usage is not None:
+        if "usage" not in response_dict or response_dict["usage"] is None:
+            response_dict["usage"] = json.loads(last_usage.model_dump_json())
+        response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
+        response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
+
+    yield json.dumps(response_dict, separators=(',', ':'))
     return
