@@ -121,6 +121,27 @@ else
         exit 1
     fi
 
+    # Enable IP forwarding and add cross-subnet routes
+    # Each node has 2 direct links, but needs a route for the 3rd subnet it's not on.
+    echo "Enabling IP forwarding and configuring cross-subnet routes..."
+
+    SUBNET_M4_1_M4_2=$(echo "$M4_1_TO_M4_2" | awk -F. '{print $1"."$2"."$3".0/24"}')
+    SUBNET_M4_1_MBP=$(echo "$M4_1_TO_MBP" | awk -F. '{print $1"."$2"."$3".0/24"}')
+    SUBNET_M4_2_MBP=$(echo "$M4_2_TO_MBP" | awk -F. '{print $1"."$2"."$3".0/24"}')
+
+    for NODE in macstudio-m4-1 macstudio-m4-2 macbook-m4; do
+        ssh "$NODE" "sudo sysctl -w net.inet.ip.forwarding=1" &> /dev/null
+    done
+
+    # M4-1 is NOT on the M4-2<->MBP subnet → route via M4-2
+    ssh macstudio-m4-1 "sudo route delete -net $SUBNET_M4_2_MBP 2>/dev/null; sudo route add -net $SUBNET_M4_2_MBP $M4_2_TO_M4_1" &> /dev/null
+    # M4-2 is NOT on the M4-1<->MBP subnet → route via M4-1
+    ssh macstudio-m4-2 "sudo route delete -net $SUBNET_M4_1_MBP 2>/dev/null; sudo route add -net $SUBNET_M4_1_MBP $M4_1_TO_M4_2" &> /dev/null
+    # MBP is NOT on the M4-1<->M4-2 subnet → route via M4-1
+    ssh macbook-m4 "sudo route delete -net $SUBNET_M4_1_M4_2 2>/dev/null; sudo route add -net $SUBNET_M4_1_M4_2 $M4_1_TO_MBP" &> /dev/null
+
+    echo "Cross-subnet routes configured."
+
     # Check Ping
     echo "Testing full-mesh connectivity..."
     
