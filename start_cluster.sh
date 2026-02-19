@@ -67,7 +67,7 @@ else
     # Thunderbolt Connectivity Check
     echo "Discovering active Thunderbolt IPs..."
     
-    get_node_tb_ip() {
+    get_node_tb_ips() {
         local node=$1
         # 1. Ask the node for its Thunderbolt device names (e.g., en1, en2)
         local devices=$(ssh "$node" "networksetup -listallhardwareports" | awk '/Hardware Port: Thunderbolt/{getline; print $2}')
@@ -78,44 +78,54 @@ else
                 local ip=$(ssh "$node" "ifconfig $dev" | awk '/inet / && !/127\.0\.0\.1/{print $2}')
                 if [ -n "$ip" ]; then
                     echo "$ip"
-                    return 0
                 fi
             fi
         done
-        return 1
     }
 
-    TB_M4_1=$(get_node_tb_ip "macstudio-m4-1")
+    # Keep only the first IP for the Studios, as they only have one port actively connected
+    TB_M4_1=$(get_node_tb_ips "macstudio-m4-1" | head -n 1)
     if [ -z "$TB_M4_1" ]; then
         echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-1."
         exit 1
     fi
     echo "macstudio-m4-1 Thunderbolt IP: $TB_M4_1"
 
-    TB_M4_2=$(get_node_tb_ip "macstudio-m4-2")
+    TB_M4_2=$(get_node_tb_ips "macstudio-m4-2" | head -n 1)
     if [ -z "$TB_M4_2" ]; then
         echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-2."
         exit 1
     fi
     echo "macstudio-m4-2 Thunderbolt IP: $TB_M4_2"
 
-    TB_MBP=$(get_node_tb_ip "macbook-m4")
-    if [ -z "$TB_MBP" ]; then
-        echo "ERROR: Could not find an active Thunderbolt IP on macbook-m4."
+    # Get ALL active Thunderbolt IPs for the Macbook Pro
+    TB_MBP_IPS=$(get_node_tb_ips "macbook-m4")
+    if [ -z "$TB_MBP_IPS" ]; then
+        echo "ERROR: Could not find any active Thunderbolt IPs on macbook-m4."
         exit 1
     fi
-    echo "macbook-m4 Thunderbolt IP: $TB_MBP"
+    
+    # Extract the subnet prefixes from the Studios
+    SUBNET_M4_1=$(echo "$TB_M4_1" | awk -F. '{print $1"."$2"."$3}')
+    SUBNET_M4_2=$(echo "$TB_M4_2" | awk -F. '{print $1"."$2"."$3}')
+
+    # Find the matching MBP IP for each Studio's subnet
+    TB_MBP_FOR_M4_1=$(echo "$TB_MBP_IPS" | grep "^$SUBNET_M4_1" | head -n 1)
+    TB_MBP_FOR_M4_2=$(echo "$TB_MBP_IPS" | grep "^$SUBNET_M4_2" | head -n 1)
+
+    echo "macbook-m4 IP (for M4-1 via $SUBNET_M4_1): $TB_MBP_FOR_M4_1"
+    echo "macbook-m4 IP (for M4-2 via $SUBNET_M4_2): $TB_MBP_FOR_M4_2"
 
     # Check Ping
     echo "Testing full-mesh connectivity..."
     
     # M4-1 to others
     if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."; exit 1; fi
-    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_MBP" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macbook-m4 over Thunderbolt ($TB_MBP)."; exit 1; fi
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_MBP_FOR_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macbook-m4 over Thunderbolt ($TB_MBP_FOR_M4_1)."; exit 1; fi
     
     # M4-2 to others
     if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macstudio-m4-1 over Thunderbolt ($TB_M4_1)."; exit 1; fi
-    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_MBP" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macbook-m4 over Thunderbolt ($TB_MBP)."; exit 1; fi
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_MBP_FOR_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macbook-m4 over Thunderbolt ($TB_MBP_FOR_M4_2)."; exit 1; fi
     
     # MBP to others
     if ! ssh macbook-m4 "ping -c 1 -W 1 $TB_M4_1" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping macstudio-m4-1 over Thunderbolt ($TB_M4_1)."; exit 1; fi
