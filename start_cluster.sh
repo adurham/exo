@@ -4,9 +4,15 @@
 # Usage: ./start_cluster.sh
 # Detects the current host and sets up the appropriate environment for the 2-node M4 cluster.
 
-export EXO_FAST_SYNCH=off
+# export EXO_FAST_SYNCH=off
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
 export IBV_FORK_SAFE=1
+
+# Exo Runtime Variables
+export EXO_KV_BITS=false
+export EXO_BATCH_COMPLETION_SIZE=8
+export EXO_MLX_WIRED_LIMIT_RATIO=0.87
+export PYTHONUNBUFFERED=1
 
 # Define Node Constants
 M4_1_IP="192.168.86.201"
@@ -143,10 +149,17 @@ else
     # 3. Start Exo on each node
     for NODE in "${NODES[@]}"; do
         echo "Starting Exo on $NODE..."
+        
+        # Build the dynamic environment string based on the current exports
+        EXO_ENV="EXO_KV_BITS=${EXO_KV_BITS:-false} EXO_BATCH_COMPLETION_SIZE=${EXO_BATCH_COMPLETION_SIZE:-8} EXO_MLX_WIRED_LIMIT_RATIO=${EXO_MLX_WIRED_LIMIT_RATIO:-0.87} PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}"
+        if [ -n "$EXO_FAST_SYNCH" ]; then
+            EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
+        fi
+        
         if [ "$NODE" == "macstudio-m4-1" ]; then
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_KV_BITS=false EXO_BATCH_COMPLETION_SIZE=8 EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/$TB_M4_2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_2/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         else
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_KV_BITS=false EXO_BATCH_COMPLETION_SIZE=8 EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         fi
     done
 
