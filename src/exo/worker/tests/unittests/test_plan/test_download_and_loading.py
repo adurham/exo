@@ -5,12 +5,12 @@ from exo.shared.types.tasks import LoadModel
 from exo.shared.types.worker.downloads import DownloadCompleted, DownloadProgress
 from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runners import (
-from exo.shared.types.worker.runners import (
     RunnerConnected,
     RunnerIdle,
 )
 from exo.shared.topology import Topology
-from exo.shared.types.profiling import NodeNetworkInfo, Interface, InterfaceType
+from exo.shared.types.multiaddr import Multiaddr
+from exo.shared.types.profiling import NodeNetworkInfo, NetworkInterfaceInfo
 from exo.shared.types.topology import SocketConnection, Connection
 from exo.shared.constants import EXO_FILE_SERVER_PORT
 from exo.shared.constants import EXO_FILE_SERVER_PORT
@@ -129,7 +129,7 @@ def test_plan_does_not_request_download_when_shard_already_downloaded():
     If the local shard already has a DownloadCompleted entry, plan()
     should not re-emit DownloadModel while global state is still catching up.
     """
-    shard = get_pipeline_shard_metadata(MODEL_A_ID, device_rank=0)
+    shard = get_pipeline_shard_metadata(model_id=MODEL_A_ID, device_rank=0)
     instance = get_mlx_ring_instance(
         instance_id=INSTANCE_1_ID,
         model_id=MODEL_A_ID,
@@ -284,16 +284,14 @@ def test_plan_requests_p2p_download_from_peer_when_peer_has_model():
     
     tb_ip = "10.0.0.2"
     conn = SocketConnection(
-        rank=0, # ignored
-        source_multiaddr=Interface(ip_address="10.0.0.1", interface_name="tb0", interface_type="thunderbolt", netmask=None, broadcast=None, ptp=None),
-        sink_multiaddr=Interface(ip_address=tb_ip, interface_name="tb0", interface_type="thunderbolt", netmask=None, broadcast=None, ptp=None)
+        sink_multiaddr=Multiaddr(address=f"/ip4/{tb_ip}/tcp/5678")
     )
     topology.add_connection(Connection(source=NODE_A, sink=NODE_B, edge=conn))
 
     node_network = {
         NODE_B: NodeNetworkInfo(
             interfaces=[
-                Interface(ip_address=tb_ip, interface_name="tb0", interface_type="thunderbolt", netmask=None, broadcast=None, ptp=None)
+                NetworkInterfaceInfo(ip_address=tb_ip, name="tb0", interface_type="thunderbolt")
             ]
         )
     }

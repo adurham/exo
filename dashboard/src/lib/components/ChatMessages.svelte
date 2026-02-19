@@ -3,16 +3,17 @@
     messages,
     currentResponse,
     isLoading,
+    prefillProgress,
     deleteMessage,
     editAndRegenerate,
     regenerateLastResponse,
     regenerateFromToken,
     setEditingImage,
   } from "$lib/stores/app.svelte";
-  import type { Message } from "$lib/stores/app.svelte";
   import type { MessageAttachment } from "$lib/stores/app.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
   import TokenHeatmap from "./TokenHeatmap.svelte";
+  import PrefillProgressBar from "./PrefillProgressBar.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
 
   interface Props {
@@ -25,6 +26,7 @@
   const messageList = $derived(messages());
   const response = $derived(currentResponse());
   const loading = $derived(isLoading());
+  const prefill = $derived(prefillProgress());
 
   // Scroll management - user controls scroll, show button when not at bottom
   const SCROLL_THRESHOLD = 100;
@@ -225,6 +227,7 @@
   }
 
   function handleDeleteClick(messageId: string) {
+    if (loading) return;
     deleteConfirmId = messageId;
   }
 
@@ -255,7 +258,7 @@
 </script>
 
 <div class="flex flex-col gap-4 sm:gap-6 {className}">
-  {#each messageList as message (message.id)}
+  {#each messageList as message, i (message.id)}
     <div
       class="group flex {message.role === 'user'
         ? 'justify-end'
@@ -317,9 +320,11 @@
           <!-- Delete confirmation -->
           <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
             <p class="text-xs text-red-400 mb-3">
-              Delete this message{message.role === "user"
-                ? " and all responses after it"
-                : ""}?
+              {#if i === messageList.length - 1}
+                Delete this message?
+              {:else}
+                Delete this message and all messages after it?
+              {/if}
             </p>
             <div class="flex gap-2 justify-end">
               <button
@@ -425,6 +430,9 @@
             {:else}
               <!-- Assistant message styling -->
               <div class="p-3 sm:p-4">
+                {#if loading && isLastAssistantMessage(message.id) && prefill && !message.content}
+                  <PrefillProgressBar progress={prefill} class="mb-3" />
+                {/if}
                 {#if message.thinking && message.thinking.trim().length > 0}
                   <div
                     class="mb-3 rounded border border-exo-yellow/20 bg-exo-black/40"
@@ -751,8 +759,13 @@
             <!-- Delete button -->
             <button
               onclick={() => handleDeleteClick(message.id)}
-              class="p-1.5 text-exo-light-gray hover:text-red-400 transition-colors rounded hover:bg-red-500/10 cursor-pointer"
-              title="Delete message"
+              disabled={loading}
+              class="p-1.5 transition-colors rounded {loading
+                ? 'text-exo-light-gray/30 cursor-not-allowed'
+                : 'text-exo-light-gray hover:text-red-400 hover:bg-red-500/10 cursor-pointer'}"
+              title={loading
+                ? "Cannot delete while generating"
+                : "Delete message"}
             >
               <svg
                 class="w-3.5 h-3.5"

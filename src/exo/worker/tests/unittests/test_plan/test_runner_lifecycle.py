@@ -2,6 +2,7 @@ from typing import Any
 
 import exo.worker.plan as plan_mod
 from exo.shared.types.tasks import Shutdown
+from exo.shared.topology import Topology
 from exo.shared.types.worker.instances import BoundInstance, Instance, InstanceId
 from exo.shared.types.worker.runners import (
     RunnerFailed,
@@ -52,6 +53,8 @@ def test_plan_kills_runner_when_instance_missing():
         instances=instances,
         all_runners=all_runners,
         tasks={},
+        topology=Topology(),
+        node_network={},
     )
 
     assert isinstance(result, Shutdown)
@@ -91,6 +94,8 @@ def test_plan_kills_runner_when_sibling_failed():
         instances=instances,
         all_runners=all_runners,
         tasks={},
+        topology=Topology(),
+        node_network={},
     )
 
     assert isinstance(result, Shutdown)
@@ -122,6 +127,8 @@ def test_plan_creates_runner_when_missing_for_node():
         instances=instances,
         all_runners=all_runners,
         tasks={},
+        topology=Topology(),
+        node_network={},
     )
 
     # We patched plan_mod.CreateRunner → CreateRunner
@@ -160,6 +167,8 @@ def test_plan_does_not_create_runner_when_supervisor_already_present():
         instances=instances,
         all_runners=all_runners,
         tasks={},
+        topology=Topology(),
+        node_network={},
     )
 
     assert result is None
@@ -189,6 +198,8 @@ def test_plan_does_not_create_runner_for_unassigned_node():
         instances=instances,
         all_runners=all_runners,
         tasks={},
+        topology=Topology(),
+        node_network={},
     )
 
     assert result is None

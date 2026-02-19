@@ -15,6 +15,7 @@ from exo.shared.types.events import (
     NodeDownloadProgress,
     NodeGatheredInfo,
     NodeTimedOut,
+    PrefillProgress,
     RunnerDeleted,
     RunnerStatusUpdated,
     TaskAcknowledged,
@@ -64,6 +65,7 @@ def event_apply(event: Event, state: State) -> State:
             | ChunkGenerated()
             | TaskAcknowledged()
             | InputChunkReceived()
+            | PrefillProgress()
             | TracesCollected()
             | TracesMerged()
         ):  # Pass-through events that don't modify state
@@ -218,11 +220,6 @@ def apply_node_timed_out(event: NodeTimedOut, state: State) -> State:
         key: value for key, value in state.downloads.items() if key != event.node_id
     }
     # Clean up all granular node mappings
-    node_identities = {
-        key: value
-        for key, value in state.node_identities.items()
-        if key != event.node_id
-    }
     node_memory = {
         key: value for key, value in state.node_memory.items() if key != event.node_id
     }
@@ -263,7 +260,6 @@ def apply_node_timed_out(event: NodeTimedOut, state: State) -> State:
             "downloads": downloads,
             "topology": topology,
             "last_seen": last_seen,
-            "node_identities": node_identities,
             "node_memory": node_memory,
             "node_disk": node_disk,
             "node_system": node_system,

@@ -11,7 +11,7 @@ sys.stdout.flush()
 import loguru
 
 from exo.shared.types.events import Event, RunnerStatusUpdated
-from exo.shared.types.tasks import Task
+from exo.shared.types.tasks import Task, TaskId
 from exo.shared.types.worker.instances import BoundInstance, MlxJacclInstance
 from exo.shared.types.worker.runners import RunnerFailed
 from exo.utils.channels import ClosedResourceError, MpReceiver, MpSender
@@ -23,6 +23,7 @@ def entrypoint(
     bound_instance: BoundInstance,
     event_sender: MpSender[Event],
     task_receiver: MpReceiver[Task],
+    cancel_receiver: MpReceiver[TaskId],
     _logger: "loguru.Logger",
 ) -> None:
     fast_synch_override = os.environ.get("EXO_FAST_SYNCH")
@@ -90,7 +91,7 @@ def entrypoint(
     try:
         from exo.worker.runner.runner import main
 
-        main(bound_instance, event_sender, task_receiver)
+        main(bound_instance, event_sender, task_receiver, cancel_receiver)
     except ClosedResourceError:
         logger.warning("Runner communication closed unexpectedly")
     except Exception as e:

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -65,8 +66,6 @@ Group = mx.distributed.Group
 # Removed restrictive setrlimit (2048/4096) to allow higher system limits for RDMA
 
 
-# TODO: Test this
-#  ALSO https://github.com/exo-explore/exo/pull/233#discussion_r2549683673
 def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
     return Memory.from_float_kb(
         (model_shard_meta.end_layer - model_shard_meta.start_layer)
@@ -82,30 +81,6 @@ def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
 
 class ModelLoadingTimeoutError(Exception):
     pass
-
-
-def mx_barrier(group: Group | None = None):
-    mx.eval(
-        mx.distributed.all_sum(
-            mx.array(1.0),
-            stream=mx.default_stream(mx.Device(mx.cpu)),
-            group=group,
-        )
-    )
-
-
-def broadcast_from_zero(value: int, group: Group | None = None):
-    if group is None:
-        return value
-
-    if group.rank() == 0:
-        a = mx.array([value], dtype=mx.int32)
-    else:
-        a = mx.array([0], dtype=mx.int32)
-
-    m = mx.distributed.all_sum(a, stream=mx.Device(mx.DeviceType.cpu), group=group)
-    mx.eval(m)
-    return int(m.item())
 
 
 class HostList(RootModel[list[str]]):
@@ -362,10 +337,12 @@ def get_eos_token_ids_for_model(model_id: ModelId) -> list[int] | None:
     model_id_lower = model_id.lower()
     if "kimi-k2" in model_id_lower:
         return [163586]
-    elif "glm-4.7-flash" in model_id_lower:
+    elif "glm-5" in model_id_lower or "glm-4.7" in model_id_lower:
+        # For GLM-5 and GLM-4.7
         # 154820: <|endoftext|>, 154827: <|user|>, 154829: <|observation|>
         return [154820, 154827, 154829]
     elif "glm" in model_id_lower:
+        # For GLM-4.5 and older
         return [151336, 151329, 151338]
     elif "qwen" in model_id_lower:
         return [151643, 151644, 151645]
@@ -375,6 +352,8 @@ def get_eos_token_ids_for_model(model_id: ModelId) -> list[int] | None:
         return [32000, 32001, 32007]
     elif "minimax" in model_id_lower:
         return [200020, 200021]
+    elif "gpt-oss" in model_id_lower:
+        return [200002, 200012]
     return None
 
 
@@ -438,7 +417,13 @@ def load_tokenizer_for_model_id(
             return list(hf_tokenizer.model.encode(text, allowed_special="all"))  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
 
         hf_tokenizer.encode = _patched_encode
-        return TokenizerWrapper(hf_tokenizer, eos_token_ids=eos_token_ids)
+        return TokenizerWrapper(
+            hf_tokenizer,
+            eos_token_ids=eos_token_ids,
+            tool_call_start="<|tool_calls_section_begin|>",
+            tool_call_end="<|tool_calls_section_end|>",
+            tool_parser=_parse_kimi_tool_calls,
+        )
 
     tokenizer = load_tokenizer(
         model_path,
@@ -480,6 +465,56 @@ def _normalize_tool_calls(msg_dict: dict[str, Any]) -> None:
         if isinstance(args, str):
             with contextlib.suppress(json.JSONDecodeError):
                 func["arguments"] = json.loads(args)
+
+
+def _collect_nested_property_names(schema: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    properties: dict[str, Any] = schema.get("properties", {})  # type: ignore[reportAny]
+    for prop_spec in properties.values():  # pyright: ignore[reportAny]
+        if not isinstance(prop_spec, dict):
+            continue
+        if prop_spec.get("type") == "array":  # type: ignore[reportAny]
+            items: dict[str, Any] | None = prop_spec.get("items")  # type: ignore[reportAny]
+            if isinstance(items, dict) and items.get("type") == "object":  # type: ignore[reportAny]
+                inner_props: dict[str, Any] = items.get("properties", {})  # type: ignore[reportAny]
+                for k in inner_props:  # pyright: ignore[reportUnknownVariableType]
+                    names.add(str(k))  # pyright: ignore[reportUnknownArgumentType]
+                names.update(_collect_nested_property_names(items))  # pyright: ignore[reportUnknownArgumentType]
+    return names
+
+
+def _schemas_lost_in_prompt(prompt: str, tools: list[dict[str, Any]]) -> bool:
+    """Return True if nested property names from any tool schema are absent."""
+    for tool in tools:
+        fn: dict[str, Any] = tool.get("function", {})  # type: ignore
+        params: dict[str, Any] = fn.get("parameters", {})  # type: ignore
+        nested = _collect_nested_property_names(params)
+        if nested and not all(name in prompt for name in nested):
+            return True
+    return False
+
+
+_LOSSY_TEMPLATE_PATTERN = re.compile(
+    r"""inner_type\s*==\s*["']object \| object["']\s*or\s*inner_type\|length\s*>\s*\d+""",
+)
+
+
+def _patch_lossy_chat_template(template: str) -> str | None:
+    """Patch chat templates that collapse nested object schemas to ``any[]``.
+
+    Some templates (e.g., GPT-OSS) have a guard like::
+
+        inner_type == "object | object" or inner_type|length > 50
+
+    The length check silently drops complex array-of-object schemas.
+    We remove the length guard, keeping only the object-union check.
+    Returns the patched template, or *None* if no patch was needed.
+    """
+    patched, n = _LOSSY_TEMPLATE_PATTERN.subn(
+        lambda m: m.group(0).split(" or ")[0],  # keep only the object-union check
+        template,
+    )
+    return patched if n > 0 else None
 
 
 def apply_chat_template(
@@ -528,13 +563,27 @@ def apply_chat_template(
         extra_kwargs["enable_thinking"] = task_params.enable_thinking
         extra_kwargs["thinking"] = task_params.enable_thinking
 
+    patched_template: str | None = None
+    if task_params.tools:
+        original_template: str | None = getattr(tokenizer, "chat_template", None)
+        if isinstance(original_template, str):
+            patched_template = _patch_lossy_chat_template(original_template)
+            if patched_template is not None:
+                logger.info(
+                    "Patched lossy chat template (removed inner_type length guard)"
+                )
+
     prompt: str = tokenizer.apply_chat_template(
         formatted_messages,
         tokenize=False,
         add_generation_prompt=True,
         tools=task_params.tools,
+        **({"chat_template": patched_template} if patched_template is not None else {}),
         **extra_kwargs,
     )
+
+    if task_params.tools and _schemas_lost_in_prompt(prompt, task_params.tools):
+        logger.warning("Chat template lost nested tool schemas even after patching")
 
     if partial_assistant_content:
         prompt += partial_assistant_content
@@ -650,3 +699,61 @@ def mlx_cleanup(
     import gc
 
     gc.collect()
+
+
+def mx_any(bool_: bool, group: Group | None) -> bool:
+    if group is None:
+        return bool_
+    num_true = mx.distributed.all_sum(
+        mx.array(bool_), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
+    )
+    mx.eval(num_true)
+    return num_true.item() > 0
+
+
+def mx_barrier(group: Group | None):
+    if group is None:
+        return
+    mx.eval(
+        mx.distributed.all_sum(
+            mx.array(1.0), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
+        )
+    )
+
+
+def _parse_kimi_tool_calls(text: str):
+    import regex as re
+
+    # kimi has a fixed function naming scheme, with a json formatted arg
+    #   functions.multiply:0<|tool_call_argument_begin|>{"a": 2, "b": 3}
+    _func_name_regex = re.compile(
+        r"^\s*((?:functions\.)?(.+?):\d+)\s*<\|tool_call_argument_begin\|>", re.DOTALL
+    )
+    _func_arg_regex = re.compile(r"<\|tool_call_argument_begin\|>\s*(.*)\s*", re.DOTALL)
+    _tool_call_split_regex = re.compile(
+        r"<\|tool_call_begin\|>(.*?)<\|tool_call_end\|>", re.DOTALL
+    )
+
+    def _parse_single_tool(text: str) -> dict[str, Any]:
+        func_name_match = _func_name_regex.search(text)
+        if func_name_match is None:
+            raise ValueError("No tool call found.")
+        tool_call_id = func_name_match.group(1)  # e.g. "functions.get_weather:0"
+        func_name = func_name_match.group(2)  # e.g. "get_weather"
+
+        func_args_match = _func_arg_regex.search(text)
+        if func_args_match is None:
+            raise ValueError("No tool call arguments found.")
+        func_args = func_args_match.group(1)
+        try:
+            arg_dct = json.loads(func_args)  # pyright: ignore[reportAny]
+        except Exception:
+            arg_dct = None
+
+        return dict(id=tool_call_id, name=func_name, arguments=arg_dct)
+
+    tool_matches = _tool_call_split_regex.findall(text)
+    if tool_matches:
+        return [_parse_single_tool(match) for match in tool_matches]  # pyright: ignore[reportAny]
+    else:
+        return [_parse_single_tool(text)]
