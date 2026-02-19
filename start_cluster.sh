@@ -4,7 +4,7 @@
 # Usage: ./start_cluster.sh
 # Detects the current host and sets up the appropriate environment for the 2-node M4 cluster.
 
-# export EXO_FAST_SYNCH=off
+export EXO_FAST_SYNCH=off
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
 export IBV_FORK_SAFE=1
 
