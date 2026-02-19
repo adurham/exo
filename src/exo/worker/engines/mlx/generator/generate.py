@@ -545,8 +545,8 @@ def generate_step(
             _t3 = _time.perf_counter()
 
             _kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
-            import logging as _logging
-            _logging.getLogger("exo").info(
+            from loguru import logger as _logger
+            _logger.info(
                 f"PREFILL chunk {_prefill_chunk_idx}: "
                 f"tokens={n_to_process}, kv_len={_kv_len}, "
                 f"model={(_t1-_t0)*1000:.0f}ms, "
