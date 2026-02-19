@@ -6,6 +6,7 @@
 
 export EXO_FAST_SYNCH=off
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
+export IBV_FORK_SAFE=1
 
 # Define Node Constants
 M4_1_IP="192.168.86.201"
