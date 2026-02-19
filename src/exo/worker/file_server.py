@@ -40,6 +40,12 @@ class FileServer:
              return web.Response(status=403, text="Access denied")
         
         if not file_path.exists():
+            # Model directories use '--' separator on disk (e.g. mlx-community--MiniMax-M2.5-5bit)
+            # but peer download URLs use '/' (e.g. mlx-community/MiniMax-M2.5-5bit)
+            normalized_path = path.replace("/", "--", 1)
+            file_path = EXO_MODELS_DIR / normalized_path
+        
+        if not file_path.exists():
             return web.Response(status=404, text="File not found")
             
         if not file_path.is_file():
