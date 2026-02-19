@@ -20,7 +20,7 @@ M4_1_PEER_ID="12D3KooWDGQKAJUYpqTHzBhVpGzYxQagWRwFqJPzkEYzHxt3SSUg"
 M4_2_IP="192.168.86.202"
 M4_2_PEER_ID="12D3KooWQDzFqvjsgFRfheeV7uvtVUP1gruphpgoVELP9pkHBses"
 MBP_IP="192.168.86.203"
-MBP_PEER_ID="PLACEHOLDER_MBP_PEER_ID"
+MBP_PEER_ID="12D3KooWGtRYJcQpFLQBc3AFbES1A3BrFy55GyNLMNLNm64bHv16"
 
 # Get current IPs (check all interfaces to correctly identify the node)
 CURRENT_IPS=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}')
