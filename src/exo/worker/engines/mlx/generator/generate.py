@@ -523,9 +523,13 @@ def generate_step(
         )
         prompt_processed_tokens = 0
         prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
+        import time as _time
+        _prefill_chunk_idx = 0
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
+
+            _t0 = _time.perf_counter()
             _model_call(
                 input_tokens=prompt[:n_to_process][None],
                 input_embeddings=(
@@ -534,8 +538,24 @@ def generate_step(
                     else None
                 ),
             )
+            _t1 = _time.perf_counter()
             quantize_cache_fn(prompt_cache)
+            _t2 = _time.perf_counter()
             mx.eval([c.state for c in prompt_cache])
+            _t3 = _time.perf_counter()
+
+            _kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
+            import logging as _logging
+            _logging.getLogger("exo").info(
+                f"PREFILL chunk {_prefill_chunk_idx}: "
+                f"tokens={n_to_process}, kv_len={_kv_len}, "
+                f"model={(_t1-_t0)*1000:.0f}ms, "
+                f"quantize={(_t2-_t1)*1000:.0f}ms, "
+                f"eval={(_t3-_t2)*1000:.0f}ms, "
+                f"total={(_t3-_t0)*1000:.0f}ms"
+            )
+            _prefill_chunk_idx += 1
+
             prompt_processed_tokens += n_to_process
             prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
             prompt = prompt[n_to_process:]
