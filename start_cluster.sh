@@ -52,27 +52,51 @@ else
     TB_M4_1="192.168.200.1"
     TB_M4_2="192.168.200.2"
 
-    # Check M4-1 IP
-    CURRENT_M4_1_TB=$(ssh macstudio-m4-1 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
-    if [ "$CURRENT_M4_1_TB" != "$TB_M4_1" ]; then
-        echo "ERROR: macstudio-m4-1 Thunderbolt (en2) IP is '$CURRENT_M4_1_TB', expected '$TB_M4_1'."
-        exit 1
-    fi
-
-    # Check M4-2 IP
-    CURRENT_M4_2_TB=$(ssh macstudio-m4-2 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
-    if [ "$CURRENT_M4_2_TB" != "$TB_M4_2" ]; then
-        echo "WARNING: macstudio-m4-2 Thunderbolt (en2) IP is '$CURRENT_M4_2_TB', expected '$TB_M4_2'."
-        echo "Attempting to auto-fix..."
-        ssh macstudio-m4-2 "sudo networksetup -setmanual 'EXO Thunderbolt 1' $TB_M4_2 255.255.255.0"
-        sleep 2
-        CURRENT_M4_2_TB=$(ssh macstudio-m4-2 "ifconfig en2 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
-        if [ "$CURRENT_M4_2_TB" != "$TB_M4_2" ]; then
-             echo "ERROR: Failed to set IP. Still '$CURRENT_M4_2_TB'. Please fix manually."
-             exit 1
+    for NODE in "macstudio-m4-1" "macstudio-m4-2"; do
+        if [ "$NODE" == "macstudio-m4-1" ]; then
+            TARGET_IP=$TB_M4_1
+        else
+            TARGET_IP=$TB_M4_2
         fi
-        echo "Auto-fix successful. IP set to $TB_M4_2."
-    fi
+        
+        echo "Discovering active Thunderbolt interface on $NODE..."
+        ACTIVE_TB=$(ssh "$NODE" '
+            while IFS= read -r line; do
+                if [[ $line == *"Hardware Port: Thunderbolt"* ]]; then
+                    PORT_NAME=${line#Hardware Port: }
+                elif [[ $line == *"Device: "* ]]; then
+                    DEVICE=${line#Device: }
+                    if ifconfig "$DEVICE" 2>/dev/null | grep -q "status: active"; then
+                        echo "$PORT_NAME|$DEVICE"
+                        exit 0
+                    fi
+                fi
+            done <<< "$(networksetup -listallhardwareports)"
+            echo ""
+        ')
+        
+        if [ -z "$ACTIVE_TB" ]; then
+            echo "ERROR: No active Thunderbolt connection found on $NODE."
+            exit 1
+        fi
+        
+        PORT_NAME=$(echo "$ACTIVE_TB" | cut -d"|" -f1)
+        DEVICE=$(echo "$ACTIVE_TB" | cut -d"|" -f2)
+        
+        echo "Found active Thunderbolt on $NODE: $PORT_NAME ($DEVICE)"
+        
+        CURRENT_IP=$(ssh "$NODE" "ifconfig $DEVICE 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
+        if [ "$CURRENT_IP" != "$TARGET_IP" ]; then
+            echo "Configuring $PORT_NAME on $NODE to $TARGET_IP..."
+            ssh "$NODE" "sudo networksetup -setmanual \"$PORT_NAME\" $TARGET_IP 255.255.255.0"
+            sleep 2
+            CURRENT_IP=$(ssh "$NODE" "ifconfig $DEVICE 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
+            if [ "$CURRENT_IP" != "$TARGET_IP" ]; then
+                echo "ERROR: Failed to set IP on $NODE ($DEVICE). Still '$CURRENT_IP'."
+                exit 1
+            fi
+        fi
+    done
 
     # Check Ping
     if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then
