@@ -2,7 +2,7 @@
 
 # Standardized Exo Cluster Startup Script
 # Usage: ./start_cluster.sh
-# Detects the current host and sets up the appropriate environment for the 2-node M4 cluster.
+# Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
 
 export EXO_FAST_SYNCH=off
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
@@ -19,12 +19,15 @@ M4_1_IP="192.168.86.201"
 M4_1_PEER_ID="12D3KooWDGQKAJUYpqTHzBhVpGzYxQagWRwFqJPzkEYzHxt3SSUg"
 M4_2_IP="192.168.86.202"
 M4_2_PEER_ID="12D3KooWQDzFqvjsgFRfheeV7uvtVUP1gruphpgoVELP9pkHBses"
+MBP_IP="192.168.86.203"
+MBP_PEER_ID="PLACEHOLDER_MBP_PEER_ID"
 
 # Get current IPs (check all interfaces to correctly identify the node)
 CURRENT_IPS=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}')
 
 IS_M4_1=false
 IS_M4_2=false
+IS_MBP=false
 
 for IP in $CURRENT_IPS; do
     if [ "$IP" == "$M4_1_IP" ]; then
@@ -33,6 +36,10 @@ for IP in $CURRENT_IPS; do
     fi
     if [ "$IP" == "$M4_2_IP" ]; then
         IS_M4_2=true
+        break
+    fi
+    if [ "$IP" == "$MBP_IP" ]; then
+        IS_MBP=true
         break
     fi
 done
@@ -45,13 +52,17 @@ elif [ "$IS_M4_2" = true ]; then
     echo "Detected M4-2 ($M4_2_IP)"
     # Peer with M4-1
     export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
+elif [ "$IS_MBP" = true ]; then
+    echo "Detected MacBook Pro ($MBP_IP)"
+    # Peer with M4-1
+    export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
 else
     echo "Unknown host IPs: $CURRENT_IPS. Assuming remote controller."
     echo "Attempting to start cluster on known nodes via SSH..."
     echo "-----------------------------------------------------"
 
     # Define nodes to start (using SSH config aliases)
-    NODES=("macstudio-m4-1" "macstudio-m4-2")
+    NODES=("macstudio-m4-1" "macstudio-m4-2" "macbook-m4")
 
     # Thunderbolt Connectivity Check
     echo "Discovering active Thunderbolt IPs..."
@@ -90,19 +101,39 @@ else
     fi
     echo "macstudio-m4-2 Thunderbolt IP: $TB_M4_2"
 
-    # Check Ping
-    echo "Testing connectivity ($TB_M4_1 -> $TB_M4_2)..."
-    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then
-        echo "ERROR: macstudio-m4-1 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."
+    TB_MBP=$(ssh macbook-m4 "$get_tb_ip_script")
+    if [ -z "$TB_MBP" ]; then
+        echo "ERROR: Could not find an active Thunderbolt IP on macbook-m4."
         exit 1
     fi
-    echo "Thunderbolt Link Verified!"
+    echo "macbook-m4 Thunderbolt IP: $TB_MBP"
+
+    # Check Ping
+    echo "Testing full-mesh connectivity..."
+    
+    # M4-1 to others
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."; exit 1; fi
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_MBP" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macbook-m4 over Thunderbolt ($TB_MBP)."; exit 1; fi
+    
+    # M4-2 to others
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macstudio-m4-1 over Thunderbolt ($TB_M4_1)."; exit 1; fi
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_MBP" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macbook-m4 over Thunderbolt ($TB_MBP)."; exit 1; fi
+    
+    # MBP to others
+    if ! ssh macbook-m4 "ping -c 1 -W 1 $TB_M4_1" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping macstudio-m4-1 over Thunderbolt ($TB_M4_1)."; exit 1; fi
+    if ! ssh macbook-m4 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."; exit 1; fi
+
+    echo "Thunderbolt Links Verified (Full Mesh)!"
 
     # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
         echo "Preparing $NODE..."
         echo "Setting Metal memory limit on $NODE..."
-        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
+        if [[ "$NODE" == *"macbook"* ]]; then
+            ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=33000"
+        else
+            ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
+        fi
         
         echo "Killing existing Exo processes on $NODE..."
         for i in {1..5}; do
@@ -133,15 +164,17 @@ else
         ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
     done
 
-    # 2. Inter-Node Git Sync Check (M4-1 vs M4-2)
+    # 2. Inter-Node Git Sync Check (M4-1 vs M4-2 vs MBP)
     echo "Verifying commit consistency between nodes..."
     COMMIT_M4_1=$(ssh macstudio-m4-1 "cd ~/repos/exo && git rev-parse --short HEAD")
     COMMIT_M4_2=$(ssh macstudio-m4-2 "cd ~/repos/exo && git rev-parse --short HEAD")
+    COMMIT_MBP=$(ssh macbook-m4 "cd ~/repos/exo && git rev-parse --short HEAD")
 
-    if [ "$COMMIT_M4_1" != "$COMMIT_M4_2" ]; then
+    if [ "$COMMIT_M4_1" != "$COMMIT_M4_2" ] || [ "$COMMIT_M4_1" != "$COMMIT_MBP" ]; then
         echo "CRITICAL ERROR: Cluster out of sync!"
         echo "macstudio-m4-1: $COMMIT_M4_1"
         echo "macstudio-m4-2: $COMMIT_M4_2"
+        echo "macbook-m4: $COMMIT_MBP"
         exit 1
     fi
     echo "Nodes synchronized on commit $COMMIT_M4_1."
@@ -158,6 +191,8 @@ else
         
         if [ "$NODE" == "macstudio-m4-1" ]; then
              ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_2/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+        elif [ "$NODE" == "macstudio-m4-2" ]; then
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         else
              ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         fi
@@ -175,7 +210,7 @@ else
             node_count=0
         fi
 
-        if [ "$node_count" -ge 2 ]; then
+        if [ "$node_count" -ge 3 ]; then
             echo " HEALTHY! (Nodes: $node_count)"
             CLUSTER_READY=true
             break
