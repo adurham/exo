@@ -70,7 +70,7 @@ exo_pyo3_bindings = { workspace = true }
 #mlx-lm = { git = "https://github.com/davidmcc73/mlx-lm", branch = "stable" }
 # Uncomment to use local mlx/mlx-lm development versions:
 mlx = { path = "./mlx", editable=true }
-# mlx-lm = { path = "/Users/Shared/mlx-lm", editable=true }
+mlx-lm = { path = "./mlx-lm", editable=true }
 
 [build-system]
 requires = ["uv_build>=0.8.9,<0.9.0"]
@@ -135,7 +135,7 @@ markers = [
 env = [
   "EXO_TESTS=1"
 ]
-addopts = "-m 'not slow' --ignore=tests/start_distributed_test.py"
+addopts = "-m 'not slow' --ignore=tests/start_distributed_test.py --ignore=mlx --ignore=mlx-lm"
 filterwarnings = [
     "ignore:builtin type Swig:DeprecationWarning",
 ]

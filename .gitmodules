@@ -2,3 +2,6 @@
 	path = mlx
 	url = https://github.com/adurham/mlx.git
 	branch = main
+[submodule "mlx-lm"]
+	path = mlx-lm
+	url = git@github.com:adurham/mlx-lm.git

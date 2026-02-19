@@ -350,17 +350,27 @@ def _find_ip_prioritised(
     other_network_info = node_network.get(other_node_id, NodeNetworkInfo())
     
     # Get all IPv4 addresses from the peer's network info
-    ips = [
-        iface.ip_address 
-        for iface in other_network_info.interfaces 
+    network_ip_map = {
+        iface.ip_address: iface
+        for iface in other_network_info.interfaces
         if iface.ip_address and ":" not in iface.ip_address
-    ]
+    }
+    
+    # Check for direct connections first
+    topology_ips = set(_find_connection_ip(node_id, other_node_id, cycle_digraph))
+    
+    # Filter network IPs by topology connections if any exist
+    candidate_ips = [ip for ip in network_ip_map if ip in topology_ips]
+    
+    # If no overlap or no topology connections, fall back to all network IPs
+    if not candidate_ips:
+        candidate_ips = list(network_ip_map.keys())
+        
+    # If still no IPs (no network info), use topology IPs
+    if not candidate_ips:
+        candidate_ips = list(topology_ips)
 
-    if not ips:
-        # Fallback to topology connections
-        ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
-
-    if not ips:
+    if not candidate_ips:
         return None
 
     ip_to_type = {
@@ -378,7 +388,7 @@ def _find_ip_prioritised(
     def get_priority(ip: str) -> int:
         return priority.get(ip_to_type.get(ip, "unknown"), 4)
 
-    return min(ips, key=get_priority)
+    return min(candidate_ips, key=get_priority)
 
 
 def get_mlx_ring_hosts_by_node(
