@@ -55,6 +55,7 @@ _MIN_PREFIX_HIT_TO_UPDATE = 1000
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
+_DEFAULT_PREFILL_STEP_SIZE = 4096
 
 
 from mlx.utils import tree_reduce
@@ -255,7 +256,7 @@ def prefill(
             max_tokens=1,
             sampler=sampler,
             prompt_cache=cache,
-            prefill_step_size=512,
+            prefill_step_size=_env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE),
             kv_group_size=KV_GROUP_SIZE,
             kv_bits=KV_BITS,
             prompt_progress_callback=progress_callback,
