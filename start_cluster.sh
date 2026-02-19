@@ -194,8 +194,11 @@ else
         echo "Running build on $NODE..."
         ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to build on $NODE"; exit 1; }
 
+        echo "Ensuring build dependencies on $NODE..."
+        ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
+
         echo "Building mlx C++ (JACCL) on $NODE..."
-        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo/mlx && mkdir -p build && cd build && cmake .. -DMLX_BUILD_JACCL=ON && make -j\$(sysctl -n hw.ncpu)'" || { echo "Failed to build mlx on $NODE"; exit 1; }
+        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo/mlx && mkdir -p build && cd build && cmake .. && make -j\$(sysctl -n hw.ncpu)'" || { echo "Failed to build mlx on $NODE"; exit 1; }
 
         echo "Building dashboard on $NODE..."
         ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
