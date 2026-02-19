@@ -143,7 +143,7 @@ else
         echo "Preparing $NODE..."
         echo "Setting Metal memory limit on $NODE..."
         if [[ "$NODE" == *"macbook"* ]]; then
-            ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=33000"
+            ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=31000"
         else
             ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
         fi
