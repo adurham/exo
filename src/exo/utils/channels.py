@@ -197,8 +197,14 @@ class MpReceiver[T]:
         except Empty:
             raise WouldBlock from None
         except WouldBlock:
-            item = self._state.buffer.get()
-        
+            try:
+                item = self._state.buffer.get()
+            except (TypeError, OSError):
+                # Queue pipe can get closed while we are blocked on get().
+                # The underlying connection._handle becomes None, causing
+                # TypeError in read(handle, remaining).
+                raise ClosedResourceError from None
+                
         if isinstance(item, _MpEndOfStream):
             self.close()
             raise EndOfStream from None
