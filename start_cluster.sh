@@ -68,23 +68,15 @@ else
     echo "Discovering active Thunderbolt IPs..."
     
     get_tb_ip_script='
-        is_tb=0
-        while IFS= read -r line; do
-            if [[ "$line" == *"Hardware Port: Thunderbolt"* ]]; then
-                is_tb=1
-            elif [[ "$line" == *"Hardware Port:"* ]]; then
-                is_tb=0
-            elif [[ "$line" == *"Device: "* ]] && [[ $is_tb -eq 1 ]]; then
-                device=${line#Device: }
-                if ifconfig "$device" 2>/dev/null | grep -q "status: active"; then
-                    ip=$(ifconfig "$device" 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk "{print \$2}")
-                    if [ -n "$ip" ]; then
-                        echo "$ip"
-                        exit 0
-                    fi
+        networksetup -listallhardwareports | awk "/Hardware Port: Thunderbolt/{getline; print \$2}" | while read device; do
+            if [ -n "$device" ] && ifconfig "$device" 2>/dev/null | grep -q "status: active"; then
+                ip=$(ifconfig "$device" 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk "{print \$2}")
+                if [ -n "$ip" ]; then
+                    echo "$ip"
+                    exit 0
                 fi
             fi
-        done <<< "$(networksetup -listallhardwareports)"
+        done
     '
 
     TB_M4_1=$(ssh macstudio-m4-1 "$get_tb_ip_script")
