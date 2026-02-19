@@ -1,3 +1,4 @@
 [submodule "mlx"]
 	path = mlx
 	url = https://github.com/adurham/mlx.git
+	branch = main
