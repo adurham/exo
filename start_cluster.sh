@@ -75,61 +75,66 @@ else
         # 2. Iterate through them locally, asking the node about each one individually
         for dev in $devices; do
             if ssh "$node" "ifconfig $dev" 2>/dev/null | grep -q "status: active"; then
-                local ip=$(ssh "$node" "ifconfig $dev" | awk '/inet / && !/127\.0\.0\.1/{print $2}')
-                if [ -n "$ip" ]; then
-                    echo "$ip"
-                fi
+                ssh "$node" "ifconfig $dev" | awk '/inet / && !/127\.0\.0\.1/{print $2}'
             fi
         done
     }
 
-    # Keep only the first IP for the Studios, as they only have one port actively connected
-    TB_M4_1=$(get_node_tb_ips "macstudio-m4-1" | head -n 1)
-    if [ -z "$TB_M4_1" ]; then
-        echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-1."
-        exit 1
-    fi
-    echo "macstudio-m4-1 Thunderbolt IP: $TB_M4_1"
+    find_shared_ip() {
+        local target_ips=$1
+        local peer_ips=$2
+        for tip in $target_ips; do
+            local t_subnet=$(echo "$tip" | awk -F. '{print $1"."$2"."$3}')
+            for pip in $peer_ips; do
+                local p_subnet=$(echo "$pip" | awk -F. '{print $1"."$2"."$3}')
+                if [ "$t_subnet" == "$p_subnet" ]; then
+                    echo "$tip"
+                    return 0
+                fi
+            done
+        done
+        return 1
+    }
 
-    TB_M4_2=$(get_node_tb_ips "macstudio-m4-2" | head -n 1)
-    if [ -z "$TB_M4_2" ]; then
-        echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-2."
-        exit 1
-    fi
-    echo "macstudio-m4-2 Thunderbolt IP: $TB_M4_2"
-
-    # Get ALL active Thunderbolt IPs for the Macbook Pro
+    echo "Fetching active Thunderbolt IPs from all nodes..."
+    TB_M4_1_IPS=$(get_node_tb_ips "macstudio-m4-1")
+    TB_M4_2_IPS=$(get_node_tb_ips "macstudio-m4-2")
     TB_MBP_IPS=$(get_node_tb_ips "macbook-m4")
-    if [ -z "$TB_MBP_IPS" ]; then
-        echo "ERROR: Could not find any active Thunderbolt IPs on macbook-m4."
+
+    # Match IPs by their shared broadcast domains
+    M4_1_TO_M4_2=$(find_shared_ip "$TB_M4_1_IPS" "$TB_M4_2_IPS")
+    M4_1_TO_MBP=$(find_shared_ip "$TB_M4_1_IPS" "$TB_MBP_IPS")
+
+    M4_2_TO_M4_1=$(find_shared_ip "$TB_M4_2_IPS" "$TB_M4_1_IPS")
+    M4_2_TO_MBP=$(find_shared_ip "$TB_M4_2_IPS" "$TB_MBP_IPS")
+
+    MBP_TO_M4_1=$(find_shared_ip "$TB_MBP_IPS" "$TB_M4_1_IPS")
+    MBP_TO_M4_2=$(find_shared_ip "$TB_MBP_IPS" "$TB_M4_2_IPS")
+
+    echo "macstudio-m4-1 routes: -> M4-2 ($M4_1_TO_M4_2), -> MBP ($M4_1_TO_MBP)"
+    echo "macstudio-m4-2 routes: -> M4-1 ($M4_2_TO_M4_1), -> MBP ($M4_2_TO_MBP)"
+    echo "macbook-m4   routes: -> M4-1 ($MBP_TO_M4_1), -> M4-2 ($MBP_TO_M4_2)"
+
+    # Verify all 6 connection points were successfully discovered
+    if [ -z "$M4_1_TO_M4_2" ] || [ -z "$M4_1_TO_MBP" ] || [ -z "$M4_2_TO_M4_1" ] || [ -z "$M4_2_TO_MBP" ] || [ -z "$MBP_TO_M4_1" ] || [ -z "$MBP_TO_M4_2" ]; then
+        echo "CRITICAL ERROR: Could not map a full 3-way Thunderbolt mesh subnet topology!"
         exit 1
     fi
-    
-    # Extract the subnet prefixes from the Studios
-    SUBNET_M4_1=$(echo "$TB_M4_1" | awk -F. '{print $1"."$2"."$3}')
-    SUBNET_M4_2=$(echo "$TB_M4_2" | awk -F. '{print $1"."$2"."$3}')
-
-    # Find the matching MBP IP for each Studio's subnet
-    TB_MBP_FOR_M4_1=$(echo "$TB_MBP_IPS" | grep "^$SUBNET_M4_1" | head -n 1)
-    TB_MBP_FOR_M4_2=$(echo "$TB_MBP_IPS" | grep "^$SUBNET_M4_2" | head -n 1)
-
-    echo "macbook-m4 IP (for M4-1 via $SUBNET_M4_1): $TB_MBP_FOR_M4_1"
-    echo "macbook-m4 IP (for M4-2 via $SUBNET_M4_2): $TB_MBP_FOR_M4_2"
 
     # Check Ping
     echo "Testing full-mesh connectivity..."
     
     # M4-1 to others
-    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."; exit 1; fi
-    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_MBP_FOR_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping macbook-m4 over Thunderbolt ($TB_MBP_FOR_M4_1)."; exit 1; fi
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $M4_2_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping M4-2 ($M4_2_TO_M4_1)."; exit 1; fi
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $MBP_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping MBP ($MBP_TO_M4_1)."; exit 1; fi
     
     # M4-2 to others
-    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macstudio-m4-1 over Thunderbolt ($TB_M4_1)."; exit 1; fi
-    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $TB_MBP_FOR_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping macbook-m4 over Thunderbolt ($TB_MBP_FOR_M4_2)."; exit 1; fi
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $M4_1_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping M4-1 ($M4_1_TO_M4_2)."; exit 1; fi
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $MBP_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping MBP ($MBP_TO_M4_2)."; exit 1; fi
     
     # MBP to others
-    if ! ssh macbook-m4 "ping -c 1 -W 1 $TB_M4_1" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping macstudio-m4-1 over Thunderbolt ($TB_M4_1)."; exit 1; fi
-    if ! ssh macbook-m4 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."; exit 1; fi
+    if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_1_TO_MBP" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping M4-1 ($M4_1_TO_MBP)."; exit 1; fi
+    if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_2_TO_MBP" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping M4-2 ($M4_2_TO_MBP)."; exit 1; fi
 
     echo "Thunderbolt Links Verified (Full Mesh)!"
 
@@ -198,11 +203,11 @@ else
         fi
         
         if [ "$NODE" == "macstudio-m4-1" ]; then
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_2/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         elif [ "$NODE" == "macstudio-m4-2" ]; then
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         else
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
         fi
     done
 
