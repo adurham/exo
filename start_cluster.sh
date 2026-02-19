@@ -48,62 +48,49 @@ else
     NODES=("macstudio-m4-1" "macstudio-m4-2")
 
     # Thunderbolt Connectivity Check
-    echo "Verifying Thunderbolt Connectivity..."
-    TB_M4_1="192.168.200.1"
-    TB_M4_2="192.168.200.2"
-
-    for NODE in "macstudio-m4-1" "macstudio-m4-2"; do
-        if [ "$NODE" == "macstudio-m4-1" ]; then
-            TARGET_IP=$TB_M4_1
-        else
-            TARGET_IP=$TB_M4_2
-        fi
-        
-        echo "Discovering active Thunderbolt interface on $NODE..."
-        ACTIVE_TB=$(ssh "$NODE" '
-            while IFS= read -r line; do
-                if [[ $line == *"Hardware Port: Thunderbolt"* ]]; then
-                    PORT_NAME=${line#Hardware Port: }
-                elif [[ $line == *"Device: "* ]]; then
-                    DEVICE=${line#Device: }
-                    if ifconfig "$DEVICE" 2>/dev/null | grep -q "status: active"; then
-                        echo "$PORT_NAME|$DEVICE"
+    echo "Discovering active Thunderbolt IPs..."
+    
+    get_tb_ip_script='
+        is_tb=0
+        while IFS= read -r line; do
+            if [[ "$line" == *"Hardware Port: Thunderbolt"* ]]; then
+                is_tb=1
+            elif [[ "$line" == *"Hardware Port:"* ]]; then
+                is_tb=0
+            elif [[ "$line" == *"Device: "* ]] && [[ $is_tb -eq 1 ]]; then
+                device=${line#Device: }
+                if ifconfig "$device" 2>/dev/null | grep -q "status: active"; then
+                    ip=$(ifconfig "$device" 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk "{print \$2}")
+                    if [ -n "$ip" ]; then
+                        echo "$ip"
                         exit 0
                     fi
                 fi
-            done <<< "$(networksetup -listallhardwareports)"
-            echo ""
-        ')
-        
-        if [ -z "$ACTIVE_TB" ]; then
-            echo "ERROR: No active Thunderbolt connection found on $NODE."
-            exit 1
-        fi
-        
-        PORT_NAME=$(echo "$ACTIVE_TB" | cut -d"|" -f1)
-        DEVICE=$(echo "$ACTIVE_TB" | cut -d"|" -f2)
-        
-        echo "Found active Thunderbolt on $NODE: $PORT_NAME ($DEVICE)"
-        
-        CURRENT_IP=$(ssh "$NODE" "ifconfig $DEVICE 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
-        if [ "$CURRENT_IP" != "$TARGET_IP" ]; then
-            echo "Configuring $PORT_NAME on $NODE to $TARGET_IP..."
-            ssh "$NODE" "sudo networksetup -setmanual \"$PORT_NAME\" $TARGET_IP 255.255.255.0"
-            sleep 2
-            CURRENT_IP=$(ssh "$NODE" "ifconfig $DEVICE 2>/dev/null | grep 'inet ' | awk '{print \$2}'")
-            if [ "$CURRENT_IP" != "$TARGET_IP" ]; then
-                echo "ERROR: Failed to set IP on $NODE ($DEVICE). Still '$CURRENT_IP'."
-                exit 1
             fi
-        fi
-    done
+        done <<< "$(networksetup -listallhardwareports)"
+    '
+
+    TB_M4_1=$(ssh macstudio-m4-1 "$get_tb_ip_script")
+    if [ -z "$TB_M4_1" ]; then
+        echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-1."
+        exit 1
+    fi
+    echo "macstudio-m4-1 Thunderbolt IP: $TB_M4_1"
+
+    TB_M4_2=$(ssh macstudio-m4-2 "$get_tb_ip_script")
+    if [ -z "$TB_M4_2" ]; then
+        echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-2."
+        exit 1
+    fi
+    echo "macstudio-m4-2 Thunderbolt IP: $TB_M4_2"
 
     # Check Ping
+    echo "Testing connectivity ($TB_M4_1 -> $TB_M4_2)..."
     if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $TB_M4_2" &> /dev/null; then
         echo "ERROR: macstudio-m4-1 cannot ping macstudio-m4-2 over Thunderbolt ($TB_M4_2)."
         exit 1
     fi
-    echo "Thunderbolt Link Verified ($TB_M4_1 <-> $TB_M4_2)."
+    echo "Thunderbolt Link Verified!"
 
     # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
@@ -157,11 +144,9 @@ else
     for NODE in "${NODES[@]}"; do
         echo "Starting Exo on $NODE..."
         if [ "$NODE" == "macstudio-m4-1" ]; then
-             # M4-1 connects to M4-2 via Thunderbolt IP (192.168.200.2)
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_KV_BITS=false EXO_BATCH_COMPLETION_SIZE=8 EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_KV_BITS=false EXO_BATCH_COMPLETION_SIZE=8 EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/$TB_M4_2/tcp/52415/p2p/$M4_2_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
         else
-             # M4-2 connects to M4-1 via Thunderbolt IP (192.168.200.1)
-             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_KV_BITS=false EXO_BATCH_COMPLETION_SIZE=8 EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/192.168.200.1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
+             ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && EXO_KV_BITS=false EXO_BATCH_COMPLETION_SIZE=8 EXO_FAST_SYNCH=off EXO_MLX_WIRED_LIMIT_RATIO=0.87 EXO_DISCOVERY_PEERS=/ip4/$TB_M4_1/tcp/52415/p2p/$M4_1_PEER_ID PYTHONUNBUFFERED=1 uv run python -m exo.main > /tmp/exo.log 2>&1'"
         fi
     done
 
