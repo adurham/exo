@@ -175,7 +175,6 @@ class PipelineLastLayer(CustomMlxLayer):
             # Force intermediate send to avoid deadlock where Rank 1 waits for this
             # while Rank 0 waits for Rank 1's final output.
             mx.eval(output)
-            mx.synchronize() # Stronger sync to ensure RDMA flush
             logger.info(f"Rank {self.group.rank()}: Sent intermediate output")
 
             if cache is not None:
@@ -184,7 +183,6 @@ class PipelineLastLayer(CustomMlxLayer):
                 _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
                 _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
             if self.is_prefill:
-                mx.eval(output)
                 if cache is not None:
                     mx.eval(_cache.keys)  # type: ignore
 

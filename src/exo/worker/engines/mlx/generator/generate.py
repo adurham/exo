@@ -544,7 +544,9 @@ def generate_step(
                 if input_embeddings is not None
                 else input_embeddings
             )
-            mx.clear_cache()
+
+        # Clear cache once after prefill completes, not per-chunk
+        mx.clear_cache()
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
 
