@@ -67,33 +67,39 @@ else
     # Thunderbolt Connectivity Check
     echo "Discovering active Thunderbolt IPs..."
     
-    get_tb_ip_script='
-        networksetup -listallhardwareports | awk "/Hardware Port: Thunderbolt/{getline; print \$2}" | while read device; do
-            if [ -n "$device" ] && ifconfig "$device" 2>/dev/null | grep -q "status: active"; then
-                ip=$(ifconfig "$device" 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk "{print \$2}")
+    get_node_tb_ip() {
+        local node=$1
+        # 1. Ask the node for its Thunderbolt device names (e.g., en1, en2)
+        local devices=$(ssh "$node" "networksetup -listallhardwareports" | awk '/Hardware Port: Thunderbolt/{getline; print $2}')
+        
+        # 2. Iterate through them locally, asking the node about each one individually
+        for dev in $devices; do
+            if ssh "$node" "ifconfig $dev" 2>/dev/null | grep -q "status: active"; then
+                local ip=$(ssh "$node" "ifconfig $dev" | awk '/inet / && !/127\.0\.0\.1/{print $2}')
                 if [ -n "$ip" ]; then
                     echo "$ip"
-                    exit 0
+                    return 0
                 fi
             fi
         done
-    '
+        return 1
+    }
 
-    TB_M4_1=$(ssh macstudio-m4-1 "$get_tb_ip_script")
+    TB_M4_1=$(get_node_tb_ip "macstudio-m4-1")
     if [ -z "$TB_M4_1" ]; then
         echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-1."
         exit 1
     fi
     echo "macstudio-m4-1 Thunderbolt IP: $TB_M4_1"
 
-    TB_M4_2=$(ssh macstudio-m4-2 "$get_tb_ip_script")
+    TB_M4_2=$(get_node_tb_ip "macstudio-m4-2")
     if [ -z "$TB_M4_2" ]; then
         echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-2."
         exit 1
     fi
     echo "macstudio-m4-2 Thunderbolt IP: $TB_M4_2"
 
-    TB_MBP=$(ssh macbook-m4 "$get_tb_ip_script")
+    TB_MBP=$(get_node_tb_ip "macbook-m4")
     if [ -z "$TB_MBP" ]; then
         echo "ERROR: Could not find an active Thunderbolt IP on macbook-m4."
         exit 1
