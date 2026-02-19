@@ -13,9 +13,15 @@ def _get_kv_bits() -> int | None:
 KV_GROUP_SIZE: int | None = 32
 KV_BITS: int | None = _get_kv_bits()
 ATTENTION_KV_BITS: int | None = _get_kv_bits()
+def _get_int_or_none(env_var: str, default: str) -> int | None:
+    val = os.environ.get(env_var, default)
+    if val.lower() in ("none", "null", "false"):
+        return None
+    return int(val)
+
 MAX_TOKENS: int = 32168
-MAX_KV_SIZE: int | None = 3200
-KEEP_KV_SIZE: int | None = 1600
+MAX_KV_SIZE: int | None = _get_int_or_none("EXO_MAX_KV_SIZE", "20000")
+KEEP_KV_SIZE: int | None = _get_int_or_none("EXO_KEEP_KV_SIZE", "10000")
 QUANTIZE_MODEL_MODE: str | None = "affine"
 CACHE_GROUP_SIZE: int = 64
 KV_CACHE_BITS: int | None = _get_kv_bits()
