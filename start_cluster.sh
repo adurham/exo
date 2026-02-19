@@ -218,14 +218,9 @@ else
         echo "Starting Exo on $NODE..."
         
         # Build the dynamic environment string based on the current exports
-        # Studios (128GB) get larger KV cache, MBP (36GB) gets smaller
-        if [[ "$NODE" == *"macbook"* ]]; then
-            KV_SIZE="${EXO_MAX_KV_SIZE:-15000}"
-            KV_KEEP="${EXO_KEEP_KV_SIZE:-7500}"
-        else
-            KV_SIZE="${EXO_MAX_KV_SIZE:-20000}"
-            KV_KEEP="${EXO_KEEP_KV_SIZE:-10000}"
-        fi
+        # KV cache size (same for all nodes — effective window is limited by smallest)
+        KV_SIZE="${EXO_MAX_KV_SIZE:-20000}"
+        KV_KEEP="${EXO_KEEP_KV_SIZE:-10000}"
         EXO_ENV="EXO_KV_BITS=${EXO_KV_BITS:-false} EXO_MAX_KV_SIZE=$KV_SIZE EXO_KEEP_KV_SIZE=$KV_KEEP EXO_BATCH_COMPLETION_SIZE=${EXO_BATCH_COMPLETION_SIZE:-8} EXO_MLX_WIRED_LIMIT_RATIO=${EXO_MLX_WIRED_LIMIT_RATIO:-0.87} PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}"
         if [ -n "$EXO_FAST_SYNCH" ]; then
             EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
