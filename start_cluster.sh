@@ -80,30 +80,34 @@ else
                     ip=$(ifconfig "$device" 2>/dev/null | grep "inet " | grep -v 127.0.0.1 | awk "{print \$2}")
                     if [ -n "$ip" ]; then
                         echo "$ip"
-                        exit 0
                     fi
                 fi
             fi
         done <<< "$(networksetup -listallhardwareports)"
     '
 
-    TB_M4_1=$(ssh macstudio-m4-1 "$get_tb_ip_script")
+    TB_M4_1_ALL=$(ssh macstudio-m4-1 "$get_tb_ip_script")
+    TB_M4_1=$(echo "$TB_M4_1_ALL" | head -n 1)
     if [ -z "$TB_M4_1" ]; then
         echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-1."
         exit 1
     fi
     echo "macstudio-m4-1 Thunderbolt IP: $TB_M4_1"
 
-    TB_M4_2=$(ssh macstudio-m4-2 "$get_tb_ip_script")
+    # Extract subnet prefix dynamically (e.g. 192.168.202)
+    # to ensure all nodes pick an interface on the same broadcast domain
+    TB_SUBNET=$(echo "$TB_M4_1" | awk -F. '{print $1"."$2"."$3}')
+
+    TB_M4_2=$(ssh macstudio-m4-2 "$get_tb_ip_script" | grep "^$TB_SUBNET\." | head -n 1)
     if [ -z "$TB_M4_2" ]; then
-        echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-2."
+        echo "ERROR: Could not find an active Thunderbolt IP on macstudio-m4-2 in subnet $TB_SUBNET."
         exit 1
     fi
     echo "macstudio-m4-2 Thunderbolt IP: $TB_M4_2"
 
-    TB_MBP=$(ssh macbook-m4 "$get_tb_ip_script")
+    TB_MBP=$(ssh macbook-m4 "$get_tb_ip_script" | grep "^$TB_SUBNET\." | head -n 1)
     if [ -z "$TB_MBP" ]; then
-        echo "ERROR: Could not find an active Thunderbolt IP on macbook-m4."
+        echo "ERROR: Could not find an active Thunderbolt IP on macbook-m4 in subnet $TB_SUBNET."
         exit 1
     fi
     echo "macbook-m4 Thunderbolt IP: $TB_MBP"
