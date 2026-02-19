@@ -19,7 +19,7 @@ class ConnectionUpdate:
         Whether this is a connection or disconnection event
         """
     @property
-    def peer_id(self) -> PeerId:
+    def peer_id(self) -> builtins.str:
         r"""
         Identity of the peer that we have connected to or disconnected from.
         """
@@ -40,57 +40,23 @@ class Keypair:
     Identity keypair of a node.
     """
     @staticmethod
-    def generate_ed25519() -> Keypair:
+    def generate() -> Keypair:
         r"""
         Generate a new Ed25519 keypair.
         """
     @staticmethod
-    def generate_ecdsa() -> Keypair:
+    def from_bytes(bytes: bytes) -> Keypair:
         r"""
-        Generate a new ECDSA keypair.
+        Construct an Ed25519 keypair from secret key bytes
         """
-    @staticmethod
-    def generate_secp256k1() -> Keypair:
+    def to_bytes(self) -> bytes:
         r"""
-        Generate a new Secp256k1 keypair.
+        Get the secret key bytes underlying the keypair
         """
-    @staticmethod
-    def from_protobuf_encoding(bytes: bytes) -> Keypair:
+    def to_node_id(self) -> builtins.str:
         r"""
-        Decode a private key from a protobuf structure and parse it as a `Keypair`.
+        Convert the `Keypair` into the corresponding `PeerId` string, which we use as our `NodeId`.
         """
-    @staticmethod
-    def rsa_from_pkcs8(bytes: bytes) -> Keypair:
-        r"""
-        Decode an keypair from a DER-encoded secret key in PKCS#8 `PrivateKeyInfo`
-        format (i.e. unencrypted) as defined in [RFC5208].
-        
-        [RFC5208]: https://tools.ietf.org/html/rfc5208#section-5
-        """
-    @staticmethod
-    def secp256k1_from_der(bytes: bytes) -> Keypair:
-        r"""
-        Decode a keypair from a DER-encoded Secp256k1 secret key in an `ECPrivateKey`
-        structure as defined in [RFC5915].
-        
-        [RFC5915]: https://tools.ietf.org/html/rfc5915
-        """
-    @staticmethod
-    def ed25519_from_bytes(bytes: bytes) -> Keypair: ...
-    def to_protobuf_encoding(self) -> bytes:
-        r"""
-        Encode a private key as protobuf structure.
-        """
-    def to_peer_id(self) -> PeerId:
-        r"""
-        Convert the `Keypair` into the corresponding `PeerId`.
-        """
-
-@typing.final
-class MessageTooLargeError(builtins.Exception):
-    def __new__(cls, *args: typing.Any) -> MessageTooLargeError: ...
-    def __repr__(self) -> builtins.str: ...
-    def __str__(self) -> builtins.str: ...
 
 @typing.final
 class NetworkingHandle:
@@ -149,42 +115,7 @@ class NoPeersSubscribedToTopicError(builtins.Exception):
     def __str__(self) -> builtins.str: ...
 
 @typing.final
-class PeerId:
-    r"""
-    Identifier of a peer of the network.
-    
-    The data is a `CIDv0` compatible multihash of the protobuf encoded public key of the peer
-    as specified in [specs/peer-ids](https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md).
-    """
-    @staticmethod
-    def random() -> PeerId:
-        r"""
-        Generates a random peer ID from a cryptographically secure PRNG.
-        
-        This is useful for randomly walking on a DHT, or for testing purposes.
-        """
-    @staticmethod
-    def from_bytes(bytes: bytes) -> PeerId:
-        r"""
-        Parses a `PeerId` from bytes.
-        """
-    @staticmethod
-    def from_base58(s: builtins.str) -> PeerId:
-        r"""
-        Parses a `PeerId` from a base-58 encoded string.
-        """
-    def to_bytes(self) -> bytes:
-        r"""
-        Returns a raw bytes representation of this `PeerId`.
-        """
-    def to_base58(self) -> builtins.str:
-        r"""
-        Returns a base-58 encoded string of this `PeerId`.
-        """
-    def __repr__(self) -> builtins.str: ...
-    def __str__(self) -> builtins.str: ...
 
-@typing.final
 class ConnectionUpdateType(enum.Enum):
     r"""
     Connection or disconnection event discriminant type.
