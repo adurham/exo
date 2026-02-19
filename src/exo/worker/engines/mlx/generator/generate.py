@@ -55,7 +55,7 @@ _MIN_PREFIX_HIT_TO_UPDATE = 1000
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
-_DEFAULT_PREFILL_STEP_SIZE = 4096
+_DEFAULT_PREFILL_STEP_SIZE = 8192
 
 
 from mlx.utils import tree_reduce
@@ -527,7 +527,16 @@ def generate_step(
         _prefill_chunk_idx = 0
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
-            n_to_process = min(prefill_step_size, remaining)
+            # Dynamic chunk sizing: use full step size early when KV cache is small
+            # and attention is cheap, shrink later as O(n²) cost grows
+            kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else 0
+            if kv_len < prefill_step_size:
+                effective_step = prefill_step_size
+            elif kv_len < prefill_step_size * 2:
+                effective_step = prefill_step_size // 2
+            else:
+                effective_step = prefill_step_size // 4
+            n_to_process = min(effective_step, remaining)
 
             _t0 = _time.perf_counter()
             _model_call(
