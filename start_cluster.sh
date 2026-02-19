@@ -111,6 +111,9 @@ else
         
         echo "Running build on $NODE..."
         ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to build on $NODE"; exit 1; }
+
+        echo "Building dashboard on $NODE..."
+        ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
     done
 
     # 2. Inter-Node Git Sync Check (M4-1 vs M4-2)
