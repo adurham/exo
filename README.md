@@ -73,11 +73,13 @@ There are two ways to run exo:
 ### Run from Source (macOS)
 
 **Prerequisites:**
+
 - [brew](https://github.com/Homebrew/brew) (for simple package management on macOS)
   
   ```bash
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   ```
+
 - [uv](https://github.com/astral-sh/uv) (for Python dependency management)
 - [macmon](https://github.com/vladkens/macmon) (for hardware monitoring on Apple Silicon)
 - [node](https://github.com/nodejs/node) (for building the dashboard)
@@ -85,6 +87,7 @@ There are two ways to run exo:
   ```bash
   brew install uv macmon node
   ```
+
 - [rust](https://github.com/rust-lang/rustup) (to build Rust bindings, nightly for now)
 
   ```bash
@@ -105,11 +108,9 @@ cd exo/dashboard && npm install && npm run build && cd ..
 uv run exo
 ```
 
-This starts the exo dashboard and API at http://localhost:52415/
-
+This starts the exo dashboard and API at <http://localhost:52415/>
 
 *Please view the section on RDMA to enable this feature on MacOS >=26.2!*
-
 
 ### Run from Source (Linux)
 
@@ -122,6 +123,7 @@ This starts the exo dashboard and API at http://localhost:52415/
 **Installation methods:**
 
 **Option 1: Using system package manager (Ubuntu/Debian example):**
+
 ```bash
 # Install Node.js and npm
 sudo apt update
@@ -136,6 +138,7 @@ rustup toolchain install nightly
 ```
 
 **Option 2: Using Homebrew on Linux (if preferred):**
+
 ```bash
 # Install Homebrew on Linux
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -163,7 +166,7 @@ cd exo/dashboard && npm install && npm run build && cd ..
 uv run exo
 ```
 
-This starts the exo dashboard and API at http://localhost:52415/
+This starts the exo dashboard and API at <http://localhost:52415/>
 
 **Important note for Linux users:** Currently, exo runs on CPU on Linux. GPU support for Linux platforms is under development. If you'd like to see support for your specific Linux hardware, please [search for existing feature requests](https://github.com/exo-explore/exo/issues) or create a new one.
 
@@ -221,6 +224,7 @@ sudo ./app/EXO/uninstall-exo.sh
 ```
 
 This removes:
+
 - Network setup LaunchDaemon
 - Network configuration script
 - Log files
@@ -243,9 +247,11 @@ To enable RDMA on macOS, follow these steps:
 3. Select "Options" to enter Recovery mode.
 4. When the Recovery UI appears, open the Terminal from the Utilities menu.
 5. In the Terminal, type:
+
    ```
    rdma_ctl enable
    ```
+
    and press Enter.
 6. Reboot your Mac.
 
@@ -314,7 +320,6 @@ curl -X POST http://localhost:52415/instance \
   }'
 ```
 
-
 Sample response:
 
 ```json
@@ -369,6 +374,7 @@ For further details, see:
 The `exo-bench` tool measures model prefill and token generation speed across different placement configurations. This helps you optimize model performance and validate improvements.
 
 **Prerequisites:**
+
 - Nodes should be running with `uv run exo` before benchmarking
 - The tool uses the `/bench/chat/completions` endpoint
 
@@ -419,3 +425,5 @@ On macOS, exo uses the GPU. On Linux, exo currently runs on CPU. We are working 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to exo.
+
+A guide for local development and cluster operations can be found in [docs/local_development.md](docs/local_development.md).

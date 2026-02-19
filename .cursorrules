@@ -1,4 +1,4 @@
-# follow **every** rule exactly; report any violation instead of silently fixing it.
+# follow **every** rule exactly; report any violation instead of silently fixing it
 
 You must prioritize straightforward code semantics, well-named types, clear function signatures, and robust, carefully-chosen abstractions. Think about how your decisions might impact these aspects of code quality before proposing any changes.
 
@@ -56,6 +56,14 @@ You can use the advanced features of `typing`. You have access to all of the new
 
 If you spot a rule violation within code that you've not been asked to work on directly, inform the user rather than patching it ad-hoc.
 
+---
+
+## 10. Local Development & Operational Safety
+
+* **Context**: You are operating on the **Controller** (MacBook), NOT a cluster node.
+* **Prohibition**: **NEVER** run `start_cluster.sh`. This script is for the physical cluster nodes only.
+* **Cluster Management**: The cluster nodes (`macstudio-m4-1`, `macstudio-m4-2`) are defined in `start_cluster.sh` but managed remotely.
+* **Troubleshooting**: When diagnosing cluster issues, **always** check the remote node logs (e.g., via `ssh macstudio-m4-1 "tail -f /tmp/exo.log"`). Do not assume local logs reflect cluster state.
 
 ---
 

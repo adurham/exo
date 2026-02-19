@@ -6,6 +6,15 @@ This file provides guidance to AI coding agents when working with code in this r
 
 exo is a distributed AI inference system that connects multiple devices into a cluster. It enables running large language models across multiple machines using MLX as the inference backend and libp2p for peer-to-peer networking.
 
+## Local Development Context
+
+**CRITICAL**: You are running on a MacBook (Controller), **NOT** on the cluster nodes (`macstudio-m4-1`, `macstudio-m4-2`).
+
+* **DO NOT** run `start_cluster.sh` locally.
+* **DO NOT** attempt to configure Thunderbolt networking on this machine.
+* **ALWAYS** check remote logs (`ssh macstudio-m4-1 ...`) when diagnosing cluster issues.
+* **ALWAYS** refer to `docs/local_development.md` for operational details.
+
 ## Build & Run Commands
 
 ```bash
@@ -59,6 +68,7 @@ uv run pytest
 ```
 
 Run all checks in sequence:
+
 ```bash
 uv run basedpyright && uv run ruff check && nix fmt && uv run pytest
 ```
@@ -68,53 +78,59 @@ If `nix fmt` changes any files, stage them before committing. The CI runs `nix f
 ## Architecture
 
 ### Node Composition
+
 A single exo `Node` (src/exo/main.py) runs multiple components:
-- **Router**: libp2p-based pub/sub messaging via Rust bindings (exo_pyo3_bindings)
-- **Worker**: Handles inference tasks, downloads models, manages runner processes
-- **Master**: Coordinates cluster state, places model instances across nodes
-- **Election**: Bully algorithm for master election
-- **API**: FastAPI server for OpenAI-compatible chat completions
+* **Router**: libp2p-based pub/sub messaging via Rust bindings (exo_pyo3_bindings)
+* **Worker**: Handles inference tasks, downloads models, manages runner processes
+* **Master**: Coordinates cluster state, places model instances across nodes
+* **Election**: Bully algorithm for master election
+* **API**: FastAPI server for OpenAI-compatible chat completions
 
 ### Message Flow
+
 Components communicate via typed pub/sub topics (src/exo/routing/topics.py):
-- `GLOBAL_EVENTS`: Master broadcasts indexed events to all workers
-- `LOCAL_EVENTS`: Workers send events to master for indexing
-- `COMMANDS`: Workers/API send commands to master
-- `ELECTION_MESSAGES`: Election protocol messages
-- `CONNECTION_MESSAGES`: libp2p connection updates
+* `GLOBAL_EVENTS`: Master broadcasts indexed events to all workers
+* `LOCAL_EVENTS`: Workers send events to master for indexing
+* `COMMANDS`: Workers/API send commands to master
+* `ELECTION_MESSAGES`: Election protocol messages
+* `CONNECTION_MESSAGES`: libp2p connection updates
 
 ### Event Sourcing
+
 The system uses event sourcing for state management:
-- `State` (src/exo/shared/types/state.py): Immutable state object
-- `apply()` (src/exo/shared/apply.py): Pure function that applies events to state
-- Master indexes events and broadcasts; workers apply indexed events
+* `State` (src/exo/shared/types/state.py): Immutable state object
+* `apply()` (src/exo/shared/apply.py): Pure function that applies events to state
+* Master indexes events and broadcasts; workers apply indexed events
 
 ### Key Type Hierarchy
+
 - `src/exo/shared/types/`: Pydantic models for all shared types
-  - `events.py`: Event types (discriminated union)
-  - `commands.py`: Command types
-  - `tasks.py`: Task types for worker execution
-  - `state.py`: Cluster state model
+  * `events.py`: Event types (discriminated union)
+  * `commands.py`: Command types
+  * `tasks.py`: Task types for worker execution
+  * `state.py`: Cluster state model
 
 ### Rust Components
+
 Rust code in `rust/` provides:
-- `networking`: libp2p networking (gossipsub, peer discovery)
-- `exo_pyo3_bindings`: PyO3 bindings exposing Rust to Python
-- `system_custodian`: System-level operations
+* `networking`: libp2p networking (gossipsub, peer discovery)
+* `exo_pyo3_bindings`: PyO3 bindings exposing Rust to Python
+* `system_custodian`: System-level operations
 
 ### Dashboard
+
 Svelte 5 + TypeScript frontend in `dashboard/`. Build output goes to `dashboard/build/` and is served by the API.
 
 ## Code Style Requirements
 
 From .cursorrules:
-- Strict, exhaustive typing - never bypass the type-checker
-- Use `Literal[...]` for enum-like sets, `typing.NewType` for primitives
-- Pydantic models with `frozen=True` and `strict=True`
-- Pure functions with injectable effect handlers for side-effects
-- Descriptive names - no abbreviations or 3-letter acronyms
-- Catch exceptions only where you can handle them meaningfully
-- Use `@final` and immutability wherever applicable
+* Strict, exhaustive typing - never bypass the type-checker
+* Use `Literal[...]` for enum-like sets, `typing.NewType` for primitives
+* Pydantic models with `frozen=True` and `strict=True`
+* Pure functions with injectable effect handlers for side-effects
+* Descriptive names - no abbreviations or 3-letter acronyms
+* Catch exceptions only where you can handle them meaningfully
+* Use `@final` and immutability wherever applicable
 
 ## Testing
 
@@ -123,6 +139,7 @@ Tests use pytest-asyncio with `asyncio_mode = "auto"`. Tests are in `tests/` sub
 ## Dashboard UI Testing & Screenshots
 
 ### Building and Running the Dashboard
+
 ```bash
 # Build the dashboard (must be done before running exo)
 cd dashboard && npm install && npm run build && cd ..
@@ -133,15 +150,18 @@ sleep 8  # Wait for server to start
 ```
 
 ### Taking Headless Screenshots with Playwright
+
 Use Playwright with headless Chromium for programmatic screenshots — no manual browser interaction needed.
 
 **Setup (one-time):**
+
 ```bash
 npx --yes playwright install chromium
 cd /tmp && npm init -y && npm install playwright
 ```
 
 **Taking screenshots:**
+
 ```javascript
 // Run from /tmp where playwright is installed: cd /tmp && node -e "..."
 const { chromium } = require('playwright');
@@ -171,9 +191,11 @@ const { chromium } = require('playwright');
 ```
 
 ### Uploading Images to GitHub PRs
+
 GitHub's API doesn't support direct image upload for PR comments. Workaround:
 
 1. **Commit images to the branch** (temporarily):
+
    ```bash
    cp /tmp/screenshot.png .
    git add screenshot.png
@@ -183,14 +205,17 @@ GitHub's API doesn't support direct image upload for PR comments. Workaround:
    ```
 
 2. **Post PR comment** referencing the raw image URL (uses permanent commit SHA so images survive deletion):
+
    ```bash
    gh pr comment <PR_NUMBER> --body "![Screenshot](https://raw.githubusercontent.com/exo-explore/exo/${COMMIT_SHA}/screenshot.png)"
    ```
 
 3. **Remove the images** from the branch:
+
    ```bash
    git rm screenshot.png
    git commit -m "chore: remove temporary screenshot files"
    git push origin <branch>
    ```
+
    The images still render in the PR comment because they reference the permanent commit SHA.
