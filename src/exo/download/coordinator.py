@@ -115,12 +115,16 @@ class DownloadCoordinator:
         )
         if not self.offline:
             self._test_internet_connection()
-        async with self._tg as tg:
-            tg.start_soon(self._command_processor)
-            tg.start_soon(self._forward_events)
-            tg.start_soon(self._emit_existing_download_progress)
-            if not self.offline:
-                tg.start_soon(self._check_internet_connection)
+        try:
+            async with self._tg as tg:
+                tg.start_soon(self._command_processor)
+                tg.start_soon(self._forward_events)
+                tg.start_soon(self._emit_existing_download_progress)
+                if not self.offline:
+                    tg.start_soon(self._check_internet_connection)
+        finally:
+            for task in self.active_downloads.values():
+                task.cancel()
 
     def _test_internet_connection(self) -> None:
         # Try multiple endpoints since some ISPs/networks block specific IPs
