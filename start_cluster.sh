@@ -211,7 +211,7 @@ else
         # Since the MacBook is only a pipeline tail (no split() needed), the PyPI wheel works fine.
         if [[ "$NODE" == *"macbook"* ]]; then
             echo "Overriding MLX on $NODE with PyPI wheel (local build breaks RDMA on MacBook)..."
-            ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install --reinstall mlx>=0.30.6'" || { echo "Failed to install PyPI MLX on $NODE"; exit 1; }
+            ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install --reinstall \"mlx>=0.30.6\"'" || { echo "Failed to install PyPI MLX on $NODE"; exit 1; }
         fi
 
         echo "Building dashboard on $NODE..."
