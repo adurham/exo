@@ -518,18 +518,24 @@ def hybrid_auto_parallel(
     is_tp_node = shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
     import sys
-    print(f"[DEBUG] hybrid_auto_parallel REACHED: tp_color={tp_color}, is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}", file=sys.stderr, flush=True)
-    logger.info(f"About to call group.split(color={tp_color}), is_tp_node={is_tp_node}")
+    print(f"[DEBUG] hybrid_auto_parallel: tp_color={tp_color}, is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}", file=sys.stderr, flush=True)
+
     try:
-        print(f"[DEBUG] Calling group.split({tp_color}) NOW", file=sys.stderr, flush=True)
         tp_group = group.split(tp_color)
         print(f"[DEBUG] group.split({tp_color}) SUCCEEDED", file=sys.stderr, flush=True)
     except RuntimeError as e:
         print(f"[DEBUG] group.split({tp_color}) FAILED: {e}", file=sys.stderr, flush=True)
-        logger.error(
-            f"group.split(color={tp_color}) FAILED: {e}"
-        )
-        raise
+        if not is_tp_node:
+            # PP-only node: split() failed but we don't need the sub-group anyway.
+            # The TP nodes already completed their split successfully.
+            # Use the global group as a stand-in (it won't be used for TP ops).
+            logger.warning(
+                f"group.split(color={tp_color}) failed on PP-only node: {e}. "
+                f"Using global group as singleton stand-in."
+            )
+            tp_group = group
+        else:
+            raise
 
     logger.info(
         f"Hybrid parallel: rank={group.rank()}, "
