@@ -177,6 +177,14 @@ class PipelineLastLayer(CustomMlxLayer):
             mx.eval(output)
             logger.info(f"Rank {self.group.rank()}: Sent intermediate output")
 
+            # After send completes (unblocking downstream), eval ALL cache state
+            # immediately. This overlaps cache materialization with downstream
+            # pipeline compute. Without this, cache eval is deferred to
+            # generate.py's mx.eval([c.state]) which runs AFTER the pipeline
+            # finishes — wasting ~20s on the middle node.
+            if self.is_prefill and hasattr(self, '_prompt_cache') and self._prompt_cache is not None:
+                mx.eval([c.state for c in self._prompt_cache])
+
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
                 # doesn't have .keys directly; access via first sub-cache.
@@ -203,6 +211,13 @@ def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
             layer.is_prefill = is_prefill
+
+
+def set_pipeline_cache(model: nn.Module, prompt_cache: list) -> None:  # type: ignore
+    """Pass cache reference to PipelineLastLayer for early eval after send."""
+    for layer in model.layers:  # type: ignore
+        if isinstance(layer, PipelineLastLayer):
+            layer._prompt_cache = prompt_cache
 
 
 def _inner_model(model: nn.Module) -> nn.Module:

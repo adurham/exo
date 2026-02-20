@@ -27,7 +27,7 @@ from exo.shared.types.worker.runner_response import (
     GenerationResponse,
 )
 from exo.worker.engines.mlx import Model
-from exo.worker.engines.mlx.auto_parallel import set_pipeline_prefill
+from exo.worker.engines.mlx.auto_parallel import set_pipeline_prefill, set_pipeline_cache
 from exo.worker.engines.mlx.cache import (
     CacheSnapshot,
     KVPrefixCache,
@@ -242,6 +242,7 @@ def prefill(
             on_prefill_progress(processed, total)
 
     set_pipeline_prefill(model, is_prefill=True)
+    set_pipeline_cache(model, cache)
 
     mx_barrier(group)
     logger.info("Starting prefill")
