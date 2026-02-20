@@ -177,21 +177,6 @@ class PipelineLastLayer(CustomMlxLayer):
             mx.eval(output)
             logger.info(f"Rank {self.group.rank()}: Sent intermediate output")
 
-            # After send completes (unblocking downstream), eval ALL cache state
-            # immediately. This overlaps cache materialization with downstream
-            # pipeline compute. Without this, cache eval is deferred to
-            # generate.py's mx.eval([c.state]) which runs AFTER the pipeline
-            # finishes — wasting ~20s on the middle node.
-            _has_cache = hasattr(self, '_prompt_cache')
-            _cache_val = getattr(self, '_prompt_cache', None)
-            logger.info(f"Rank {self.group.rank()}: is_prefill={self.is_prefill}, has_prompt_cache={_has_cache}, cache_is_none={_cache_val is None}, cache_len={len(_cache_val) if _cache_val is not None else 'N/A'}")
-            if self.is_prefill and _cache_val is not None:
-                import time as _time
-                _pc_t0 = _time.perf_counter()
-                mx.eval([c.state for c in _cache_val])
-                _pc_t1 = _time.perf_counter()
-                logger.info(f"Rank {self.group.rank()}: Early cache eval took {(_pc_t1-_pc_t0)*1000:.0f}ms for {len(_cache_val)} layers")
-
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
                 # doesn't have .keys directly; access via first sub-cache.
@@ -200,6 +185,19 @@ class PipelineLastLayer(CustomMlxLayer):
             if self.is_prefill:
                 if cache is not None:
                     mx.eval(_cache.keys)  # type: ignore
+
+        # After model forward pass completes, eval ALL cache state for all ranks
+        # during prefill. On intermediate ranks this overlaps with downstream
+        # pipeline compute. On the last rank this prevents the deferred eval
+        # from blocking sequentially in generate.py (~21.8s for 28 layers).
+        if self.is_prefill:
+            _cache_val = getattr(self, '_prompt_cache', None)
+            if _cache_val is not None:
+                import time as _time
+                _pc_t0 = _time.perf_counter()
+                mx.eval([c.state for c in _cache_val])
+                _pc_t1 = _time.perf_counter()
+                logger.info(f"Rank {self.group.rank()}: Early cache eval took {(_pc_t1-_pc_t0)*1000:.0f}ms for {len(_cache_val)} layers")
 
         if not self.is_prefill:
             # Revert to all_gather to avoid GPU time out on huge models
