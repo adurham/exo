@@ -121,6 +121,36 @@ else
         exit 1
     fi
 
+    # Validate each node has 2 active Thunderbolt interfaces (catches loose cables)
+    echo "Verifying direct Thunderbolt links..."
+    for node in macstudio-m4-1 macstudio-m4-2 macbook-m4; do
+        active_count=$(echo "$(get_node_tb_ips "$node")" | grep -c '.')
+        if [ "$active_count" -lt 2 ]; then
+            echo "CRITICAL ERROR: $node has only $active_count active Thunderbolt interface(s) — expected 2."
+            echo "Check physical Thunderbolt cable connections!"
+            exit 1
+        fi
+        echo "  $node: $active_count active TB interfaces ✓"
+    done
+
+    # Direct-link pings BEFORE cross-subnet routes are added.
+    # Without routes, pings can only succeed over direct physical links — no relay possible.
+    echo "Testing direct-link connectivity (no routing, no relay)..."
+
+    # M4-1 ↔ M4-2 (direct link)
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $M4_2_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot directly reach M4-2 ($M4_2_TO_M4_1). Check cable!"; exit 1; fi
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $M4_1_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot directly reach M4-1 ($M4_1_TO_M4_2). Check cable!"; exit 1; fi
+
+    # M4-1 ↔ MBP (direct link)
+    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $MBP_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot directly reach MBP ($MBP_TO_M4_1). Check cable!"; exit 1; fi
+    if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_1_TO_MBP" &> /dev/null; then echo "ERROR: macbook-m4 cannot directly reach M4-1 ($M4_1_TO_MBP). Check cable!"; exit 1; fi
+
+    # M4-2 ↔ MBP (direct link)
+    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $MBP_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot directly reach MBP ($MBP_TO_M4_2). Check cable!"; exit 1; fi
+    if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_2_TO_MBP" &> /dev/null; then echo "ERROR: macbook-m4 cannot directly reach M4-2 ($M4_2_TO_MBP). Check cable!"; exit 1; fi
+
+    echo "All 6 direct Thunderbolt links verified ✓"
+
     # Enable IP forwarding and add cross-subnet routes
     # Each node has 2 direct links, but needs a route for the 3rd subnet it's not on.
     echo "Enabling IP forwarding and configuring cross-subnet routes..."
@@ -141,23 +171,6 @@ else
     ssh macbook-m4 "sudo route delete -net $SUBNET_M4_1_M4_2 2>/dev/null; sudo route add -net $SUBNET_M4_1_M4_2 $M4_1_TO_MBP" &> /dev/null
 
     echo "Cross-subnet routes configured."
-
-    # Check Ping
-    echo "Testing full-mesh connectivity..."
-    
-    # M4-1 to others
-    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $M4_2_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping M4-2 ($M4_2_TO_M4_1)."; exit 1; fi
-    if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $MBP_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot ping MBP ($MBP_TO_M4_1)."; exit 1; fi
-    
-    # M4-2 to others
-    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $M4_1_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping M4-1 ($M4_1_TO_M4_2)."; exit 1; fi
-    if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $MBP_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot ping MBP ($MBP_TO_M4_2)."; exit 1; fi
-    
-    # MBP to others
-    if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_1_TO_MBP" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping M4-1 ($M4_1_TO_MBP)."; exit 1; fi
-    if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_2_TO_MBP" &> /dev/null; then echo "ERROR: macbook-m4 cannot ping M4-2 ($M4_2_TO_MBP)."; exit 1; fi
-
-    echo "Thunderbolt Links Verified (Full Mesh)!"
 
     # 1. Cleanup, Update, and Build
     for NODE in "${NODES[@]}"; do
