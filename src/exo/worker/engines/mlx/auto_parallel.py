@@ -140,12 +140,10 @@ class PipelineFirstLayer(CustomMlxLayer):
         if self.r != 0:
             print(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            if self.is_prefill:
-                # We want to avoid GPU timeout errors by evalling the distributed operation
-                # so that it stays on CPU, which does not have a timeout.
-                print(f"[PIPELINE-RECV] rank={self.r} calling mx.eval on recv", file=sys.stderr, flush=True)
-                mx.eval(x)
-                print(f"[PIPELINE-RECV] rank={self.r} mx.eval completed", file=sys.stderr, flush=True)
+            # Always eval the recv to ensure RDMA operations stay synchronized.
+            # Without this, lazy evaluation can desync between nodes during decode.
+            mx.eval(x)
+            print(f"[PIPELINE-RECV] rank={self.r} mx.eval completed", file=sys.stderr, flush=True)
         return self.original_layer(x, *args, **kwargs)
 
 
