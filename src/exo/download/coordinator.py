@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Iterator
+from random import random
 
 import anyio
 from anyio import current_time
@@ -21,10 +21,13 @@ from exo.shared.types.commands import (
     ForwarderDownloadCommand,
     StartDownload,
 )
-from exo.shared.types.common import NodeId, SessionId
+from exo.shared.types.common import NodeId, SessionId, SystemId
 from exo.shared.types.events import (
     Event,
-    ForwarderEvent,
+    EventId,
+    # TODO(evan): just for acks, should delete this ASAP
+    GlobalForwarderEvent,
+    LocalForwarderEvent,
     NodeDownloadProgress,
 )
 from exo.shared.types.worker.downloads import (
@@ -45,9 +48,15 @@ class DownloadCoordinator:
     session_id: SessionId
     shard_downloader: ShardDownloader
     download_command_receiver: Receiver[ForwarderDownloadCommand]
-    local_event_sender: Sender[ForwarderEvent]
-    event_index_counter: Iterator[int]
+    local_event_sender: Sender[LocalForwarderEvent]
+
+    # ack stuff
+    _global_event_receiver: Receiver[GlobalForwarderEvent]
+    _out_for_delivery: dict[EventId, LocalForwarderEvent] = field(default_factory=dict)
+
     offline: bool = False
+
+    _system_id: SystemId = field(default_factory=SystemId)
 
     # Local state
     download_status: dict[ModelId, DownloadProgress] = field(default_factory=dict)
@@ -116,13 +125,28 @@ class DownloadCoordinator:
                 tg.start_soon(self._command_processor)
                 tg.start_soon(self._forward_events)
                 tg.start_soon(self._emit_existing_download_progress)
-
+                tg.start_soon(self._resend_out_for_delivery)
+                tg.start_soon(self._clear_ofd)
         finally:
             for task in self.active_downloads.values():
                 task.cancel()
 
     def shutdown(self) -> None:
         self._tg.cancel_tasks()
+
+    # directly copied from worker
+    async def _resend_out_for_delivery(self) -> None:
+        # This can also be massively tightened, we should check events are at least a certain age before resending.
+        # Exponential backoff would also certainly help here.
+        while True:
+            await anyio.sleep(1 + random())
+            for event in self._out_for_delivery.copy().values():
+                await self.local_event_sender.send(event)
+
+    async def _clear_ofd(self) -> None:
+        with self._global_event_receiver as events:
+            async for event in events:
+                self._out_for_delivery.pop(event.event.event_id, None)
 
     async def _command_processor(self) -> None:
         with self.download_command_receiver as commands:
@@ -167,7 +191,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=shard,
                 node_id=self.node_id,
-                total=shard.model_card.storage_size,
+                total_bytes=Memory(in_bytes=shard.model_card.storage_size),
                 model_directory=str(found_path),
                 read_only=True,
             )
@@ -304,19 +328,21 @@ class DownloadCoordinator:
             del self.download_status[model_id]
 
     async def _forward_events(self) -> None:
+        idx = 0
         with self.event_receiver as events:
             async for event in events:
-                idx = next(self.event_index_counter)
-                fe = ForwarderEvent(
+                fe = LocalForwarderEvent(
                     origin_idx=idx,
-                    origin=self.node_id,
+                    origin=self._system_id,
                     session=self.session_id,
                     event=event,
                 )
+                idx += 1
                 logger.debug(
                     f"DownloadCoordinator published event {idx}: {str(event)[:100]}"
                 )
                 await self.local_event_sender.send(fe)
+                self._out_for_delivery[event.event_id] = fe
 
     async def _emit_existing_download_progress(self) -> None:
         try:
@@ -351,8 +377,8 @@ class DownloadCoordinator:
                                 model_directory=self._model_dir(
                                     progress.shard.model_card.model_id
                                 ),
-                                downloaded=progress.downloaded,
-                                total=progress.total,
+                                downloaded=progress.downloaded_bytes,
+                                total=progress.total_bytes,
                             )
                         else:
                             status = DownloadOngoing(
@@ -396,7 +422,7 @@ class DownloadCoordinator:
                             path_completed: DownloadProgress = DownloadCompleted(
                                 node_id=self.node_id,
                                 shard_metadata=path_shard,
-                                total=card.storage_size,
+                                total_bytes=Memory(in_bytes=card.storage_size),
                                 model_directory=str(found),
                                 read_only=True,
                             )
