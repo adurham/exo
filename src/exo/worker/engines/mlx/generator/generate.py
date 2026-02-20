@@ -518,6 +518,19 @@ def generate_step(
             logger.info("DEBUG: Calling sampler")
             sampled = sampler(logprobs)
             logger.info("DEBUG: Returned from sampler")
+
+            # Hybrid TP+PP token sync: only the PP tail has the correct token
+            # (it processes the final layers). TP nodes produce garbage from
+            # partial layer output. Broadcast correct token via all_sum:
+            # PP tail contributes its token, others contribute zero.
+            _sync_group = getattr(model, '_hybrid_token_sync_group', None)
+            if _sync_group is not None:
+                _is_pp_tail = getattr(model, '_hybrid_is_pp_tail', False)
+                if _is_pp_tail:
+                    sampled = mx.distributed.all_sum(sampled, group=_sync_group)
+                else:
+                    sampled = mx.distributed.all_sum(mx.zeros_like(sampled), group=_sync_group)
+
             return sampled, logprobs.squeeze(0)
 
     with mx.stream(generation_stream):

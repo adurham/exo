@@ -595,6 +595,17 @@ def hybrid_auto_parallel(
         )
 
     _set_layers(model, layers)
+
+    # Store hybrid token sync metadata on the model.
+    # During decode, all nodes sample their own tokens, but only the PP tail
+    # (which processes the final layers) has the correct token. We use all_sum
+    # to broadcast: PP tail contributes its token, others contribute zero.
+    is_pp_tail = (shard_meta.pipeline_recv_from is not None and shard_meta.pipeline_send_to is None)
+    model._hybrid_token_sync_group = group  # type: ignore
+    model._hybrid_is_pp_tail = is_pp_tail  # type: ignore
+    import sys
+    print(f"[HYBRID] Token sync configured: is_pp_tail={is_pp_tail}, group_rank={group.rank()}", file=sys.stderr, flush=True)
+
     return patch_pipeline_model(model, group)
 
 
