@@ -10,6 +10,7 @@ from exo.utils.pydantic_ext import TaggedModel
 class Sharding(str, Enum):
     Tensor = "Tensor"
     Pipeline = "Pipeline"
+    Hybrid = "Hybrid"
 
 
 class BaseShardMetadata(TaggedModel):
@@ -79,6 +80,23 @@ class TensorShardMetadata(BaseShardMetadata):
     pass
 
 
+@final
+class HybridShardMetadata(BaseShardMetadata):
+    """Hybrid tensor + pipeline parallel shard metadata.
+
+    TP nodes share the same [start_layer, end_layer) range and split each
+    layer's compute via all-reduce.  PP nodes own a disjoint layer range and
+    communicate via send/recv.
+    """
+
+    tp_size: int  # number of nodes in the TP sub-group (e.g. 2)
+    tp_rank: int  # rank within TP sub-group (-1 if not in TP group)
+    pp_rank: int  # rank within the 2-stage pipeline
+    pp_size: int  # total pipeline stages (e.g. 2)
+    pipeline_send_to: int | None = None  # global rank to send output to
+    pipeline_recv_from: int | None = None  # global rank to receive input from
+
+
 ShardMetadata: TypeAlias = (
-    PipelineShardMetadata | CfgShardMetadata | TensorShardMetadata
+    PipelineShardMetadata | CfgShardMetadata | TensorShardMetadata | HybridShardMetadata
 )

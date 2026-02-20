@@ -20,7 +20,7 @@
       }>;
     } | null;
     nodes?: Record<string, NodeInfo>;
-    sharding?: "Pipeline" | "Tensor";
+    sharding?: "Pipeline" | "Tensor" | "Hybrid";
     runtime?: "MlxRing" | "MlxIbv" | "MlxJaccl";
     onLaunch?: () => void;
     tags?: string[];
@@ -636,15 +636,7 @@
             {@const allConnections =
               isDebugMode && usedNodes.length > 1
                 ? (() => {
-                    const conns: Array<{
-                      ip: string;
-                      iface: string | null;
-                      from: string;
-                      to: string;
-                      midX: number;
-                      midY: number;
-                      arrow: string;
-                    }> = [];
+                    const conns: Array = [];
                     for (let i = 0; i < usedNodes.length; i++) {
                       for (let j = i + 1; j < usedNodes.length; j++) {
                         const n1 = usedNodes[i];

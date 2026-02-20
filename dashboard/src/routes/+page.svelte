@@ -223,14 +223,14 @@
     if (!model?.tasks) return false;
     return model.tasks.includes("ImageToImage");
   }
-  let selectedSharding = $state<"Pipeline" | "Tensor">("Pipeline");
+  let selectedSharding = $state<"Pipeline" | "Tensor" | "Hybrid">("Pipeline");
   type InstanceMeta = "MlxRing" | "MlxIbv" | "MlxJaccl";
 
   // Launch defaults persistence
   const LAUNCH_DEFAULTS_KEY = "exo-launch-defaults";
   interface LaunchDefaults {
     modelId: string | null;
-    sharding: "Pipeline" | "Tensor";
+    sharding: "Pipeline" | "Tensor" | "Hybrid";
     instanceType: InstanceMeta;
     minNodes: number;
   }
@@ -1309,6 +1309,7 @@
       const [shardTag] = getTagged(firstShardWrapped);
       if (shardTag === "PipelineShardMetadata") sharding = "Pipeline";
       else if (shardTag === "TensorShardMetadata") sharding = "Tensor";
+      else if (shardTag === "HybridShardMetadata") sharding = "Hybrid";
       else if (shardTag === "PrefillDecodeShardMetadata")
         sharding = "Prefill/Decode";
     }
@@ -2800,7 +2801,7 @@
                   Sharding:
                 </div>
                 <div class="flex gap-2">
-                  <button
+                                  <button
                     onclick={() => {
                       selectedSharding = "Pipeline";
                       saveLaunchDefaults();
@@ -2843,6 +2844,29 @@
                       {/if}
                     </span>
                     Tensor
+                  </button>
+                  <button
+                    onclick={() => {
+                      selectedSharding = "Hybrid";
+                      saveLaunchDefaults();
+                    }}
+                    class="flex items-center gap-2 py-2 px-4 text-sm font-mono border rounded transition-all duration-200 cursor-pointer {selectedSharding ===
+                    'Hybrid'
+                      ? 'bg-transparent text-exo-yellow border-exo-yellow'
+                      : 'bg-transparent text-white/70 border-exo-medium-gray/50 hover:border-exo-yellow/50'}"
+                    title="Hybrid TP+PP: tensor parallel on high-memory nodes, pipeline to remaining"
+                  >
+                    <span
+                      class="w-4 h-4 rounded-full border-2 flex items-center justify-center {selectedSharding ===
+                      'Hybrid'
+                        ? 'border-exo-yellow'
+                        : 'border-exo-medium-gray'}"
+                    >
+                      {#if selectedSharding === "Hybrid"}
+                        <span class="w-2 h-2 rounded-full bg-exo-yellow"></span>
+                      {/if}
+                    </span>
+                    Hybrid
                   </button>
                 </div>
               </div>

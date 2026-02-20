@@ -167,7 +167,7 @@ export interface ModelDownloadStatus {
 // Placement preview from the API
 export interface PlacementPreview {
   model_id: string;
-  sharding: "Pipeline" | "Tensor";
+  sharding: "Pipeline" | "Tensor" | "Hybrid";
   instance_meta: "MlxRing" | "MlxIbv" | "MlxJaccl";
   instance: unknown | null;
   memory_delta_by_node: Record<string, number> | null;
@@ -311,14 +311,14 @@ const IMAGE_PARAMS_STORAGE_KEY = "exo-image-generation-params";
 export interface ImageGenerationParams {
   // Basic params
   size:
-    | "auto"
-    | "512x512"
-    | "768x768"
-    | "1024x1024"
-    | "1024x768"
-    | "768x1024"
-    | "1024x1536"
-    | "1536x1024";
+  | "auto"
+  | "512x512"
+  | "768x768"
+  | "1024x1024"
+  | "1024x768"
+  | "768x1024"
+  | "1024x1536"
+  | "1536x1024";
   quality: "low" | "medium" | "high";
   outputFormat: "png" | "jpeg";
   numImages: number;
@@ -921,6 +921,7 @@ class AppStore {
       const [shardTag] = this.getTaggedValue(firstShardWrapped);
       if (shardTag === "PipelineShardMetadata") sharding = "Pipeline";
       else if (shardTag === "TensorShardMetadata") sharding = "Tensor";
+      else if (shardTag === "HybridShardMetadata") sharding = "Hybrid";
       else if (shardTag === "PrefillDecodeShardMetadata")
         sharding = "Prefill/Decode";
     }
@@ -2573,8 +2574,8 @@ class AppStore {
           ...(params.guidance !== null && { guidance: params.guidance }),
           ...(params.negativePrompt !== null &&
             params.negativePrompt.trim() !== "" && {
-              negative_prompt: params.negativePrompt,
-            }),
+            negative_prompt: params.negativePrompt,
+          }),
           ...(params.numSyncSteps !== null && {
             num_sync_steps: params.numSyncSteps,
           }),
@@ -2846,8 +2847,8 @@ class AppStore {
             ...(params.guidance !== null && { guidance: params.guidance }),
             ...(params.negativePrompt !== null &&
               params.negativePrompt.trim() !== "" && {
-                negative_prompt: params.negativePrompt,
-              }),
+              negative_prompt: params.negativePrompt,
+            }),
             ...(params.numSyncSteps !== null && {
               num_sync_steps: params.numSyncSteps,
             }),

@@ -494,6 +494,114 @@ def tensor_auto_parallel(
     return patch_tensor_model(model)
 
 
+def hybrid_auto_parallel(
+    model: nn.Module,
+    group: mx.distributed.Group,
+    shard_meta: "HybridShardMetadata",
+    timeout_seconds: float = 60.0,
+    on_timeout: TimeoutCallback | None = None,
+) -> nn.Module:
+    """Apply hybrid tensor + pipeline parallelism.
+
+    TP nodes: apply tensor sharding (all-reduce per layer) across a sub-group,
+    then slice to shared layers and wrap with pipeline send if TP-master.
+    PP tail nodes: slice to their own layers and wrap with pipeline recv.
+    """
+    from exo.shared.types.worker.shards import HybridShardMetadata  # noqa: F811
+
+    inner = _inner_model(model)
+    layers = _get_layers(inner)
+    all_layers = list(layers)  # full copy before slicing
+
+    # --- Step 1: Create TP sub-group via split ---
+    # Nodes in the TP group (tp_rank >= 0) share a color; PP tail gets a different color.
+    is_tp_node = shard_meta.tp_rank >= 0
+    tp_color = 0 if is_tp_node else 1
+    tp_group = group.split(tp_color)
+
+    logger.info(
+        f"Hybrid parallel: rank={group.rank()}, "
+        f"tp_rank={shard_meta.tp_rank}, tp_size={shard_meta.tp_size}, "
+        f"pp_rank={shard_meta.pp_rank}, layers=[{shard_meta.start_layer}:{shard_meta.end_layer}], "
+        f"send_to={shard_meta.pipeline_send_to}, recv_from={shard_meta.pipeline_recv_from}"
+    )
+
+    # --- Step 2: Apply TP sharding for TP nodes ---
+    if is_tp_node and tp_group.size() > 1:
+        logger.info(
+            f"Applying tensor parallelism (TP group size={tp_group.size()}, "
+            f"TP rank={tp_group.rank()})"
+        )
+        model = tensor_auto_parallel(model, tp_group, timeout_seconds, on_timeout)
+        # Re-fetch layers after TP modified the model
+        inner = _inner_model(model)
+        layers = _get_layers(inner)
+        all_layers = list(layers)
+
+    # --- Step 3: Slice layers to this node's range ---
+    start, end = shard_meta.start_layer, shard_meta.end_layer
+    layers = all_layers[start:end]
+    for layer in layers:
+        mx.eval(layer)  # type: ignore
+
+    # --- Step 4: Pipeline wrapping ---
+    # Recv from upstream (if we have a pipeline_recv_from)
+    if shard_meta.pipeline_recv_from is not None:
+        layers[0] = PipelineFirstLayer(
+            layers[0], group.rank(), group=group
+        )
+
+    # Send downstream (if we have a pipeline_send_to)
+    if shard_meta.pipeline_send_to is not None:
+        layers[-1] = _HybridPipelineLastLayer(
+            layers[-1],
+            group.rank(),
+            shard_meta.world_size,
+            group=group,
+            send_to=shard_meta.pipeline_send_to,
+        )
+    elif shard_meta.pp_rank == shard_meta.pp_size - 1:
+        # Last pipeline stage: all_gather logits to all nodes
+        layers[-1] = PipelineLastLayer(
+            layers[-1],
+            shard_meta.world_size - 1,  # Pretend we're last rank
+            shard_meta.world_size,
+            group=group,
+        )
+
+    _set_layers(model, layers)
+    return patch_pipeline_model(model, group)
+
+
+class _HybridPipelineLastLayer(CustomMlxLayer):
+    """Pipeline last layer for hybrid mode: sends to a specific target rank."""
+
+    def __init__(
+        self,
+        original_layer: _LayerCallable,
+        r: int,
+        s: int,
+        group: mx.distributed.Group,
+        send_to: int,
+    ):
+        super().__init__(original_layer)
+        self.r = r
+        self.s = s
+        self.group = group
+        self.send_to = send_to
+        self.original_layer_signature = signature(self.original_layer.__call__)
+        self.is_prefill: bool = False
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        output: mx.array = self.original_layer(x, *args, **kwargs)
+
+        # Send to the explicit target rank
+        output = mx.distributed.send(output, self.send_to, group=self.group)
+        mx.eval(output)
+
+        return output
+
+
 class TensorParallelShardingStrategy(ABC):
     def __init__(
         self,

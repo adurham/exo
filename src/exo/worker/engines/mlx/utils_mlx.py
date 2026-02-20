@@ -49,6 +49,7 @@ from exo.shared.types.worker.instances import (
 )
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
+    HybridShardMetadata,
     PipelineShardMetadata,
     ShardMetadata,
     TensorShardMetadata,
@@ -57,6 +58,7 @@ from exo.worker.engines.mlx import Model
 from exo.worker.engines.mlx.auto_parallel import (
     TimeoutCallback,
     eval_with_timeout,
+    hybrid_auto_parallel,
     pipeline_auto_parallel,
     tensor_auto_parallel,
 )
@@ -303,6 +305,13 @@ def shard_and_load(
                 "CfgShardMetadata is not supported for text model loading - "
                 "this metadata type is only for image generation models"
             )
+        case HybridShardMetadata():
+            logger.info(f"loading model from {model_path} with hybrid TP+PP")
+            model = hybrid_auto_parallel(
+                model, group, shard_metadata,
+                timeout_seconds, on_timeout,
+            )
+            eval_with_timeout(model.parameters(), timeout_seconds, on_timeout)
 
     # TODO: Do we need this?
     mx.eval(model)
