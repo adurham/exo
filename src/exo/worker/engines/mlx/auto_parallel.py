@@ -127,17 +127,19 @@ class PipelineFirstLayer(CustomMlxLayer):
         original_layer: _LayerCallable,
         r: int,
         group: mx.distributed.Group,
+        recv_from: int | None = None,
     ):
         super().__init__(original_layer)
         self.r: int = r
+        self.recv_from: int = recv_from if recv_from is not None else (r - 1)
         self.group = group
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         import sys
         if self.r != 0:
-            print(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.r - 1}, x.shape={x.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
-            x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+            print(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
+            x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
             if self.is_prefill:
                 # We want to avoid GPU timeout errors by evalling the distributed operation
                 # so that it stays on CPU, which does not have a timeout.
@@ -570,7 +572,8 @@ def hybrid_auto_parallel(
     # Recv from upstream (if we have a pipeline_recv_from)
     if shard_meta.pipeline_recv_from is not None:
         layers[0] = PipelineFirstLayer(
-            layers[0], group.rank(), group=group
+            layers[0], group.rank(), group=group,
+            recv_from=shard_meta.pipeline_recv_from,
         )
 
     # Send downstream (if we have a pipeline_send_to)
