@@ -1,8 +1,10 @@
 #!/bin/bash
 
-# Standardized Exo Cluster Startup Script
-# Usage: ./start_cluster.sh
-# Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
+# ROLLBACK TEST: Exo Cluster Startup Script
+# Usage: ./start_cluster_rollback.sh
+# Resets all nodes to the ROLLBACK MARKER commit (5a14d195) and launches.
+# Purpose: verify that 3-node JACCL RDMA works at the old commit.
+# This uses the OLD build approach (no uv pip install -e ./mlx).
 
 export EXO_FAST_SYNCH=off
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
@@ -187,9 +189,10 @@ else
         echo "Ensuring Xcode developer directory on $NODE..."
         ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
         
-        # Update and Build Logic
-        TARGET_BRANCH="main"
-        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
+        # Update and Build Logic — ROLLBACK to 5a14d195
+        ROLLBACK_COMMIT="5a14d195"
+        echo "Hard-resetting $NODE to ROLLBACK MARKER ($ROLLBACK_COMMIT)..."
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $ROLLBACK_COMMIT && git clean -fdx mlx/ && git submodule sync && git submodule update --init --recursive --force'" || { echo "Failed to reset repo on $NODE"; exit 1; }
         
         echo "Running build on $NODE..."
         ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package mlx'" || { echo "Failed to build on $NODE"; exit 1; }
