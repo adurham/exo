@@ -140,10 +140,12 @@ class PipelineFirstLayer(CustomMlxLayer):
         if self.r != 0:
             print(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            # Always eval the recv to ensure RDMA operations stay synchronized.
-            # Without this, lazy evaluation can desync between nodes during decode.
-            mx.eval(x)
-            print(f"[PIPELINE-RECV] rank={self.r} mx.eval completed", file=sys.stderr, flush=True)
+            if self.is_prefill:
+                # During prefill, force-eval the recv to avoid GPU timeout.
+                # During decode, keep it lazy so TP all-reduce + pipeline ops
+                # are evaluated together via mx.async_eval (avoids TP deadlock).
+                mx.eval(x)
+            print(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})", file=sys.stderr, flush=True)
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -206,7 +208,7 @@ class PipelineLastLayer(CustomMlxLayer):
 
 def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
-        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, _HybridPipelineLastLayer)):
             layer.is_prefill = is_prefill
 
 
@@ -620,10 +622,14 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         # Send to the explicit target rank
-        print(f"[PIPELINE-SEND] rank={self.r} sending to {self.send_to}, output.shape={output.shape}", file=sys.stderr, flush=True)
+        print(f"[PIPELINE-SEND] rank={self.r} sending to {self.send_to}, output.shape={output.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
         output = mx.distributed.send(output, self.send_to, group=self.group)
-        mx.eval(output)
-        print(f"[PIPELINE-SEND] rank={self.r} send completed", file=sys.stderr, flush=True)
+        if self.is_prefill:
+            # During prefill, force-eval the send synchronously.
+            # During decode, keep it lazy so TP all-reduce + pipeline ops
+            # are evaluated together via mx.async_eval (avoids TP deadlock).
+            mx.eval(output)
+        print(f"[PIPELINE-SEND] rank={self.r} send posted (is_prefill={self.is_prefill})", file=sys.stderr, flush=True)
 
         return output
 
