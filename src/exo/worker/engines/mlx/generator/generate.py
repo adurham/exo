@@ -541,8 +541,17 @@ def generate_step(
             _t1 = _time.perf_counter()
             quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
-            mx.eval([c.state for c in prompt_cache])
+
+            # Detailed eval timing breakdown
+            _num_caches = len(prompt_cache)
+            _cache_eval_times = []
+            for _ci, _c in enumerate(prompt_cache):
+                _ce0 = _time.perf_counter()
+                mx.eval(_c.state)
+                _ce1 = _time.perf_counter()
+                _cache_eval_times.append((_ce1 - _ce0) * 1000)
             _t3 = _time.perf_counter()
+            _slow_caches = [(i, t) for i, t in enumerate(_cache_eval_times) if t > 100]
 
             _kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
             from loguru import logger as _logger
@@ -551,9 +560,14 @@ def generate_step(
                 f"tokens={n_to_process}, kv_len={_kv_len}, "
                 f"model={(_t1-_t0)*1000:.0f}ms, "
                 f"quantize={(_t2-_t1)*1000:.0f}ms, "
-                f"eval={(_t3-_t2)*1000:.0f}ms, "
+                f"eval={(_t3-_t2)*1000:.0f}ms ({_num_caches} layers), "
                 f"total={(_t3-_t0)*1000:.0f}ms"
             )
+            if _slow_caches:
+                _logger.info(
+                    f"PREFILL slow cache layers: "
+                    f"{', '.join(f'L{i}={t:.0f}ms' for i, t in _slow_caches)}"
+                )
             _prefill_chunk_idx += 1
 
             prompt_processed_tokens += n_to_process
