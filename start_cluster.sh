@@ -191,11 +191,20 @@ else
         TARGET_BRANCH="main"
         ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule sync && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
         
-        echo "Running build on $NODE..."
-        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package mlx'" || { echo "Failed to build on $NODE"; exit 1; }
-
         echo "Ensuring build dependencies on $NODE..."
         ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
+
+        # Check if MLX needs rebuilding by comparing installed version hash to submodule HEAD
+        INSTALLED_MLX=$(ssh "$NODE" "cd ~/repos/exo && .venv/bin/python -c \"import mlx.core; v=mlx.core.__version__; print(v.split('+')[-1] if '+' in v else 'none')\" 2>/dev/null || echo none")
+        SUBMODULE_MLX=$(ssh "$NODE" "cd ~/repos/exo/mlx && git rev-parse --short HEAD")
+
+        if [ "$INSTALLED_MLX" != "$SUBMODULE_MLX" ]; then
+            echo "MLX source changed on $NODE ($INSTALLED_MLX → $SUBMODULE_MLX), rebuilding..."
+            ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package mlx'" || { echo "Failed to build on $NODE"; exit 1; }
+        else
+            echo "MLX unchanged on $NODE ($INSTALLED_MLX), skipping C++ rebuild."
+            ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to build on $NODE"; exit 1; }
+        fi
 
         echo "Building dashboard on $NODE..."
         ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
