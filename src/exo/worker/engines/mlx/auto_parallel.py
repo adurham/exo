@@ -517,7 +517,19 @@ def hybrid_auto_parallel(
     # Nodes in the TP group (tp_rank >= 0) share a color; PP tail gets a different color.
     is_tp_node = shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
-    tp_group = group.split(tp_color)
+    logger.info(
+        f"About to call group.split(color={tp_color}): "
+        f"global_rank={group.rank()}, global_size={group.size()}, "
+        f"is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}"
+    )
+    import sys; sys.stderr.flush(); sys.stdout.flush()
+    try:
+        tp_group = group.split(tp_color)
+    except RuntimeError as e:
+        logger.error(
+            f"group.split(color={tp_color}) FAILED on global_rank={group.rank()}: {e}"
+        )
+        raise
 
     logger.info(
         f"Hybrid parallel: rank={group.rank()}, "
