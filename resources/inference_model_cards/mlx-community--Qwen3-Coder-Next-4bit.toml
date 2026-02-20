@@ -6,6 +6,6 @@ hidden_size = 2048
 supports_tensor = true
 tasks = ["TextGeneration"]
 quantization = "4bit"
-
+capabilities = ["text", "code"]
 [storage_size]
 in_bytes = 45644286500

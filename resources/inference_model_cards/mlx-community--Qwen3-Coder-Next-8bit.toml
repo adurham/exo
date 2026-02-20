@@ -4,8 +4,14 @@ hidden_size = 2048
 supports_tensor = true
 tasks = ["TextGeneration"]
 family = "qwen"
+<<<<<<< HEAD
 base_model = "Qwen3 Coder Next 80B"
 quantization = "8bit"
+=======
+quantization = "8bit"
+base_model = "Qwen3 Coder Next"
+capabilities = ["text", "code"]
+>>>>>>> 71e48c0f (model-cards: add missing metadata for Qwen3 Coder Next variants (#1576))
 
 [storage_size]
 in_bytes = 89357758772
