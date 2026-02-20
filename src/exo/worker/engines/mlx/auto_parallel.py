@@ -134,12 +134,16 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        import sys
         if self.r != 0:
+            print(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.r - 1}, x.shape={x.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
             if self.is_prefill:
                 # We want to avoid GPU timeout errors by evalling the distributed operation
                 # so that it stays on CPU, which does not have a timeout.
+                print(f"[PIPELINE-RECV] rank={self.r} calling mx.eval on recv", file=sys.stderr, flush=True)
                 mx.eval(x)
+                print(f"[PIPELINE-RECV] rank={self.r} mx.eval completed", file=sys.stderr, flush=True)
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -611,11 +615,14 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        import sys
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         # Send to the explicit target rank
+        print(f"[PIPELINE-SEND] rank={self.r} sending to {self.send_to}, output.shape={output.shape}", file=sys.stderr, flush=True)
         output = mx.distributed.send(output, self.send_to, group=self.group)
         mx.eval(output)
+        print(f"[PIPELINE-SEND] rank={self.r} send completed", file=sys.stderr, flush=True)
 
         return output
 
