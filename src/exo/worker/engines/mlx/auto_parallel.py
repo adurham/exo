@@ -182,8 +182,15 @@ class PipelineLastLayer(CustomMlxLayer):
             # pipeline compute. Without this, cache eval is deferred to
             # generate.py's mx.eval([c.state]) which runs AFTER the pipeline
             # finishes — wasting ~20s on the middle node.
-            if self.is_prefill and hasattr(self, '_prompt_cache') and self._prompt_cache is not None:
-                mx.eval([c.state for c in self._prompt_cache])
+            _has_cache = hasattr(self, '_prompt_cache')
+            _cache_val = getattr(self, '_prompt_cache', None)
+            logger.info(f"Rank {self.group.rank()}: is_prefill={self.is_prefill}, has_prompt_cache={_has_cache}, cache_is_none={_cache_val is None}, cache_len={len(_cache_val) if _cache_val is not None else 'N/A'}")
+            if self.is_prefill and _cache_val is not None:
+                import time as _time
+                _pc_t0 = _time.perf_counter()
+                mx.eval([c.state for c in _cache_val])
+                _pc_t1 = _time.perf_counter()
+                logger.info(f"Rank {self.group.rank()}: Early cache eval took {(_pc_t1-_pc_t0)*1000:.0f}ms for {len(_cache_val)} layers")
 
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
