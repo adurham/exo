@@ -2800,8 +2800,8 @@
                 <div class="text-xs text-white/70 font-mono mb-2">
                   Sharding:
                 </div>
-                <div class="flex gap-2">
-                                  <button
+                <div class="flex flex-wrap gap-2">
+                  <button
                     onclick={() => {
                       selectedSharding = "Pipeline";
                       saveLaunchDefaults();
