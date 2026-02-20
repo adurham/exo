@@ -517,17 +517,17 @@ def hybrid_auto_parallel(
     # Nodes in the TP group (tp_rank >= 0) share a color; PP tail gets a different color.
     is_tp_node = shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
-    logger.info(
-        f"About to call group.split(color={tp_color}): "
-        f"global_rank={group.rank()}, global_size={group.size()}, "
-        f"is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}"
-    )
-    import sys; sys.stderr.flush(); sys.stdout.flush()
+    import sys
+    print(f"[DEBUG] hybrid_auto_parallel REACHED: tp_color={tp_color}, is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}", file=sys.stderr, flush=True)
+    logger.info(f"About to call group.split(color={tp_color}), is_tp_node={is_tp_node}")
     try:
+        print(f"[DEBUG] Calling group.split({tp_color}) NOW", file=sys.stderr, flush=True)
         tp_group = group.split(tp_color)
+        print(f"[DEBUG] group.split({tp_color}) SUCCEEDED", file=sys.stderr, flush=True)
     except RuntimeError as e:
+        print(f"[DEBUG] group.split({tp_color}) FAILED: {e}", file=sys.stderr, flush=True)
         logger.error(
-            f"group.split(color={tp_color}) FAILED on global_rank={group.rank()}: {e}"
+            f"group.split(color={tp_color}) FAILED: {e}"
         )
         raise
 
