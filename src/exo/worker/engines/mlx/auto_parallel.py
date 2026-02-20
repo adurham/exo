@@ -164,18 +164,14 @@ class PipelineLastLayer(CustomMlxLayer):
         ).arguments.get("cache", None)
 
         output: mx.array = self.original_layer(x, *args, **kwargs)
-        
-        logger.info(f"Rank {self.group.rank()}: Layer call. is_prefill={self.is_prefill}")
 
         if self.r != self.s - 1:
-            logger.info(f"Rank {self.group.rank()}: Sending intermediate output to {(self.r + 1) % self.s}")
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
             # Force intermediate send to avoid deadlock where Rank 1 waits for this
             # while Rank 0 waits for Rank 1's final output.
             mx.eval(output)
-            logger.info(f"Rank {self.group.rank()}: Sent intermediate output")
 
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
@@ -186,18 +182,10 @@ class PipelineLastLayer(CustomMlxLayer):
                 if cache is not None:
                     mx.eval(_cache.keys)  # type: ignore
 
-        # After model forward pass completes, eval ALL cache state for all ranks
-        # during prefill. On intermediate ranks this overlaps with downstream
-        # pipeline compute. On the last rank this prevents the deferred eval
-        # from blocking sequentially in generate.py (~21.8s for 28 layers).
-        if self.is_prefill:
-            _cache_val = getattr(self, '_prompt_cache', None)
-            if _cache_val is not None:
-                import time as _time
-                _pc_t0 = _time.perf_counter()
-                mx.eval([c.state for c in _cache_val])
-                _pc_t1 = _time.perf_counter()
-                logger.info(f"Rank {self.group.rank()}: Early cache eval took {(_pc_t1-_pc_t0)*1000:.0f}ms for {len(_cache_val)} layers")
+        # Note: On intermediate ranks (not last), mx.eval(output) after the send
+        # materializes cache state as a side effect (0ms). On the last rank,
+        # cache state is deferred to generate.py's bulk eval. Moving it here
+        # doesn't help since there's no downstream node to overlap with.
 
         if not self.is_prefill:
             # Revert to all_gather to avoid GPU time out on huge models
