@@ -206,6 +206,14 @@ else
             ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to build on $NODE"; exit 1; }
         fi
 
+        # MacBook Pro: override local MLX build with PyPI wheel
+        # Locally-built MLX can't allocate RDMA protection domains on MacBook Pro.
+        # Since the MacBook is only a pipeline tail (no split() needed), the PyPI wheel works fine.
+        if [[ "$NODE" == *"macbook"* ]]; then
+            echo "Overriding MLX on $NODE with PyPI wheel (local build breaks RDMA on MacBook)..."
+            ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install --reinstall mlx>=0.30.6'" || { echo "Failed to install PyPI MLX on $NODE"; exit 1; }
+        fi
+
         echo "Building dashboard on $NODE..."
         ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
     done
