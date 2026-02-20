@@ -197,8 +197,8 @@ else
         echo "Ensuring build dependencies on $NODE..."
         ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
 
-        echo "Building mlx C++ (JACCL) on $NODE..."
-        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo/mlx && mkdir -p build && cd build && cmake .. && make -j\$(sysctl -n hw.ncpu)'" || { echo "Failed to build mlx on $NODE"; exit 1; }
+        echo "Building and installing mlx C++ (JACCL) on $NODE..."
+        ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv pip install --no-build-isolation -e ./mlx'" || { echo "Failed to build mlx on $NODE"; exit 1; }
 
         echo "Building dashboard on $NODE..."
         ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
