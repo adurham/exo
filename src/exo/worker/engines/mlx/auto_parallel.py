@@ -567,6 +567,13 @@ def hybrid_auto_parallel(
         mx.eval(layer)  # type: ignore
 
     # --- Step 4: Pipeline wrapping ---
+    # Compute PP tail rank for decode recv (TP nodes need it to get final hidden states)
+    # With TP-first ordering, TP nodes are ranks 0..tp_size-1, PP tail is tp_size..
+    pp_tail_rank: int | None = None
+    if shard_meta.pp_size > 1 and shard_meta.pp_rank != shard_meta.pp_size - 1:
+        # This is a TP node and needs to know the PP tail's rank
+        pp_tail_rank = shard_meta.tp_size  # First PP rank after all TP ranks
+
     # Recv from upstream (if we have a pipeline_recv_from)
     if shard_meta.pipeline_recv_from is not None:
         layers[0] = PipelineFirstLayer(
@@ -574,7 +581,7 @@ def hybrid_auto_parallel(
             recv_from=shard_meta.pipeline_recv_from,
         )
 
-    # Send downstream (if we have a pipeline_send_to)
+    # Send downstream (if we have a pipeline_send_to) — TP master
     if shard_meta.pipeline_send_to is not None:
         layers[-1] = _HybridPipelineLastLayer(
             layers[-1],
@@ -582,6 +589,7 @@ def hybrid_auto_parallel(
             shard_meta.world_size,
             group=group,
             send_to=[shard_meta.pipeline_send_to],
+            decode_recv_from=pp_tail_rank,  # Recv PP tail's output during decode
         )
     elif shard_meta.pp_rank == shard_meta.pp_size - 1:
         # Last pipeline stage: send output to every OTHER rank explicitly.
@@ -597,6 +605,16 @@ def hybrid_auto_parallel(
             group=group,
             send_to=other_ranks,
             send_during_prefill=False,  # TP nodes have no matching recv during prefill
+        )
+    elif pp_tail_rank is not None:
+        # TP follower: no send, but needs to recv PP tail's output during decode
+        layers[-1] = _HybridPipelineLastLayer(
+            layers[-1],
+            group.rank(),
+            shard_meta.world_size,
+            group=group,
+            send_to=[],  # No sends
+            decode_recv_from=pp_tail_rank,
         )
 
     _set_layers(model, layers)
@@ -617,6 +635,9 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
             the PP tail, since TP nodes have no matching recv during prefill).
             If True, sends happen during both prefill and decode (used by the
             TP master to forward activations to the PP tail).
+        decode_recv_from: If set, during decode this layer recv's from the given
+            rank (the PP tail) and returns that output instead of its own. This
+            gives TP nodes the correct final hidden states for lm_head.
     """
 
     def __init__(
@@ -627,6 +648,7 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         group: mx.distributed.Group,
         send_to: list[int],
         send_during_prefill: bool = True,
+        decode_recv_from: int | None = None,
     ):
         super().__init__(original_layer)
         self.r = r
@@ -634,6 +656,7 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         self.group = group
         self.send_to = send_to
         self.send_during_prefill = send_during_prefill
+        self.decode_recv_from = decode_recv_from
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
 
@@ -655,6 +678,10 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
             # During decode, keep it lazy so TP all-reduce + pipeline ops
             # are evaluated together via mx.async_eval (avoids TP deadlock).
             mx.eval(output)
+        elif self.decode_recv_from is not None:
+            # During decode, TP nodes receive the PP tail's final hidden states.
+            # This replaces our intermediate output so lm_head gets correct input.
+            output = mx.distributed.recv_like(output, self.decode_recv_from, group=self.group)
 
         return output
 

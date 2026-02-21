@@ -494,9 +494,12 @@ class TestPipelineWrapping:
             result = hybrid_auto_parallel(model, group, shard)
 
         layers = result.model.layers
-        # No pipeline wrapping on follower
+        # No pipeline recv wrapping on first layer (follower doesn't receive from upstream)
         assert not isinstance(layers[0], PipelineFirstLayer)
-        assert not isinstance(layers[-1], _HybridPipelineLastLayer)
+        # Last layer should have a recv-only wrapper (no sends, but receives from PP tail during decode)
+        assert isinstance(layers[-1], _HybridPipelineLastLayer)
+        assert layers[-1].send_to == []
+        assert layers[-1].decode_recv_from is not None
 
 
 # ---------------------------------------------------------------------------
