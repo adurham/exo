@@ -129,27 +129,30 @@ def place_instance(
         ),
     )
 
-    shard_assignments = get_shard_assignments(
+    shard_assignments, reordered_cycle = get_shard_assignments(
         command.model_card, selected_cycle, command.sharding, node_memory
     )
 
-    cycle_digraph: Topology = topology.get_subgraph_from_nodes(selected_cycle.node_ids)
+    # Use the reordered cycle if the sharding strategy provides one (e.g. hybrid
+    # mode reorders so TP nodes get the lowest ranks).  Otherwise keep original.
+    effective_cycle = reordered_cycle or selected_cycle
+    cycle_digraph: Topology = topology.get_subgraph_from_nodes(effective_cycle.node_ids)
 
     instance_id = InstanceId()
     target_instances = dict(deepcopy(current_instances))
 
-    if len(selected_cycle) == 1:
+    if len(effective_cycle) == 1:
         command.instance_meta = InstanceMeta.MlxRing
 
     # TODO: Single node instances
     match command.instance_meta:
         case InstanceMeta.MlxJaccl:
             mlx_jaccl_devices = get_mlx_jaccl_devices_matrix(
-                [node_id for node_id in selected_cycle],
+                [node_id for node_id in effective_cycle],
                 cycle_digraph,
             )
             mlx_jaccl_coordinators = get_mlx_jaccl_coordinators(
-                coordinator=selected_cycle.node_ids[0],
+                coordinator=effective_cycle.node_ids[0],
                 coordinator_port=random_ephemeral_port(),
                 cycle_digraph=cycle_digraph,
                 node_network=node_network,
@@ -163,7 +166,7 @@ def place_instance(
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
             hosts_by_node = get_mlx_ring_hosts_by_node(
-                selected_cycle=selected_cycle,
+                selected_cycle=effective_cycle,
                 cycle_digraph=cycle_digraph,
                 ephemeral_port=ephemeral_port,
                 node_network=node_network,

@@ -279,7 +279,7 @@ def get_shard_assignments_for_hybrid_parallel(
     model_card: ModelCard,
     cycle: Cycle,
     node_memory: Mapping[NodeId, MemoryUsage],
-) -> ShardAssignments:
+) -> tuple[ShardAssignments, Cycle]:
     """Create shard assignments for hybrid tensor + pipeline parallel execution.
 
     The nodes with the most memory form a TP group (they share the same layers
@@ -287,6 +287,11 @@ def get_shard_assignments_for_hybrid_parallel(
     the PP tail with their own disjoint layer range.
 
     Topology:  TP-group (all-reduce per layer) → PP-tail (pipeline send/recv)
+
+    Returns both the shard assignments and a reordered Cycle where TP nodes
+    occupy the lowest ranks (0..tp_size-1) and PP tail nodes follow.  The
+    caller must use the reordered cycle for coordinator/devices setup so that
+    JACCL ranks match the shard metadata.
     """
     _validate_cycle(cycle)
     world_size = len(cycle)
@@ -304,6 +309,12 @@ def get_shard_assignments_for_hybrid_parallel(
     tp_size = world_size - 1  # e.g. 2 Studios
     tp_node_ids = nodes_by_memory[:tp_size]
     pp_tail_node_ids = nodes_by_memory[tp_size:]  # e.g. MacBook
+
+    # --- Reorder cycle: TP nodes first, PP tail last ---
+    # This ensures TP nodes always get the lowest ranks (0..tp_size-1)
+    # and data flows logically: TP group → PP tail.
+    reordered_node_ids = tp_node_ids + pp_tail_node_ids
+    reordered_cycle = Cycle(node_ids=reordered_node_ids)
 
     # --- Layer allocation ---
     # TP group acts as one unit: combined memory for its share of layers.
@@ -332,18 +343,13 @@ def get_shard_assignments_for_hybrid_parallel(
     runner_to_shard: dict[RunnerId, ShardMetadata] = {}
     node_to_runner: dict[NodeId, RunnerId] = {}
 
-    # Map global ranks: TP nodes get ranks 0..tp_size-1, PP tail gets tp_size..
-    # (follow the original cycle order so JACCL ranks stay consistent)
-    rank_of: dict[NodeId, int] = {}
-    for i, nid in enumerate(cycle.node_ids):
-        rank_of[nid] = i
-
-    tp_master_global_rank = rank_of[tp_node_ids[0]]
-    pp_tail_first_global_rank = rank_of[pp_tail_node_ids[0]]
+    # Ranks follow the reordered cycle: TP nodes = 0..tp_size-1, PP = tp_size..
+    tp_master_global_rank = 0  # TP master is always rank 0
+    pp_tail_first_global_rank = tp_size  # PP tail starts after TP group
 
     # TP nodes: all share layers [0, tp_layers)
     for tp_rank, nid in enumerate(tp_node_ids):
-        global_rank = rank_of[nid]
+        global_rank = tp_rank  # ranks 0..tp_size-1
         shard = HybridShardMetadata(
             model_card=model_card,
             device_rank=global_rank,
@@ -364,8 +370,8 @@ def get_shard_assignments_for_hybrid_parallel(
         node_to_runner[nid] = runner_id
 
     # PP tail nodes: own layers [tp_layers, total_layers)
-    for _, nid in enumerate(pp_tail_node_ids):
-        global_rank = rank_of[nid]
+    for pp_idx, nid in enumerate(pp_tail_node_ids):
+        global_rank = tp_size + pp_idx  # ranks tp_size..
         shard = HybridShardMetadata(
             model_card=model_card,
             device_rank=global_rank,
@@ -388,7 +394,7 @@ def get_shard_assignments_for_hybrid_parallel(
         model_id=model_card.model_id,
         runner_to_shard=runner_to_shard,
         node_to_runner=node_to_runner,
-    )
+    ), reordered_cycle
 
 
 def get_shard_assignments(
@@ -396,19 +402,24 @@ def get_shard_assignments(
     cycle: Cycle,
     sharding: Sharding,
     node_memory: Mapping[NodeId, MemoryUsage],
-) -> ShardAssignments:
+) -> tuple[ShardAssignments, Cycle | None]:
+    """Return shard assignments and optionally a reordered cycle.
+
+    For hybrid mode, the cycle is reordered so TP nodes get the lowest ranks.
+    For other modes, the second element is None (cycle order unchanged).
+    """
     match sharding:
         case Sharding.Pipeline:
             return get_shard_assignments_for_pipeline_parallel(
                 model_card=model_card,
                 cycle=cycle,
                 node_memory=node_memory,
-            )
+            ), None
         case Sharding.Tensor:
             return get_shard_assignments_for_tensor_parallel(
                 model_card=model_card,
                 cycle=cycle,
-            )
+            ), None
         case Sharding.Hybrid:
             return get_shard_assignments_for_hybrid_parallel(
                 model_card=model_card,

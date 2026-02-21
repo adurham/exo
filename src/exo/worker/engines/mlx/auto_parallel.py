@@ -136,16 +136,15 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        import sys
         if self.r != 0:
-            print(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
+            logger.debug(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}")
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
             if self.is_prefill:
                 # During prefill, force-eval the recv to avoid GPU timeout.
                 # During decode, keep it lazy so TP all-reduce + pipeline ops
                 # are evaluated together via mx.async_eval (avoids TP deadlock).
                 mx.eval(x)
-            print(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})", file=sys.stderr, flush=True)
+            logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -523,14 +522,13 @@ def hybrid_auto_parallel(
     # Nodes in the TP group (tp_rank >= 0) share a color; PP tail gets a different color.
     is_tp_node = shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
-    import sys
-    print(f"[DEBUG] hybrid_auto_parallel: tp_color={tp_color}, is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}", file=sys.stderr, flush=True)
+    logger.debug(f"hybrid_auto_parallel: tp_color={tp_color}, is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}")
 
     try:
         tp_group = group.split(tp_color)
-        print(f"[DEBUG] group.split({tp_color}) SUCCEEDED", file=sys.stderr, flush=True)
+        logger.debug(f"group.split({tp_color}) succeeded")
     except RuntimeError as e:
-        print(f"[DEBUG] group.split({tp_color}) FAILED: {e}", file=sys.stderr, flush=True)
+        logger.debug(f"group.split({tp_color}) failed: {e}")
         if not is_tp_node:
             # PP-only node: split() failed but we don't need the sub-group anyway.
             # The TP nodes already completed their split successfully.
@@ -583,34 +581,36 @@ def hybrid_auto_parallel(
             group.rank(),
             shard_meta.world_size,
             group=group,
-            send_to=shard_meta.pipeline_send_to,
+            send_to=[shard_meta.pipeline_send_to],
         )
     elif shard_meta.pp_rank == shard_meta.pp_size - 1:
-        # Last pipeline stage: all_gather logits to all nodes
-        layers[-1] = PipelineLastLayer(
+        # Last pipeline stage: send output to every OTHER rank explicitly.
+        # We CANNOT use all_gather here because the TP nodes don't have a
+        # matching all_gather call — they use _HybridPipelineLastLayer (send-only)
+        # or have no pipeline wrapper at all. Using a collective that requires
+        # all group members when only this node calls it causes a GPU deadlock.
+        other_ranks = [r for r in range(shard_meta.world_size) if r != group.rank()]
+        layers[-1] = _HybridPipelineLastLayer(
             layers[-1],
-            shard_meta.world_size - 1,  # Pretend we're last rank
+            group.rank(),
             shard_meta.world_size,
             group=group,
+            send_to=other_ranks,
         )
 
     _set_layers(model, layers)
-
-    # Store hybrid token sync metadata on the model.
-    # During decode, all nodes sample their own tokens, but only the PP tail
-    # (which processes the final layers) has the correct token. We use all_sum
-    # to broadcast: PP tail contributes its token, others contribute zero.
-    is_pp_tail = (shard_meta.pipeline_recv_from is not None and shard_meta.pipeline_send_to is None)
-    model._hybrid_token_sync_group = group  # type: ignore
-    model._hybrid_is_pp_tail = is_pp_tail  # type: ignore
-    import sys
-    print(f"[HYBRID] Token sync configured: is_pp_tail={is_pp_tail}, group_rank={group.rank()}", file=sys.stderr, flush=True)
 
     return patch_pipeline_model(model, group)
 
 
 class _HybridPipelineLastLayer(CustomMlxLayer):
-    """Pipeline last layer for hybrid mode: sends to a specific target rank."""
+    """Pipeline last layer for hybrid mode: sends output to explicit target ranks.
+
+    Unlike PipelineLastLayer which uses all_gather (a collective requiring ALL
+    group members), this layer uses point-to-point send() to each target.
+    This avoids deadlocks in hybrid mode where not all nodes have matching
+    collective calls.
+    """
 
     def __init__(
         self,
@@ -618,7 +618,7 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         r: int,
         s: int,
         group: mx.distributed.Group,
-        send_to: int,
+        send_to: list[int],
     ):
         super().__init__(original_layer)
         self.r = r
@@ -629,18 +629,18 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        import sys
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
-        # Send to the explicit target rank
-        print(f"[PIPELINE-SEND] rank={self.r} sending to {self.send_to}, output.shape={output.shape}, is_prefill={self.is_prefill}", file=sys.stderr, flush=True)
-        output = mx.distributed.send(output, self.send_to, group=self.group)
+        # Send to each explicit target rank (no collective needed)
+        for target in self.send_to:
+            logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {target}, shape={output.shape}, prefill={self.is_prefill}")
+            output = mx.distributed.send(output, target, group=self.group)
+
         if self.is_prefill:
             # During prefill, force-eval the send synchronously.
             # During decode, keep it lazy so TP all-reduce + pipeline ops
             # are evaluated together via mx.async_eval (avoids TP deadlock).
             mx.eval(output)
-        print(f"[PIPELINE-SEND] rank={self.r} send posted (is_prefill={self.is_prefill})", file=sys.stderr, flush=True)
 
         return output
 

@@ -470,7 +470,7 @@ def generate_step(
     )
 
     sampler = sampler or (lambda x: mx.argmax(x, axis=-1))
-    _decode_mode = False  # Token sync only during decode, not prefill
+
     def _model_call(input_tokens: mx.array, input_embeddings: Optional[mx.array]):
         if input_embeddings is not None:
             out = model(
@@ -482,7 +482,7 @@ def generate_step(
         return out
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
-        nonlocal tokens, _decode_mode
+        nonlocal tokens
 
         with mx.stream(generation_stream):
             logits = _model_call(
@@ -511,14 +511,10 @@ def generate_step(
                 for processor in logits_processors:
                     logits = processor(tokens, logits)
 
-            logger.info("DEBUG: Calling quantize_cache_fn")
             quantize_cache_fn(prompt_cache)
-            logger.info("DEBUG: Returned from quantize_cache_fn")
 
             logprobs = logits - mx.logsumexp(logits, keepdims=True)
-            logger.info("DEBUG: Calling sampler")
             sampled = sampler(logprobs)
-            logger.info("DEBUG: Returned from sampler")
 
             return sampled, logprobs.squeeze(0)
 

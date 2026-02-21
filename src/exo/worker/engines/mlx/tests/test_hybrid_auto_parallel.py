@@ -395,7 +395,7 @@ class TestPipelineWrapping:
         assert isinstance(last_layer, _HybridPipelineLastLayer), (
             "TP master's last layer must be wrapped with _HybridPipelineLastLayer"
         )
-        assert last_layer.send_to == 2
+        assert last_layer.send_to == [2]
 
     def test_pp_tail_gets_recv_wrapper(self):
         """PP tail (pipeline_recv_from set) should wrap first layer."""
@@ -424,6 +424,48 @@ class TestPipelineWrapping:
         first_layer = result.model.layers[0]
         assert isinstance(first_layer, PipelineFirstLayer), (
             "PP tail's first layer must be wrapped with PipelineFirstLayer"
+        )
+
+    def test_pp_tail_uses_hybrid_send_not_all_gather(self):
+        """PP tail's last layer MUST use _HybridPipelineLastLayer, NOT PipelineLastLayer.
+
+        PipelineLastLayer uses all_gather (a collective requiring all group members).
+        In hybrid mode, TP nodes don't call all_gather, causing a GPU deadlock.
+        The PP tail must use _HybridPipelineLastLayer with explicit sends instead.
+        """
+        shard = _make_shard(
+            tp_rank=-1, tp_size=0, pp_rank=1,
+            start_layer=52, end_layer=62,
+            pipeline_recv_from=0,
+        )
+        group = _make_mock_group(rank=2, size=3)
+        group.split.return_value = _make_singleton_group()
+        model = FakeModel()
+
+        with patch(
+            "exo.worker.engines.mlx.auto_parallel.tensor_auto_parallel",
+            side_effect=lambda model, *a, **kw: model,
+        ), patch(
+            "exo.worker.engines.mlx.auto_parallel.patch_pipeline_model",
+            side_effect=lambda model, *a, **kw: model,
+        ):
+            from exo.worker.engines.mlx.auto_parallel import (
+                hybrid_auto_parallel,
+                _HybridPipelineLastLayer,
+                PipelineLastLayer,
+            )
+            result = hybrid_auto_parallel(model, group, shard)
+
+        last_layer = result.model.layers[-1]
+        assert not isinstance(last_layer, PipelineLastLayer), (
+            "PP tail must NOT use PipelineLastLayer (all_gather deadlocks in hybrid mode)"
+        )
+        assert isinstance(last_layer, _HybridPipelineLastLayer), (
+            "PP tail's last layer must be _HybridPipelineLastLayer with explicit sends"
+        )
+        # PP tail (rank=2) should send to all other ranks: [0, 1]
+        assert sorted(last_layer.send_to) == [0, 1], (
+            f"PP tail should send to all other ranks, got {last_layer.send_to}"
         )
 
     def test_tp_follower_no_pipeline_wrappers(self):

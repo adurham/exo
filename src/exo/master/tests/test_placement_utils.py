@@ -253,7 +253,7 @@ def test_get_shard_assignments(
     selected_cycle = next(cycle for cycle in cycles if len(cycle) == 3)
 
     # act
-    shard_assignments = get_shard_assignments(
+    shard_assignments, _ = get_shard_assignments(
         model_card, selected_cycle, Sharding.Pipeline, node_memory=node_memory
     )
 
@@ -493,7 +493,7 @@ def test_get_shard_assignments_insufficient_memory_raises():
     with pytest.raises(ValueError, match="insufficient memory"):
         get_shard_assignments(
             model_card, selected_cycle, Sharding.Pipeline, node_memory
-        )
+        )[0]  # Only need shard_assignments, not the optional cycle
 
 
 class TestCfgParallelPlacement:
@@ -729,7 +729,7 @@ class TestHybridParallelPlacement:
             macbook: create_node_memory(64_000 * 1024),   # 64 GB
         }
 
-        assignments = get_shard_assignments_for_hybrid_parallel(
+        assignments, reordered_cycle = get_shard_assignments_for_hybrid_parallel(
             self._make_model_card(80), cycle, node_memory
         )
 
@@ -760,6 +760,14 @@ class TestHybridParallelPlacement:
         assert mb_shard.tp_size == 0
         assert mb_shard.tp_rank == -1
 
+        # TP nodes must have lower ranks than PP nodes
+        assert s1_shard.device_rank < mb_shard.device_rank
+        assert s2_shard.device_rank < mb_shard.device_rank
+
+        # Reordered cycle should have TP nodes first, PP tail last
+        assert reordered_cycle.node_ids[:2] == [studio1, studio2]
+        assert reordered_cycle.node_ids[2] == macbook
+
     def test_3_node_hybrid_layer_ranges_disjoint(self):
         """TP group and PP tail should have non-overlapping, covering layer ranges."""
         studio1 = NodeId()
@@ -776,7 +784,7 @@ class TestHybridParallelPlacement:
             macbook: create_node_memory(64_000 * 1024),
         }
 
-        assignments = get_shard_assignments_for_hybrid_parallel(
+        assignments, _ = get_shard_assignments_for_hybrid_parallel(
             self._make_model_card(80), cycle, node_memory
         )
 
@@ -817,7 +825,7 @@ class TestHybridParallelPlacement:
             macbook: create_node_memory(64_000 * 1024),
         }
 
-        assignments = get_shard_assignments_for_hybrid_parallel(
+        assignments, _ = get_shard_assignments_for_hybrid_parallel(
             self._make_model_card(80), cycle, node_memory
         )
 
@@ -858,7 +866,7 @@ class TestHybridParallelPlacement:
             macbook: create_node_memory(64_000 * 1024),
         }
 
-        assignments = get_shard_assignments_for_hybrid_parallel(
+        assignments, _ = get_shard_assignments_for_hybrid_parallel(
             self._make_model_card(80), cycle, node_memory
         )
 
@@ -906,7 +914,7 @@ class TestHybridParallelPlacement:
             macbook: create_node_memory(64_000 * 1024),
         }
 
-        assignments = get_shard_assignments_for_hybrid_parallel(
+        assignments, _ = get_shard_assignments_for_hybrid_parallel(
             self._make_model_card(80), cycle, node_memory
         )
 
@@ -961,10 +969,13 @@ class TestHybridParallelPlacement:
             macbook: create_node_memory(64_000 * 1024),
         }
 
-        assignments = get_shard_assignments(
+        assignments, reordered_cycle = get_shard_assignments(
             self._make_model_card(80), cycle, Sharding.Hybrid, node_memory
         )
 
         # Should produce HybridShardMetadata
         for shard in assignments.runner_to_shard.values():
             assert isinstance(shard, HybridShardMetadata)
+
+        # Hybrid mode should return a reordered cycle
+        assert reordered_cycle is not None
