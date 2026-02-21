@@ -516,6 +516,21 @@ def generate_step(
             logprobs = logits - mx.logsumexp(logits, keepdims=True)
             sampled = sampler(logprobs)
 
+            # Hybrid pipeline token sync: TP nodes have incomplete layers and
+            # produce garbage logits. Only the PP tail has correct logits.
+            # Sync the sampled token from PP tail to all nodes via all_sum.
+            hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
+            if hybrid_group is not None:
+                is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
+                if is_pp_tail:
+                    # PP tail contributes its (correct) sampled token
+                    contribution = sampled
+                else:
+                    # TP nodes contribute zero — their logits are garbage
+                    contribution = mx.zeros_like(sampled)
+                sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                mx.eval(sampled)
+
             return sampled, logprobs.squeeze(0)
 
     with mx.stream(generation_stream):
