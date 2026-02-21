@@ -590,14 +590,7 @@ def get_mlx_jaccl_coordinators(
 
     def get_ip_for_node(n: NodeId) -> str:
         if n == coordinator:
-            # Use specific IP instead of 0.0.0.0 to avoid potential binding issues
-            network_info = node_network.get(coordinator, NodeNetworkInfo())
-            
-            # Prioritize Thunderbolt > Ethernet > WiFi
-            for iface_type in ["thunderbolt", "ethernet", "maybe_ethernet", "wifi"]:
-                for iface in network_info.interfaces:
-                    if iface.interface_type == iface_type and iface.ip_address and ":" not in iface.ip_address: # IPv4
-                         return iface.ip_address
+            # The coordinator itself should bind to all interfaces
             return "0.0.0.0"
 
         ip = _find_ip_prioritised(n, coordinator, cycle_digraph, node_network)
