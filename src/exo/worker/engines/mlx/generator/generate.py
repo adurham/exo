@@ -481,16 +481,29 @@ def generate_step(
         
         return out
 
+    _step_counter = [0]
+
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
         nonlocal tokens
+        import time as _t
+        _step_id = _step_counter[0]
+        _step_counter[0] += 1
+
+        _hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
+        _rank = _hybrid_group.rank() if _hybrid_group is not None else '?'
+        _is_pp = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
 
         with mx.stream(generation_stream):
+            _t0 = _t.perf_counter()
+            logger.info(f"[STEP {_step_id}] rank={_rank} pp_tail={_is_pp} entering _model_call tokens={input_tokens.shape}")
             logits = _model_call(
                 input_tokens=input_tokens[None],
                 input_embeddings=(
                     input_embeddings[None] if input_embeddings is not None else None
                 ),
             )
+            _t1 = _t.perf_counter()
+            logger.info(f"[STEP {_step_id}] rank={_rank} _model_call returned in {(_t1-_t0)*1000:.0f}ms logits.shape={logits.shape}")
 
             # Robust reshaping for 2D logits
             # If (Seq, Vocab) where Seq == input_tokens.shape[0], unsqueeze batch dim 0
@@ -528,8 +541,13 @@ def generate_step(
                 else:
                     # TP nodes contribute zero — their logits are garbage
                     contribution = mx.zeros_like(sampled)
+                _t2 = _t.perf_counter()
+                logger.info(f"[STEP {_step_id}] rank={_rank} entering token sync all_sum (is_pp_tail={is_pp_tail}) sample_time={(_t2-_t1)*1000:.0f}ms")
                 sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                logger.info(f"[STEP {_step_id}] rank={_rank} all_sum submitted, calling mx.eval(sampled)...")
                 mx.eval(sampled)
+                _t3 = _t.perf_counter()
+                logger.info(f"[STEP {_step_id}] rank={_rank} token sync done in {(_t3-_t2)*1000:.0f}ms, token={sampled.item()}")
 
             return sampled, logprobs.squeeze(0)
 
