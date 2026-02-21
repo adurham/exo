@@ -673,17 +673,16 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
             logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {target}, shape={output.shape}, prefill={self.is_prefill}")
             output = mx.distributed.send(output, target, group=self.group)
 
-        # Force-eval sends synchronously so downstream nodes can recv.
-        # This is safe because all TP all-reduce ops have already completed
-        # (this is the LAST layer). Without this, decode gets a circular
-        # dependency: TP master send -> PP tail recv/process/send -> TP recv,
-        # but the lazy graph includes both send AND recv, deadlocking.
-        if self.send_to:
+        if self.is_prefill:
+            # During prefill, force-eval the send synchronously because the
+            # generate loop evals cache states individually per layer.
             mx.eval(output)
-
-        if not self.is_prefill and self.decode_recv_from is not None:
+        elif self.decode_recv_from is not None:
             # During decode, TP nodes receive the PP tail's final hidden states.
             # This replaces our intermediate output so lm_head gets correct input.
+            # Both send and recv stay lazy — mx.async_eval in the generate loop
+            # submits the full dependency graph across all ranks at once, letting
+            # the GPU resolve: TP layers -> send -> PP recv -> PP layers -> PP send -> TP recv.
             output = mx.distributed.recv_like(output, self.decode_recv_from, group=self.group)
 
         return output
