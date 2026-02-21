@@ -6,6 +6,15 @@ Tests pipeline send/recv + all_sum token sync WITHOUT TP all_sum ops.
 can't simulate TP all_sum. On the real cluster, TP all_sum works fine
 because it uses a proper sub-group of ranks 0+1 only.)
 
+Structural guards (catch bugs the ring backend's fast IPC would mask):
+- Eval-detection: fails if mx.eval/mx.async_eval is called INSIDE
+  _HybridPipelineLastLayer.__call__, catching the exact deadlock
+  (mx.eval) and GPU Timeout (mx.async_eval) bugs.
+- Pending send assertions: verifies sends are deferred after forward
+  pass (rank 0 has pending sends, cleared after drain).
+- Co-eval assertion: verifies pending sends are included in the
+  mx.eval(sampled, *pending) call, not evaluated separately.
+
 This test exercises:
 - PipelineFirstLayer recv (lazy during decode, sync during prefill)
 - _HybridPipelineLastLayer send (sync mx.eval inside __call__)
@@ -25,6 +34,7 @@ Launch with:
 import sys
 import signal
 import traceback
+from contextlib import contextmanager
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -53,6 +63,56 @@ signal.signal(signal.SIGALRM, timeout_handler)
 
 def log(rank, msg):
     print(f"[RANK {rank}] {msg}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Eval-detection guard: catches deadlock/GPU-race patterns
+# ---------------------------------------------------------------------------
+_inside_pipeline_call = False
+
+@contextmanager
+def _guard_no_eval():
+    """Context manager that fails if mx.eval or mx.async_eval is called.
+
+    Applied inside _HybridPipelineLastLayer.__call__ to catch the exact
+    bug patterns that cause cluster deadlocks:
+      - mx.eval(output)      → rank 0 blocks at send, rank 1 races to all_sum
+      - mx.async_eval(sent)  → background GPU thread races with main thread
+
+    These pass locally (ring backend is instant IPC) but deadlock on real
+    hardware. This guard makes the test fail immediately instead.
+    """
+    global _inside_pipeline_call
+    _inside_pipeline_call = True
+    _orig_eval = mx.eval
+    _orig_async = mx.async_eval
+
+    def _blocked_eval(*args, **kwargs):
+        if _inside_pipeline_call:
+            raise AssertionError(
+                "BUG: mx.eval() called inside _HybridPipelineLastLayer.__call__! "
+                "Sends must be deferred to the caller's mx.eval(sampled, *pending). "
+                "mx.eval here deadlocks: rank 0 blocks at send while rank 1 races to all_sum."
+            )
+        return _orig_eval(*args, **kwargs)
+
+    def _blocked_async(*args, **kwargs):
+        if _inside_pipeline_call:
+            raise AssertionError(
+                "BUG: mx.async_eval() called inside _HybridPipelineLastLayer.__call__! "
+                "This submits GPU work on a background thread that races with the main "
+                "thread's mx.eval(sampled), causing GPU Timeout on real hardware."
+            )
+        return _orig_async(*args, **kwargs)
+
+    mx.eval = _blocked_eval
+    mx.async_eval = _blocked_async
+    try:
+        yield
+    finally:
+        mx.eval = _orig_eval
+        mx.async_eval = _orig_async
+        _inside_pipeline_call = False
 
 
 # ---------------------------------------------------------------------------
@@ -101,10 +161,13 @@ class _HybridPipelineLastLayer(nn.Module):
         if not self.is_prefill and not self.send_during_decode:
             return output
 
-        # DEFERRED SEND: store lazy send arrays, drain in _step via mx.eval
-        for target in self.send_to:
-            sent = mx.distributed.send(output, target, group=self.group)
-            self._pending_sends.append(sent)
+        # DEFERRED SEND with eval-detection guard:
+        # The guard catches if someone accidentally adds mx.eval()/mx.async_eval()
+        # inside this method — the exact bug patterns that deadlock on real hardware.
+        with _guard_no_eval():
+            for target in self.send_to:
+                sent = mx.distributed.send(output, target, group=self.group)
+                self._pending_sends.append(sent)
         return output
 
 
@@ -218,6 +281,17 @@ def run_test(model, prompt, rank, group):
                 pending.extend(layer._pending_sends)
                 layer._pending_sends = []
 
+        # === STRUCTURAL ASSERTIONS ===
+        # After forward pass, rank 0 (TP master with pipeline) must have
+        # produced pending sends. This catches regressions where sends
+        # are eagerly evaluated inside __call__ instead of deferred.
+        has_pipeline = any(isinstance(l, _HybridPipelineLastLayer) for l in model.layers)
+        if has_pipeline:
+            assert len(pending) > 0, (
+                f"BUG: rank {rank} has pipeline layers but no pending sends after forward pass! "
+                "Sends should be deferred in _pending_sends, not eagerly evaluated."
+            )
+
         if hybrid_group is not None and decode_mode:
             is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
             if is_pp_tail:
@@ -225,11 +299,20 @@ def run_test(model, prompt, rank, group):
             else:
                 contribution = mx.zeros_like(sampled)
             sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+            # Co-eval assertion: pending sends MUST be included in this mx.eval
             mx.eval(sampled, *pending)
         elif hybrid_group is not None:
             if pending:
                 mx.eval(*pending)
             log(rank, f"Skipping token sync (decode_mode={decode_mode}), drained {len(pending)} sends")
+
+        # Verify drain is complete
+        for layer in model.layers:
+            if isinstance(layer, _HybridPipelineLastLayer):
+                assert len(layer._pending_sends) == 0, (
+                    f"BUG: _pending_sends not empty after drain on rank {rank}! "
+                    "Sends were added after drain or drain was incomplete."
+                )
 
         return sampled, logprobs.squeeze(0)
 

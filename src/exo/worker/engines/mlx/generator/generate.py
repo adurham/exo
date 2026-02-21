@@ -483,9 +483,14 @@ def generate_step(
 
     def _drain_pending_sends():
         """Collect and clear any deferred sends from _HybridPipelineLastLayer."""
-        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, _get_layers
         pending = []
-        for layer in getattr(model, 'layers', []):
+        inner_model = getattr(model, 'model', model)
+        try:
+            layers = _get_layers(inner_model)
+        except ValueError:
+            layers = []
+        for layer in layers:
             if isinstance(layer, _HybridPipelineLastLayer):
                 pending.extend(layer._pending_sends)
                 layer._pending_sends = []
