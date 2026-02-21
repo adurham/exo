@@ -520,21 +520,6 @@ def generate_step(
             sampled = sampler(logprobs)
             logger.info("DEBUG: Returned from sampler")
 
-            # Hybrid TP+PP token sync: only the PP tail has the correct token
-            # (it processes the final layers). TP nodes produce garbage from
-            # partial layer output. Broadcast correct token via all_sum:
-            # PP tail contributes its token, others contribute zero.
-            # ONLY during decode — during prefill the sampled token is unused
-            # and the all_sum collective desynchronizes nodes.
-            if _decode_mode:
-                _sync_group = getattr(model, '_hybrid_token_sync_group', None)
-                if _sync_group is not None:
-                    _is_pp_tail = getattr(model, '_hybrid_is_pp_tail', False)
-                    if _is_pp_tail:
-                        sampled = mx.distributed.all_sum(sampled, group=_sync_group)
-                    else:
-                        sampled = mx.distributed.all_sum(mx.zeros_like(sampled), group=_sync_group)
-
             return sampled, logprobs.squeeze(0)
 
     with mx.stream(generation_stream):
@@ -604,23 +589,12 @@ def generate_step(
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
 
-    # Switch to decode mode — token sync all_sum is now active
-    _decode_mode = True
-
-    # In hybrid TP+PP mode, cross-node ops (TP all-reduce, pipeline send/recv,
-    # token sync all_sum) deadlock if two token graphs are pipelined via async_eval.
-    # Use synchronous eval to keep all nodes in lockstep.
-    _is_hybrid = getattr(model, '_hybrid_token_sync_group', None) is not None
-
     mx.async_eval(y, logprobs)
     n = 0
     while True:
         if n != max_tokens:
             next_y, next_logprobs = _step(y)
-            if _is_hybrid:
-                mx.eval(next_y, next_logprobs)
-            else:
-                mx.async_eval(next_y, next_logprobs)
+            mx.async_eval(next_y, next_logprobs)
         if n == 0:
             mx.eval(y)
             prompt_progress_callback(total_prompt_tokens, total_prompt_tokens)
