@@ -91,6 +91,7 @@ class _HybridPipelineLastLayer(nn.Module):
         self.send_during_prefill = send_during_prefill
         self.send_during_decode = send_during_decode
         self.is_prefill = False
+        self._pending_sends = []
 
     def __call__(self, x, *args, **kwargs):
         output = self.original_layer(x, *args, **kwargs)
@@ -100,11 +101,10 @@ class _HybridPipelineLastLayer(nn.Module):
         if not self.is_prefill and not self.send_during_decode:
             return output
 
-        # Async send: fire-and-forget. Return original output so downstream
-        # ops (norm, lm_head, token sync) don't depend on send completion.
+        # DEFERRED SEND: store lazy send arrays, drain in _step via mx.eval
         for target in self.send_to:
             sent = mx.distributed.send(output, target, group=self.group)
-            mx.async_eval(sent)
+            self._pending_sends.append(sent)
         return output
 
 
@@ -210,6 +210,14 @@ def run_test(model, prompt, rank, group):
         # Token sync (generate.py lines 519-532) — only in decode mode
         hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
         decode_mode = getattr(model, '_hybrid_decode_mode', False)
+
+        # Drain deferred sends
+        pending = []
+        for layer in model.layers:
+            if isinstance(layer, _HybridPipelineLastLayer):
+                pending.extend(layer._pending_sends)
+                layer._pending_sends = []
+
         if hybrid_group is not None and decode_mode:
             is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
             if is_pp_tail:
@@ -217,9 +225,11 @@ def run_test(model, prompt, rank, group):
             else:
                 contribution = mx.zeros_like(sampled)
             sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-            mx.eval(sampled)
+            mx.eval(sampled, *pending)
         elif hybrid_group is not None:
-            log(rank, f"Skipping token sync (decode_mode={decode_mode})")
+            if pending:
+                mx.eval(*pending)
+            log(rank, f"Skipping token sync (decode_mode={decode_mode}), drained {len(pending)} sends")
 
         return sampled, logprobs.squeeze(0)
 
@@ -232,8 +242,13 @@ def run_test(model, prompt, rank, group):
     if len(prompt) > 1:
         prefill_tokens = prompt[:-1]
         _model_call(prefill_tokens[None])
-        # Force eval prefill (like generate.py line 566: mx.eval(_c.state))
-        mx.eval(model.parameters())
+        # Drain pending sends alongside prefill eval
+        prefill_pending = []
+        for layer in model.layers:
+            if isinstance(layer, _HybridPipelineLastLayer):
+                prefill_pending.extend(layer._pending_sends)
+                layer._pending_sends = []
+        mx.eval(model.parameters(), *prefill_pending)
 
     # Last prefill token via _step (generate.py line 601)
     y, logprobs = _step(prompt[-1:])

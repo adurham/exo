@@ -481,6 +481,16 @@ def generate_step(
         
         return out
 
+    def _drain_pending_sends():
+        """Collect and clear any deferred sends from _HybridPipelineLastLayer."""
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer
+        pending = []
+        for layer in getattr(model, 'layers', []):
+            if isinstance(layer, _HybridPipelineLastLayer):
+                pending.extend(layer._pending_sends)
+                layer._pending_sends = []
+        return pending
+
     _step_counter = [0]
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
@@ -549,12 +559,20 @@ def generate_step(
                 _t2 = _t.perf_counter()
                 logger.info(f"[STEP {_step_id}] rank={_rank} entering token sync all_sum (is_pp_tail={is_pp_tail}) sample_time={(_t2-_t1)*1000:.0f}ms")
                 sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-                logger.info(f"[STEP {_step_id}] rank={_rank} all_sum submitted, calling mx.eval(sampled)...")
-                mx.eval(sampled)
+                # Drain deferred sends alongside sampled token eval — single mx.eval
+                # ensures the send, TP all_sums, recv, and all_sum(full_group) are
+                # all resolved in the same GPU submission, avoiding deadlock.
+                _pending = _drain_pending_sends()
+                logger.info(f"[STEP {_step_id}] rank={_rank} all_sum submitted + {len(_pending)} pending sends, calling mx.eval...")
+                mx.eval(sampled, *_pending)
                 _t3 = _t.perf_counter()
                 logger.info(f"[STEP {_step_id}] rank={_rank} token sync done in {(_t3-_t2)*1000:.0f}ms, token={sampled.item()}")
             elif hybrid_group is not None:
-                logger.info(f"[STEP {_step_id}] rank={_rank} skipping token sync (decode_mode={decode_mode})")
+                # During warmup: still drain pending sends
+                _pending = _drain_pending_sends()
+                if _pending:
+                    mx.eval(*_pending)
+                logger.info(f"[STEP {_step_id}] rank={_rank} skipping token sync (decode_mode={decode_mode}), drained {len(_pending)} sends")
 
             return sampled, logprobs.squeeze(0)
 
@@ -586,9 +604,15 @@ def generate_step(
             # Detailed eval timing breakdown
             _num_caches = len(prompt_cache)
             _cache_eval_times = []
+            _prefill_pending = _drain_pending_sends()
             for _ci, _c in enumerate(prompt_cache):
                 _ce0 = _time.perf_counter()
-                mx.eval(_c.state)
+                if _ci == 0 and _prefill_pending:
+                    # Drain deferred sends alongside first cache layer eval
+                    mx.eval(_c.state, *_prefill_pending)
+                    _prefill_pending = []
+                else:
+                    mx.eval(_c.state)
                 _ce1 = _time.perf_counter()
                 _cache_eval_times.append((_ce1 - _ce0) * 1000)
             _t3 = _time.perf_counter()

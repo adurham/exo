@@ -651,6 +651,7 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         self.send_during_decode = send_during_decode
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
+        self._pending_sends: list[mx.array] = []
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         output: mx.array = self.original_layer(x, *args, **kwargs)
@@ -661,17 +662,19 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         if not self.is_prefill and not self.send_during_decode:
             return output
 
-        # Send to each explicit target rank (no collective needed).
-        # IMPORTANT: We fire the send asynchronously and return the ORIGINAL
-        # output (not the send result). This prevents downstream ops (norm,
-        # lm_head, token sync all_sum) from depending on the send's completion.
-        # Without this, rank 0 blocks at mx.eval(output) waiting for rank 2's
-        # recv, while rank 1 races ahead to all_sum(full_group), causing a
-        # deadlock (rank 0 can't reach all_sum until send completes).
+        # DEFERRED SEND: Create lazy send arrays but do NOT eval them here.
+        # Store them so the caller (generate_step) can include them in a
+        # single mx.eval() alongside sampled tokens and token sync.
+        #
+        # Why not mx.eval(output) or mx.async_eval(sent)?
+        #   - mx.eval(output) blocks rank 0 at send (waiting for rank 2's recv)
+        #     while rank 1 races ahead to all_sum(full_group) → deadlock
+        #   - mx.async_eval(sent) submits TP all_sums on a background thread,
+        #     then mx.eval(sampled) re-submits them on the main thread → GPU Timeout
         for target in self.send_to:
             logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {target}, shape={output.shape}, prefill={self.is_prefill}")
             sent = mx.distributed.send(output, target, group=self.group)
-            mx.async_eval(sent)
+            self._pending_sends.append(sent)
 
         return output
 
