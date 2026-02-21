@@ -470,6 +470,7 @@ def generate_step(
     )
 
     sampler = sampler or (lambda x: mx.argmax(x, axis=-1))
+    _decode_mode = False  # Token sync only during decode, not prefill
     def _model_call(input_tokens: mx.array, input_embeddings: Optional[mx.array]):
         if input_embeddings is not None:
             out = model(
@@ -481,7 +482,7 @@ def generate_step(
         return out
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
-        nonlocal tokens
+        nonlocal tokens, _decode_mode
 
         with mx.stream(generation_stream):
             logits = _model_call(
@@ -523,13 +524,16 @@ def generate_step(
             # (it processes the final layers). TP nodes produce garbage from
             # partial layer output. Broadcast correct token via all_sum:
             # PP tail contributes its token, others contribute zero.
-            _sync_group = getattr(model, '_hybrid_token_sync_group', None)
-            if _sync_group is not None:
-                _is_pp_tail = getattr(model, '_hybrid_is_pp_tail', False)
-                if _is_pp_tail:
-                    sampled = mx.distributed.all_sum(sampled, group=_sync_group)
-                else:
-                    sampled = mx.distributed.all_sum(mx.zeros_like(sampled), group=_sync_group)
+            # ONLY during decode — during prefill the sampled token is unused
+            # and the all_sum collective desynchronizes nodes.
+            if _decode_mode:
+                _sync_group = getattr(model, '_hybrid_token_sync_group', None)
+                if _sync_group is not None:
+                    _is_pp_tail = getattr(model, '_hybrid_is_pp_tail', False)
+                    if _is_pp_tail:
+                        sampled = mx.distributed.all_sum(sampled, group=_sync_group)
+                    else:
+                        sampled = mx.distributed.all_sum(mx.zeros_like(sampled), group=_sync_group)
 
             return sampled, logprobs.squeeze(0)
 
@@ -599,6 +603,9 @@ def generate_step(
         mx.clear_cache()
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
+
+    # Switch to decode mode — token sync all_sum is now active
+    _decode_mode = True
 
     # In hybrid TP+PP mode, cross-node ops (TP all-reduce, pipeline send/recv,
     # token sync all_sum) deadlock if two token graphs are pipelined via async_eval.
