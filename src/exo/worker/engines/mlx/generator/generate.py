@@ -600,12 +600,20 @@ def generate_step(
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
 
+    # In hybrid TP+PP mode, cross-node ops (TP all-reduce, pipeline send/recv,
+    # token sync all_sum) deadlock if two token graphs are pipelined via async_eval.
+    # Use synchronous eval to keep all nodes in lockstep.
+    _is_hybrid = getattr(model, '_hybrid_token_sync_group', None) is not None
+
     mx.async_eval(y, logprobs)
     n = 0
     while True:
         if n != max_tokens:
             next_y, next_logprobs = _step(y)
-            mx.async_eval(next_y, next_logprobs)
+            if _is_hybrid:
+                mx.eval(next_y, next_logprobs)
+            else:
+                mx.async_eval(next_y, next_logprobs)
         if n == 0:
             mx.eval(y)
             prompt_progress_callback(total_prompt_tokens, total_prompt_tokens)
