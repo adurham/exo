@@ -596,6 +596,7 @@ def hybrid_auto_parallel(
             shard_meta.world_size,
             group=group,
             send_to=other_ranks,
+            send_during_prefill=False,  # TP nodes have no matching recv during prefill
         )
 
     _set_layers(model, layers)
@@ -610,6 +611,12 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
     group members), this layer uses point-to-point send() to each target.
     This avoids deadlocks in hybrid mode where not all nodes have matching
     collective calls.
+
+    Args:
+        send_during_prefill: If False, sends are skipped during prefill (used by
+            the PP tail, since TP nodes have no matching recv during prefill).
+            If True, sends happen during both prefill and decode (used by the
+            TP master to forward activations to the PP tail).
     """
 
     def __init__(
@@ -619,17 +626,24 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         s: int,
         group: mx.distributed.Group,
         send_to: list[int],
+        send_during_prefill: bool = True,
     ):
         super().__init__(original_layer)
         self.r = r
         self.s = s
         self.group = group
         self.send_to = send_to
+        self.send_during_prefill = send_during_prefill
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         output: mx.array = self.original_layer(x, *args, **kwargs)
+
+        # Skip sends during prefill if this layer shouldn't send then
+        # (PP tail has no matching recv on TP nodes during prefill)
+        if self.is_prefill and not self.send_during_prefill:
+            return output
 
         # Send to each explicit target rank (no collective needed)
         for target in self.send_to:
