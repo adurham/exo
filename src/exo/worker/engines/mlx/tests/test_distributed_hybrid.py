@@ -100,9 +100,11 @@ class _HybridPipelineLastLayer(nn.Module):
         if not self.is_prefill and not self.send_during_decode:
             return output
 
+        # Async send: fire-and-forget. Return original output so downstream
+        # ops (norm, lm_head, token sync) don't depend on send completion.
         for target in self.send_to:
-            output = mx.distributed.send(output, target, group=self.group)
-        mx.eval(output)
+            sent = mx.distributed.send(output, target, group=self.group)
+            mx.async_eval(sent)
         return output
 
 
@@ -173,9 +175,10 @@ def setup_model(rank, group):
         )
         log(rank, f"PP tail: {len(model.layers)} layers, recv from rank 0")
 
-    # Store hybrid pipeline metadata (matches auto_parallel.py lines 610-611)
+    # Store hybrid pipeline metadata (matches auto_parallel.py)
     model._hybrid_pipeline_group = group
     model._hybrid_pipeline_is_pp_tail = (rank == 2)
+    model._hybrid_decode_mode = False  # Starts False; toggled by set_pipeline_prefill
 
     return model
 
@@ -204,9 +207,10 @@ def run_test(model, prompt, rank, group):
         logprobs = logits - mx.logsumexp(logits, keepdims=True)
         sampled = mx.argmax(logprobs, axis=-1)
 
-        # Token sync (generate.py lines 519-532)
+        # Token sync (generate.py lines 519-532) — only in decode mode
         hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
-        if hybrid_group is not None:
+        decode_mode = getattr(model, '_hybrid_decode_mode', False)
+        if hybrid_group is not None and decode_mode:
             is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
             if is_pp_tail:
                 contribution = sampled
@@ -214,6 +218,8 @@ def run_test(model, prompt, rank, group):
                 contribution = mx.zeros_like(sampled)
             sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
             mx.eval(sampled)
+        elif hybrid_group is not None:
+            log(rank, f"Skipping token sync (decode_mode={decode_mode})")
 
         return sampled, logprobs.squeeze(0)
 
@@ -232,6 +238,7 @@ def run_test(model, prompt, rank, group):
     # Last prefill token via _step (generate.py line 601)
     y, logprobs = _step(prompt[-1:])
     set_pipeline_prefill(model, False)
+    model._hybrid_decode_mode = True  # Enable token sync for decode
 
     log(rank, f"Prefill complete, first token={y.item()}")
     signal.alarm(0)

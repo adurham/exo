@@ -209,6 +209,9 @@ def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, _HybridPipelineLastLayer)):
             layer.is_prefill = is_prefill
+    # Toggle hybrid decode mode: token sync only runs during decode (is_prefill=False)
+    if hasattr(model, '_hybrid_pipeline_group'):
+        model._hybrid_decode_mode = not is_prefill  # type: ignore
 
 
 def set_pipeline_cache(model: nn.Module, prompt_cache: list) -> None:  # type: ignore
@@ -609,6 +612,7 @@ def hybrid_auto_parallel(
     is_pp_tail = shard_meta.pp_rank == shard_meta.pp_size - 1
     model._hybrid_pipeline_group = group  # type: ignore
     model._hybrid_pipeline_is_pp_tail = is_pp_tail  # type: ignore
+    model._hybrid_decode_mode = False  # type: ignore  # Starts as False; set_pipeline_prefill toggles it
 
     return patch_pipeline_model(model, group)
 
@@ -657,14 +661,17 @@ class _HybridPipelineLastLayer(CustomMlxLayer):
         if not self.is_prefill and not self.send_during_decode:
             return output
 
-        # Send to each explicit target rank (no collective needed)
+        # Send to each explicit target rank (no collective needed).
+        # IMPORTANT: We fire the send asynchronously and return the ORIGINAL
+        # output (not the send result). This prevents downstream ops (norm,
+        # lm_head, token sync all_sum) from depending on the send's completion.
+        # Without this, rank 0 blocks at mx.eval(output) waiting for rank 2's
+        # recv, while rank 1 races ahead to all_sum(full_group), causing a
+        # deadlock (rank 0 can't reach all_sum until send completes).
         for target in self.send_to:
             logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {target}, shape={output.shape}, prefill={self.is_prefill}")
-            output = mx.distributed.send(output, target, group=self.group)
-
-        # Force-eval sends synchronously. During decode, TP nodes have no
-        # pipeline recv so the graph is simple: TP layers -> send. Safe to eval.
-        mx.eval(output)
+            sent = mx.distributed.send(output, target, group=self.group)
+            mx.async_eval(sent)
 
         return output
 

@@ -532,8 +532,13 @@ def generate_step(
             # Hybrid pipeline token sync: TP nodes have incomplete layers and
             # produce garbage logits. Only the PP tail has correct logits.
             # Sync the sampled token from PP tail to all nodes via all_sum.
+            # IMPORTANT: Only run during decode mode. During warmup (is_prefill=True),
+            # the pipeline send/recv handles data flow, and running all_sum(full_group)
+            # here would deadlock: rank 1 reaches all_sum while rank 0 is blocked
+            # in mx.eval(output) at _HybridPipelineLastLayer (waiting for rank 2's recv).
             hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
-            if hybrid_group is not None:
+            decode_mode = getattr(model, '_hybrid_decode_mode', False)
+            if hybrid_group is not None and decode_mode:
                 is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
                 if is_pp_tail:
                     # PP tail contributes its (correct) sampled token
@@ -548,6 +553,8 @@ def generate_step(
                 mx.eval(sampled)
                 _t3 = _t.perf_counter()
                 logger.info(f"[STEP {_step_id}] rank={_rank} token sync done in {(_t3-_t2)*1000:.0f}ms, token={sampled.item()}")
+            elif hybrid_group is not None:
+                logger.info(f"[STEP {_step_id}] rank={_rank} skipping token sync (decode_mode={decode_mode})")
 
             return sampled, logprobs.squeeze(0)
 
