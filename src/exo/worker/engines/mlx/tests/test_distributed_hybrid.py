@@ -34,10 +34,18 @@ Launch with:
 import sys
 import signal
 import traceback
+import pathlib
 from contextlib import contextmanager
 
 import mlx.core as mx
 import mlx.nn as nn
+
+def _get_layers(inner_model_instance: nn.Module) -> list:
+    if hasattr(inner_model_instance, "layers"):
+        return inner_model_instance.layers
+    elif hasattr(inner_model_instance, "h"):
+        return inner_model_instance.h
+    raise ValueError("Model must have either a 'layers' or 'h' attribute")
 
 # ---------------------------------------------------------------------------
 # Config
@@ -172,7 +180,12 @@ class _HybridPipelineLastLayer(nn.Module):
 
 
 def set_pipeline_prefill(model, is_prefill):
-    for layer in model.layers:
+    inner_model = getattr(model, 'model', model)
+    try:
+        layers = _get_layers(inner_model)
+    except ValueError:
+        layers = []
+    for layer in layers:
         if hasattr(layer, 'is_prefill'):
             layer.is_prefill = is_prefill
 
@@ -190,19 +203,29 @@ class SimpleLayer(nn.Module):
         return self.linear(x)
 
 
-class SimpleModel(nn.Module):
+class SimpleInnerModel(nn.Module):
     def __init__(self, n_layers, dim, vocab_size):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, dim)
         self.layers = [SimpleLayer(dim, i) for i in range(n_layers)]
         self.norm = nn.RMSNorm(dim)
-        self.lm_head = nn.Linear(dim, vocab_size, bias=False)
 
     def __call__(self, x, cache=None, **kwargs):
         h = self.embed(x)
         for layer in self.layers:
             h = layer(h, **kwargs)
-        h = self.norm(h)
+        return self.norm(h)
+
+
+class SimpleModel(nn.Module):
+    def __init__(self, n_layers, dim, vocab_size):
+        super().__init__()
+        # Wrap in 'model' to mirror LlamaModel/QwenModel hierarchy
+        self.model = SimpleInnerModel(n_layers, dim, vocab_size)
+        self.lm_head = nn.Linear(dim, vocab_size, bias=False)
+
+    def __call__(self, x, cache=None, **kwargs):
+        h = self.model(x, cache=cache, **kwargs)
         return self.lm_head(h)
 
 
@@ -216,27 +239,27 @@ def setup_model(rank, group):
 
     if rank == 0:
         # TP master: layers 0-5, send to rank 2
-        model.layers = model.layers[:N_TP_LAYERS]
-        model.layers[-1] = _HybridPipelineLastLayer(
-            model.layers[-1], r=rank, s=group.size(), group=group,
+        model.model.layers = model.model.layers[:N_TP_LAYERS]
+        model.model.layers[-1] = _HybridPipelineLastLayer(
+            model.model.layers[-1], r=rank, s=group.size(), group=group,
             send_to=[2],
             send_during_prefill=True,
             send_during_decode=True,
         )
-        log(rank, f"TP master: {len(model.layers)} layers + send to rank 2")
+        log(rank, f"TP master: {len(model.model.layers)} layers + send to rank 2")
 
     elif rank == 1:
         # TP follower: layers 0-5, no pipeline
-        model.layers = model.layers[:N_TP_LAYERS]
-        log(rank, f"TP follower: {len(model.layers)} layers, no pipeline")
+        model.model.layers = model.model.layers[:N_TP_LAYERS]
+        log(rank, f"TP follower: {len(model.model.layers)} layers, no pipeline")
 
     elif rank == 2:
         # PP tail: layers 6-7, recv from rank 0, does NOT send during decode
-        model.layers = model.layers[N_TP_LAYERS:]
-        model.layers[0] = PipelineFirstLayer(
-            model.layers[0], r=rank, group=group, recv_from=0,
+        model.model.layers = model.model.layers[N_TP_LAYERS:]
+        model.model.layers[0] = PipelineFirstLayer(
+            model.model.layers[0], r=rank, group=group, recv_from=0,
         )
-        log(rank, f"PP tail: {len(model.layers)} layers, recv from rank 0")
+        log(rank, f"PP tail: {len(model.model.layers)} layers, recv from rank 0")
 
     # Store hybrid pipeline metadata (matches auto_parallel.py)
     model._hybrid_pipeline_group = group
@@ -274,9 +297,15 @@ def run_test(model, prompt, rank, group):
         hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
         decode_mode = getattr(model, '_hybrid_decode_mode', False)
 
-        # Drain deferred sends
+        # Drain deferred sends (exactly like generate.py)
         pending = []
-        for layer in model.layers:
+        inner_model = getattr(model, 'model', model)
+        try:
+            layers = _get_layers(inner_model)
+        except ValueError:
+            layers = []
+
+        for layer in layers:
             if isinstance(layer, _HybridPipelineLastLayer):
                 pending.extend(layer._pending_sends)
                 layer._pending_sends = []
@@ -285,7 +314,7 @@ def run_test(model, prompt, rank, group):
         # After forward pass, rank 0 (TP master with pipeline) must have
         # produced pending sends. This catches regressions where sends
         # are eagerly evaluated inside __call__ instead of deferred.
-        has_pipeline = any(isinstance(l, _HybridPipelineLastLayer) for l in model.layers)
+        has_pipeline = any(isinstance(l, _HybridPipelineLastLayer) for l in layers)
         if has_pipeline:
             assert len(pending) > 0, (
                 f"BUG: rank {rank} has pipeline layers but no pending sends after forward pass! "
@@ -307,7 +336,7 @@ def run_test(model, prompt, rank, group):
             log(rank, f"Skipping token sync (decode_mode={decode_mode}), drained {len(pending)} sends")
 
         # Verify drain is complete
-        for layer in model.layers:
+        for layer in layers:
             if isinstance(layer, _HybridPipelineLastLayer):
                 assert len(layer._pending_sends) == 0, (
                     f"BUG: _pending_sends not empty after drain on rank {rank}! "
@@ -327,7 +356,12 @@ def run_test(model, prompt, rank, group):
         _model_call(prefill_tokens[None])
         # Drain pending sends alongside prefill eval
         prefill_pending = []
-        for layer in model.layers:
+        inner_model = getattr(model, 'model', model)
+        try:
+            layers = _get_layers(inner_model)
+        except ValueError:
+            layers = []
+        for layer in layers:
             if isinstance(layer, _HybridPipelineLastLayer):
                 prefill_pending.extend(layer._pending_sends)
                 layer._pending_sends = []

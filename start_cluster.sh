@@ -157,6 +157,28 @@ if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_2_TO_MBP" &> /dev/null; then echo "ERROR
 
 echo "All 6 direct Thunderbolt links verified ✓"
 
+# RoCEv2 (RDMA) Protection Domain Allocation Check
+# A degraded Thunderbolt cable will pass `ping` (using USB-C fallback Ethernet), but fail to allocate
+# an RDMA Protection Domain, causing `jaccl` to instantly crash when Exo starts.
+echo "Verifying RoCEv2 (RDMA) support over Thunderbolt..."
+for NODE in macstudio-m4-1 macstudio-m4-2 macbook-m4; do
+    echo -n "  Testing RDMA allocation on $NODE... "
+    # We use `timeout 2` because a successful PD allocation will hang waiting for a coordinator.
+    # We run it within the uv environment to ensure mlx is available.
+    # If the Thunderbolt cable is degraded, allocating the Protection Domain crashes immediately.
+    RDMA_CHECK=$(ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && timeout 2 uv run python -c \"import mlx.core as mx; mx.distributed.init(strict=False, backend='\\''jaccl'\\'')\" 2>&1'" || true)
+    
+    if echo "$RDMA_CHECK" | grep -q "Couldn't allocate protection domain"; then
+        echo "FAIL ❌"
+        echo "CRITICAL ERROR: Failed to allocate RDMA Protection Domain on $NODE!"
+        echo "One of your Thunderbolt cables has fallen back to standard USB-C Ethernet."
+        echo "Please re-seat the cables on $NODE."
+        exit 1
+    else
+        echo "OK ✓"
+    fi
+done
+
 # Enable IP forwarding and add cross-subnet routes
 # Each node has 2 direct links, but needs a route for the 3rd subnet it's not on.
 echo "Enabling IP forwarding and configuring cross-subnet routes..."
