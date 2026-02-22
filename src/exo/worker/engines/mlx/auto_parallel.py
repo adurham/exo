@@ -43,6 +43,13 @@ from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
 
 from exo.shared.logging import logger
+import datetime as _dt
+
+def _dbg(msg: str) -> None:
+    """Write debug trace directly to file (bypasses loguru and subprocess stdout issues)."""
+    with open("/tmp/exo_tp_debug.log", "a") as f:
+        f.write(f"{_dt.datetime.now().isoformat()} {msg}\n")
+        f.flush()
 from exo.shared.types.worker.shards import PipelineShardMetadata
 
 if TYPE_CHECKING:
@@ -557,7 +564,9 @@ def hybrid_auto_parallel(
             f"Applying tensor parallelism (TP group size={tp_group.size()}, "
             f"TP rank={tp_group.rank()})"
         )
+        _dbg(f"Entering tensor_auto_parallel with tp_group rank={tp_group.rank()}, size={tp_group.size()}")
         model = tensor_auto_parallel(model, tp_group, timeout_seconds, on_timeout)
+        _dbg("tensor_auto_parallel completed")
         # Re-fetch layers after TP modified the model
         inner = _inner_model(model)
         layers = _get_layers(inner)
@@ -565,9 +574,12 @@ def hybrid_auto_parallel(
 
     # --- Step 3: Slice layers to this node's range ---
     start, end = shard_meta.start_layer, shard_meta.end_layer
+    _dbg(f"Slicing layers [{start}:{end}]")
     layers = all_layers[start:end]
-    for layer in layers:
+    for i, layer in enumerate(layers):
+        _dbg(f"mx.eval(layer[{start + i}]) starting")
         mx.eval(layer)  # type: ignore
+        _dbg(f"mx.eval(layer[{start + i}]) done")
 
     # --- Step 4: Pipeline wrapping ---
     # Recv from upstream (if we have a pipeline_recv_from)
@@ -998,10 +1010,12 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
         on_timeout: TimeoutCallback | None,
     ) -> nn.Module:
         model = cast(MiniMaxModel, model)
-        for layer in model.layers:
+        for li, layer in enumerate(model.layers):
+            _dbg(f"MiniMax shard layer {li}/{len(model.layers)}: eval_with_timeout starting")
             eval_with_timeout(
                 layer.parameters(), timeout_seconds / len(model.layers), on_timeout
             )
+            _dbg(f"MiniMax shard layer {li}/{len(model.layers)}: eval done, sharding attention")
             # Shard the self attention
             layer.self_attn.q_proj = self.all_to_sharded_linear(layer.self_attn.q_proj)
             layer.self_attn.k_proj = self.all_to_sharded_linear(layer.self_attn.k_proj)
@@ -1025,7 +1039,9 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
             )
             layer.block_sparse_moe = ShardedMoE(layer.block_sparse_moe)  # pyright: ignore[reportAttributeAccessIssue, reportArgumentType]
             layer.block_sparse_moe.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            _dbg(f"MiniMax shard layer {li}/{len(model.layers)}: mx.eval(layer) starting")
             mx.eval(layer)
+            _dbg(f"MiniMax shard layer {li}/{len(model.layers)}: mx.eval(layer) done")
         return model
 
 
