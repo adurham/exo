@@ -59,12 +59,6 @@ _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
 _DEFAULT_PREFILL_STEP_SIZE = 512 * 1024  # Single-shot prefill: minimize per-chunk overhead
 
-# Hybrid pipeline GPU timeout guard.  When the PP tail's recv waits for
-# the PP head's send, each prefill chunk boundary is a natural sync point.
-# Keep chunks small enough that the recv never approaches the ~60 s GPU
-# command-buffer timeout.  16 K tokens ≈ 43 s with a 54-layer TP split.
-_HYBRID_PREFILL_STEP_SIZE = 16384
-
 
 from mlx.utils import tree_reduce
 import contextlib
@@ -627,19 +621,6 @@ def generate_step(
         import time as _time
         _prefill_chunk_idx = 0
 
-        # Hybrid pipeline: clamp prefill_step_size to prevent GPU timeout.
-        # The PP tail's recv blocks on GPU until the PP head's send arrives.
-        # With single-shot prefill (512K tokens), the recv could wait ~50s+.
-        # Chunked prefill bounds the wait to ~12s per chunk (well under
-        # the ~60s GPU command-buffer timeout).  Each chunk boundary acts
-        # as a natural coordination/sync point between PP head and tail.
-        # IMPORTANT: use _hybrid_pipeline_group (set on ALL hybrid nodes,
-        # including TP followers) — not send_to/recv_from (only on head/tail).
-        # All TP nodes MUST use the same prefill_step_size or their
-        # intra-chunk all-reduces will desync → deadlock.
-        if getattr(model, '_hybrid_pipeline_group', None) is not None:
-            prefill_step_size = min(prefill_step_size, _HYBRID_PREFILL_STEP_SIZE)
-            logger.info(f"Hybrid pipeline: clamped prefill_step_size to {prefill_step_size} (GPU timeout guard)")
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
