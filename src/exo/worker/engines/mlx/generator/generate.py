@@ -633,9 +633,11 @@ def generate_step(
         # Chunked prefill bounds the wait to ~12s per chunk (well under
         # the ~60s GPU command-buffer timeout).  Each chunk boundary acts
         # as a natural coordination/sync point between PP head and tail.
-        _pp_recv_from = getattr(model, '_hybrid_pipeline_recv_from', None)
-        _pp_send_to = getattr(model, '_hybrid_pipeline_send_to', None)
-        if _pp_recv_from is not None or _pp_send_to is not None:
+        # IMPORTANT: use _hybrid_pipeline_group (set on ALL hybrid nodes,
+        # including TP followers) — not send_to/recv_from (only on head/tail).
+        # All TP nodes MUST use the same prefill_step_size or their
+        # intra-chunk all-reduces will desync → deadlock.
+        if getattr(model, '_hybrid_pipeline_group', None) is not None:
             prefill_step_size = min(prefill_step_size, _HYBRID_PREFILL_STEP_SIZE)
             logger.info(f"Hybrid pipeline: clamped prefill_step_size to {prefill_step_size} (GPU timeout guard)")
         while total_prompt_tokens - prompt_processed_tokens > 1:
