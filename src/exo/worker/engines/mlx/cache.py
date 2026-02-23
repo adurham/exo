@@ -296,7 +296,23 @@ def get_prefix_length(prompt: mx.array, cached_prompt: mx.array) -> int:
 
     equal = mx.equal(prompt[:n], cached_prompt[:n]).astype(mx.int32)
     prefix_mask = mx.cumprod(equal)  # stays 1 until first mismatch, then 0 forever
-    return int(mx.sum(prefix_mask).item())
+    prefix_len = int(mx.sum(prefix_mask).item())
+
+    # Log where the mismatch occurs for debugging
+    if prefix_len < n and prefix_len < len(prompt) - 1:
+        # Show a few tokens around the mismatch point
+        ctx_start = max(0, prefix_len - 3)
+        ctx_end = min(n, prefix_len + 5)
+        prompt_ctx = prompt[ctx_start:ctx_end].tolist()
+        cached_ctx = cached_prompt[ctx_start:ctx_end].tolist()
+        logger.info(
+            f"KV prefix mismatch at token {prefix_len}/{n} "
+            f"(prompt={len(prompt)}, cached={len(cached_prompt)}). "
+            f"Prompt tokens[{ctx_start}:{ctx_end}]: {prompt_ctx}, "
+            f"Cached tokens[{ctx_start}:{ctx_end}]: {cached_ctx}"
+        )
+
+    return prefix_len
 
 
 def get_available_memory() -> Memory:
