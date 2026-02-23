@@ -329,14 +329,19 @@ def get_shard_assignments_for_hybrid_parallel(
         raise ValueError("Total available memory is 0")
 
     total_layers = model_card.n_layers
-    tp_layers = round(total_layers * tp_memory_bytes / total_memory_bytes)
-    tp_layers = max(tp_layers, 1)
-    tp_layers = min(tp_layers, total_layers - len(pp_tail_node_ids))
-    pp_layers = total_layers - tp_layers
+
+    # Minimize PP tail layers to reduce pipeline sync wait.
+    # PP tail runs full-width (no TP) so each layer takes ~2× longer than
+    # on the TP group.  Every layer moved from PP tail to TP group saves
+    # ~1.6s of blocked wait.  Give PP tail exactly 1 layer per node
+    # (minimum to participate and contribute KV cache memory).
+    pp_layers = len(pp_tail_node_ids)  # 1 layer per PP tail node
+    tp_layers = total_layers - pp_layers
 
     logger.info(
         f"Hybrid placement: {tp_size} TP nodes × {tp_layers} shared layers, "
-        f"{len(pp_tail_node_ids)} PP tail node(s) × {pp_layers} layers"
+        f"{len(pp_tail_node_ids)} PP tail node(s) × {pp_layers} layers "
+        f"(compute-optimized: minimize PP tail for pipeline sync)"
     )
 
     # --- Build shard assignments ---
