@@ -1,3 +1,4 @@
+import os
 import time
 from copy import deepcopy
 import functools
@@ -611,22 +612,33 @@ def generate_step(
             quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
 
-            # Detailed eval timing breakdown
+            # Evaluate all cache states — batched for performance, per-layer for debug
             _num_caches = len(prompt_cache)
-            _cache_eval_times = []
             _prefill_pending = _drain_pending_sends()
-            for _ci, _c in enumerate(prompt_cache):
-                _ce0 = _time.perf_counter()
-                if _ci == 0 and _prefill_pending:
-                    # Drain deferred sends alongside first cache layer eval
-                    mx.eval(_c.state, *_prefill_pending)
-                    _prefill_pending = []
+            _prefill_debug = os.environ.get("EXO_PREFILL_DEBUG", "0") == "1"
+
+            if _prefill_debug:
+                # Per-layer eval with timing breakdown (slow but diagnostic)
+                _cache_eval_times = []
+                for _ci, _c in enumerate(prompt_cache):
+                    _ce0 = _time.perf_counter()
+                    if _ci == 0 and _prefill_pending:
+                        mx.eval(_c.state, *_prefill_pending)
+                        _prefill_pending = []
+                    else:
+                        mx.eval(_c.state)
+                    _ce1 = _time.perf_counter()
+                    _cache_eval_times.append((_ce1 - _ce0) * 1000)
+                _slow_caches = [(i, t) for i, t in enumerate(_cache_eval_times) if t > 100]
+            else:
+                # Single batched eval — let MLX schedule compute/comm overlap
+                all_states = [_c.state for _c in prompt_cache]
+                if _prefill_pending:
+                    mx.eval(*all_states, *_prefill_pending)
                 else:
-                    mx.eval(_c.state)
-                _ce1 = _time.perf_counter()
-                _cache_eval_times.append((_ce1 - _ce0) * 1000)
+                    mx.eval(*all_states)
+                _slow_caches = []
             _t3 = _time.perf_counter()
-            _slow_caches = [(i, t) for i, t in enumerate(_cache_eval_times) if t > 100]
 
             _kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
             from loguru import logger as _logger
