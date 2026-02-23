@@ -638,43 +638,14 @@ def generate_step(
             quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
 
-            # Eval cache states + pending sends together.
-            # For hybrid pipeline: PP head must signal PP tail AFTER its eval
-            # (so the send is dispatched before the tail's recv is submitted
-            # to GPU, preventing GPU command buffer timeout).
+            # Eval cache states + pending sends together
             _num_caches = len(prompt_cache)
             _current_sends = _drain_pending_sends()
             all_states = [_c.state for _c in prompt_cache]
-
-            # Coordination signal: PP tail waits for PP head's "send ready"
-            # before submitting its own eval (which contains the recv).
-            _pp_send_to = getattr(model, '_hybrid_pipeline_send_to', None)
-            _pp_recv_from = getattr(model, '_hybrid_pipeline_recv_from', None)
-            _pp_group = getattr(model, '_hybrid_pipeline_group', None)
-
-            if _pp_recv_from is not None and _pp_group is not None:
-                # PP tail: wait for coordination signal BEFORE eval.
-                # This ensures the send is already dispatched on the GPU
-                # when our recv gets submitted, preventing timeout.
-                _signal = mx.zeros((1,), dtype=mx.float32)
-                _signal = mx.distributed.recv_like(_signal, _pp_recv_from, group=_pp_group)
-                mx.eval(_signal)
-                logger.info(f"PREFILL coordination: received 'send ready' signal from rank {_pp_recv_from}")
-
             if _current_sends:
                 mx.eval(*all_states, *_current_sends)
             else:
                 mx.eval(*all_states)
-
-            if _pp_send_to is not None and _pp_group is not None:
-                # PP head: send coordination signal AFTER eval.
-                # Our pipeline send is now dispatched on the GPU, so the
-                # PP tail can safely submit its recv without timeout risk.
-                _signal = mx.ones((1,), dtype=mx.float32)
-                _signal = mx.distributed.send(_signal, _pp_send_to, group=_pp_group)
-                mx.eval(_signal)
-                logger.info(f"PREFILL coordination: sent 'send ready' signal to rank {_pp_send_to}")
-
             _slow_caches = []
             _t3 = _time.perf_counter()
 
