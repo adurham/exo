@@ -516,20 +516,18 @@ def generate_step(
         _step_counter[0] += 1
 
         with mx.stream(generation_stream):
-            logger.debug(f"[STEP {_step_id}] entering _model_call tokens={input_tokens.shape}")
+            _st0 = _time.perf_counter()
             logits = _model_call(
                 input_tokens=input_tokens[None],
                 input_embeddings=(
                     input_embeddings[None] if input_embeddings is not None else None
                 ),
             )
-            logger.debug(f"[STEP {_step_id}] _model_call returned logits.shape={logits.shape}")
+            _st1 = _time.perf_counter()
 
             # Robust reshaping for 2D logits
-            # If (Seq, Vocab) where Seq == input_tokens.shape[0], unsqueeze batch dim 0
             if len(logits.shape) == 2 and logits.shape[0] == input_tokens.shape[0]:
                 logits = logits[None, :, :]
-            # If (Batch, Vocab) where Batch == input_tokens.shape[0] (unlikely for single seq but possible if 1 token), unsqueeze seq dim 1
             elif len(logits.shape) == 2:
                 logits = logits[:, None, :]
 
@@ -544,42 +542,68 @@ def generate_step(
                 for processor in logits_processors:
                     logits = processor(tokens, logits)
 
+            _st2 = _time.perf_counter()
             quantize_cache_fn(prompt_cache)
+            _st3 = _time.perf_counter()
 
             logprobs = logits - mx.logsumexp(logits, keepdims=True)
             sampled = sampler(logprobs)
+            _st4 = _time.perf_counter()
 
-            # Hybrid pipeline token sync: TP nodes have incomplete layers and
-            # produce garbage logits. Only the PP tail has correct logits.
-            # Sync the sampled token from PP tail to all nodes via all_sum.
-            # IMPORTANT: Only run during decode mode. During warmup (is_prefill=True),
-            # the pipeline send/recv handles data flow, and running all_sum(full_group)
-            # here would deadlock: rank 1 reaches all_sum while rank 0 is blocked
-            # in mx.eval(output) at _HybridPipelineLastLayer (waiting for rank 2's recv).
+            # Hybrid pipeline token sync
             hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
             decode_mode = getattr(model, '_hybrid_decode_mode', False)
             if hybrid_group is not None and decode_mode:
                 is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
 
-                # Phase 1: Evaluate model forward (TP sub-ring all_sums) + pipeline sends.
                 _pending = _drain_pending_sends()
-                logger.debug(f"[STEP {_step_id}] entering decode sync (is_pp_tail={is_pp_tail}), {len(_pending)} pending sends")
+                _st5 = _time.perf_counter()
                 mx.eval(sampled, *_pending)
+                _st6 = _time.perf_counter()
 
-                # Phase 2: Token sync all_sum on parent ring.
                 if is_pp_tail:
                     contribution = sampled
                 else:
                     contribution = mx.zeros_like(sampled)
                 sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
                 mx.eval(sampled)
-                logger.debug(f"[STEP {_step_id}] token sync done, token={sampled.item()}")
+                _st7 = _time.perf_counter()
+
+                logger.info(
+                    f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
+                    f"model={(_st1-_st0)*1000:.0f}ms "
+                    f"reshape={(_st2-_st1)*1000:.0f}ms "
+                    f"quantize={(_st3-_st2)*1000:.0f}ms "
+                    f"sample={(_st4-_st3)*1000:.0f}ms "
+                    f"eval={(_st6-_st5)*1000:.0f}ms "
+                    f"token_sync={(_st7-_st6)*1000:.0f}ms "
+                    f"total={(_st7-_st0)*1000:.0f}ms"
+                )
             elif hybrid_group is not None:
-                # During warmup: still drain pending sends
                 _pending = _drain_pending_sends()
+                _st5 = _time.perf_counter()
                 if _pending:
                     mx.eval(*_pending)
-                logger.debug(f"[STEP {_step_id}] skipping token sync (decode_mode={decode_mode}), drained {len(_pending)} sends")
+                _st6 = _time.perf_counter()
+
+                logger.info(
+                    f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
+                    f"model={(_st1-_st0)*1000:.0f}ms "
+                    f"reshape={(_st2-_st1)*1000:.0f}ms "
+                    f"quantize={(_st3-_st2)*1000:.0f}ms "
+                    f"sample={(_st4-_st3)*1000:.0f}ms "
+                    f"drain={(_st6-_st5)*1000:.0f}ms "
+                    f"total={(_st6-_st0)*1000:.0f}ms (prefill_mode)"
+                )
+            else:
+                logger.info(
+                    f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
+                    f"model={(_st1-_st0)*1000:.0f}ms "
+                    f"reshape={(_st2-_st1)*1000:.0f}ms "
+                    f"quantize={(_st3-_st2)*1000:.0f}ms "
+                    f"sample={(_st4-_st3)*1000:.0f}ms "
+                    f"total={(_st4-_st0)*1000:.0f}ms"
+                )
 
             return sampled, logprobs.squeeze(0)
 
@@ -663,11 +687,15 @@ def generate_step(
             )
 
         # Clear cache once after prefill completes, not per-chunk
+        _gap_t0 = _time.perf_counter()
         mx.clear_cache()
+        _gap_t1 = _time.perf_counter()
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
+        _gap_t2 = _time.perf_counter()
 
     mx.async_eval(y, logprobs)
+    _gap_t3 = _time.perf_counter()
     n = 0
     while True:
         if n != max_tokens:
@@ -675,6 +703,15 @@ def generate_step(
             mx.async_eval(next_y, next_logprobs)
         if n == 0:
             mx.eval(y)
+            _gap_t4 = _time.perf_counter()
+            logger.info(
+                f"PREFILL->DECODE gap: "
+                f"clear_cache={(_gap_t1-_gap_t0)*1000:.0f}ms "
+                f"first_step={(_gap_t2-_gap_t1)*1000:.0f}ms "
+                f"async_eval={(_gap_t3-_gap_t2)*1000:.0f}ms "
+                f"eval_y={(_gap_t4-_gap_t3)*1000:.0f}ms "
+                f"total={(_gap_t4-_gap_t0)*1000:.0f}ms"
+            )
             prompt_progress_callback(total_prompt_tokens, total_prompt_tokens)
         if n == max_tokens:
             break
