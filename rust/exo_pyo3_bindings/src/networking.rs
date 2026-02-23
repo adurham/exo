@@ -99,6 +99,37 @@ mod exception {
             Self::MSG.to_string()
         }
     }
+
+    #[gen_stub_pyclass]
+    #[pyclass(frozen, extends=PyException, name="MessageTooLargeError")]
+    pub struct PyMessageTooLargeError {}
+
+    impl PyMessageTooLargeError {
+        const MSG: &'static str = "Gossipsub message exceeds max_transmit_size. Reduce prompt length or increase the limit.";
+
+        pub(crate) fn new_err() -> PyErr {
+            PyErr::new::<Self, _>(())
+        }
+    }
+
+    #[gen_stub_pymethods]
+    #[pymethods]
+    impl PyMessageTooLargeError {
+        #[new]
+        #[pyo3(signature = (*args))]
+        #[allow(unused_variables)]
+        pub(crate) fn new(args: &Bound<'_, PyTuple>) -> Self {
+            Self {}
+        }
+
+        fn __repr__(&self) -> String {
+            format!("MessageTooLargeError(\"{}\")", Self::MSG)
+        }
+
+        fn __str__(&self) -> String {
+            Self::MSG.to_string()
+        }
+    }
 }
 
 /// Connection or disconnection event discriminant type.
@@ -207,6 +238,7 @@ async fn networking_task(
                             Ok(mid) => Ok(mid),
                             Err(PublishError::NoPeersSubscribedToTopic) => Err("NoPeersSubscribedToTopic".to_string()),
                             Err(PublishError::AllQueuesFull(_)) => Err("AllQueuesFull".to_string()),
+                            Err(PublishError::MessageTooLarge) => Err("MessageTooLarge".to_string()),
                             Err(e) => Err(e.to_string()),
                         };
 
@@ -521,6 +553,7 @@ impl PyNetworkingHandle {
             .map_err(|e| match e.as_str() {
                 "NoPeersSubscribedToTopic" => exception::PyNoPeersSubscribedToTopicError::new_err(),
                 "AllQueuesFull" => exception::PyAllQueuesFullError::new_err(),
+                "MessageTooLarge" => exception::PyMessageTooLargeError::new_err(),
                 _ => PyRuntimeError::new_err(e),
             })?;
         Ok(())
@@ -606,6 +639,7 @@ impl PyNetworkingHandle {
 pub fn networking_submodule(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<exception::PyNoPeersSubscribedToTopicError>()?;
     m.add_class::<exception::PyAllQueuesFullError>()?;
+    m.add_class::<exception::PyMessageTooLargeError>()?;
 
     m.add_class::<PyConnectionUpdateType>()?;
     m.add_class::<PyConnectionUpdate>()?;
