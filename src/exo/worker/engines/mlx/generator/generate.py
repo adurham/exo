@@ -490,44 +490,40 @@ def generate_step(
         
         return out
 
+    # Pre-compute hybrid pipeline layer list once (avoid per-step getattr + iteration)
+    _hybrid_layers: list = []
+    try:
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, _get_layers
+        inner_model = getattr(model, 'model', model)
+        _all_layers = _get_layers(inner_model)
+        _hybrid_layers = [l for l in _all_layers if isinstance(l, _HybridPipelineLastLayer)]
+    except (ValueError, ImportError):
+        pass
+
     def _drain_pending_sends():
         """Collect and clear any deferred sends from _HybridPipelineLastLayer."""
-        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, _get_layers
         pending = []
-        inner_model = getattr(model, 'model', model)
-        try:
-            layers = _get_layers(inner_model)
-        except ValueError:
-            layers = []
-        for layer in layers:
-            if isinstance(layer, _HybridPipelineLastLayer):
-                pending.extend(layer._pending_sends)
-                layer._pending_sends = []
+        for layer in _hybrid_layers:
+            pending.extend(layer._pending_sends)
+            layer._pending_sends = []
         return pending
 
     _step_counter = [0]
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
         nonlocal tokens
-        import time as _t
         _step_id = _step_counter[0]
         _step_counter[0] += 1
 
-        _hybrid_group = getattr(model, '_hybrid_pipeline_group', None)
-        _rank = _hybrid_group.rank() if _hybrid_group is not None else '?'
-        _is_pp = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
-
         with mx.stream(generation_stream):
-            _t0 = _t.perf_counter()
-            logger.info(f"[STEP {_step_id}] rank={_rank} pp_tail={_is_pp} entering _model_call tokens={input_tokens.shape}")
+            logger.debug(f"[STEP {_step_id}] entering _model_call tokens={input_tokens.shape}")
             logits = _model_call(
                 input_tokens=input_tokens[None],
                 input_embeddings=(
                     input_embeddings[None] if input_embeddings is not None else None
                 ),
             )
-            _t1 = _t.perf_counter()
-            logger.info(f"[STEP {_step_id}] rank={_rank} _model_call returned in {(_t1-_t0)*1000:.0f}ms logits.shape={logits.shape}")
+            logger.debug(f"[STEP {_step_id}] _model_call returned logits.shape={logits.shape}")
 
             # Robust reshaping for 2D logits
             # If (Seq, Vocab) where Seq == input_tokens.shape[0], unsqueeze batch dim 0
@@ -564,34 +560,26 @@ def generate_step(
             decode_mode = getattr(model, '_hybrid_decode_mode', False)
             if hybrid_group is not None and decode_mode:
                 is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
-                _t2 = _t.perf_counter()
 
                 # Phase 1: Evaluate model forward (TP sub-ring all_sums) + pipeline sends.
-                # This MUST happen before the token sync because:
-                # - mx.zeros_like(sampled) has NO data dependency on the model forward,
-                #   so MLX could evaluate the parent ring all_sum first, deadlocking
-                #   because rank 2 hasn't received its pipeline data yet.
-                # - Pipeline sends unblock rank 2 (PP tail) to participate in token sync.
                 _pending = _drain_pending_sends()
-                logger.info(f"[STEP {_step_id}] rank={_rank} entering decode sync (is_pp_tail={is_pp_tail}), {len(_pending)} pending sends")
+                logger.debug(f"[STEP {_step_id}] entering decode sync (is_pp_tail={is_pp_tail}), {len(_pending)} pending sends")
                 mx.eval(sampled, *_pending)
 
                 # Phase 2: Token sync all_sum on parent ring.
-                # Now all nodes are ready: TP all_sums done, pipeline data delivered.
                 if is_pp_tail:
-                    contribution = sampled  # PP tail has the correct token
+                    contribution = sampled
                 else:
-                    contribution = mx.zeros_like(sampled)  # TP nodes contribute zero
+                    contribution = mx.zeros_like(sampled)
                 sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
                 mx.eval(sampled)
-                _t3 = _t.perf_counter()
-                logger.info(f"[STEP {_step_id}] rank={_rank} token sync done in {(_t3-_t2)*1000:.0f}ms, token={sampled.item()}")
+                logger.debug(f"[STEP {_step_id}] token sync done, token={sampled.item()}")
             elif hybrid_group is not None:
                 # During warmup: still drain pending sends
                 _pending = _drain_pending_sends()
                 if _pending:
                     mx.eval(*_pending)
-                logger.info(f"[STEP {_step_id}] rank={_rank} skipping token sync (decode_mode={decode_mode}), drained {len(_pending)} sends")
+                logger.debug(f"[STEP {_step_id}] skipping token sync (decode_mode={decode_mode}), drained {len(_pending)} sends")
 
             return sampled, logprobs.squeeze(0)
 
@@ -691,7 +679,7 @@ def generate_step(
         if n == max_tokens:
             break
         yield y.item(), logprobs
-        if n % 256 == 0:
+        if n % 1024 == 0:
             mx.clear_cache()
         y, logprobs = next_y, next_logprobs
         n += 1
@@ -935,7 +923,7 @@ def mlx_generate(
         ),
         start=1,
     ):
-        logger.info(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
+        logger.debug(f"Gen token [{completion_tokens}]: {out.token} | {out.text}")
         generated_text_parts.append(out.text)
         accumulated_text += out.text
         

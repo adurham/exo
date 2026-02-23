@@ -1,5 +1,6 @@
 import os
 import re
+import time as _time
 from copy import deepcopy
 
 import mlx.core as mx
@@ -123,15 +124,17 @@ class KVPrefixCache:
             if overlap >= _MIN_OVERLAP_TO_DEDUP:
                 if new_len >= cached_len:
                     # New entry is longer or same — replace the existing one
+                    _t0 = _time.perf_counter()
                     self.prompts[i] = compare_tokens
                     self.caches[i] = deepcopy(cache)
                     self._snapshots[i] = ssm_snapshots
                     self._access_counter += 1
                     self._last_used[i] = self._access_counter
                     self._access_counts[i] += 1
+                    _dt = (_time.perf_counter() - _t0) * 1000
                     logger.info(
                         f"KV cache dedup-replaced entry {i}: {cached_len} -> {new_len} tokens "
-                        f"({overlap:.0%} overlap)"
+                        f"({overlap:.0%} overlap, copy={_dt:.0f}ms)"
                     )
                 else:
                     # Existing entry is longer — just bump its access
@@ -146,13 +149,15 @@ class KVPrefixCache:
 
         self._evict_if_needed()
         # Store normalized tokens for comparison, original tokens for reference
+        _t0 = _time.perf_counter()
         self.prompts.append(compare_tokens)
         self.caches.append(deepcopy(cache))
         self._snapshots.append(ssm_snapshots)
         self._access_counter += 1
         self._last_used.append(self._access_counter)
         self._access_counts.append(1)
-        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (entries={len(self.caches)})")
+        _dt = (_time.perf_counter() - _t0) * 1000
+        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (entries={len(self.caches)}, copy={_dt:.0f}ms)")
 
     def update_kv_cache(
         self,
@@ -172,13 +177,15 @@ class KVPrefixCache:
             merged.extend(snapshots)
 
         # Store normalized tokens for comparison, like add_kv_cache
+        _t0 = _time.perf_counter()
         self.prompts[index] = normalized_tokens if normalized_tokens is not None else prompt_tokens
         self.caches[index] = deepcopy(cache)
         self._snapshots[index] = merged or None
         self._access_counter += 1
         self._last_used[index] = self._access_counter
         self._access_counts[index] += 1
-        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens")
+        _dt = (_time.perf_counter() - _t0) * 1000
+        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens (copy={_dt:.0f}ms)")
 
     def _get_snapshot(
         self, entry_index: int, target_token_count: int
