@@ -297,6 +297,7 @@ def warmup_inference(
     model: Model,
     tokenizer: TokenizerWrapper,
     group: mx.distributed.Group | None,
+    kv_prefix_cache: KVPrefixCache | None = None,
 ) -> int:
     content = "Prompt to warm up the inference engine. Repeat this."
 
@@ -335,6 +336,12 @@ def warmup_inference(
         logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
     set_pipeline_prefill(model, is_prefill=False)
+
+    # Save warmup KV cache to prefix cache for potential reuse
+    if kv_prefix_cache is not None:
+        warmup_tokens = encode_prompt(tokenizer, warmup_prompt)
+        kv_prefix_cache.add_kv_cache(warmup_tokens, cache)
+        logger.info(f"Warmup KV cache saved to prefix cache ({len(warmup_tokens)} tokens)")
 
     logger.info("Generated ALL warmup tokens")
 

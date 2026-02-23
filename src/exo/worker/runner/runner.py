@@ -303,6 +303,7 @@ def main(
                                 model=inference_model,
                                 tokenizer=tokenizer,
                                 group=group,
+                                kv_prefix_cache=kv_prefix_cache,
                             )
                             logger.info(f"warmed up by generating {toks} tokens")
                             check_for_cancel_every = min(

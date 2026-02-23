@@ -19,6 +19,8 @@ from exo.worker.engines.mlx import Model
 from exo.worker.engines.mlx.constants import CACHE_GROUP_SIZE, KV_CACHE_BITS
 from exo.worker.runner.bootstrap import logger
 
+import math
+
 
 # Fraction of device memory above which LRU eviction kicks in.
 # Smaller machines need more aggressive eviction.
@@ -76,6 +78,13 @@ def has_non_kv_caches(cache: KVCacheType) -> bool:
     """Check if a cache contains any ArraysCache (SSM) entries."""
     return any(isinstance(c, (ArraysCache, RotatingKVCache)) for c in cache)
 
+# Deduplication: entries with >90% prefix overlap are merged instead of duplicated
+_MIN_OVERLAP_TO_DEDUP = 0.90
+# Maximum number of cache entries before forced eviction
+_MAX_ENTRIES = int(os.environ.get("EXO_KV_CACHE_MAX_ENTRIES", "4"))
+# Mismatches in first N tokens are flagged as likely volatile patterns
+_VOLATILE_DETECTION_THRESHOLD = 100
+
 
 class KVPrefixCache:
     def __init__(self, group: mx.distributed.Group | None):
@@ -83,6 +92,7 @@ class KVPrefixCache:
         self.caches: list[KVCacheType] = []
         self._snapshots: list[list[CacheSnapshot] | None] = []
         self._last_used: list[int] = []  # monotonic counter of last access per entry
+        self._access_counts: list[int] = []  # total access count per entry
         self._access_counter: int = 0
         self._group = group
 
@@ -92,6 +102,7 @@ class KVPrefixCache:
         self.caches.clear()
         self._snapshots.clear()
         self._last_used.clear()
+        self._access_counts.clear()
 
     def add_kv_cache(
         self,
@@ -100,15 +111,48 @@ class KVPrefixCache:
         ssm_snapshots: list[CacheSnapshot] | None = None,
         normalized_tokens: mx.array | None = None,
     ):
-        """Add a new cache entry. Evicts LRU entries if memory is high."""
+        """Add a new cache entry. Deduplicates overlapping entries and evicts if needed."""
+        compare_tokens = normalized_tokens if normalized_tokens is not None else prompt_tokens
+        new_len = len(compare_tokens)
+
+        # Dedup: if an existing entry shares >90% prefix, update it instead
+        for i, cached_prompt in enumerate(self.prompts):
+            prefix_len = get_prefix_length(compare_tokens, cached_prompt)
+            cached_len = len(cached_prompt)
+            overlap = prefix_len / max(cached_len, new_len) if max(cached_len, new_len) > 0 else 0
+            if overlap >= _MIN_OVERLAP_TO_DEDUP:
+                if new_len >= cached_len:
+                    # New entry is longer or same — replace the existing one
+                    self.prompts[i] = compare_tokens
+                    self.caches[i] = deepcopy(cache)
+                    self._snapshots[i] = ssm_snapshots
+                    self._access_counter += 1
+                    self._last_used[i] = self._access_counter
+                    self._access_counts[i] += 1
+                    logger.info(
+                        f"KV cache dedup-replaced entry {i}: {cached_len} -> {new_len} tokens "
+                        f"({overlap:.0%} overlap)"
+                    )
+                else:
+                    # Existing entry is longer — just bump its access
+                    self._access_counter += 1
+                    self._last_used[i] = self._access_counter
+                    self._access_counts[i] += 1
+                    logger.info(
+                        f"KV cache dedup-skipped: existing entry {i} ({cached_len} tokens) "
+                        f"subsumes new ({new_len} tokens, {overlap:.0%} overlap)"
+                    )
+                return
+
         self._evict_if_needed()
         # Store normalized tokens for comparison, original tokens for reference
-        self.prompts.append(normalized_tokens if normalized_tokens is not None else prompt_tokens)
+        self.prompts.append(compare_tokens)
         self.caches.append(deepcopy(cache))
         self._snapshots.append(ssm_snapshots)
         self._access_counter += 1
         self._last_used.append(self._access_counter)
-        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (normalized={normalized_tokens is not None})")
+        self._access_counts.append(1)
+        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (entries={len(self.caches)})")
 
     def update_kv_cache(
         self,
@@ -133,7 +177,8 @@ class KVPrefixCache:
         self._snapshots[index] = merged or None
         self._access_counter += 1
         self._last_used[index] = self._access_counter
-        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens (normalized={normalized_tokens is not None})")
+        self._access_counts[index] += 1
+        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens")
 
     def _get_snapshot(
         self, entry_index: int, target_token_count: int
@@ -218,24 +263,42 @@ class KVPrefixCache:
 
         return prompt_cache, remaining, best_index
 
+    def _entry_value(self, index: int) -> float:
+        """Compute eviction value for an entry. Higher = more valuable to keep."""
+        token_count = len(self.prompts[index])
+        access_count = self._access_counts[index]
+        return token_count * math.sqrt(access_count)
+
     def _evict_if_needed(self):
-        """Evict least recently used entries while memory usage is high."""
+        """Evict lowest-value entries while memory is high or entry count exceeds max."""
         if len(self.caches) == 0:
             return
 
-        # Evict LRU entries until below threshold
-        while (
-            len(self.caches) > 0
-            and self.get_memory_used_percentage() > _MEMORY_THRESHOLD
+        # Evict by value (not pure LRU) until below threshold and max entries
+        while len(self.caches) > 0 and (
+            len(self.caches) >= _MAX_ENTRIES
+            or self.get_memory_used_percentage() > _MEMORY_THRESHOLD
         ):
-            lru_index = self._last_used.index(min(self._last_used))
-            evicted_tokens = len(self.prompts[lru_index])
-            self.prompts.pop(lru_index)
-            self.caches.pop(lru_index)
-            self._snapshots.pop(lru_index)
-            self._last_used.pop(lru_index)
+            # Find lowest-value entry
+            min_value = float('inf')
+            evict_index = 0
+            for i in range(len(self.caches)):
+                v = self._entry_value(i)
+                if v < min_value:
+                    min_value = v
+                    evict_index = i
+
+            evicted_tokens = len(self.prompts[evict_index])
+            evicted_accesses = self._access_counts[evict_index]
+            self.prompts.pop(evict_index)
+            self.caches.pop(evict_index)
+            self._snapshots.pop(evict_index)
+            self._last_used.pop(evict_index)
+            self._access_counts.pop(evict_index)
             logger.info(
-                f"KV cache evicted LRU entry ({evicted_tokens} tokens) due to memory usage"
+                f"KV cache evicted entry {evict_index} "
+                f"({evicted_tokens} tokens, {evicted_accesses} accesses, value={min_value:.0f}) "
+                f"— {len(self.caches)} entries remaining"
             )
 
     def get_memory_used_percentage(self) -> float:
@@ -330,16 +393,29 @@ def get_prefix_length(prompt: mx.array, cached_prompt: mx.array) -> int:
 
     # Log where the mismatch occurs for debugging
     if prefix_len < n and prefix_len < len(prompt) - 1:
-        ctx_start = max(0, prefix_len - 3)
-        ctx_end = min(n, prefix_len + 5)
+        # Use wider context (10 tokens) for early mismatches to aid pattern identification
+        is_early = prefix_len < _VOLATILE_DETECTION_THRESHOLD
+        ctx_radius = 5 if is_early else 3
+        ctx_start = max(0, prefix_len - ctx_radius)
+        ctx_end = min(n, prefix_len + ctx_radius + 2)
         prompt_ctx = prompt[ctx_start:ctx_end].tolist()
         cached_ctx = cached_prompt[ctx_start:ctx_end].tolist()
-        logger.info(
+
+        msg = (
             f"KV prefix mismatch at token {prefix_len}/{n} "
             f"(prompt={len(prompt)}, cached={len(cached_prompt)}). "
             f"Prompt tokens[{ctx_start}:{ctx_end}]: {prompt_ctx}, "
             f"Cached tokens[{ctx_start}:{ctx_end}]: {cached_ctx}"
         )
+
+        if is_early:
+            logger.warning(
+                f"VOLATILE PATTERN DETECTED — {msg}. "
+                f"Mismatch in first {_VOLATILE_DETECTION_THRESHOLD} tokens suggests a volatile "
+                f"header (timestamp, hash, session ID). Consider adding to _VOLATILE_PATTERNS."
+            )
+        else:
+            logger.info(msg)
 
     return prefix_len
 
