@@ -146,11 +146,13 @@ class PipelineFirstLayer(CustomMlxLayer):
         if self.r != 0:
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}")
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            if self.is_prefill:
-                # During prefill, force-eval the recv to avoid GPU timeout.
-                # During decode, keep it lazy so TP all-reduce + pipeline ops
-                # are evaluated together via mx.async_eval (avoids TP deadlock).
-                mx.eval(x)
+            # Keep recv lazy in ALL phases.  During prefill, generate_step
+            # coordinates: PP head signals after its send is eval'd, PP tail
+            # waits for this signal before running mx.eval(*all_states).
+            # This prevents the GPU timeout that occurred when force-eval
+            # submitted the recv too early (before the send was dispatched).
+            # During decode, laziness lets TP all-reduce + pipeline ops
+            # evaluate together via mx.async_eval (avoids TP deadlock).
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
         return self.original_layer(x, *args, **kwargs)
 
@@ -619,12 +621,17 @@ def hybrid_auto_parallel(
     _set_layers(model, layers)
 
     # Store hybrid pipeline metadata on the model for token sync in generate_step.
-    # During decode, TP nodes produce garbage logits (layersare incomplete),
+    # During decode, TP nodes produce garbage logits (layers are incomplete),
     # so generate_step must sync the sampled token from the PP tail.
     is_pp_tail = shard_meta.pp_rank == shard_meta.pp_size - 1
     model._hybrid_pipeline_group = group  # type: ignore
     model._hybrid_pipeline_is_pp_tail = is_pp_tail  # type: ignore
     model._hybrid_decode_mode = False  # type: ignore  # Starts as False; set_pipeline_prefill toggles it
+    # Store pipeline send/recv targets for prefill coordination signal.
+    # PP head sends a tiny "ready" signal after its eval (send dispatched),
+    # PP tail waits for this signal before submitting its eval (recv).
+    model._hybrid_pipeline_send_to = shard_meta.pipeline_send_to  # type: ignore
+    model._hybrid_pipeline_recv_from = shard_meta.pipeline_recv_from  # type: ignore
 
     return patch_pipeline_model(model, group)
 
