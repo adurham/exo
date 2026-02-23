@@ -311,23 +311,20 @@ def shard_and_load(
                 model, group, shard_metadata,
                 timeout_seconds, on_timeout,
             )
-            from exo.worker.engines.mlx.auto_parallel import _dbg
-            _dbg("hybrid_auto_parallel returned, calling eval_with_timeout(model.parameters())")
             eval_with_timeout(model.parameters(), timeout_seconds, on_timeout)
-            _dbg("eval_with_timeout(model.parameters()) done")
 
     # TODO: Do we need this?
-    _dbg("mx.eval(model) starting")  # type: ignore[possibly-undefined]
     mx.eval(model)
-    _dbg("mx.eval(model) done")  # type: ignore[possibly-undefined]
 
     logger.debug("SHARDED")
     logger.debug(model)
 
-    # Synchronize processes before generation to avoid timeout
-    _dbg("mx_barrier(group) starting")  # type: ignore[possibly-undefined]
-    mx_barrier(group)
-    _dbg("mx_barrier(group) done")  # type: ignore[possibly-undefined]
+    # Synchronize processes before generation to avoid timeout.
+    # Skip for hybrid mode: group.split() creates TP sub-rings which disrupts
+    # all_sum on the parent ring. Hybrid mode synchronizes naturally via
+    # pipeline send/recv during inference.
+    if not isinstance(shard_metadata, HybridShardMetadata):
+        mx_barrier(group)
 
     return model, tokenizer
 
