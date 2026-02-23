@@ -555,21 +555,26 @@ def generate_step(
             decode_mode = getattr(model, '_hybrid_decode_mode', False)
             if hybrid_group is not None and decode_mode:
                 is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
-                if is_pp_tail:
-                    # PP tail contributes its (correct) sampled token
-                    contribution = sampled
-                else:
-                    # TP nodes contribute zero — their logits are garbage
-                    contribution = mx.zeros_like(sampled)
                 _t2 = _t.perf_counter()
-                logger.info(f"[STEP {_step_id}] rank={_rank} entering token sync all_sum (is_pp_tail={is_pp_tail}) sample_time={(_t2-_t1)*1000:.0f}ms")
-                sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-                # Drain deferred sends alongside sampled token eval — single mx.eval
-                # ensures the send, TP all_sums, recv, and all_sum(full_group) are
-                # all resolved in the same GPU submission, avoiding deadlock.
+
+                # Phase 1: Evaluate model forward (TP sub-ring all_sums) + pipeline sends.
+                # This MUST happen before the token sync because:
+                # - mx.zeros_like(sampled) has NO data dependency on the model forward,
+                #   so MLX could evaluate the parent ring all_sum first, deadlocking
+                #   because rank 2 hasn't received its pipeline data yet.
+                # - Pipeline sends unblock rank 2 (PP tail) to participate in token sync.
                 _pending = _drain_pending_sends()
-                logger.info(f"[STEP {_step_id}] rank={_rank} all_sum submitted + {len(_pending)} pending sends, calling mx.eval...")
+                logger.info(f"[STEP {_step_id}] rank={_rank} entering decode sync (is_pp_tail={is_pp_tail}), {len(_pending)} pending sends")
                 mx.eval(sampled, *_pending)
+
+                # Phase 2: Token sync all_sum on parent ring.
+                # Now all nodes are ready: TP all_sums done, pipeline data delivered.
+                if is_pp_tail:
+                    contribution = sampled  # PP tail has the correct token
+                else:
+                    contribution = mx.zeros_like(sampled)  # TP nodes contribute zero
+                sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                mx.eval(sampled)
                 _t3 = _t.perf_counter()
                 logger.info(f"[STEP {_step_id}] rank={_rank} token sync done in {(_t3-_t2)*1000:.0f}ms, token={sampled.item()}")
             elif hybrid_group is not None:
