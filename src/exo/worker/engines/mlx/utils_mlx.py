@@ -197,7 +197,7 @@ def mlx_distributed_init(
                 mx.set_wired_limit(safe_limit)
                 logger.info(f"Set MLX wired limit to {safe_limit / 1e9:.2f} GB")
 
-                group = mx.distributed.init(backend="jaccl", strict=False)
+                group = mx.distributed.init(backend="jaccl", strict=True)
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
 
