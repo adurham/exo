@@ -605,7 +605,7 @@ def generate_step(
                 ),
             )
             _t1 = _time.perf_counter()
-            # Skip KV quantization during prefill — defer to single pass before decode
+            quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
 
             # Evaluate all cache states — batched for performance, per-layer for debug
@@ -662,20 +662,10 @@ def generate_step(
                 else input_embeddings
             )
 
-        # Quantize KV cache once before decode begins (deferred from per-chunk)
-        _quant_t0 = _time.perf_counter()
-        quantize_cache_fn(prompt_cache)
-        _quant_t1 = _time.perf_counter()
+        # Clear cache once after prefill completes, not per-chunk
         mx.clear_cache()
-        _quant_dt = (_quant_t1 - _quant_t0) * 1000
 
-        _first_step_t0 = _time.perf_counter()
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
-        _first_step_t1 = _time.perf_counter()
-        logger.info(
-            f"PREFILL done: quantize={_quant_dt:.0f}ms, "
-            f"first_step={(_first_step_t1 - _first_step_t0)*1000:.0f}ms"
-        )
 
     mx.async_eval(y, logprobs)
     n = 0
