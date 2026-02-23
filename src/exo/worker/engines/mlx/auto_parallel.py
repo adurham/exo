@@ -867,28 +867,20 @@ class ShardedMoE(CustomMlxLayer):
         _tp_layer_counter += 1
 
     def __call__(self, x: mx.array) -> mx.array:
-        if self.sharding_group is not None:
-            if _tp_debug:
-                _t0 = _time.perf_counter()
-            x = sum_gradients(self.sharding_group)(x)
-            if _tp_debug:
-                _t1 = _time.perf_counter()
-        else:
-            if _tp_debug:
-                _t0 = _t1 = _time.perf_counter()
+        if _tp_debug:
+            _t0 = _time.perf_counter()
         y = self.original_layer.__call__(x)
         if _tp_debug:
-            _t2 = _time.perf_counter()
+            _t1 = _time.perf_counter()
         if self.sharding_group is not None:
             y = mx.distributed.all_sum(y, group=self.sharding_group)
         if _tp_debug:
-            _t3 = _time.perf_counter()
+            _t2 = _time.perf_counter()
             _dbg(
                 f"[MoE {self._moe_id}] "
-                f"sum_grad={(_t1-_t0)*1000:.1f}ms "
-                f"compute={(_t2-_t1)*1000:.1f}ms "
-                f"all_sum={(_t3-_t2)*1000:.1f}ms "
-                f"total={(_t3-_t0)*1000:.1f}ms "
+                f"compute={(_t1-_t0)*1000:.1f}ms "
+                f"all_sum={(_t2-_t1)*1000:.1f}ms "
+                f"total={(_t2-_t0)*1000:.1f}ms "
                 f"x.shape={x.shape}"
             )
         return y
