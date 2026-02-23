@@ -76,7 +76,7 @@ def _find_nearest_snapshot(
 
 
 def has_non_kv_caches(cache: KVCacheType) -> bool:
-    """Check if a cache contains any ArraysCache (SSM) entries."""
+    """Check if a cache contains any ArraysCache (SSM) or RotatingKVCache entries."""
     return any(isinstance(c, (ArraysCache, RotatingKVCache)) for c in cache)
 
 # Deduplication: entries with >90% prefix overlap are merged instead of duplicated
