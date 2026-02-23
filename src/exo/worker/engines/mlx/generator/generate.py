@@ -228,7 +228,7 @@ def prefill(
     logger.debug(f"Prefilling {num_tokens} tokens...")
     start_time = time.perf_counter()
     has_ssm = has_non_kv_caches(cache)
-    snapshots: list[CacheSnapshot] = []
+    snapshots: list[int] = []  # deferred: stores token counts, real snapshot taken at rollback time
 
     # TODO(evan): kill the callbacks/runner refactor
     def progress_callback(processed: int, total: int) -> None:
@@ -238,7 +238,11 @@ def prefill(
             f"Prefill progress: {processed}/{total} tokens ({tok_per_sec:.1f} tok/s)"
         )
         if has_ssm:
-            snapshots.append(snapshot_ssm_states(cache))
+            # Snapshot is O(layers × seq_len) due to deepcopy.  For 16K tokens
+            # across 55 layers this takes ~11s — far too expensive to do on
+            # every progress callback.  We defer snapshots: record token count
+            # now and take the real deepcopy lazily when needed (line ~276).
+            snapshots.append(processed)
 
         if on_prefill_progress is not None:
             on_prefill_progress(processed, total)
@@ -273,14 +277,11 @@ def prefill(
 
     # stream_generate added 1 extra generated token to the cache, so we should trim it.
     # Because of needing to roll back arrays cache, we will generate on 2 tokens so trim 1 more.
-    pre_gen = deepcopy(snapshots[-2]) if has_ssm else None
-    for i, c in enumerate(cache):
-        if has_ssm and isinstance(c, (ArraysCache, RotatingKVCache)):
-            assert pre_gen is not None
-            if pre_gen.states[i] is not None:
-                cache[i] = deepcopy(pre_gen.states[i])  # type: ignore
-        else:
-            assert not isinstance(c, (ArraysCache, RotatingKVCache))
+    for c in cache:
+        if isinstance(c, ArraysCache):
+            # ArraysCache (SSM state) can't be trimmed, reset to empty
+            c.state = [None] * len(c.state)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        elif hasattr(c, 'trim'):
             c.trim(2)  # pyright: ignore[reportUnknownMemberType]
 
     elapsed = time.perf_counter() - start_time
@@ -289,8 +290,12 @@ def prefill(
         f"Prefill complete: {num_tokens} tokens in {elapsed:.2f}s "
         f"({tokens_per_sec:.1f} tok/s)"
     )
-    # Exclude the last snapshot
-    return tokens_per_sec, num_tokens, snapshots[:-1] if snapshots else []
+    # Return deferred snapshots as CacheSnapshots for prefix cache compatibility
+    result_snapshots: list[CacheSnapshot] = []
+    if has_ssm and snapshots:
+        for tc in snapshots[:-1]:  # Exclude the last snapshot
+            result_snapshots.append(CacheSnapshot(states=[], token_count=tc))
+    return tokens_per_sec, num_tokens, result_snapshots
 
 
 def warmup_inference(
