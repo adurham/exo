@@ -57,7 +57,7 @@ _MIN_PREFIX_HIT_TO_UPDATE = 1000
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
-_DEFAULT_PREFILL_STEP_SIZE = 512 * 1024  # Single-shot prefill: minimize per-chunk overhead
+_DEFAULT_PREFILL_STEP_SIZE = 4096  # Multi-chunk prefill: enables pipelining PP tail overlap
 
 
 from mlx.utils import tree_reduce
@@ -620,10 +620,11 @@ def generate_step(
         prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
         import time as _time
         _prefill_chunk_idx = 0
+        _deferred_sends: list = []  # Pipeline overlap: defer sends to next chunk's eval
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
-            logger.info(f"PREFILL loop: starting chunk, remaining={remaining}, n_to_process={n_to_process}")
+            logger.info(f"PREFILL loop: starting chunk {_prefill_chunk_idx}, remaining={remaining}, n_to_process={n_to_process}")
 
             _t0 = _time.perf_counter()
             _model_call(
@@ -638,50 +639,29 @@ def generate_step(
             quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
 
-            # Evaluate all cache states — batched for performance, per-layer for debug
+            # Pipeline overlap: eval THIS chunk's cache + PREVIOUS chunk's deferred sends.
+            # This lets PP head start chunk N+1 while PP tail processes chunk N.
             _num_caches = len(prompt_cache)
-            _prefill_pending = _drain_pending_sends()
-            _prefill_debug = os.environ.get("EXO_PREFILL_DEBUG", "0") == "1"
-
-            if _prefill_debug:
-                # Per-layer eval with timing breakdown (slow but diagnostic)
-                _cache_eval_times = []
-                for _ci, _c in enumerate(prompt_cache):
-                    _ce0 = _time.perf_counter()
-                    if _ci == 0 and _prefill_pending:
-                        mx.eval(_c.state, *_prefill_pending)
-                        _prefill_pending = []
-                    else:
-                        mx.eval(_c.state)
-                    _ce1 = _time.perf_counter()
-                    _cache_eval_times.append((_ce1 - _ce0) * 1000)
-                _slow_caches = [(i, t) for i, t in enumerate(_cache_eval_times) if t > 100]
+            _current_sends = _drain_pending_sends()
+            all_states = [_c.state for _c in prompt_cache]
+            if _deferred_sends:
+                mx.eval(*all_states, *_deferred_sends)
             else:
-                # Single batched eval — let MLX schedule compute/comm overlap
-                all_states = [_c.state for _c in prompt_cache]
-                if _prefill_pending:
-                    mx.eval(*all_states, *_prefill_pending)
-                else:
-                    mx.eval(*all_states)
-                _slow_caches = []
+                mx.eval(*all_states)
+            _deferred_sends = _current_sends  # Defer current sends to next iteration
+            _slow_caches = []
             _t3 = _time.perf_counter()
 
             _kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
-            from loguru import logger as _logger
-            _logger.info(
+            logger.info(
                 f"PREFILL chunk {_prefill_chunk_idx}: "
                 f"tokens={n_to_process}, kv_len={_kv_len}, "
                 f"model={(_t1-_t0)*1000:.0f}ms, "
                 f"quantize={(_t2-_t1)*1000:.0f}ms, "
                 f"eval={(_t3-_t2)*1000:.0f}ms ({_num_caches} layers), "
+                f"deferred_sends={len(_current_sends)}, "
                 f"total={(_t3-_t0)*1000:.0f}ms"
             )
-            if _slow_caches:
-                _logger.info(
-                    f"PREFILL slow cache layers: "
-                    f"{', '.join(f'L{i}={t:.0f}ms' for i, t in _slow_caches)}"
-                )
-            _t3a = _time.perf_counter()
             _prefill_chunk_idx += 1
 
             prompt_processed_tokens += n_to_process
@@ -699,14 +679,17 @@ def generate_step(
                 f"model={(_t1-_t0)*1000:.0f}ms "
                 f"quantize={(_t2-_t1)*1000:.0f}ms "
                 f"eval={(_t3-_t2)*1000:.0f}ms "
-                f"loguru={(_t3a-_t3)*1000:.0f}ms "
-                f"callback={(_t4-_t3a)*1000:.0f}ms "
+                f"callback={(_t4-_t3)*1000:.0f}ms "
                 f"slice={(_t5-_t4)*1000:.0f}ms "
                 f"total={(_t5-_t0)*1000:.0f}ms"
             )
 
         _loop_exit = _time.perf_counter()
-        logger.info(f"PREFILL loop exited, prompt_remaining={len(prompt)}")
+        # Flush any remaining deferred sends from the last prefill chunk
+        if _deferred_sends:
+            mx.eval(*_deferred_sends)
+            _deferred_sends = []
+        logger.info(f"PREFILL loop exited, prompt_remaining={len(prompt)}, chunks={_prefill_chunk_idx}")
 
         # Clear cache once after prefill completes, not per-chunk
         _gap_t0 = _time.perf_counter()
