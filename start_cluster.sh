@@ -235,12 +235,21 @@ for NODE in "${NODES[@]}"; do
     echo "Ensuring build dependencies on $NODE..."
     ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
 
-    # Check if MLX needs rebuilding by comparing installed version hash to submodule HEAD
+    # Check if MLX needs rebuilding:
+    # 1. Compare installed version hash to submodule HEAD (detects submodule update)
+    # 2. Check if any C++ source file is newer than the compiled .so (detects stale cmake cache)
     INSTALLED_MLX=$(ssh "$NODE" "cd ~/repos/exo && .venv/bin/python -c \"import mlx.core; v=mlx.core.__version__; print(v.split('+')[-1] if '+' in v else 'none')\" 2>/dev/null || echo none")
     SUBMODULE_MLX=$(ssh "$NODE" "cd ~/repos/exo/mlx && git rev-parse --short HEAD")
+    STALE_SO=$(ssh "$NODE" "find ~/repos/exo/mlx/mlx -name '*.cpp' -newer ~/repos/exo/mlx/python/mlx/core.cpython-*-darwin.so 2>/dev/null | head -1")
 
-    if [ "$INSTALLED_MLX" != "$SUBMODULE_MLX" ]; then
-        echo "MLX source changed on $NODE ($INSTALLED_MLX → $SUBMODULE_MLX), rebuilding..."
+    if [ "$INSTALLED_MLX" != "$SUBMODULE_MLX" ] || [ -n "$STALE_SO" ]; then
+        if [ -n "$STALE_SO" ]; then
+            echo "MLX C++ sources newer than compiled .so on $NODE, forcing clean rebuild..."
+        else
+            echo "MLX submodule changed on $NODE ($INSTALLED_MLX → $SUBMODULE_MLX), rebuilding..."
+        fi
+        # Clean cmake build cache to ensure ALL source files are recompiled
+        ssh "$NODE" "rm -rf ~/repos/exo/mlx/build"
         ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package mlx'" || { echo "Failed to build on $NODE"; exit 1; }
     else
         echo "MLX unchanged on $NODE ($INSTALLED_MLX), skipping C++ rebuild."
