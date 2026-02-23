@@ -618,6 +618,7 @@ def generate_step(
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
+            logger.info(f"PREFILL loop: starting chunk, remaining={remaining}, n_to_process={n_to_process}")
 
             _t0 = _time.perf_counter()
             _model_call(
@@ -679,12 +680,26 @@ def generate_step(
 
             prompt_processed_tokens += n_to_process
             prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
+            _t4 = _time.perf_counter()
             prompt = prompt[n_to_process:]
             input_embeddings = (
                 input_embeddings[n_to_process:]
                 if input_embeddings is not None
                 else input_embeddings
             )
+            _t5 = _time.perf_counter()
+            logger.info(
+                f"PREFILL loop end: "
+                f"model={(_t1-_t0)*1000:.0f}ms "
+                f"quantize={(_t2-_t1)*1000:.0f}ms "
+                f"eval={(_t3-_t2)*1000:.0f}ms "
+                f"log+callback={(_t4-_t3)*1000:.0f}ms "
+                f"slice={(_t5-_t4)*1000:.0f}ms "
+                f"total={(_t5-_t0)*1000:.0f}ms"
+            )
+
+        _loop_exit = _time.perf_counter()
+        logger.info(f"PREFILL loop exited, prompt_remaining={len(prompt)}")
 
         # Clear cache once after prefill completes, not per-chunk
         _gap_t0 = _time.perf_counter()
