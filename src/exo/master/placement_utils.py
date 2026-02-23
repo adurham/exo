@@ -333,11 +333,11 @@ def get_shard_assignments_for_hybrid_parallel(
     # Minimize PP tail layers to reduce pipeline sync wait.
     # PP tail runs full-width (no TP) so each layer takes ~2× longer than
     # on the TP group.  Every layer moved from PP tail to TP group saves
-    # ~1.6s of blocked wait.  Give PP tail exactly 1 layer per node
-    # (minimum to participate and contribute KV cache memory).
-    # GPU timeout safety: generate_step clamps prefill_step_size to 4096
-    # for hybrid mode, so each chunk takes ~12s (well under ~60s timeout).
-    pp_layers = len(pp_tail_node_ids)  # 1 layer per PP tail node
+    # ~1.6s of blocked wait.
+    # With chunked prefill (4096 tokens/chunk ≈ 12s per chunk), force-eval
+    # on the PP tail recv stays well under the ~60s GPU timeout.
+    min_pp_layers = max(4, len(pp_tail_node_ids))
+    pp_layers = min(min_pp_layers, total_layers - 1)
     tp_layers = total_layers - pp_layers
 
     logger.info(

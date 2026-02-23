@@ -146,12 +146,13 @@ class PipelineFirstLayer(CustomMlxLayer):
         if self.r != 0:
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv_like from {self.recv_from}, x.shape={x.shape}, is_prefill={self.is_prefill}")
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            # Keep recv lazy in ALL phases.  During prefill, generate_step
-            # coordinates: PP head signals after its send is eval'd, PP tail
-            # waits for this signal before running mx.eval(*all_states).
-            # This prevents the GPU timeout that occurred when force-eval
-            # submitted the recv too early (before the send was dispatched).
-            # During decode, laziness lets TP all-reduce + pipeline ops
+            if self.is_prefill:
+                # Force-eval during prefill: submit recv to GPU and block
+                # until the matching send arrives.  With chunked prefill
+                # (4096 tokens/chunk), each chunk takes ~12s — well under
+                # the ~60s GPU command-buffer timeout.
+                mx.eval(x)
+            # During decode, keep recv lazy so TP all-reduce + pipeline ops
             # evaluate together via mx.async_eval (avoids TP deadlock).
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
         return self.original_layer(x, *args, **kwargs)
