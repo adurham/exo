@@ -117,6 +117,7 @@ class KVPrefixCache:
         cache: KVCacheType,
         snapshots: list[CacheSnapshot] | None,
         restore_pos: int,
+        normalized_tokens: mx.array | None = None,
     ):
         """Update an existing cache entry in-place."""
         old_snapshots = self._snapshots[index]
@@ -126,12 +127,13 @@ class KVPrefixCache:
         if snapshots:
             merged.extend(snapshots)
 
-        self.prompts[index] = prompt_tokens
+        # Store normalized tokens for comparison, like add_kv_cache
+        self.prompts[index] = normalized_tokens if normalized_tokens is not None else prompt_tokens
         self.caches[index] = deepcopy(cache)
         self._snapshots[index] = merged or None
         self._access_counter += 1
         self._last_used[index] = self._access_counter
-        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens")
+        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens (normalized={normalized_tokens is not None})")
 
     def _get_snapshot(
         self, entry_index: int, target_token_count: int

@@ -1031,6 +1031,7 @@ def mlx_generate(
                         caches,
                         cache_snapshots,
                         restore_pos=prefix_hit_length,
+                        normalized_tokens=normalized_tokens,
                     )
                 else:
                     kv_prefix_cache.add_kv_cache(
