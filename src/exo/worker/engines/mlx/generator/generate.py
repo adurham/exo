@@ -35,6 +35,7 @@ from exo.worker.engines.mlx.cache import (
     encode_prompt,
     has_non_kv_caches,
     make_kv_cache,
+    normalize_prompt_for_cache,
     snapshot_ssm_states,
 )
 from exo.worker.engines.mlx.constants import (
@@ -825,6 +826,18 @@ def mlx_generate(
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
 
+    # Normalize prompt for cache comparison (strip volatile patterns like cch=)
+    normalized_prompt = normalize_prompt_for_cache(prompt)
+    if normalized_prompt != prompt:
+        normalized_tokens = encode_prompt(tokenizer, normalized_prompt)
+        normalized_tokens = fix_unmatched_think_end_tokens(normalized_tokens, tokenizer)
+        logger.info(
+            f"Prompt normalized for cache: {len(all_prompt_tokens)} -> {len(normalized_tokens)} tokens "
+            f"(stripped {len(all_prompt_tokens) - len(normalized_tokens)} volatile tokens)"
+        )
+    else:
+        normalized_tokens = None
+
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench
     if is_bench:
@@ -838,7 +851,7 @@ def mlx_generate(
         prompt_tokens = all_prompt_tokens
     else:
         caches, prompt_tokens, matched_index = kv_prefix_cache.get_kv_cache(
-            model, all_prompt_tokens
+            model, all_prompt_tokens, normalized_tokens=normalized_tokens
         )
         prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)
         if prefix_hit_length > 0:
@@ -1021,7 +1034,8 @@ def mlx_generate(
                     )
                 else:
                     kv_prefix_cache.add_kv_cache(
-                        all_prompt_tokens, caches, cache_snapshots
+                        all_prompt_tokens, caches, cache_snapshots,
+                        normalized_tokens=normalized_tokens,
                     )
 
         yield GenerationResponse(

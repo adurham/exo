@@ -1,4 +1,5 @@
 import os
+import re
 from copy import deepcopy
 
 import mlx.core as mx
@@ -97,15 +98,17 @@ class KVPrefixCache:
         prompt_tokens: mx.array,
         cache: KVCacheType,
         ssm_snapshots: list[CacheSnapshot] | None = None,
+        normalized_tokens: mx.array | None = None,
     ):
         """Add a new cache entry. Evicts LRU entries if memory is high."""
         self._evict_if_needed()
-        self.prompts.append(prompt_tokens)
+        # Store normalized tokens for comparison, original tokens for reference
+        self.prompts.append(normalized_tokens if normalized_tokens is not None else prompt_tokens)
         self.caches.append(deepcopy(cache))
         self._snapshots.append(ssm_snapshots)
         self._access_counter += 1
         self._last_used.append(self._access_counter)
-        logger.info(f"KV cache added: {len(prompt_tokens)} tokens")
+        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (normalized={normalized_tokens is not None})")
 
     def update_kv_cache(
         self,
@@ -150,6 +153,7 @@ class KVPrefixCache:
         self,
         model: Model,
         prompt_tokens: mx.array,
+        normalized_tokens: mx.array | None = None,
     ) -> tuple[KVCacheType, mx.array, int | None]:
         """Get KV cache for prompt, returning remaining tokens to prefill.
 
@@ -163,15 +167,17 @@ class KVPrefixCache:
         nearest SSM snapshot position at or before the match point for correctness.
         Same for rotating KV Cache.
         """
-        max_length = len(prompt_tokens)
+        # Use normalized tokens for comparison if available
+        compare_tokens = normalized_tokens if normalized_tokens is not None else prompt_tokens
+        max_length = len(compare_tokens)
 
         best_index: int | None = None
         best_length = 0
         is_exact = False
 
-        # Find best cache match
+        # Find best cache match (using normalized tokens)
         for i, cached_prompt in enumerate(self.prompts):
-            length = get_prefix_length(prompt_tokens, cached_prompt)
+            length = get_prefix_length(compare_tokens, cached_prompt)
             if length >= max_length - 1:
                 best_index, best_length = i, length
                 is_exact = True
@@ -205,6 +211,7 @@ class KVPrefixCache:
 
         self._access_counter += 1
         self._last_used[best_index] = self._access_counter
+        # Return remaining from ORIGINAL prompt tokens (for actual computation)
         remaining = prompt_tokens[restore_pos:]
 
         return prompt_cache, remaining, best_index
@@ -288,6 +295,27 @@ def cache_length(cache: KVCacheType) -> int:
     return max(_entry_length(c) for c in cache)
 
 
+# Volatile patterns stripped from prompts before cache comparison.
+# Each pattern should match the full volatile token (e.g., 'cch=abc123;').
+_VOLATILE_PATTERNS = [
+    re.compile(r'cch=[a-fA-F0-9]+;'),      # Claude Code content-cache hash
+    re.compile(r'ccid=[a-fA-F0-9\-]+;'),   # Claude Code conversation ID
+]
+
+
+def normalize_prompt_for_cache(prompt: str) -> str:
+    """Strip volatile, semantically-irrelevant tokens from a prompt.
+
+    Removes patterns like 'cch=abc123;' that change every request but
+    have no effect on model behavior. This allows the KV prefix cache
+    to match prompts that differ only in these volatile sections.
+    """
+    normalized = prompt
+    for pattern in _VOLATILE_PATTERNS:
+        normalized = pattern.sub('', normalized)
+    return normalized
+
+
 def get_prefix_length(prompt: mx.array, cached_prompt: mx.array) -> int:
     """Find the length of the common prefix between two token arrays."""
     n = min(int(prompt.shape[0]), int(cached_prompt.shape[0]))
@@ -300,7 +328,6 @@ def get_prefix_length(prompt: mx.array, cached_prompt: mx.array) -> int:
 
     # Log where the mismatch occurs for debugging
     if prefix_len < n and prefix_len < len(prompt) - 1:
-        # Show a few tokens around the mismatch point
         ctx_start = max(0, prefix_len - 3)
         ctx_end = min(n, prefix_len + 5)
         prompt_ctx = prompt[ctx_start:ctx_end].tolist()
