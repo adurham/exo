@@ -44,7 +44,7 @@ class ThunderboltConnectivityData(BaseModel, extra="ignore"):
         # if tag not in ifaces: return None
         iface = ifaces[tag]
         return ThunderboltIdentifier(
-            rdma_interface=iface,
+            rdma_interface=f"rdma_{iface}",
             domain_uuid=self.domain_uuid_key,
             link_speed=self.receptacle_1_tag.current_speed_key or "",
         )
