@@ -418,11 +418,7 @@ def main(
                         want_to_cancel = (_task_id in cancelled_tasks) or (
                             TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
                         )
-                        # Local check only — mx_any would block on a distributed
-                        # all_sum barrier, stalling PP head 11s+ waiting for PP
-                        # tail to finish its forward pass.  Each node checks its
-                        # own cancel_receiver independently.
-                        if want_to_cancel:
+                        if mx_any(want_to_cancel, _group):
                             raise PrefillCancelled()
 
                     try:
