@@ -333,9 +333,13 @@ def get_shard_assignments_for_hybrid_parallel(
     # Minimize PP tail layers to reduce pipeline sync wait.
     # PP tail runs full-width (no TP) so each layer takes ~2× longer than
     # on the TP group.  Every layer moved from PP tail to TP group saves
-    # ~1.6s of blocked wait.  Give PP tail exactly 1 layer per node
-    # (minimum to participate and contribute KV cache memory).
-    pp_layers = len(pp_tail_node_ids)  # 1 layer per PP tail node
+    # ~1.6s of blocked wait.
+    # NOTE: Cannot go below ~4 layers on PP tail — with too many TP layers,
+    # the eval graph grows so large that the deferred pipeline send takes
+    # too long to materialize, causing GPU command buffer timeout on the
+    # recv side.  4 layers is a safe minimum (58/4 split for 62-layer models).
+    min_pp_layers = max(4, len(pp_tail_node_ids))
+    pp_layers = min(min_pp_layers, total_layers - 1)
     tp_layers = total_layers - pp_layers
 
     logger.info(
