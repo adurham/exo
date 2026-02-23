@@ -61,9 +61,9 @@ _DEFAULT_PREFILL_STEP_SIZE = 512 * 1024  # Single-shot prefill: minimize per-chu
 
 # Hybrid pipeline GPU timeout guard.  When the PP tail's recv waits for
 # the PP head's send, each prefill chunk boundary is a natural sync point.
-# Keep chunks small enough (~4 K tokens ≈ 12 s on 2× M4 Max) so the recv
-# never approaches the ~60 s GPU command-buffer timeout.
-_HYBRID_PREFILL_STEP_SIZE = 4096
+# Keep chunks small enough that the recv never approaches the ~60 s GPU
+# command-buffer timeout.  16 K tokens ≈ 43 s with a 54-layer TP split.
+_HYBRID_PREFILL_STEP_SIZE = 16384
 
 
 from mlx.utils import tree_reduce
