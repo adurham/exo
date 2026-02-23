@@ -620,7 +620,6 @@ def generate_step(
         prompt_progress_callback(prompt_processed_tokens, total_prompt_tokens)
         import time as _time
         _prefill_chunk_idx = 0
-        _deferred_sends: list = []  # Pipeline overlap: defer sends to next chunk's eval
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
@@ -639,16 +638,14 @@ def generate_step(
             quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
 
-            # Pipeline overlap: eval THIS chunk's cache + PREVIOUS chunk's deferred sends.
-            # This lets PP head start chunk N+1 while PP tail processes chunk N.
+            # Eval cache states + pending sends together
             _num_caches = len(prompt_cache)
             _current_sends = _drain_pending_sends()
             all_states = [_c.state for _c in prompt_cache]
-            if _deferred_sends:
-                mx.eval(*all_states, *_deferred_sends)
+            if _current_sends:
+                mx.eval(*all_states, *_current_sends)
             else:
                 mx.eval(*all_states)
-            _deferred_sends = _current_sends  # Defer current sends to next iteration
             _slow_caches = []
             _t3 = _time.perf_counter()
 
@@ -659,7 +656,7 @@ def generate_step(
                 f"model={(_t1-_t0)*1000:.0f}ms, "
                 f"quantize={(_t2-_t1)*1000:.0f}ms, "
                 f"eval={(_t3-_t2)*1000:.0f}ms ({_num_caches} layers), "
-                f"deferred_sends={len(_current_sends)}, "
+                f"sends={len(_current_sends)}, "
                 f"total={(_t3-_t0)*1000:.0f}ms"
             )
             _prefill_chunk_idx += 1
@@ -685,10 +682,6 @@ def generate_step(
             )
 
         _loop_exit = _time.perf_counter()
-        # Flush any remaining deferred sends from the last prefill chunk
-        if _deferred_sends:
-            mx.eval(*_deferred_sends)
-            _deferred_sends = []
         logger.info(f"PREFILL loop exited, prompt_remaining={len(prompt)}, chunks={_prefill_chunk_idx}")
 
         # Clear cache once after prefill completes, not per-chunk

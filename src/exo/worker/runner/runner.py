@@ -414,12 +414,17 @@ def main(
                                     total_tokens=total,
                                 )
                             )
-                        cancelled_tasks.update(cancel_receiver.collect())
-                        want_to_cancel = (_task_id in cancelled_tasks) or (
-                            TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
-                        )
-                        if mx_any(want_to_cancel, _group):
-                            raise PrefillCancelled()
+                        # Only sync/barrier on the final chunk to allow PP head
+                        # to race ahead on intermediate chunks while PP tail
+                        # processes asynchronously.  The mx_any all_sum barrier
+                        # costs ~11s per call (PP head waiting for PP tail).
+                        if processed >= total - 1:
+                            cancelled_tasks.update(cancel_receiver.collect())
+                            want_to_cancel = (_task_id in cancelled_tasks) or (
+                                TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
+                            )
+                            if mx_any(want_to_cancel, _group):
+                                raise PrefillCancelled()
 
                     try:
                         if len(batch) > 1:
