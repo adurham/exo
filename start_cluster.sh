@@ -293,6 +293,9 @@ for NODE in "${NODES[@]}"; do
     if [ -n "$EXO_TP_DEBUG" ]; then
         EXO_ENV="$EXO_ENV EXO_TP_DEBUG=$EXO_TP_DEBUG"
     fi
+    if [ -n "$EXO_EVAL_DEBUG" ]; then
+        EXO_ENV="$EXO_ENV EXO_EVAL_DEBUG=$EXO_EVAL_DEBUG"
+    fi
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
