@@ -601,13 +601,17 @@ def generate_step(
                     f"total={(_st6-_st0)*1000:.0f}ms (prefill_mode)"
                 )
             else:
+                _st5 = _time.perf_counter()
+                mx.eval(sampled)
+                _st6 = _time.perf_counter()
                 logger.info(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
                     f"model={(_st1-_st0)*1000:.0f}ms "
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
                     f"quantize={(_st3-_st2)*1000:.0f}ms "
                     f"sample={(_st4-_st3)*1000:.0f}ms "
-                    f"total={(_st4-_st0)*1000:.0f}ms"
+                    f"eval={(_st6-_st5)*1000:.0f}ms "
+                    f"total={(_st6-_st0)*1000:.0f}ms"
                 )
 
             return sampled, logprobs.squeeze(0)

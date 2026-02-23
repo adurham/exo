@@ -74,6 +74,7 @@ from exo.shared.types.worker.shards import (
     CfgShardMetadata,
     PipelineShardMetadata,
     ShardMetadata,
+    TensorShardMetadata,
 )
 from exo.utils.channels import MpReceiver, MpSender, WouldBlock
 from exo.worker.engines.image import (
@@ -422,8 +423,15 @@ def main(
                         want_to_cancel = (_task_id in cancelled_tasks) or (
                             TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
                         )
-                        if mx_any(want_to_cancel, _group):
-                            raise PrefillCancelled()
+                        # Pure TP: no PP head/tail desync risk, skip distributed
+                        # barrier. This avoids an all_sum + mx.eval round-trip
+                        # per prefill chunk.
+                        if isinstance(shard_metadata, TensorShardMetadata):
+                            if want_to_cancel:
+                                raise PrefillCancelled()
+                        else:
+                            if mx_any(want_to_cancel, _group):
+                                raise PrefillCancelled()
 
                     try:
                         if len(batch) > 1:

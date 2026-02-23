@@ -44,6 +44,10 @@ from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
 
 from exo.shared.logging import logger
 import datetime as _dt
+import time as _time
+
+_tp_debug = os.environ.get("EXO_TP_DEBUG", "0") == "1"
+_tp_layer_counter = 0  # auto-incrementing layer ID for debug logs
 
 def _dbg(msg: str) -> None:
     """Write debug trace directly to file (bypasses loguru and subprocess stdout issues)."""
@@ -858,13 +862,35 @@ class ShardedMoE(CustomMlxLayer):
     def __init__(self, layer: _LayerCallable):
         super().__init__(layer)
         self.sharding_group: mx.distributed.Group | None = None
+        global _tp_layer_counter
+        self._moe_id = _tp_layer_counter
+        _tp_layer_counter += 1
 
     def __call__(self, x: mx.array) -> mx.array:
         if self.sharding_group is not None:
+            if _tp_debug:
+                _t0 = _time.perf_counter()
             x = sum_gradients(self.sharding_group)(x)
+            if _tp_debug:
+                _t1 = _time.perf_counter()
+        else:
+            if _tp_debug:
+                _t0 = _t1 = _time.perf_counter()
         y = self.original_layer.__call__(x)
+        if _tp_debug:
+            _t2 = _time.perf_counter()
         if self.sharding_group is not None:
             y = mx.distributed.all_sum(y, group=self.sharding_group)
+        if _tp_debug:
+            _t3 = _time.perf_counter()
+            _dbg(
+                f"[MoE {self._moe_id}] "
+                f"sum_grad={(_t1-_t0)*1000:.1f}ms "
+                f"compute={(_t2-_t1)*1000:.1f}ms "
+                f"all_sum={(_t3-_t2)*1000:.1f}ms "
+                f"total={(_t3-_t0)*1000:.1f}ms "
+                f"x.shape={x.shape}"
+            )
         return y
 
 
@@ -936,6 +962,9 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
     def __init__(self, layer: _LayerCallable, group: mx.distributed.Group):
         super().__init__(layer)
         self.group = group
+        global _tp_layer_counter
+        self._attn_id = _tp_layer_counter
+        _tp_layer_counter += 1
 
     def __call__(
         self,
@@ -943,6 +972,9 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         mask: mx.array | None = None,
         cache: "Cache | None" = None,
     ) -> mx.array:
+        if _tp_debug:
+            _t0 = _time.perf_counter()
+
         batch_dim, seq_dim, _ = x.shape
 
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
@@ -950,6 +982,9 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         queries: mx.array = self._original_layer.q_proj(x)
         keys: mx.array = self._original_layer.k_proj(x)
         values: mx.array = self._original_layer.v_proj(x)
+
+        if _tp_debug:
+            _t1 = _time.perf_counter()
 
         if getattr(self, "use_qk_norm", False):
             q_dim = queries.shape[-1]
@@ -977,6 +1012,9 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             # Split back and take this rank's portion
             queries = mx.split(queries, n, axis=-1)[self.group.rank()]
             keys = mx.split(keys, n, axis=-1)[self.group.rank()]
+
+        if _tp_debug:
+            _t2 = _time.perf_counter()
 
         queries = queries.reshape(
             batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
@@ -1007,7 +1045,24 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
 
         output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
 
-        return self._original_layer.o_proj(output)
+        if _tp_debug:
+            _t3 = _time.perf_counter()
+
+        result = self._original_layer.o_proj(output)
+
+        if _tp_debug:
+            _t4 = _time.perf_counter()
+            _dbg(
+                f"[Attn {self._attn_id}] "
+                f"qkv_proj={(_t1-_t0)*1000:.1f}ms "
+                f"qk_norm={(_t2-_t1)*1000:.1f}ms "
+                f"sdpa={(_t3-_t2)*1000:.1f}ms "
+                f"o_proj+allsum={(_t4-_t3)*1000:.1f}ms "
+                f"total={(_t4-_t0)*1000:.1f}ms "
+                f"seq={seq_dim}"
+            )
+
+        return result
 
 
 class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
