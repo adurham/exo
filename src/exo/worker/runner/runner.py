@@ -414,15 +414,15 @@ def main(
                                     total_tokens=total,
                                 )
                             )
-                        # Local cancellation check only — no distributed barrier.
-                        # PP head/tail sync is handled by force-eval on recv in
-                        # PipelineFirstLayer.  The mx_any all_sum used to cost
-                        # ~11s here (PP head waiting for PP tail's forward pass).
+                        # Distributed barrier: required to keep PP head and
+                        # PP tail in sync.  Without it, PP head races into
+                        # decode while PP tail is still in prefill → desync.
+                        # Costs ~11 s (PP tail compute time) but cannot be removed.
                         cancelled_tasks.update(cancel_receiver.collect())
                         want_to_cancel = (_task_id in cancelled_tasks) or (
                             TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
                         )
-                        if want_to_cancel:
+                        if mx_any(want_to_cancel, _group):
                             raise PrefillCancelled()
 
                     try:
