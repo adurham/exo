@@ -26,6 +26,9 @@ def entrypoint(
     cancel_receiver: MpReceiver[TaskId],
     _logger: "loguru.Logger",
 ) -> None:
+    global logger
+    logger = _logger
+
     fast_synch_override = os.environ.get("EXO_FAST_SYNCH")
     if fast_synch_override == "on" or (
         fast_synch_override != "off"
