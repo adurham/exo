@@ -681,6 +681,7 @@ def generate_step(
                     f"PREFILL slow cache layers: "
                     f"{', '.join(f'L{i}={t:.0f}ms' for i, t in _slow_caches)}"
                 )
+            _t3a = _time.perf_counter()
             _prefill_chunk_idx += 1
 
             prompt_processed_tokens += n_to_process
@@ -698,7 +699,8 @@ def generate_step(
                 f"model={(_t1-_t0)*1000:.0f}ms "
                 f"quantize={(_t2-_t1)*1000:.0f}ms "
                 f"eval={(_t3-_t2)*1000:.0f}ms "
-                f"log+callback={(_t4-_t3)*1000:.0f}ms "
+                f"loguru={(_t3a-_t3)*1000:.0f}ms "
+                f"callback={(_t4-_t3a)*1000:.0f}ms "
                 f"slice={(_t5-_t4)*1000:.0f}ms "
                 f"total={(_t5-_t0)*1000:.0f}ms"
             )
