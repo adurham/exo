@@ -57,7 +57,7 @@ _MIN_PREFIX_HIT_TO_UPDATE = 1000
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
-_DEFAULT_PREFILL_STEP_SIZE = 4096  # Multi-chunk prefill: enables pipelining PP tail overlap
+_DEFAULT_PREFILL_STEP_SIZE = 512 * 1024  # Single-shot prefill: minimize per-chunk overhead
 
 
 from mlx.utils import tree_reduce
