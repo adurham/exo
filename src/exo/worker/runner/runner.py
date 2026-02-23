@@ -414,17 +414,16 @@ def main(
                                     total_tokens=total,
                                 )
                             )
-                        # Only sync/barrier on the final chunk to allow PP head
-                        # to race ahead on intermediate chunks while PP tail
-                        # processes asynchronously.  The mx_any all_sum barrier
-                        # costs ~11s per call (PP head waiting for PP tail).
-                        if processed >= total - 1:
-                            cancelled_tasks.update(cancel_receiver.collect())
-                            want_to_cancel = (_task_id in cancelled_tasks) or (
-                                TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
-                            )
-                            if mx_any(want_to_cancel, _group):
-                                raise PrefillCancelled()
+                        # Local cancellation check only — no distributed barrier.
+                        # PP head/tail sync is handled by force-eval on recv in
+                        # PipelineFirstLayer.  The mx_any all_sum used to cost
+                        # ~11s here (PP head waiting for PP tail's forward pass).
+                        cancelled_tasks.update(cancel_receiver.collect())
+                        want_to_cancel = (_task_id in cancelled_tasks) or (
+                            TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
+                        )
+                        if want_to_cancel:
+                            raise PrefillCancelled()
 
                     try:
                         if len(batch) > 1:
