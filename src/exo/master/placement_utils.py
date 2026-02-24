@@ -334,6 +334,13 @@ def get_shard_assignments_for_hybrid_parallel(
     tp_layers = min(tp_layers, total_layers - len(pp_tail_node_ids))
     pp_layers = total_layers - tp_layers
 
+    # Cap PP tail layers to avoid OOM on memory-constrained nodes (e.g. MacBook 36GB).
+    # The PP tail mainly exists for KV cache offload, not heavy compute.
+    max_pp_layers = 3
+    if pp_layers > max_pp_layers:
+        pp_layers = max_pp_layers
+        tp_layers = total_layers - pp_layers
+
     logger.info(
         f"Hybrid placement: {tp_size} TP nodes × {tp_layers} shared layers, "
         f"{len(pp_tail_node_ids)} PP tail node(s) × {pp_layers} layers "
