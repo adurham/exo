@@ -5,7 +5,7 @@ import os
 
 
 def _get_kv_bits() -> int | None:
-    bits = os.environ.get("EXO_KV_BITS", "4")
+    bits = os.environ.get("EXO_KV_BITS", "none")
     if bits.lower() in ("none", "null", "false"):
         return None
     return int(bits)
