@@ -821,6 +821,7 @@
       availableModels.some((m) => m.id === defaults.modelId)
     ) {
       selectPreviewModel(defaults.modelId);
+      setSelectedChatModel(defaults.modelId);
     }
   }
 
@@ -1256,6 +1257,7 @@
 
   function handleModelPickerSelect(modelId: string) {
     selectPreviewModel(modelId);
+    setSelectedChatModel(modelId);
     saveLaunchDefaults();
     isModelPickerOpen = false;
   }
@@ -2220,7 +2222,8 @@
     selectedChatCategory = null;
     pendingAutoMessage = null;
     userForcedIdle = true;
-    setSelectedChatModel("");
+    // Restore chat model from the sidebar preview selection so both selectors stay in sync
+    setSelectedChatModel(selectedModelId ?? "");
     clearChat();
   }
 
@@ -2929,6 +2932,7 @@
   // Handle model selection from the picker when opened from chat context
   function handleChatPickerSelect(modelId: string) {
     setSelectedChatModel(modelId);
+    selectPreviewModel(modelId);
     userForcedIdle = false;
     isModelPickerOpen = false;
   }
@@ -2948,6 +2952,7 @@
 
     // Model is selected and running — send directly
     if (model && hasRunningInstance(model)) {
+      chatLaunchState = "ready";
       sendMessage(content, files, null);
       return;
     }
