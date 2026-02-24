@@ -20,8 +20,8 @@ def _get_int_or_none(env_var: str, default: str) -> int | None:
     return int(val)
 
 MAX_TOKENS: int = 32168
-MAX_KV_SIZE: int | None = _get_int_or_none("EXO_MAX_KV_SIZE", "20000")
-KEEP_KV_SIZE: int | None = _get_int_or_none("EXO_KEEP_KV_SIZE", "10000")
+MAX_KV_SIZE: int | None = _get_int_or_none("EXO_MAX_KV_SIZE", "none")
+KEEP_KV_SIZE: int | None = _get_int_or_none("EXO_KEEP_KV_SIZE", "none")
 QUANTIZE_MODEL_MODE: str | None = "affine"
 CACHE_GROUP_SIZE: int = 64
 KV_CACHE_BITS: int | None = _get_kv_bits()
