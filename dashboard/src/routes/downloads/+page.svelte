@@ -422,7 +422,7 @@
                   <div>{col.label}</div>
                   {#if col.diskAvailable != null}
                     <div
-                      class="text-[9px] text-exo-light-gray/60 normal-case tracking-normal mt-0.5"
+                      class="text-[9px] text-white/70 normal-case tracking-normal mt-0.5"
                     >
                       {formatBytes(col.diskAvailable)} free
                     </div>
@@ -446,7 +446,7 @@
                       </div>
                       {#if row.prettyName}
                         <div
-                          class="text-[10px] text-exo-light-gray/60"
+                          class="text-[10px] text-white/60"
                           title={row.modelId}
                         >
                           {row.modelId}
@@ -460,7 +460,7 @@
                       title="View model details"
                     >
                       <svg
-                        class="w-4 h-4 text-white/30 hover:text-white/60"
+                        class="w-4 h-4 text-white/60 hover:text-white/80"
                         viewBox="0 0 24 24"
                         fill="currentColor"
                       >
@@ -493,12 +493,12 @@
                             clip-rule="evenodd"
                           ></path>
                         </svg>
-                        <span class="text-xs text-exo-light-gray/70"
+                        <span class="text-xs text-white/70"
                           >{formatBytes(cell.totalBytes)}</span
                         >
                         <button
                           type="button"
-                          class="text-exo-light-gray/40 hover:text-red-400 transition-colors mt-0.5 cursor-pointer"
+                          class="text-white/50 hover:text-red-400 transition-colors mt-0.5 cursor-pointer"
                           onclick={() =>
                             deleteDownload(col.nodeId, row.modelId)}
                           title="Delete from this node"
@@ -540,7 +540,7 @@
                             ).toFixed(1)}%"
                           ></div>
                         </div>
-                        <span class="text-[10px] text-exo-light-gray/60"
+                        <span class="text-[10px] text-white/70"
                           >{formatSpeed(cell.speed)}</span
                         >
                       </div>
@@ -552,7 +552,7 @@
                           : "Download pending"}
                       >
                         {#if cell.downloaded > 0 && cell.total > 0}
-                          <span class="text-exo-light-gray/70 text-xs"
+                          <span class="text-white/70 text-xs"
                             >{formatBytes(cell.downloaded)} / {formatBytes(
                               cell.total,
                             )}</span
@@ -571,7 +571,7 @@
                           {#if row.shardMetadata}
                             <button
                               type="button"
-                              class="text-exo-light-gray/50 hover:text-exo-yellow transition-colors cursor-pointer"
+                              class="text-white/50 hover:text-exo-yellow transition-colors cursor-pointer"
                               onclick={() =>
                                 startDownload(col.nodeId, row.shardMetadata!)}
                               title="Resume download on this node"
@@ -591,14 +591,13 @@
                               </svg>
                             </button>
                           {:else}
-                            <span class="text-exo-light-gray/40 text-[10px]"
-                              >paused</span
+                            <span class="text-white/50 text-[10px]">paused</span
                             >
                           {/if}
                         {:else if row.shardMetadata}
                           <button
                             type="button"
-                            class="text-exo-light-gray/30 hover:text-exo-yellow transition-colors cursor-pointer"
+                            class="text-white/50 hover:text-exo-yellow transition-colors cursor-pointer"
                             onclick={() =>
                               startDownload(col.nodeId, row.shardMetadata!)}
                             title="Start download on this node"
@@ -618,8 +617,7 @@
                             </svg>
                           </button>
                         {:else}
-                          <span class="text-exo-light-gray/50 text-sm">...</span
-                          >
+                          <span class="text-white/40 text-sm">...</span>
                         {/if}
                       </div>
                     {:else if cell.kind === "failed"}
@@ -641,7 +639,7 @@
                         {#if row.shardMetadata}
                           <button
                             type="button"
-                            class="text-exo-light-gray/40 hover:text-exo-yellow transition-colors cursor-pointer"
+                            class="text-white/50 hover:text-exo-yellow transition-colors cursor-pointer"
                             onclick={() =>
                               startDownload(col.nodeId, row.shardMetadata!)}
                             title="Retry download on this node"
@@ -673,7 +671,7 @@
                         {#if row.shardMetadata}
                           <button
                             type="button"
-                            class="text-exo-light-gray/30 hover:text-exo-yellow transition-colors mt-0.5 opacity-0 group-hover:opacity-100 cursor-pointer"
+                            class="text-white/50 hover:text-exo-yellow transition-colors mt-0.5 opacity-0 group-hover:opacity-100 cursor-pointer"
                             onclick={() =>
                               startDownload(col.nodeId, row.shardMetadata!)}
                             title="Download to this node"
