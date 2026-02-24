@@ -299,6 +299,9 @@ for NODE in "${NODES[@]}"; do
     if [ -n "$EXO_MAX_ACTIVE_TASKS" ]; then
         EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
     fi
+    if [ -n "$EXO_PREFILL_STEP_SIZE" ]; then
+        EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
+    fi
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"

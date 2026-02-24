@@ -252,6 +252,13 @@ def prefill(
 
     mx_barrier(group)
     logger.info("Starting prefill")
+    # TP mode: smaller chunks dramatically reduce per-allreduce RDMA volume
+    # (512 tokens × 3072 dims × 2B = 3MB vs 95MB at 16K tokens)
+    tp_active = group is not None and group.size() > 1
+    default_step = 512 if tp_active else _DEFAULT_PREFILL_STEP_SIZE
+    _prefill_step = _env_int("EXO_PREFILL_STEP_SIZE", default_step)
+    if tp_active:
+        logger.info(f"TP prefill: chunk_size={_prefill_step} tokens (default={default_step})")
 
     # Use max_tokens=1 because max_tokens=0 does not work.
     # We just throw away the generated token - we only care about filling the cache
@@ -263,7 +270,7 @@ def prefill(
             max_tokens=1,
             sampler=sampler,
             prompt_cache=cache,
-            prefill_step_size=_env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE),
+            prefill_step_size=_prefill_step,
             kv_group_size=KV_GROUP_SIZE,
             kv_bits=KV_BITS,
             prompt_progress_callback=progress_callback,
