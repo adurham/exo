@@ -15,7 +15,7 @@ KV_BITS: int | None = _get_kv_bits()
 ATTENTION_KV_BITS: int | None = _get_kv_bits()
 def _get_int_or_none(env_var: str, default: str) -> int | None:
     val = os.environ.get(env_var, default)
-    if val.lower() in ("none", "null", "false"):
+    if not val or val.lower() in ("none", "null", "false"):
         return None
     return int(val)
 
