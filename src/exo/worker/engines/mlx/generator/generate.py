@@ -57,7 +57,7 @@ _MIN_PREFIX_HIT_TO_UPDATE = 1000
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
-_DEFAULT_PREFILL_STEP_SIZE = 32  # Must be small for hybrid TP: 59 layers × all-reduce per layer. 48 tokens = 766ms, 177 = GPU timeout
+_DEFAULT_PREFILL_STEP_SIZE = 1  # Must be 1 for hybrid TP: 59 layers × all-reduce causes GPU timeout at any batch >1
 
 
 from mlx.utils import tree_reduce
@@ -657,6 +657,7 @@ def generate_step(
                 mx.eval(*all_states, *_current_sends)
             else:
                 mx.eval(*all_states)
+            mx.synchronize()  # Force GPU completion before next chunk
             _slow_caches = []
             _t3 = _time.perf_counter()
 
