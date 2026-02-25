@@ -155,7 +155,10 @@ class PipelineFirstLayer(CustomMlxLayer):
                 # until the matching send arrives.  With chunked prefill
                 # (4096 tokens/chunk), each chunk takes ~12s — well under
                 # the ~60s GPU command-buffer timeout.
+                t0 = _time.monotonic()
                 mx.eval(x)
+                elapsed = _time.monotonic() - t0
+                logger.info(f"[PIPELINE-RECV-EVAL] rank={self.r} recv eval took {elapsed:.3f}s (prefill)")
             # During decode, keep recv lazy so TP all-reduce + pipeline ops
             # evaluate together via mx.async_eval (avoids TP deadlock).
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
@@ -190,7 +193,10 @@ class PipelineLastLayer(CustomMlxLayer):
             )
             # Force intermediate send to avoid deadlock where Rank 1 waits for this
             # while Rank 0 waits for Rank 1's final output.
+            t0 = _time.monotonic()
             mx.eval(output)
+            elapsed = _time.monotonic() - t0
+            logger.info(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill={self.is_prefill})")
 
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
@@ -199,7 +205,10 @@ class PipelineLastLayer(CustomMlxLayer):
                 _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
             if self.is_prefill:
                 if cache is not None:
+                    t1 = _time.monotonic()
                     mx.eval(_cache.keys)  # type: ignore
+                    elapsed2 = _time.monotonic() - t1
+                    logger.info(f"[PIPELINE-CACHE-EVAL] rank={self.r} cache eval took {elapsed2:.3f}s (prefill)")
 
         # Note: On intermediate ranks (not last), mx.eval(output) after the send
         # materializes cache state as a side effect (0ms). On the last rank,
