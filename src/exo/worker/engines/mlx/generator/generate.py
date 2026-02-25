@@ -350,6 +350,12 @@ def warmup_inference(
 
     logger.info("Generated ALL warmup tokens")
 
+    # Force GPU to complete all pending command buffers from warmup.
+    # Without this, the warmup's GPU command buffer may still be executing
+    # asynchronously, and Metal's 60s timeout will kill it during real inference.
+    mx.synchronize()
+    logger.info("Warmup GPU sync complete")
+
     mx_barrier(group)
 
     return tokens_generated
