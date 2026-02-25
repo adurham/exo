@@ -57,7 +57,7 @@ _MIN_PREFIX_HIT_TO_UPDATE = 1000
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 _DEFAULT_COMPLETION_BATCH_SIZE = 8
 _DEFAULT_PREFILL_BATCH_SIZE = 8
-_DEFAULT_PREFILL_STEP_SIZE = 512  # Keep small for hybrid TP: large chunks with 59 TP layers × all-reduce cause GPU timeout
+_DEFAULT_PREFILL_STEP_SIZE = 32  # Must be small for hybrid TP: 59 layers × all-reduce per layer. 48 tokens = 766ms, 177 = GPU timeout
 
 
 from mlx.utils import tree_reduce
