@@ -4,17 +4,10 @@
 # Usage: ./start_cluster.sh
 # Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
 
-export EXO_FAST_SYNCH=on
+export EXO_FAST_SYNCH=off
 export EXO_EVAL_DEBUG=1
-export EXO_TP_DEBUG=1
-export EXO_MAX_ACTIVE_TASKS=30
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
 export IBV_FORK_SAFE=1
-
-# Exo Runtime Variables
-export EXO_KV_BITS=false
-export EXO_BATCH_COMPLETION_SIZE=8
-export EXO_MLX_WIRED_LIMIT_RATIO=0.87
 export PYTHONUNBUFFERED=1
 
 # Define Node Constants
@@ -259,7 +252,9 @@ for NODE in "${NODES[@]}"; do
         ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to build on $NODE"; exit 1; }
     fi
 
-
+    # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
+    echo "Rebuilding Rust pyo3 bindings on $NODE..."
+    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install maturin 2>/dev/null && uv run maturin develop --release -m rust/exo_pyo3_bindings/Cargo.toml'" || { echo "Failed to rebuild Rust bindings on $NODE"; exit 1; }
 
 
     echo "Building dashboard on $NODE..."
@@ -285,36 +280,15 @@ echo "Nodes synchronized on commit $COMMIT_M4_1."
 for NODE in "${NODES[@]}"; do
     echo "Starting Exo on $NODE..."
     
-    # Build the dynamic environment string based on the current exports
-    # KV cache size (same for all nodes — effective window is limited by smallest)
-    KV_SIZE="${EXO_MAX_KV_SIZE:-}"
-    KV_KEEP="${EXO_KEEP_KV_SIZE:-}"
-    EXO_ENV="EXO_KV_BITS=${EXO_KV_BITS:-false} EXO_MAX_KV_SIZE=$KV_SIZE EXO_KEEP_KV_SIZE=$KV_KEEP EXO_BATCH_COMPLETION_SIZE=${EXO_BATCH_COMPLETION_SIZE:-8} EXO_MLX_WIRED_LIMIT_RATIO=${EXO_MLX_WIRED_LIMIT_RATIO:-0.87} PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}"
-    if [ -n "$EXO_FAST_SYNCH" ]; then
-        EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
-    fi
-    if [ -n "$EXO_TP_DEBUG" ]; then
-        EXO_ENV="$EXO_ENV EXO_TP_DEBUG=$EXO_TP_DEBUG"
-    fi
-    if [ -n "$EXO_EVAL_DEBUG" ]; then
-        EXO_ENV="$EXO_ENV EXO_EVAL_DEBUG=$EXO_EVAL_DEBUG"
-    fi
-    if [ -n "$EXO_MAX_ACTIVE_TASKS" ]; then
-        EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
-    fi
-    if [ -n "$EXO_MAX_ACTIVE_TASKS_DECODE" ]; then
-        EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS_DECODE=$EXO_MAX_ACTIVE_TASKS_DECODE"
-    fi
-    if [ -n "$EXO_PREFILL_STEP_SIZE" ]; then
-        EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
-    fi
+    # Build the dynamic environment string — minimal, matching upstream B-side
+    EXO_ENV="PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main > /tmp/exo.log 2>&1'"
     elif [ "$NODE" == "macstudio-m4-2" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main > /tmp/exo.log 2>&1'"
     else
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID uv run python -m exo.main > /tmp/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main > /tmp/exo.log 2>&1'"
     fi
 done
 

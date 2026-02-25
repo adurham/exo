@@ -1,3 +1,4 @@
 {
-    "basedpyright.importStrategy": "fromEnvironment"
+    "basedpyright.importStrategy": "fromEnvironment",
+    "cmake.ignoreCMakeListsMissing": true
 }
