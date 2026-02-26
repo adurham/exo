@@ -24,6 +24,11 @@ Achieve stable, high-performance distributed inference on a 3-node M4 cluster wi
     - Set `EXO_PREFILL_STEP_SIZE=1024` and `EXO_ADAPTIVE_THROTTLE=100` in `start_cluster.sh`.
     - **Result:** Massive context jumps are now processed in steady, high-speed 1K pulses instead of single giant bursts that caused RDMA overflows and system stutters.
 
+5.  **Dynamic Safe Sync (GPU Timeout Mitigation):**
+    - Fixed an issue where the pipeline tail node crashed with `kIOGPUCommandBufferCallbackErrorTimeout` because its GPU waited >2s for the compute-heavy node during massive decodes.
+    - Added a dynamic fallback (`MLX_FORCE_DISTRIBUTED_GPU=0`) that automatically switches pipeline synchronization from the GPU to the CPU when context exceeds 50,000 tokens.
+    - **Result:** Retains blazing fast 1ms GPU sync for short contexts, while safely surviving indefinitely on massive 200k contexts. (Documented in `docs/gpu_timeout_fix.md`).
+
 ## Current System State
 - **Branch:** Optimized Fork (A-Side)
 - **FAST_SYNCH:** Off (Safe mode)
