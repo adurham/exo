@@ -591,16 +591,9 @@ def generate_step(
             if hybrid_group is not None and decode_mode:
                 is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
 
-                _pending = _drain_pending_sends()
-                _st5 = _time.perf_counter()
-                mx.eval(sampled, *_pending)
-                _st6 = _time.perf_counter()
-
                 # Dynamic Safe Sync: if the context is massive, the network wait can trigger 
                 # a Metal GPU Timeout Error (>2-5s) on the pipeline tail node while waiting for 
                 # other nodes to chew through their massive KV cache.
-                # If EXO_DISABLE_METAL_TIMEOUT=1 (default), we rely on the OS-level override.
-                # Otherwise, we fallback to CPU network sync at EXO_SAFE_SYNC_LIMIT (default 50,000).
                 _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
                 
                 _massive_context = False
@@ -608,21 +601,29 @@ def generate_step(
                     _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
                     _massive_context = _kv_len > _safe_sync_limit
 
+                # Unified Graph Fusion: Build the full dependency graph (Compute -> Token Sync)
+                # and trigger a single mx.eval() to reduce Metal driver overhead.
+                if is_pp_tail:
+                    contribution = sampled
+                else:
+                    contribution = mx.zeros_like(sampled)
+                
+                synced_sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                _pending = _drain_pending_sends()
+
+                _st5 = _time.perf_counter()
                 if _massive_context:
                     os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
 
                 try:
-                    if is_pp_tail:
-                        contribution = sampled
-                    else:
-                        contribution = mx.zeros_like(sampled)
-                    sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-                    mx.eval(sampled)
+                    # Evaluate compute layers, deferred pipeline sends, and the token sync all at once.
+                    mx.eval(synced_sampled, *_pending)
                 finally:
                     if _massive_context:
                         os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
-
-                _st7 = _time.perf_counter()
+                
+                sampled = synced_sampled
+                _st6 = _time.perf_counter()
 
                 logger.info(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
@@ -630,9 +631,8 @@ def generate_step(
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
                     f"quantize={(_st3-_st2)*1000:.0f}ms "
                     f"sample={(_st4-_st3)*1000:.0f}ms "
-                    f"eval={(_st6-_st5)*1000:.0f}ms "
-                    f"token_sync={(_st7-_st6)*1000:.0f}ms "
-                    f"total={(_st7-_st0)*1000:.0f}ms "
+                    f"fused_eval={(_st6-_st5)*1000:.0f}ms "
+                    f"total={(_st6-_st0)*1000:.0f}ms "
                     f"({'SAFE_SYNC' if _massive_context else 'FAST_SYNC'})"
                 )
             elif hybrid_group is not None:
