@@ -6,6 +6,7 @@
 
 export EXO_FAST_SYNCH=off
 export EXO_EVAL_DEBUG=1
+export EXO_ADAPTIVE_THROTTLE=1
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -281,7 +282,11 @@ for NODE in "${NODES[@]}"; do
     echo "Starting Exo on $NODE..."
     
     # Build the dynamic environment string — minimal, matching upstream B-side
-    EXO_ENV="PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
+    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
+    
+    if [ -n "$EXO_ADAPTIVE_THROTTLE" ]; then
+        EXO_ENV="$EXO_ENV EXO_ADAPTIVE_THROTTLE=$EXO_ADAPTIVE_THROTTLE"
+    fi
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main > /tmp/exo.log 2>&1'"
