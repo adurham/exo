@@ -21,6 +21,8 @@ from exo_pyo3_bindings import (
     PeerId,
     NetworkingHandle,
     NoPeersSubscribedToTopicError,
+    AllQueuesFullError,
+    MessageTooLargeError,
 )
 import base58
 from filelock import FileLock
@@ -235,6 +237,8 @@ class Router:
                     pass
                 except AllQueuesFullError:
                     logger.warning(f"All peer queues full, dropping message on {topic}")
+                except MessageTooLargeError:
+                    logger.warning(f"Message too large to send on {topic}, dropping")
 
 
 def get_node_id_keypair(
