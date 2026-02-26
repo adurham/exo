@@ -100,25 +100,27 @@ def _allocate_and_validate_layers(
     total_memory: Memory,
     model_card: ModelCard,
 ) -> list[int]:
-    # --- Dynamic KV Cache Calculation ---
-    # Goal: Ensure sharding fits the weights + a full 200k token KV cache.
-    TARGET_CONTEXT = 200_000
+    # --- Dynamic KV Cache Calculation (100% Context) ---
+    # Goal: Ensure sharding fits the weights + the model's MAXIMUM supported context window.
+    max_context = getattr(model_card, "max_context_length", 2048)
+    if max_context <= 0:
+        max_context = 2048
     
     # Typical KV per token per layer: 2 * num_kv_heads * head_dim * 2 bytes (FP16)
-    # Using ModelCard attributes (with defaults if missing)
     num_kv_heads = getattr(model_card, "num_kv_heads", 8)
     head_dim = getattr(model_card, "head_dim", 128)
     kv_bytes_per_token_per_layer = 2 * num_kv_heads * head_dim * 2
     
-    kv_mem_per_layer_bytes = kv_bytes_per_token_per_layer * TARGET_CONTEXT
+    kv_mem_per_layer_bytes = kv_bytes_per_token_per_layer * max_context
     weight_mem_per_layer_bytes = model_card.storage_size.in_bytes / model_card.n_layers
     
     total_mem_per_layer_bytes = weight_mem_per_layer_bytes + kv_mem_per_layer_bytes
     
-    logger.info(f"Sharding model {model_card.model_id}: Weight/layer={weight_mem_per_layer_bytes/(1024**3):.2f}GB, "
-                f"KV/layer(200k)={kv_mem_per_layer_bytes/(1024**3):.2f}GB, Total/layer={total_mem_per_layer_bytes/(1024**3):.2f}GB")
+    logger.info(f"Sharding model {model_card.model_id} for 100% KV ({max_context} tokens): "
+                f"Weight/layer={weight_mem_per_layer_bytes/(1024**3):.2f}GB, "
+                f"KV/layer={kv_mem_per_layer_bytes/(1024**3):.2f}GB, Total/layer={total_mem_per_layer_bytes/(1024**3):.2f}GB")
 
-    # Reserve a small 5% buffer for system/OS overhead, then use the remaining for layers
+    # Reserve a small 5% buffer for system/OS overhead
     SYSTEM_RESERVE = 0.05
     
     layer_allocations = allocate_layers_proportionally(
@@ -135,7 +137,7 @@ def _allocate_and_validate_layers(
         available_memory = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
         
         if required_memory > available_memory:
-            # If 200k context won't fit, we try to at least fit 32k context as a fallback
+            # If 100% context won't fit, we try to at least fit 32k context as a baseline
             FALLBACK_CONTEXT = 32_000
             fallback_kv_mem = kv_bytes_per_token_per_layer * FALLBACK_CONTEXT
             fallback_total = (weight_mem_per_layer_bytes + fallback_kv_mem) * node_layers
@@ -143,12 +145,12 @@ def _allocate_and_validate_layers(
             if fallback_total > available_memory:
                 raise ValueError(
                     f"Node {i} ({node_id}) has insufficient memory: "
-                    f"requires {required_memory / (1024**3):.2f} GB for {node_layers} layers (weights + 200k KV), "
+                    f"requires {fallback_total / (1024**3):.2f} GB for {node_layers} layers (weights + 32k KV), "
                     f"but only has {available_memory / (1024**3):.2f} GB available."
                 )
             else:
-                logger.warning(f"Node {i} ({node_id}) cannot fit 200k context for {node_layers} layers. "
-                               f"Falling back to {FALLBACK_CONTEXT/1000:.0f}k context limit for this node.")
+                logger.warning(f"Node {i} ({node_id}) cannot fit full {max_context} context for {node_layers} layers. "
+                               f"Fitting up to {available_memory / (total_mem_per_layer_bytes/max_context) / node_layers:.0f} tokens instead.")
 
     return layer_allocations
 
