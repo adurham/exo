@@ -625,7 +625,7 @@ def generate_step(
                 sampled = synced_sampled
                 _st6 = _time.perf_counter()
 
-                logger.info(
+                logger.debug(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
                     f"model={(_st1-_st0)*1000:.0f}ms "
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
@@ -642,7 +642,7 @@ def generate_step(
                     mx.eval(*_pending)
                 _st6 = _time.perf_counter()
 
-                logger.info(
+                logger.debug(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
                     f"model={(_st1-_st0)*1000:.0f}ms "
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
@@ -674,7 +674,7 @@ def generate_step(
                         os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
 
                 _st6 = _time.perf_counter()
-                logger.info(
+                logger.debug(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
                     f"model={(_st1-_st0)*1000:.0f}ms "
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
@@ -699,7 +699,7 @@ def generate_step(
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
-            logger.info(f"PREFILL loop: starting chunk {_prefill_chunk_idx}, remaining={remaining}, n_to_process={n_to_process}")
+            logger.debug(f"PREFILL loop: starting chunk {_prefill_chunk_idx}, remaining={remaining}, n_to_process={n_to_process}")
 
             _t0 = _time.perf_counter()
             _model_call(
@@ -727,7 +727,7 @@ def generate_step(
             _t3 = _time.perf_counter()
 
             _kv_len = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
-            logger.info(
+            logger.debug(
                 f"PREFILL chunk {_prefill_chunk_idx}: "
                 f"tokens={n_to_process}, kv_len={_kv_len}, "
                 f"model={(_t1-_t0)*1000:.0f}ms, "
@@ -748,7 +748,7 @@ def generate_step(
                 else input_embeddings
             )
             _t5 = _time.perf_counter()
-            logger.info(
+            logger.debug(
                 f"PREFILL loop end: "
                 f"model={(_t1-_t0)*1000:.0f}ms "
                 f"quantize={(_t2-_t1)*1000:.0f}ms "
@@ -759,7 +759,7 @@ def generate_step(
             )
 
         _loop_exit = _time.perf_counter()
-        logger.info(f"PREFILL loop exited, prompt_remaining={len(prompt)}, chunks={_prefill_chunk_idx}")
+        logger.debug(f"PREFILL loop exited, prompt_remaining={len(prompt)}, chunks={_prefill_chunk_idx}")
 
         # Clear cache once after prefill completes, not per-chunk
         _gap_t0 = _time.perf_counter()
@@ -779,7 +779,7 @@ def generate_step(
         if n == 0:
             mx.eval(y)
             _gap_t4 = _time.perf_counter()
-            logger.info(
+            logger.debug(
                 f"PREFILL->DECODE gap: "
                 f"clear_cache={(_gap_t1-_gap_t0)*1000:.0f}ms "
                 f"first_step={(_gap_t2-_gap_t1)*1000:.0f}ms "
