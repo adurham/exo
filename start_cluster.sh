@@ -285,7 +285,13 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
     # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context decodes
-    EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0"
+    # Set EXO_DISABLE_METAL_TIMEOUT=1 to completely disable the watchdog (default).
+    # Set EXO_SAFE_SYNC_LIMIT=50000 to use CPU-fallback when context size exceeds 50k (if watchdog is active).
+    if [ "${EXO_DISABLE_METAL_TIMEOUT:-1}" == "1" ]; then
+        EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
+    else
+        EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-50000}"
+    fi
 
     # Prefill Optimization: Use 256 step size for smoother RDMA and throttle 100 for concurrency
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-256} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"

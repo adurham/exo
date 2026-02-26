@@ -599,9 +599,15 @@ def generate_step(
                 # Dynamic Safe Sync: if the context is massive, the network wait can trigger 
                 # a Metal GPU Timeout Error (>2-5s) on the pipeline tail node while waiting for 
                 # other nodes to chew through their massive KV cache.
-                # When context > 50,000, we force the network sync to fall back to the CPU.
+                # If EXO_DISABLE_METAL_TIMEOUT=1 (default), we rely on the OS-level override.
+                # Otherwise, we fallback to CPU network sync at EXO_SAFE_SYNC_LIMIT (default 50,000).
                 _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
-                _massive_context = _kv_len > 50000
+                
+                _massive_context = False
+                if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+                    _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
+                    _massive_context = _kv_len > _safe_sync_limit
+
                 if _massive_context:
                     os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
 

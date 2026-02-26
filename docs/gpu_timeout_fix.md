@@ -17,10 +17,10 @@ Fatal Python error: Aborted
 To fix this, we implemented a dual-layered approach that keeps the blazing fast 1ms latency for 90% of workloads, but provides a rock-solid safety net for extreme hyper-growth contexts.
 
 ### 1. OS-Level Mitigation
-We added environment variables to `start_cluster.sh` to request the Metal driver to disable the command buffer timeout watchdog:
+We added environment variables to `start_cluster.sh` to request the Metal driver to disable the command buffer timeout watchdog. This is enabled by default via `EXO_DISABLE_METAL_TIMEOUT=1`:
 ```bash
 # Metal GPU Timeout mitigations
-EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0"
+EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
 ```
 
 ### 2. The `MLX_FORCE_DISTRIBUTED_GPU` Escape Hatch (C++)
@@ -29,14 +29,17 @@ We modified `mlx/backend/metal/distributed.cpp` to introduce a dynamic environme
 * When set to `0`, MLX throws an internal error, forcing the primitive to fall back to standard CPU execution. This frees the GPU entirely so it cannot timeout while waiting.
 
 ### 3. Context-Aware Auto-Adjustment (Python)
-In `src/exo/worker/engines/mlx/generator/generate.py`, we added a check directly into the `_step` generation loop:
+In `src/exo/worker/engines/mlx/generator/generate.py`, we added a check directly into the `_step` generation loop. If the user chooses *not* to disable the Metal timeout (by setting `EXO_DISABLE_METAL_TIMEOUT=0`), the system enforces a safe CPU sync limit:
 ```python
 # Check current context size
 _kv_len = prompt_cache[0].offset if prompt_cache else 0
 
-# If context > 50,000 tokens, Node 2 will take >2 seconds to compute.
-# We must move the network wait off the GPU to avoid triggering the Apple watchdog.
-_massive_context = _kv_len > 50000
+# If EXO_DISABLE_METAL_TIMEOUT=1 (default), we rely on the OS-level override.
+# Otherwise, we fallback to CPU network sync at EXO_SAFE_SYNC_LIMIT (default 50,000).
+_massive_context = False
+if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+    _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
+    _massive_context = _kv_len > _safe_sync_limit
 
 if _massive_context:
     os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0" # Drop to CPU wait
