@@ -100,15 +100,12 @@ def _allocate_and_validate_layers(
     total_memory: Memory,
     model_card: ModelCard,
 ) -> list[int]:
-    # --- Conservative Model-Aware Memory Budgeting ---
-    # We aim to fit the model weights + 100% of the model's MAX context length.
+    # --- Robust Model-Aware Memory Budgeting ---
     max_context = getattr(model_card, "max_context_length", 2048)
     if max_context <= 0:
         max_context = 2048
     
-    # Reserve 15% for System/OS/Disk Cache (macOS needs more breathing room)
-    SYSTEM_RESERVE = 0.15
-    # Add a 20% safety factor to KV cache for activations and temporary tensors
+    SYSTEM_RESERVE = 0.15 # 15% for macOS/System
     KV_SAFETY_FACTOR = 1.2
     
     num_kv_heads = getattr(model_card, "num_kv_heads", 8)
@@ -117,14 +114,9 @@ def _allocate_and_validate_layers(
     
     kv_mem_per_layer_bytes = kv_bytes_per_token_per_layer * max_context * KV_SAFETY_FACTOR
     weight_mem_per_layer_bytes = model_card.storage_size.in_bytes / model_card.n_layers
-    
     total_mem_per_layer_bytes = weight_mem_per_layer_bytes + kv_mem_per_layer_bytes
     
-    for nid, mem in node_memory.items():
-        logger.info(f"Node {nid} reports Available RAM: {mem.ram_available.in_bytes/(1024**3):.2f} GB. "
-                    f"Target context: {max_context} tokens.")
-
-    # Calculate layer allocations based on the "Effective Available RAM"
+    # 1. Initial Proportional Allocation
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
@@ -133,26 +125,39 @@ def _allocate_and_validate_layers(
         ],
     )
 
-    for i, node_id in enumerate(node_ids):
-        node_layers = layer_allocations[i]
-        required_memory = int(total_mem_per_layer_bytes * node_layers)
-        available_memory = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
+    # 2. Redistribution Loop: Move layers from overloaded nodes to underloaded nodes
+    max_iterations = model_card.n_layers # Safety break
+    for _ in range(max_iterations):
+        overloaded_idx = -1
+        for i, node_id in enumerate(node_ids):
+            available = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
+            required = int(total_mem_per_layer_bytes * layer_allocations[i])
+            if required > available and layer_allocations[i] > 1:
+                overloaded_idx = i
+                break
         
-        # If the allocated layers don't fit the 100% context goal, we must REDUCE layers on this node.
-        while required_memory > available_memory and node_layers > 1:
-            logger.warning(f"Node {i} ({node_id}) cannot fit {node_layers} layers at 100% context. Reducing layers.")
-            node_layers -= 1
-            # We would need to redistribute these layers, but for now we'll fail if the constraint is impossible.
-            required_memory = int(total_mem_per_layer_bytes * node_layers)
-            layer_allocations[i] = node_layers
+        if overloaded_idx == -1:
+            break # Everyone fits!
 
-    # Final validation check
-    for i, node_id in enumerate(node_ids):
-        node_layers = layer_allocations[i]
-        required_memory = int(total_mem_per_layer_bytes * node_layers)
-        available_memory = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
-        if required_memory > available_memory:
-             raise ValueError(f"CRITICAL: Node {node_id} cannot even fit its minimum layer share at 100% context.")
+        # Find the node with the MOST relative headroom to take the layer
+        best_target_idx = -1
+        max_headroom = -1
+        for i, node_id in enumerate(node_ids):
+            if i == overloaded_idx: continue
+            available = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
+            required = int(total_mem_per_layer_bytes * (layer_allocations[i] + 1))
+            headroom = available - required
+            if headroom > max_headroom:
+                max_headroom = headroom
+                best_target_idx = i
+        
+        if best_target_idx != -1:
+            logger.info(f"Redistributing layer: Node {overloaded_idx} -> Node {best_target_idx} to fit 200k KV.")
+            layer_allocations[overloaded_idx] -= 1
+            layer_allocations[best_target_idx] += 1
+        else:
+            # If no node can take the layer, we have to fail or lower context
+            raise ValueError(f"Cluster-wide OOM: Cannot fit {model_card.n_layers} layers even with redistribution.")
 
     return layer_allocations
 
