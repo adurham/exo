@@ -31,10 +31,6 @@
     kimi: "Kimi",
     flux: "FLUX",
     "qwen-image": "Qwen Img",
-    step: "Step",
-    gemma: "Gemma",
-    mistral: "Mistral",
-    phi: "Phi",
   };
 
   function getFamilyName(family: string): string {
