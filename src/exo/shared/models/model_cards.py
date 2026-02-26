@@ -89,6 +89,9 @@ class ModelCard(CamelCaseModel):
     storage_size: Memory
     n_layers: PositiveInt
     hidden_size: PositiveInt
+    num_kv_heads: PositiveInt = 8  # Default for GQA in most large models
+    head_dim: PositiveInt = 128    # Standard transformer head dimension
+    max_context_length: PositiveInt = 2048 # Default if not specified
     supports_tensor: bool
     tasks: list[ModelTask]
     components: list[ComponentInfo] | None = None
@@ -142,6 +145,8 @@ class ModelCard(CamelCaseModel):
             storage_size=mem_size_bytes,
             n_layers=num_layers,
             hidden_size=config_data.hidden_size or 0,
+            num_kv_heads=config_data.num_kv_heads or 8,
+            max_context_length=config_data.max_context_length or 2048,
             supports_tensor=config_data.supports_tensor,
             tasks=[ModelTask.TextGeneration],
             family=_infer_family(model_id),

@@ -1,0 +1,722 @@
+[ 06:11:41.6819PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:11:51.7025PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:01.7216PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:11.7389PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:21.7588PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:31.7760PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:41.7934PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:51.8132PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:01.8331PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:11.8495PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:21.8717PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:31.8931PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:41.9134PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:50.1993PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='4e3cec28-5d6d-4dc0-88b5-0681cfc6357b' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:13:50.2829PM | [1mINFO    [0m] [1mWorker plan: TextGeneration[0m
+[ 06:13:50.2842PM | [1mINFO    [0m] [1mStarting task TextGeneration(task_id='3ab56ba4-908a-4858-bdf4-2b324d5b6956' task_status=<TaskStatus.Running: 'Running'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='4e3cec28-5d6d-4dc0-88b5-0681cfc6357b' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:13:50.2939PM | [1mINFO    [0m] [1mreceived chat request(s): batch_size=1[0m
+[ 06:13:50.2949PM | [1mINFO    [0m] [1mrunner running[0m
+[ 06:13:50.2958PM | [1mINFO    [0m] [1mreceived chat request: TextGeneration(task_id='3ab56ba4-908a-4858-bdf4-2b324d5b6956' task_status=<TaskStatus.Running: 'Running'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='4e3cec28-5d6d-4dc0-88b5-0681cfc6357b' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:13:50.2966PM | [1mINFO    [0m] [1m]~!b[]~b]system
+You are a helpful assistant. Your name is MiniMax-M2.5 and is built by MiniMax.[e~[
+]~b]user
+Explain quantum entanglement in 2 sentences.[e~[
+]~b]ai
+<think>
+[0m
+[EVAL_DEBUG] total=0.3ms gpu_eval=0.3ms(7 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.7000PM | [33m[1mWARNING [0m] [33m[1mVOLATILE PATTERN DETECTED — KV prefix mismatch at token 31/46 (prompt=46, cached=46). Prompt tokens[26:38]: [200020, 10, 200019, 3995, 10, 140186, 18108, 97581, 296, 32, 50, 27006], Cached tokens[26:38]: [200020, 10, 200019, 3995, 10, 20768, 258, 501, 49884, 894, 12580, 17408]. Mismatch in first 100 tokens suggests a volatile header (timestamp, hash, session ID). Consider adding to _VOLATILE_PATTERNS.[0m
+[ 06:13:50.7004PM | [1mINFO    [0m] [1mKV cache hit: 31/46 tokens cached (67.4%)[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.7008PM | [1mINFO    [0m] [1mStarting prefill[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.7594PM | [1mINFO    [0m] [1mPREFILL loop: starting chunk 0, remaining=13, n_to_process=13[0m
+2026-02-25 18:13:50.761 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 13, 3072), prefill=True
+[EVAL_DEBUG] total=110.9ms gpu_eval=7.6ms(4972 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=101.4ms(196: 196 task/0 mem) tape_size=3 needs_fence=357 max_active=10 (limit=0)
+[ 06:13:50.8808PM | [1mINFO    [0m] [1mPREFILL chunk 0: tokens=13, kv_len=44, model=2ms, quantize=0ms, eval=119ms (59 layers), sends=1, total=121ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9078PM | [1mINFO    [0m] [1mPREFILL loop end: model=2ms quantize=0ms eval=119ms callback=27ms slice=0ms total=148ms[0m
+[ 06:13:50.9079PM | [1mINFO    [0m] [1mPREFILL loop exited, prompt_remaining=1, chunks=1[0m
+2026-02-25 18:13:50.911 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=True
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.2ms(4375 ops) cpu_eval=0.1ms(179 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=355 max_active=100 (limit=1)
+[ 06:13:50.9505PM | [1mINFO    [0m] [1m[STEP 0] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms drain=39ms total=41ms (prefill_mode)[0m
+[EVAL_DEBUG] total=0.1ms gpu_eval=0.1ms(15 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:50.953 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=True
+[EVAL_DEBUG] total=23.8ms gpu_eval=22.4ms(4375 ops) cpu_eval=0.0ms(179 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=355 max_active=100 (limit=1)
+[ 06:13:50.9906PM | [1mINFO    [0m] [1m[STEP 1] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms drain=38ms total=40ms (prefill_mode)[0m
+[EVAL_DEBUG] total=0.1ms gpu_eval=0.1ms(16 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9909PM | [1mINFO    [0m] [1mPREFILL->DECODE gap: clear_cache=1ms first_step=41ms async_eval=0ms eval_y=40ms total=83ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9953PM | [1mINFO    [0m] [1mStarting decode[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9979PM | [1mINFO    [0m] [1mStarting stream_generate loop...[0m
+[ 06:13:51.0552PM | [1mINFO    [0m] [1mPREFILL loop: starting chunk 0, remaining=1, n_to_process=1[0m
+2026-02-25 18:13:51.057 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=41.9ms gpu_eval=6.2ms(4499 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=33.9ms(110: 110 task/0 mem) tape_size=3 needs_fence=357 max_active=10 (limit=0)
+[ 06:13:51.1027PM | [1mINFO    [0m] [1mPREFILL chunk 0: tokens=1, kv_len=45, model=2ms, quantize=0ms, eval=45ms (59 layers), sends=1, total=47ms[0m
+[ 06:13:51.1028PM | [1mINFO    [0m] [1mPREFILL loop end: model=2ms quantize=0ms eval=45ms callback=0ms slice=0ms total=47ms[0m
+[ 06:13:51.1028PM | [1mINFO    [0m] [1mPREFILL loop exited, prompt_remaining=1, chunks=1[0m
+2026-02-25 18:13:51.105 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.1527PM | [1mINFO    [0m] [1m[STEP 0] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.155 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.2016PM | [1mINFO    [0m] [1m[STEP 1] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:51.2018PM | [1mINFO    [0m] [1mPREFILL->DECODE gap: clear_cache=1ms first_step=49ms async_eval=0ms eval_y=49ms total=99ms[0m
+2026-02-25 18:13:51.204 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.2510PM | [1mINFO    [0m] [1m[STEP 2] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.253 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.3008PM | [1mINFO    [0m] [1m[STEP 3] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.303 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.3504PM | [1mINFO    [0m] [1m[STEP 4] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.352 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.3994PM | [1mINFO    [0m] [1m[STEP 5] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.401 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.2ms gpu_eval=22.7ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.4481PM | [1mINFO    [0m] [1m[STEP 6] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.450 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=27.5ms gpu_eval=26.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.4995PM | [1mINFO    [0m] [1m[STEP 7] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=7ms total=51ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.501 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.5487PM | [1mINFO    [0m] [1m[STEP 8] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.550 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.5976PM | [1mINFO    [0m] [1m[STEP 9] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.599 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.6465PM | [1mINFO    [0m] [1m[STEP 10] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.648 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.2ms gpu_eval=22.7ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.6949PM | [1mINFO    [0m] [1m[STEP 11] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.697 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.2ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.7436PM | [1mINFO    [0m] [1m[STEP 12] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.745 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.7929PM | [1mINFO    [0m] [1m[STEP 13] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.795 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.8418PM | [1mINFO    [0m] [1m[STEP 14] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.844 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.8907PM | [1mINFO    [0m] [1m[STEP 15] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.892 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[ 06:13:51.9203PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.9394PM | [1mINFO    [0m] [1m[STEP 16] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.941 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=27.0ms gpu_eval=25.5ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.9915PM | [1mINFO    [0m] [1m[STEP 17] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=8ms total=52ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:51.993 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=25.4ms gpu_eval=23.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.0424PM | [1mINFO    [0m] [1m[STEP 18] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=41ms token_sync=7ms total=51ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.044 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=28.8ms gpu_eval=27.4ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.0960PM | [1mINFO    [0m] [1m[STEP 19] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=43ms token_sync=8ms total=53ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.098 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.1443PM | [1mINFO    [0m] [1m[STEP 20] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.146 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.1934PM | [1mINFO    [0m] [1m[STEP 21] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.195 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=23.9ms gpu_eval=22.4ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.2418PM | [1mINFO    [0m] [1m[STEP 22] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.244 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.1ms gpu_eval=22.7ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.2907PM | [1mINFO    [0m] [1m[STEP 23] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.292 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.3394PM | [1mINFO    [0m] [1m[STEP 24] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.341 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.3889PM | [1mINFO    [0m] [1m[STEP 25] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.391 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.2ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.4377PM | [1mINFO    [0m] [1m[STEP 26] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.439 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.4864PM | [1mINFO    [0m] [1m[STEP 27] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.488 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.5357PM | [1mINFO    [0m] [1m[STEP 28] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.537 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.5838PM | [1mINFO    [0m] [1m[STEP 29] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.586 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=28.3ms gpu_eval=26.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.6389PM | [1mINFO    [0m] [1m[STEP 30] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=45ms token_sync=8ms total=55ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.641 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.6883PM | [1mINFO    [0m] [1m[STEP 31] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.690 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.7376PM | [1mINFO    [0m] [1m[STEP 32] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.739 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.7868PM | [1mINFO    [0m] [1m[STEP 33] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.789 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.8362PM | [1mINFO    [0m] [1m[STEP 34] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.838 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.8855PM | [1mINFO    [0m] [1m[STEP 35] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.887 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.9345PM | [1mINFO    [0m] [1m[STEP 36] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.936 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.9832PM | [1mINFO    [0m] [1m[STEP 37] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:52.985 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.0328PM | [1mINFO    [0m] [1m[STEP 38] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.035 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.0824PM | [1mINFO    [0m] [1m[STEP 39] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.084 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.1307PM | [1mINFO    [0m] [1m[STEP 40] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.132 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.1798PM | [1mINFO    [0m] [1m[STEP 41] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.182 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.2284PM | [1mINFO    [0m] [1m[STEP 42] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.230 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.2775PM | [1mINFO    [0m] [1m[STEP 43] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.279 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.3266PM | [1mINFO    [0m] [1m[STEP 44] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.329 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=28.8ms gpu_eval=27.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.3799PM | [1mINFO    [0m] [1m[STEP 45] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=43ms token_sync=8ms total=53ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.382 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=27.1ms gpu_eval=25.5ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.4318PM | [1mINFO    [0m] [1m[STEP 46] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=41ms token_sync=8ms total=51ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.434 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.4813PM | [1mINFO    [0m] [1m[STEP 47] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.483 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.5299PM | [1mINFO    [0m] [1m[STEP 48] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.532 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.5789PM | [1mINFO    [0m] [1m[STEP 49] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.581 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=26.5ms gpu_eval=25.0ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.6324PM | [1mINFO    [0m] [1m[STEP 50] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=43ms token_sync=7ms total=53ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.634 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.6844PM | [1mINFO    [0m] [1m[STEP 51] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=8ms total=52ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.686 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.7337PM | [1mINFO    [0m] [1m[STEP 52] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.736 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.7834PM | [1mINFO    [0m] [1m[STEP 53] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.785 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.8326PM | [1mINFO    [0m] [1m[STEP 54] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.835 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.8820PM | [1mINFO    [0m] [1m[STEP 55] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.884 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.9308PM | [1mINFO    [0m] [1m[STEP 56] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.933 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.9799PM | [1mINFO    [0m] [1m[STEP 57] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:53.982 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.0288PM | [1mINFO    [0m] [1m[STEP 58] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.031 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.0776PM | [1mINFO    [0m] [1m[STEP 59] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.079 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.1262PM | [1mINFO    [0m] [1m[STEP 60] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.128 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.1754PM | [1mINFO    [0m] [1m[STEP 61] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.177 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.2243PM | [1mINFO    [0m] [1m[STEP 62] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.226 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.2735PM | [1mINFO    [0m] [1m[STEP 63] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.275 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.3228PM | [1mINFO    [0m] [1m[STEP 64] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.325 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.3715PM | [1mINFO    [0m] [1m[STEP 65] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.373 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.4204PM | [1mINFO    [0m] [1m[STEP 66] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.422 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.4691PM | [1mINFO    [0m] [1m[STEP 67] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.471 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.5183PM | [1mINFO    [0m] [1m[STEP 68] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.520 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.5677PM | [1mINFO    [0m] [1m[STEP 69] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.569 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.6168PM | [1mINFO    [0m] [1m[STEP 70] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.619 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.1ms gpu_eval=22.7ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.6656PM | [1mINFO    [0m] [1m[STEP 71] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.667 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:54.7144PM | [1mINFO    [0m] [1m[STEP 72] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+2026-02-25 18:13:54.716 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.7635PM | [1mINFO    [0m] [1m[STEP 73] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.765 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.8125PM | [1mINFO    [0m] [1m[STEP 74] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.814 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.8617PM | [1mINFO    [0m] [1m[STEP 75] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.863 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.9111PM | [1mINFO    [0m] [1m[STEP 76] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.913 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.9603PM | [1mINFO    [0m] [1m[STEP 77] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:54.962 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.0094PM | [1mINFO    [0m] [1m[STEP 78] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.011 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.0588PM | [1mINFO    [0m] [1m[STEP 79] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.061 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.1079PM | [1mINFO    [0m] [1m[STEP 80] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.110 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.1568PM | [1mINFO    [0m] [1m[STEP 81] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.159 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.2062PM | [1mINFO    [0m] [1m[STEP 82] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.208 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.2548PM | [1mINFO    [0m] [1m[STEP 83] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.257 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.3040PM | [1mINFO    [0m] [1m[STEP 84] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.306 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.3530PM | [1mINFO    [0m] [1m[STEP 85] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.355 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.4026PM | [1mINFO    [0m] [1m[STEP 86] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.405 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.4521PM | [1mINFO    [0m] [1m[STEP 87] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.454 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.5013PM | [1mINFO    [0m] [1m[STEP 88] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.503 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.5504PM | [1mINFO    [0m] [1m[STEP 89] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.552 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.5996PM | [1mINFO    [0m] [1m[STEP 90] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.601 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.6486PM | [1mINFO    [0m] [1m[STEP 91] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.650 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.6977PM | [1mINFO    [0m] [1m[STEP 92] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.699 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.7467PM | [1mINFO    [0m] [1m[STEP 93] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.749 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.7953PM | [1mINFO    [0m] [1m[STEP 94] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.797 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.4ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.8441PM | [1mINFO    [0m] [1m[STEP 95] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.846 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.8933PM | [1mINFO    [0m] [1m[STEP 96] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.895 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.9425PM | [1mINFO    [0m] [1m[STEP 97] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.944 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.9918PM | [1mINFO    [0m] [1m[STEP 98] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:55.994 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.7ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:56.0408PM | [1mINFO    [0m] [1m[STEP 99] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+2026-02-25 18:13:56.043 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(178 ops) fence_wait=0.0ms(1) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=356 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:56.0900PM | [1mINFO    [0m] [1m[STEP 100] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:56.0908PM | [1mINFO    [0m] [1mKV cache updated (index 0): 46 tokens (copy=0ms)[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:56.0930PM | [1mINFO    [0m] [1mExecuting command: TaskFinished(command_id='8169b4dc-92c7-4134-b007-0a93062fdc2e' finished_command_id='4e3cec28-5d6d-4dc0-88b5-0681cfc6357b')[0m
+[ 06:13:56.0947PM | [1mINFO    [0m] [1mrunner ready[0m
+[ 06:14:00.2800PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='3360fc9c-4a6e-4742-9768-22d5a5f1a6be' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:14:00.3704PM | [1mINFO    [0m] [1mWorker plan: TextGeneration[0m
+[ 06:14:00.3714PM | [1mINFO    [0m] [1mStarting task TextGeneration(task_id='4b0d33a0-1f16-46f8-ba39-44f632beca73' task_status=<TaskStatus.Running: 'Running'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='3360fc9c-4a6e-4742-9768-22d5a5f1a6be' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:14:00.3794PM | [1mINFO    [0m] [1mreceived chat request(s): batch_size=1[0m
+[ 06:14:00.3803PM | [1mINFO    [0m] [1mrunner running[0m
+[ 06:14:00.3814PM | [1mINFO    [0m] [1mreceived chat request: TextGeneration(task_id='4b0d33a0-1f16-46f8-ba39-44f632beca73' task_status=<TaskStatus.Running: 'Running'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='3360fc9c-4a6e-4742-9768-22d5a5f1a6be' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:14:00.3828PM | [1mINFO    [0m] [1m]~!b[]~b]system
+You are a helpful assistant. Your name is MiniMax-M2.5 and is built by MiniMax.[e~[
+]~b]user
+Explain quantum entanglement in 2 sentences.[e~[
+]~b]ai
+<think>
+[0m
+[EVAL_DEBUG] total=0.2ms gpu_eval=0.2ms(7 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:14:00.7739PM | [1mINFO    [0m] [1mKV cache hit: 45/46 tokens cached (97.8%)[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:14:00.7742PM | [1mINFO    [0m] [1mStarting decode[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:14:00.7744PM | [1mINFO    [0m] [1mStarting stream_generate loop...[0m
+[ 06:14:00.8321PM | [1mINFO    [0m] [1mPREFILL loop exited, prompt_remaining=1, chunks=0[0m
+2026-02-25 18:14:00.835 | DEBUG    | exo.worker.engines.mlx.auto_parallel:__call__:708 - [PIPELINE-SEND] rank=0 -> 2, shape=(1, 1, 3072), prefill=False
+[ 06:14:01.9369PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+libc++abi: terminating due to uncaught exception of type std::runtime_error: [METAL] Command buffer execution failed: Caused GPU Timeout Error (00000002:kIOGPUCommandBufferCallbackErrorTimeout)
+Fatal Python error: Aborted
+
+Thread 0x0000000170c8f000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/concurrent/futures/thread.py", line 90 in _worker
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x000000016fc83000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py", line 249 in _feed
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x000000016ead3000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 395 in _recv
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 430 in _recv_bytes
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 216 in recv_bytes
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py", line 385 in get
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/loguru/_handler.py", line 300 in _queued_writer
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001efb7f080 (most recent call first):
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 572 in _step
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 704 in generate_step
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 767 in <genexpr>
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 776 in stream_generate
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 956 in mlx_generate
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 876 in parse_thinking_models
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 994 in parse_tool_calls
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 543 in main
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/bootstrap.py", line 94 in entrypoint
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 108 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 313 in _bootstrap
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 135 in _main
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 122 in spawn_main
+  File "<string>", line 1 in <module>
+
+Extension modules: uvloop.loop, zstandard.backend_c, yaml._yaml, psutil._psutil_osx, multidict._multidict, yarl._quoting_c, propcache._helpers_c, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket.mask, aiohttp._websocket.reader_c, frozenlist._frozenlist, msgspec._core, regex._regex, numpy._core._multiarray_umath, numpy.linalg._umath_linalg, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, markupsafe._speedups, PIL._imaging, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._pcg64, numpy.random._generator, numpy.random._mt19937, numpy.random._philox, numpy.random._sfc64, numpy.random.mtrand, sentencepiece._sentencepiece (total: 39)
+[ 06:14:11.2746PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='006fcad4-90fa-44aa-861f-bb1a08689801' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='hi')], instructions=None, max_output_tokens=10, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'hi'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:14:11.9559PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:21.9763PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:31.9966PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:42.0169PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:52.0332PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:02.0533PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:03.4978PM | [1mINFO    [0m] [1mExecuting command: TaskCancelled(command_id='4ff1415f-6e7d-46fa-9b48-ba334eced382' cancelled_command_id='006fcad4-90fa-44aa-861f-bb1a08689801')[0m
+[ 06:15:03.5070PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:15:12.0724PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:22.0913PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:32.1119PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:42.1315PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:52.1519PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:00.4333PM | [1mINFO    [0m] [1mExecuting command: TaskCancelled(command_id='d79a7fe7-5421-4aab-9ad7-18f271402bae' cancelled_command_id='3360fc9c-4a6e-4742-9768-22d5a5f1a6be')[0m
+[ 06:16:00.4650PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:16:02.1715PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:02.3989PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='7214fd1a-d46a-4b7a-b7f7-78cdba02bbc6' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:16:12.1773PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:22.1984PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:32.2194PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:42.2390PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:52.2601PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:02.2786PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:12.2965PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:22.3164PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:32.3341PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:42.3559PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:52.3758PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:02.3926PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:02.4975PM | [1mINFO    [0m] [1mExecuting command: TaskCancelled(command_id='6fe3150a-287b-4e68-b013-1f0563506ad0' cancelled_command_id='7214fd1a-d46a-4b7a-b7f7-78cdba02bbc6')[0m
+[ 06:18:02.5736PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:18:06.5025PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='d8c3b2af-c88c-4ddc-b4d6-17eb0016c35e' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:18:12.4134PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:22.4322PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:32.4510PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:42.4708PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:52.4907PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:02.5054PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:12.5258PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:22.5464PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:32.5549PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:42.5752PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:52.5927PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:02.6135PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:06.6054PM | [1mINFO    [0m] [1mExecuting command: TaskCancelled(command_id='298f5319-ab8f-4978-96f6-e092f55b99d5' cancelled_command_id='d8c3b2af-c88c-4ddc-b4d6-17eb0016c35e')[0m
+[ 06:20:06.6593PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:20:10.5469PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='2b0563cf-a465-4e4d-86e1-e3ab06cca5f0' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:20:12.6332PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:22.6527PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:32.6736PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:42.6932PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:52.7133PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:02.7343PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:12.7557PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:22.7746PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:32.7958PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:42.8171PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:52.8369PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:02.8542PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:10.6398PM | [1mINFO    [0m] [1mExecuting command: TaskCancelled(command_id='fc79d585-922d-4e51-b07d-c1126369a9f7' cancelled_command_id='2b0563cf-a465-4e4d-86e1-e3ab06cca5f0')[0m
+[ 06:22:10.6818PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:22:12.6764PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='57a8a9fc-40c1-485f-8f3a-71cd871c4216' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:22:12.8710PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:22.8888PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:32.9092PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:42.9293PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:52.9477PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:02.9555PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:12.9756PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:22.9960PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:33.0162PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:43.0363PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:53.0547PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:03.0745PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:12.7748PM | [1mINFO    [0m] [1mExecuting command: TaskCancelled(command_id='553dbef6-489d-4fec-b3d3-addf0d5bf433' cancelled_command_id='57a8a9fc-40c1-485f-8f3a-71cd871c4216')[0m
+[ 06:24:12.7968PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:24:13.0937PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:14.7251PM | [1mINFO    [0m] [1mExecuting command: TextGeneration(command_id='c170a09e-556a-48a0-be71-fb107e8014fa' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None))[0m
+[ 06:24:23.1143PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:33.1352PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:43.1541PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:53.1743PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:25:03.1952PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m

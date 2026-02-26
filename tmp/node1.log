@@ -1,0 +1,677 @@
+[ 06:12:36.1444PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:41.3796PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:12:41.3814PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:12:41.3834PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:12:41.3849PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:12:41.3862PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:12:41.3874PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:12:46.1642PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:12:56.1852PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:06.2059PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:16.2177PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:26.2369PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:26.3899PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:26.3928PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:26.3951PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:26.3971PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:26.3988PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:26.4001PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:36.2579PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:41.3862PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:41.3879PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:41.3901PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:41.3916PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:41.3927PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:41.3936PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:13:46.2783PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:13:50.2662PM | [1mINFO    [0m] [1mWorker plan: TextGeneration[0m
+[ 06:13:50.2672PM | [1mINFO    [0m] [1mStarting task TextGeneration(task_id='3ab56ba4-908a-4858-bdf4-2b324d5b6956' task_status=<TaskStatus.Pending: 'Pending'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='4e3cec28-5d6d-4dc0-88b5-0681cfc6357b' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:13:50.2758PM | [1mINFO    [0m] [1mreceived chat request(s): batch_size=1[0m
+[ 06:13:50.2767PM | [1mINFO    [0m] [1mrunner running[0m
+[ 06:13:50.2785PM | [1mINFO    [0m] [1mreceived chat request: TextGeneration(task_id='3ab56ba4-908a-4858-bdf4-2b324d5b6956' task_status=<TaskStatus.Pending: 'Pending'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='4e3cec28-5d6d-4dc0-88b5-0681cfc6357b' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:13:50.2799PM | [1mINFO    [0m] [1m]~!b[]~b]system
+You are a helpful assistant. Your name is MiniMax-M2.5 and is built by MiniMax.[e~[
+]~b]user
+Explain quantum entanglement in 2 sentences.[e~[
+]~b]ai
+<think>
+[0m
+[EVAL_DEBUG] total=0.4ms gpu_eval=0.4ms(7 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.6858PM | [33m[1mWARNING [0m] [33m[1mVOLATILE PATTERN DETECTED — KV prefix mismatch at token 31/46 (prompt=46, cached=46). Prompt tokens[26:38]: [200020, 10, 200019, 3995, 10, 140186, 18108, 97581, 296, 32, 50, 27006], Cached tokens[26:38]: [200020, 10, 200019, 3995, 10, 20768, 258, 501, 49884, 894, 12580, 17408]. Mismatch in first 100 tokens suggests a volatile header (timestamp, hash, session ID). Consider adding to _VOLATILE_PATTERNS.[0m
+[ 06:13:50.6862PM | [1mINFO    [0m] [1mKV cache hit: 31/46 tokens cached (67.4%)[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.6993PM | [1mINFO    [0m] [1mStarting prefill[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.7580PM | [1mINFO    [0m] [1mPREFILL loop: starting chunk 0, remaining=13, n_to_process=13[0m
+[EVAL_DEBUG] total=110.9ms gpu_eval=7.6ms(4972 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=101.4ms(199: 199 task/0 mem) tape_size=3 needs_fence=355 max_active=10 (limit=0)
+[ 06:13:50.8793PM | [1mINFO    [0m] [1mPREFILL chunk 0: tokens=13, kv_len=44, model=2ms, quantize=0ms, eval=119ms (59 layers), sends=0, total=121ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9063PM | [1mINFO    [0m] [1mPREFILL loop end: model=2ms quantize=0ms eval=119ms callback=27ms slice=0ms total=148ms[0m
+[ 06:13:50.9064PM | [1mINFO    [0m] [1mPREFILL loop exited, prompt_remaining=1, chunks=1[0m
+[ 06:13:50.9099PM | [1mINFO    [0m] [1m[STEP 0] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms drain=0ms total=2ms (prefill_mode)[0m
+[EVAL_DEBUG] total=25.4ms gpu_eval=23.8ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[ 06:13:50.9385PM | [1mINFO    [0m] [1m[STEP 1] tokens=1 model=3ms reshape=0ms quantize=0ms sample=0ms drain=0ms total=3ms (prefill_mode)[0m
+[EVAL_DEBUG] total=37.3ms gpu_eval=35.6ms(4391 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[ 06:13:50.9766PM | [1mINFO    [0m] [1mPREFILL->DECODE gap: clear_cache=1ms first_step=2ms async_eval=26ms eval_y=41ms total=70ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9939PM | [1mINFO    [0m] [1mStarting decode[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:50.9965PM | [1mINFO    [0m] [1mStarting stream_generate loop...[0m
+[ 06:13:51.0540PM | [1mINFO    [0m] [1mPREFILL loop: starting chunk 0, remaining=1, n_to_process=1[0m
+[EVAL_DEBUG] total=41.8ms gpu_eval=6.3ms(4499 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=33.8ms(115: 115 task/0 mem) tape_size=3 needs_fence=355 max_active=10 (limit=0)
+[ 06:13:51.1010PM | [1mINFO    [0m] [1mPREFILL chunk 0: tokens=1, kv_len=45, model=2ms, quantize=0ms, eval=45ms (59 layers), sends=0, total=47ms[0m
+[ 06:13:51.1012PM | [1mINFO    [0m] [1mPREFILL loop end: model=2ms quantize=0ms eval=45ms callback=0ms slice=0ms total=47ms[0m
+[ 06:13:51.1012PM | [1mINFO    [0m] [1mPREFILL loop exited, prompt_remaining=1, chunks=1[0m
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.1513PM | [1mINFO    [0m] [1m[STEP 0] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.2002PM | [1mINFO    [0m] [1m[STEP 1] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:51.2004PM | [1mINFO    [0m] [1mPREFILL->DECODE gap: clear_cache=1ms first_step=49ms async_eval=0ms eval_y=49ms total=99ms[0m
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.2496PM | [1mINFO    [0m] [1m[STEP 2] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.2994PM | [1mINFO    [0m] [1m[STEP 3] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.3490PM | [1mINFO    [0m] [1m[STEP 4] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:51.3980PM | [1mINFO    [0m] [1m[STEP 5] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.4467PM | [1mINFO    [0m] [1m[STEP 6] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=27.4ms gpu_eval=25.9ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.4981PM | [1mINFO    [0m] [1m[STEP 7] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=41ms token_sync=7ms total=51ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.5473PM | [1mINFO    [0m] [1m[STEP 8] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.5962PM | [1mINFO    [0m] [1m[STEP 9] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.6451PM | [1mINFO    [0m] [1m[STEP 10] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.6935PM | [1mINFO    [0m] [1m[STEP 11] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.7422PM | [1mINFO    [0m] [1m[STEP 12] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.7915PM | [1mINFO    [0m] [1m[STEP 13] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.8404PM | [1mINFO    [0m] [1m[STEP 14] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.8893PM | [1mINFO    [0m] [1m[STEP 15] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.9380PM | [1mINFO    [0m] [1m[STEP 16] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=27.4ms gpu_eval=26.0ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:51.9901PM | [1mINFO    [0m] [1m[STEP 17] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=8ms total=52ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.6ms gpu_eval=24.0ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.0410PM | [1mINFO    [0m] [1m[STEP 18] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=7ms total=51ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=28.5ms gpu_eval=27.0ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.0946PM | [1mINFO    [0m] [1m[STEP 19] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=43ms token_sync=8ms total=53ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.1429PM | [1mINFO    [0m] [1m[STEP 20] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.1920PM | [1mINFO    [0m] [1m[STEP 21] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.2ms gpu_eval=22.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.2404PM | [1mINFO    [0m] [1m[STEP 22] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.2893PM | [1mINFO    [0m] [1m[STEP 23] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.3380PM | [1mINFO    [0m] [1m[STEP 24] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.3875PM | [1mINFO    [0m] [1m[STEP 25] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.4ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.4363PM | [1mINFO    [0m] [1m[STEP 26] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.4850PM | [1mINFO    [0m] [1m[STEP 27] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.5343PM | [1mINFO    [0m] [1m[STEP 28] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.8ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.5824PM | [1mINFO    [0m] [1m[STEP 29] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=28.0ms gpu_eval=26.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.6375PM | [1mINFO    [0m] [1m[STEP 30] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=44ms token_sync=8ms total=55ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.6869PM | [1mINFO    [0m] [1m[STEP 31] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.7362PM | [1mINFO    [0m] [1m[STEP 32] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.7854PM | [1mINFO    [0m] [1m[STEP 33] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.8348PM | [1mINFO    [0m] [1m[STEP 34] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.8841PM | [1mINFO    [0m] [1m[STEP 35] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.9331PM | [1mINFO    [0m] [1m[STEP 36] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:52.9818PM | [1mINFO    [0m] [1m[STEP 37] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.0313PM | [1mINFO    [0m] [1m[STEP 38] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.0810PM | [1mINFO    [0m] [1m[STEP 39] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.1293PM | [1mINFO    [0m] [1m[STEP 40] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.1784PM | [1mINFO    [0m] [1m[STEP 41] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.2270PM | [1mINFO    [0m] [1m[STEP 42] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.2761PM | [1mINFO    [0m] [1m[STEP 43] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.3251PM | [1mINFO    [0m] [1m[STEP 44] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=29.5ms gpu_eval=28.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.3785PM | [1mINFO    [0m] [1m[STEP 45] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=43ms token_sync=8ms total=53ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=27.7ms gpu_eval=26.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:53.4304PM | [1mINFO    [0m] [1m[STEP 46] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=8ms total=52ms[0m
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.4798PM | [1mINFO    [0m] [1m[STEP 47] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.5285PM | [1mINFO    [0m] [1m[STEP 48] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.5775PM | [1mINFO    [0m] [1m[STEP 49] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=27.2ms gpu_eval=25.8ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.6310PM | [1mINFO    [0m] [1m[STEP 50] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=43ms token_sync=8ms total=53ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.4ms gpu_eval=24.0ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.6830PM | [1mINFO    [0m] [1m[STEP 51] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=42ms token_sync=8ms total=52ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.7323PM | [1mINFO    [0m] [1m[STEP 52] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.2ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:53.7820PM | [1mINFO    [0m] [1m[STEP 53] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.8312PM | [1mINFO    [0m] [1m[STEP 54] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.8806PM | [1mINFO    [0m] [1m[STEP 55] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.9293PM | [1mINFO    [0m] [1m[STEP 56] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:53.9785PM | [1mINFO    [0m] [1m[STEP 57] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.0274PM | [1mINFO    [0m] [1m[STEP 58] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.0762PM | [1mINFO    [0m] [1m[STEP 59] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.1248PM | [1mINFO    [0m] [1m[STEP 60] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.1740PM | [1mINFO    [0m] [1m[STEP 61] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.2228PM | [1mINFO    [0m] [1m[STEP 62] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.2721PM | [1mINFO    [0m] [1m[STEP 63] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.3214PM | [1mINFO    [0m] [1m[STEP 64] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.3701PM | [1mINFO    [0m] [1m[STEP 65] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.4190PM | [1mINFO    [0m] [1m[STEP 66] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.4677PM | [1mINFO    [0m] [1m[STEP 67] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=7ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.5169PM | [1mINFO    [0m] [1m[STEP 68] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.2ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.5663PM | [1mINFO    [0m] [1m[STEP 69] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.6154PM | [1mINFO    [0m] [1m[STEP 70] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.3ms gpu_eval=22.9ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.6641PM | [1mINFO    [0m] [1m[STEP 71] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.6ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.7130PM | [1mINFO    [0m] [1m[STEP 72] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.7620PM | [1mINFO    [0m] [1m[STEP 73] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.8111PM | [1mINFO    [0m] [1m[STEP 74] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.8602PM | [1mINFO    [0m] [1m[STEP 75] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.9097PM | [1mINFO    [0m] [1m[STEP 76] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:54.9589PM | [1mINFO    [0m] [1m[STEP 77] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.0080PM | [1mINFO    [0m] [1m[STEP 78] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.1ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.0574PM | [1mINFO    [0m] [1m[STEP 79] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.2ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.1065PM | [1mINFO    [0m] [1m[STEP 80] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.1ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.1554PM | [1mINFO    [0m] [1m[STEP 81] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.2048PM | [1mINFO    [0m] [1m[STEP 82] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.2534PM | [1mINFO    [0m] [1m[STEP 83] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.3026PM | [1mINFO    [0m] [1m[STEP 84] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.3515PM | [1mINFO    [0m] [1m[STEP 85] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.2ms gpu_eval=23.7ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.4012PM | [1mINFO    [0m] [1m[STEP 86] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.4507PM | [1mINFO    [0m] [1m[STEP 87] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.4999PM | [1mINFO    [0m] [1m[STEP 88] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.6ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.5490PM | [1mINFO    [0m] [1m[STEP 89] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.5982PM | [1mINFO    [0m] [1m[STEP 90] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.6472PM | [1mINFO    [0m] [1m[STEP 91] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.6963PM | [1mINFO    [0m] [1m[STEP 92] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.8ms gpu_eval=23.3ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.7452PM | [1mINFO    [0m] [1m[STEP 93] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:55.7939PM | [1mINFO    [0m] [1m[STEP 94] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=24.5ms gpu_eval=23.0ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.8427PM | [1mINFO    [0m] [1m[STEP 95] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=38ms token_sync=8ms total=48ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.4ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.8919PM | [1mINFO    [0m] [1m[STEP 96] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=25.0ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.9411PM | [1mINFO    [0m] [1m[STEP 97] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.5ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:55.9903PM | [1mINFO    [0m] [1m[STEP 98] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.9ms gpu_eval=23.4ms(4390 ops) cpu_eval=0.0ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:56.0394PM | [1mINFO    [0m] [1m[STEP 99] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[EVAL_DEBUG] total=24.7ms gpu_eval=23.2ms(4390 ops) cpu_eval=0.1ms(177 ops) fence_wait=0.0ms(0) fence_update=0.5ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=354 max_active=100 (limit=1)
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=2 needs_fence=1 max_active=100 (limit=1)
+[ 06:13:56.0886PM | [1mINFO    [0m] [1m[STEP 100] tokens=1 model=2ms reshape=0ms quantize=0ms sample=0ms eval=39ms token_sync=8ms total=49ms[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(2 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:56.0894PM | [1mINFO    [0m] [1mKV cache updated (index 0): 46 tokens (copy=0ms)[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:13:56.0936PM | [1mINFO    [0m] [1mrunner ready[0m
+[ 06:13:56.2937PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:00.2877PM | [1mINFO    [0m] [1mWorker plan: TextGeneration[0m
+[ 06:14:00.2890PM | [1mINFO    [0m] [1mStarting task TextGeneration(task_id='4b0d33a0-1f16-46f8-ba39-44f632beca73' task_status=<TaskStatus.Pending: 'Pending'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='3360fc9c-4a6e-4742-9768-22d5a5f1a6be' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:14:00.2976PM | [1mINFO    [0m] [1mreceived chat request(s): batch_size=1[0m
+[ 06:14:00.2982PM | [1mINFO    [0m] [1mrunner running[0m
+[ 06:14:00.2992PM | [1mINFO    [0m] [1mreceived chat request: TextGeneration(task_id='4b0d33a0-1f16-46f8-ba39-44f632beca73' task_status=<TaskStatus.Pending: 'Pending'> instance_id='6c27d1a3-a133-4d95-99f5-c22e345e2edf' command_id='3360fc9c-4a6e-4742-9768-22d5a5f1a6be' task_params=TextGenerationTaskParams(model='mlx-community/MiniMax-M2.5-5bit', input=[InputMessage(role='user', content='Explain quantum entanglement in 2 sentences.')], instructions=None, max_output_tokens=100, temperature=None, top_p=None, stream=False, tools=None, bench=False, top_k=None, stop=None, seed=None, chat_template_messages=[{'role': 'user', 'content': 'Explain quantum entanglement in 2 sentences.'}], enable_thinking=None, logprobs=False, top_logprobs=None) error_type=None error_message=None)[0m
+[ 06:14:00.3009PM | [1mINFO    [0m] [1m]~!b[]~b]system
+You are a helpful assistant. Your name is MiniMax-M2.5 and is built by MiniMax.[e~[
+]~b]user
+Explain quantum entanglement in 2 sentences.[e~[
+]~b]ai
+<think>
+[0m
+[EVAL_DEBUG] total=0.3ms gpu_eval=0.3ms(7 ops) cpu_eval=0.0ms(0 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:14:00.6962PM | [1mINFO    [0m] [1mKV cache hit: 45/46 tokens cached (97.8%)[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:14:00.7728PM | [1mINFO    [0m] [1mStarting decode[0m
+[EVAL_DEBUG] total=0.0ms gpu_eval=0.0ms(0 ops) cpu_eval=0.0ms(2 ops) fence_wait=0.0ms(0) fence_update=0.0ms sched_wait=0.0ms(0: 0 task/0 mem) tape_size=1 needs_fence=0 max_active=100 (limit=1)
+[ 06:14:00.7730PM | [1mINFO    [0m] [1mStarting stream_generate loop...[0m
+[ 06:14:00.8313PM | [1mINFO    [0m] [1mPREFILL loop exited, prompt_remaining=1, chunks=0[0m
+libc++abi: terminating due to uncaught exception of type std::runtime_error: [METAL] Command buffer execution failed: Caused GPU Timeout Error (00000002:kIOGPUCommandBufferCallbackErrorTimeout)
+Fatal Python error: Aborted
+
+Thread 0x0000000172873000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/concurrent/futures/thread.py", line 90 in _worker
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000171867000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py", line 249 in _feed
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x00000001706b7000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 395 in _recv
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 430 in _recv_bytes
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 216 in recv_bytes
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py", line 385 in get
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/loguru/_handler.py", line 300 in _queued_writer
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000201c1f080 (most recent call first):
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 572 in _step
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 704 in generate_step
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 767 in <genexpr>
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 776 in stream_generate
+  File "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/generator/generate.py", line 956 in mlx_generate
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 876 in parse_thinking_models
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 994 in parse_tool_calls
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 543 in main
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/bootstrap.py", line 94 in entrypoint
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 108 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 313 in _bootstrap
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 135 in _main
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 122 in spawn_main
+  File "<string>", line 1 in <module>
+
+Extension modules: uvloop.loop, zstandard.backend_c, yaml._yaml, psutil._psutil_osx, multidict._multidict, yarl._quoting_c, propcache._helpers_c, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket.mask, aiohttp._websocket.reader_c, frozenlist._frozenlist, msgspec._core, regex._regex, numpy._core._multiarray_umath, numpy.linalg._umath_linalg, torch._C, torch._C._dynamo.autograd_compiler, torch._C._dynamo.eval_frame, torch._C._dynamo.guards, torch._C._dynamo.utils, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, markupsafe._speedups, PIL._imaging, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._pcg64, numpy.random._generator, numpy.random._mt19937, numpy.random._philox, numpy.random._sfc64, numpy.random.mtrand, sentencepiece._sentencepiece (total: 39)
+[ 06:14:06.3017PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:11.3982PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:11.4004PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:16.3222PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:26.3427PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:26.3987PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:26.4003PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:36.3627PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:41.4128PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:41.4155PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:46.3825PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:56.4000PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:14:56.4172PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:14:56.4187PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:03.5190PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:15:06.4192PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:11.4208PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:11.4234PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:16.4404PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:26.4192PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:26.4217PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:26.4517PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:36.4723PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:41.4273PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:41.4295PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:46.4925PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:15:56.4882PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:56.4905PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:15:56.5060PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:00.5283PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:16:06.5131PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:11.4300PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:11.4316PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:16.5330PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:26.4328PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:26.4349PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:26.5490PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:36.5685PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:41.4455PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:41.4480PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:46.5888PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:16:56.4465PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:56.4490PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:16:56.6046PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:06.6262PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:11.4516PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:11.4541PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:16.6413PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:26.4546PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:26.4573PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:26.6629PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:36.6841PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:41.4628PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:41.4657PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:46.7059PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:17:56.4649PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:56.4674PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:17:56.7263PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:02.5773PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:18:06.7503PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:11.4662PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:11.4686PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:16.7716PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:26.4714PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:26.4738PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:26.7918PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:36.8123PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:41.4753PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:41.4773PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:46.8327PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:18:56.4785PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:56.4806PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:18:56.8518PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:06.8713PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:11.5836PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:19:11.5858PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:19:16.8917PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:26.9118PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:29.3772PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:19:29.3791PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:19:36.9199PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:46.9394PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:19:54.6628PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:19:54.6649PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:19:56.9573PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:06.6275PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:20:06.9767PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:16.9960PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:27.0176PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:35.7197PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:20:35.7223PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:20:37.0358PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:47.0564PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:20:57.0768PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:03.8080PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:21:03.8091PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:21:07.0978PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:17.1181PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:27.1350PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:37.1536PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:47.1722PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:21:57.1930PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:07.2140PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:10.6512PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:22:12.9123PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:22:12.9134PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:22:17.2328PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:27.2529PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:37.2728PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:47.2921PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:22:57.3101PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:07.3319PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:17.3386PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:26.4411PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:23:26.4421PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:23:27.3582PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:37.3778PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:41.5617PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:23:41.5641PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:23:47.3995PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:23:56.5587PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:23:56.5620PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:23:57.4179PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:07.4395PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:11.5604PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:11.5632PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:12.8229PM | [1mINFO    [0m] [1mWorker plan: CancelTask[0m
+[ 06:24:17.4596PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:26.4856PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:26.4871PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:27.4736PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:37.4932PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:41.5883PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:41.5895PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:47.5141PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
+[ 06:24:56.5158PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:56.5182PM | [1mINFO    [0m] [1mHybrid placement: 2 TP nodes × 59 shared layers, 1 PP tail node(s) × 3 layers (compute-optimized: minimize PP tail for pipeline sync)[0m
+[ 06:24:57.5305PM | [1mINFO    [0m] [1mNetwork Watchdog (en2): [][0m
