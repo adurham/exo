@@ -1069,7 +1069,7 @@ wheels = [
 
 [[package]]
 name = "mlx"
-version = "0.30.7.dev20260222+4c8bfe82"
+version = "0.30.7.dev20260225+f1d471ae"
 source = { editable = "mlx" }
 
 [package.metadata]

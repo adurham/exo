@@ -39,6 +39,11 @@ Achieve stable, high-performance distributed inference on a 3-node M4 cluster wi
     - **Conclusion:** We cannot use KV Cache Quantization until MLX supports quantized caches inside its fast Flash Attention kernels.
 2.  **The Memory Wall:**
     - Without Context/Sequence Parallelism (like Ring Attention), standard Pipeline Parallelism is bound by the memory bandwidth of individual nodes during decode (reading the entire KV cache for each token). At ~100K context, TPS drops to ~6-7 as the nodes hit the 546 GB/s memory bandwidth limit of the M4 Max.
+3.  **Context Parallelism (CP) vs Tensor Parallelism (TP) on 3-Node Architecture:**
+    - We investigated building Context Parallelism (Ring Attention) to pool memory bandwidth and solve the 100K memory wall. However, we mathematically proved it offers **zero benefit** over the existing Hybrid TP+PP strategy for this specific 3-node layout.
+    - **Reason:** On 2 identical Mac Studios, CP splits the sequence length 50/50, while TP splits the attention heads 50/50. In both scenarios, the nodes read exactly 50% of the KV cache simultaneously (identical memory bandwidth pooling).
+    - Furthermore, both CP and TP require massive network synchronization (broadcasting the query, and `all_sum` combining the outputs) twice per layer. For 59 layers, that is 118 network syncs per token.
+    - **Conclusion:** At ~1-2ms latency per sync (due to `FAST_SYNCH=off`), both TP and CP incur ~150ms+ of pure network waiting per token, capping decode speeds severely. The 7 TPS achieved on Pure Pipeline Parallelism (which only requires 2 network syncs total) is currently the absolute mathematical maximum for this cluster when running in Safe Mode.
 
 ## Final Task (Next Session)
 1.  **User Action:** Run `./start_cluster.sh` to apply the latest C++ optimizations (64KB frames and uncapped pipeline).

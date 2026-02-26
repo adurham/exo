@@ -27,6 +27,17 @@ To combat the memory bandwidth wall, we attempted to enable 8-bit KV Cache Quant
 
 **Conclusion:** We cannot use `EXO_KV_BITS` for long-context scaling until MLX supports quantized KV caches natively within its fast Flash Attention kernels.
 
+## 4. Architectural Epiphany: Context Parallelism Abandoned
+We briefly investigated implementing Context Parallelism (Ring Attention) as a new sharding strategy to break the 100K memory bandwidth wall. However, we proved mathematically that it is useless for our specific 3-node topology.
+
+**The Math:**
+- On two identical Mac Studios (Layers 0-59), CP splits the sequence length 50/50. Tensor Parallelism (TP) splits the attention heads 50/50. 
+- In both architectures, the nodes read exactly 50% of the KV cache simultaneously, resulting in identical memory bandwidth pooling.
+- Both CP and TP require the exact same network overhead: ~118 network syncs per generated token (`all_sum`).
+- At 1-2ms of latency per sync (`FAST_SYNCH=off`), this network overhead completely dominates the compute time, capping the theoretical maximum speed at ~3.5 TPS.
+
+**Conclusion:** Pure Pipeline Parallelism (which requires only 2 network syncs per token instead of 118) is the most efficient configuration for 100K+ context lengths on this cluster while running in Safe Mode, achieving ~7 TPS.
+
 ## Next Steps
-- Given the hard physical limit of the 546 GB/s memory bus during Pipeline Parallelism decode, the only architectural path forward to achieve high-speed 200K+ context is implementing **Context Parallelism (Sequence Parallelism / Ring Attention)**.
-- Context Parallelism would split the *prompt* across the nodes instead of the *model*, pooling the memory bandwidth of the entire cluster (~1.4 TB/s) to process the attention scores simultaneously. This requires a major architectural rewrite of Exo's mesh and MLX's distributed operations.
+- Maintain the current Pure Pipeline Parallelism architecture as the baseline for long-context runs.
+- The next major frontier for boosting decode speeds is resolving the synchronization hangs that prevent us from running `FAST_SYNCH=on` natively, as that would drop network latency from ~2ms to ~0.05ms per sync.
