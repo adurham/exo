@@ -63,7 +63,7 @@ def allocate_layers_proportionally(
     result = [int(r) for r in raw]
     by_remainder = sorted(range(n), key=lambda i: raw[i] - result[i], reverse=True)
     for i in range(total_layers - sum(result)):
-        result[by_remainder[i]] += 1
+        result[by_remainder[i % n]] += 1
 
     # Ensure minimum 1 per node by taking from the largest
     for i in range(n):
