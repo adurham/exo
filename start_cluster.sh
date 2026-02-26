@@ -284,11 +284,11 @@ for NODE in "${NODES[@]}"; do
     # Build the dynamic environment string — minimal, matching upstream B-side
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
-    # Prefill Optimization: Use 512 step size for smoother RDMA and throttle 100 for concurrency
-    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-512} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
+    # Prefill Optimization: Use 256 step size for smoother RDMA and throttle 100 for concurrency
+    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-256} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
     
-    # Use the provided MLX_JACCL_NUM_BUFFERS or default to 8
-    EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-8}"
+    # Use the provided MLX_JACCL_NUM_BUFFERS or default to 4 (reduced from 8 to prevent ENOMEM on large context)
+    EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-4}"
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main > /tmp/exo.log 2>&1'"
