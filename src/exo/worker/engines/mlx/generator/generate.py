@@ -525,23 +525,22 @@ def generate_step(
         
         return out
 
-    # Pre-compute pipeline layer list once (avoid per-step getattr + iteration)
-    _pipeline_last_layers: list = []
+    # Pre-compute hybrid pipeline layer list once (avoid per-step getattr + iteration)
+    _hybrid_layers: list = []
     try:
-        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, PipelineLastLayer, _get_layers
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, _get_layers
         inner_model = getattr(model, 'model', model)
         _all_layers = _get_layers(inner_model)
-        _pipeline_last_layers = [l for l in _all_layers if isinstance(l, (_HybridPipelineLastLayer, PipelineLastLayer))]
+        _hybrid_layers = [l for l in _all_layers if isinstance(l, _HybridPipelineLastLayer)]
     except (ValueError, ImportError):
         pass
 
     def _drain_pending_sends():
-        """Collect and clear any deferred sends from pipeline layers."""
+        """Collect and clear any deferred sends from _HybridPipelineLastLayer."""
         pending = []
-        for layer in _pipeline_last_layers:
-            if hasattr(layer, '_pending_sends'):
-                pending.extend(layer._pending_sends)
-                layer._pending_sends = []
+        for layer in _hybrid_layers:
+            pending.extend(layer._pending_sends)
+            layer._pending_sends = []
         return pending
 
     _step_counter = [0]
@@ -592,9 +591,16 @@ def generate_step(
             if hybrid_group is not None and decode_mode:
                 is_pp_tail = getattr(model, '_hybrid_pipeline_is_pp_tail', False)
 
+                _pending = _drain_pending_sends()
+                _st5 = _time.perf_counter()
+                mx.eval(sampled, *_pending)
+                _st6 = _time.perf_counter()
+
                 # Dynamic Safe Sync: if the context is massive, the network wait can trigger 
                 # a Metal GPU Timeout Error (>2-5s) on the pipeline tail node while waiting for 
                 # other nodes to chew through their massive KV cache.
+                # If EXO_DISABLE_METAL_TIMEOUT=1 (default), we rely on the OS-level override.
+                # Otherwise, we fallback to CPU network sync at EXO_SAFE_SYNC_LIMIT (default 50,000).
                 _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
                 
                 _massive_context = False
@@ -602,29 +608,21 @@ def generate_step(
                     _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
                     _massive_context = _kv_len > _safe_sync_limit
 
-                # Unified Graph Fusion: Build the full dependency graph (Compute -> Token Sync)
-                # and trigger a single mx.eval() to reduce Metal driver overhead.
-                if is_pp_tail:
-                    contribution = sampled
-                else:
-                    contribution = mx.zeros_like(sampled)
-                
-                synced_sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-                _pending = _drain_pending_sends()
-
-                _st5 = _time.perf_counter()
                 if _massive_context:
                     os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
 
                 try:
-                    # Evaluate compute layers, deferred pipeline sends, and the token sync all at once.
-                    mx.eval(synced_sampled, *_pending)
+                    if is_pp_tail:
+                        contribution = sampled
+                    else:
+                        contribution = mx.zeros_like(sampled)
+                    sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                    mx.eval(sampled)
                 finally:
                     if _massive_context:
                         os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
-                
-                sampled = synced_sampled
-                _st6 = _time.perf_counter()
+
+                _st7 = _time.perf_counter()
 
                 logger.debug(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
@@ -632,8 +630,9 @@ def generate_step(
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
                     f"quantize={(_st3-_st2)*1000:.0f}ms "
                     f"sample={(_st4-_st3)*1000:.0f}ms "
-                    f"fused_eval={(_st6-_st5)*1000:.0f}ms "
-                    f"total={(_st6-_st0)*1000:.0f}ms "
+                    f"eval={(_st6-_st5)*1000:.0f}ms "
+                    f"token_sync={(_st7-_st6)*1000:.0f}ms "
+                    f"total={(_st7-_st0)*1000:.0f}ms "
                     f"({'SAFE_SYNC' if _massive_context else 'FAST_SYNC'})"
                 )
             elif hybrid_group is not None:
@@ -653,27 +652,8 @@ def generate_step(
                     f"total={(_st6-_st0)*1000:.0f}ms (prefill_mode)"
                 )
             else:
-                # Standard Pipeline Path: Apply Unified Graph Fusion and SAFE_SYNC here as well.
-                _pending = _drain_pending_sends()
                 _st5 = _time.perf_counter()
-                
-                # Check for massive context
-                _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
-                _massive_context = False
-                if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
-                    _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
-                    _massive_context = _kv_len > _safe_sync_limit
-
-                if _massive_context:
-                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
-
-                try:
-                    # Evaluate compute layers and deferred pipeline sends in a single graph.
-                    mx.eval(sampled, *_pending)
-                finally:
-                    if _massive_context:
-                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
-
+                mx.eval(sampled)
                 _st6 = _time.perf_counter()
                 logger.debug(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
@@ -681,9 +661,8 @@ def generate_step(
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
                     f"quantize={(_st3-_st2)*1000:.0f}ms "
                     f"sample={(_st4-_st3)*1000:.0f}ms "
-                    f"fused_eval={(_st6-_st5)*1000:.0f}ms "
-                    f"total={(_st6-_st0)*1000:.0f}ms "
-                    f"({'SAFE_SYNC' if _massive_context else 'FAST_SYNC'})"
+                    f"eval={(_st6-_st5)*1000:.0f}ms "
+                    f"total={(_st6-_st0)*1000:.0f}ms"
                 )
 
             return sampled, logprobs.squeeze(0)
