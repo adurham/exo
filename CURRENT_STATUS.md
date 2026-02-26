@@ -26,8 +26,11 @@ Achieve stable, high-performance distributed inference on a 3-node M4 cluster wi
 
 5.  **Dynamic Safe Sync (GPU Timeout Mitigation):**
     - Fixed an issue where the pipeline tail node crashed with `kIOGPUCommandBufferCallbackErrorTimeout` because its GPU waited >2s for the compute-heavy node during massive decodes.
-    - Added a dynamic fallback (`MLX_FORCE_DISTRIBUTED_GPU=0`) that automatically switches pipeline synchronization from the GPU to the CPU when context exceeds 50,000 tokens.
-    - **Result:** Retains blazing fast 1ms GPU sync for short contexts, while safely surviving indefinitely on massive 200k contexts. (Documented in `docs/gpu_timeout_fix.md`).
+    - Discovered that an OS-level watchdog override (`MTL_DISABLE_TIMEOUT=1`) successfully keeps the GPU alive indefinitely during massive contexts without needing CPU fallback.
+    - Made the fix fully configurable:
+        - `EXO_DISABLE_METAL_TIMEOUT=1` (Default) bypasses the OS watchdog entirely for maximum performance.
+        - If the watchdog is enabled (`0`), the system uses a dynamic CPU fallback when context exceeds `EXO_SAFE_SYNC_LIMIT` (Default `50000` tokens).
+    - **Result:** Retains blazing fast 1ms GPU sync indefinitely, successfully pushing past 60,000+ tokens in stress testing. (Documented in `docs/gpu_timeout_fix.md`).
 
 ## Current System State
 - **Branch:** Optimized Fork (A-Side)
