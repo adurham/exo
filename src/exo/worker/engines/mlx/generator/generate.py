@@ -255,6 +255,30 @@ def prefill(
 
     # Use max_tokens=1 because max_tokens=0 does not work.
     # We just throw away the generated token - we only care about filling the cache
+    
+    # Dynamic Prefill Scaling: Calculate safe step size based on current available memory
+    # Prevents ENOMEM crashes during massive context offloads
+    try:
+        active_mem = mx.get_active_memory()
+        total_mem = mx.device_info().get('memory_size', 32 * 1024**3)
+        free_ratio = 1.0 - (active_mem / total_mem)
+        
+        # Base config defaults
+        max_step = _env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE)
+        
+        # If memory is extremely tight (< 15% free), shrink the prefill chunks aggressively
+        if free_ratio < 0.15:
+            dynamic_step = 256
+            logger.warning(f"Memory tight ({free_ratio*100:.1f}% free). Shrinking prefill step size to {dynamic_step}")
+        elif free_ratio < 0.30:
+            dynamic_step = 512
+            logger.info(f"Memory constrained ({free_ratio*100:.1f}% free). Adjusting prefill step size to {dynamic_step}")
+        else:
+            dynamic_step = max_step
+    except Exception as e:
+        logger.warning(f"Failed to calculate dynamic prefill step size: {e}")
+        dynamic_step = _env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE)
+
     try:
         for _ in stream_generate(
             model=model,
@@ -263,7 +287,7 @@ def prefill(
             max_tokens=1,
             sampler=sampler,
             prompt_cache=cache,
-            prefill_step_size=_env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE),
+            prefill_step_size=dynamic_step,
             kv_group_size=KV_GROUP_SIZE,
             kv_bits=KV_BITS,
             prompt_progress_callback=progress_callback,
