@@ -179,6 +179,7 @@ class PipelineLastLayer(CustomMlxLayer):
         self.group = group
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
+        self._pending_sends: list[mx.array] = []
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         cache = self.original_layer_signature.bind_partial(
@@ -188,17 +189,22 @@ class PipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self.r != self.s - 1:
-            output = mx.distributed.send(
+            sent = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
-            # Force intermediate send to avoid deadlock where Rank 1 waits for this
-            # while Rank 0 waits for Rank 1's final output.
-            # (Unified graph fusion cannot be used here because the subsequent all_gather
-            #  in this layer is a collective that will deadlock if the send is deferred).
-            t0 = _time.monotonic()
-            mx.eval(output)
-            elapsed = _time.monotonic() - t0
-            logger.debug(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill={self.is_prefill})")
+            
+            if self.is_prefill:
+                # Defer send during prefill for unified graph fusion.
+                # This prevents GPU command buffer timeouts on massive prefill graphs.
+                self._pending_sends.append(sent)
+                logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {(self.r + 1) % self.s}, shape={output.shape}, prefill=True")
+            else:
+                # Eagerly evaluate send during decode to prevent deadlock
+                # against the upcoming all_gather collective!
+                t0 = _time.monotonic()
+                mx.eval(sent)
+                elapsed = _time.monotonic() - t0
+                logger.debug(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill=False)")
 
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)

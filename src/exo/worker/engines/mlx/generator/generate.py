@@ -525,22 +525,23 @@ def generate_step(
         
         return out
 
-    # Pre-compute hybrid pipeline layer list once (avoid per-step getattr + iteration)
-    _hybrid_layers: list = []
+    # Pre-compute pipeline layer list once (avoid per-step getattr + iteration)
+    _pipeline_last_layers: list = []
     try:
-        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, _get_layers
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, PipelineLastLayer, _get_layers
         inner_model = getattr(model, 'model', model)
         _all_layers = _get_layers(inner_model)
-        _hybrid_layers = [l for l in _all_layers if isinstance(l, _HybridPipelineLastLayer)]
+        _pipeline_last_layers = [l for l in _all_layers if isinstance(l, (_HybridPipelineLastLayer, PipelineLastLayer))]
     except (ValueError, ImportError):
         pass
 
     def _drain_pending_sends():
-        """Collect and clear any deferred sends from _HybridPipelineLastLayer."""
+        """Collect and clear any deferred sends from pipeline layers."""
         pending = []
-        for layer in _hybrid_layers:
-            pending.extend(layer._pending_sends)
-            layer._pending_sends = []
+        for layer in _pipeline_last_layers:
+            if hasattr(layer, '_pending_sends'):
+                pending.extend(layer._pending_sends)
+                layer._pending_sends = []
         return pending
 
     _step_counter = [0]
