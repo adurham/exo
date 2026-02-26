@@ -322,6 +322,20 @@ done
 
 if [ "$CLUSTER_READY" = false ]; then
     echo ""
+    # Check for the specific pyo3 initialization panic that happens when uv.lock goes out of sync
+    PYO3_PANIC=$(ssh macstudio-m4-1 "grep -i 'The Python interpreter is not initialized' /tmp/exo.log" 2>/dev/null || true)
+    
+    if [ -n "$PYO3_PANIC" ]; then
+        echo "CRITICAL ERROR: Detected a corrupted Rust pyo3 binding state on the primary node!"
+        echo "This usually happens when 'uv.lock' changes (e.g. from switching git branches) and the virtual environment gets out of sync."
+        echo ""
+        echo "AUTOMATIC FIX: Run the following command on ALL nodes to repair the bindings:"
+        echo "  zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package exo_pyo3_bindings'"
+        echo ""
+        echo "Exiting."
+        exit 1
+    fi
+
     echo "TIMEOUT: Cluster did not stabilize."
     echo "Fetching logs from macstudio-m4-1:"
     ssh macstudio-m4-1 "tail -n 20 /tmp/exo.log"
