@@ -284,8 +284,8 @@ for NODE in "${NODES[@]}"; do
     # Build the dynamic environment string — minimal, matching upstream B-side
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
-    # Prefill Optimization: Use 1024 step size for smoother RDMA and throttle 100 for concurrency
-    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-1024} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
+    # Prefill Optimization: Use 512 step size for smoother RDMA and throttle 100 for concurrency
+    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-512} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
     
     # Use the provided MLX_JACCL_NUM_BUFFERS or default to 8
     EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-8}"
