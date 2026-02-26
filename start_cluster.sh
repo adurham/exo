@@ -289,8 +289,6 @@ for NODE in "${NODES[@]}"; do
     
     # Use the provided MLX_JACCL_NUM_BUFFERS or default to 8
     EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-8}"
-        EXO_ENV="$EXO_ENV EXO_ADAPTIVE_THROTTLE=$EXO_ADAPTIVE_THROTTLE"
-    fi
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main > /tmp/exo.log 2>&1'"
