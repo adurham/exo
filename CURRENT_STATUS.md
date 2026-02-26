@@ -1,24 +1,46 @@
-# Current Progress: Exo + MLX Inference Optimization
+# Current Progress: Exo + MLX High-Context Optimization
 
 ## Goal
-Optimize distributed LLM inference on the 3-node M4 cluster (macstudio-m4-1, macstudio-m4-2, macbook-m4) running `mlx-community/MiniMax-M2.5-5bit`. We are currently compute-starved (50W / 50% utilization) and experiencing significant orchestration overhead during decode steps.
+Achieve stable, high-performance distributed inference on a 3-node M4 cluster with a target context of **200,000 tokens** on `mlx-community/MiniMax-M2.5-5bit`.
 
-## What We've Discovered
-1.  **Adaptive Throttle Was Lost:** The adaptive throttle (`MAX_ACTIVE_TASKS`) was introduced in a previous commit but its environment variables were lost in `start_cluster.sh`. We restored it using a single `EXO_ADAPTIVE_THROTTLE=1` variable that dynamically switches `MAX_ACTIVE_TASKS` between 30 (for prefill) and 100 (for decode). This successfully eliminated OOMs during massive prefill chunks while allowing decode to run faster.
-2.  **GPU Command Buffer Timeouts:** Earlier crashes (`kIOGPUCommandBufferCallbackErrorTimeout`) were caused by the GPU spinning forever on stale memory during RDMA transfers. 
-3.  **FAST_SYNCH Fix:** The user implemented a critical fix in the MLX submodule (`3c19d389`) adding a `DSB SY` barrier and atomic fallback to the Metal kernel, which solves the stale memory issue and makes `MLX_METAL_FAST_SYNCH=1` stable.
-4.  **The 29ms Bottleneck:** Currently, a decode step takes 36ms total, but the actual GPU execution (`model=7ms`) and evaluation (`gpu_eval=0.5ms`) are tiny. The vast majority of the time (`eval=29ms`) is lost to orchestration overhead. This is because the MLX scheduler is forcing a full pipeline stall to perform RDMA transfers on the CPU stream.
+## What We've Achieved
+1.  **Universal GPU Delegation:**
+    - Modified `mlx/backend/metal/distributed.cpp` to ensure distributed operations (AllReduce, etc.) always run on the GPU stream.
+    - This eliminated the 40ms-50ms "CPU Fallback" bottleneck that occurred when `FAST_SYNCH` was off. 
+    - **Result:** Orchestration overhead (`eval`) dropped from 30ms+ to **1ms (Fast)** or **10ms (Safe)**.
 
-## What We Just Did
-To eliminate the 29ms overhead, we need the GPU to orchestrate the RDMA transfers without breaking the GPU stream. 
-1.  **Conditionally Re-enabled `eval_gpu` Delegation:** In the `mlx` submodule (`mlx/backend/metal/distributed.cpp`), we updated `AllReduce`, `AllGather`, `Send`, `Recv`, and `ReduceScatter` to conditionally call `eval_cpu(inputs, outputs)` **only if** `metal_fast_synch()` is true.
-2.  **Safety Fallback:** If `FAST_SYNCH` is off, it throws an error. This forces the MLX scheduler to fall back to the slower but safer `MTLSharedEvent` synchronization on the CPU stream, preventing the 60s timeout race condition.
-3.  **Enabled FAST_SYNCH:** We updated `start_cluster.sh` to set `EXO_FAST_SYNCH=on` as the default.
+2.  **Architecture-Aware Sharding (MacBook Protection):**
+    - Refactored `placement_utils.py` to calculate exact memory requirements for a **100% context window (200k tokens)** based on model architecture (layers, heads, head_dim).
+    - Implemented a redistribution loop that moves layers from memory-constrained nodes (MBP 36GB) to high-capacity nodes (Studios 128GB) until the 200K footprint is guaranteed to fit.
+    - **Result:** Successfully grew context to **31,000+ tokens** with **6.6GB of RAM headroom** on the MacBook (where previously it would have been near 0GB).
 
-All changes have been committed and pushed to both the `mlx` submodule and the `exo` repository.
+3.  **RDMA Pipelining & Prefill Speed:**
+    - Increased `NUM_BUFFERS` to 8 and `MAX_WR` to 256 for better distributed saturation.
+    - Increased `FRAME_SIZE` from 4KB to **64KB**, reducing CPU interrupt overhead for large prefill chunks by 16x.
+    - Uncapped the prefill pipeline in `mesh.cpp` and `ring.cpp` to allow all 8 buffers to work concurrently.
+    - Tuned `BUFFER_SIZES` to 6 to keep the total memory pool at a safe **~67MB**, avoiding RDMA driver crashes.
 
-## Next Steps (Upon Restart)
-1.  **User Action:** The user needs to run `./start_cluster.sh` to pull the latest commits, rebuild the MLX submodule, and start the cluster.
-2.  **User Action:** The user needs to create the inference instance.
-3.  **Agent Action:** The agent needs to restart the continuous `tmp/stress_test.py` script.
-4.  **Agent Action:** Monitor the remote logs (`tail -f /tmp/exo.log`) on `macstudio-m4-1` and `macstudio-m4-2`. We are looking for the `eval=` timing in the `[STEP X]` logs to drop significantly from the previous ~29ms overhead, confirming that GPU delegation is successfully keeping the pipeline saturated.
+4.  **Adaptive Prefill Chunking:**
+    - Set `EXO_PREFILL_STEP_SIZE=1024` and `EXO_ADAPTIVE_THROTTLE=100` in `start_cluster.sh`.
+    - **Result:** Massive context jumps are now processed in steady, high-speed 1K pulses instead of single giant bursts that caused RDMA overflows and system stutters.
+
+## Current System State
+- **Branch:** Optimized Fork (A-Side)
+- **FAST_SYNCH:** Off (Safe mode)
+- **Decode Performance:** ~25 TPS (Safe Sync) / ~90 TPS (Fast Sync).
+- **Prefill Performance:** ~250+ tokens/sec (Stable).
+- **GPU Saturation:** 100% residency reached; power draw hit **74W** peak on M4 Studios.
+
+## Known Limitations & Architectural Findings
+1.  **KV Cache Quantization (`EXO_KV_BITS`) & Flash Attention Trap:**
+    - Setting `EXO_KV_BITS=8` or `4` to reduce memory bandwidth bottleneck during long-context generation currently **fails**.
+    - **Reason:** In `mlx-lm`, if the KV cache is quantized, MLX bypasses the hardware-accelerated `mx.fast.scaled_dot_product_attention` (Flash Attention) Metal kernel and falls back to a naive Python-based implementation (`quantized_scaled_dot_product_attention`).
+    - **Effect:** Without Flash Attention, the naive kernel materializes the full $O(N^2)$ attention matrix in memory. During large prefills (e.g., 10,000+ tokens), this intermediate matrix ballooning causes immediate Out Of Memory (OOM) crashes and OS-level fatal errors (`ENOMEM -12`).
+    - **Conclusion:** We cannot use KV Cache Quantization until MLX supports quantized caches inside its fast Flash Attention kernels.
+2.  **The Memory Wall:**
+    - Without Context/Sequence Parallelism (like Ring Attention), standard Pipeline Parallelism is bound by the memory bandwidth of individual nodes during decode (reading the entire KV cache for each token). At ~100K context, TPS drops to ~6-7 as the nodes hit the 546 GB/s memory bandwidth limit of the M4 Max.
+
+## Final Task (Next Session)
+1.  **User Action:** Run `./start_cluster.sh` to apply the latest C++ optimizations (64KB frames and uncapped pipeline).
+2.  **Agent Action:** Resume the `tmp/stress_test.py` in HYPER-GROWTH mode to confirm the climb to 200,000 tokens.
+3.  **Monitoring:** Watch MacBook RAM; it should safely hit the 200K mark without OOM.
