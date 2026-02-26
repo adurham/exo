@@ -284,6 +284,10 @@ for NODE in "${NODES[@]}"; do
     # Build the dynamic environment string — minimal, matching upstream B-side
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
+    if [ -n "$MLX_JACCL_NUM_BUFFERS" ]; then
+        EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=$MLX_JACCL_NUM_BUFFERS"
+    fi
+
     if [ -n "$EXO_ADAPTIVE_THROTTLE" ]; then
         EXO_ENV="$EXO_ENV EXO_ADAPTIVE_THROTTLE=$EXO_ADAPTIVE_THROTTLE"
     fi
