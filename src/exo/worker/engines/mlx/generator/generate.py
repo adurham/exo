@@ -596,12 +596,26 @@ def generate_step(
                 mx.eval(sampled, *_pending)
                 _st6 = _time.perf_counter()
 
-                if is_pp_tail:
-                    contribution = sampled
-                else:
-                    contribution = mx.zeros_like(sampled)
-                sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-                mx.eval(sampled)
+                # Dynamic Safe Sync: if the context is massive, the network wait can trigger 
+                # a Metal GPU Timeout Error (>2-5s) on the pipeline tail node while waiting for 
+                # other nodes to chew through their massive KV cache.
+                # When context > 50,000, we force the network sync to fall back to the CPU.
+                _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
+                _massive_context = _kv_len > 50000
+                if _massive_context:
+                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+
+                try:
+                    if is_pp_tail:
+                        contribution = sampled
+                    else:
+                        contribution = mx.zeros_like(sampled)
+                    sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                    mx.eval(sampled)
+                finally:
+                    if _massive_context:
+                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+
                 _st7 = _time.perf_counter()
 
                 logger.info(
@@ -612,7 +626,8 @@ def generate_step(
                     f"sample={(_st4-_st3)*1000:.0f}ms "
                     f"eval={(_st6-_st5)*1000:.0f}ms "
                     f"token_sync={(_st7-_st6)*1000:.0f}ms "
-                    f"total={(_st7-_st0)*1000:.0f}ms"
+                    f"total={(_st7-_st0)*1000:.0f}ms "
+                    f"({'SAFE_SYNC' if _massive_context else 'FAST_SYNC'})"
                 )
             elif hybrid_group is not None:
                 _pending = _drain_pending_sends()

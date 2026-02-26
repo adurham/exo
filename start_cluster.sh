@@ -284,6 +284,9 @@ for NODE in "${NODES[@]}"; do
     # Build the dynamic environment string — minimal, matching upstream B-side
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
+    # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context decodes
+    EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0"
+
     # Prefill Optimization: Use 256 step size for smoother RDMA and throttle 100 for concurrency
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-256} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
     
