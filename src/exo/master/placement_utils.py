@@ -123,6 +123,9 @@ def _allocate_and_validate_layers(
     # Reserve a small 5% buffer for system/OS overhead
     SYSTEM_RESERVE = 0.05
     
+    for nid, mem in node_memory.items():
+        logger.info(f"Node {nid} reports Available RAM: {mem.ram_available.in_bytes/(1024**3):.2f} GB")
+
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
