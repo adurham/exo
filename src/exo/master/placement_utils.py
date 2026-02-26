@@ -100,10 +100,16 @@ def _allocate_and_validate_layers(
     total_memory: Memory,
     model_card: ModelCard,
 ) -> list[int]:
+    # Estimate KV cache requirement: ~128KB per token per layer (conservative average)
+    # Total for 200k tokens at 62 layers: ~25GB total across cluster.
+    # We reserve 25% of each node's available RAM for KV cache and system overhead
+    # to ensure stability at high context.
+    RESERVE_FRACTION = 0.25
+    
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
-            node_memory[node_id].ram_available.in_bytes / total_memory.in_bytes
+            (node_memory[node_id].ram_available.in_bytes * (1.0 - RESERVE_FRACTION)) / total_memory.in_bytes
             for node_id in node_ids
         ],
     )
@@ -113,10 +119,10 @@ def _allocate_and_validate_layers(
     for i, node_id in enumerate(node_ids):
         node_layers = layer_allocations[i]
         required_memory = (total_storage_bytes * node_layers) // total_layers
-        available_memory = node_memory[node_id].ram_available.in_bytes
+        available_memory = node_memory[node_id].ram_available.in_bytes * (1.0 - RESERVE_FRACTION)
         if required_memory > available_memory:
             raise ValueError(
-                f"Node {i} ({node_id}) has insufficient memory: "
+                f"Node {i} ({node_id}) has insufficient memory (reserved {RESERVE_FRACTION*100}% for KV): "
                 f"requires {required_memory / (1024**3):.2f} GB for {node_layers} layers, "
                 f"but only has {available_memory / (1024**3):.2f} GB available"
             )
