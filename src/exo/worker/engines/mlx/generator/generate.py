@@ -652,8 +652,27 @@ def generate_step(
                     f"total={(_st6-_st0)*1000:.0f}ms (prefill_mode)"
                 )
             else:
+                # Standard Pipeline Path: Apply Unified Graph Fusion and SAFE_SYNC here as well.
+                _pending = _drain_pending_sends()
                 _st5 = _time.perf_counter()
-                mx.eval(sampled)
+                
+                # Check for massive context
+                _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
+                _massive_context = False
+                if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+                    _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
+                    _massive_context = _kv_len > _safe_sync_limit
+
+                if _massive_context:
+                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+
+                try:
+                    # Evaluate compute layers and deferred pipeline sends in a single graph.
+                    mx.eval(sampled, *_pending)
+                finally:
+                    if _massive_context:
+                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+
                 _st6 = _time.perf_counter()
                 logger.info(
                     f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
@@ -661,8 +680,9 @@ def generate_step(
                     f"reshape={(_st2-_st1)*1000:.0f}ms "
                     f"quantize={(_st3-_st2)*1000:.0f}ms "
                     f"sample={(_st4-_st3)*1000:.0f}ms "
-                    f"eval={(_st6-_st5)*1000:.0f}ms "
-                    f"total={(_st6-_st0)*1000:.0f}ms"
+                    f"fused_eval={(_st6-_st5)*1000:.0f}ms "
+                    f"total={(_st6-_st0)*1000:.0f}ms "
+                    f"({'SAFE_SYNC' if _massive_context else 'FAST_SYNC'})"
                 )
 
             return sampled, logprobs.squeeze(0)

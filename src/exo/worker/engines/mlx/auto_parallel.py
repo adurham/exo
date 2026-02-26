@@ -179,6 +179,7 @@ class PipelineLastLayer(CustomMlxLayer):
         self.group = group
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
+        self._pending_sends: list[mx.array] = []
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         cache = self.original_layer_signature.bind_partial(
@@ -188,15 +189,12 @@ class PipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self.r != self.s - 1:
-            output = mx.distributed.send(
+            sent = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
-            # Force intermediate send to avoid deadlock where Rank 1 waits for this
-            # while Rank 0 waits for Rank 1's final output.
-            t0 = _time.monotonic()
-            mx.eval(output)
-            elapsed = _time.monotonic() - t0
-            logger.info(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill={self.is_prefill})")
+            # DEFERRED SEND: Do not eval here. Store for top-level fusion in generate.py.
+            self._pending_sends.append(sent)
+            logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {(self.r + 1) % self.s}, shape={output.shape}, prefill={self.is_prefill}")
 
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
