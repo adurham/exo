@@ -20,7 +20,6 @@ from huggingface_hub import (
 )
 from loguru import logger
 from pydantic import (
-    DirectoryPath,
     TypeAdapter,
 )
 
@@ -31,7 +30,7 @@ from exo.download.huggingface_utils import (
     get_hf_endpoint,
     get_hf_token,
 )
-from exo.shared.constants import EXO_MODELS_DIR
+from exo.shared.constants import EXO_MODELS_DIR, EXO_MODELS_PATH
 from exo.shared.models.model_cards import ModelTask
 from exo.shared.types.common import ModelId
 from exo.shared.types.memory import Memory
@@ -80,9 +79,9 @@ def map_repo_file_download_progress_to_download_progress_data(
     repo_file_download_progress: RepoFileDownloadProgress,
 ) -> DownloadProgressData:
     return DownloadProgressData(
-        downloaded_bytes=repo_file_download_progress.downloaded,
-        downloaded_bytes_this_session=repo_file_download_progress.downloaded_this_session,
-        total_bytes=repo_file_download_progress.total,
+        downloaded=repo_file_download_progress.downloaded,
+        downloaded_this_session=repo_file_download_progress.downloaded_this_session,
+        total=repo_file_download_progress.total,
         completed_files=1 if repo_file_download_progress.status == "complete" else 0,
         total_files=1,
         speed=repo_file_download_progress.speed,
@@ -95,9 +94,9 @@ def map_repo_download_progress_to_download_progress_data(
     repo_download_progress: RepoDownloadProgress,
 ) -> DownloadProgressData:
     return DownloadProgressData(
-        total_bytes=repo_download_progress.total_bytes,
-        downloaded_bytes=repo_download_progress.downloaded_bytes,
-        downloaded_bytes_this_session=repo_download_progress.downloaded_bytes_this_session,
+        total=repo_download_progress.total,
+        downloaded=repo_download_progress.downloaded,
+        downloaded_this_session=repo_download_progress.downloaded_this_session,
         completed_files=repo_download_progress.completed_files,
         total_files=repo_download_progress.total_files,
         speed=repo_download_progress.overall_speed,
@@ -111,7 +110,27 @@ def map_repo_download_progress_to_download_progress_data(
     )
 
 
-def build_model_path(model_id: ModelId) -> DirectoryPath:
+def resolve_model_in_path(model_id: ModelId) -> Path | None:
+    """Search EXO_MODELS_PATH directories for a pre-existing model.
+
+    Checks each directory for the normalized name (org--model).  A candidate
+    is only returned if ``is_model_directory_complete`` confirms all weight
+    files are present.
+    """
+    if EXO_MODELS_PATH is None:
+        return None
+    normalized = model_id.normalize()
+    for search_dir in EXO_MODELS_PATH:
+        candidate = search_dir / normalized
+        if candidate.is_dir() and is_model_directory_complete(candidate):
+            return candidate
+    return None
+
+
+def build_model_path(model_id: ModelId) -> Path:
+    found = resolve_model_in_path(model_id)
+    if found is not None:
+        return found
     return EXO_MODELS_DIR / model_id.normalize()
 
 
@@ -142,7 +161,7 @@ async def delete_model(model_id: ModelId) -> bool:
 
 
 async def seed_models(seed_dir: str | Path):
-    """Move model in resources folder of app to .cache/huggingface/hub"""
+    """Move models from resources folder to EXO_MODELS_DIR."""
     source_dir = Path(seed_dir)
     dest_dir = await ensure_models_dir()
     for path in source_dir.iterdir():
@@ -156,6 +175,72 @@ async def seed_models(seed_dir: str | Path):
                 except Exception:
                     logger.error(f"Error seeding model {path} to {dest_path}")
                     logger.error(traceback.format_exc())
+
+
+def _scan_model_directory(
+    model_dir: Path, recursive: bool = False
+) -> list[FileListEntry] | None:
+    """Scan a local model directory and build a file list.
+
+    Requires at least one ``*.safetensors.index.json``.  Every weight file
+    referenced by the index that is missing on disk gets ``size=None``.
+    """
+    index_files = list(model_dir.glob("**/*.safetensors.index.json"))
+    if not index_files:
+        return None
+
+    entries_by_path: dict[str, FileListEntry] = {}
+
+    if recursive:
+        for dirpath, _, filenames in os.walk(model_dir):
+            for filename in filenames:
+                if filename.endswith(".partial"):
+                    continue
+                full_path = Path(dirpath) / filename
+                rel_path = str(full_path.relative_to(model_dir))
+                entries_by_path[rel_path] = FileListEntry(
+                    type="file",
+                    path=rel_path,
+                    size=full_path.stat().st_size,
+                )
+    else:
+        for item in model_dir.iterdir():
+            if item.is_file() and not item.name.endswith(".partial"):
+                entries_by_path[item.name] = FileListEntry(
+                    type="file",
+                    path=item.name,
+                    size=item.stat().st_size,
+                )
+
+    # Add expected weight files from index that haven't been downloaded yet
+    for index_file in index_files:
+        try:
+            index_data = ModelSafetensorsIndex.model_validate_json(
+                index_file.read_text()
+            )
+            relative_dir = index_file.parent.relative_to(model_dir)
+            for filename in set(index_data.weight_map.values()):
+                rel_path = (
+                    str(relative_dir / filename)
+                    if relative_dir != Path(".")
+                    else filename
+                )
+                if rel_path not in entries_by_path:
+                    entries_by_path[rel_path] = FileListEntry(
+                        type="file",
+                        path=rel_path,
+                        size=None,
+                    )
+        except Exception:
+            continue
+
+    return list(entries_by_path.values())
+
+
+def is_model_directory_complete(model_dir: Path) -> bool:
+    """Check if a model directory contains all required weight files."""
+    file_list = _scan_model_directory(model_dir, recursive=True)
+    return file_list is not None and all(f.size is not None for f in file_list)
 
 
 async def _build_file_list_from_local_directory(
@@ -172,59 +257,7 @@ async def _build_file_list_from_local_directory(
     if not await aios.path.exists(model_dir):
         return None
 
-    def _scan() -> list[FileListEntry] | None:
-        index_files = list(model_dir.glob("**/*.safetensors.index.json"))
-        if not index_files:
-            return None
-
-        entries_by_path: dict[str, FileListEntry] = {}
-
-        if recursive:
-            for dirpath, _, filenames in os.walk(model_dir):
-                for filename in filenames:
-                    if filename.endswith(".partial"):
-                        continue
-                    full_path = Path(dirpath) / filename
-                    rel_path = str(full_path.relative_to(model_dir))
-                    entries_by_path[rel_path] = FileListEntry(
-                        type="file",
-                        path=rel_path,
-                        size=full_path.stat().st_size,
-                    )
-        else:
-            for item in model_dir.iterdir():
-                if item.is_file() and not item.name.endswith(".partial"):
-                    entries_by_path[item.name] = FileListEntry(
-                        type="file",
-                        path=item.name,
-                        size=item.stat().st_size,
-                    )
-
-        # Add expected weight files from index that haven't been downloaded yet
-        for index_file in index_files:
-            try:
-                index_data = ModelSafetensorsIndex.model_validate_json(
-                    index_file.read_text()
-                )
-                relative_dir = index_file.parent.relative_to(model_dir)
-                for filename in set(index_data.weight_map.values()):
-                    rel_path = (
-                        str(relative_dir / filename)
-                        if relative_dir != Path(".")
-                        else filename
-                    )
-                    if rel_path not in entries_by_path:
-                        entries_by_path[rel_path] = FileListEntry(
-                            type="file",
-                            path=rel_path,
-                            size=None,
-                        )
-            except Exception:
-                continue
-
-        return list(entries_by_path.values())
-
-    file_list = await asyncio.to_thread(_scan)
+    file_list = await asyncio.to_thread(_scan_model_directory, model_dir, recursive)
     if not file_list:
         return None
     return file_list
@@ -281,9 +314,13 @@ async def fetch_file_list_with_cache(
         _fetched_file_lists_this_session.add(cache_key)
         return file_list
     except Exception as e:
+        logger.opt(exception=e).warning(
+            "Ran into exception when fetching file list from HF."
+        )
+
         if await aios.path.exists(cache_file):
             logger.warning(
-                f"No internet and no cached file list for {model_id} - using local file list"
+                f"No cached file list for {model_id} - using local file list"
             )
             async with aiofiles.open(cache_file, "r") as f:
                 return TypeAdapter(list[FileListEntry]).validate_json(await f.read())
@@ -578,19 +615,20 @@ def calculate_repo_progress(
     file_progress: dict[str, RepoFileDownloadProgress],
     all_start_time: float,
 ) -> RepoDownloadProgress:
-    all_total_bytes = sum((p.total.in_bytes for p in file_progress.values()), 0)
-    all_downloaded_bytes = sum(
-        (p.downloaded.in_bytes for p in file_progress.values()), 0
+    all_total = sum((p.total for p in file_progress.values()), Memory.from_bytes(0))
+    all_downloaded = sum(
+        (p.downloaded for p in file_progress.values()), Memory.from_bytes(0)
     )
-    all_downloaded_bytes_this_session = sum(
-        (p.downloaded_this_session.in_bytes for p in file_progress.values()), 0
+    all_downloaded_this_session = sum(
+        (p.downloaded_this_session for p in file_progress.values()),
+        Memory.from_bytes(0),
     )
     elapsed_time = time.time() - all_start_time
     all_speed = (
-        all_downloaded_bytes_this_session / elapsed_time if elapsed_time > 0 else 0
+        all_downloaded_this_session.in_bytes / elapsed_time if elapsed_time > 0 else 0
     )
     all_eta = (
-        timedelta(seconds=(all_total_bytes - all_downloaded_bytes) / all_speed)
+        timedelta(seconds=(all_total - all_downloaded).in_bytes / all_speed)
         if all_speed > 0
         else timedelta(seconds=0)
     )
@@ -609,11 +647,9 @@ def calculate_repo_progress(
             [p for p in file_progress.values() if p.downloaded == p.total]
         ),
         total_files=len(file_progress),
-        downloaded_bytes=Memory.from_bytes(all_downloaded_bytes),
-        downloaded_bytes_this_session=Memory.from_bytes(
-            all_downloaded_bytes_this_session
-        ),
-        total_bytes=Memory.from_bytes(all_total_bytes),
+        downloaded=all_downloaded,
+        downloaded_this_session=all_downloaded_this_session,
+        total=all_total,
         overall_speed=all_speed,
         overall_eta=all_eta,
         status=status,
@@ -681,99 +717,6 @@ async def get_downloaded_size(path: Path) -> int:
         return (await aios.stat(partial_path)).st_size
     return 0
 
-async def download_file_from_peer_with_retry(
-    repo_url: str,
-    model_id: ModelId,
-    path: str,
-    target_dir: Path,
-    on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
-    on_connection_lost: Callable[[], None] = lambda: None,
-) -> Path:
-    n_attempts = 3
-    for attempt in range(n_attempts):
-        try:
-            return await _download_file_from_peer(
-                repo_url, model_id, path, target_dir, on_progress
-            )
-        except Exception as e:
-            if attempt == n_attempts - 1:
-                on_connection_lost()
-                raise e
-            logger.error(
-                f"Peer download error on attempt {attempt + 1}/{n_attempts} for {model_id=} {path=} {target_dir=} {repo_url=}: {e}"
-            )
-            logger.error(traceback.format_exc())
-            await asyncio.sleep(2.0**attempt)
-    raise Exception(
-        f"Failed to download file from peer {model_id=} {path=} {target_dir=} {repo_url=}"
-    )
-
-
-async def _download_file_from_peer(
-    repo_url: str,
-    model_id: ModelId,
-    path: str,
-    target_dir: Path,
-    on_progress: Callable[[int, int, bool], None] = lambda _, __, ___: None,
-) -> Path:
-    target_path = target_dir / path
-
-    if await aios.path.exists(target_path):
-        # We assume if it exists locally it's good, similar to _download_file logic for offline
-        # Ideally we would check size against peer, but for now let's trust local if complete?
-        # Only if we can verify against remote (HF) we might delete it.
-        # But here we are downloading from peer.
-        # Let's simple check: if we are downloading from peer, we probably don't have it or it's incomplete.
-        pass
-
-    await aios.makedirs((target_dir / path).parent, exist_ok=True)
-    
-    url = f"{repo_url}/{model_id}/{path}"
-    partial_path = target_dir / f"{path}.partial"
-    
-    resume_byte_pos = (
-        (await aios.stat(partial_path)).st_size
-        if (await aios.path.exists(partial_path))
-        else None
-    )
-
-    headers = {}
-    if resume_byte_pos:
-        headers["Range"] = f"bytes={resume_byte_pos}-"
-    
-    n_read = resume_byte_pos or 0
-
-    async with (
-        create_http_session(timeout_profile="long") as session,
-        session.get(url, headers=headers) as r,
-    ):
-        if r.status == 404:
-             raise FileNotFoundError(f"File not found on peer: {url}")
-        
-        if r.status not in [200, 206]:
-             raise Exception(f"Failed to download {path} from peer {url}: {r.status}")
-             
-        # Content-Length from peer
-        content_length = int(r.headers.get("Content-Length", 0))
-        if r.status == 206:
-             total_length = content_length + n_read
-        else:
-             total_length = content_length
-             if resume_byte_pos and resume_byte_pos > 0:
-                  # Server didn't support range, restart
-                  n_read = 0
-                  resume_byte_pos = 0
-
-        async with aiofiles.open(
-            partial_path, "ab" if resume_byte_pos else "wb"
-        ) as f:
-            while chunk := await r.content.read(8 * 1024 * 1024):
-                n_read += await f.write(chunk)
-                on_progress(n_read, total_length, False)
-
-    await aios.rename(partial_path, target_dir / path)
-    on_progress(n_read, n_read, True)
-    return target_dir / path
 
 async def download_shard(
     shard: ShardMetadata,
@@ -782,7 +725,6 @@ async def download_shard(
     skip_download: bool = False,
     skip_internet: bool = False,
     allow_patterns: list[str] | None = None,
-    repo_url: str | None = None,
     on_connection_lost: Callable[[], None] = lambda: None,
 ) -> tuple[Path, RepoDownloadProgress]:
     if not skip_download:
@@ -885,6 +827,7 @@ async def download_shard(
 
     for file in filtered_file_list:
         downloaded_bytes = await get_downloaded_size(target_dir / file.path)
+        final_file_exists = await aios.path.exists(target_dir / file.path)
         file_progress[file.path] = RepoFileDownloadProgress(
             repo_id=shard.model_card.model_id,
             repo_revision=revision,
@@ -894,7 +837,9 @@ async def download_shard(
             total=Memory.from_bytes(file.size or 0),
             speed=0,
             eta=timedelta(0),
-            status="complete" if downloaded_bytes == file.size else "not_started",
+            status="complete"
+            if final_file_exists and downloaded_bytes == file.size
+            else "not_started",
             start_time=time.time(),
         )
 
@@ -909,24 +854,6 @@ async def download_shard(
 
     async def download_with_semaphore(file: FileListEntry) -> None:
         async with semaphore:
-            if repo_url:
-                try:
-                    await download_file_from_peer_with_retry(
-                        repo_url,
-                        shard.model_card.model_id,
-                        file.path,
-                        target_dir,
-                        lambda curr_bytes, total_bytes, is_renamed: schedule_progress(
-                            file, curr_bytes, total_bytes, is_renamed
-                        ),
-                        on_connection_lost=on_connection_lost,
-                    )
-                    return
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to download from peer {repo_url} for {file.path}: {e}. Falling back to HuggingFace."
-                    )
-            
             await download_file_with_retry(
                 shard.model_card.model_id,
                 revision,

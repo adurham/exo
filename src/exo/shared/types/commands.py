@@ -6,7 +6,7 @@ from exo.shared.types.api import (
     ImageGenerationTaskParams,
 )
 from exo.shared.types.chunks import InputImageChunk
-from exo.shared.types.common import CommandId, NodeId
+from exo.shared.types.common import CommandId, NodeId, SystemId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
 from exo.shared.types.worker.shards import Sharding, ShardMetadata
@@ -69,7 +69,6 @@ class RequestEventLog(BaseCommand):
 class StartDownload(BaseCommand):
     target_node_id: NodeId
     shard_metadata: ShardMetadata
-    repo_url: str | None = None
 
 
 class DeleteDownload(BaseCommand):
@@ -101,10 +100,10 @@ Command = (
 
 
 class ForwarderCommand(CamelCaseModel):
-    origin: NodeId
+    origin: SystemId
     command: Command
 
 
 class ForwarderDownloadCommand(CamelCaseModel):
-    origin: NodeId
+    origin: SystemId
     command: DownloadCommand

@@ -1,31 +1,28 @@
 import asyncio
-import socket
 from dataclasses import dataclass, field
-from typing import Iterator
 
 import anyio
 from anyio import current_time
-from anyio.abc import TaskGroup
 from loguru import logger
 
 from exo.download.download_utils import (
     RepoDownloadProgress,
     delete_model,
     map_repo_download_progress_to_download_progress_data,
+    resolve_model_in_path,
 )
 from exo.download.shard_downloader import ShardDownloader
-from exo.shared.constants import EXO_MODELS_DIR
-from exo.shared.models.model_cards import ModelId
+from exo.shared.constants import EXO_MODELS_DIR, EXO_MODELS_PATH
+from exo.shared.models.model_cards import ModelId, get_model_cards
 from exo.shared.types.commands import (
     CancelDownload,
     DeleteDownload,
     ForwarderDownloadCommand,
     StartDownload,
 )
-from exo.shared.types.common import NodeId, SessionId
+from exo.shared.types.common import NodeId
 from exo.shared.types.events import (
     Event,
-    ForwarderEvent,
     NodeDownloadProgress,
 )
 from exo.shared.types.worker.downloads import (
@@ -35,36 +32,29 @@ from exo.shared.types.worker.downloads import (
     DownloadPending,
     DownloadProgress,
 )
-from exo.shared.types.worker.shards import ShardMetadata
-from exo.utils.channels import Receiver, Sender, channel
+from exo.shared.types.worker.shards import PipelineShardMetadata, ShardMetadata
+from exo.utils.channels import Receiver, Sender
+from exo.utils.task_group import TaskGroup
 
 
 @dataclass
 class DownloadCoordinator:
     node_id: NodeId
-    session_id: SessionId
     shard_downloader: ShardDownloader
     download_command_receiver: Receiver[ForwarderDownloadCommand]
-    local_event_sender: Sender[ForwarderEvent]
-    event_index_counter: Iterator[int]
+    event_sender: Sender[Event]
     offline: bool = False
 
     # Local state
     download_status: dict[ModelId, DownloadProgress] = field(default_factory=dict)
     active_downloads: dict[ModelId, asyncio.Task[None]] = field(default_factory=dict)
 
-    # Internal event channel for forwarding (initialized in __post_init__)
-    event_sender: Sender[Event] = field(init=False)
-    event_receiver: Receiver[Event] = field(init=False)
-    _tg: TaskGroup = field(init=False, default_factory=anyio.create_task_group)
+    _tg: TaskGroup = field(init=False, default_factory=TaskGroup)
 
     # Per-model throttle for download progress events
     _last_progress_time: dict[ModelId, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.event_sender, self.event_receiver = channel[Event]()
-        if self.offline:
-            self.shard_downloader.set_internet_connection(False)
         self.shard_downloader.on_progress(self._download_progress_callback)
 
     def _model_dir(self, model_id: ModelId) -> str:
@@ -80,7 +70,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=callback_shard,
                 node_id=self.node_id,
-                total_bytes=progress.total_bytes,
+                total=progress.total,
                 model_directory=self._model_dir(model_id),
             )
             self.download_status[model_id] = completed
@@ -113,45 +103,16 @@ class DownloadCoordinator:
         logger.info(
             f"Starting DownloadCoordinator{' (offline mode)' if self.offline else ''}"
         )
-        if not self.offline:
-            self._test_internet_connection()
-        async with self._tg as tg:
-            tg.start_soon(self._command_processor)
-            tg.start_soon(self._forward_events)
-            tg.start_soon(self._emit_existing_download_progress)
-            if not self.offline:
-                tg.start_soon(self._check_internet_connection)
-
-    def _test_internet_connection(self) -> None:
-        # Try multiple endpoints since some ISPs/networks block specific IPs
-        for host in ("1.1.1.1", "8.8.8.8", "1.0.0.1"):
-            try:
-                socket.create_connection((host, 443), timeout=3).close()
-                self.shard_downloader.set_internet_connection(True)
-                logger.debug(f"Internet connectivity: True (via {host})")
-                return
-            except OSError:
-                continue
-        self.shard_downloader.set_internet_connection(False)
-        logger.debug("Internet connectivity: False")
-
-    async def _check_internet_connection(self) -> None:
-        first_connection = True
-        while True:
-            await asyncio.sleep(10)
-
-            # Assume that internet connection is set to False on 443 errors.
-            if self.shard_downloader.internet_connection:
-                continue
-
-            self._test_internet_connection()
-
-            if first_connection and self.shard_downloader.internet_connection:
-                first_connection = False
-                self._tg.start_soon(self._emit_existing_download_progress)
+        try:
+            async with self._tg as tg:
+                tg.start_soon(self._command_processor)
+                tg.start_soon(self._emit_existing_download_progress)
+        finally:
+            for task in self.active_downloads.values():
+                task.cancel()
 
     def shutdown(self) -> None:
-        self._tg.cancel_scope.cancel()
+        self._tg.cancel_tasks()
 
     async def _command_processor(self) -> None:
         with self.download_command_receiver as commands:
@@ -161,8 +122,8 @@ class DownloadCoordinator:
                     continue
 
                 match cmd.command:
-                    case StartDownload(shard_metadata=shard, repo_url=repo_url):
-                        await self._start_download(shard, repo_url)
+                    case StartDownload(shard_metadata=shard):
+                        await self._start_download(shard)
                     case DeleteDownload(model_id=model_id):
                         await self._delete_download(model_id)
                     case CancelDownload(model_id=model_id):
@@ -173,9 +134,7 @@ class DownloadCoordinator:
             logger.info(f"Cancelling download for {model_id}")
             self.active_downloads.pop(model_id).cancel()
 
-    async def _start_download(
-        self, shard: ShardMetadata, repo_url: str | None = None
-    ) -> None:
+    async def _start_download(self, shard: ShardMetadata) -> None:
         model_id = shard.model_card.model_id
 
         # Check if already downloading, complete, or recently failed
@@ -186,6 +145,25 @@ class DownloadCoordinator:
                     f"Download for {model_id} already in progress, complete, or failed, skipping"
                 )
                 return
+
+        # Check EXO_MODELS_PATH for pre-downloaded models
+        found_path = resolve_model_in_path(model_id)
+        if found_path is not None:
+            logger.info(
+                f"DownloadCoordinator: Model {model_id} found in EXO_MODELS_PATH at {found_path}"
+            )
+            completed = DownloadCompleted(
+                shard_metadata=shard,
+                node_id=self.node_id,
+                total=shard.model_card.storage_size,
+                model_directory=str(found_path),
+                read_only=True,
+            )
+            self.download_status[model_id] = completed
+            await self.event_sender.send(
+                NodeDownloadProgress(download_progress=completed)
+            )
+            return
 
         # Emit pending status
         progress = DownloadPending(
@@ -205,7 +183,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=shard,
                 node_id=self.node_id,
-                total_bytes=initial_progress.total_bytes,
+                total=initial_progress.total,
                 model_directory=self._model_dir(model_id),
             )
             self.download_status[model_id] = completed
@@ -229,13 +207,10 @@ class DownloadCoordinator:
             return
 
         # Start actual download
-        self._start_download_task(shard, initial_progress, repo_url)
+        self._start_download_task(shard, initial_progress)
 
     def _start_download_task(
-        self,
-        shard: ShardMetadata,
-        initial_progress: RepoDownloadProgress,
-        repo_url: str | None = None,
+        self, shard: ShardMetadata, initial_progress: RepoDownloadProgress
     ) -> None:
         model_id = shard.model_card.model_id
 
@@ -253,9 +228,7 @@ class DownloadCoordinator:
 
         async def download_wrapper() -> None:
             try:
-                await self.shard_downloader.ensure_shard(
-                    shard, repo_url=repo_url
-                )
+                await self.shard_downloader.ensure_shard(shard)
             except Exception as e:
                 logger.error(f"Download failed for {model_id}: {e}")
                 failed = DownloadFailed(
@@ -276,6 +249,15 @@ class DownloadCoordinator:
         self.active_downloads[model_id] = task
 
     async def _delete_download(self, model_id: ModelId) -> None:
+        # Protect read-only models (from EXO_MODELS_PATH) from deletion
+        if model_id in self.download_status:
+            current = self.download_status[model_id]
+            if isinstance(current, DownloadCompleted) and current.read_only:
+                logger.warning(
+                    f"Refusing to delete read-only model {model_id} (from EXO_MODELS_PATH)"
+                )
+                return
+
         # Cancel if active
         if model_id in self.active_downloads:
             logger.info(f"Cancelling active download for {model_id} before deletion")
@@ -304,21 +286,6 @@ class DownloadCoordinator:
             )
             del self.download_status[model_id]
 
-    async def _forward_events(self) -> None:
-        with self.event_receiver as events:
-            async for event in events:
-                idx = next(self.event_index_counter)
-                fe = ForwarderEvent(
-                    origin_idx=idx,
-                    origin=self.node_id,
-                    session=self.session_id,
-                    event=event,
-                )
-                logger.debug(
-                    f"DownloadCoordinator published event {idx}: {str(event)[:100]}"
-                )
-                await self.local_event_sender.send(fe)
-
     async def _emit_existing_download_progress(self) -> None:
         try:
             while True:
@@ -339,19 +306,21 @@ class DownloadCoordinator:
                         status: DownloadProgress = DownloadCompleted(
                             node_id=self.node_id,
                             shard_metadata=progress.shard,
-                            total_bytes=progress.total_bytes,
+                            total=progress.total,
                             model_directory=self._model_dir(
                                 progress.shard.model_card.model_id
                             ),
                         )
                     elif progress.status in ["in_progress", "not_started"]:
-                        if progress.downloaded_bytes_this_session.in_bytes == 0:
+                        if progress.downloaded_this_session.in_bytes == 0:
                             status = DownloadPending(
                                 node_id=self.node_id,
                                 shard_metadata=progress.shard,
                                 model_directory=self._model_dir(
                                     progress.shard.model_card.model_id
                                 ),
+                                downloaded=progress.downloaded,
+                                total=progress.total,
                             )
                         else:
                             status = DownloadOngoing(
@@ -371,6 +340,39 @@ class DownloadCoordinator:
                     await self.event_sender.send(
                         NodeDownloadProgress(download_progress=status)
                     )
+                # Scan EXO_MODELS_PATH for pre-downloaded models
+                if EXO_MODELS_PATH is not None:
+                    for card in await get_model_cards():
+                        mid = card.model_id
+                        if mid in self.active_downloads:
+                            continue
+                        if isinstance(
+                            self.download_status.get(mid),
+                            (DownloadCompleted, DownloadOngoing, DownloadFailed),
+                        ):
+                            continue
+                        found = resolve_model_in_path(mid)
+                        if found is not None:
+                            path_shard = PipelineShardMetadata(
+                                model_card=card,
+                                device_rank=0,
+                                world_size=1,
+                                start_layer=0,
+                                end_layer=card.n_layers,
+                                n_layers=card.n_layers,
+                            )
+                            path_completed: DownloadProgress = DownloadCompleted(
+                                node_id=self.node_id,
+                                shard_metadata=path_shard,
+                                total=card.storage_size,
+                                model_directory=str(found),
+                                read_only=True,
+                            )
+                            self.download_status[mid] = path_completed
+                            await self.event_sender.send(
+                                NodeDownloadProgress(download_progress=path_completed)
+                            )
+
                 logger.debug(
                     "DownloadCoordinator: Done emitting existing download progress."
                 )

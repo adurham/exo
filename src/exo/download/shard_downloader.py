@@ -16,17 +16,9 @@ from exo.shared.types.worker.shards import (
 
 # TODO: the PipelineShardMetadata getting reinstantiated is a bit messy. Should this be a classmethod?
 class ShardDownloader(ABC):
-    internet_connection: bool = False
-
-    def set_internet_connection(self, value: bool) -> None:
-        self.internet_connection = value
-
     @abstractmethod
     async def ensure_shard(
-        self,
-        shard: ShardMetadata,
-        config_only: bool = False,
-        repo_url: str | None = None,
+        self, shard: ShardMetadata, config_only: bool = False
     ) -> Path:
         """
         Ensures that the shard is downloaded.
@@ -64,10 +56,7 @@ class ShardDownloader(ABC):
 
 class NoopShardDownloader(ShardDownloader):
     async def ensure_shard(
-        self,
-        shard: ShardMetadata,
-        config_only: bool = False,
-        repo_url: str | None = None,
+        self, shard: ShardMetadata, config_only: bool = False
     ) -> Path:
         return Path("/tmp/noop_shard")
 
@@ -113,9 +102,9 @@ NOOP_DOWNLOAD_PROGRESS = RepoDownloadProgress(
     ),
     completed_files=0,
     total_files=0,
-    downloaded_bytes=Memory.from_bytes(0),
-    downloaded_bytes_this_session=Memory.from_bytes(0),
-    total_bytes=Memory.from_bytes(0),
+    downloaded=Memory.from_bytes(0),
+    downloaded_this_session=Memory.from_bytes(0),
+    total=Memory.from_bytes(0),
     overall_speed=0,
     overall_eta=timedelta(seconds=0),
     status="complete",

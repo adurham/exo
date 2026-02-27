@@ -1,9 +1,8 @@
 """OpenAI Chat Completions API adapter for converting requests/responses."""
 
-import json
 import time
 from collections.abc import AsyncGenerator
-from typing import Any, cast
+from typing import Any
 
 from exo.shared.types.api import (
     ChatCompletionChoice,
@@ -60,7 +59,11 @@ def chat_request_to_text_generation(
             chat_template_messages.append({"role": "system", "content": content})
         else:
             # Skip messages with no meaningful content
-            if msg.content is None and msg.thinking is None and msg.tool_calls is None:
+            if (
+                msg.content is None
+                and msg.reasoning_content is None
+                and msg.tool_calls is None
+            ):
                 continue
 
             if msg.role in ("user", "assistant", "developer"):
@@ -112,6 +115,11 @@ def chunk_to_response(
             ]
         )
 
+    if chunk.is_thinking:
+        delta = ChatCompletionMessage(role="assistant", reasoning_content=chunk.text)
+    else:
+        delta = ChatCompletionMessage(role="assistant", content=chunk.text)
+
     return ChatCompletionResponse(
         id=command_id,
         created=int(time.time()),
@@ -119,7 +127,7 @@ def chunk_to_response(
         choices=[
             StreamingChoiceResponse(
                 index=0,
-                delta=ChatCompletionMessage(role="assistant", content=chunk.text),
+                delta=delta,
                 logprobs=logprobs,
                 finish_reason=chunk.finish_reason,
             )
@@ -181,14 +189,7 @@ async def generate_chat_stream(
                     ],
                     usage=last_usage,
                 )
-                tool_response_dict = cast(dict[str, Any], json.loads(tool_response.model_dump_json()))
-                if last_usage is not None:
-                    if "usage" not in tool_response_dict or tool_response_dict["usage"] is None:
-                        tool_response_dict["usage"] = json.loads(last_usage.model_dump_json())
-                    tool_response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
-                    tool_response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
-
-                yield f"data: {json.dumps(tool_response_dict, separators=(',', ':'))}\n\n"
+                yield f"data: {tool_response.model_dump_json()}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -200,14 +201,7 @@ async def generate_chat_stream(
                     chunk_response = chunk_response.model_copy(
                         update={"usage": last_usage}
                     )
-                chunk_response_dict = cast(dict[str, Any], json.loads(chunk_response.model_dump_json()))
-                if chunk.finish_reason is not None and last_usage is not None:
-                    if "usage" not in chunk_response_dict or chunk_response_dict["usage"] is None:
-                        chunk_response_dict["usage"] = json.loads(last_usage.model_dump_json())
-                    chunk_response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
-                    chunk_response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
-
-                yield f"data: {json.dumps(chunk_response_dict, separators=(',', ':'))}\n\n"
+                yield f"data: {chunk_response.model_dump_json()}\n\n"
 
                 if chunk.finish_reason is not None:
                     yield "data: [DONE]\n\n"
@@ -223,6 +217,7 @@ async def collect_chat_response(
     # FastAPI handles the cancellation better but wouldn't auto-serialize for some reason
     """Collect all token chunks and return a single ChatCompletionResponse."""
     text_parts: list[str] = []
+    thinking_parts: list[str] = []
     tool_calls: list[ToolCall] = []
     logprobs_content: list[LogprobsContentItem] = []
     model: str | None = None
@@ -243,7 +238,10 @@ async def collect_chat_response(
                 if model is None:
                     model = chunk.model
                 last_usage = chunk.usage or last_usage
-                text_parts.append(chunk.text)
+                if chunk.is_thinking:
+                    thinking_parts.append(chunk.text)
+                else:
+                    text_parts.append(chunk.text)
                 if chunk.logprob is not None:
                     logprobs_content.append(
                         LogprobsContentItem(
@@ -273,9 +271,10 @@ async def collect_chat_response(
         raise ValueError(error_message)
 
     combined_text = "".join(text_parts)
+    combined_thinking = "".join(thinking_parts) if thinking_parts else None
     assert model is not None
 
-    response = ChatCompletionResponse(
+    yield ChatCompletionResponse(
         id=command_id,
         created=int(time.time()),
         model=model,
@@ -285,6 +284,7 @@ async def collect_chat_response(
                 message=ChatCompletionMessage(
                     role="assistant",
                     content=combined_text,
+                    reasoning_content=combined_thinking,
                     tool_calls=tool_calls if tool_calls else None,
                 ),
                 logprobs=Logprobs(content=logprobs_content)
@@ -294,14 +294,5 @@ async def collect_chat_response(
             )
         ],
         usage=last_usage,
-    )
-
-    response_dict = cast(dict[str, Any], json.loads(response.model_dump_json()))
-    if last_usage is not None:
-        if "usage" not in response_dict or response_dict["usage"] is None:
-            response_dict["usage"] = json.loads(last_usage.model_dump_json())
-        response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
-        response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
-
-    yield json.dumps(response_dict, separators=(',', ':'))
+    ).model_dump_json()
     return

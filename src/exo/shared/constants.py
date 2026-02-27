@@ -33,6 +33,15 @@ EXO_MODELS_DIR = (
     if _EXO_MODELS_DIR_ENV is None
     else Path.home() / _EXO_MODELS_DIR_ENV
 )
+
+# Read-only search path for pre-downloaded models (colon-separated directories)
+_EXO_MODELS_PATH_ENV = os.environ.get("EXO_MODELS_PATH", None)
+EXO_MODELS_PATH: tuple[Path, ...] | None = (
+    tuple(Path(p).expanduser() for p in _EXO_MODELS_PATH_ENV.split(":") if p)
+    if _EXO_MODELS_PATH_ENV is not None
+    else None
+)
+
 _RESOURCES_DIR_ENV = os.environ.get("EXO_RESOURCES_DIR", None)
 RESOURCES_DIR = (
     find_resources() if _RESOURCES_DIR_ENV is None else Path.home() / _RESOURCES_DIR_ENV
@@ -57,9 +66,6 @@ LIBP2P_GLOBAL_EVENTS_TOPIC = "global_events"
 LIBP2P_ELECTION_MESSAGES_TOPIC = "election_message"
 LIBP2P_COMMANDS_TOPIC = "commands"
 
-EXO_FILE_SERVER_PORT = 52416
-
-
 EXO_MAX_CHUNK_SIZE = 512 * 1024
 
 EXO_CUSTOM_MODEL_CARDS_DIR = EXO_DATA_HOME / "custom_model_cards"
@@ -71,5 +77,7 @@ EXO_TRACING_CACHE_DIR = EXO_CACHE_HOME / "traces"
 EXO_ENABLE_IMAGE_MODELS = (
     os.getenv("EXO_ENABLE_IMAGE_MODELS", "false").lower() == "true"
 )
+
+EXO_OFFLINE = os.getenv("EXO_OFFLINE", "false").lower() == "true"
 
 EXO_TRACING_ENABLED = os.getenv("EXO_TRACING_ENABLED", "false").lower() == "true"

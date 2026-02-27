@@ -167,8 +167,8 @@ export interface ModelDownloadStatus {
 // Placement preview from the API
 export interface PlacementPreview {
   model_id: string;
-  sharding: "Pipeline" | "Tensor" | "Hybrid";
-  instance_meta: "MlxRing" | "MlxIbv" | "MlxJaccl";
+  sharding: "Pipeline" | "Tensor";
+  instance_meta: "MlxRing" | "MlxJaccl";
   instance: unknown | null;
   memory_delta_by_node: Record<string, number> | null;
   error: string | null;
@@ -219,7 +219,6 @@ interface RawStateResponse {
     string,
     {
       MlxRingInstance?: Instance;
-      MlxIbvInstance?: Instance;
       MlxJacclInstance?: Instance;
     }
   >;
@@ -250,6 +249,11 @@ interface RawStateResponse {
   >;
   // Thunderbolt bridge cycles (nodes with bridge enabled forming loops)
   thunderboltBridgeCycles?: string[][];
+  // Disk usage per node
+  nodeDisk?: Record<
+    string,
+    { total: { inBytes: number }; available: { inBytes: number } }
+  >;
 }
 
 export interface MessageAttachment {
@@ -276,6 +280,8 @@ export interface TokenData {
 export interface PrefillProgress {
   processed: number;
   total: number;
+  /** Timestamp (performance.now()) when prefill started. */
+  startedAt: number;
 }
 
 export interface Message {
@@ -311,14 +317,14 @@ const IMAGE_PARAMS_STORAGE_KEY = "exo-image-generation-params";
 export interface ImageGenerationParams {
   // Basic params
   size:
-  | "auto"
-  | "512x512"
-  | "768x768"
-  | "1024x1024"
-  | "1024x768"
-  | "768x1024"
-  | "1024x1536"
-  | "1536x1024";
+    | "auto"
+    | "512x512"
+    | "768x768"
+    | "1024x1024"
+    | "1024x768"
+    | "768x1024"
+    | "1024x1536"
+    | "1536x1024";
   quality: "low" | "medium" | "high";
   outputFormat: "png" | "jpeg";
   numImages: number;
@@ -583,6 +589,12 @@ class AppStore {
   // Image editing state
   editingImage = $state<EditingImage | null>(null);
 
+  /** True when the backend is reachable. */
+  isConnected = $state<boolean>(true);
+  /** Number of consecutive fetch failures. */
+  private consecutiveFailures = 0;
+  private static readonly CONNECTION_LOST_THRESHOLD = 3;
+
   private fetchInterval: ReturnType<typeof setInterval> | null = null;
   private previewsInterval: ReturnType<typeof setInterval> | null = null;
   private lastConversationPersistTs = 0;
@@ -835,6 +847,10 @@ class AppStore {
     this.thinkingEnabled = conversation.enableThinking ?? true;
     this.refreshConversationModelFromInstances();
 
+    // Sync global selection to the loaded conversation's model so reactive
+    // effects in +page.svelte can determine the correct chat launch state.
+    this.selectedChatModel = conversation.modelId || "";
+
     return true;
   }
 
@@ -905,11 +921,7 @@ class AppStore {
 
     let instanceType: string | null = null;
     if (instanceTag === "MlxRingInstance") instanceType = "MLX Ring";
-    else if (
-      instanceTag === "MlxIbvInstance" ||
-      instanceTag === "MlxJacclInstance"
-    )
-      instanceType = "MLX RDMA";
+    else if (instanceTag === "MlxJacclInstance") instanceType = "MLX RDMA";
 
     let sharding: string | null = null;
     const inst = instance as {
@@ -921,7 +933,6 @@ class AppStore {
       const [shardTag] = this.getTaggedValue(firstShardWrapped);
       if (shardTag === "PipelineShardMetadata") sharding = "Pipeline";
       else if (shardTag === "TensorShardMetadata") sharding = "Tensor";
-      else if (shardTag === "HybridShardMetadata") sharding = "Hybrid";
       else if (shardTag === "PrefillDecodeShardMetadata")
         sharding = "Prefill/Decode";
     }
@@ -1289,7 +1300,19 @@ class AppStore {
       // Thunderbolt bridge status per node
       this.nodeThunderboltBridge = data.nodeThunderboltBridge ?? {};
       this.lastUpdate = Date.now();
+      // Connection recovered
+      if (!this.isConnected) {
+        this.isConnected = true;
+      }
+      this.consecutiveFailures = 0;
     } catch (error) {
+      this.consecutiveFailures++;
+      if (
+        this.consecutiveFailures >= AppStore.CONNECTION_LOST_THRESHOLD &&
+        this.isConnected
+      ) {
+        this.isConnected = false;
+      }
       console.error("Error fetching state:", error);
     }
   }
@@ -1653,11 +1676,12 @@ class AppStore {
       if (!reader) throw new Error("No response body");
 
       let fullContent = prefixText;
+      let streamedThinking = "";
       const collectedTokens: TokenData[] = [...tokensToKeep];
 
       interface ChatCompletionChunk {
         choices?: Array<{
-          delta?: { content?: string };
+          delta?: { content?: string; reasoning_content?: string };
           logprobs?: {
             content?: Array<{
               token: string;
@@ -1678,6 +1702,7 @@ class AppStore {
         (parsed) => {
           const choice = parsed.choices?.[0];
           const delta = choice?.delta?.content;
+          const thinkingDelta = choice?.delta?.reasoning_content;
 
           // Collect logprobs data
           const logprobsContent = choice?.logprobs?.content;
@@ -1696,7 +1721,11 @@ class AppStore {
             }
           }
 
-          if (delta) {
+          if (thinkingDelta) {
+            streamedThinking += thinkingDelta;
+          }
+
+          if (delta || thinkingDelta) {
             if (firstTokenTime === null) {
               firstTokenTime = performance.now();
               this.ttftMs = firstTokenTime - requestStartTime;
@@ -1710,9 +1739,14 @@ class AppStore {
               this.tps = ((tokenCount - tokensToKeep.length) / elapsed) * 1000;
             }
 
-            fullContent += delta;
-            const { displayContent, thinkingContent } =
+            if (delta) {
+              fullContent += delta;
+            }
+            const { displayContent, thinkingContent: tagThinking } =
               this.stripThinkingTags(fullContent);
+            const combinedThinking = [streamedThinking, tagThinking]
+              .filter(Boolean)
+              .join("\n\n");
 
             if (this.activeConversationId === targetConversationId) {
               this.currentResponse = displayContent;
@@ -1724,7 +1758,7 @@ class AppStore {
               messageId,
               (m) => {
                 m.content = displayContent;
-                m.thinking = thinkingContent || undefined;
+                m.thinking = combinedThinking || undefined;
                 m.tokens = [...collectedTokens];
               },
             );
@@ -1736,11 +1770,14 @@ class AppStore {
 
       // Final update
       if (this.conversationExists(targetConversationId)) {
-        const { displayContent, thinkingContent } =
+        const { displayContent, thinkingContent: tagThinking } =
           this.stripThinkingTags(fullContent);
+        const finalThinking = [streamedThinking, tagThinking]
+          .filter(Boolean)
+          .join("\n\n");
         this.updateConversationMessage(targetConversationId, messageId, (m) => {
           m.content = displayContent;
-          m.thinking = thinkingContent || undefined;
+          m.thinking = finalThinking || undefined;
           m.tokens = [...collectedTokens];
           if (this.ttftMs !== null) m.ttftMs = this.ttftMs;
           if (this.tps !== null) m.tps = this.tps;
@@ -1816,7 +1853,7 @@ class AppStore {
           assistantMessage.id,
           (msg) => {
             msg.content =
-              "Error: No model available. Please launch an instance first.";
+              "No model is loaded yet. Select a model from the sidebar to get started — it will download and load automatically.";
           },
         );
         this.syncActiveMessagesIfNeeded(targetConversationId);
@@ -1848,11 +1885,12 @@ class AppStore {
       }
 
       let streamedContent = "";
+      let streamedThinking = "";
       const collectedTokens: TokenData[] = [];
 
       interface ChatCompletionChunk {
         choices?: Array<{
-          delta?: { content?: string };
+          delta?: { content?: string; reasoning_content?: string };
           logprobs?: {
             content?: Array<{
               token: string;
@@ -1873,6 +1911,7 @@ class AppStore {
         (parsed) => {
           const choice = parsed.choices?.[0];
           const delta = choice?.delta?.content;
+          const thinkingDelta = choice?.delta?.reasoning_content;
 
           // Collect logprobs data
           const logprobsContent = choice?.logprobs?.content;
@@ -1891,10 +1930,19 @@ class AppStore {
             }
           }
 
-          if (delta) {
-            streamedContent += delta;
-            const { displayContent, thinkingContent } =
+          if (thinkingDelta) {
+            streamedThinking += thinkingDelta;
+          }
+
+          if (delta || thinkingDelta) {
+            if (delta) {
+              streamedContent += delta;
+            }
+            const { displayContent, thinkingContent: tagThinking } =
               this.stripThinkingTags(streamedContent);
+            const combinedThinking = [streamedThinking, tagThinking]
+              .filter(Boolean)
+              .join("\n\n");
 
             // Only update currentResponse if target conversation is active
             if (this.activeConversationId === targetConversationId) {
@@ -1907,7 +1955,7 @@ class AppStore {
               assistantMessage.id,
               (msg) => {
                 msg.content = displayContent;
-                msg.thinking = thinkingContent || undefined;
+                msg.thinking = combinedThinking || undefined;
                 msg.tokens = [...collectedTokens];
               },
             );
@@ -1919,14 +1967,17 @@ class AppStore {
 
       // Final cleanup of the message (if conversation still exists)
       if (this.conversationExists(targetConversationId)) {
-        const { displayContent, thinkingContent } =
+        const { displayContent, thinkingContent: tagThinking } =
           this.stripThinkingTags(streamedContent);
+        const finalThinking = [streamedThinking, tagThinking]
+          .filter(Boolean)
+          .join("\n\n");
         this.updateConversationMessage(
           targetConversationId,
           assistantMessage.id,
           (msg) => {
             msg.content = displayContent;
-            msg.thinking = thinkingContent || undefined;
+            msg.thinking = finalThinking || undefined;
             msg.tokens = [...collectedTokens];
           },
         );
@@ -2273,7 +2324,7 @@ class AppStore {
       const modelToUse = this.getModelForRequest();
       if (!modelToUse) {
         throw new Error(
-          "No model selected and no running instances available. Please launch an instance first.",
+          "No model is loaded yet. Select a model from the sidebar to get started — it will download and load automatically.",
         );
       }
 
@@ -2318,10 +2369,11 @@ class AppStore {
       }
 
       let streamedContent = "";
+      let streamedThinking = "";
 
       interface ChatCompletionChunk {
         choices?: Array<{
-          delta?: { content?: string };
+          delta?: { content?: string; reasoning_content?: string };
           logprobs?: {
             content?: Array<{
               token: string;
@@ -2349,6 +2401,7 @@ class AppStore {
 
           const choice = parsed.choices?.[0];
           const tokenContent = choice?.delta?.content;
+          const thinkingContent = choice?.delta?.reasoning_content;
 
           // Collect logprobs data
           const logprobsContent = choice?.logprobs?.content;
@@ -2367,7 +2420,11 @@ class AppStore {
             }
           }
 
-          if (tokenContent) {
+          if (thinkingContent) {
+            streamedThinking += thinkingContent;
+          }
+
+          if (tokenContent || thinkingContent) {
             // Track first token for TTFT
             if (firstTokenTime === null) {
               firstTokenTime = performance.now();
@@ -2384,11 +2441,16 @@ class AppStore {
               this.tps = (tokenCount / elapsed) * 1000;
             }
 
-            streamedContent += tokenContent;
+            if (tokenContent) {
+              streamedContent += tokenContent;
+            }
 
-            // Strip thinking tags for display and extract thinking content
-            const { displayContent, thinkingContent } =
+            // Use stripThinkingTags as fallback for any <think> tags still in content
+            const { displayContent, thinkingContent: tagThinking } =
               this.stripThinkingTags(streamedContent);
+            const combinedThinking = [streamedThinking, tagThinking]
+              .filter(Boolean)
+              .join("\n\n");
 
             // Only update currentResponse if target conversation is active
             if (this.activeConversationId === targetConversationId) {
@@ -2401,7 +2463,7 @@ class AppStore {
               assistantMessage.id,
               (msg) => {
                 msg.content = displayContent;
-                msg.thinking = thinkingContent || undefined;
+                msg.thinking = combinedThinking || undefined;
                 msg.tokens = [...collectedTokens];
               },
             );
@@ -2421,6 +2483,7 @@ class AppStore {
             this.prefillProgress = {
               processed: inner.processed_tokens,
               total: inner.total_tokens,
+              startedAt: this.prefillProgress?.startedAt ?? performance.now(),
             };
           },
         },
@@ -2437,14 +2500,17 @@ class AppStore {
 
       // Final cleanup of the message (if conversation still exists)
       if (this.conversationExists(targetConversationId)) {
-        const { displayContent, thinkingContent } =
+        const { displayContent, thinkingContent: tagThinking } =
           this.stripThinkingTags(streamedContent);
+        const finalThinking = [streamedThinking, tagThinking]
+          .filter(Boolean)
+          .join("\n\n");
         this.updateConversationMessage(
           targetConversationId,
           assistantMessage.id,
           (msg) => {
             msg.content = displayContent;
-            msg.thinking = thinkingContent || undefined;
+            msg.thinking = finalThinking || undefined;
             msg.tokens = [...collectedTokens];
             // Store performance metrics on the message
             if (this.ttftMs !== null) {
@@ -2574,8 +2640,8 @@ class AppStore {
           ...(params.guidance !== null && { guidance: params.guidance }),
           ...(params.negativePrompt !== null &&
             params.negativePrompt.trim() !== "" && {
-            negative_prompt: params.negativePrompt,
-          }),
+              negative_prompt: params.negativePrompt,
+            }),
           ...(params.numSyncSteps !== null && {
             num_sync_steps: params.numSyncSteps,
           }),
@@ -2847,8 +2913,8 @@ class AppStore {
             ...(params.guidance !== null && { guidance: params.guidance }),
             ...(params.negativePrompt !== null &&
               params.negativePrompt.trim() !== "" && {
-              negative_prompt: params.negativePrompt,
-            }),
+                negative_prompt: params.negativePrompt,
+              }),
             ...(params.numSyncSteps !== null && {
               num_sync_steps: params.numSyncSteps,
             }),
@@ -3200,6 +3266,9 @@ export const toggleChatSidebarVisible = () =>
 export const setChatSidebarVisible = (visible: boolean) =>
   appStore.setChatSidebarVisible(visible);
 export const refreshState = () => appStore.fetchState();
+
+// Connection status
+export const isConnected = () => appStore.isConnected;
 
 // Node identities (for OS version mismatch detection)
 export const nodeIdentities = () => appStore.nodeIdentities;

@@ -41,20 +41,13 @@ _card_cache: dict[ModelId, "ModelCard"] = {}
 
 async def _refresh_card_cache():
     for path in CARD_SEARCH_PATH:
-        logger.info(f"Scanning for model cards in: {path}")
-        if not await aios.path.exists(path):
-            logger.warning(f"Model card path does not exist: {path}")
-            continue
         async for toml_file in path.rglob("*.toml"):
-            logger.info(f"Found model card file: {toml_file}")
             try:
                 card = await ModelCard.load_from_path(toml_file)
-                _card_cache[card.model_id] = card
-                logger.info(f"Loaded model card: {card.model_id}")
-            except (ValidationError, TOMLKitError) as e:
-                logger.error(f"Failed to load model card from {toml_file}: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error loading model card from {toml_file}: {e}")
+                if card.model_id not in _card_cache:
+                    _card_cache[card.model_id] = card
+            except (ValidationError, TOMLKitError):
+                pass
 
 
 def _is_image_card(card: "ModelCard") -> bool:
@@ -89,9 +82,6 @@ class ModelCard(CamelCaseModel):
     storage_size: Memory
     n_layers: PositiveInt
     hidden_size: PositiveInt
-    num_kv_heads: PositiveInt = 8  # Default for GQA in most large models
-    head_dim: PositiveInt = 128    # Standard transformer head dimension
-    max_context_length: PositiveInt = 2048 # Default if not specified
     supports_tensor: bool
     tasks: list[ModelTask]
     components: list[ComponentInfo] | None = None
@@ -100,6 +90,7 @@ class ModelCard(CamelCaseModel):
     base_model: str = ""
     capabilities: list[str] = []
     uses_cfg: bool = False
+    trust_remote_code: bool = True
 
     @field_validator("tasks", mode="before")
     @classmethod
@@ -145,45 +136,13 @@ class ModelCard(CamelCaseModel):
             storage_size=mem_size_bytes,
             n_layers=num_layers,
             hidden_size=config_data.hidden_size or 0,
-            num_kv_heads=config_data.num_kv_heads or 8,
-            max_context_length=config_data.max_context_length or 2048,
             supports_tensor=config_data.supports_tensor,
             tasks=[ModelTask.TextGeneration],
-            family=_infer_family(model_id),
+            trust_remote_code=False,
         )
         await mc.save_to_custom_dir()
         _card_cache[model_id] = mc
         return mc
-
-
-def _infer_family(model_id: str) -> str:
-    """Infers the model family from the model ID."""
-    model_id = model_id.lower()
-    if "llama" in model_id:
-        return "llama"
-    elif "qwen" in model_id:
-        return "qwen"
-    elif "deepseek" in model_id:
-        return "deepseek"
-    elif "gemma" in model_id:
-        return "gemma"
-    elif "mistral" in model_id:
-        return "mistral"
-    elif "phi" in model_id:
-        return "phi"
-    elif "glm" in model_id:
-        return "glm"
-    elif "minimax" in model_id:
-        return "minimax"
-    elif "kimi" in model_id or "moonshot" in model_id:
-        return "kimi"
-    elif "step" in model_id:
-        return "step"
-    elif "gpt-oss" in model_id or "gpt" in model_id:
-        return "gpt-oss"
-    elif "flux" in model_id:
-        return "flux"
-    return ""
 
 
 async def delete_custom_card(model_id: ModelId) -> bool:
