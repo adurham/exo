@@ -60,10 +60,26 @@ if TYPE_CHECKING:
     from mlx_lm.models.cache import Cache
 
 TimeoutCallback = Callable[[], None]
+LayerLoadedCallback = Callable[[int, int], None]  # (layers_loaded, total_layers)
 
+
+_pending_prefill_sends: list[tuple[mx.array, int, mx.distributed.Group]] = []
+
+
+def flush_prefill_sends() -> None:
+    for output, dst, group in _pending_prefill_sends:
+        sent = mx.distributed.send(output, dst, group=group)
+        mx.async_eval(sent)
+    _pending_prefill_sends.clear()
+
+
+def clear_prefill_sends() -> None:
+    # Discard pending sends (e.g. on cancellation).
+    _pending_prefill_sends.clear()
 
 
 from concurrent.futures import ThreadPoolExecutor
+
 
 _watchdog_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="watchdog")
 
@@ -179,6 +195,8 @@ class PipelineLastLayer(CustomMlxLayer):
         self.group = group
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
+        self.queue_sends: bool = False
+        self._pending_sends: list[mx.array] = []
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         cache = self.original_layer_signature.bind_partial(
@@ -188,15 +206,18 @@ class PipelineLastLayer(CustomMlxLayer):
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self.r != self.s - 1:
-            output = mx.distributed.send(
-                output, (self.r + 1) % self.s, group=self.group
-            )
-            # Force intermediate send to avoid deadlock where Rank 1 waits for this
-            # while Rank 0 waits for Rank 1's final output.
-            t0 = _time.monotonic()
-            mx.eval(output)
-            elapsed = _time.monotonic() - t0
-            logger.info(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill={self.is_prefill})")
+            if self.queue_sends:
+                # OVERLAPPED PREFILL (Upstream): Queue send for later flush to allow pipeline parallelism.
+                _pending_prefill_sends.append(
+                    (output, (self.r + 1) % self.s, self.group)
+                )
+            else:
+                # FUSED DECODE (Optimized): Dispatch lazy send and store for unified evaluation.
+                sent = mx.distributed.send(
+                    output, (self.r + 1) % self.s, group=self.group
+                )
+                self._pending_sends.append(sent)
+                logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {(self.r + 1) % self.s}, shape={output.shape}, prefill={self.is_prefill}")
 
             if cache is not None:
                 # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
@@ -235,6 +256,12 @@ def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     # Toggle hybrid decode mode: token sync only runs during decode (is_prefill=False)
     if hasattr(model, '_hybrid_pipeline_group'):
         model._hybrid_decode_mode = not is_prefill  # type: ignore
+
+
+def set_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
+    for layer in model.layers:  # type: ignore
+        if isinstance(layer, PipelineLastLayer):
+            layer.queue_sends = queue_sends
 
 
 def set_pipeline_cache(model: nn.Module, prompt_cache: list) -> None:  # type: ignore
