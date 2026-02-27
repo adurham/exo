@@ -308,7 +308,6 @@ pyo3_stub_gen::inventory::submit! {
         r#"
             class PyNetworkingHandle:
                 async def recv() -> PyFromSwarm: ...
-                async def dial(self, peer_id: str, addr: str) -> None: ...
         "#
     }
 }

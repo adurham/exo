@@ -61,6 +61,10 @@ class NetworkingHandle:
         
         If no peers are found that subscribe to this topic, throws `NoPeersSubscribedToTopicError` exception.
         """
+    async def dial(self, peer_id: builtins.str, addr: builtins.str) -> None:
+        r"""
+        Dial a peer given their ID and multiaddress async.
+        """
     async def recv(self) -> PyFromSwarm: ...
 
 @typing.final
