@@ -3,6 +3,7 @@ import socket
 import sys
 from subprocess import CalledProcessError
 
+import psutil
 from anyio import run_process
 
 from exo.shared.types.profiling import InterfaceType, NetworkInterfaceInfo
@@ -83,8 +84,7 @@ async def _get_interface_types_from_networksetup() -> dict[str, InterfaceType]:
             device = line.split(":", 1)[1].strip()
             # enX is ethernet adapters or thunderbolt - these must be deprioritised
             if device.startswith("en") and device not in ["en0", "en1"]:
-                if current_type != "thunderbolt":
-                    current_type = "maybe_ethernet"
+                current_type = "maybe_ethernet"
             types[device] = current_type
 
     return types
@@ -100,38 +100,19 @@ async def get_network_interfaces() -> list[NetworkInterfaceInfo]:
     interfaces_info: list[NetworkInterfaceInfo] = []
     interface_types = await _get_interface_types_from_networksetup()
 
-    # psutil.net_if_addrs() is notoriously buggy on macOS for dynamic Thunderbolt 
-    # interfaces and can drop them in long-running processes. We parse ifconfig instead.
-    try:
-        ifconfig_output = await run_process(["ifconfig"])
-        output_str = ifconfig_output.stdout.decode()
-        
-        current_iface = None
-        for line in output_str.splitlines():
-            # e.g., "en3: flags=8863<UP,BROADCAST,SMART...>"
-            if not line.startswith(" ") and not line.startswith("\t") and ":" in line:
-                current_iface = line.split(":", 1)[0].strip()
-            elif current_iface:
-                line_stripped = line.strip()
-                # matches "inet 192.168.200.1 netmask..." or "inet6 fe80::..."
-                if line_stripped.startswith("inet ") or line_stripped.startswith("inet6 "):
-                    parts = line_stripped.split()
-                    if len(parts) >= 2:
-                        ip_addr = parts[1]
-                        # Remove interface scope from IPv6 like "%en0"
-                        # Keep it identical to psutil output
-                        if "%" not in ip_addr:
-                             pass # we can keep pure IPv6 and IPv4
-                             
-                        interfaces_info.append(
-                            NetworkInterfaceInfo(
-                                name=current_iface,
-                                ip_address=ip_addr,
-                                interface_type=interface_types.get(current_iface, "unknown"),
-                            )
+    for iface, services in psutil.net_if_addrs().items():
+        for service in services:
+            match service.family:
+                case socket.AF_INET | socket.AF_INET6:
+                    interfaces_info.append(
+                        NetworkInterfaceInfo(
+                            name=iface,
+                            ip_address=service.address,
+                            interface_type=interface_types.get(iface, "unknown"),
                         )
-    except CalledProcessError:
-        pass
+                    )
+                case _:
+                    pass
 
     return interfaces_info
 

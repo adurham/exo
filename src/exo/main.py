@@ -1,26 +1,12 @@
 import argparse
-import itertools
 import multiprocessing as mp
 import os
 import resource
-import faulthandler
 import signal
-try:
-    import uvloop
-    uvloop.install()
-except ImportError:
-    pass
-
-faulthandler.enable()
-if hasattr(signal, "SIGQUIT"):
-    faulthandler.register(signal.SIGQUIT)
-
-
 from dataclasses import dataclass, field
-from typing import Iterator, Self
+from typing import Self
 
 import anyio
-from anyio.abc import TaskGroup
 from loguru import logger
 from pydantic import PositiveInt
 
@@ -29,6 +15,7 @@ from exo.download.coordinator import DownloadCoordinator
 from exo.download.impl_shard_downloader import exo_shard_downloader
 from exo.master.api import API  # TODO: should API be in master?
 from exo.master.main import Master
+from exo.routing.event_router import EventRouter
 from exo.routing.router import Router, get_node_id_keypair
 from exo.shared.constants import EXO_LOG
 from exo.shared.election import Election, ElectionResult
@@ -36,12 +23,14 @@ from exo.shared.logging import logger_cleanup, logger_setup
 from exo.shared.types.common import NodeId, SessionId
 from exo.utils.channels import Receiver, channel
 from exo.utils.pydantic_ext import CamelCaseModel
+from exo.utils.task_group import TaskGroup
 from exo.worker.main import Worker
 
 
 @dataclass
 class Node:
     router: Router
+    event_router: EventRouter
     download_coordinator: DownloadCoordinator | None
     worker: Worker | None
     election: Election  # Every node participates in election, as we do want a node to become master even if it isn't a master candidate if no master candidates are present.
@@ -50,14 +39,13 @@ class Node:
     api: API | None
 
     node_id: NodeId
-    event_index_counter: Iterator[int]
     offline: bool
-    _tg: TaskGroup = field(init=False, default_factory=anyio.create_task_group)
+    _tg: TaskGroup = field(init=False, default_factory=TaskGroup)
 
     @classmethod
-    async def create(cls, args: "Args") -> "Self":
+    async def create(cls, args: "Args") -> Self:
         keypair = get_node_id_keypair()
-        node_id = NodeId(keypair.to_peer_id().to_base58())
+        node_id = NodeId(keypair.to_node_id())
         session_id = SessionId(master_node_id=node_id, election_clock=0)
         router = Router.create(keypair)
         await router.register_topic(topics.GLOBAL_EVENTS)
@@ -66,21 +54,22 @@ class Node:
         await router.register_topic(topics.ELECTION_MESSAGES)
         await router.register_topic(topics.CONNECTION_MESSAGES)
         await router.register_topic(topics.DOWNLOAD_COMMANDS)
+        event_router = EventRouter(
+            session_id,
+            command_sender=router.sender(topics.COMMANDS),
+            external_outbound=router.sender(topics.LOCAL_EVENTS),
+            external_inbound=router.receiver(topics.GLOBAL_EVENTS),
+        )
 
         logger.info(f"Starting node {node_id}")
-
-        # Create shared event index counter for Worker and DownloadCoordinator
-        event_index_counter = itertools.count()
 
         # Create DownloadCoordinator (unless --no-downloads)
         if not args.no_downloads:
             download_coordinator = DownloadCoordinator(
                 node_id,
-                session_id,
-                exo_shard_downloader(),
+                exo_shard_downloader(offline=args.offline),
+                event_sender=event_router.sender(),
                 download_command_receiver=router.receiver(topics.DOWNLOAD_COMMANDS),
-                local_event_sender=router.sender(topics.LOCAL_EVENTS),
-                event_index_counter=event_index_counter,
                 offline=args.offline,
             )
         else:
@@ -89,9 +78,8 @@ class Node:
         if args.spawn_api:
             api = API(
                 node_id,
-                session_id,
                 port=args.api_port,
-                global_event_receiver=router.receiver(topics.GLOBAL_EVENTS),
+                event_receiver=event_router.receiver(),
                 command_sender=router.sender(topics.COMMANDS),
                 download_command_sender=router.sender(topics.DOWNLOAD_COMMANDS),
                 election_receiver=router.receiver(topics.ELECTION_MESSAGES),
@@ -102,12 +90,10 @@ class Node:
         if not args.no_worker:
             worker = Worker(
                 node_id,
-                session_id,
-                global_event_receiver=router.receiver(topics.GLOBAL_EVENTS),
-                local_event_sender=router.sender(topics.LOCAL_EVENTS),
+                event_receiver=event_router.receiver(),
+                event_sender=event_router.sender(),
                 command_sender=router.sender(topics.COMMANDS),
                 download_command_sender=router.sender(topics.DOWNLOAD_COMMANDS),
-                event_index_counter=event_index_counter,
             )
         else:
             worker = None
@@ -116,6 +102,7 @@ class Node:
         master = Master(
             node_id,
             session_id,
+            event_sender=event_router.sender(),
             global_event_sender=router.sender(topics.GLOBAL_EVENTS),
             local_event_receiver=router.receiver(topics.LOCAL_EVENTS),
             command_receiver=router.receiver(topics.COMMANDS),
@@ -138,6 +125,7 @@ class Node:
 
         return cls(
             router,
+            event_router,
             download_coordinator,
             worker,
             election,
@@ -145,7 +133,6 @@ class Node:
             master,
             api,
             node_id,
-            event_index_counter,
             args.offline,
         )
 
@@ -154,6 +141,7 @@ class Node:
             signal.signal(signal.SIGINT, lambda _, __: self.shutdown())
             signal.signal(signal.SIGTERM, lambda _, __: self.shutdown())
             tg.start_soon(self.router.run)
+            tg.start_soon(self.event_router.run)
             tg.start_soon(self.election.run)
             if self.download_coordinator:
                 tg.start_soon(self.download_coordinator.run)
@@ -167,11 +155,11 @@ class Node:
 
     def shutdown(self):
         # if this is our second call to shutdown, just sys.exit
-        if self._tg.cancel_scope.cancel_called:
+        if self._tg.cancel_called():
             import sys
 
             sys.exit(1)
-        self._tg.cancel_scope.cancel()
+        self._tg.cancel_tasks()
 
     async def _elect_loop(self):
         with self.election_result_receiver as results:
@@ -201,6 +189,7 @@ class Node:
                     self.master = Master(
                         self.node_id,
                         result.session_id,
+                        event_sender=self.event_router.sender(),
                         global_event_sender=self.router.sender(topics.GLOBAL_EVENTS),
                         local_event_receiver=self.router.receiver(topics.LOCAL_EVENTS),
                         command_receiver=self.router.receiver(topics.COMMANDS),
@@ -224,42 +213,41 @@ class Node:
                     )
                 if result.is_new_master:
                     await anyio.sleep(0)
-                    # Fresh counter for new session (buffer expects indices from 0)
-                    self.event_index_counter = itertools.count()
+                    self.event_router.shutdown()
+                    self.event_router = EventRouter(
+                        result.session_id,
+                        self.router.sender(topics.COMMANDS),
+                        self.router.receiver(topics.GLOBAL_EVENTS),
+                        self.router.sender(topics.LOCAL_EVENTS),
+                    )
+                    self._tg.start_soon(self.event_router.run)
                     if self.download_coordinator:
                         self.download_coordinator.shutdown()
                         self.download_coordinator = DownloadCoordinator(
                             self.node_id,
-                            result.session_id,
-                            exo_shard_downloader(),
+                            exo_shard_downloader(offline=self.offline),
+                            event_sender=self.event_router.sender(),
                             download_command_receiver=self.router.receiver(
                                 topics.DOWNLOAD_COMMANDS
                             ),
-                            local_event_sender=self.router.sender(topics.LOCAL_EVENTS),
-                            event_index_counter=self.event_index_counter,
                             offline=self.offline,
                         )
                         self._tg.start_soon(self.download_coordinator.run)
                     if self.worker:
                         self.worker.shutdown()
-                        await self.worker.wait_until_stopped()
                         # TODO: add profiling etc to resource monitor
                         self.worker = Worker(
                             self.node_id,
-                            result.session_id,
-                            global_event_receiver=self.router.receiver(
-                                topics.GLOBAL_EVENTS
-                            ),
-                            local_event_sender=self.router.sender(topics.LOCAL_EVENTS),
+                            event_receiver=self.event_router.receiver(),
+                            event_sender=self.event_router.sender(),
                             command_sender=self.router.sender(topics.COMMANDS),
                             download_command_sender=self.router.sender(
                                 topics.DOWNLOAD_COMMANDS
                             ),
-                            event_index_counter=self.event_index_counter,
                         )
                         self._tg.start_soon(self.worker.run)
                     if self.api:
-                        self.api.reset(result.session_id, result.won_clock)
+                        self.api.reset(result.won_clock, self.event_router.receiver())
                 else:
                     if self.api:
                         self.api.unpause(result.won_clock)
@@ -289,9 +277,16 @@ def main():
         logger.info("FAST_SYNCH forced OFF")
 
     node = anyio.run(Node.create, args)
-    anyio.run(node.run)
-    logger.info("EXO Shutdown complete")
-    logger_cleanup()
+    try:
+        anyio.run(node.run)
+    except BaseException as exception:
+        logger.opt(exception=exception).critical(
+            "EXO terminated due to unhandled exception"
+        )
+        raise
+    finally:
+        logger.info("EXO Shutdown complete")
+        logger_cleanup()
 
 
 class Args(CamelCaseModel):
@@ -302,7 +297,7 @@ class Args(CamelCaseModel):
     tb_only: bool = False
     no_worker: bool = False
     no_downloads: bool = False
-    offline: bool = False
+    offline: bool = os.getenv("EXO_OFFLINE", "false").lower() == "true"
     fast_synch: bool | None = None  # None = auto, True = force on, False = force off
 
     @classmethod
@@ -353,6 +348,7 @@ class Args(CamelCaseModel):
         parser.add_argument(
             "--offline",
             action="store_true",
+            default=os.getenv("EXO_OFFLINE", "false").lower() == "true",
             help="Run in offline/air-gapped mode: skip internet checks, use only pre-staged local models",
         )
         fast_synch_group = parser.add_mutually_exclusive_group()
@@ -372,6 +368,3 @@ class Args(CamelCaseModel):
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - We are intentionally validating here, we can't do it statically
-
-if __name__ == "__main__":
-    main()

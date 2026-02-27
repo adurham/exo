@@ -5,7 +5,7 @@ from math import inf
 from multiprocessing.synchronize import Event
 from queue import Empty, Full
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 from anyio import (
     CapacityLimiter,
@@ -157,7 +157,7 @@ class MpSender[T]:
     ) -> None:
         self.close()
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         d = self.__dict__.copy()
         d.pop("__orig_class__", None)
         return d
@@ -188,21 +188,21 @@ class MpReceiver[T]:
             print("Unreachable code path - let me know!")
             raise ClosedResourceError from e
 
-    def receive(self, timeout: float | None = None) -> T:
+    def receive(self) -> T:
         try:
-            if timeout is not None:
-                item = self._state.buffer.get(block=True, timeout=timeout)
-            else:
-                return self.receive_nowait()
-        except Empty:
-            raise WouldBlock from None
+            return self.receive_nowait()
         except WouldBlock:
-            item = self._state.buffer.get()
-        
-        if isinstance(item, _MpEndOfStream):
-            self.close()
-            raise EndOfStream from None
-        return item
+            try:
+                item = self._state.buffer.get()
+            except (TypeError, OSError):
+                # Queue pipe can get closed while we are blocked on get().
+                # The underlying connection._handle becomes None, causing
+                # TypeError in read(handle, remaining).
+                raise ClosedResourceError from None
+            if isinstance(item, _MpEndOfStream):
+                self.close()
+                raise EndOfStream from None
+            return item
 
     async def receive_async(self) -> T:
         return await to_thread.run_sync(
