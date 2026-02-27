@@ -5,9 +5,7 @@
 # Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
 
 export EXO_FAST_SYNCH=off
-export MTL_DISABLE_TIMEOUT=1
-export MTL_COMMAND_BUFFER_TIMEOUT=0
-export EXO_DISABLE_METAL_TIMEOUT=0
+export EXO_DISABLE_METAL_TIMEOUT=1
 export EXO_EVAL_DEBUG=1
 export LOG_LEVEL=DEBUG
 export EXO_ADAPTIVE_THROTTLE=1
@@ -288,14 +286,16 @@ for NODE in "${NODES[@]}"; do
     # Build the dynamic environment string — minimal, matching upstream B-side
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
-    # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context decodes
-    # Always set OS-level overrides (The "Hammer")
-    EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0"
-    
-    # Configure C++ Backend "Safe Sync" (The Escape Hatch / Brains)
-    # Set EXO_DISABLE_METAL_TIMEOUT=1 to rely ONLY on the OS-level override (default).
-    # Set EXO_DISABLE_METAL_TIMEOUT=0 to activate the dynamic CPU sync fallback.
-    EXO_ENV="$EXO_ENV EXO_DISABLE_METAL_TIMEOUT=${EXO_DISABLE_METAL_TIMEOUT:-1}"
+    # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context runs
+    # Set EXO_DISABLE_METAL_TIMEOUT=1 at the top of the script to enable the triple-layered defense:
+    # 1. OS-Level Override (MTL_DISABLE_TIMEOUT=1, MTL_COMMAND_BUFFER_TIMEOUT=0)
+    # 2. C++ Backend "Safe Sync" (MLX_FORCE_DISTRIBUTED_GPU=0 fallback)
+    # 3. Dynamic Python Trigger (Generate.py monitoring context size)
+    if [ "${EXO_DISABLE_METAL_TIMEOUT:-0}" == "1" ]; then
+        EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
+    else
+        EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=0 MTL_COMMAND_BUFFER_TIMEOUT=1 EXO_DISABLE_METAL_TIMEOUT=0"
+    fi
     EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-50000}"
 
     # Prefill Optimization: Use 256 step size for smoother RDMA and throttle 100 for concurrency

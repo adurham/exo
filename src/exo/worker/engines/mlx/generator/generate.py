@@ -599,12 +599,12 @@ def generate_step(
                 # Dynamic Safe Sync: if the context is massive, the network wait can trigger 
                 # a Metal GPU Timeout Error (>2-5s) on the pipeline tail node while waiting for 
                 # other nodes to chew through their massive KV cache.
-                # If EXO_DISABLE_METAL_TIMEOUT=1 (default), we rely on the OS-level override.
-                # Otherwise, we fallback to CPU network sync at EXO_SAFE_SYNC_LIMIT (default 50,000).
+                # If EXO_DISABLE_METAL_TIMEOUT=1, we use both OS-level overrides and the
+                # dynamic CPU network sync fallback at EXO_SAFE_SYNC_LIMIT (default 50,000).
                 _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
                 
                 _massive_context = False
-                if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+                if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "0") == "1":
                     _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
                     _massive_context = _kv_len > _safe_sync_limit
 
@@ -702,7 +702,7 @@ def generate_step(
             # Dynamic Safe Sync for Prefill
             _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
             _massive_context = False
-            if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+            if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "0") == "1":
                 _massive_context = True # Prefill is always compute-heavy, default to safe sync
 
             if _massive_context:
