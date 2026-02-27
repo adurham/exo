@@ -5,9 +5,7 @@
 # Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
 
 export EXO_FAST_SYNCH=off
-export MTL_DISABLE_TIMEOUT=1
-export MTL_COMMAND_BUFFER_TIMEOUT=0
-export EXO_DISABLE_METAL_TIMEOUT=1
+export EXO_DISABLE_METAL_TIMEOUT=0
 export EXO_EVAL_DEBUG=1
 export EXO_ADAPTIVE_THROTTLE=1
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
@@ -293,7 +291,7 @@ for NODE in "${NODES[@]}"; do
     if [ "${EXO_DISABLE_METAL_TIMEOUT:-1}" == "1" ]; then
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
     else
-        EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-50000}"
+        EXO_ENV="$EXO_ENV EXO_DISABLE_METAL_TIMEOUT=0 EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-0}"
     fi
 
     # Prefill Optimization: Use 256 step size for smoother RDMA and throttle 100 for concurrency
