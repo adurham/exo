@@ -283,7 +283,7 @@ for NODE in "${NODES[@]}"; do
     echo "Starting Exo on $NODE..."
     
     # Build the dynamic environment string — minimal, matching upstream B-side
-    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
+    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 LOG_LEVEL=DEBUG EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
     # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context decodes
     # Set EXO_DISABLE_METAL_TIMEOUT=1 to completely disable the watchdog (default).
