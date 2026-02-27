@@ -710,8 +710,9 @@ def generate_step(
             all_states = [_c.state for _c in prompt_cache]
             
             # Dynamic Safe Sync for Prefill
-            _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
-            _massive_context = True # Prefill network operations are moved to CPU to prevent GPU Command Buffer 60s Watchdog Timeouts
+            _massive_context = False
+            if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+                _massive_context = True # Prefill is always compute-heavy, default to safe sync
 
             if _massive_context:
                 logger.debug(f"Prefill: setting MLX_FORCE_DISTRIBUTED_GPU=0 for safe sync (massive context)")
