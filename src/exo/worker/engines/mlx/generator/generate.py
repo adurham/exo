@@ -377,15 +377,10 @@ def warmup_inference(
 
     # Force GPU to complete all pending command buffers from warmup.
     # Without this, the warmup's GPU command buffer may still be executing
-    # asynchronously, and Metal's 60s timeout will kill it during real inference.
     mx.synchronize()
     logger.info("Warmup GPU sync complete")
 
-    # Clear MLX allocator cache to deregister cached Memory Regions (MRs)
-    # used by AppleThunderboltRDMA. WARMUP pins 50+ MRs which exhausts
-    # the 64 MR limit per driver if kept in the MLX cache pool.
-    mx.metal.clear_cache()
-    logger.info("Warmup MLX cache cleared")
+    mx_barrier(group)
 
     mx_barrier(group)
 
