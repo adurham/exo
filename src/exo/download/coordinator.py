@@ -22,6 +22,14 @@ from exo.shared.types.commands import (
     StartDownload,
 )
 from exo.shared.types.common import NodeId, SessionId, SystemId
+from exo.shared.types.worker.downloads import (
+    DownloadCompleted,
+    DownloadFailed,
+    DownloadOngoing,
+    DownloadPending,
+    DownloadProgress,
+)
+
 from exo.shared.types.events import (
     Event,
     EventId,
@@ -30,13 +38,7 @@ from exo.shared.types.events import (
     LocalForwarderEvent,
     NodeDownloadProgress,
 )
-from exo.shared.types.worker.downloads import (
-    DownloadCompleted,
-    DownloadFailed,
-    DownloadOngoing,
-    DownloadPending,
-    DownloadProgress,
-)
+
 from exo.shared.types.worker.shards import PipelineShardMetadata, ShardMetadata
 from exo.utils.channels import Receiver, Sender, channel
 from exo.utils.task_group import TaskGroup
@@ -191,7 +193,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=shard,
                 node_id=self.node_id,
-                total_bytes=Memory(in_bytes=shard.model_card.storage_size),
+                total_bytes=shard.model_card.storage_size,
                 model_directory=str(found_path),
                 read_only=True,
             )
@@ -422,7 +424,7 @@ class DownloadCoordinator:
                             path_completed: DownloadProgress = DownloadCompleted(
                                 node_id=self.node_id,
                                 shard_metadata=path_shard,
-                                total_bytes=Memory(in_bytes=card.storage_size),
+                                total_bytes=card.storage_size,
                                 model_directory=str(found),
                                 read_only=True,
                             )
