@@ -211,6 +211,21 @@ class ConfigData(BaseModel):
 
     architectures: list[str] | None = None
     hidden_size: Annotated[int, Field(ge=0)] | None = None
+    num_kv_heads: int | None = Field(
+        None,
+        validation_alias=AliasChoices(
+            "num_key_value_heads",
+            "multi_query_group_num",
+            "num_kv_heads",
+        ),
+    )
+    max_context_length: int | None = Field(
+        None,
+        validation_alias=AliasChoices(
+            "max_position_embeddings",
+            "max_sequence_length",
+        ),
+    )
     layer_count: int = Field(
         validation_alias=AliasChoices(
             "num_hidden_layers",
