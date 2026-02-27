@@ -1,6 +1,6 @@
 [project]
 name = "exo"
-version = "0.3.0"
+version = "0.3.68"
 description = "Exo"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -17,10 +17,9 @@ dependencies = [
     "loguru>=0.7.3",
     "exo_pyo3_bindings", # rust bindings
     "anyio==4.11.0",
-    "uvloop>=0.21.0; sys_platform != 'win32'",
-    "mlx>=0.30.6; sys_platform == 'darwin'",
-    "mlx[cpu]>=0.30.6; sys_platform == 'linux'",
-    "mlx-lm>=0.30.7",
+    "mlx; sys_platform == 'darwin'",
+    "mlx[cpu]==0.30.6; sys_platform == 'linux'",
+    "mlx-lm==0.30.7",
     "tiktoken>=0.12.0", # required for kimi k2 tokenizer
     "hypercorn>=0.18.0",
     "openai-harmony>=0.0.8",
@@ -31,7 +30,6 @@ dependencies = [
     "python-multipart>=0.0.21",
     "msgspec>=0.19.0",
     "zstandard>=0.23.0",
-    "base58>=2.1.1",
 ]
 
 [project.scripts]
@@ -135,7 +133,7 @@ markers = [
 env = [
   "EXO_TESTS=1"
 ]
-addopts = "-m 'not slow' --ignore=tests/start_distributed_test.py --ignore=mlx --ignore=mlx-lm"
+addopts = "-m 'not slow' --ignore=tests/start_distributed_test.py"
 filterwarnings = [
     "ignore:builtin type Swig:DeprecationWarning",
 ]
