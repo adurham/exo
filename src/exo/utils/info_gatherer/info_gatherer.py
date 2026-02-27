@@ -543,12 +543,19 @@ class InfoGatherer:
                         logger.critical("MacMon closed stdout")
                         return
                     t = TextReceiveStream(BufferedByteReceiveStream(p.stdout))
+                    buffer = ""
                     while True:
                         with anyio.fail_after(self.macmon_interval * 3):
-                            macmon_output = await t.receive()
-                            await self.info_sender.send(
-                                MacmonMetrics.from_raw_json(macmon_output)
-                            )
+                            chunk = await t.receive()
+                            buffer += chunk
+                            if "\n" in buffer:
+                                lines = buffer.split("\n")
+                                buffer = lines.pop()
+                                for line in lines:
+                                    if line.strip():
+                                        await self.info_sender.send(
+                                            MacmonMetrics.from_raw_json(line.strip())
+                                        )
             except CalledProcessError as e:
                 stderr_msg = "no stderr"
                 stderr_output = cast(bytes | str | None, e.stderr)
