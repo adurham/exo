@@ -386,7 +386,12 @@ class InfoGatherer:
     async def run(self):
         async with self._tg as tg:
             if IS_DARWIN:
-                if (macmon_path := shutil.which("macmon")) is not None:
+                import os
+                
+                cargo_macmon = os.path.expanduser("~/.cargo/bin/macmon")
+                macmon_path = cargo_macmon if os.path.exists(cargo_macmon) else shutil.which("macmon")
+                
+                if macmon_path is not None:
                     tg.start_soon(self._monitor_macmon, macmon_path)
                 else:
                     # macmon not installed — fall back to psutil for memory
