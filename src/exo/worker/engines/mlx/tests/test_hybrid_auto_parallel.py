@@ -496,10 +496,10 @@ class TestPipelineWrapping:
         layers = result.model.layers
         # No pipeline recv wrapping on first layer (follower doesn't receive from upstream)
         assert not isinstance(layers[0], PipelineFirstLayer)
-        # Last layer should have a recv-only wrapper (no sends, but receives from PP tail during decode)
-        assert isinstance(layers[-1], _HybridPipelineLastLayer)
-        assert layers[-1].send_to == []
-        assert layers[-1].decode_recv_from is not None
+        # Last layer should NOT have a pipeline wrapper (TP follower has no sends)
+        assert not isinstance(layers[-1], _HybridPipelineLastLayer)
+        from exo.worker.engines.mlx.auto_parallel import PipelineLastLayer
+        assert not isinstance(layers[-1], PipelineLastLayer)
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +514,7 @@ class TestHybridPipelineLastLayerDataFlow:
     final hidden states received via recv_like.
     """
 
-    def _make_layer(self, *, send_to, send_during_prefill=True, decode_recv_from=None):
+    def _make_layer(self, *, send_to, send_during_prefill=True):
         """Create a _HybridPipelineLastLayer with a FakeLayer that returns its input."""
         from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer
         group = MagicMock()
@@ -523,55 +523,44 @@ class TestHybridPipelineLastLayerDataFlow:
             r=0, s=3, group=group,
             send_to=send_to,
             send_during_prefill=send_during_prefill,
-            decode_recv_from=decode_recv_from,
         )
         return layer, group
 
-    @patch("mlx.core.distributed.recv_like")
     @patch("mlx.core.distributed.send")
-    def test_tp_master_decode_returns_recv_output(self, mock_send, mock_recv_like):
-        """During decode, TP master sends to PP tail, then returns recv_like output."""
-        layer, group = self._make_layer(send_to=[2], decode_recv_from=2)
+    def test_tp_master_decode_returns_local_output(self, mock_send):
+        """During decode, TP master sends to PP tail, then returns local output."""
+        layer, group = self._make_layer(send_to=[2])
         layer.is_prefill = False
 
         local_output = mx.array([1.0, 2.0, 3.0])
         sent_output = mx.array([4.0, 5.0, 6.0])
-        remote_output = mx.array([7.0, 8.0, 9.0])
         mock_send.return_value = sent_output
-        mock_recv_like.return_value = remote_output
 
         result = layer(local_output)
 
         # Should have sent
         mock_send.assert_called_once_with(local_output, 2, group=group)
-        # Should have recv'd from PP tail rank 2 using sent_output as template
-        mock_recv_like.assert_called_once_with(sent_output, 2, group=group)
-        # Return value must be the RECV'd output, not the local output
-        assert result is remote_output
+        # Return value must be the local output, send is deferred
+        assert result is local_output
+        assert layer._pending_sends == [sent_output]
 
-    @patch("mlx.core.distributed.recv_like")
     @patch("mlx.core.distributed.send")
-    def test_tp_follower_decode_returns_recv_output(self, mock_send, mock_recv_like):
-        """During decode, TP follower has no sends but returns recv_like output."""
-        layer, group = self._make_layer(send_to=[], decode_recv_from=2)
+    def test_tp_follower_decode_returns_local_output(self, mock_send):
+        """During decode, TP follower has no sends but returns local output."""
+        layer, group = self._make_layer(send_to=[])
         layer.is_prefill = False
 
         local_output = mx.array([1.0, 2.0, 3.0])
-        remote_output = mx.array([7.0, 8.0, 9.0])
-        mock_recv_like.return_value = remote_output
 
         result = layer(local_output)
 
         # No sends for follower
         mock_send.assert_not_called()
-        # Should recv from PP tail using local output as template
-        mock_recv_like.assert_called_once_with(local_output, 2, group=group)
-        # Return value must be the RECV'd output
-        assert result is remote_output
+        # Return value must be local output
+        assert result is local_output
 
-    @patch("mlx.core.distributed.recv_like")
     @patch("mlx.core.distributed.send")
-    def test_pp_tail_prefill_skips_sends(self, mock_send, mock_recv_like):
+    def test_pp_tail_prefill_skips_sends(self, mock_send):
         """During prefill, PP tail (send_during_prefill=False) skips all sends."""
         layer, _group = self._make_layer(
             send_to=[0, 1], send_during_prefill=False,
@@ -583,14 +572,11 @@ class TestHybridPipelineLastLayerDataFlow:
 
         # No sends during prefill
         mock_send.assert_not_called()
-        mock_recv_like.assert_not_called()
         # Returns local output unchanged
         assert result is local_output
 
-    @patch("mlx.core.distributed.recv_like")
     @patch("mlx.core.distributed.send")
-    @patch("mlx.core.eval")
-    def test_pp_tail_decode_sends_to_all_tp_nodes(self, mock_eval, mock_send, mock_recv_like):
+    def test_pp_tail_decode_sends_to_all_tp_nodes(self, mock_send):
         """During decode, PP tail sends to all TP nodes and does NOT recv."""
         layer, group = self._make_layer(
             send_to=[0, 1], send_during_prefill=False,
@@ -609,21 +595,16 @@ class TestHybridPipelineLastLayerDataFlow:
         # Verify rank targets (avoid mx.array equality issues with assert_any_call)
         send_targets = [call_args[0][1] for call_args in mock_send.call_args_list]
         assert send_targets == [0, 1]
-        # No recv (PP tail doesn't need to receive anything)
-        mock_recv_like.assert_not_called()
-        # Returns last send result (lazy chain)
-        assert result is sent_twice
+        
+        # Returns local output
+        assert result is local_output
+        assert layer._pending_sends == [sent_once, sent_twice]
 
-    @patch("mlx.core.distributed.recv_like")
     @patch("mlx.core.distributed.send")
-    def test_tp_follower_prefill_no_recv(self, mock_send, mock_recv_like):
-        """During prefill, TP follower with decode_recv_from does NOT recv.
-
-        Recv is only for decode. If follower recv'd during prefill, it would
-        deadlock because the PP tail doesn't send during prefill.
-        """
+    def test_tp_follower_prefill_no_recv(self, mock_send):
+        """During prefill, TP follower has no sends and does not recv."""
         layer, _group = self._make_layer(
-            send_to=[], send_during_prefill=True, decode_recv_from=2,
+            send_to=[], send_during_prefill=True,
         )
         layer.is_prefill = True
 
@@ -632,7 +613,7 @@ class TestHybridPipelineLastLayerDataFlow:
 
         # No sends (empty send_to), no recv during prefill
         mock_send.assert_not_called()
-        mock_recv_like.assert_not_called()
+        assert result is local_output
 
 
 # ---------------------------------------------------------------------------

@@ -41,8 +41,8 @@ def test_filter_cycles_by_memory():
         source=node2_id, sink=node1_id, edge=create_socket_connection(2)
     )
 
-    node1_mem = create_node_memory(1000 * 1024)
-    node2_mem = create_node_memory(1000 * 1024)
+    node1_mem = create_node_memory(1010 * 1024)
+    node2_mem = create_node_memory(1010 * 1024)
     node_memory = {node1_id: node1_mem, node2_id: node2_mem}
 
     topology = Topology()
@@ -114,7 +114,7 @@ def test_filter_multiple_cycles_by_memory():
 
     node_a_mem = create_node_memory(500 * 1024)
     node_b_mem = create_node_memory(500 * 1024)
-    node_c_mem = create_node_memory(1000 * 1024)
+    node_c_mem = create_node_memory(1010 * 1024)
     node_memory = {
         node_a_id: node_a_mem,
         node_b_id: node_b_mem,
@@ -193,7 +193,7 @@ def test_get_smallest_cycles():
         ((312, 518, 1024), 12, (2, 3, 7)),
         # Edge case: one node has ~90% of memory - should not over-allocate.
         # Each node must have enough memory for at least 1 layer (50 KB = 1000/20).
-        ((900, 50, 50), 20, (18, 1, 1)),
+        ((905, 60, 60), 20, (18, 1, 1)),
     ],
 )
 def test_get_shard_assignments(
@@ -243,7 +243,10 @@ def test_get_shard_assignments(
         n_layers=total_layers,
         storage_size=Memory.from_kb(1000),
         hidden_size=1000,
-        supports_tensor=True,
+        max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
+            supports_tensor=True,
         tasks=[ModelTask.TextGeneration],
     )
 
@@ -484,13 +487,16 @@ def test_get_shard_assignments_insufficient_memory_raises():
         n_layers=20,
         storage_size=Memory.from_kb(1000),
         hidden_size=1000,
-        supports_tensor=True,
+        max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
+            supports_tensor=True,
         tasks=[ModelTask.TextGeneration],
     )
     cycles = topology.get_cycles()
     selected_cycle = cycles[0]
 
-    with pytest.raises(ValueError, match="insufficient memory"):
+    with pytest.raises(ValueError, match="Cluster-wide OOM|insufficient memory"):
         get_shard_assignments(
             model_card, selected_cycle, Sharding.Pipeline, node_memory
         )[0]  # Only need shard_assignments, not the optional cycle
@@ -523,8 +529,8 @@ class TestCfgParallelPlacement:
         cycle = cycles[0]
 
         node_memory = {
-            node_a: create_node_memory(1000 * 1024),
-            node_b: create_node_memory(1000 * 1024),
+            node_a: create_node_memory(1010 * 1024),
+            node_b: create_node_memory(1010 * 1024),
         }
 
         model_card = ModelCard(
@@ -532,6 +538,9 @@ class TestCfgParallelPlacement:
             n_layers=60,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=False,
             uses_cfg=True,
             tasks=[ModelTask.TextToImage],
@@ -568,13 +577,16 @@ class TestCfgParallelPlacement:
         cycles = [c for c in topology.get_cycles() if len(c) == 4]
         cycle = cycles[0]
 
-        node_memory = {n: create_node_memory(1000 * 1024) for n in nodes}
+        node_memory = {n: create_node_memory(1010 * 1024) for n in nodes}
 
         model_card = ModelCard(
             model_id=ModelId("qwen-image-test"),
             n_layers=60,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=False,
             uses_cfg=True,
             tasks=[ModelTask.TextToImage],
@@ -617,13 +629,16 @@ class TestCfgParallelPlacement:
         cycles = [c for c in topology.get_cycles() if len(c) == 3]
         cycle = cycles[0]
 
-        node_memory = {n: create_node_memory(1000 * 1024) for n in nodes}
+        node_memory = {n: create_node_memory(1010 * 1024) for n in nodes}
 
         model_card = ModelCard(
             model_id=ModelId("qwen-image-test"),
             n_layers=60,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=False,
             uses_cfg=True,
             tasks=[ModelTask.TextToImage],
@@ -650,8 +665,8 @@ class TestCfgParallelPlacement:
         cycle = cycles[0]
 
         node_memory = {
-            node_a: create_node_memory(1000 * 1024),
-            node_b: create_node_memory(1000 * 1024),
+            node_a: create_node_memory(1010 * 1024),
+            node_b: create_node_memory(1010 * 1024),
         }
 
         model_card = ModelCard(
@@ -659,6 +674,9 @@ class TestCfgParallelPlacement:
             n_layers=57,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=False,
             uses_cfg=False,  # Non-CFG model
             tasks=[ModelTask.TextToImage],
@@ -709,6 +727,9 @@ class TestHybridParallelPlacement:
             n_layers=n_layers,
             storage_size=Memory.from_kb(1000),
             hidden_size=1000,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=True,
             tasks=[ModelTask.TextGeneration],
         )

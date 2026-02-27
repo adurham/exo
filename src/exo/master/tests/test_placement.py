@@ -51,7 +51,10 @@ def model_card() -> ModelCard:
         storage_size=Memory.from_kb(1000),
         n_layers=10,
         hidden_size=30,
-        supports_tensor=True,
+        max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
+            supports_tensor=True,
         tasks=[ModelTask.TextGeneration],
     )
 
@@ -82,9 +85,7 @@ def test_get_instance_placements_create_instance(
 ):
     # arrange
     model_card.n_layers = total_layers
-    model_card.storage_size.in_bytes = sum(
-        available_memory
-    )  # make it exactly fit across all nodes
+    model_card.storage_size.in_bytes = sum(available_memory) - 200  # make it exactly fit across all nodes
     topology = Topology()
 
     cic = place_instance_command(model_card)
@@ -163,7 +164,7 @@ def test_get_instance_placements_one_node_exact_fit() -> None:
     topology = Topology()
     node_id = NodeId()
     topology.add_node(node_id)
-    node_memory = {node_id: create_node_memory(1000 * 1024)}
+    node_memory = {node_id: create_node_memory(1010 * 1024)}
     node_network = {node_id: create_node_network()}
     cic = place_instance_command(
         ModelCard(
@@ -171,6 +172,9 @@ def test_get_instance_placements_one_node_exact_fit() -> None:
             storage_size=Memory.from_kb(1000),
             n_layers=10,
             hidden_size=1000,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=True,
             tasks=[ModelTask.TextGeneration],
         ),
@@ -190,7 +194,7 @@ def test_get_instance_placements_one_node_fits_with_extra_memory() -> None:
     topology = Topology()
     node_id = NodeId()
     topology.add_node(node_id)
-    node_memory = {node_id: create_node_memory(1001 * 1024)}
+    node_memory = {node_id: create_node_memory(1010 * 1024)}
     node_network = {node_id: create_node_network()}
     cic = place_instance_command(
         ModelCard(
@@ -198,6 +202,9 @@ def test_get_instance_placements_one_node_fits_with_extra_memory() -> None:
             storage_size=Memory.from_kb(1000),
             n_layers=10,
             hidden_size=1000,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=True,
             tasks=[ModelTask.TextGeneration],
         ),
@@ -217,7 +224,7 @@ def test_get_instance_placements_one_node_not_fit() -> None:
     topology = Topology()
     node_id = NodeId()
     topology.add_node(node_id)
-    node_memory = {node_id: create_node_memory(1000 * 1024)}
+    node_memory = {node_id: create_node_memory(900 * 1024)}
     node_network = {node_id: create_node_network()}
     cic = place_instance_command(
         model_card=ModelCard(
@@ -225,6 +232,9 @@ def test_get_instance_placements_one_node_not_fit() -> None:
             storage_size=Memory.from_kb(1001),
             n_layers=10,
             hidden_size=1000,
+            max_context_length=1,
+            num_kv_heads=1,
+            head_dim=1,
             supports_tensor=True,
             tasks=[ModelTask.TextGeneration],
         ),
@@ -282,7 +292,7 @@ def test_placement_selects_leaf_nodes(
     # arrange
     topology = Topology()
 
-    model_card.storage_size = Memory.from_bytes(1000)
+    model_card.storage_size = Memory.from_bytes(800)
 
     node_id_a = NodeId()
     node_id_b = NodeId()

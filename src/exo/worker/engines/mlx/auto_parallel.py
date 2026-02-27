@@ -546,8 +546,8 @@ def hybrid_auto_parallel(
     """
     from exo.shared.types.worker.shards import HybridShardMetadata  # noqa: F811
 
-    inner = _inner_model(model)
-    layers = _get_layers(inner)
+    inner = get_inner_model(model)
+    layers = get_layers(inner)
     all_layers = list(layers)  # full copy before slicing
 
     # --- Step 1: Create TP sub-group via split ---
@@ -590,8 +590,8 @@ def hybrid_auto_parallel(
         model = tensor_auto_parallel(model, tp_group, timeout_seconds, on_timeout)
         _dbg("tensor_auto_parallel completed")
         # Re-fetch layers after TP modified the model
-        inner = _inner_model(model)
-        layers = _get_layers(inner)
+        inner = get_inner_model(model)
+        layers = get_layers(inner)
         all_layers = list(layers)
 
     # --- Step 3: Slice layers to this node's range ---

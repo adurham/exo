@@ -87,46 +87,10 @@ class Keypair:
         """
 
 @typing.final
-class Multiaddr:
-    r"""
-    Representation of a Multiaddr.
-    """
-    @staticmethod
-    def empty() -> Multiaddr:
-        r"""
-        Create a new, empty multiaddress.
-        """
-    @staticmethod
-    def with_capacity(n: builtins.int) -> Multiaddr:
-        r"""
-        Create a new, empty multiaddress with the given capacity.
-        """
-    @staticmethod
-    def from_bytes(bytes: bytes) -> Multiaddr:
-        r"""
-        Parse a `Multiaddr` value from its byte slice representation.
-        """
-    @staticmethod
-    def from_string(string: builtins.str) -> Multiaddr:
-        r"""
-        Parse a `Multiaddr` value from its string representation.
-        """
-    def len(self) -> builtins.int:
-        r"""
-        Return the length in bytes of this multiaddress.
-        """
-    def is_empty(self) -> builtins.bool:
-        r"""
-        Returns true if the length of this multiaddress is 0.
-        """
-    def to_bytes(self) -> bytes:
-        r"""
-        Return a copy of this [`Multiaddr`]'s byte representation.
-        """
-    def to_string(self) -> builtins.str:
-        r"""
-        Convert a Multiaddr to a string.
-        """
+class MessageTooLargeError(builtins.Exception):
+    def __new__(cls, *args: typing.Any) -> MessageTooLargeError: ...
+    def __repr__(self) -> builtins.str: ...
+    def __str__(self) -> builtins.str: ...
 
 @typing.final
 class NetworkingHandle:
@@ -161,6 +125,10 @@ class NetworkingHandle:
         
         If no peers are found that subscribe to this topic, throws `NoPeersSubscribedToTopicError` exception.
         """
+    async def dial(self, peer_id: PeerId, addr: builtins.str) -> None:
+        r"""
+        Dial a peer given their ID and multiaddress.
+        """
     async def gossipsub_recv(self) -> tuple[builtins.str, bytes]:
         r"""
         Receives the next message from the `GossipSub` network.
@@ -173,12 +141,6 @@ class NetworkingHandle:
         For `limit > 0`, if there are no messages in the channel's queue this method
         will sleep until a message is sent.
         """
-
-@typing.final
-class MessageTooLargeError(builtins.Exception):
-    def __new__(cls, *args: typing.Any) -> MessageTooLargeError: ...
-    def __repr__(self) -> builtins.str: ...
-    def __str__(self) -> builtins.str: ...
 
 @typing.final
 class NoPeersSubscribedToTopicError(builtins.Exception):
@@ -205,6 +167,11 @@ class PeerId:
     def from_bytes(bytes: bytes) -> PeerId:
         r"""
         Parses a `PeerId` from bytes.
+        """
+    @staticmethod
+    def from_base58(s: builtins.str) -> PeerId:
+        r"""
+        Parses a `PeerId` from a base-58 encoded string.
         """
     def to_bytes(self) -> bytes:
         r"""

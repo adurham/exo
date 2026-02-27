@@ -105,8 +105,10 @@ def _allocate_and_validate_layers(
     if max_context <= 0:
         max_context = 2048
     
-    SYSTEM_RESERVE = 0.15 # 15% for macOS/System
+    import os
+    SYSTEM_RESERVE = float(os.getenv("EXO_SYSTEM_RESERVE", "0.15")) # 15% for macOS/System
     KV_SAFETY_FACTOR = 1.2
+    
     
     num_kv_heads = getattr(model_card, "num_kv_heads", 8)
     head_dim = getattr(model_card, "head_dim", 128)
@@ -120,7 +122,7 @@ def _allocate_and_validate_layers(
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
-            (node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE)) / total_memory.in_bytes
+            node_memory[node_id].ram_available.in_bytes / total_memory.in_bytes
             for node_id in node_ids
         ],
     )
