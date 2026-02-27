@@ -287,10 +287,9 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-off}"
     
     # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context runs
-    # Set EXO_DISABLE_METAL_TIMEOUT=1 at the top of the script to enable the triple-layered defense:
-    # 1. OS-Level Override (MTL_DISABLE_TIMEOUT=1, MTL_COMMAND_BUFFER_TIMEOUT=0)
-    # 2. C++ Backend "Safe Sync" (MLX_FORCE_DISTRIBUTED_GPU=0 fallback)
-    # 3. Dynamic Python Trigger (Generate.py monitoring context size)
+    # Set EXO_DISABLE_METAL_TIMEOUT=1 at the top of the script to disable the watchdog at the OS level.
+    # When enabled (1), Python relies on the OS override and avoids its own CPU fallback.
+    # When disabled (0), Python activates its dynamic CPU fallback safety net.
     if [ "${EXO_DISABLE_METAL_TIMEOUT:-0}" == "1" ]; then
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
     else
