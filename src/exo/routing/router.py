@@ -151,9 +151,7 @@ class Router:
     async def dial(self, peer_id: str, multiaddr: str):
         await self._net.dial(peer_id, multiaddr)
 
-    async def run(self):
-        logger.debug("Starting Router")
-
+    async def _bootstrap_discovery(self):
         # Bootstrap from environment variables if set
         discovery_peers = os.environ.get("EXO_DISCOVERY_PEERS", "")
         if discovery_peers:
@@ -168,6 +166,9 @@ class Router:
                 except Exception as e:
                     logger.error(f"Failed to dial static peer {peer}: {e}")
 
+    async def run(self):
+        logger.debug("Starting Router")
+
         try:
             async with self._tg as tg:
                 for topic in self.topic_routers:
@@ -178,6 +179,10 @@ class Router:
                 # subscribe to pending topics
                 for topic in self.topic_routers:
                     await self._networking_subscribe(topic)
+                
+                # dial static peers after networking has started
+                tg.start_soon(self._bootstrap_discovery)
+
                 # Router only shuts down if you cancel it.
                 await sleep_forever()
         finally:
