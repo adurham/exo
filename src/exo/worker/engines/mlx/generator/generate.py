@@ -706,6 +706,7 @@ def generate_step(
                 _massive_context = True # Prefill is always compute-heavy, default to safe sync
 
             if _massive_context:
+                logger.debug(f"Prefill: setting MLX_FORCE_DISTRIBUTED_GPU=0 for safe sync (massive context)")
                 os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
             
             try:
@@ -716,6 +717,7 @@ def generate_step(
                 mx.synchronize()  # Force GPU completion before next chunk
             finally:
                 if _massive_context:
+                    logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
                     os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
                     
             _slow_caches = []
