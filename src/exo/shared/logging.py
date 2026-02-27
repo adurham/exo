@@ -64,22 +64,20 @@ def logger_setup(log_file: Path | None, verbosity: int = 0):
             enqueue=True,
         )
     else:
-        logger.add(
-            sys.__stderr__,  # type: ignore
-            format="[ {time:HH:mm:ss.SSS} | <level>{level: <8}</level> | {name}:{function}:{line} ] <level>{message}</level>",
-            level="DEBUG",
-            colorize=True,
-            enqueue=True,
-        )
-    if log_file:
-        rotate_once = _once_then_never()
-        logger.add(
-            log_file,
-            format="[ {time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} ] {message}",
-            level="DEBUG",
-            colorize=False,
+                    logger.add(
+                    sys.__stderr__,  # type: ignore
+                    format="[ {time:HH:mm:ss.SSS} |<level>{level: <8}</level>| {name}:{function}:{line} ] <level>{message}</level>",
+                    level="DEBUG",
+                    colorize=True,
                     enqueue=True,
-                    rotation=lambda _, __: next(rotate_once),
+                )    if log_file:
+        rotate_once = _once_then_never()
+                logger.add(
+                    log_file,
+                    format="[ {time:YYYY-MM-DD HH:mm:ss.SSS} |<level>{level: <8}</level>| {name}:{function}:{line} ] {message}",
+                    level="DEBUG",
+                    colorize=False,
+                    enqueue=True,                    rotation=lambda _, __: next(rotate_once),
                     retention=_MAX_LOG_ARCHIVES,
                     compression=_zstd_compress,
                 )
