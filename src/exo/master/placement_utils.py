@@ -567,14 +567,14 @@ def _find_ip_prioritised(
             "wifi": 3,
             "unknown": 4,
         }
-    # RDMA prefers ethernet coordinator
+    # RDMA prefers ethernet coordinator unless lightning fast thunderbolt is available
     else:
         priority = {
-            "ethernet": 0,
-            "wifi": 1,
-            "maybe_ethernet": 2,
-            "unknown": 3,
-            "thunderbolt": 4,
+            "thunderbolt": 0,
+            "ethernet": 1,
+            "wifi": 2,
+            "maybe_ethernet": 3,
+            "unknown": 4,
         }
 
     def get_priority(ip: str) -> int:
