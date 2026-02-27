@@ -5,6 +5,9 @@
 # Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
 
 export EXO_FAST_SYNCH=off
+export MTL_DISABLE_TIMEOUT=1
+export MTL_COMMAND_BUFFER_TIMEOUT=0
+export EXO_DISABLE_METAL_TIMEOUT=1
 export EXO_EVAL_DEBUG=1
 export EXO_ADAPTIVE_THROTTLE=1
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
