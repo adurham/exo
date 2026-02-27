@@ -698,11 +698,26 @@ def generate_step(
             _num_caches = len(prompt_cache)
             _current_sends = _drain_pending_sends()
             all_states = [_c.state for _c in prompt_cache]
-            if _current_sends:
-                mx.eval(*all_states, *_current_sends)
-            else:
-                mx.eval(*all_states)
-            mx.synchronize()  # Force GPU completion before next chunk
+            
+            # Dynamic Safe Sync for Prefill
+            _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
+            _massive_context = False
+            if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+                _massive_context = True # Prefill is always compute-heavy, default to safe sync
+
+            if _massive_context:
+                os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+            
+            try:
+                if _current_sends:
+                    mx.eval(*all_states, *_current_sends)
+                else:
+                    mx.eval(*all_states)
+                mx.synchronize()  # Force GPU completion before next chunk
+            finally:
+                if _massive_context:
+                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+                    
             _slow_caches = []
             _t3 = _time.perf_counter()
 
