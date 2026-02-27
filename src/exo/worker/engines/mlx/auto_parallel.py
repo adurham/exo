@@ -149,7 +149,15 @@ class PipelineFirstLayer(CustomMlxLayer):
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            # DEFERRED EVAL: Do not manually mx.eval(x) here.
+            if self.is_prefill and os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1":
+                # Upstream Chunked Prefill: block Python thread until recv completes.
+                # Safe for memory-constrained edge devices but halts pipeline throughput.
+                t0 = _time.monotonic()
+                mx.eval(x)
+                elapsed = _time.monotonic() - t0
+                logger.debug(f"[PIPELINE-RECV-EVAL] rank={self.r} recv eval took {elapsed:.3f}s (prefill)")
+                
+            # DEFERRED EVAL (Default): Do not manually mx.eval(x) here.
             # Eager evaluation blocks the Python thread which delays building TP all_sum graphs.
             # This causes node 0 to Timeout while waiting for node 1 to participate in TP.
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
@@ -183,15 +191,31 @@ class PipelineLastLayer(CustomMlxLayer):
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
-            # DEFERRED SEND: Queue send array so central generation loop evaluates it
-            # via _drain_pending_sends. Eager eval blocks Python graph formulation.
-            self._pending_sends.append(output)
 
-            if cache is not None:
-                # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
-                # doesn't have .keys directly; access via first sub-cache.
-                _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+            if self.is_prefill and os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1":
+                # Upstream Chunked Prefill: force eager evaluation of send and cache state.
+                t0 = _time.monotonic()
+                mx.eval(output)
+                elapsed = _time.monotonic() - t0
+                logger.info(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill={self.is_prefill})")
+
+                if cache is not None:
+                    _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
+                    _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+                    t1 = _time.monotonic()
+                    mx.eval(_cache.keys)  # type: ignore
+                    elapsed2 = _time.monotonic() - t1
+                    logger.debug(f"[PIPELINE-CACHE-EVAL] rank={self.r} cache eval took {elapsed2:.3f}s (prefill)")
+            else:
+                # DEFERRED SEND (Default): Queue send array so central generation loop evaluates it
+                # via _drain_pending_sends. Eager eval blocks Python graph formulation.
+                self._pending_sends.append(output)
+    
+                if cache is not None:
+                    # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
+                    # doesn't have .keys directly; access via first sub-cache.
+                    _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
+                    _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
 
         # Note: On intermediate ranks (not last), cache state is evaluated
         # when generate.py processes bulk eval. Moving it here eagerly
