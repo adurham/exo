@@ -145,11 +145,12 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.recv_from: int = recv_from if recv_from is not None else (r - 1)
         self.group = group
         self.is_prefill: bool = False
+        self.chunked_prefill = os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1"
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            if self.is_prefill and os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1":
+            if self.is_prefill and self.chunked_prefill:
                 # Upstream Chunked Prefill: block Python thread until recv completes.
                 # Safe for memory-constrained edge devices but halts pipeline throughput.
                 t0 = _time.monotonic()
@@ -178,6 +179,7 @@ class PipelineLastLayer(CustomMlxLayer):
         self.group = group
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
+        self.chunked_prefill = os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1"
         self._pending_sends: list[mx.array] = []
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
@@ -192,7 +194,7 @@ class PipelineLastLayer(CustomMlxLayer):
                 output, (self.r + 1) % self.s, group=self.group
             )
 
-            if self.is_prefill and os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1":
+            if self.is_prefill and self.chunked_prefill:
                 # Upstream Chunked Prefill: force eager evaluation of send and cache state.
                 t0 = _time.monotonic()
                 mx.eval(output)
