@@ -13,10 +13,7 @@ from anyio import (
     sleep_forever,
 )
 from exo_pyo3_bindings import (
-    ConnectionUpdate,
-    ConnectionUpdateType,
     Keypair,
-    PeerId,
     MessageTooLargeError,
     NetworkingHandle,
     NoPeersSubscribedToTopicError,
@@ -151,7 +148,7 @@ class Router:
 
         return recv
 
-    async def dial(self, peer_id: PeerId, multiaddr: str):
+    async def dial(self, peer_id: str, multiaddr: str):
         await self._net.dial(peer_id, multiaddr)
 
     async def run(self):
@@ -166,9 +163,7 @@ class Router:
                     if len(parts) == 2:
                         addr = parts[0]
                         peer_id_str = parts[1]
-                        # Use base58 decode + from_bytes to workaround missing from_base58 in binding
-                        peer_id_bytes = base58.b58decode(peer_id_str)
-                        await self.dial(PeerId.from_bytes(peer_id_bytes), addr)
+                        await self.dial(peer_id_str, addr)
                         logger.info(f"Dialed static peer {peer_id_str} at {addr}")
                 except Exception as e:
                     logger.error(f"Failed to dial static peer {peer}: {e}")

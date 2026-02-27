@@ -27,6 +27,7 @@ def entrypoint(
     _logger: "loguru.Logger",
 ) -> None:
     global logger
+    global logger
     logger = _logger
 
     fast_synch_override = os.environ.get("EXO_FAST_SYNCH")
@@ -43,7 +44,7 @@ def entrypoint(
 
     # IBV_FORK_SAFE is set at module level now
 
-    global logger
+
     # Add file logging for debugging
     _logger.add(f"/tmp/exo_runner_debug_{bound_instance.bound_runner_id}.log", level="DEBUG", enqueue=True)
     logger = _logger
