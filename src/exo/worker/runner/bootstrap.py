@@ -31,7 +31,7 @@ def entrypoint(
     logger = _logger
 
     fast_synch_override = os.environ.get("EXO_FAST_SYNCH")
-    if fast_synch_override != "off":
+    if fast_synch_override != "0":
         os.environ["MLX_METAL_FAST_SYNCH"] = "1"
     else:
         os.environ["MLX_METAL_FAST_SYNCH"] = "0"

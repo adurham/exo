@@ -283,10 +283,10 @@ def main():
 
     # Set FAST_SYNCH override env var for runner subprocesses
     if args.fast_synch is True:
-        os.environ["EXO_FAST_SYNCH"] = "on"
+        os.environ["EXO_FAST_SYNCH"] = "1"
         logger.info("FAST_SYNCH forced ON")
     elif args.fast_synch is False:
-        os.environ["EXO_FAST_SYNCH"] = "off"
+        os.environ["EXO_FAST_SYNCH"] = "0"
         logger.info("FAST_SYNCH forced OFF")
 
     node = anyio.run(Node.create, args)
