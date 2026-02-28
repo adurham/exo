@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import {
     messages,
     currentResponse,
@@ -72,7 +73,7 @@
   // Auto-scroll when user sends a new message
   $effect(() => {
     const count = messageList.length;
-    if (count > lastMessageCount) {
+    if (count > untrack(() => lastMessageCount)) {
       const el = getScrollContainer();
       if (el) {
         requestAnimationFrame(() => {
@@ -87,9 +88,20 @@
   $effect(() => {
     // Track response to trigger re-check during streaming
     const _ = response;
+    const __ = messageList.length;
+
+    const shouldAutoScroll = untrack(() => !showScrollButton);
 
     // Small delay to let DOM update
-    requestAnimationFrame(() => updateScrollButtonVisibility());
+    requestAnimationFrame(() => {
+      const el = getScrollContainer();
+      if (el) {
+        if (shouldAutoScroll) {
+          el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+        }
+        updateScrollButtonVisibility();
+      }
+    });
   });
 
   // Edit state
