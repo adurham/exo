@@ -535,46 +535,35 @@ class InfoGatherer:
         # macmon pipe --interval [interval in ms]
         while True:
             try:
-                async with await open_process(
+                import subprocess
+                p = subprocess.Popen(
                     [
                         macmon_path,
                         "pipe",
                         "--interval",
                         str(int(self.macmon_interval * 1000)),
-                    ]
-                ) as p:
-                    if not p.stdout:
-                        logger.critical("MacMon closed stdout")
-                        return
-                    buffer = b""
-                    while True:
-                        with anyio.fail_after(self.macmon_interval * 3):
-                            chunk = await p.stdout.receive()
-                            buffer += chunk
-                            if b"\n" in buffer:
-                                lines = buffer.split(b"\n")
-                                buffer = lines.pop()
-                                for line in lines:
-                                    if line.strip():
-                                        await self.info_sender.send(
-                                            MacmonMetrics.from_raw_json(line.decode("utf-8").strip())
-                                        )
-            except CalledProcessError as e:
-                stderr_msg = "no stderr"
-                stderr_output = cast(bytes | str | None, e.stderr)
-                if stderr_output is not None:
-                    stderr_msg = (
-                        stderr_output.decode()
-                        if isinstance(stderr_output, bytes)
-                        else str(stderr_output)
-                    )
-                logger.warning(
-                    f"memory monitor failed with return code {e.returncode}: {stderr_msg}"
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
-            except TimeoutError:
-                logger.warning(
-                    f"memory monitor silent for {self.macmon_interval * 3}s - reloading"
-                )
+                if not p.stdout:
+                    logger.critical("MacMon closed stdout")
+                    return
+                
+                try:
+                    while p.poll() is None:
+                        line = await to_thread.run_sync(p.stdout.readline)
+                        if not line:
+                            break
+                        line_str = line.decode("utf-8").strip()
+                        if line_str.startswith("{"):
+                            try:
+                                await self.info_sender.send(MacmonMetrics.from_raw_json(line_str))
+                            except Exception as parse_e:
+                                pass
+                finally:
+                    p.terminate()
+                    p.wait(timeout=1.0)
             except Exception as e:
                 logger.opt(exception=e).warning("Error in memory monitor")
             await anyio.sleep(self.macmon_interval)
