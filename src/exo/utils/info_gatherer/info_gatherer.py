@@ -9,8 +9,7 @@ from typing import Self, cast
 
 import anyio
 from anyio import fail_after, open_process, to_thread
-from anyio.streams.buffered import BufferedByteReceiveStream
-from anyio.streams.text import TextReceiveStream
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from loguru import logger
 from pydantic import ValidationError
 
@@ -541,25 +540,24 @@ class InfoGatherer:
                         macmon_path,
                         "pipe",
                         "--interval",
-                        str(self.macmon_interval * 1000),
+                        str(int(self.macmon_interval * 1000)),
                     ]
                 ) as p:
                     if not p.stdout:
                         logger.critical("MacMon closed stdout")
                         return
-                    t = TextReceiveStream(BufferedByteReceiveStream(p.stdout))
-                    buffer = ""
+                    buffer = b""
                     while True:
                         with anyio.fail_after(self.macmon_interval * 3):
-                            chunk = await t.receive()
+                            chunk = await p.stdout.receive()
                             buffer += chunk
-                            if "\n" in buffer:
-                                lines = buffer.split("\n")
+                            if b"\n" in buffer:
+                                lines = buffer.split(b"\n")
                                 buffer = lines.pop()
                                 for line in lines:
                                     if line.strip():
                                         await self.info_sender.send(
-                                            MacmonMetrics.from_raw_json(line.strip())
+                                            MacmonMetrics.from_raw_json(line.decode("utf-8").strip())
                                         )
             except CalledProcessError as e:
                 stderr_msg = "no stderr"
