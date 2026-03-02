@@ -153,7 +153,7 @@ class DiskEventLog:
     def clear(self) -> None:
         """Clear all events from the log and delete the active file and all archives."""
         self._file.close()
-        for f in self._dir.iterdir():
+        for f in self._directory.iterdir():
             if f.is_file():
                 f.unlink()
         self._offset_cache.clear()
