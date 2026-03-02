@@ -151,10 +151,11 @@ class DiskEventLog:
         return self._count
 
     def clear(self) -> None:
-        """Clear all events from the log and delete the active file."""
+        """Clear all events from the log and delete the active file and all archives."""
         self._file.close()
-        if self._active_path.exists():
-            self._active_path.unlink()
+        for f in self._dir.iterdir():
+            if f.is_file():
+                f.unlink()
         self._offset_cache.clear()
         self._count = 0
         self._file = open(self._active_path, "w+b")
