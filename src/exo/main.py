@@ -232,7 +232,6 @@ class Node:
                         self.router.receiver(topics.GLOBAL_EVENTS),
                         self.router.sender(topics.LOCAL_EVENTS),
                     )
-                    self._tg.start_soon(self.event_router.run)
                     if self.download_coordinator:
                         self.download_coordinator.shutdown()
                         self.download_coordinator = DownloadCoordinator(
@@ -261,6 +260,12 @@ class Node:
                         self._tg.start_soon(self.worker.run)
                     if self.api:
                         self.api.reset(result.won_clock, self.event_router.receiver())
+                    # Start EventRouter AFTER all receivers are created.
+                    # Starting it earlier causes a race: events drain from the
+                    # OrderedBuffer while internal_outbound is still empty
+                    # (especially during `await worker.wait_until_stopped()`),
+                    # so workers/API never see those events and crash on desync.
+                    self._tg.start_soon(self.event_router.run)
                 else:
                     if self.api:
                         self.api.unpause(result.won_clock)
