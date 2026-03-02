@@ -258,8 +258,7 @@ class API:
 
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
-        self._event_log.close()
-        self._event_log = DiskEventLog(_API_EVENT_LOG_DIR)
+        self._event_log.clear()
         self.state = State()
         self._system_id = SystemId()
         self._text_generation_queues = {}
