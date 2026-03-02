@@ -1621,6 +1621,12 @@ class API:
     async def _apply_state(self):
         with self.event_receiver as events:
             async for i_event in events:
+                if self.state.last_event_applied_idx != i_event.idx - 1:
+                    logger.warning(
+                        f"Expected event {self.state.last_event_applied_idx + 1} but received {i_event.idx}. Dropping out-of-order event."
+                    )
+                    continue
+
                 self._event_log.append(i_event.event)
                 self.state = apply(self.state, i_event)
                 event = i_event.event
