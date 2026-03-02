@@ -249,6 +249,12 @@ class API:
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
 
+        # Replay existing event log into state
+        logger.info(f"Replaying {len(self._event_log)} events from disk log for API")
+        for i, event in enumerate(self._event_log.read_all()):
+            indexed = IndexedEvent(idx=i, event=event)
+            self.state = apply(self.state, indexed)
+
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
         self._event_log.close()
