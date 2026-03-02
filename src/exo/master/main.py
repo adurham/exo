@@ -96,12 +96,6 @@ class Master:
     async def run(self):
         logger.info("Starting Master")
 
-        # Replay existing event log into state
-        logger.info(f"Replaying {len(self._event_log)} events from disk log")
-        for i, event in enumerate(self._event_log.read_all()):
-            indexed = IndexedEvent(idx=i, event=event)
-            self.state = apply(self.state, indexed)
-
         try:
             async with self._tg as tg:
                 tg.start_soon(self._event_processor)

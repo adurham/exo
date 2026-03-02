@@ -100,9 +100,9 @@ def apply(state: State, event: IndexedEvent) -> State:
     # Just to test that events are only applied in correct order
     if state.last_event_applied_idx != event.idx - 1:
         logger.warning(
-            f"Expected event {state.last_event_applied_idx + 1} but received {event.idx}. Ignoring out-of-order event."
+            f"Expected event {state.last_event_applied_idx + 1} but received {event.idx}"
         )
-        return state
+    assert state.last_event_applied_idx == event.idx - 1
     new_state: State = event_apply(event.event, state)
     return new_state.model_copy(update={"last_event_applied_idx": event.idx})
 
