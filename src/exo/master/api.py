@@ -248,6 +248,7 @@ class API:
         ] = {}
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
+        self._apply_state_cancel_scope = anyio.CancelScope()
 
         # Replay existing event log into state
         logger.info(f"Replaying {len(self._event_log)} events from disk log for API")
@@ -266,6 +267,8 @@ class API:
         self.unpause(result_clock)
         self.event_receiver.close()
         self.event_receiver = event_receiver
+        self._apply_state_cancel_scope.cancel()
+        self._apply_state_cancel_scope = anyio.CancelScope()
         self._tg.start_soon(self._apply_state)
 
     def unpause(self, result_clock: int):
@@ -1625,37 +1628,38 @@ class API:
             )
 
     async def _apply_state(self):
-        with self.event_receiver as events:
-            async for i_event in events:
-                if self.state.last_event_applied_idx != i_event.idx - 1:
-                    logger.warning(
-                        f"Expected event {self.state.last_event_applied_idx + 1} but received {i_event.idx}. Dropping out-of-order event."
-                    )
-                    continue
+        with self._apply_state_cancel_scope:
+            with self.event_receiver as events:
+                async for i_event in events:
+                    if self.state.last_event_applied_idx != i_event.idx - 1:
+                        logger.warning(
+                            f"Expected event {self.state.last_event_applied_idx + 1} but received {i_event.idx}. Dropping out-of-order event."
+                        )
+                        continue
 
-                self._event_log.append(i_event.event)
-                self.state = apply(self.state, i_event)
-                event = i_event.event
+                    self._event_log.append(i_event.event)
+                    self.state = apply(self.state, i_event)
+                    event = i_event.event
 
-                if isinstance(event, ChunkGenerated):
-                    if queue := self._image_generation_queues.get(
-                        event.command_id, None
-                    ):
-                        assert isinstance(event.chunk, ImageChunk)
-                        try:
-                            await queue.send(event.chunk)
-                        except BrokenResourceError:
-                            self._image_generation_queues.pop(event.command_id, None)
-                    if queue := self._text_generation_queues.get(
-                        event.command_id, None
-                    ):
-                        assert not isinstance(event.chunk, ImageChunk)
-                        try:
-                            await queue.send(event.chunk)
-                        except BrokenResourceError:
-                            self._text_generation_queues.pop(event.command_id, None)
-                if isinstance(event, TracesMerged):
-                    self._save_merged_trace(event)
+                    if isinstance(event, ChunkGenerated):
+                        if queue := self._image_generation_queues.get(
+                            event.command_id, None
+                        ):
+                            assert isinstance(event.chunk, ImageChunk)
+                            try:
+                                await queue.send(event.chunk)
+                            except BrokenResourceError:
+                                self._image_generation_queues.pop(event.command_id, None)
+                        if queue := self._text_generation_queues.get(
+                            event.command_id, None
+                        ):
+                            assert not isinstance(event.chunk, ImageChunk)
+                            try:
+                                await queue.send(event.chunk)
+                            except BrokenResourceError:
+                                self._text_generation_queues.pop(event.command_id, None)
+                    if isinstance(event, TracesMerged):
+                        self._save_merged_trace(event)
 
     def _save_merged_trace(self, event: TracesMerged) -> None:
         traces = [
