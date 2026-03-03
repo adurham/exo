@@ -1,5 +1,6 @@
 import math
 import os
+import subprocess
 import time
 from copy import deepcopy
 import functools
@@ -86,9 +87,35 @@ def wired_limit(model: nn.Module, streams: Optional[List[mx.Stream]] = None):
         if model_bytes > 0.9 * max_rec_size:
             model_mb = model_bytes // 2**20
             max_rec_mb = max_rec_size // 2**20
-            # logger.warning(...) 
+            # logger.warning(...)
             pass
-        old_limit = mx.set_wired_limit(max_rec_size)
+
+        # Read the kernel's iogpu.wired_limit_mb to set MLX's limit BELOW it.
+        # If MLX's limit is higher than the kernel limit, the kernel will SIGABRT
+        # (uncatchable) when memory is exceeded.  By capping MLX's limit lower,
+        # MLX throws a catchable RuntimeError instead.
+        safe_limit = int(max_rec_size)
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", "iogpu.wired_limit_mb"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                iogpu_limit_bytes = int(result.stdout.strip()) * 1024 * 1024
+                # Use 90% of the kernel limit to leave headroom
+                safe_limit = int(iogpu_limit_bytes * 0.90)
+                logger.info(
+                    f"iogpu.wired_limit_mb={result.stdout.strip()}, "
+                    f"setting MLX wired limit to {safe_limit // (1024**2)}MB "
+                    f"(90% of kernel limit)"
+                )
+        except Exception:
+            # sysctl not available or failed; use 85% of max_rec_size
+            safe_limit = int(max_rec_size * 0.85)
+
+        # Never exceed max_rec_size
+        safe_limit = min(safe_limit, int(max_rec_size))
+        old_limit = mx.set_wired_limit(safe_limit)
         try:
             yield
         finally:
