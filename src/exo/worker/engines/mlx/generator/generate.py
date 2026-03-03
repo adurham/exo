@@ -947,6 +947,26 @@ def generate_step(
         if n == 0:
             mx.eval(y)
             _gap_t4 = _time.perf_counter()
+
+            # Hybrid KV quantization: convert fp16 cache to int8 for faster decode.
+            # Flash Attention was used during prefill (fp16); now switch to quantized
+            # attention which reads 2x less KV data per step.
+            _decode_kv_bits = _env_int("EXO_DECODE_KV_BITS", 0) or None
+            if _decode_kv_bits is not None and prompt_cache:
+                _qt0 = _time.perf_counter()
+                for _ce, _cc in enumerate(prompt_cache):
+                    if hasattr(_cc, "to_quantized"):
+                        prompt_cache[_ce] = _cc.to_quantized(
+                            group_size=kv_group_size, bits=_decode_kv_bits
+                        )
+                _qt1 = _time.perf_counter()
+                _kv_offset = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
+                logger.info(
+                    f"Hybrid KV quantization: {len(prompt_cache)} caches to "
+                    f"{_decode_kv_bits}-bit in {(_qt1-_qt0)*1000:.0f}ms "
+                    f"(kv_len={_kv_offset})"
+                )
+
             logger.debug(
                 f"PREFILL->DECODE gap: "
                 f"clear_cache={(_gap_t1-_gap_t0)*1000:.0f}ms "

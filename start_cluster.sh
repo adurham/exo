@@ -306,6 +306,10 @@ for NODE in "${NODES[@]}"; do
 
     # Per-layer profiling: forces mx.eval() per layer to measure real GPU time (slower but accurate)
     EXO_ENV="$EXO_ENV EXO_PROFILE_LAYERS=${EXO_PROFILE_LAYERS:-0}"
+
+    # Hybrid KV cache quantization: use Flash Attention for prefill, then quantize to 8-bit for decode.
+    # Set to 0 to disable. Reduces KV bandwidth by 2x during decode at large context.
+    EXO_ENV="$EXO_ENV EXO_DECODE_KV_BITS=${EXO_DECODE_KV_BITS:-8}"
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"
