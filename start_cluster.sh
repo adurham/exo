@@ -298,9 +298,6 @@ for NODE in "${NODES[@]}"; do
     fi
     EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-50000}"
 
-    # KV cache quantization: reduces memory for large contexts, improving decode throughput
-    EXO_ENV="$EXO_ENV EXO_KV_BITS=${EXO_KV_BITS:-8}"
-
     # Prefill Optimization: let code default to single-shot prefill (dynamic memory-aware adjustment)
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-524288} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
     
