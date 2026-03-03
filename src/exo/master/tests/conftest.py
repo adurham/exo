@@ -9,7 +9,7 @@ from exo.shared.types.topology import RDMAConnection, SocketConnection
 
 def create_node_memory(memory: int) -> MemoryUsage:
     return MemoryUsage.from_bytes(
-        ram_total=1000,
+        ram_total=memory * 4,
         ram_available=memory,
         swap_total=1000,
         swap_available=1000,

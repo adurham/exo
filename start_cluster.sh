@@ -298,8 +298,11 @@ for NODE in "${NODES[@]}"; do
     fi
     EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-50000}"
 
-    # Prefill Optimization: Use 256 step size for smoother RDMA and throttle 100 for concurrency
-    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-256} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
+    # KV cache quantization: reduces memory for large contexts, improving decode throughput
+    EXO_ENV="$EXO_ENV EXO_KV_BITS=${EXO_KV_BITS:-8}"
+
+    # Prefill Optimization: let code default to single-shot prefill (dynamic memory-aware adjustment)
+    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-524288} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
     
     # Use the provided MLX_JACCL_NUM_BUFFERS or default to 4 (reduced from 8 to prevent ENOMEM on large context)
     EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-4}"

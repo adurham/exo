@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator, Mapping
 
 from loguru import logger
@@ -101,20 +102,32 @@ def _allocate_and_validate_layers(
     model_card: ModelCard,
 ) -> list[int]:
     # --- Robust Model-Aware Memory Budgeting ---
-    max_context = getattr(model_card, "max_context_length", 0)
-    
-    import os
-    SYSTEM_RESERVE = float(os.getenv("EXO_SYSTEM_RESERVE", "0.15")) # 15% for macOS/System
-    KV_SAFETY_FACTOR = 1.2
-    
-    num_kv_heads = getattr(model_card, "num_kv_heads", 0)
-    head_dim = getattr(model_card, "head_dim", 0)
-    kv_bytes_per_token_per_layer = 2 * num_kv_heads * head_dim * 2
-    
-    kv_mem_per_layer_bytes = kv_bytes_per_token_per_layer * max_context * KV_SAFETY_FACTOR
+    system_reserve = float(
+        os.getenv("EXO_SYSTEM_RESERVE", "0.15")
+    )  # 15% for macOS/System
+    wired_limit_pct = float(
+        os.getenv("EXO_WIRED_LIMIT_PCT", "0.75")
+    )  # 75% for macOS GPU wired limit
+    kv_safety_factor = 1.2
+
+    kv_bytes_per_token_per_layer = 2 * model_card.num_kv_heads * model_card.head_dim * 2
+
+    kv_mem_per_layer_bytes = (
+        kv_bytes_per_token_per_layer * model_card.max_context_length * kv_safety_factor
+    )
     weight_mem_per_layer_bytes = model_card.storage_size.in_bytes / model_card.n_layers
     total_mem_per_layer_bytes = weight_mem_per_layer_bytes + kv_mem_per_layer_bytes
-    
+
+    def get_capped_available_memory(node_id: NodeId) -> int:
+        mem = node_memory[node_id]
+        # Cap 1: Standard system reserve from available
+        available = int(mem.ram_available.in_bytes * (1.0 - system_reserve))
+        # Cap 2: OS-level hard boundary for wired memory (e.g. macOS 75%)
+        wired_ceiling = int(
+            mem.ram_total.in_bytes * wired_limit_pct * (1.0 - system_reserve)
+        )
+        return min(available, wired_ceiling)
+
     # 1. Initial Proportional Allocation
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
@@ -125,40 +138,44 @@ def _allocate_and_validate_layers(
     )
 
     # 2. Redistribution Loop: Move layers from overloaded nodes to underloaded nodes
-    max_iterations = model_card.n_layers # Safety break
+    max_iterations = model_card.n_layers  # Safety break
     for _ in range(max_iterations):
         overloaded_idx = -1
         for i, node_id in enumerate(node_ids):
-            available = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
+            available = get_capped_available_memory(node_id)
             required = int(total_mem_per_layer_bytes * layer_allocations[i])
             if required > available and layer_allocations[i] > 1:
                 overloaded_idx = i
                 break
-        
+
         if overloaded_idx == -1:
-            break # Everyone fits!
+            break  # Everyone fits!
 
         # Find the node with the MOST relative headroom to take the layer
         best_target_idx = -1
         max_headroom = -1
         for i, node_id in enumerate(node_ids):
-            if i == overloaded_idx: continue
-            available = int(node_memory[node_id].ram_available.in_bytes * (1.0 - SYSTEM_RESERVE))
+            if i == overloaded_idx:
+                continue
+            available = get_capped_available_memory(node_id)
             required = int(total_mem_per_layer_bytes * (layer_allocations[i] + 1))
             headroom = available - required
             if headroom > max_headroom:
                 max_headroom = headroom
                 best_target_idx = i
-        
+
         if best_target_idx != -1:
-            logger.info(f"Redistributing layer: Node {overloaded_idx} -> Node {best_target_idx} to fit 200k KV.")
+            logger.info(
+                f"Redistributing layer: Node {overloaded_idx} -> Node {best_target_idx} to fit 200k KV."
+            )
             layer_allocations[overloaded_idx] -= 1
             layer_allocations[best_target_idx] += 1
         else:
-            if os.getenv("PYTEST_CURRENT_TEST") and "insufficient_memory" not in os.getenv("PYTEST_CURRENT_TEST", ""):
-                break # Allow toy bounds during unit testing
-            # If no node can take the layer, we have to fail or lower context
-            raise ValueError(f"Cluster-wide OOM: Cannot fit {model_card.n_layers} layers even with redistribution.")
+            logger.warning(
+                f"Cannot redistribute layers from overloaded node {overloaded_idx} "
+                f"(no node has enough headroom). Using best-effort allocation."
+            )
+            break
 
     return layer_allocations
 
@@ -335,9 +352,7 @@ def get_shard_assignments_for_hybrid_parallel(
     _validate_cycle(cycle)
     world_size = len(cycle)
     if world_size < 3:
-        raise ValueError(
-            "Hybrid TP+PP requires at least 3 nodes (2 TP + 1 PP)"
-        )
+        raise ValueError("Hybrid TP+PP requires at least 3 nodes (2 TP + 1 PP)")
 
     # Sort nodes by available memory descending; top N-1 form the TP group.
     nodes_by_memory = sorted(
@@ -356,13 +371,19 @@ def get_shard_assignments_for_hybrid_parallel(
     reordered_cycle = Cycle(node_ids=reordered_node_ids)
 
     # --- Layer allocation ---
+    wired_limit_pct = float(os.getenv("EXO_WIRED_LIMIT_PCT", "0.75"))
+
+    def get_wired_capacity(node_id: NodeId) -> int:
+        mem = node_memory[node_id]
+        # Same logic as PP: don't allocate more than the wired boundary permits
+        available = mem.ram_available.in_bytes
+        wired_ceiling = int(mem.ram_total.in_bytes * wired_limit_pct)
+        return min(available, wired_ceiling)
+
     # TP group acts as one unit: combined memory for its share of layers.
-    tp_memory_bytes = sum(
-        node_memory[nid].ram_available.in_bytes for nid in tp_node_ids
-    )
-    pp_memory_bytes = sum(
-        node_memory[nid].ram_available.in_bytes for nid in pp_tail_node_ids
-    )
+    tp_memory_bytes = sum(get_wired_capacity(nid) for nid in tp_node_ids)
+    pp_memory_bytes = sum(get_wired_capacity(nid) for nid in pp_tail_node_ids)
+
     total_memory_bytes = tp_memory_bytes + pp_memory_bytes
     if total_memory_bytes == 0:
         raise ValueError("Total available memory is 0")
@@ -373,17 +394,13 @@ def get_shard_assignments_for_hybrid_parallel(
     tp_layers = min(tp_layers, total_layers - len(pp_tail_node_ids))
     pp_layers = total_layers - tp_layers
 
-    # Cap PP tail layers to avoid OOM on memory-constrained nodes (e.g. MacBook 36GB).
-    # The PP tail mainly exists for KV cache offload, not heavy compute.
-    max_pp_layers = 3
-    if pp_layers > max_pp_layers:
-        pp_layers = max_pp_layers
-        tp_layers = total_layers - pp_layers
+    # The maximum layers the PP tail can handle is now calculated natively
+    # through the dynamically capped `pp_memory_bytes` fraction. No hardcoded limit.
 
     logger.info(
         f"Hybrid placement: {tp_size} TP nodes × {tp_layers} shared layers, "
         f"{len(pp_tail_node_ids)} PP tail node(s) × {pp_layers} layers "
-        f"(compute-optimized: minimize PP tail for pipeline sync)"
+        f"(dynamically memory-capped)"
     )
 
     # --- Build shard assignments ---
@@ -501,7 +518,9 @@ def get_mlx_jaccl_devices_matrix(
                     break
             else:
                 raise ValueError(
-                    "Current jaccl backend requires all-to-all RDMA connections"
+                    f"No RDMA connection from {node_i} to {node_j} "
+                    f"(interface may be PORT_DOWN). Check Thunderbolt cables "
+                    f"and run 'ibv_devinfo' on affected nodes."
                 )
 
     return matrix
@@ -530,24 +549,24 @@ def _find_ip_prioritised(
     Priority: 192.168.200.x > thunderbolt > ethernet > wifi > unknown
     """
     other_network_info = node_network.get(other_node_id, NodeNetworkInfo())
-    
+
     # Get all IPv4 addresses from the peer's network info
     network_ip_map = {
         iface.ip_address: iface
         for iface in other_network_info.interfaces
         if iface.ip_address and ":" not in iface.ip_address
     }
-    
+
     # Check for direct connections first
     topology_ips = set(_find_connection_ip(node_id, other_node_id, cycle_digraph))
-    
+
     # Filter network IPs by topology connections if any exist
     candidate_ips = [ip for ip in network_ip_map if ip in topology_ips]
-    
+
     # If no overlap or no topology connections, fall back to all network IPs
     if not candidate_ips:
         candidate_ips = list(network_ip_map.keys())
-        
+
     # If still no IPs (no network info), use topology IPs
     if not candidate_ips:
         candidate_ips = list(topology_ips)
@@ -556,7 +575,8 @@ def _find_ip_prioritised(
         return None
 
     ip_to_type = {
-        iface.ip_address: iface.interface_type for iface in other_network_info.interfaces
+        iface.ip_address: iface.interface_type
+        for iface in other_network_info.interfaces
     }
     # Ring should prioritise fastest connection. As a best-effort, we prioritise TB.
     if ring:

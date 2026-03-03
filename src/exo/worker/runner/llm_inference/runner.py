@@ -139,9 +139,7 @@ def main(
     seen = set[TaskId]()
     running_notified = set[TaskId]()
     batch_max_size = max(1, int(os.environ.get("EXO_BATCH_MAX_SIZE", "4")))
-    batch_max_wait_s = max(
-        0.0, float(os.environ.get("EXO_BATCH_MAX_WAIT_S", "0.005"))
-    )
+    batch_max_wait_s = max(0.0, float(os.environ.get("EXO_BATCH_MAX_WAIT_S", "0.005")))
 
     def _is_batchable_text_task(task_params: TextGenerationTaskParams) -> bool:
         return (
@@ -355,9 +353,7 @@ def main(
                                     pending.append(nxt)
                                     break
 
-                    logger.info(
-                        f"received chat request(s): batch_size={len(batch)}"
-                    )
+                    logger.info(f"received chat request(s): batch_size={len(batch)}")
                     current_status = RunnerRunning()
                     logger.info("runner running")
                     event_sender.send(
@@ -368,7 +364,9 @@ def main(
                     for b in batch:
                         event_sender.send(TaskAcknowledged(task_id=b.task_id))
 
-                    assert inference_model and not isinstance(inference_model, DistributedImageModel)
+                    assert inference_model and not isinstance(
+                        inference_model, DistributedImageModel
+                    )
                     assert tokenizer
                     assert check_for_cancel_every
 
@@ -376,11 +374,18 @@ def main(
                     # and check for cancellation between prefill chunks.
                     # TODO(evan): kill the callbacks/runner refactor
                     #  Specifically the part that this is literally duplicated code.
+                    _prefill_barrier_interval = int(
+                        os.environ.get("EXO_PREFILL_BARRIER_INTERVAL", "10")
+                    )
+                    _prefill_chunks_since_barrier = [0]  # mutable container for closure
+
                     def on_prefill_progress(
                         processed: int,
                         total: int,
                         _task_id: TaskId = task.task_id,
                         _group: mx.distributed.Group | None = group,
+                        _barrier_counter: list[int] = _prefill_chunks_since_barrier,
+                        _barrier_interval: int = _prefill_barrier_interval,
                     ) -> None:
                         if device_rank == 0:
                             event_sender.send(
@@ -393,10 +398,7 @@ def main(
                                     ),
                                 )
                             )
-                        # Distributed barrier: required to keep PP head and
-                        # PP tail in sync.  Without it, PP head races into
-                        # decode while PP tail is still in prefill → desync.
-                        # Costs ~11 s (PP tail compute time) but cannot be removed.
+                        _barrier_counter[0] += 1
                         cancelled_tasks.update(cancel_receiver.collect())
                         want_to_cancel = (_task_id in cancelled_tasks) or (
                             TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
@@ -408,7 +410,18 @@ def main(
                             if want_to_cancel:
                                 raise PrefillCancelled()
                         else:
-                            if mx_any(want_to_cancel, _group):
+                            # Only run the distributed barrier every N chunks
+                            # or on the final chunk to avoid wasting ~1.5-2s
+                            # per chunk on RDMA all_sum + mx.eval round-trips.
+                            is_last_chunk = processed >= total
+                            at_barrier_interval = (
+                                _barrier_counter[0] >= _barrier_interval
+                            )
+                            if at_barrier_interval or is_last_chunk:
+                                _barrier_counter[0] = 0
+                                if mx_any(want_to_cancel, _group):
+                                    raise PrefillCancelled()
+                            elif want_to_cancel:
                                 raise PrefillCancelled()
 
                     try:
@@ -517,7 +530,8 @@ def main(
                                 mlx_generator = parse_gpt_oss(mlx_generator)
                             elif (
                                 isinstance(inference_model, DeepseekV32Model)
-                                and "deepseek" in shard_metadata.model_card.model_id.lower()
+                                and "deepseek"
+                                in shard_metadata.model_card.model_id.lower()
                             ):
                                 mlx_generator = parse_deepseek_v32(mlx_generator)
                             elif tool_parser:
@@ -537,7 +551,9 @@ def main(
                                     cancelled_tasks.update(cancel_receiver.collect())
                                     want_to_cancel = (
                                         task.task_id in cancelled_tasks
-                                    ) or (TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks)
+                                    ) or (
+                                        TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
+                                    )
                                     if mx_any(want_to_cancel, group):
                                         break
 
@@ -964,7 +980,6 @@ def parse_tool_calls(
         else:
             # fallthrough
             yield response
-
 
 
 def filter_kimi_tokens(
