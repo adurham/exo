@@ -303,6 +303,9 @@ for NODE in "${NODES[@]}"; do
     
     # Use the provided MLX_JACCL_NUM_BUFFERS or default to 8 (increased from 4 for better RDMA pipelining)
     EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-8}"
+
+    # Per-layer profiling: forces mx.eval() per layer to measure real GPU time (slower but accurate)
+    EXO_ENV="$EXO_ENV EXO_PROFILE_LAYERS=${EXO_PROFILE_LAYERS:-1}"
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"
