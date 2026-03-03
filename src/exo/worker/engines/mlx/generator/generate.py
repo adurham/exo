@@ -94,6 +94,12 @@ def wired_limit(model: nn.Module, streams: Optional[List[mx.Stream]] = None):
         # If MLX's limit is higher than the kernel limit, the kernel will SIGABRT
         # (uncatchable) when memory is exceeded.  By capping MLX's limit lower,
         # MLX throws a catchable RuntimeError instead.
+        #
+        # Use a fixed 3GB margin below the kernel limit rather than a percentage.
+        # A percentage-based margin (e.g. 90%) is too aggressive on high-memory
+        # nodes where the model barely fits (e.g. 71GB model on 115GB limit needs
+        # ~108GB during prefill — 90% of 115GB = 103.5GB is too low).
+        _HEADROOM_BYTES = 3 * 1024**3  # 3 GB below kernel limit
         safe_limit = int(max_rec_size)
         try:
             result = subprocess.run(
@@ -102,16 +108,18 @@ def wired_limit(model: nn.Module, streams: Optional[List[mx.Stream]] = None):
             )
             if result.returncode == 0 and result.stdout.strip():
                 iogpu_limit_bytes = int(result.stdout.strip()) * 1024 * 1024
-                # Use 90% of the kernel limit to leave headroom
-                safe_limit = int(iogpu_limit_bytes * 0.90)
+                safe_limit = max(
+                    iogpu_limit_bytes - _HEADROOM_BYTES,
+                    iogpu_limit_bytes // 2,  # never go below 50%
+                )
                 logger.info(
                     f"iogpu.wired_limit_mb={result.stdout.strip()}, "
                     f"setting MLX wired limit to {safe_limit // (1024**2)}MB "
-                    f"(90% of kernel limit)"
+                    f"(kernel limit minus {_HEADROOM_BYTES // (1024**3)}GB headroom)"
                 )
         except Exception:
-            # sysctl not available or failed; use 85% of max_rec_size
-            safe_limit = int(max_rec_size * 0.85)
+            # sysctl not available or failed; use 95% of max_rec_size
+            safe_limit = int(max_rec_size * 0.95)
 
         # Never exceed max_rec_size
         safe_limit = min(safe_limit, int(max_rec_size))
