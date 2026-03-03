@@ -315,12 +315,22 @@ def prefill(
         if group is not None and group.size() > 1:
             pp_cap = _env_int("EXO_PP_PREFILL_STEP_SIZE", 4096)
 
-            # Memory-aware step size for pipeline parallel.  During prefill each
-            # token needs temporary activation memory for attention, MoE expert
-            # routing, and KV-cache growth.  Conservative estimate: ~4MB per
-            # token covers worst-case MoE models (128 experts, top-8 routing).
-            free_bytes = max(0, total_mem - active_mem)
-            _BYTES_PER_TOKEN = 4 * 1024 * 1024
+            # Memory-aware step size for pipeline parallel.  Use the GPU wired
+            # limit (not total device memory) as the ceiling — the kernel will
+            # SIGABRT if we exceed iogpu.wired_limit_mb.  Per-token activation
+            # memory for MoE models (128 experts, top-8) is ~6-8MB empirically.
+            wired_limit_bytes = total_mem
+            try:
+                _r = subprocess.run(
+                    ["sysctl", "-n", "iogpu.wired_limit_mb"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                if _r.returncode == 0 and _r.stdout.strip():
+                    wired_limit_bytes = int(_r.stdout.strip()) * 1024 * 1024
+            except Exception:
+                pass
+            free_bytes = max(0, wired_limit_bytes - active_mem)
+            _BYTES_PER_TOKEN = 8 * 1024 * 1024  # 8MB per token (empirical for MoE)
             local_safe = max(256, int(free_bytes * 0.5) // _BYTES_PER_TOKEN)
             local_safe = min(local_safe, pp_cap, max_step)
 
@@ -334,7 +344,9 @@ def prefill(
             logger.info(
                 f"Pipeline parallel prefill: step={dynamic_step} "
                 f"(local_safe={local_safe}, pp_cap={pp_cap}, "
-                f"free={free_bytes / 1e9:.1f}GB)"
+                f"wired_limit={wired_limit_bytes / 1e9:.1f}GB, "
+                f"active={active_mem / 1e9:.1f}GB, "
+                f"free_for_activations={free_bytes / 1e9:.1f}GB)"
             )
         elif free_ratio < 0.15:
             dynamic_step = 256
