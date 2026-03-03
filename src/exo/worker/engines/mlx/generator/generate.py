@@ -10,7 +10,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.generate import BatchGenerator
 from mlx_lm.utils import does_model_support_input_embeddings
-from mlx_lm.models.cache import ArraysCache, RotatingKVCache
+from mlx_lm.models.cache import ArraysCache, QuantizedKVCache, RotatingKVCache
 from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
@@ -431,11 +431,19 @@ def warmup_inference(
         tokens_generated += 1
     set_pipeline_prefill(model, is_prefill=False)
 
-    # Save warmup KV cache to prefix cache for potential reuse
+    # Save warmup KV cache to prefix cache for potential reuse.
+    # Skip if caches were quantized (QuantizedKVCache) — quantized caches use
+    # quantized_scaled_dot_product_attention instead of Flash Attention during
+    # prefill, which deadlocks in pipeline parallel (mx.depends can't handle
+    # the tuple-based keys of QuantizedKVCache).
     if kv_prefix_cache is not None:
-        warmup_tokens = encode_prompt(tokenizer, warmup_prompt)
-        kv_prefix_cache.add_kv_cache(warmup_tokens, cache)
-        logger.info(f"Warmup KV cache saved to prefix cache ({len(warmup_tokens)} tokens)")
+        _has_quantized = any(isinstance(c, QuantizedKVCache) for c in cache)
+        if _has_quantized:
+            logger.info("Skipping prefix cache save: caches were quantized during warmup decode")
+        else:
+            warmup_tokens = encode_prompt(tokenizer, warmup_prompt)
+            kv_prefix_cache.add_kv_cache(warmup_tokens, cache)
+            logger.info(f"Warmup KV cache saved to prefix cache ({len(warmup_tokens)} tokens)")
 
     logger.info("Generated ALL warmup tokens")
 
@@ -1148,11 +1156,21 @@ def mlx_generate(
         caches, prompt_tokens, matched_index = kv_prefix_cache.get_kv_cache(
             model, all_prompt_tokens, normalized_tokens=normalized_tokens
         )
-        prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)
-        if prefix_hit_length > 0:
-            logger.info(
-                f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
-            )
+        # Safety: if restored caches are quantized, discard them and use fresh
+        # fp16 caches. Quantized caches deadlock pipeline parallel prefill
+        # because quantized_scaled_dot_product_attention + mx.depends on tuple
+        # keys breaks the distributed send dependency chain.
+        if any(isinstance(c, QuantizedKVCache) for c in caches):
+            logger.warning("Prefix cache returned quantized caches — falling back to fresh fp16 caches")
+            caches = make_kv_cache(model=model)
+            prompt_tokens = all_prompt_tokens
+            matched_index = None
+        else:
+            prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)
+            if prefix_hit_length > 0:
+                logger.info(
+                    f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
+                )
 
     logits_processors: list[Callable[[mx.array, mx.array], mx.array]] = []
     if is_bench:
@@ -1303,36 +1321,42 @@ def mlx_generate(
                 f"{generation_tps:.1f} tok/s"
             )
             if kv_prefix_cache is not None:
-                generated_tokens_array = mx.array(
-                    tokenizer.encode(
-                        "".join(generated_text_parts), add_special_tokens=False
-                    )
-                )
-                full_prompt_tokens = mx.concatenate(
-                    [all_prompt_tokens, generated_tokens_array]
-                )
-                hit_ratio = (
-                    prefix_hit_length / len(all_prompt_tokens)
-                    if len(all_prompt_tokens) > 0
-                    else 0.0
-                )
-                if (
-                    matched_index is not None
-                    and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
-                ):
-                    kv_prefix_cache.update_kv_cache(
-                        matched_index,
-                        all_prompt_tokens,
-                        caches,
-                        cache_snapshots,
-                        restore_pos=prefix_hit_length,
-                        normalized_tokens=normalized_tokens,
-                    )
+                # Don't save quantized caches — they deadlock pipeline parallel
+                # prefill on subsequent requests (see warmup comment for details).
+                _has_quantized = any(isinstance(c, QuantizedKVCache) for c in caches)
+                if _has_quantized:
+                    logger.debug("Skipping prefix cache save: caches are quantized")
                 else:
-                    kv_prefix_cache.add_kv_cache(
-                        all_prompt_tokens, caches, cache_snapshots,
-                        normalized_tokens=normalized_tokens,
+                    generated_tokens_array = mx.array(
+                        tokenizer.encode(
+                            "".join(generated_text_parts), add_special_tokens=False
+                        )
                     )
+                    full_prompt_tokens = mx.concatenate(
+                        [all_prompt_tokens, generated_tokens_array]
+                    )
+                    hit_ratio = (
+                        prefix_hit_length / len(all_prompt_tokens)
+                        if len(all_prompt_tokens) > 0
+                        else 0.0
+                    )
+                    if (
+                        matched_index is not None
+                        and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
+                    ):
+                        kv_prefix_cache.update_kv_cache(
+                            matched_index,
+                            all_prompt_tokens,
+                            caches,
+                            cache_snapshots,
+                            restore_pos=prefix_hit_length,
+                            normalized_tokens=normalized_tokens,
+                        )
+                    else:
+                        kv_prefix_cache.add_kv_cache(
+                            all_prompt_tokens, caches, cache_snapshots,
+                            normalized_tokens=normalized_tokens,
+                        )
 
         yield GenerationResponse(
             text=text,
