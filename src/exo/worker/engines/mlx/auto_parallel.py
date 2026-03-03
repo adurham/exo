@@ -48,6 +48,34 @@ import time as _time
 _tp_debug = os.environ.get("EXO_TP_DEBUG", "0") == "1"
 _tp_layer_counter = 0  # auto-incrementing layer ID for debug logs
 
+# Per-layer profiling: forces mx.eval() after each layer to measure real GPU time.
+# Slower than normal execution, but gives accurate relative breakdown.
+PROFILE_LAYERS = os.environ.get("EXO_PROFILE_LAYERS", "0") == "1"
+
+
+class _LayerProfiler:
+    """Accumulates per-layer timing data across decode steps."""
+
+    def __init__(self) -> None:
+        self._current: dict[str, float] = {}
+        self._steps: list[dict[str, float]] = []
+
+    def record(self, key: str, ms: float) -> None:
+        self._current[key] = ms
+
+    def end_step(self) -> None:
+        if self._current:
+            self._steps.append(self._current)
+            self._current = {}
+
+    def get_and_clear(self) -> list[dict[str, float]]:
+        data = list(self._steps)
+        self._steps.clear()
+        return data
+
+
+layer_profiler = _LayerProfiler()
+
 def _dbg(msg: str) -> None:
     """Write debug trace directly to file (bypasses loguru and subprocess stdout issues)."""
     with open("/tmp/exo_tp_debug.log", "a") as f:
@@ -132,6 +160,22 @@ class CustomMlxLayer(nn.Module):
                 return getattr(original_layer, name)
 
 
+class _ProfiledLayerWrapper(CustomMlxLayer):
+    """Wraps a middle layer to force eval and measure real GPU time."""
+
+    def __init__(self, original_layer: _LayerCallable, label: str):
+        super().__init__(original_layer)
+        self._label = label
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        mx.eval(x)
+        t0 = _time.perf_counter()
+        out: mx.array = self.original_layer(x, *args, **kwargs)
+        mx.eval(out)
+        layer_profiler.record(self._label, (_time.perf_counter() - t0) * 1000)
+        return out
+
+
 class PipelineFirstLayer(CustomMlxLayer):
     def __init__(
         self,
@@ -149,8 +193,14 @@ class PipelineFirstLayer(CustomMlxLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
+            if PROFILE_LAYERS:
+                mx.eval(x)
+                _t_recv0 = _time.perf_counter()
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            if self.is_prefill and self.chunked_prefill:
+            if PROFILE_LAYERS:
+                mx.eval(x)
+                layer_profiler.record("recv", (_time.perf_counter() - _t_recv0) * 1000)
+            elif self.is_prefill and self.chunked_prefill:
                 # Upstream Chunked Prefill: block Python thread until recv completes.
                 # Safe for memory-constrained edge devices but halts pipeline throughput.
                 t0 = _time.monotonic()
@@ -162,6 +212,13 @@ class PipelineFirstLayer(CustomMlxLayer):
             # Eager evaluation blocks the Python thread which delays building TP all_sum graphs.
             # This causes node 0 to Timeout while waiting for node 1 to participate in TP.
             logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
+        if PROFILE_LAYERS:
+            mx.eval(x)
+            _t_compute0 = _time.perf_counter()
+            out = self.original_layer(x, *args, **kwargs)
+            mx.eval(out)
+            layer_profiler.record("layer_first", (_time.perf_counter() - _t_compute0) * 1000)
+            return out
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -187,14 +244,25 @@ class PipelineLastLayer(CustomMlxLayer):
             x, *args, **kwargs
         ).arguments.get("cache", None)
 
+        if PROFILE_LAYERS:
+            mx.eval(x)
+            _t_compute0 = _time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
+        if PROFILE_LAYERS:
+            mx.eval(output)
+            layer_profiler.record("layer_last", (_time.perf_counter() - _t_compute0) * 1000)
 
         if self.r != self.s - 1:
+            if PROFILE_LAYERS:
+                _t_send0 = _time.perf_counter()
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
+            if PROFILE_LAYERS:
+                mx.eval(output)
+                layer_profiler.record("send", (_time.perf_counter() - _t_send0) * 1000)
 
-            if self.is_prefill and self.chunked_prefill:
+            elif self.is_prefill and self.chunked_prefill:
                 # Upstream Chunked Prefill: force eager evaluation of send and cache state.
                 t0 = _time.monotonic()
                 mx.eval(output)
@@ -314,6 +382,12 @@ def pipeline_auto_parallel(
         world_size,
         group=group,
     )
+
+    # When profiling, wrap middle layers to force eval and measure per-layer time
+    if PROFILE_LAYERS:
+        for i in range(1, len(layers) - 1):
+            layers[i] = _ProfiledLayerWrapper(layers[i], f"layer_{i}")  # type: ignore
+        logger.info(f"[PROFILE] Layer profiling enabled: rank={device_rank}, {len(layers)} layers")
 
     if isinstance(inner_model_instance, GptOssMoeModel):
         inner_model_instance.layer_types = inner_model_instance.layer_types[  # type: ignore

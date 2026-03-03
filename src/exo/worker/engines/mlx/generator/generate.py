@@ -596,11 +596,15 @@ def generate_step(
 
     # Pre-compute hybrid pipeline layer list once (avoid per-step getattr + iteration)
     _hybrid_layers: list = []
+    _profile_enabled = False
+    _layer_profiler: Any = None
     try:
-        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, PipelineLastLayer, get_layers, get_inner_model
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, PipelineLastLayer, get_layers, get_inner_model, layer_profiler as _lp, PROFILE_LAYERS
         inner_model = get_inner_model(model)
         _all_layers = get_layers(inner_model)
         _hybrid_layers = [l for l in _all_layers if isinstance(l, (_HybridPipelineLastLayer, PipelineLastLayer))]
+        _profile_enabled = PROFILE_LAYERS
+        _layer_profiler = _lp
     except (ValueError, ImportError):
         pass
 
@@ -819,6 +823,19 @@ def generate_step(
                         f"mem_active={_mem_active:.1f}GB mem_peak={_mem_peak:.1f}GB "
                         f"step_ms={(_st6-_st0)*1000:.0f}"
                     )
+
+            # Per-layer profiling summary
+            if _profile_enabled and _layer_profiler is not None:
+                _layer_profiler.end_step()
+                if _step_id > 0 and _step_id % 10 == 0:
+                    steps = _layer_profiler.get_and_clear()
+                    if steps:
+                        # Average across steps
+                        all_keys = sorted({k for s in steps for k in s})
+                        avgs = {k: sum(s.get(k, 0) for s in steps) / len(steps) for k in all_keys}
+                        total = sum(avgs.values())
+                        parts = " ".join(f"{k}={v:.1f}" for k, v in avgs.items())
+                        logger.info(f"[PROFILE step={_step_id} n={len(steps)}] {parts} total={total:.1f}ms")
 
             return sampled, logprobs.squeeze(0)
 
