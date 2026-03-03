@@ -263,10 +263,23 @@ def prefill(
         active_mem = mx.get_active_memory()
         total_mem = mx.device_info().get('memory_size', 32 * 1024**3)
         free_ratio = 1.0 - (active_mem / total_mem)
-        
+
         # Base config defaults
         max_step = _env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE)
-        
+
+        # Pipeline parallel RDMA cap: each chunk's hidden state tensor is sent
+        # via mx.distributed.send/recv over RDMA.  Large chunks (e.g. 50K tokens
+        # × 3072 hidden × 2B = 300MB) exceed jaccl's RDMA buffer capacity and
+        # trigger SIGABRT.  Cap at a safe size for distributed prefill.
+        if group is not None and group.size() > 1:
+            pp_cap = _env_int("EXO_PP_PREFILL_STEP_SIZE", 4096)
+            if max_step > pp_cap:
+                logger.info(
+                    f"Pipeline parallel: capping prefill step size from "
+                    f"{max_step} to {pp_cap} (RDMA buffer safety)"
+                )
+                max_step = pp_cap
+
         # If memory is extremely tight (< 15% free), shrink the prefill chunks aggressively
         if free_ratio < 0.15:
             dynamic_step = 256
