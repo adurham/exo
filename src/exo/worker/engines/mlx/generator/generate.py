@@ -312,26 +312,36 @@ def prefill(
         # Base config defaults
         max_step = _env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE)
 
-        # Pipeline parallel RDMA cap: each chunk's hidden state tensor is sent
-        # via mx.distributed.send/recv over RDMA.  Large chunks (e.g. 50K tokens
-        # × 3072 hidden × 2B = 300MB) exceed jaccl's RDMA buffer capacity and
-        # trigger SIGABRT.  Cap at a safe size for distributed prefill.
         if group is not None and group.size() > 1:
             pp_cap = _env_int("EXO_PP_PREFILL_STEP_SIZE", 4096)
-            if max_step > pp_cap:
-                logger.info(
-                    f"Pipeline parallel: capping prefill step size from "
-                    f"{max_step} to {pp_cap} (RDMA buffer safety)"
-                )
-                max_step = pp_cap
 
-        # If memory is extremely tight (< 15% free), shrink the prefill chunks aggressively
-        if free_ratio < 0.15:
+            # Memory-aware step size for pipeline parallel.  During prefill each
+            # token needs temporary activation memory for attention, MoE expert
+            # routing, and KV-cache growth.  Conservative estimate: ~4MB per
+            # token covers worst-case MoE models (128 experts, top-8 routing).
+            free_bytes = max(0, total_mem - active_mem)
+            _BYTES_PER_TOKEN = 4 * 1024 * 1024
+            local_safe = max(256, int(free_bytes * 0.5) // _BYTES_PER_TOKEN)
+            local_safe = min(local_safe, pp_cap, max_step)
+
+            # All ranks MUST use the same step size or the pipeline desyncs.
+            # Coordinate via all_gather to find the minimum safe value.
+            local_val = mx.array([local_safe], dtype=mx.int32)
+            all_vals = mx.distributed.all_gather(local_val, group=group)
+            mx.eval(all_vals)
+            dynamic_step = max(256, int(all_vals.min().item()))
+
+            logger.info(
+                f"Pipeline parallel prefill: step={dynamic_step} "
+                f"(local_safe={local_safe}, pp_cap={pp_cap}, "
+                f"free={free_bytes / 1e9:.1f}GB)"
+            )
+        elif free_ratio < 0.15:
             dynamic_step = 256
-            logger.warning(f"Memory tight ({free_ratio*100:.1f}% free). Shrinking prefill step size to {dynamic_step}")
+            logger.warning(f"Memory tight ({free_ratio*100:.1f}% free). Shrinking prefill step to {dynamic_step}")
         elif free_ratio < 0.30:
             dynamic_step = 512
-            logger.info(f"Memory constrained ({free_ratio*100:.1f}% free). Adjusting prefill step size to {dynamic_step}")
+            logger.info(f"Memory constrained ({free_ratio*100:.1f}% free). Adjusting prefill step to {dynamic_step}")
         else:
             dynamic_step = max_step
     except Exception as e:
