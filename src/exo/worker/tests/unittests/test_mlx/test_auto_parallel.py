@@ -138,9 +138,17 @@ def test_composed_call_works() -> None:
                 f"Device {rank} failed: {errors.get(rank, 'unknown')}"
             )
             result_array = results[rank]
-            # Both devices see the final result (4.0) after all_gather
-            assert (result_array == 4.0).all(), (
-                f"Device {rank}: expected 4.0, got {result_array}"
-            )
+            if rank == world_size - 1:
+                # Last rank has the correct final result (pipeline output)
+                assert (result_array == 4.0).all(), (
+                    f"Device {rank}: expected 4.0, got {result_array}"
+                )
+            else:
+                # Non-last ranks get their local intermediate result (no all_gather).
+                # Token sync to broadcast the correct token happens in generate.py
+                # via all_sum, not in PipelineLastLayer.
+                assert (result_array == 2.0).all(), (
+                    f"Device {rank}: expected 2.0 (local), got {result_array}"
+                )
     finally:
         os.unlink(hostfile_path)

@@ -223,16 +223,9 @@ class PipelineLastLayer(CustomMlxLayer):
         # when generate.py processes bulk eval. Moving it here eagerly
         # doesn't help since there's no downstream node to overlap with.
 
-        if not self.is_prefill:
-            # Revert to all_gather to avoid GPU time out on huge models
-            # Manual broadcast's explicit eval() was causing command buffer timeouts on Rank 1
-            outputs = mx.distributed.all_gather(output, group=self.group)
-            
-            # Retrieve the output from the last rank, preserving dimensions.
-            # all_gather concatenates along axis 0. We need the last B rows.
-            B = output.shape[0]
-            output = outputs[-B:]
-
+        # During decode, skip all_gather — only the last rank has correct logits.
+        # Token sync is handled via all_sum in generate.py, transferring ~12 bytes
+        # (one token ID) instead of the full hidden state from all ranks.
         return output
 
 
@@ -243,6 +236,9 @@ def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     # Toggle hybrid decode mode: token sync only runs during decode (is_prefill=False)
     if hasattr(model, '_hybrid_pipeline_group'):
         model._hybrid_decode_mode = not is_prefill  # type: ignore
+    # Toggle pipeline-only decode mode for token sync via all_sum
+    if hasattr(model, '_pipeline_group'):
+        model._pipeline_decode_mode = not is_prefill  # type: ignore
 
 
 def set_pipeline_cache(model: nn.Module, prompt_cache: list) -> None:  # type: ignore
@@ -354,6 +350,12 @@ def pipeline_auto_parallel(
         inner_model_instance._full_idx = 0 if not full_layers else full_layers[0]
 
     _set_layers(model, layers)
+
+    # Store pipeline metadata so generate_step can do token sync via all_sum
+    # instead of the removed all_gather in PipelineLastLayer.
+    model._pipeline_group = group  # type: ignore
+    model._pipeline_rank = device_rank  # type: ignore
+    model._pipeline_size = world_size  # type: ignore
 
     assert isinstance(layers, list), (
         "Expected a list of layers after auto-parallel initialisation"

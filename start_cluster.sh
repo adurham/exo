@@ -301,8 +301,8 @@ for NODE in "${NODES[@]}"; do
     # Prefill Optimization: let code default to single-shot prefill (dynamic memory-aware adjustment)
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-524288} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
     
-    # Use the provided MLX_JACCL_NUM_BUFFERS or default to 4 (reduced from 8 to prevent ENOMEM on large context)
-    EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-4}"
+    # Use the provided MLX_JACCL_NUM_BUFFERS or default to 8 (increased from 4 for better RDMA pipelining)
+    EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-8}"
     
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"

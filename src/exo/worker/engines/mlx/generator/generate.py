@@ -597,9 +597,9 @@ def generate_step(
     # Pre-compute hybrid pipeline layer list once (avoid per-step getattr + iteration)
     _hybrid_layers: list = []
     try:
-        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, PipelineLastLayer, _get_layers
-        inner_model = getattr(model, 'model', model)
-        _all_layers = _get_layers(inner_model)
+        from exo.worker.engines.mlx.auto_parallel import _HybridPipelineLastLayer, PipelineLastLayer, get_layers, get_inner_model
+        inner_model = get_inner_model(model)
+        _all_layers = get_layers(inner_model)
         _hybrid_layers = [l for l in _all_layers if isinstance(l, (_HybridPipelineLastLayer, PipelineLastLayer))]
     except (ValueError, ImportError):
         pass
@@ -613,6 +613,7 @@ def generate_step(
         return pending
 
     _step_counter = [0]
+    _decode_log_interval = int(os.environ.get("EXO_DECODE_LOG_INTERVAL", "100"))
 
     def _step(input_tokens: mx.array, input_embeddings: Optional[mx.array] = None):
         nonlocal tokens
@@ -721,18 +722,101 @@ def generate_step(
                     f"total={(_st6-_st0)*1000:.0f}ms (prefill_mode)"
                 )
             else:
-                _st5 = _time.perf_counter()
-                mx.eval(sampled)
-                _st6 = _time.perf_counter()
-                logger.debug(
-                    f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
-                    f"model={(_st1-_st0)*1000:.0f}ms "
-                    f"reshape={(_st2-_st1)*1000:.0f}ms "
-                    f"quantize={(_st3-_st2)*1000:.0f}ms "
-                    f"sample={(_st4-_st3)*1000:.0f}ms "
-                    f"eval={(_st6-_st5)*1000:.0f}ms "
-                    f"total={(_st6-_st0)*1000:.0f}ms"
-                )
+                # Pipeline-only token sync (no hybrid/TP involved).
+                # Read pipeline metadata stored by pipeline_auto_parallel.
+                pipeline_group = getattr(model, '_pipeline_group', None)
+                pipeline_decode_mode = getattr(model, '_pipeline_decode_mode', False)
+
+                if pipeline_group is not None and pipeline_decode_mode:
+                    # Last rank has correct logits, others have garbage from
+                    # intermediate hidden states flowing through lm_head.
+                    # Use all_sum to broadcast the correct token from last rank.
+                    pipeline_rank = getattr(model, '_pipeline_rank', -1)
+                    pipeline_size = getattr(model, '_pipeline_size', 1)
+                    is_last_rank = (pipeline_rank == pipeline_size - 1)
+
+                    if is_last_rank:
+                        contribution = sampled
+                    else:
+                        contribution = mx.zeros_like(sampled)
+
+                    _pending = _drain_pending_sends()
+                    _st5 = _time.perf_counter()
+                    mx.eval(sampled, *_pending)
+                    _st6 = _time.perf_counter()
+
+                    # Dynamic Safe Sync (same logic as hybrid path)
+                    _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
+                    _massive_context = False
+                    if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
+                        _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
+                        _massive_context = _kv_len > _safe_sync_limit
+
+                    if _massive_context:
+                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+
+                    try:
+                        sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
+                        mx.eval(sampled)
+                    finally:
+                        if _massive_context:
+                            os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+
+                    _st7 = _time.perf_counter()
+
+                    logger.debug(
+                        f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
+                        f"model={(_st1-_st0)*1000:.0f}ms "
+                        f"reshape={(_st2-_st1)*1000:.0f}ms "
+                        f"quantize={(_st3-_st2)*1000:.0f}ms "
+                        f"sample={(_st4-_st3)*1000:.0f}ms "
+                        f"eval={(_st6-_st5)*1000:.0f}ms "
+                        f"token_sync={(_st7-_st6)*1000:.0f}ms "
+                        f"total={(_st7-_st0)*1000:.0f}ms "
+                        f"({'SAFE_SYNC' if _massive_context else 'PP_FAST_SYNC'})"
+                    )
+                elif pipeline_group is not None:
+                    # Pipeline prefill mode — just drain pending sends
+                    _pending = _drain_pending_sends()
+                    _st5 = _time.perf_counter()
+                    if _pending:
+                        mx.eval(*_pending)
+                    _st6 = _time.perf_counter()
+
+                    logger.debug(
+                        f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
+                        f"model={(_st1-_st0)*1000:.0f}ms "
+                        f"reshape={(_st2-_st1)*1000:.0f}ms "
+                        f"quantize={(_st3-_st2)*1000:.0f}ms "
+                        f"sample={(_st4-_st3)*1000:.0f}ms "
+                        f"drain={(_st6-_st5)*1000:.0f}ms "
+                        f"total={(_st6-_st0)*1000:.0f}ms (pp_prefill_mode)"
+                    )
+                else:
+                    _st5 = _time.perf_counter()
+                    mx.eval(sampled)
+                    _st6 = _time.perf_counter()
+                    logger.debug(
+                        f"[STEP {_step_id}] tokens={input_tokens.shape[0]} "
+                        f"model={(_st1-_st0)*1000:.0f}ms "
+                        f"reshape={(_st2-_st1)*1000:.0f}ms "
+                        f"quantize={(_st3-_st2)*1000:.0f}ms "
+                        f"sample={(_st4-_st3)*1000:.0f}ms "
+                        f"eval={(_st6-_st5)*1000:.0f}ms "
+                        f"total={(_st6-_st0)*1000:.0f}ms"
+                    )
+
+            # Periodic memory + KV cache stats for stress testing
+            if _decode_log_interval > 0 and _step_id % _decode_log_interval == 0 and _step_id > 0:
+                _kv_len_log = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
+                if mx.metal.is_available():
+                    _mem_active = mx.metal.get_active_memory() / (1024**3)
+                    _mem_peak = mx.metal.get_peak_memory() / (1024**3)
+                    logger.info(
+                        f"[DECODE {_step_id}] kv_len={_kv_len_log} "
+                        f"mem_active={_mem_active:.1f}GB mem_peak={_mem_peak:.1f}GB "
+                        f"step_ms={(_st6-_st0)*1000:.0f}"
+                    )
 
             return sampled, logprobs.squeeze(0)
 
