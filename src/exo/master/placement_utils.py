@@ -103,19 +103,39 @@ def _allocate_and_validate_layers(
 ) -> list[int]:
     # --- Robust Model-Aware Memory Budgeting ---
     system_reserve = float(
-        os.getenv("EXO_SYSTEM_RESERVE", "0.15")
-    )  # 15% for macOS/System
+        os.getenv("EXO_SYSTEM_RESERVE", "0.10")
+    )  # 10% for macOS/System
     wired_limit_pct = float(
-        os.getenv("EXO_WIRED_LIMIT_PCT", "0.75")
-    )  # 75% for macOS GPU wired limit
+        os.getenv("EXO_WIRED_LIMIT_PCT", "0.85")
+    )  # 85% for macOS GPU wired limit
+
+    # Runtime overhead factor: accounts for MLX computation graphs, Metal
+    # buffers, MoE activation patterns, and other GPU memory that isn't
+    # captured by weight size + KV cache alone.  Empirically, MoE models
+    # use ~1.25-1.5x their on-disk weight size in runtime GPU memory.
+    runtime_overhead = float(
+        os.getenv("EXO_RUNTIME_OVERHEAD_FACTOR", "1.25")
+    )
     kv_safety_factor = 1.2
 
     kv_bytes_per_token_per_layer = 2 * model_card.num_kv_heads * model_card.head_dim * 2
 
-    kv_mem_per_layer_bytes = (
-        kv_bytes_per_token_per_layer * model_card.max_context_length * kv_safety_factor
+    # Use a practical target context for KV budgeting rather than the model's
+    # theoretical max_context_length.  Budgeting for 200K context on a model
+    # that can barely fit at 30K causes the redistribution loop to conclude
+    # ALL nodes are overloaded, falling through to unvalidated proportional
+    # allocation.  Default to 50K which is achievable on most clusters.
+    target_context = int(
+        os.getenv("EXO_PLACEMENT_TARGET_CONTEXT", "50000")
     )
-    weight_mem_per_layer_bytes = model_card.storage_size.in_bytes / model_card.n_layers
+    effective_context = min(target_context, model_card.max_context_length)
+
+    kv_mem_per_layer_bytes = (
+        kv_bytes_per_token_per_layer * effective_context * kv_safety_factor
+    )
+    weight_mem_per_layer_bytes = (
+        model_card.storage_size.in_bytes / model_card.n_layers * runtime_overhead
+    )
     total_mem_per_layer_bytes = weight_mem_per_layer_bytes + kv_mem_per_layer_bytes
 
     def get_capped_available_memory(node_id: NodeId) -> int:
@@ -166,7 +186,8 @@ def _allocate_and_validate_layers(
 
         if best_target_idx != -1:
             logger.info(
-                f"Redistributing layer: Node {overloaded_idx} -> Node {best_target_idx} to fit 200k KV."
+                f"Redistributing layer: Node {overloaded_idx} -> Node {best_target_idx} "
+                f"(budgeting for {effective_context}-token context)."
             )
             layer_allocations[overloaded_idx] -= 1
             layer_allocations[best_target_idx] += 1

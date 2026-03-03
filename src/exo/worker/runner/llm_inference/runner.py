@@ -378,6 +378,10 @@ def main(
                         os.environ.get("EXO_PREFILL_BARRIER_INTERVAL", "10")
                     )
                     _prefill_chunks_since_barrier = [0]  # mutable container for closure
+                    _memory_exceeded = [False]
+                    _oom_threshold = float(
+                        os.environ.get("EXO_PREFILL_OOM_THRESHOLD", "0.90")
+                    )
 
                     def on_prefill_progress(
                         processed: int,
@@ -386,6 +390,8 @@ def main(
                         _group: mx.distributed.Group | None = group,
                         _barrier_counter: list[int] = _prefill_chunks_since_barrier,
                         _barrier_interval: int = _prefill_barrier_interval,
+                        _oom_flag: list[bool] = _memory_exceeded,
+                        _oom_thresh: float = _oom_threshold,
                     ) -> None:
                         if device_rank == 0:
                             event_sender.send(
@@ -403,6 +409,34 @@ def main(
                         want_to_cancel = (_task_id in cancelled_tasks) or (
                             TaskId("CANCEL_CURRENT_TASK") in cancelled_tasks
                         )
+
+                        # Memory pressure check: detect impending OOM and abort
+                        # prefill gracefully before Metal triggers SIGABRT.
+                        if not _oom_flag[0]:
+                            try:
+                                active_mem = mx.get_active_memory()
+                                total_mem = mx.device_info().get(
+                                    "memory_size", 32 * 1024**3
+                                )
+                                usage_ratio = active_mem / total_mem
+                                if usage_ratio > _oom_thresh:
+                                    logger.warning(
+                                        f"Memory pressure during prefill: "
+                                        f"{active_mem / 1e9:.1f}GB / "
+                                        f"{total_mem / 1e9:.1f}GB "
+                                        f"({usage_ratio * 100:.1f}%) at "
+                                        f"{processed}/{total} tokens. "
+                                        f"Aborting to prevent SIGABRT."
+                                    )
+                                    _oom_flag[0] = True
+                                    want_to_cancel = True
+                                    # Force barrier check on next iteration
+                                    _barrier_counter[0] = _barrier_interval
+                            except Exception:
+                                pass
+                        elif _oom_flag[0]:
+                            want_to_cancel = True
+
                         # Pure TP: no PP head/tail desync risk, skip distributed
                         # barrier. This avoids an all_sum + mx.eval round-trip
                         # per prefill chunk.
@@ -609,7 +643,30 @@ def main(
                                                 )
                                             )
                     except PrefillCancelled:
-                        logger.info(f"Prefill cancelled for task {task.task_id}")
+                        if _memory_exceeded[0]:
+                            logger.warning(
+                                f"Prefill aborted for task {task.task_id} "
+                                f"due to memory pressure"
+                            )
+                            if device_rank == 0:
+                                event_sender.send(
+                                    ChunkGenerated(
+                                        command_id=command_id,
+                                        chunk=ErrorChunk(
+                                            model=shard_metadata.model_card.model_id,
+                                            finish_reason="error",
+                                            error_message=(
+                                                "Out of memory: prefill aborted "
+                                                "due to memory pressure. Reduce "
+                                                "prompt length or add more nodes."
+                                            ),
+                                        ),
+                                    )
+                                )
+                        else:
+                            logger.info(
+                                f"Prefill cancelled for task {task.task_id}"
+                            )
                     # can we make this more explicit?
                     except Exception as e:
                         if device_rank == 0:

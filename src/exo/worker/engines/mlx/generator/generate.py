@@ -264,6 +264,16 @@ def prefill(
         total_mem = mx.device_info().get('memory_size', 32 * 1024**3)
         free_ratio = 1.0 - (active_mem / total_mem)
 
+        # Pre-flight memory check: refuse prefill if memory is already critical.
+        # Better to return an error than crash with SIGABRT.
+        oom_threshold = float(os.environ.get("EXO_PREFILL_OOM_THRESHOLD", "0.90"))
+        if free_ratio < (1.0 - oom_threshold):
+            raise RuntimeError(
+                f"Cannot start prefill of {num_tokens} tokens: memory already at "
+                f"{(1 - free_ratio) * 100:.1f}% ({active_mem / 1e9:.1f}GB / "
+                f"{total_mem / 1e9:.1f}GB). Threshold: {oom_threshold * 100:.0f}%."
+            )
+
         # Base config defaults
         max_step = _env_int("EXO_PREFILL_STEP_SIZE", _DEFAULT_PREFILL_STEP_SIZE)
 
