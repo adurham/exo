@@ -315,38 +315,22 @@ def prefill(
         if group is not None and group.size() > 1:
             pp_cap = _env_int("EXO_PP_PREFILL_STEP_SIZE", 4096)
 
-            # Memory-aware step size for pipeline parallel.  Use the GPU wired
-            # limit (not total device memory) as the ceiling — the kernel will
-            # SIGABRT if we exceed iogpu.wired_limit_mb.  Per-token activation
-            # memory for MoE models (128 experts, top-8) is ~6-8MB empirically.
-            wired_limit_bytes = total_mem
-            try:
-                _r = subprocess.run(
-                    ["sysctl", "-n", "iogpu.wired_limit_mb"],
-                    capture_output=True, text=True, timeout=2,
-                )
-                if _r.returncode == 0 and _r.stdout.strip():
-                    wired_limit_bytes = int(_r.stdout.strip()) * 1024 * 1024
-            except Exception:
-                pass
-            free_bytes = max(0, wired_limit_bytes - active_mem)
-            _BYTES_PER_TOKEN = 8 * 1024 * 1024  # 8MB per token (empirical for MoE)
-            local_safe = max(256, int(free_bytes * 0.5) // _BYTES_PER_TOKEN)
-            local_safe = min(local_safe, pp_cap, max_step)
-
-            # All ranks MUST use the same step size or the pipeline desyncs.
-            # Coordinate via all_gather to find the minimum safe value.
-            local_val = mx.array([local_safe], dtype=mx.int32)
-            all_vals = mx.distributed.all_gather(local_val, group=group)
-            mx.eval(all_vals)
-            dynamic_step = max(256, int(all_vals.min().item()))
+            # RDMA buffer constraint: each prefill chunk's hidden state is sent
+            # between pipeline ranks via mx.distributed.send/recv.  The tensor
+            # size is tokens × hidden_size × dtype_bytes.  jaccl's largest
+            # pre-allocated buffer tier is 2MB (FRAME_SIZE << (BUFFER_SIZES-1)).
+            # Tensors larger than this require multi-frame segmentation which
+            # fails with ENOMEM (-12) when MLX_JACCL_NUM_BUFFERS is small.
+            # Keep the tensor within a single 2MB buffer to be safe.
+            _RDMA_MAX_BUFFER = 2 * 1024 * 1024  # 2MB (largest jaccl tier)
+            _hidden = getattr(getattr(model, 'args', None), 'hidden_size', 3072)
+            _dtype_bytes = 2  # float16
+            rdma_safe = max(256, _RDMA_MAX_BUFFER // (_hidden * _dtype_bytes))
+            dynamic_step = min(rdma_safe, pp_cap, max_step)
 
             logger.info(
                 f"Pipeline parallel prefill: step={dynamic_step} "
-                f"(local_safe={local_safe}, pp_cap={pp_cap}, "
-                f"wired_limit={wired_limit_bytes / 1e9:.1f}GB, "
-                f"active={active_mem / 1e9:.1f}GB, "
-                f"free_for_activations={free_bytes / 1e9:.1f}GB)"
+                f"(rdma_safe={rdma_safe}, hidden={_hidden}, pp_cap={pp_cap})"
             )
         elif free_ratio < 0.15:
             dynamic_step = 256
