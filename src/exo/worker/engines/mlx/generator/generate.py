@@ -322,7 +322,9 @@ def prefill(
             # Tensors larger than this require multi-frame segmentation which
             # fails with ENOMEM (-12) when MLX_JACCL_NUM_BUFFERS is small.
             # Keep the tensor within a single 2MB buffer to be safe.
-            _RDMA_MAX_BUFFER = 2 * 1024 * 1024  # 2MB (largest jaccl tier)
+            # Use 90% of the buffer to leave headroom for RDMA frame headers,
+            # alignment requirements, and jaccl metadata.
+            _RDMA_MAX_BUFFER = int(2 * 1024 * 1024 * 0.90)  # 90% of 2MB jaccl tier
             _hidden = getattr(getattr(model, 'args', None), 'hidden_size', 3072)
             _dtype_bytes = 2  # float16
             rdma_safe = max(256, _RDMA_MAX_BUFFER // (_hidden * _dtype_bytes))
@@ -848,6 +850,11 @@ def generate_step(
         import time as _time
         _prefill_chunk_idx = 0
 
+        # Flush any residual work on generation_stream from prior invocations
+        # (e.g. warmup). Without this, stale RDMA sends/recvs can interfere
+        # with the new prefill's pipeline coordination.
+        mx.synchronize()
+
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
@@ -881,13 +888,16 @@ def generate_step(
                 os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
             
             try:
+                # Two-phase eval for pipeline prefill (mirrors the decode PP_SAFE_SYNC pattern):
+                # Phase 1: Evaluate sends first so RDMA transfers complete promptly.
+                #          This ensures the downstream node's recv is satisfied before
+                #          we move on, preventing RDMA timeout/ordering issues.
+                # Phase 2: Evaluate cache states. Cache keys depend on sends via mx.depends,
+                #          but since sends completed in Phase 1, this just evaluates the
+                #          cache computation itself.
                 if _current_sends:
-                    mx.eval(*all_states, *_current_sends)
-                else:
-                    mx.eval(*all_states)
-                # Note: mx.synchronize() was removed here — it caused deadlocks during
-                # decode's mini-prefill by forcing rank 0 to wait for RDMA send
-                # completion before downstream ranks had posted their recvs.
+                    mx.eval(*_current_sends)
+                mx.eval(*all_states)
             finally:
                 if _massive_context:
                     logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
