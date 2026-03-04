@@ -101,6 +101,22 @@ def _allocate_and_validate_layers(
     total_memory: Memory,
     model_card: ModelCard,
 ) -> list[int]:
+    # --- Manual Layer Split Override ---
+    manual_split = os.getenv("EXO_LAYER_SPLIT", "")
+    if manual_split:
+        parts = [int(x.strip()) for x in manual_split.split(",")]
+        if len(parts) != len(node_ids):
+            logger.warning(
+                f"EXO_LAYER_SPLIT has {len(parts)} values but {len(node_ids)} nodes; ignoring override"
+            )
+        elif sum(parts) != model_card.n_layers:
+            logger.warning(
+                f"EXO_LAYER_SPLIT sums to {sum(parts)} but model has {model_card.n_layers} layers; ignoring override"
+            )
+        else:
+            logger.info(f"Using manual layer split: {parts} (EXO_LAYER_SPLIT)")
+            return parts
+
     # --- Robust Model-Aware Memory Budgeting ---
     system_reserve = float(
         os.getenv("EXO_SYSTEM_RESERVE", "0.10")
