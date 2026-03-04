@@ -136,15 +136,16 @@ def _allocate_and_validate_layers(
 
     kv_bytes_per_token_per_layer = 2 * model_card.num_kv_heads * model_card.head_dim * 2
 
-    # Use a practical target context for KV budgeting rather than the model's
-    # theoretical max_context_length.  Budgeting for 200K context on a model
-    # that can barely fit at 30K causes the redistribution loop to conclude
-    # ALL nodes are overloaded, falling through to unvalidated proportional
-    # allocation.  Default to 50K which is achievable on most clusters.
+    # Budget KV for the model's max context length. If all nodes are overloaded
+    # at this budget, the proportional allocation (based on capped memory) still
+    # gives a sensible split. Override with EXO_PLACEMENT_TARGET_CONTEXT if needed.
+    fallback_context = 50000
     target_context = int(
-        os.getenv("EXO_PLACEMENT_TARGET_CONTEXT", "50000")
+        os.getenv("EXO_PLACEMENT_TARGET_CONTEXT", "0")
     )
-    effective_context = min(target_context, model_card.max_context_length)
+    effective_context = target_context if target_context > 0 else model_card.max_context_length
+    if effective_context <= 0:
+        effective_context = fallback_context
 
     kv_mem_per_layer_bytes = (
         kv_bytes_per_token_per_layer * effective_context * kv_safety_factor
