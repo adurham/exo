@@ -752,30 +752,21 @@ def generate_step(
                     else:
                         contribution = mx.zeros_like(sampled)
 
-                    # Dynamic Safe Sync (same logic as hybrid path)
-                    _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
-                    _massive_context = False
-                    if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
-                        _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
-                        _massive_context = _kv_len > _safe_sync_limit
-
                     _pending = _drain_pending_sends()
                     _st5 = _time.perf_counter()
 
-                    if _massive_context:
-                        # Two-phase eval: flush local compute first, then CPU-side sync
-                        mx.eval(sampled, *_pending)
-                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
-                        try:
-                            sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
-                            mx.eval(sampled)
-                        finally:
-                            os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
-                    else:
-                        # Single eval: all_sum is just another node in the lazy graph,
-                        # evaluated alongside local compute + sends in one GPU pass.
+                    # Two-phase eval: flush local compute + sends first, then collective.
+                    # The all_sum collective blocks until ALL ranks participate. If evaluated
+                    # in the same graph as the send, the GPU may schedule all_sum before send,
+                    # deadlocking because downstream ranks can't recv (and thus can't reach
+                    # their own all_sum) until this rank's send completes.
+                    mx.eval(sampled, *_pending)
+                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+                    try:
                         sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
-                        mx.eval(sampled, *_pending)
+                        mx.eval(sampled)
+                    finally:
+                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
 
                     _st6 = _time.perf_counter()
 
@@ -786,8 +777,7 @@ def generate_step(
                         f"quantize={(_st3-_st2)*1000:.0f}ms "
                         f"sample={(_st4-_st3)*1000:.0f}ms "
                         f"eval={(_st6-_st5)*1000:.0f}ms "
-                        f"total={(_st6-_st0)*1000:.0f}ms "
-                        f"({'SAFE_SYNC' if _massive_context else 'PP_FAST_SYNC'})"
+                        f"total={(_st6-_st0)*1000:.0f}ms (PP_SAFE_SYNC)"
                     )
                 elif pipeline_group is not None:
                     # Pipeline prefill mode — just drain pending sends
