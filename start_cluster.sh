@@ -380,11 +380,10 @@ for NODE in "${NODES[@]}"; do
     # Set to 0 to disable. Reduces KV bandwidth by ~2x during decode at large context.
     EXO_ENV="$EXO_ENV EXO_DECODE_KV_BITS=${EXO_DECODE_KV_BITS:-8}"
 
-    # Manual layer split override: e.g., EXO_LAYER_SPLIT="7,25,30" for 3 nodes.
+    # Manual layer split override for 3-node MiniMax-M2.5 (62 layers).
+    # Default 7/28/27: MacBook gets fewest layers (slowest), Studios split the rest.
     # Bypasses automatic memory-proportional allocation. Sum must equal model layer count.
-    if [ -n "${EXO_LAYER_SPLIT:-}" ]; then
-        EXO_ENV="$EXO_ENV EXO_LAYER_SPLIT=$EXO_LAYER_SPLIT"
-    fi
+    EXO_ENV="$EXO_ENV EXO_LAYER_SPLIT=${EXO_LAYER_SPLIT:-7,28,27}"
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"
