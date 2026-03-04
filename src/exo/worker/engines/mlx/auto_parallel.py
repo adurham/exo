@@ -271,7 +271,9 @@ class PipelineLastLayer(CustomMlxLayer):
 
                 if cache is not None:
                     _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+                    # Skip mx.depends for QuantizedKVCache — keys is a tuple, not mx.array
+                    if isinstance(_cache.keys, mx.array):
+                        _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
                     t1 = _time.monotonic()
                     mx.eval(_cache.keys)  # type: ignore
                     elapsed2 = _time.monotonic() - t1
@@ -280,12 +282,14 @@ class PipelineLastLayer(CustomMlxLayer):
                 # DEFERRED SEND (Default): Queue send array so central generation loop evaluates it
                 # via _drain_pending_sends. Eager eval blocks Python graph formulation.
                 self._pending_sends.append(output)
-    
+
                 if cache is not None:
                     # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
                     # doesn't have .keys directly; access via first sub-cache.
                     _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+                    # Skip mx.depends for QuantizedKVCache — keys is a tuple, not mx.array
+                    if isinstance(_cache.keys, mx.array):
+                        _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
 
         # Note: On intermediate ranks (not last), cache state is evaluated
         # when generate.py processes bulk eval. Moving it here eagerly
@@ -458,7 +462,9 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
         if cache is not None:
             last = cache[-1]  # type: ignore
             dep_cache = last[0] if hasattr(last, "caches") else last  # type: ignore
-            dep_cache.keys = mx.depends(dep_cache.keys, logits)  # type: ignore
+            # Skip mx.depends for QuantizedKVCache — keys is a tuple, not mx.array
+            if isinstance(dep_cache.keys, mx.array):
+                dep_cache.keys = mx.depends(dep_cache.keys, logits)  # type: ignore
 
         return logits
 
@@ -486,7 +492,9 @@ def patch_tensor_model[T](model: T) -> T:
         if cache is not None and len(cache) > 0:  # pyright: ignore[reportAny]
             last = cache[-1]  # pyright: ignore[reportAny]
             dep_cache = last[0] if hasattr(last, "caches") else last  # pyright: ignore[reportAny]
-            dep_cache.keys = mx.depends(dep_cache.keys, logits)  # pyright: ignore[reportAny,reportUnknownMemberType]
+            # Skip mx.depends for QuantizedKVCache — keys is a tuple, not mx.array
+            if isinstance(dep_cache.keys, mx.array):
+                dep_cache.keys = mx.depends(dep_cache.keys, logits)  # pyright: ignore[reportAny,reportUnknownMemberType]
 
         return logits
 
