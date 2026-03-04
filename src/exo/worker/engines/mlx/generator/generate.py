@@ -883,7 +883,9 @@ def generate_step(
                     mx.eval(*all_states, *_current_sends)
                 else:
                     mx.eval(*all_states)
-                mx.synchronize()  # Force GPU completion before next chunk
+                # Note: mx.synchronize() was removed here — it caused deadlocks during
+                # decode's mini-prefill by forcing rank 0 to wait for RDMA send
+                # completion before downstream ranks had posted their recvs.
             finally:
                 if _massive_context:
                     logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
