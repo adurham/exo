@@ -761,6 +761,7 @@ def generate_step(
                     # deadlocking because downstream ranks can't recv (and thus can't reach
                     # their own all_sum) until this rank's send completes.
                     mx.eval(sampled, *_pending)
+                    _st5b = _time.perf_counter()
                     os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
                     try:
                         sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
@@ -776,7 +777,8 @@ def generate_step(
                         f"reshape={(_st2-_st1)*1000:.0f}ms "
                         f"quantize={(_st3-_st2)*1000:.0f}ms "
                         f"sample={(_st4-_st3)*1000:.0f}ms "
-                        f"eval={(_st6-_st5)*1000:.0f}ms "
+                        f"pipe={(_st5b-_st5)*1000:.0f}ms "
+                        f"sync={(_st6-_st5b)*1000:.0f}ms "
                         f"total={(_st6-_st0)*1000:.0f}ms (PP_SAFE_SYNC)"
                     )
                 elif pipeline_group is not None:
