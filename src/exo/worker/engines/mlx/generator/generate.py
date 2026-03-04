@@ -428,6 +428,7 @@ def warmup_inference(
         prefill_step_size=2048,
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
+        ignore_eos=True,  # Pipeline nodes sample independently during warmup (no all_sum)
     ):
         logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
@@ -1005,6 +1006,7 @@ def stream_generate(
     draft_model: Optional[nn.Module] = None,
     return_logprobs: bool = False,
     top_logprobs_k: Optional[int] = None,
+    ignore_eos: bool = False,
     **kwargs,
 ) -> Generator[GenerationResponse, None, None]:
     
@@ -1048,7 +1050,7 @@ def stream_generate(
                 prompt_time = time.perf_counter() - tic
                 prompt_tps = prompt.size / prompt_time
                 tic = time.perf_counter()
-            if token in tokenizer.eos_token_ids:
+            if not ignore_eos and token in tokenizer.eos_token_ids:
                 break
 
             detokenizer.add_token(token)
