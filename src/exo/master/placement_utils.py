@@ -164,21 +164,41 @@ def _allocate_and_validate_layers(
         )
         return min(available, wired_ceiling)
 
-    # 1. Initial Proportional Allocation
+    # Use capped memory (not raw ram_available) for proportional allocation.
+    # Raw ram_available varies with OS state; capped values account for system
+    # reserve and macOS wired limit, giving consistent results.
+    capped_memories = [get_capped_available_memory(nid) for nid in node_ids]
+    total_capped = sum(capped_memories)
+    if total_capped == 0:
+        total_capped = 1  # avoid division by zero
+
+    logger.info(
+        f"Placement budget: {weight_mem_per_layer_bytes/1e9:.2f}GB weights/layer + "
+        f"{kv_mem_per_layer_bytes/1e9:.2f}GB KV/layer ({effective_context} ctx) = "
+        f"{total_mem_per_layer_bytes/1e9:.2f}GB/layer × {model_card.n_layers} layers"
+    )
+    for i, nid in enumerate(node_ids):
+        logger.info(
+            f"  Node {i} ({nid[:12]}...): "
+            f"available={node_memory[nid].ram_available.in_bytes/1e9:.1f}GB, "
+            f"capped={capped_memories[i]/1e9:.1f}GB, "
+            f"max_layers={int(capped_memories[i] / total_mem_per_layer_bytes)}"
+        )
+
+    # 1. Initial Proportional Allocation (based on capped memory)
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
-        memory_fractions=[
-            node_memory[node_id].ram_available.in_bytes / total_memory.in_bytes
-            for node_id in node_ids
-        ],
+        memory_fractions=[cm / total_capped for cm in capped_memories],
     )
+    logger.info(f"Initial proportional allocation: {layer_allocations}")
 
     # 2. Redistribution Loop: Move layers from overloaded nodes to underloaded nodes
     max_iterations = model_card.n_layers  # Safety break
+    redistributed = 0
     for _ in range(max_iterations):
         overloaded_idx = -1
         for i, node_id in enumerate(node_ids):
-            available = get_capped_available_memory(node_id)
+            available = capped_memories[i]
             required = int(total_mem_per_layer_bytes * layer_allocations[i])
             if required > available and layer_allocations[i] > 1:
                 overloaded_idx = i
@@ -193,7 +213,7 @@ def _allocate_and_validate_layers(
         for i, node_id in enumerate(node_ids):
             if i == overloaded_idx:
                 continue
-            available = get_capped_available_memory(node_id)
+            available = capped_memories[i]
             required = int(total_mem_per_layer_bytes * (layer_allocations[i] + 1))
             headroom = available - required
             if headroom > max_headroom:
@@ -201,18 +221,23 @@ def _allocate_and_validate_layers(
                 best_target_idx = i
 
         if best_target_idx != -1:
-            logger.info(
-                f"Redistributing layer: Node {overloaded_idx} -> Node {best_target_idx} "
-                f"(budgeting for {effective_context}-token context)."
-            )
             layer_allocations[overloaded_idx] -= 1
             layer_allocations[best_target_idx] += 1
+            redistributed += 1
         else:
             logger.warning(
                 f"Cannot redistribute layers from overloaded node {overloaded_idx} "
                 f"(no node has enough headroom). Using best-effort allocation."
             )
             break
+
+    if redistributed > 0:
+        logger.info(
+            f"Redistributed {redistributed} layers for {effective_context}-token context. "
+            f"Final allocation: {layer_allocations}"
+        )
+    else:
+        logger.info(f"Final allocation (no redistribution needed): {layer_allocations}")
 
     return layer_allocations
 
