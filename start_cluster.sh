@@ -158,24 +158,32 @@ if ! ssh macbook-m4 "ping -c 1 -W 1 $M4_2_TO_MBP" &> /dev/null; then echo "ERROR
 echo "All 6 direct Thunderbolt links verified ✓"
 
 # RoCEv2 (RDMA) Per-Device Port State Check
-# Catches PORT_DOWN on individual RDMA interfaces before they cascade into cryptic errno=57.
-echo "Checking per-device RDMA port states..."
+# Only checks RDMA ports corresponding to TB interfaces that have active IPs (in use).
+# PORT_DOWN on unconnected TB ports is expected and harmless.
+echo "Checking per-device RDMA port states (active TB interfaces only)..."
 RDMA_HEALTHY=true
 for NODE in macstudio-m4-1 macstudio-m4-2 macbook-m4; do
     echo -n "  $NODE: "
+    # Get only the RDMA devices whose underlying interface has an active IP
     PORT_STATUS=$(ssh "$NODE" 'for dev in rdma_en1 rdma_en2 rdma_en3 rdma_en4 rdma_en5; do
-        state=$(ibv_devinfo -d $dev 2>/dev/null | grep "state:" | head -1 | awk "{print \$2}")
-        if [ -n "$state" ]; then
-            echo -n "$dev=$state "
+        iface=${dev#rdma_}
+        # Only check if this interface has a 192.168.x.x IP (active TB link)
+        ip=$(ifconfig "$iface" 2>/dev/null | awk "/inet / && /192\.168\./{print \$2}")
+        if [ -n "$ip" ]; then
+            state=$(ibv_devinfo -d $dev 2>/dev/null | grep "state:" | head -1 | awk "{print \$2}")
+            if [ -n "$state" ]; then
+                echo -n "$dev($iface=$ip)=$state "
+            fi
         fi
     done' 2>/dev/null)
 
     if [ -z "$PORT_STATUS" ]; then
-        echo "no RDMA devices found (may be expected for this node)"
+        echo "no active RDMA devices found"
+        RDMA_HEALTHY=false
     else
         echo "$PORT_STATUS"
         if echo "$PORT_STATUS" | grep -q "PORT_DOWN"; then
-            echo "    WARNING: PORT_DOWN detected on $NODE! Cable reseat or rdma_ctl reset may be needed."
+            echo "    ERROR: PORT_DOWN on an active TB interface on $NODE! Check cable."
             RDMA_HEALTHY=false
         fi
     fi
@@ -183,15 +191,10 @@ done
 
 if [ "$RDMA_HEALTHY" = false ]; then
     echo ""
-    echo "WARNING: One or more RDMA ports are DOWN."
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted. Fix RDMA ports and retry."
-        exit 1
-    fi
+    echo "ERROR: One or more active-link RDMA ports are DOWN. Fix cables and retry."
+    exit 1
 else
-    echo "  All RDMA ports active ✓"
+    echo "  All active-link RDMA ports active \u2713"
 fi
 
 # RoCEv2 (RDMA) Protection Domain Allocation Check
