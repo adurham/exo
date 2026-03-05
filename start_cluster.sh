@@ -378,6 +378,7 @@ for NODE in "${NODES[@]}"; do
 
     # Hybrid KV cache quantization: use Flash Attention for prefill, then quantize to N-bit for decode.
     # Set to 0 to disable. Reduces KV bandwidth by ~2x during decode at large context.
+    # Uses unfused quantized_matmul by default. Set EXO_FUSED_SDPA=1 for fused Metal kernel.
     EXO_ENV="$EXO_ENV EXO_DECODE_KV_BITS=${EXO_DECODE_KV_BITS:-8}"
 
     # Manual layer split override: e.g., EXO_LAYER_SPLIT="7,28,27" for 3 nodes.
