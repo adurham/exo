@@ -10,7 +10,7 @@ def _get_kv_bits() -> int | None:
         return None
     return int(bits)
 
-KV_GROUP_SIZE: int | None = 32
+KV_GROUP_SIZE: int | None = 64
 KV_BITS: int | None = _get_kv_bits()
 ATTENTION_KV_BITS: int | None = _get_kv_bits()
 def _get_int_or_none(env_var: str, default: str) -> int | None:
