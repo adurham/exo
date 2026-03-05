@@ -367,13 +367,15 @@ def prefill(
     set_pipeline_prefill(model, is_prefill=False)
 
     # stream_generate added 1 extra generated token to the cache, so we should trim it.
-    # Because of needing to roll back arrays cache, we will generate on 2 tokens so trim 1 more.
+    # Trim only 1 so decode starts with 1 token (skips PREFILL loop, goes straight to _step).
+    # This avoids the RDMA fence deadlock caused by evaluating cache states alongside sends
+    # in the PREFILL loop (cache has mx.depends on sends, creating fence dependencies).
     for c in cache:
         if isinstance(c, ArraysCache):
             # ArraysCache (SSM state) can't be trimmed, reset to empty
             c.state = [None] * len(c.state)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         elif hasattr(c, 'trim'):
-            c.trim(2)  # pyright: ignore[reportUnknownMemberType]
+            c.trim(1)  # pyright: ignore[reportUnknownMemberType]
 
     elapsed = time.perf_counter() - start_time
     tokens_per_sec = num_tokens / elapsed if elapsed > 0 else 0.0
@@ -1245,8 +1247,8 @@ def mlx_generate(
     )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
-    # stream_generate starts from the last token
-    last_token = prompt_tokens[-2:]
+    # Start decode from the last token only (1 token skips PREFILL loop, avoids fence deadlock)
+    last_token = prompt_tokens[-1:]
 
     max_tokens = task.max_output_tokens or MAX_TOKENS
     accumulated_text = ""
