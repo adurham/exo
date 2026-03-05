@@ -860,6 +860,7 @@ def generate_step(
             logger.debug(f"PREFILL loop: starting chunk {_prefill_chunk_idx}, remaining={remaining}, n_to_process={n_to_process}")
 
             _t0 = _time.perf_counter()
+            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: calling _model_call with {n_to_process} tokens")
             _model_call(
                 input_tokens=prompt[:n_to_process][None],
                 input_embeddings=(
@@ -869,14 +870,16 @@ def generate_step(
                 ),
             )
             _t1 = _time.perf_counter()
+            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: _model_call done in {(_t1-_t0)*1000:.0f}ms")
             quantize_cache_fn(prompt_cache)
             _t2 = _time.perf_counter()
 
             # Eval cache states + pending sends together
             _num_caches = len(prompt_cache)
             _current_sends = _drain_pending_sends()
+            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: drained {len(_current_sends)} sends")
             all_states = [_c.state for _c in prompt_cache]
-            
+
             # Dynamic Safe Sync for Prefill
             _massive_context = False
             if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
@@ -885,7 +888,7 @@ def generate_step(
             if _massive_context:
                 logger.debug(f"Prefill: setting MLX_FORCE_DISTRIBUTED_GPU=0 for safe sync (massive context)")
                 os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
-            
+
             try:
                 # Two-phase eval for pipeline prefill (mirrors the decode PP_SAFE_SYNC pattern):
                 # Phase 1: Evaluate sends first so RDMA transfers complete promptly.
@@ -895,8 +898,14 @@ def generate_step(
                 #          but since sends completed in Phase 1, this just evaluates the
                 #          cache computation itself.
                 if _current_sends:
+                    logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 — evaluating {len(_current_sends)} sends")
                     mx.eval(*_current_sends)
+                    logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 done")
+                else:
+                    logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 skipped (no sends)")
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 — evaluating {len(all_states)} cache states")
                 mx.eval(*all_states)
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 done")
             finally:
                 if _massive_context:
                     logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")

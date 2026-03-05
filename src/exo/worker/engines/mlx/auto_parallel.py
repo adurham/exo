@@ -263,10 +263,12 @@ class PipelineLastLayer(CustomMlxLayer):
             x, *args, **kwargs
         ).arguments.get("cache", None)
 
+        logger.info(f"[PIPELINE-LAST] rank={self.r} entering (is_prefill={self.is_prefill}, x.shape={x.shape})")
         if PROFILE_LAYERS:
             mx.eval(x)
             _t_compute0 = _time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
+        logger.info(f"[PIPELINE-LAST] rank={self.r} layer done (output.shape={output.shape})")
         if PROFILE_LAYERS:
             mx.eval(output)
             layer_profiler.record("layer_last", (_time.perf_counter() - _t_compute0) * 1000)
@@ -277,6 +279,7 @@ class PipelineLastLayer(CustomMlxLayer):
             output = mx.distributed.send(
                 output, (self.r + 1) % self.s, group=self.group
             )
+            logger.info(f"[PIPELINE-LAST] rank={self.r} send created (deferred)")
             if PROFILE_LAYERS:
                 mx.eval(output)
                 layer_profiler.record("send", (_time.perf_counter() - _t_send0) * 1000)
@@ -305,6 +308,7 @@ class PipelineLastLayer(CustomMlxLayer):
                     # doesn't have .keys directly; access via first sub-cache.
                     _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
                     _link_cache_to_send(_cache, output)
+                logger.info(f"[PIPELINE-LAST] rank={self.r} cache linked, pending_sends={len(self._pending_sends)}")
 
         # Note: On intermediate ranks (not last), cache state is evaluated
         # when generate.py processes bulk eval. Moving it here eagerly
@@ -468,7 +472,9 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
         *args: object,
         **kwargs: object,
     ) -> mx.array:
+        logger.info("[PATCHED-CALL] entering model forward")
         logits: mx.array = original_call(self, *args, **kwargs)  # type: ignore
+        logger.info(f"[PATCHED-CALL] model forward done (logits.shape={logits.shape})")
         cache = call_signature.bind_partial(self, *args, **kwargs).arguments.get(
             "cache", None
         )
@@ -478,6 +484,7 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
             last = cache[-1]  # type: ignore
             dep_cache = last[0] if hasattr(last, "caches") else last  # type: ignore
             _link_cache_to_send(dep_cache, logits)
+            logger.info("[PATCHED-CALL] cache linked to logits")
 
         return logits
 
