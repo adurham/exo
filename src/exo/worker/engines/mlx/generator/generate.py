@@ -890,22 +890,28 @@ def generate_step(
                 os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
 
             try:
-                # Two-phase eval for pipeline prefill (mirrors the decode PP_SAFE_SYNC pattern):
-                # Phase 1: Evaluate sends first so RDMA transfers complete promptly.
-                #          This ensures the downstream node's recv is satisfied before
-                #          we move on, preventing RDMA timeout/ordering issues.
-                # Phase 2: Evaluate cache states. Cache keys depend on sends via mx.depends,
-                #          but since sends completed in Phase 1, this just evaluates the
-                #          cache computation itself.
-                if _current_sends:
-                    logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 — evaluating {len(_current_sends)} sends")
-                    mx.eval(*_current_sends)
-                    logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 done")
-                else:
-                    logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 skipped (no sends)")
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 — evaluating {len(all_states)} cache states")
-                mx.eval(*all_states)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 done")
+                # Single-phase eval: evaluate sends AND cache states together.
+                #
+                # Unlike _step's decode path (PP_SAFE_SYNC), the PREFILL loop has no
+                # all_sum collective, so there's no risk of the GPU scheduling all_sum
+                # before sends.  Splitting into Phase 1 (sends) / Phase 2 (cache)
+                # actually *causes* RDMA deadlocks: the last rank (no sends) posts its
+                # recv only in Phase 2 — but intermediate ranks block in Phase 1 waiting
+                # for that recv to be posted before their send can complete.  Combining
+                # everything into one mx.eval lets the Metal scheduler post recvs and
+                # sends in dependency order across all ranks simultaneously.
+                _flat_states: list[mx.array] = []
+                for _s in all_states:
+                    if isinstance(_s, tuple):
+                        _flat_states.extend(_s)
+                    else:
+                        _flat_states.append(_s)
+                logger.info(
+                    f"PREFILL chunk {_prefill_chunk_idx}: evaluating "
+                    f"{len(_current_sends)} sends + {len(_flat_states)} cache arrays"
+                )
+                mx.eval(*_current_sends, *_flat_states)
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: eval done")
             finally:
                 if _massive_context:
                     logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
