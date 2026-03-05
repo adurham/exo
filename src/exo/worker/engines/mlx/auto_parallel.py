@@ -222,6 +222,25 @@ class PipelineFirstLayer(CustomMlxLayer):
         return self.original_layer(x, *args, **kwargs)
 
 
+def _link_cache_to_send(_cache: Any, send_output: mx.array) -> None:
+    """Link ALL cache components (keys AND values) to the send output via mx.depends.
+
+    For QuantizedKVCache, keys/values are tuples (data, scales, biases).
+    ALL components must be linked — not just data — because the fused quantized
+    SDPA kernel reads all 6 arrays in a single dispatch. Without full linking,
+    the evaluator may schedule the next step's fused kernel before the current
+    step's send completes, causing pipeline deadlocks.
+    """
+    if isinstance(_cache.keys, mx.array):
+        _cache.keys = mx.depends(_cache.keys, send_output)  # type: ignore
+    elif isinstance(_cache.keys, tuple):
+        _cache.keys = tuple(mx.depends(k, send_output) for k in _cache.keys)  # type: ignore
+    if isinstance(_cache.values, mx.array):
+        _cache.values = mx.depends(_cache.values, send_output)  # type: ignore
+    elif isinstance(_cache.values, tuple):
+        _cache.values = tuple(mx.depends(v, send_output) for v in _cache.values)  # type: ignore
+
+
 class PipelineLastLayer(CustomMlxLayer):
     def __init__(
         self,
@@ -271,11 +290,7 @@ class PipelineLastLayer(CustomMlxLayer):
 
                 if cache is not None:
                     _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    # For QuantizedKVCache, keys is a tuple (data, scales, biases) — use data element
-                    if isinstance(_cache.keys, mx.array):
-                        _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
-                    elif isinstance(_cache.keys, tuple):
-                        _cache.keys = (mx.depends(_cache.keys[0], output), *_cache.keys[1:])  # type: ignore
+                    _link_cache_to_send(_cache, output)
                     t1 = _time.monotonic()
                     mx.eval(_cache.keys)  # type: ignore
                     elapsed2 = _time.monotonic() - t1
@@ -289,11 +304,7 @@ class PipelineLastLayer(CustomMlxLayer):
                     # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
                     # doesn't have .keys directly; access via first sub-cache.
                     _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    # For QuantizedKVCache, keys is a tuple (data, scales, biases) — use data element
-                    if isinstance(_cache.keys, mx.array):
-                        _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
-                    elif isinstance(_cache.keys, tuple):
-                        _cache.keys = (mx.depends(_cache.keys[0], output), *_cache.keys[1:])  # type: ignore
+                    _link_cache_to_send(_cache, output)
 
         # Note: On intermediate ranks (not last), cache state is evaluated
         # when generate.py processes bulk eval. Moving it here eagerly
@@ -466,11 +477,7 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
         if cache is not None:
             last = cache[-1]  # type: ignore
             dep_cache = last[0] if hasattr(last, "caches") else last  # type: ignore
-            # For QuantizedKVCache, keys is a tuple (data, scales, biases) — use data element
-            if isinstance(dep_cache.keys, mx.array):
-                dep_cache.keys = mx.depends(dep_cache.keys, logits)  # type: ignore
-            elif isinstance(dep_cache.keys, tuple):
-                dep_cache.keys = (mx.depends(dep_cache.keys[0], logits), *dep_cache.keys[1:])  # type: ignore
+            _link_cache_to_send(dep_cache, logits)
 
         return logits
 
@@ -498,11 +505,7 @@ def patch_tensor_model[T](model: T) -> T:
         if cache is not None and len(cache) > 0:  # pyright: ignore[reportAny]
             last = cache[-1]  # pyright: ignore[reportAny]
             dep_cache = last[0] if hasattr(last, "caches") else last  # pyright: ignore[reportAny]
-            # For QuantizedKVCache, keys is a tuple (data, scales, biases) — use data element
-            if isinstance(dep_cache.keys, mx.array):
-                dep_cache.keys = mx.depends(dep_cache.keys, logits)  # pyright: ignore[reportAny,reportUnknownMemberType]
-            elif isinstance(dep_cache.keys, tuple):
-                dep_cache.keys = (mx.depends(dep_cache.keys[0], logits), *dep_cache.keys[1:])  # pyright: ignore[reportAny,reportUnknownMemberType]
+            _link_cache_to_send(dep_cache, logits)
 
         return logits
 

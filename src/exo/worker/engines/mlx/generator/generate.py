@@ -435,10 +435,8 @@ def warmup_inference(
     set_pipeline_prefill(model, is_prefill=False)
 
     # Save warmup KV cache to prefix cache for potential reuse.
-    # Skip if caches were quantized (QuantizedKVCache) — quantized caches use
-    # quantized_scaled_dot_product_attention instead of Flash Attention during
-    # prefill, which deadlocks in pipeline parallel (mx.depends can't handle
-    # the tuple-based keys of QuantizedKVCache).
+    # Skip if caches were quantized (QuantizedKVCache) — quantized caches
+    # are not compatible with the prefix cache (different storage format).
     if kv_prefix_cache is not None:
         _has_quantized = any(isinstance(c, QuantizedKVCache) for c in cache)
         if _has_quantized:
@@ -972,6 +970,26 @@ def generate_step(
                         prompt_cache[_ce] = _cc.to_quantized(
                             group_size=kv_group_size, bits=_decode_kv_bits
                         )
+                # Force-eval quantized cache arrays on generation_stream.
+                # to_quantized() creates lazy arrays (via mx.quantize) on the default
+                # stream. The fused quantized SDPA kernel runs on generation_stream.
+                # Evaluating here avoids cross-stream lazy evaluation issues that can
+                # deadlock pipeline send/recv coordination.
+                with mx.stream(generation_stream):
+                    _eval_arrays: list[mx.array] = []
+                    for _cc in prompt_cache:
+                        if hasattr(_cc, 'keys') and _cc.keys is not None:
+                            if isinstance(_cc.keys, tuple):
+                                _eval_arrays.extend(_cc.keys)
+                            else:
+                                _eval_arrays.append(_cc.keys)
+                        if hasattr(_cc, 'values') and _cc.values is not None:
+                            if isinstance(_cc.values, tuple):
+                                _eval_arrays.extend(_cc.values)
+                            else:
+                                _eval_arrays.append(_cc.values)
+                    if _eval_arrays:
+                        mx.eval(*_eval_arrays)
                 _qt1 = _time.perf_counter()
                 _kv_offset = prompt_cache[0].offset if hasattr(prompt_cache[0], 'offset') else '?'
                 logger.info(
