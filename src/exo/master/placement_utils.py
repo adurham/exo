@@ -46,6 +46,13 @@ def get_smallest_cycles(
     return [cycle for cycle in cycles if len(cycle) == min_nodes]
 
 
+def get_largest_cycles(
+    cycles: list[Cycle],
+) -> list[Cycle]:
+    max_nodes = max(len(cycle) for cycle in cycles)
+    return [cycle for cycle in cycles if len(cycle) == max_nodes]
+
+
 def allocate_layers_proportionally(
     total_layers: int,
     memory_fractions: list[float],
