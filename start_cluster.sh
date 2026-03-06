@@ -391,11 +391,11 @@ for NODE in "${NODES[@]}"; do
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > ~/exo.log 2>&1'"
     elif [ "$NODE" == "macstudio-m4-2" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main -v > ~/exo.log 2>&1'"
     else
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main -v > /tmp/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main -v > ~/exo.log 2>&1'"
     fi
 done
 
@@ -423,7 +423,7 @@ done
 if [ "$CLUSTER_READY" = false ]; then
     echo ""
     # Check for the specific pyo3 initialization panic that happens when uv.lock goes out of sync
-    PYO3_PANIC=$(ssh macstudio-m4-1 "grep -i 'The Python interpreter is not initialized' /tmp/exo.log" 2>/dev/null || true)
+    PYO3_PANIC=$(ssh macstudio-m4-1 "grep -i 'The Python interpreter is not initialized' ~/exo.log" 2>/dev/null || true)
     
     if [ -n "$PYO3_PANIC" ]; then
         echo "CRITICAL ERROR: Detected a corrupted Rust pyo3 binding state on the primary node!"
@@ -438,7 +438,7 @@ if [ "$CLUSTER_READY" = false ]; then
 
     echo "TIMEOUT: Cluster did not stabilize."
     echo "Fetching logs from macstudio-m4-1:"
-    ssh macstudio-m4-1 "tail -n 20 /tmp/exo.log"
+    ssh macstudio-m4-1 "tail -n 20 ~/exo.log"
     exit 1
 fi
 

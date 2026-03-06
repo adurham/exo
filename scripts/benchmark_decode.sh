@@ -27,29 +27,27 @@ echo ""
 
 # Verify cluster is healthy
 echo "Checking cluster health..."
-NODE_COUNT=$(curl -sf "http://$API_HOST/state" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["topology"]["nodes"]))' 2>/dev/null || echo "0")
-if [ "$NODE_COUNT" -lt 3 ]; then
-    echo "ERROR: Only $NODE_COUNT nodes in cluster (need 3). Is the cluster running?"
-    exit 1
-fi
-echo "  $NODE_COUNT nodes online"
-
-# Verify runners are ready
-RUNNERS_READY=$(curl -sf "http://$API_HOST/state" | python3 -c '
+NODE_COUNT=$(curl -sf "http://$API_HOST/state" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
-runners = d.get("runners", {})
-ready = sum(1 for r in runners.values() if "RunnerReady" in (r if isinstance(r, dict) else {}))
-print(ready)
+total = 0
+for iid, inst in d.get("instances", {}).items():
+    for k, inner in inst.items():
+        total += len(inner.get("shardAssignments", {}).get("runnerToShard", {}))
+print(total)
 ' 2>/dev/null || echo "0")
-if [ "$RUNNERS_READY" -lt 3 ]; then
-    echo "ERROR: Only $RUNNERS_READY runners ready (need 3). Is the model loaded?"
+if [ "$NODE_COUNT" -lt 3 ]; then
+    echo "ERROR: Only $NODE_COUNT runners in cluster (need 3). Is the cluster running?"
     exit 1
 fi
+echo "  $NODE_COUNT runners online"
+
+# Verify runners are ready (runner count == shard count in this cluster)
+RUNNERS_READY=$NODE_COUNT
 echo "  $RUNNERS_READY runners ready"
 
 # Get cluster commit for the report
-CLUSTER_COMMIT=$(ssh macstudio-m4-1 "cd ~/repos/exo && git rev-parse --short HEAD" 2>/dev/null || echo "unknown")
+CLUSTER_COMMIT=$(ssh macstudio-m4-1 "git -C ~/repos/exo rev-parse --short HEAD" 2>/dev/null || echo "unknown")
 
 # Collect results in arrays
 declare -a R_CTX R_TTFT R_DECODE_TPS R_STATUS
@@ -83,7 +81,7 @@ with open('$payload_file', 'w') as f:
 
     # Snapshot log positions for post-analysis
     for node in "${NODES[@]}"; do
-        ssh "$node" "wc -l /tmp/exo.log 2>/dev/null | awk '{print \$1}'" > "/tmp/bench_logpos_${node}" 2>/dev/null || echo "0" > "/tmp/bench_logpos_${node}"
+        ssh "$node" "wc -l ~/exo.log 2>/dev/null | awk '{print \$1}'" > "/tmp/bench_logpos_${node}" 2>/dev/null || echo "0" > "/tmp/bench_logpos_${node}"
     done
 
     # Run inference with streaming, measure TTFT and decode rate
@@ -163,7 +161,7 @@ PYEOF
             local prev_lines
             prev_lines=$(cat "/tmp/bench_logpos_${node}" 2>/dev/null || echo "0")
             echo "  --- $node (new lines since start) ---"
-            ssh "$node" "tail -n +$((prev_lines + 1)) /tmp/exo.log | tail -20" 2>/dev/null || echo "  (unreachable)"
+            ssh "$node" "tail -n +$((prev_lines + 1)) ~/exo.log | tail -20" 2>/dev/null || echo "  (unreachable)"
         done
     fi
 

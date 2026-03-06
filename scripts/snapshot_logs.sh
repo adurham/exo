@@ -3,7 +3,7 @@
 #
 # Usage: ./scripts/snapshot_logs.sh [LABEL]
 #
-# Pulls /tmp/exo.log from each node into timestamped local files.
+# Pulls ~/exo.log from each node into timestamped local files.
 # Run this BEFORE restarting the cluster to preserve crash forensics.
 
 set -euo pipefail
@@ -23,7 +23,7 @@ for NODE in "${NODES[@]}"; do
     echo -n "  $NODE... "
     OUTFILE="$OUT_DIR/${NODE}.log"
 
-    if scp "$NODE:/tmp/exo.log" "$OUTFILE" 2>/dev/null; then
+    if scp "$NODE:~/exo.log" "$OUTFILE" 2>/dev/null; then
         LINES=$(wc -l < "$OUTFILE" | tr -d ' ')
         SIZE=$(du -h "$OUTFILE" | awk '{print $1}')
         echo "$LINES lines ($SIZE)"
