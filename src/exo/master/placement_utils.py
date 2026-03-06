@@ -511,31 +511,35 @@ def _find_ip_prioritised(
 
 
 def get_mlx_ring_hosts_by_node(
-    selected_cycle: Cycle,
+    nodes_by_rank: list[NodeId],
     cycle_digraph: Topology,
     ephemeral_port: int,
     node_network: Mapping[NodeId, NodeNetworkInfo],
 ) -> dict[NodeId, list[Host]]:
     """Generate per-node host lists for MLX ring backend.
 
+    ``nodes_by_rank`` defines the ring order (index == device_rank == MLX_RANK).
+    The ring backend binds on ``nodes[rank]`` and connects to
+    ``nodes[(rank+1) % size]``, so the list must be ordered by device_rank.
+
     Each node gets a list where:
     - Self position: Host(ip="0.0.0.0", port=ephemeral_port)
     - Left/right neighbors: actual connection IPs
     - Non-neighbors: Host(ip="198.51.100.1", port=0) placeholder (RFC 5737 TEST-NET-2)
     """
-    world_size = len(selected_cycle)
+    world_size = len(nodes_by_rank)
     if world_size == 0:
         return {}
 
     hosts_by_node: dict[NodeId, list[Host]] = {}
 
-    for rank, node_id in enumerate(selected_cycle):
+    for rank, node_id in enumerate(nodes_by_rank):
         left_rank = (rank - 1) % world_size
         right_rank = (rank + 1) % world_size
 
         hosts_for_node: list[Host] = []
 
-        for idx, other_node_id in enumerate(selected_cycle):
+        for idx, other_node_id in enumerate(nodes_by_rank):
             if idx == rank:
                 hosts_for_node.append(Host(ip="0.0.0.0", port=ephemeral_port))
                 continue

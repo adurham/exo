@@ -161,28 +161,26 @@ def place_instance(
 
     cycle_digraph: Topology = topology.get_subgraph_from_nodes(selected_cycle.node_ids)
 
+    # Sort nodes by device_rank so matrix/host-list indices match MLX_RANK.
+    # For pure pipeline device_rank == cycle_index (no-op), but for hybrid
+    # sharding device_rank is assigned by RAM order which may differ.
+    def _device_rank(node_id: NodeId) -> int:
+        runner_id = shard_assignments.node_to_runner[node_id]
+        shard_metadata = shard_assignments.runner_to_shard.get(runner_id)
+        assert shard_metadata is not None
+        return shard_metadata.device_rank
+
+    nodes_by_rank: list[NodeId] = sorted(selected_cycle.node_ids, key=_device_rank)
+
     instance_id = InstanceId()
     target_instances = dict(deepcopy(current_instances))
 
     match command.instance_meta:
         case InstanceMeta.MlxJaccl:
-            # TODO(evan): shard assignments should contain information about ranks, this is ugly
-            def get_device_rank(node_id: NodeId) -> int:
-                runner_id = shard_assignments.node_to_runner[node_id]
-                shard_metadata = shard_assignments.runner_to_shard.get(runner_id)
-                assert shard_metadata is not None
-                return shard_metadata.device_rank
-
-            zero_node_ids = [
-                node_id
-                for node_id in selected_cycle.node_ids
-                if get_device_rank(node_id) == 0
-            ]
-            assert len(zero_node_ids) == 1
-            coordinator_node_id = zero_node_ids[0]
+            coordinator_node_id = nodes_by_rank[0]
 
             mlx_jaccl_devices = get_mlx_jaccl_devices_matrix(
-                [node_id for node_id in selected_cycle],
+                nodes_by_rank,
                 cycle_digraph,
             )
             mlx_jaccl_coordinators = get_mlx_jaccl_coordinators(
@@ -200,7 +198,7 @@ def place_instance(
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
             hosts_by_node = get_mlx_ring_hosts_by_node(
-                selected_cycle=selected_cycle,
+                nodes_by_rank=nodes_by_rank,
                 cycle_digraph=cycle_digraph,
                 ephemeral_port=ephemeral_port,
                 node_network=node_network,
