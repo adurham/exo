@@ -681,31 +681,12 @@ def generate_step(
                 mx.eval(sampled, *_pending)
                 _st6 = _time.perf_counter()
 
-                # Dynamic Safe Sync: if the context is massive, the network wait can trigger 
-                # a Metal GPU Timeout Error (>2-5s) on the pipeline tail node while waiting for 
-                # other nodes to chew through their massive KV cache.
-                # If EXO_DISABLE_METAL_TIMEOUT=1, we rely on the OS-level override.
-                # Otherwise, we fallback to CPU network sync at EXO_SAFE_SYNC_LIMIT (default 50,000).
-                _kv_len = prompt_cache[0].offset if (prompt_cache and hasattr(prompt_cache[0], 'offset')) else 0
-                
-                _massive_context = False
-                if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
-                    _safe_sync_limit = int(os.environ.get("EXO_SAFE_SYNC_LIMIT", "50000"))
-                    _massive_context = _kv_len > _safe_sync_limit
-
-                if _massive_context:
-                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
-
-                try:
-                    if is_pp_tail:
-                        contribution = sampled
-                    else:
-                        contribution = mx.zeros_like(sampled)
-                    sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
-                    mx.eval(sampled)
-                finally:
-                    if _massive_context:
-                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+                if is_pp_tail:
+                    contribution = sampled
+                else:
+                    contribution = mx.zeros_like(sampled)
+                sampled = mx.distributed.all_sum(contribution, group=hybrid_group)
+                mx.eval(sampled)
 
                 _st7 = _time.perf_counter()
 
@@ -717,8 +698,7 @@ def generate_step(
                     f"sample={(_st4-_st3)*1000:.0f}ms "
                     f"eval={(_st6-_st5)*1000:.0f}ms "
                     f"token_sync={(_st7-_st6)*1000:.0f}ms "
-                    f"total={(_st7-_st0)*1000:.0f}ms "
-                    f"({'SAFE_SYNC' if _massive_context else 'FAST_SYNC'})"
+                    f"total={(_st7-_st0)*1000:.0f}ms"
                 )
             elif hybrid_group is not None:
                 _pending = _drain_pending_sends()
@@ -892,34 +872,14 @@ def generate_step(
             logger.info(f"PREFILL chunk {_prefill_chunk_idx}: drained {len(_current_sends)} sends")
             all_states = [_c.state for _c in prompt_cache]
 
-            # Three-phase eval for pipeline-parallel prefill.
-            #
-            # Eval model output first so each rank's recv_like (a dependency
-            # in the computation graph) is posted before upstream sends fire.
-            # For non-first ranks the graph is recv→layers→send→lm_head;
-            # the evaluator walks dependencies bottom-up, posting recv before
-            # layers or send execute.
-            #
-            _flat_states: list[mx.array] = []
-            for _s in all_states:
-                if isinstance(_s, tuple):
-                    _flat_states.extend(_s)
-                else:
-                    _flat_states.append(_s)
-            logger.info(
-                f"PREFILL chunk {_prefill_chunk_idx}: three-phase eval — "
-                f"{len(_current_sends)} sends + {len(_flat_states)} cache arrays"
-            )
-            # Phase 0: eval model output (posts recvs, triggers forward + sends)
-            mx.eval(_prefill_output)
-            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 0 (model output) done")
-            # Phase 1: eval sends (no-ops if already evaluated in Phase 0)
+            # Single eval: cache states + sends together. The model output
+            # and sends are pulled in as dependencies of the cache states.
+            # Cross-node recv-before-send timing is handled by the per-chunk
+            # barrier above.
             if _current_sends:
-                mx.eval(*_current_sends)
-            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 (sends) done")
-            # Phase 2: eval cache states
-            mx.eval(*_flat_states)
-            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 (cache) done")
+                mx.eval(*all_states, *_current_sends)
+            else:
+                mx.eval(*all_states)
 
             _slow_caches = []
             _t3 = _time.perf_counter()
