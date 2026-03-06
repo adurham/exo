@@ -13,6 +13,7 @@ from mlx_lm.models.cache import ArraysCache, RotatingKVCache
 from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.types.api import (
     CompletionTokensDetails,
     FinishReason,
@@ -33,6 +34,7 @@ from exo.worker.engines.mlx.auto_parallel import (
     PipelineLastLayer,
     clear_prefill_sends,
     flush_prefill_sends,
+    get_pipeline_timings,
     set_pipeline_prefill,
     set_pipeline_queue_sends,
 )
@@ -138,6 +140,8 @@ def pipeline_parallel_prefill(
         f"[R{rank}] Pipeline prefill: {n_real} real + {n_leading} leading + {n_trailing} trailing = {n_total} iterations"
     )
     clear_prefill_sends()
+    if EXO_TRACING_ENABLED:
+        get_pipeline_timings().reset()
 
     # Initial callback matching generate_step
     prompt_progress_callback(0, total)
@@ -172,6 +176,8 @@ def pipeline_parallel_prefill(
         clear_prefill_sends()
 
     # Post-loop: process remaining 1 token + add +1 entry to match stream_generate.
+    if EXO_TRACING_ENABLED:
+        t_post = time.perf_counter()
     for _ in range(2):
         with mx.stream(generation_stream):
             model(prompt[-1:][None], cache=_prompt_cache)
@@ -179,15 +185,27 @@ def pipeline_parallel_prefill(
         flush_prefill_sends()
 
     assert _prompt_cache is not None
+    if EXO_TRACING_ENABLED:
+        t_cache_eval = time.perf_counter()
     mx.eval([c.state for c in _prompt_cache])  # type: ignore
+    if EXO_TRACING_ENABLED:
+        cache_eval_ms = (time.perf_counter() - t_cache_eval) * 1000
+        post_ms = (time.perf_counter() - t_post) * 1000
+        logger.info(
+            f"[R{rank}] Prefill post-loop: {post_ms:.1f}ms (cache eval: {cache_eval_ms:.1f}ms)"
+        )
 
     # Final callback matching generate_step
     prompt_progress_callback(total, total)
 
+    prefill_elapsed_ms = (time.perf_counter() - t_start) * 1000
     logger.info(
         f"[R{rank}] Prefill: {n_real} real + {n_leading}+{n_trailing} dummy iterations, "
-        f"Processed {processed} tokens in {(time.perf_counter() - t_start) * 1000:.1f}ms"
+        f"Processed {processed} tokens in {prefill_elapsed_ms:.1f}ms "
+        f"({processed / (prefill_elapsed_ms / 1000):.1f} tok/s)"
     )
+    if EXO_TRACING_ENABLED:
+        get_pipeline_timings().log_and_reset("prefill", rank)
 
 
 def prefill(
@@ -237,7 +255,12 @@ def prefill(
 
     set_pipeline_prefill(model, is_prefill=True)
 
+    if EXO_TRACING_ENABLED:
+        t_barrier = time.perf_counter()
     mx_barrier(group)
+    if EXO_TRACING_ENABLED:
+        barrier_ms = (time.perf_counter() - t_barrier) * 1000
+        logger.info(f"Pre-prefill barrier: {barrier_ms:.1f}ms")
     logger.info("Starting prefill")
 
     is_pipeline = _has_pipeline_communication_layer(model)
@@ -285,6 +308,8 @@ def prefill(
 
     # stream_generate added 1 extra generated token to the cache, so we should trim it.
     # Because of needing to roll back arrays cache, we will generate on 2 tokens so trim 1 more.
+    if EXO_TRACING_ENABLED:
+        t_trim = time.perf_counter()
     pre_gen = deepcopy(snapshots[-2]) if has_ssm else None
     for i, c in enumerate(cache):
         if has_ssm and isinstance(c, (ArraysCache, RotatingKVCache)):
@@ -294,6 +319,8 @@ def prefill(
         else:
             assert not isinstance(c, (ArraysCache, RotatingKVCache))
             c.trim(2)
+    if EXO_TRACING_ENABLED:
+        logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
     elapsed = time.perf_counter() - start_time
     tokens_per_sec = num_tokens / elapsed if elapsed > 0 else 0.0
@@ -329,8 +356,16 @@ def warmup_inference(
     # Use a default sampler for warmup
     sampler = make_sampler(temp=0.0)
 
+    if EXO_TRACING_ENABLED:
+        t_barrier = time.perf_counter()
     mx_barrier(group)
+    if EXO_TRACING_ENABLED:
+        logger.info(
+            f"Warmup pre-barrier: {(time.perf_counter() - t_barrier) * 1000:.1f}ms"
+        )
 
+    if EXO_TRACING_ENABLED:
+        t_warmup_gen = time.perf_counter()
     logger.info("Generating warmup tokens")
     for _r in stream_generate(
         model=model,
@@ -346,9 +381,21 @@ def warmup_inference(
         logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
 
-    logger.info("Generated ALL warmup tokens")
+    if EXO_TRACING_ENABLED:
+        warmup_gen_ms = (time.perf_counter() - t_warmup_gen) * 1000
+        logger.info(
+            f"Generated ALL warmup tokens: {tokens_generated} in {warmup_gen_ms:.1f}ms"
+        )
+    else:
+        logger.info("Generated ALL warmup tokens")
 
+    if EXO_TRACING_ENABLED:
+        t_barrier = time.perf_counter()
     mx_barrier(group)
+    if EXO_TRACING_ENABLED:
+        logger.info(
+            f"Warmup post-barrier: {(time.perf_counter() - t_barrier) * 1000:.1f}ms"
+        )
 
     return tokens_generated
 
@@ -516,8 +563,14 @@ def mlx_generate(
     think_start = tokenizer.think_start
     think_end = tokenizer.think_end
 
-    logger.info("Starting decode")
+    if EXO_TRACING_ENABLED:
+        get_pipeline_timings().reset()
+        t_barrier = time.perf_counter()
     mx_barrier(group)
+    if EXO_TRACING_ENABLED:
+        decode_barrier_ms = (time.perf_counter() - t_barrier) * 1000
+        logger.info(f"Pre-decode barrier: {decode_barrier_ms:.1f}ms")
+    logger.info("Starting decode")
 
     for completion_tokens, out in enumerate(
         stream_generate(
@@ -610,12 +663,27 @@ def mlx_generate(
             generation_tps = (
                 generated_tokens / generation_elapsed if generation_elapsed > 0 else 0.0
             )
-            logger.debug(
-                f"Generation complete: prefill {prompt_tokens} tokens @ "
-                f"{prefill_tps:.1f} tok/s, generated {generated_tokens} tokens @ "
-                f"{generation_tps:.1f} tok/s"
-            )
+            if EXO_TRACING_ENABLED:
+                logger.info(
+                    f"Generation complete: prefill {prefill_tokens} tokens @ "
+                    f"{prefill_tps:.1f} tok/s, decoded {generated_tokens} tokens @ "
+                    f"{generation_tps:.1f} tok/s in {generation_elapsed * 1000:.1f}ms "
+                    f"({generation_elapsed * 1000 / generated_tokens:.2f}ms/tok)"
+                    if generated_tokens > 0
+                    else f"Generation complete: prefill {prefill_tokens} tokens @ "
+                    f"{prefill_tps:.1f} tok/s, 0 tokens decoded"
+                )
+                rank = group.rank() if group is not None else 0
+                get_pipeline_timings().log_and_reset("decode", rank)
+            else:
+                logger.debug(
+                    f"Generation complete: prefill {prefill_tokens} tokens @ "
+                    f"{prefill_tps:.1f} tok/s, generated {generated_tokens} tokens @ "
+                    f"{generation_tps:.1f} tok/s"
+                )
             if kv_prefix_cache is not None:
+                if EXO_TRACING_ENABLED:
+                    t_cache_update = time.perf_counter()
                 generated_tokens_array = mx.array(
                     tokenizer.encode(
                         "".join(generated_text_parts), add_special_tokens=False
@@ -644,6 +712,11 @@ def mlx_generate(
                     kv_prefix_cache.add_kv_cache(
                         full_prompt_tokens, caches, cache_snapshots
                     )
+                if EXO_TRACING_ENABLED:
+                    logger.info(
+                        f"KV prefix cache update took "
+                        f"{(time.perf_counter() - t_cache_update) * 1000:.1f}ms"
+                    )
 
         if on_generation_token is not None:
             on_generation_token()
@@ -659,7 +732,13 @@ def mlx_generate(
         )
 
         if is_done:
+            if EXO_TRACING_ENABLED:
+                t_barrier = time.perf_counter()
             mx_barrier(group)
+            if EXO_TRACING_ENABLED:
+                logger.info(
+                    f"Post-decode barrier: {(time.perf_counter() - t_barrier) * 1000:.1f}ms"
+                )
             break
 
         # Limit accumulated_text to what's needed for stop sequence detection

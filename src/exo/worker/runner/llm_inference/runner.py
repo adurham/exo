@@ -51,6 +51,7 @@ from exo.shared.types.worker.runners import (
     RunnerStatus,
     RunnerWarmingUp,
 )
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.utils.channels import MpReceiver, MpSender
 from exo.worker.engines.mlx.cache import KVPrefixCache
 from exo.worker.engines.mlx.utils_mlx import (
@@ -156,11 +157,18 @@ class Runner:
                 self.update_status(RunnerConnecting())
                 self.acknowledge_task(task)
 
+                if EXO_TRACING_ENABLED:
+                    t_connect = time.time()
                 self.generator.group = initialize_mlx(self.bound_instance)
 
                 self.send_task_status(task.task_id, TaskStatus.Complete)
                 self.update_status(RunnerConnected())
-                logger.info("runner connected")
+                if EXO_TRACING_ENABLED:
+                    logger.info(
+                        f"runner connected in {time.time() - t_connect:.2f}s"
+                    )
+                else:
+                    logger.info("runner connected")
 
             # we load the model if it's connected with a group, or idle without a group. we should never tell a model to connect if it doesn't need to
             case LoadModel() if isinstance(self.generator, Builder) and (
@@ -176,6 +184,8 @@ class Runner:
                 total_layers = (
                     self.shard_metadata.end_layer - self.shard_metadata.start_layer
                 )
+                if EXO_TRACING_ENABLED:
+                    t_load = time.time()
                 logger.info("runner loading")
 
                 self.update_status(
@@ -220,7 +230,10 @@ class Runner:
 
                 self.send_task_status(task.task_id, TaskStatus.Complete)
                 self.update_status(RunnerLoaded())
-                logger.info("runner loaded")
+                if EXO_TRACING_ENABLED:
+                    logger.info(f"runner loaded in {time.time() - t_load:.2f}s")
+                else:
+                    logger.info("runner loaded")
 
             case StartWarmup() if isinstance(self.current_status, RunnerLoaded):
                 assert isinstance(self.generator, InferenceGenerator)

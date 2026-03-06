@@ -10,6 +10,7 @@ export EXO_EVAL_DEBUG=1
 export EXO_CHUNKED_PREFILL=0
 export EXO_ADAPTIVE_THROTTLE=1
 export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
+export EXO_TRACING_ENABLED=true
 export LOG_LEVEL=DEBUG
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -382,6 +383,9 @@ for NODE in "${NODES[@]}"; do
 
     # Per-layer profiling: forces mx.eval() per layer to measure real GPU time (slower but accurate)
     EXO_ENV="$EXO_ENV EXO_PROFILE_LAYERS=${EXO_PROFILE_LAYERS:-0}"
+
+    # Tracing: detailed timing instrumentation for pipeline ops, barriers, distributed comms
+    EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=${EXO_TRACING_ENABLED:-false}"
 
     # Hybrid KV cache quantization: use Flash Attention for prefill, then quantize to N-bit for decode.
     # Set to 0 to disable. Reduces KV bandwidth by ~2x during decode at large context.

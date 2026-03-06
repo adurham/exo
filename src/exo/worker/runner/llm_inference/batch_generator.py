@@ -24,6 +24,7 @@ from exo.worker.engines.mlx.generator.generate import (
     mlx_generate,
     warmup_inference,
 )
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     mx_any,
@@ -138,7 +139,14 @@ class SequentialGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
         )
-        logger.info(f"warmed up by generating {toks} tokens")
+        if EXO_TRACING_ENABLED:
+            warmup_elapsed = time.monotonic() - t
+            logger.info(
+                f"warmed up by generating {toks} tokens in {warmup_elapsed:.2f}s "
+                f"({toks / warmup_elapsed:.1f} tok/s)"
+            )
+        else:
+            logger.info(f"warmed up by generating {toks} tokens")
         check_for_cancel_every = min(
             math.ceil(toks / min(time.monotonic() - t, 0.001)), 100
         )
@@ -165,9 +173,13 @@ class SequentialGenerator(InferenceGenerator):
 
     def agree_on_tasks(self) -> None:
         """Agree between all ranks about the task ordering (some may have received in different order or not at all)."""
+        if EXO_TRACING_ENABLED:
+            t0 = time.perf_counter()
         agreed, different = mx_all_gather_tasks(self._maybe_queue, self.group)
         self._queue.extend(task for task in self._maybe_queue if task in agreed)
         self._maybe_queue = [task for task in self._maybe_queue if task in different]
+        if EXO_TRACING_ENABLED:
+            logger.info(f"agree_on_tasks took {(time.perf_counter() - t0) * 1000:.1f}ms")
 
     def step(
         self,
@@ -253,6 +265,8 @@ class SequentialGenerator(InferenceGenerator):
                 )
 
         def distributed_prompt_progress_callback() -> None:
+            if EXO_TRACING_ENABLED:
+                t0 = time.perf_counter()
             self._cancelled_tasks.update(self.cancel_receiver.collect())
             want_to_cancel = (task.task_id in self._cancelled_tasks) or (
                 TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks
@@ -261,6 +275,11 @@ class SequentialGenerator(InferenceGenerator):
                 raise PrefillCancelled()
 
             self.agree_on_tasks()
+            if EXO_TRACING_ENABLED:
+                logger.info(
+                    f"distributed_prompt_progress_callback took "
+                    f"{(time.perf_counter() - t0) * 1000:.1f}ms"
+                )
 
         tokens_since_cancel_check = self.check_for_cancel_every
 
@@ -269,6 +288,8 @@ class SequentialGenerator(InferenceGenerator):
             tokens_since_cancel_check += 1
             if tokens_since_cancel_check >= self.check_for_cancel_every:
                 tokens_since_cancel_check = 0
+                if EXO_TRACING_ENABLED:
+                    t0 = time.perf_counter()
                 self._cancelled_tasks.update(self.cancel_receiver.collect())
                 want_to_cancel = (task.task_id in self._cancelled_tasks) or (
                     TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks
@@ -277,6 +298,11 @@ class SequentialGenerator(InferenceGenerator):
                     raise PrefillCancelled()
 
                 self.agree_on_tasks()
+                if EXO_TRACING_ENABLED:
+                    logger.info(
+                        f"on_generation_token cancel check took "
+                        f"{(time.perf_counter() - t0) * 1000:.1f}ms"
+                    )
 
         return mlx_generate(
             model=self.model,

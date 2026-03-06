@@ -1,7 +1,9 @@
 import os
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import partial
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -49,6 +51,7 @@ from mlx_lm.models.step3p5 import Model as Step35Model
 from mlx_lm.models.step3p5 import Step3p5MLP as Step35MLP
 from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.logging import logger
 from exo.shared.types.worker.shards import PipelineShardMetadata
 
@@ -62,11 +65,76 @@ LayerLoadedCallback = Callable[[int, int], None]  # (layers_loaded, total_layers
 _pending_prefill_sends: list[tuple[mx.array, int, mx.distributed.Group]] = []
 
 
+@dataclass
+class PipelineTimings:
+    """Accumulates per-operation timing for pipeline parallel layers.
+
+    All times are in microseconds. Accumulates across multiple steps
+    (tokens for decode, chunks for prefill) and should be reset between phases.
+    """
+
+    recv_eval_us: int = 0  # eval(x) before recv_like (waiting for prev compute to finish)
+    recv_us: int = 0  # recv_like + eval(x) (waiting for data from previous rank)
+    compute_us: int = 0  # layer forward + eval(output) (all GPU compute for this rank)
+    send_us: int = 0  # send + depends + eval (dispatching to next rank)
+    all_gather_us: int = 0  # all_gather + eval (decode only — gathering tokens)
+    flush_sends_us: int = 0  # flush_prefill_sends (prefill only — async send dispatch)
+    step_count: int = 0
+
+    def reset(self) -> None:
+        self.recv_eval_us = 0
+        self.recv_us = 0
+        self.compute_us = 0
+        self.send_us = 0
+        self.all_gather_us = 0
+        self.flush_sends_us = 0
+        self.step_count = 0
+
+    def log_and_reset(self, label: str, rank: int) -> None:
+        if self.step_count == 0:
+            return
+        total = (
+            self.recv_eval_us
+            + self.recv_us
+            + self.compute_us
+            + self.send_us
+            + self.all_gather_us
+            + self.flush_sends_us
+        )
+        avg = total / self.step_count
+        parts = [
+            f"recv_eval={self.recv_eval_us / 1000:.1f}ms",
+            f"recv={self.recv_us / 1000:.1f}ms",
+            f"compute={self.compute_us / 1000:.1f}ms",
+            f"send={self.send_us / 1000:.1f}ms",
+        ]
+        if self.all_gather_us > 0:
+            parts.append(f"all_gather={self.all_gather_us / 1000:.1f}ms")
+        if self.flush_sends_us > 0:
+            parts.append(f"flush_sends={self.flush_sends_us / 1000:.1f}ms")
+        logger.info(
+            f"[R{rank}] {label} pipeline ({self.step_count} steps, "
+            f"{total / 1000:.1f}ms total, {avg / 1000:.2f}ms/step): {', '.join(parts)}"
+        )
+        self.reset()
+
+
+_pipeline_timings = PipelineTimings()
+
+
+def get_pipeline_timings() -> PipelineTimings:
+    return _pipeline_timings
+
+
 def flush_prefill_sends() -> None:
+    if EXO_TRACING_ENABLED:
+        t0 = time.perf_counter()
     for output, dst, group in _pending_prefill_sends:
         sent = mx.distributed.send(output, dst, group=group)
         mx.async_eval(sent)
     _pending_prefill_sends.clear()
+    if EXO_TRACING_ENABLED:
+        _pipeline_timings.flush_sends_us += int((time.perf_counter() - t0) * 1_000_000)
 
 
 def clear_prefill_sends() -> None:
@@ -155,9 +223,16 @@ class PipelineFirstLayer(CustomMlxLayer):
         if self.r != 0:
             # We want to avoid GPU timeout errors by evalling the distributed operation
             # so that it stays on CPU, which does not have a timeout.
+            if EXO_TRACING_ENABLED:
+                t0 = time.perf_counter()
             mx.eval(x)
+            if EXO_TRACING_ENABLED:
+                t1 = time.perf_counter()
             x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
             mx.eval(x)
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
+                _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -182,13 +257,21 @@ class PipelineLastLayer(CustomMlxLayer):
             x, *args, **kwargs
         ).arguments.get("cache", None)
 
+        if EXO_TRACING_ENABLED:
+            t0 = time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         # Eval layer output to materialize it before send — this splits the graph
         # so the send is isolated and the receiving rank's recv can complete.
         mx.eval(output)
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.compute_us += int(
+                (time.perf_counter() - t0) * 1_000_000
+            )
 
         if self.r != self.s - 1:
+            if EXO_TRACING_ENABLED:
+                t_send = time.perf_counter()
             if self.queue_sends:
                 _pending_prefill_sends.append(
                     (output, (self.r + 1) % self.s, self.group)
@@ -206,13 +289,25 @@ class PipelineLastLayer(CustomMlxLayer):
             mx.eval(output)
             if cache is not None and hasattr(_cache, "keys"):  # type: ignore
                 mx.eval(_cache.keys)  # type: ignore
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.send_us += int(
+                    (time.perf_counter() - t_send) * 1_000_000
+                )
 
         if not self.is_prefill:
+            if EXO_TRACING_ENABLED:
+                t_ag = time.perf_counter()
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
             mx.eval(output)
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.all_gather_us += int(
+                    (time.perf_counter() - t_ag) * 1_000_000
+                )
 
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.step_count += 1
         return output
 
 

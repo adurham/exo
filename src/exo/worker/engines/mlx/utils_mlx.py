@@ -62,6 +62,7 @@ from exo.worker.engines.mlx.auto_parallel import (
     pipeline_auto_parallel,
     tensor_auto_parallel,
 )
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.worker.runner.bootstrap import logger
 
 Group = mx.distributed.Group
@@ -697,21 +698,29 @@ def mlx_cleanup(
 def mx_any(bool_: bool, group: Group | None) -> bool:
     if group is None:
         return bool_
+    if EXO_TRACING_ENABLED:
+        t0 = time.perf_counter()
     num_true = mx.distributed.all_sum(
         mx.array(bool_), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
     )
     mx.eval(num_true)
+    if EXO_TRACING_ENABLED:
+        logger.info(f"mx_any took {(time.perf_counter() - t0) * 1000:.1f}ms")
     return num_true.item() > 0
 
 
 def mx_barrier(group: Group | None):
     if group is None:
         return
+    if EXO_TRACING_ENABLED:
+        t0 = time.perf_counter()
     mx.eval(
         mx.distributed.all_sum(
             mx.array(1.0), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
         )
     )
+    if EXO_TRACING_ENABLED:
+        logger.info(f"mx_barrier took {(time.perf_counter() - t0) * 1000:.1f}ms")
 
 
 def _parse_kimi_tool_calls(text: str):
