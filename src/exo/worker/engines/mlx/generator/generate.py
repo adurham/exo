@@ -636,6 +636,26 @@ def generate_step(
         _step_counter[0] += 1
 
         with mx.stream(generation_stream):
+            # In-graph barrier for UC RDMA race prevention (decode mode only).
+            # UC silently drops sends if the downstream recv hasn't been posted.
+            # By embedding an all_sum barrier into the computation graph via
+            # mx.depends, all nodes complete the barrier before any recv/send
+            # ops are scheduled — structurally guaranteeing recv-before-send
+            # within a single mx.eval call (no Python-level timing gap).
+            _pp_group = (
+                getattr(model, '_hybrid_pipeline_group', None)
+                or getattr(model, '_pipeline_group', None)
+            )
+            _pp_decode = (
+                getattr(model, '_hybrid_decode_mode', False)
+                or getattr(model, '_pipeline_decode_mode', False)
+            )
+            if _pp_group is not None and _pp_decode:
+                _barrier = mx.distributed.all_sum(mx.zeros(1), group=_pp_group)
+                input_tokens = mx.depends(input_tokens, _barrier)
+                if input_embeddings is not None:
+                    input_embeddings = mx.depends(input_embeddings, _barrier)
+
             _st0 = _time.perf_counter()
             logits = _model_call(
                 input_tokens=input_tokens[None],
@@ -831,33 +851,41 @@ def generate_step(
         # with the new prefill's pipeline coordination.
         mx.synchronize()
 
-        # Pipeline group for distributed barriers (UC RDMA race prevention).
-        # After JIT warmup, rank 0 can complete its forward pass and fire
-        # its RDMA send before downstream ranks have started mx.eval()
-        # (and posted their recv).  With UC (Unreliable Connection), the
-        # send is silently dropped → deadlock.  A lightweight all_sum
-        # barrier synchronises all ranks so they enter mx.eval() at
-        # roughly the same time — downstream ranks post recv (µs) well
-        # before upstream ranks finish layer computation and send (ms).
-        _pipeline_group = getattr(model, '_pipeline_group', None)
+        # Pipeline group for in-graph barriers (UC RDMA race prevention).
+        # Barriers are embedded into the computation graph via mx.depends,
+        # ensuring all nodes complete a collective before recv/send ops.
+        _pipeline_group = (
+            getattr(model, '_hybrid_pipeline_group', None)
+            or getattr(model, '_pipeline_group', None)
+        )
 
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
             logger.debug(f"PREFILL loop: starting chunk {_prefill_chunk_idx}, remaining={remaining}, n_to_process={n_to_process}")
 
-            # Per-chunk barrier: keep ranks in lockstep so recv is always
-            # posted before upstream send fires (UC RDMA race prevention).
-            if _pipeline_group is not None and _pipeline_group.size() > 1:
-                mx.eval(mx.distributed.all_sum(mx.zeros(1), group=_pipeline_group))
-
             _t0 = _time.perf_counter()
             logger.info(f"PREFILL chunk {_prefill_chunk_idx}: calling _model_call with {n_to_process} tokens")
+
+            # In-graph barrier: embed all_sum into the model input via mx.depends
+            # so barrier + recv + compute + send are in ONE mx.eval call.
+            _chunk_tokens = prompt[:n_to_process]
+            _chunk_embeddings = (
+                input_embeddings[:n_to_process]
+                if input_embeddings is not None
+                else None
+            )
+            if _pipeline_group is not None and _pipeline_group.size() > 1:
+                _barrier = mx.distributed.all_sum(mx.zeros(1), group=_pipeline_group)
+                _chunk_tokens = mx.depends(_chunk_tokens, _barrier)
+                if _chunk_embeddings is not None:
+                    _chunk_embeddings = mx.depends(_chunk_embeddings, _barrier)
+
             _prefill_output = _model_call(
-                input_tokens=prompt[:n_to_process][None],
+                input_tokens=_chunk_tokens[None],
                 input_embeddings=(
-                    input_embeddings[:n_to_process][None]
-                    if input_embeddings is not None
+                    _chunk_embeddings[None]
+                    if _chunk_embeddings is not None
                     else None
                 ),
             )
@@ -924,10 +952,10 @@ def generate_step(
         mx.clear_cache()
         _gap_t1 = _time.perf_counter()
 
-        # Barrier before first decode step — nodes may exit the prefill loop
-        # at slightly different times (mx.clear_cache is local), so re-sync.
-        if _pipeline_group is not None and _pipeline_group.size() > 1:
-            mx.eval(mx.distributed.all_sum(mx.zeros(1), group=_pipeline_group))
+        # Note: no separate barrier needed here — the in-graph barrier in
+        # _step() (via mx.depends on the model input) provides a structural
+        # guarantee that all nodes complete a collective before any recv/send
+        # ops are scheduled, eliminating the Python-level timing gap.
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
         _gap_t2 = _time.perf_counter()
