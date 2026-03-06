@@ -914,20 +914,28 @@ def generate_step(
                 os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
 
             try:
-                # Two-phase eval for prefill (mirrors PP_SAFE_SYNC structure):
+                # Three-phase eval for pipeline-parallel prefill.
                 #
-                # Phase 0: Fire pipeline sends.
-                #   Non-last ranks dispatch sends (graph: recv → forward → send).
-                #   Last rank has no sends — Phase 0 is instant.
+                # JACCL uses UC (unreliable connection) for RDMA. With UC, if a
+                # send arrives before the matching recv is posted the message is
+                # silently dropped, causing a deadlock.  To guarantee recvs are
+                # posted before sends fire we:
                 #
-                # Phase 1: Eval model output (forces recv + forward on last rank).
-                #   Last rank: logits graph includes recv → forward → lm_head.
-                #   Posting this recv unblocks upstream sends blocked in Phase 0.
-                #   Non-last ranks: model output IS the send (already evaluated).
+                #   1. Force RDMA ops onto the CPU stream (MLX_FORCE_DISTRIBUTED_GPU=0)
+                #      so the evaluator can schedule recv before send even when
+                #      the GPU graph batches them into a single command buffer.
                 #
-                # Phase 2: Eval cache states.
-                #   Forward pass already ran (Phases 0-1), so cache data is
-                #   materialized. This is a fast finalization step.
+                #   2. Eval model output first (Phase 0).  For non-first ranks
+                #      the graph is recv→layers→send→lm_head.  Evaluating it
+                #      posts the recv early in the dependency walk, then fires
+                #      the send only after all upstream data arrives.  For the
+                #      first rank (no recv) this just runs layers→send→lm_head.
+                #
+                #   3. Eval sends (Phase 1) — already completed inside Phase 0
+                #      for non-last ranks (the send is a dependency of logits).
+                #
+                #   4. Eval cache states (Phase 2) — finalization.
+                #
                 _flat_states: list[mx.array] = []
                 for _s in all_states:
                     if isinstance(_s, tuple):
@@ -935,23 +943,25 @@ def generate_step(
                     else:
                         _flat_states.append(_s)
                 logger.info(
-                    f"PREFILL chunk {_prefill_chunk_idx}: two-phase eval — "
+                    f"PREFILL chunk {_prefill_chunk_idx}: three-phase eval — "
                     f"{len(_current_sends)} sends + {len(_flat_states)} cache arrays"
                 )
-                # Phase 0: fire sends
+                # Force CPU-side RDMA scheduling so recvs are posted before
+                # sends fire.  GPU-side scheduling (=1) batches operations into
+                # a single Metal command buffer which can reorder them.
+                os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+                # Phase 0: eval model output (posts recvs, triggers forward + sends)
+                mx.eval(_prefill_output)
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 0 (model output) done")
+                # Phase 1: eval sends (should be no-ops — already evaluated in Phase 0)
                 if _current_sends:
                     mx.eval(*_current_sends)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 0 (sends) done")
-                # Phase 1: force forward pass / recv on last rank
-                mx.eval(_prefill_output)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 (model output) done")
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 (sends) done")
                 # Phase 2: eval cache states
                 mx.eval(*_flat_states)
                 logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 (cache) done")
             finally:
-                if _massive_context:
-                    logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
-                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+                os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
                     
             _slow_caches = []
             _t3 = _time.perf_counter()
