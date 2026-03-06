@@ -878,10 +878,25 @@ def generate_step(
         # with the new prefill's pipeline coordination.
         mx.synchronize()
 
+        # Pipeline group for distributed barriers (UC RDMA race prevention).
+        # After JIT warmup, rank 0 can complete its forward pass and fire
+        # its RDMA send before downstream ranks have started mx.eval()
+        # (and posted their recv).  With UC (Unreliable Connection), the
+        # send is silently dropped → deadlock.  A lightweight all_sum
+        # barrier synchronises all ranks so they enter mx.eval() at
+        # roughly the same time — downstream ranks post recv (µs) well
+        # before upstream ranks finish layer computation and send (ms).
+        _pipeline_group = getattr(model, '_pipeline_group', None)
+
         while total_prompt_tokens - prompt_processed_tokens > 1:
             remaining = (total_prompt_tokens - prompt_processed_tokens) - 1
             n_to_process = min(prefill_step_size, remaining)
             logger.debug(f"PREFILL loop: starting chunk {_prefill_chunk_idx}, remaining={remaining}, n_to_process={n_to_process}")
+
+            # Per-chunk barrier: keep ranks in lockstep so recv is always
+            # posted before upstream send fires (UC RDMA race prevention).
+            if _pipeline_group is not None and _pipeline_group.size() > 1:
+                mx.eval(mx.distributed.all_sum(mx.zeros(1), group=_pipeline_group))
 
             _t0 = _time.perf_counter()
             logger.info(f"PREFILL chunk {_prefill_chunk_idx}: calling _model_call with {n_to_process} tokens")
@@ -904,49 +919,35 @@ def generate_step(
             logger.info(f"PREFILL chunk {_prefill_chunk_idx}: drained {len(_current_sends)} sends")
             all_states = [_c.state for _c in prompt_cache]
 
-            # Dynamic Safe Sync for Prefill
-            _massive_context = False
-            if os.environ.get("EXO_DISABLE_METAL_TIMEOUT", "1") != "1":
-                _massive_context = True # Prefill is always compute-heavy, default to safe sync
+            # Three-phase eval for pipeline-parallel prefill.
+            #
+            # Eval model output first so each rank's recv_like (a dependency
+            # in the computation graph) is posted before upstream sends fire.
+            # For non-first ranks the graph is recv→layers→send→lm_head;
+            # the evaluator walks dependencies bottom-up, posting recv before
+            # layers or send execute.
+            #
+            _flat_states: list[mx.array] = []
+            for _s in all_states:
+                if isinstance(_s, tuple):
+                    _flat_states.extend(_s)
+                else:
+                    _flat_states.append(_s)
+            logger.info(
+                f"PREFILL chunk {_prefill_chunk_idx}: three-phase eval — "
+                f"{len(_current_sends)} sends + {len(_flat_states)} cache arrays"
+            )
+            # Phase 0: eval model output (posts recvs, triggers forward + sends)
+            mx.eval(_prefill_output)
+            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 0 (model output) done")
+            # Phase 1: eval sends (no-ops if already evaluated in Phase 0)
+            if _current_sends:
+                mx.eval(*_current_sends)
+            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 (sends) done")
+            # Phase 2: eval cache states
+            mx.eval(*_flat_states)
+            logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 (cache) done")
 
-            if _massive_context:
-                logger.debug(f"Prefill: setting MLX_FORCE_DISTRIBUTED_GPU=0 for safe sync (massive context)")
-                os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
-
-            try:
-                # Three-phase eval for pipeline-parallel prefill.
-                #
-                # Eval model output first so each rank's recv_like (a dependency
-                # in the computation graph) is posted before upstream sends fire.
-                # For non-first ranks the graph is recv→layers→send→lm_head;
-                # the evaluator walks dependencies bottom-up, posting recv before
-                # layers or send execute.
-                #
-                _flat_states: list[mx.array] = []
-                for _s in all_states:
-                    if isinstance(_s, tuple):
-                        _flat_states.extend(_s)
-                    else:
-                        _flat_states.append(_s)
-                logger.info(
-                    f"PREFILL chunk {_prefill_chunk_idx}: three-phase eval — "
-                    f"{len(_current_sends)} sends + {len(_flat_states)} cache arrays"
-                )
-                # Phase 0: eval model output (posts recvs, triggers forward + sends)
-                mx.eval(_prefill_output)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 0 (model output) done")
-                # Phase 1: eval sends (no-ops if already evaluated in Phase 0)
-                if _current_sends:
-                    mx.eval(*_current_sends)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 (sends) done")
-                # Phase 2: eval cache states
-                mx.eval(*_flat_states)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 (cache) done")
-            finally:
-                if _massive_context:
-                    logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
-                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
-                    
             _slow_caches = []
             _t3 = _time.perf_counter()
 
@@ -989,6 +990,11 @@ def generate_step(
         _gap_t0 = _time.perf_counter()
         mx.clear_cache()
         _gap_t1 = _time.perf_counter()
+
+        # Barrier before first decode step — nodes may exit the prefill loop
+        # at slightly different times (mx.clear_cache is local), so re-sync.
+        if _pipeline_group is not None and _pipeline_group.size() > 1:
+            mx.eval(mx.distributed.all_sum(mx.zeros(1), group=_pipeline_group))
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
         _gap_t2 = _time.perf_counter()
