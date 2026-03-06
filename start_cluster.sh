@@ -4,14 +4,22 @@
 # Usage: ./start_cluster.sh
 # Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.
 
-export EXO_FAST_SYNCH=1
-export EXO_DISABLE_METAL_TIMEOUT=1
-export EXO_EVAL_DEBUG=1
-export EXO_CHUNKED_PREFILL=0
-export EXO_ADAPTIVE_THROTTLE=1
-export EXO_LIBP2P_NAMESPACE=MAC_STUDIO_CLUSTER
-export EXO_TRACING_ENABLED=true
-export LOG_LEVEL=DEBUG
+# ── Tunable defaults (override via environment before running) ──
+# All node env vars are derived from these; change them HERE, not below.
+: "${EXO_FAST_SYNCH:=1}"
+: "${EXO_DISABLE_METAL_TIMEOUT:=1}"
+: "${EXO_EVAL_DEBUG:=1}"
+: "${EXO_CHUNKED_PREFILL:=0}"
+: "${EXO_ADAPTIVE_THROTTLE:=100}"
+: "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
+: "${EXO_TRACING_ENABLED:=true}"
+: "${EXO_SAFE_SYNC_LIMIT:=50000}"
+: "${EXO_PREFILL_STEP_SIZE:=524288}"
+: "${MLX_JACCL_NUM_BUFFERS:=8}"
+: "${EXO_PROFILE_LAYERS:=0}"
+: "${EXO_KV_BITS:=8}"
+: "${EXO_FUSED_SDPA:=0}"
+: "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
@@ -361,38 +369,28 @@ echo "Nodes synchronized on commit $COMMIT_M4_1."
 for NODE in "${NODES[@]}"; do
     echo "Starting Exo on $NODE..."
     
-    # Build the dynamic environment string — minimal, matching upstream B-side
-    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 EXO_EVAL_DEBUG=1 EXO_LIBP2P_NAMESPACE=${EXO_LIBP2P_NAMESPACE} EXO_FAST_SYNCH=${EXO_FAST_SYNCH:-0}"
-    
-    # Metal GPU Timeout mitigations: prevent macOS Watchdog from killing process during massive context runs
-    # Set EXO_DISABLE_METAL_TIMEOUT=1 at the top of the script to disable the watchdog at the OS level.
-    # When enabled (1), Python relies on the OS override and avoids its own CPU fallback.
-    # When disabled (0), Python activates its dynamic CPU fallback safety net.
-    if [ "${EXO_DISABLE_METAL_TIMEOUT:-0}" == "1" ]; then
+    # Build the node environment string from top-level defaults
+    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1"
+    EXO_ENV="$EXO_ENV EXO_EVAL_DEBUG=$EXO_EVAL_DEBUG"
+    EXO_ENV="$EXO_ENV EXO_LIBP2P_NAMESPACE=$EXO_LIBP2P_NAMESPACE"
+    EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
+    EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=$EXO_SAFE_SYNC_LIMIT"
+    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
+    EXO_ENV="$EXO_ENV EXO_ADAPTIVE_THROTTLE=$EXO_ADAPTIVE_THROTTLE"
+    EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=$MLX_JACCL_NUM_BUFFERS"
+    EXO_ENV="$EXO_ENV EXO_PROFILE_LAYERS=$EXO_PROFILE_LAYERS"
+    EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=$EXO_TRACING_ENABLED"
+    EXO_ENV="$EXO_ENV EXO_KV_BITS=$EXO_KV_BITS"
+    EXO_ENV="$EXO_ENV EXO_FUSED_SDPA=$EXO_FUSED_SDPA"
+
+    # Metal GPU timeout mitigations
+    if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
     else
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=0 MTL_COMMAND_BUFFER_TIMEOUT=1 EXO_DISABLE_METAL_TIMEOUT=0"
     fi
-    EXO_ENV="$EXO_ENV EXO_SAFE_SYNC_LIMIT=${EXO_SAFE_SYNC_LIMIT:-50000}"
 
-    # Prefill Optimization: let code default to single-shot prefill (dynamic memory-aware adjustment)
-    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=${EXO_PREFILL_STEP_SIZE:-524288} EXO_ADAPTIVE_THROTTLE=${EXO_ADAPTIVE_THROTTLE:-100}"
-    
-    # Use the provided MLX_JACCL_NUM_BUFFERS or default to 8 (increased from 4 for better RDMA pipelining)
-    EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=${MLX_JACCL_NUM_BUFFERS:-8}"
-
-    # Per-layer profiling: forces mx.eval() per layer to measure real GPU time (slower but accurate)
-    EXO_ENV="$EXO_ENV EXO_PROFILE_LAYERS=${EXO_PROFILE_LAYERS:-0}"
-
-    # Tracing: detailed timing instrumentation for pipeline ops, barriers, distributed comms
-    EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=${EXO_TRACING_ENABLED:-false}"
-
-    # KV cache quantization: quantize KV cache to N-bit for decode. Unset to disable.
-    # EXO_FUSED_SDPA=1 enables the custom fused quantized SDPA Metal kernel.
-    EXO_ENV="$EXO_ENV EXO_KV_BITS=${EXO_KV_BITS:-8} EXO_FUSED_SDPA=${EXO_FUSED_SDPA:-0}"
-
-    # Manual layer split override: e.g., EXO_LAYER_SPLIT="7,28,27" for 3 nodes.
-    # Bypasses automatic memory-proportional allocation. Sum must equal model layer count.
+    # Manual layer split override (e.g., EXO_LAYER_SPLIT="7,28,27")
     if [ -n "${EXO_LAYER_SPLIT:-}" ]; then
         EXO_ENV="$EXO_ENV EXO_LAYER_SPLIT=$EXO_LAYER_SPLIT"
     fi
