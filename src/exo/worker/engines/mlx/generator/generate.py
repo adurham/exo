@@ -635,25 +635,24 @@ def generate_step(
         _step_id = _step_counter[0]
         _step_counter[0] += 1
 
-        with mx.stream(generation_stream):
-            # In-graph barrier for UC RDMA race prevention (all pipeline steps).
-            # UC silently drops sends if the downstream recv hasn't been posted.
-            # By embedding an all_sum barrier into the computation graph via
-            # mx.depends, all nodes complete the barrier before any recv/send
-            # ops are scheduled — structurally guaranteeing recv-before-send
-            # within a single mx.eval call (no Python-level timing gap).
-            # Runs in both prefill and decode (including warmup) — the race
-            # exists whenever pipeline sends/recvs are in the forward pass.
-            _pp_group = (
-                getattr(model, '_hybrid_pipeline_group', None)
-                or getattr(model, '_pipeline_group', None)
-            )
-            if _pp_group is not None and _pp_group.size() > 1:
-                _barrier = mx.distributed.all_sum(mx.zeros(1), group=_pp_group)
-                input_tokens = mx.depends(input_tokens, _barrier)
-                if input_embeddings is not None:
-                    input_embeddings = mx.depends(input_embeddings, _barrier)
+        # Per-step barrier: synchronise all pipeline ranks so recv is posted
+        # before upstream send fires (UC RDMA race prevention).
+        # The barrier (all_sum) is embedded into the computation graph via
+        # mx.depends on the model input.  PipelineFirstLayer chains the
+        # recv after x via mx.depends too, so the evaluator dispatches
+        # barrier → recv → forward → send in the correct order on the
+        # CPU stream (no Python-level timing gap).
+        _pp_group = (
+            getattr(model, '_hybrid_pipeline_group', None)
+            or getattr(model, '_pipeline_group', None)
+        )
+        if _pp_group is not None and _pp_group.size() > 1:
+            _barrier = mx.distributed.all_sum(mx.zeros(1), group=_pp_group)
+            input_tokens = mx.depends(input_tokens, _barrier)
+            if input_embeddings is not None:
+                input_embeddings = mx.depends(input_embeddings, _barrier)
 
+        with mx.stream(generation_stream):
             _st0 = _time.perf_counter()
             logits = _model_call(
                 input_tokens=input_tokens[None],
@@ -850,8 +849,6 @@ def generate_step(
         mx.synchronize()
 
         # Pipeline group for in-graph barriers (UC RDMA race prevention).
-        # Barriers are embedded into the computation graph via mx.depends,
-        # ensuring all nodes complete a collective before recv/send ops.
         _pipeline_group = (
             getattr(model, '_hybrid_pipeline_group', None)
             or getattr(model, '_pipeline_group', None)
@@ -865,8 +862,9 @@ def generate_step(
             _t0 = _time.perf_counter()
             logger.info(f"PREFILL chunk {_prefill_chunk_idx}: calling _model_call with {n_to_process} tokens")
 
-            # In-graph barrier: embed all_sum into the model input via mx.depends
-            # so barrier + recv + compute + send are in ONE mx.eval call.
+            # In-graph barrier: embed all_sum into the model input via
+            # mx.depends so barrier → recv → forward → send execute in
+            # correct order within a single mx.eval (no timing gap).
             _chunk_tokens = prompt[:n_to_process]
             _chunk_embeddings = (
                 input_embeddings[:n_to_process]
@@ -950,10 +948,8 @@ def generate_step(
         mx.clear_cache()
         _gap_t1 = _time.perf_counter()
 
-        # Note: no separate barrier needed here — the in-graph barrier in
-        # _step() (via mx.depends on the model input) provides a structural
-        # guarantee that all nodes complete a collective before any recv/send
-        # ops are scheduled, eliminating the Python-level timing gap.
+        # _step() has its own in-graph barrier before the model forward,
+        # so no additional barrier needed here.
 
         y, logprobs = _step(input_tokens=prompt, input_embeddings=input_embeddings)
         _gap_t2 = _time.perf_counter()

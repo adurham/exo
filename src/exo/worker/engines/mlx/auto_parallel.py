@@ -196,7 +196,12 @@ class PipelineFirstLayer(CustomMlxLayer):
             if PROFILE_LAYERS:
                 mx.eval(x)
                 _t_recv0 = _time.perf_counter()
-            x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
+            _recv = mx.distributed.recv_like(x, self.recv_from, group=self.group)
+            # recv_like creates a graph leaf (no inputs), so it can be
+            # evaluated before the barrier.  Adding x as a dependency
+            # forces the evaluator to dispatch the barrier's all_sum
+            # on the CPU stream before this recv — preventing deadlock.
+            x = mx.depends(_recv, x)
             if PROFILE_LAYERS:
                 mx.eval(x)
                 layer_profiler.record("recv", (_time.perf_counter() - _t_recv0) * 1000)
