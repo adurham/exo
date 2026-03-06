@@ -885,7 +885,7 @@ def generate_step(
 
             _t0 = _time.perf_counter()
             logger.info(f"PREFILL chunk {_prefill_chunk_idx}: calling _model_call with {n_to_process} tokens")
-            _model_call(
+            _prefill_output = _model_call(
                 input_tokens=prompt[:n_to_process][None],
                 input_embeddings=(
                     input_embeddings[:n_to_process][None]
@@ -914,16 +914,20 @@ def generate_step(
                 os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
 
             try:
-                # Single-phase eval: evaluate sends AND cache states together.
+                # Two-phase eval for prefill (mirrors PP_SAFE_SYNC structure):
                 #
-                # Unlike _step's decode path (PP_SAFE_SYNC), the PREFILL loop has no
-                # all_sum collective, so there's no risk of the GPU scheduling all_sum
-                # before sends.  Splitting into Phase 1 (sends) / Phase 2 (cache)
-                # actually *causes* RDMA deadlocks: the last rank (no sends) posts its
-                # recv only in Phase 2 — but intermediate ranks block in Phase 1 waiting
-                # for that recv to be posted before their send can complete.  Combining
-                # everything into one mx.eval lets the Metal scheduler post recvs and
-                # sends in dependency order across all ranks simultaneously.
+                # Phase 0: Fire pipeline sends.
+                #   Non-last ranks dispatch sends (graph: recv → forward → send).
+                #   Last rank has no sends — Phase 0 is instant.
+                #
+                # Phase 1: Eval model output (forces recv + forward on last rank).
+                #   Last rank: logits graph includes recv → forward → lm_head.
+                #   Posting this recv unblocks upstream sends blocked in Phase 0.
+                #   Non-last ranks: model output IS the send (already evaluated).
+                #
+                # Phase 2: Eval cache states.
+                #   Forward pass already ran (Phases 0-1), so cache data is
+                #   materialized. This is a fast finalization step.
                 _flat_states: list[mx.array] = []
                 for _s in all_states:
                     if isinstance(_s, tuple):
@@ -931,11 +935,19 @@ def generate_step(
                     else:
                         _flat_states.append(_s)
                 logger.info(
-                    f"PREFILL chunk {_prefill_chunk_idx}: evaluating "
+                    f"PREFILL chunk {_prefill_chunk_idx}: two-phase eval — "
                     f"{len(_current_sends)} sends + {len(_flat_states)} cache arrays"
                 )
-                mx.eval(*_current_sends, *_flat_states)
-                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: eval done")
+                # Phase 0: fire sends
+                if _current_sends:
+                    mx.eval(*_current_sends)
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 0 (sends) done")
+                # Phase 1: force forward pass / recv on last rank
+                mx.eval(_prefill_output)
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 1 (model output) done")
+                # Phase 2: eval cache states
+                mx.eval(*_flat_states)
+                logger.info(f"PREFILL chunk {_prefill_chunk_idx}: Phase 2 (cache) done")
             finally:
                 if _massive_context:
                     logger.debug(f"Prefill: restoring MLX_FORCE_DISTRIBUTED_GPU=1 after safe sync")
