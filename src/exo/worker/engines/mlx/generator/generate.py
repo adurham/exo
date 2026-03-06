@@ -745,8 +745,12 @@ def generate_step(
                     # all_sum at the end of each step acting as a natural barrier
                     # (plus the explicit barrier before first decode step).
                     mx.eval(sampled, *_pending)
-                    sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
-                    mx.eval(sampled)
+                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
+                    try:
+                        sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
+                        mx.eval(sampled)
+                    finally:
+                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
 
                     _st6 = _time.perf_counter()
 
