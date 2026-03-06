@@ -389,7 +389,7 @@ for NODE in "${NODES[@]}"; do
 
     # KV cache quantization: quantize KV cache to N-bit for decode. Unset to disable.
     # EXO_FUSED_SDPA=1 enables the custom fused quantized SDPA Metal kernel.
-    EXO_ENV="$EXO_ENV EXO_KV_BITS=${EXO_KV_BITS:-8} EXO_FUSED_SDPA=${EXO_FUSED_SDPA:-1}"
+    EXO_ENV="$EXO_ENV EXO_KV_BITS=${EXO_KV_BITS:-8} EXO_FUSED_SDPA=${EXO_FUSED_SDPA:-0}"
 
     # Manual layer split override: e.g., EXO_LAYER_SPLIT="7,28,27" for 3 nodes.
     # Bypasses automatic memory-proportional allocation. Sum must equal model layer count.
