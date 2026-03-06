@@ -160,7 +160,9 @@ def enable_distributed_tracing(rank: int) -> None:
         g_size = group.size() if group else "default"
         g_rank = group.rank() if group else "default"
         logger.info(f"[dist R{_dist_trace_rank}] all_gather #{n} shape={x.shape} group=(rank={g_rank},size={g_size})")
-        return _orig_all_gather(x, group=group, **kw)  # type: ignore
+        result = _orig_all_gather(x, group=group, **kw)  # type: ignore
+        logger.info(f"[dist R{_dist_trace_rank}] all_gather #{n} returned shape={result.shape}")
+        return result
 
     def _traced_send(x: mx.array, dst: int, *, group: mx.distributed.Group | None = None, **kw: object) -> mx.array:
         n = _call_count["send"]
@@ -1244,9 +1246,13 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
 
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
 
+        if EXO_TRACING_ENABLED:
+            logger.info(f"[WrappedMiniMaxAttn] projections start x.shape={x.shape}")
         queries: mx.array = self._original_layer.q_proj(x)
         keys: mx.array = self._original_layer.k_proj(x)
         values: mx.array = self._original_layer.v_proj(x)
+        if EXO_TRACING_ENABLED:
+            logger.info(f"[WrappedMiniMaxAttn] projections done q={queries.shape} k={keys.shape} v={values.shape}")
 
         if getattr(self, "use_qk_norm", False):
             q_dim = queries.shape[-1]
@@ -1256,11 +1262,17 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             qk = mx.concatenate(
                 [queries, keys], axis=-1
             )  # (batch_dim, seq_dim, q_dim + k_dim)
+            if EXO_TRACING_ENABLED:
+                logger.info(f"[WrappedMiniMaxAttn] calling all_gather qk.shape={qk.shape} group.size={n}")
             qk = mx.distributed.all_gather(
                 qk, group=self.group
             )  # (n*batch_dim, seq_dim, q_dim + k_dim)
+            if EXO_TRACING_ENABLED:
+                logger.info(f"[WrappedMiniMaxAttn] all_gather returned qk.shape={qk.shape}")
 
             qk = qk.reshape(n, batch_dim, seq_dim, q_dim + k_dim).transpose(1, 2, 0, 3)
+            if EXO_TRACING_ENABLED:
+                logger.info(f"[WrappedMiniMaxAttn] reshape+transpose done qk.shape={qk.shape}")
             queries = qk[..., :q_dim].reshape(
                 batch_dim, seq_dim, -1
             )  # (batch_dim, seq_dim, n * q_dim)
@@ -1268,12 +1280,18 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
                 batch_dim, seq_dim, -1
             )  # (batch_dim, seq_dim, n * k_dim)
 
+            if EXO_TRACING_ENABLED:
+                logger.info(f"[WrappedMiniMaxAttn] pre-norm q={queries.shape} k={keys.shape}")
             queries = self._original_layer.q_norm(queries)
             keys = self._original_layer.k_norm(keys)
+            if EXO_TRACING_ENABLED:
+                logger.info("[WrappedMiniMaxAttn] post-norm, splitting")
 
             # Split back and take this rank's portion
             queries = mx.split(queries, n, axis=-1)[self.group.rank()]
             keys = mx.split(keys, n, axis=-1)[self.group.rank()]
+            if EXO_TRACING_ENABLED:
+                logger.info(f"[WrappedMiniMaxAttn] split done q={queries.shape} k={keys.shape}")
 
         queries = queries.reshape(
             batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
@@ -1284,6 +1302,8 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         values = values.reshape(
             batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
         ).transpose(0, 2, 1, 3)
+        if EXO_TRACING_ENABLED:
+            logger.info(f"[WrappedMiniMaxAttn] head reshape done q={queries.shape}")
 
         if cache is not None:
             queries = self._original_layer.rope(queries, offset=cache.offset)
@@ -1292,6 +1312,8 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         else:
             queries = self._original_layer.rope(queries)
             keys = self._original_layer.rope(keys)
+        if EXO_TRACING_ENABLED:
+            logger.info("[WrappedMiniMaxAttn] rope+cache done, calling SDPA")
 
         output = scaled_dot_product_attention(
             queries,
@@ -1301,6 +1323,8 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             scale=self._original_layer.scale,  # type: ignore
             mask=mask,
         )
+        if EXO_TRACING_ENABLED:
+            logger.info(f"[WrappedMiniMaxAttn] SDPA done output.shape={output.shape}")
 
         output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
 
