@@ -758,40 +758,15 @@ def generate_step(
                     _pending = _drain_pending_sends()
                     _st5 = _time.perf_counter()
 
-                    # Three-phase eval to prevent RDMA deadlock:
-                    #
-                    # Phase 0: Fire-and-forget pipeline sends (same as pp_prefill_mode).
-                    #   Non-last ranks dispatch sends; last rank is a no-op (no sends).
-                    #   Each rank's send blocks on GPU until the downstream rank posts
-                    #   its recv buffer. The last rank skips Phase 0 entirely and
-                    #   immediately enters Phase 1, where its recv buffer is posted.
-                    #
-                    # Phase 1: Evaluate contribution.
-                    #   Non-last ranks: contribution = zeros (instant, no GPU work).
-                    #   Last rank: contribution = sampled (recv + layers + lm_head + sample).
-                    #   The last rank's recv is posted here, unblocking upstream sends.
-                    #
-                    # Phase 2: All-sum collective to broadcast token from last rank.
-                    #
-                    # Why this works but the old mx.eval(sampled, *_pending) deadlocks:
-                    # In a single mx.eval, the GPU compiles sends + sampled into one graph.
-                    # For non-last ranks, sampled depends on send_result (PipelineLastLayer
-                    # returns the send). The GPU must complete the send before evaluating
-                    # lm_head/sample. But the send blocks until the downstream rank posts
-                    # recv — and the last rank can't post recv because it's also stuck in
-                    # the same blocking eval. Splitting into separate phases lets the last
-                    # rank post recv independently.
-                    if _pending:
-                        mx.eval(*_pending)
-                    _st5a = _time.perf_counter()
-                    mx.eval(contribution)
-                    _st5b = _time.perf_counter()
-                    os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "0"
-                    try:
-                        sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
-                        mx.eval(sampled)
-                    finally:
-                        os.environ["MLX_FORCE_DISTRIBUTED_GPU"] = "1"
+                    # Two-phase eval: forward pass + sends in one call, then
+                    # all_sum collective separately (can't be in the same graph
+                    # because the GPU may schedule all_sum before send completes).
+                    # Cross-node recv-before-send timing is handled by the
+                    # all_sum at the end of each step acting as a natural barrier
+                    # (plus the explicit barrier before first decode step).
+                    mx.eval(sampled, *_pending)
+                    sampled = mx.distributed.all_sum(contribution, group=pipeline_group)
+                    mx.eval(sampled)
 
                     _st6 = _time.perf_counter()
 
@@ -801,9 +776,7 @@ def generate_step(
                         f"reshape={(_st2-_st1)*1000:.0f}ms "
                         f"quantize={(_st3-_st2)*1000:.0f}ms "
                         f"sample={(_st4-_st3)*1000:.0f}ms "
-                        f"sends={(_st5a-_st5)*1000:.0f}ms "
-                        f"contrib={(_st5b-_st5a)*1000:.0f}ms "
-                        f"sync={(_st6-_st5b)*1000:.0f}ms "
+                        f"eval={(_st6-_st5)*1000:.0f}ms "
                         f"total={(_st6-_st0)*1000:.0f}ms (PP_SAFE_SYNC)"
                     )
                 elif pipeline_group is not None:
