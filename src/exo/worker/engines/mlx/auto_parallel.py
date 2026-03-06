@@ -213,9 +213,11 @@ class PipelineFirstLayer(CustomMlxLayer):
         original_layer: _LayerCallable,
         r: int,
         group: mx.distributed.Group,
+        recv_from: int | None = None,
     ):
         super().__init__(original_layer)
         self.r: int = r
+        self.recv_from: int = recv_from if recv_from is not None else (r - 1)
         self.group = group
         self.is_prefill: bool = False
 
@@ -228,7 +230,7 @@ class PipelineFirstLayer(CustomMlxLayer):
             mx.eval(x)
             if EXO_TRACING_ENABLED:
                 t1 = time.perf_counter()
-            x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+            x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
             mx.eval(x)
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
@@ -634,7 +636,10 @@ def hybrid_auto_parallel(
     # PP tail's first layer receives from TP-master
     if model_shard_meta.pipeline_recv_from is not None:
         layers[0] = PipelineFirstLayer(
-            layers[0], model_shard_meta.device_rank, group=group
+            layers[0],
+            model_shard_meta.device_rank,
+            group=group,
+            recv_from=model_shard_meta.pipeline_recv_from,
         )
 
     # TP-master's last layer sends to PP tail + participates in decode all_gather
