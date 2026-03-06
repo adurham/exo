@@ -223,23 +223,6 @@ def shard_and_load(
 
     model, _ = load_model(model_path, lazy=True, strict=False)
     logger.debug(model)
-    if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
-        pass
-        # TODO: See if we should quantize the model.
-        # def is_attention_layer(path: str) -> bool:
-        #     path = path.lower()
-
-        #     return "self_attn" in path and "layernorm" not in path
-
-        # def quant_predicate(path: str, module: nn.Module):
-        #     if not isinstance(module, nn.Linear):
-        #         return False
-
-        #     return is_attention_layer(path)
-        # model, config = quantize_model(
-        #        model, config, group_size=KV_GROUP_SIZE, bits=ATTENTION_KV_BITS, quant_predicate=quant_predicate, mode=QUANTIZE_MODEL_MODE
-        #    )
-
     assert isinstance(model, nn.Module)
 
     tokenizer = get_tokenizer(model_path, shard_metadata)

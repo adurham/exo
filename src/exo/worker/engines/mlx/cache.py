@@ -16,7 +16,7 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.types.memory import Memory
 from exo.shared.types.mlx import KVCacheType, Model
-from exo.worker.engines.mlx.constants import CACHE_GROUP_SIZE, KV_CACHE_BITS
+from exo.worker.engines.mlx.constants import CACHE_GROUP_SIZE, KV_BITS
 from exo.worker.runner.bootstrap import logger
 
 import math
@@ -447,13 +447,13 @@ def make_kv_cache(
         return model.make_cache()  # type: ignore
 
     if max_kv_size is None:
-        if KV_CACHE_BITS is None:
+        if KV_BITS is None:
             logger.info("Using default KV cache")
             return [KVCache() for _ in model.layers]
         else:
             logger.info("Using quantized KV cache")
             return [
-                QuantizedKVCache(group_size=CACHE_GROUP_SIZE, bits=KV_CACHE_BITS)
+                QuantizedKVCache(group_size=CACHE_GROUP_SIZE, bits=KV_BITS)
                 for _ in model.layers
             ]
     else:
