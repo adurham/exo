@@ -136,6 +136,12 @@ def place_instance(
         ),
     )
 
+    # Sort cycle nodes deterministically so pipeline rank assignment is stable
+    # across instances.  rx.simple_cycles() does not guarantee node ordering,
+    # which can cause RDMA send/recv topology mismatches between warmup and
+    # real generation if ranks shift.
+    selected_cycle = Cycle(node_ids=sorted(selected_cycle.node_ids))
+
     # Single-node: force Pipeline/Ring (Tensor and Jaccl require multi-node)
     if len(selected_cycle) == 1:
         command.instance_meta = InstanceMeta.MlxRing
