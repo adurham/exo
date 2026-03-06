@@ -368,7 +368,8 @@ def warmup_inference(
 
     if EXO_TRACING_ENABLED:
         t_warmup_gen = time.perf_counter()
-    logger.info("Generating warmup tokens")
+    prompt_len = len(warmup_prompt) if isinstance(warmup_prompt, list) else len(warmup_prompt)  # type: ignore
+    logger.info(f"Generating warmup tokens (prompt_len={prompt_len}, max_tokens=50)")
     for _r in stream_generate(
         model=model,
         tokenizer=tokenizer,

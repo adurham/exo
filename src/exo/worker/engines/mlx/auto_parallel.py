@@ -126,6 +126,71 @@ def get_pipeline_timings() -> PipelineTimings:
     return _pipeline_timings
 
 
+_dist_trace_enabled = False
+_dist_trace_rank = -1
+
+
+def enable_distributed_tracing(rank: int) -> None:
+    """Monkey-patch mx.distributed ops to log every call with rank, op, shape, and group info."""
+    global _dist_trace_enabled, _dist_trace_rank
+    if _dist_trace_enabled:
+        return
+    _dist_trace_enabled = True
+    _dist_trace_rank = rank
+
+    _orig_all_sum = mx.distributed.all_sum
+    _orig_all_gather = mx.distributed.all_gather
+    _orig_send = mx.distributed.send
+    _orig_recv = mx.distributed.recv
+    _orig_recv_like = mx.distributed.recv_like
+
+    _call_count: dict[str, int] = {"all_sum": 0, "all_gather": 0, "send": 0, "recv": 0, "recv_like": 0}
+
+    def _traced_all_sum(x: mx.array, *, group: mx.distributed.Group | None = None, **kw: object) -> mx.array:
+        n = _call_count["all_sum"]
+        _call_count["all_sum"] = n + 1
+        g_size = group.size() if group else "default"
+        g_rank = group.rank() if group else "default"
+        logger.info(f"[dist R{_dist_trace_rank}] all_sum #{n} shape={x.shape} group=(rank={g_rank},size={g_size})")
+        return _orig_all_sum(x, group=group, **kw)  # type: ignore
+
+    def _traced_all_gather(x: mx.array, *, group: mx.distributed.Group | None = None, **kw: object) -> mx.array:
+        n = _call_count["all_gather"]
+        _call_count["all_gather"] = n + 1
+        g_size = group.size() if group else "default"
+        g_rank = group.rank() if group else "default"
+        logger.info(f"[dist R{_dist_trace_rank}] all_gather #{n} shape={x.shape} group=(rank={g_rank},size={g_size})")
+        return _orig_all_gather(x, group=group, **kw)  # type: ignore
+
+    def _traced_send(x: mx.array, dst: int, *, group: mx.distributed.Group | None = None, **kw: object) -> mx.array:
+        n = _call_count["send"]
+        _call_count["send"] = n + 1
+        g_size = group.size() if group else "default"
+        logger.info(f"[dist R{_dist_trace_rank}] send #{n} dst={dst} shape={x.shape} group_size={g_size}")
+        return _orig_send(x, dst, group=group, **kw)  # type: ignore
+
+    def _traced_recv(x: mx.array, src: int, *, group: mx.distributed.Group | None = None, **kw: object) -> mx.array:
+        n = _call_count["recv"]
+        _call_count["recv"] = n + 1
+        g_size = group.size() if group else "default"
+        logger.info(f"[dist R{_dist_trace_rank}] recv #{n} src={src} shape={x.shape} group_size={g_size}")
+        return _orig_recv(x, src, group=group, **kw)  # type: ignore
+
+    def _traced_recv_like(x: mx.array, src: int, *, group: mx.distributed.Group | None = None, **kw: object) -> mx.array:
+        n = _call_count["recv_like"]
+        _call_count["recv_like"] = n + 1
+        g_size = group.size() if group else "default"
+        logger.info(f"[dist R{_dist_trace_rank}] recv_like #{n} src={src} shape={x.shape} group_size={g_size}")
+        return _orig_recv_like(x, src, group=group, **kw)  # type: ignore
+
+    mx.distributed.all_sum = _traced_all_sum  # type: ignore
+    mx.distributed.all_gather = _traced_all_gather  # type: ignore
+    mx.distributed.send = _traced_send  # type: ignore
+    mx.distributed.recv = _traced_recv  # type: ignore
+    mx.distributed.recv_like = _traced_recv_like  # type: ignore
+    logger.info(f"[dist R{rank}] distributed op tracing enabled")
+
+
 def flush_prefill_sends() -> None:
     if EXO_TRACING_ENABLED:
         t0 = time.perf_counter()
@@ -205,6 +270,24 @@ class CustomMlxLayer(nn.Module):
             except AttributeError:
                 original_layer = cast(_LayerCallable, self["_original_layer"])
                 return getattr(original_layer, name)
+
+
+class TracingLayerWrapper(CustomMlxLayer):
+    """Wraps a layer to log entry/exit for deadlock diagnosis."""
+
+    def __init__(self, original_layer: _LayerCallable, rank: int, layer_idx: int):
+        super().__init__(original_layer)
+        self._trace_rank = rank
+        self._trace_idx = layer_idx
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        layer_type = type(self.original_layer).__name__
+        logger.info(f"[trace R{self._trace_rank}] layer {self._trace_idx} ({layer_type}) ENTER x.shape={x.shape}")
+        t0 = time.perf_counter()
+        result = self.original_layer(x, *args, **kwargs)
+        dt_ms = (time.perf_counter() - t0) * 1000
+        logger.info(f"[trace R{self._trace_rank}] layer {self._trace_idx} ({layer_type}) EXIT {dt_ms:.1f}ms")
+        return result
 
 
 class PipelineFirstLayer(CustomMlxLayer):
@@ -446,16 +529,25 @@ class HybridPipelinePassthroughLayer(CustomMlxLayer):
         return output
 
 
+def _unwrap_tracing(layer: Any) -> Any:  # pyright: ignore[reportAny]
+    """Unwrap TracingLayerWrapper to get the actual pipeline layer underneath."""
+    if isinstance(layer, TracingLayerWrapper):
+        return layer.original_layer
+    return layer
+
+
 def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
-        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
-            layer.is_prefill = is_prefill
+        inner = _unwrap_tracing(layer)
+        if isinstance(inner, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
+            inner.is_prefill = is_prefill
 
 
 def set_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
     for layer in model.layers:  # type: ignore
-        if isinstance(layer, (PipelineLastLayer, HybridPipelineLastLayer)):
-            layer.queue_sends = queue_sends
+        inner = _unwrap_tracing(layer)
+        if isinstance(inner, (PipelineLastLayer, HybridPipelineLastLayer)):
+            inner.queue_sends = queue_sends
 
 
 def get_inner_model(model: nn.Module) -> nn.Module:
@@ -629,13 +721,29 @@ def hybrid_auto_parallel(
     """
     is_tp_node = model_shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
+
+    enable_distributed_tracing(model_shard_meta.device_rank)
+
+    logger.info(
+        f"[hybrid] rank={model_shard_meta.device_rank} tp_rank={model_shard_meta.tp_rank} "
+        f"pp_rank={model_shard_meta.pp_rank} is_tp={is_tp_node} color={tp_color} "
+        f"layers=[{model_shard_meta.start_layer},{model_shard_meta.end_layer}) "
+        f"send_to={model_shard_meta.pipeline_send_to} recv_from={model_shard_meta.pipeline_recv_from}"
+    )
+    logger.info(f"[hybrid] rank={model_shard_meta.device_rank} calling group.split(color={tp_color})")
     tp_group = group.split(tp_color)
+    logger.info(
+        f"[hybrid] rank={model_shard_meta.device_rank} split complete: "
+        f"tp_group.size()={tp_group.size()} tp_group.rank()={tp_group.rank()}"
+    )
 
     # Apply tensor parallelism to TP nodes
     if is_tp_node and tp_group.size() > 1:
+        logger.info(f"[hybrid] rank={model_shard_meta.device_rank} applying tensor_auto_parallel")
         model = tensor_auto_parallel(
             model, tp_group, timeout_seconds, on_timeout, on_layer_loaded
         )
+        logger.info(f"[hybrid] rank={model_shard_meta.device_rank} tensor_auto_parallel complete")
 
     inner_model_instance = get_inner_model(model)
     all_layers = get_layers(inner_model_instance)
@@ -688,6 +796,20 @@ def hybrid_auto_parallel(
                 model_shard_meta.world_size,
                 group=group,
             )
+
+    # Wrap every layer with tracing for deadlock diagnosis
+    for i in range(len(layers)):
+        # Don't double-wrap layers that are already TracingLayerWrapper
+        if not isinstance(layers[i], TracingLayerWrapper):
+            layers[i] = TracingLayerWrapper(
+                layers[i], model_shard_meta.device_rank, start_layer + i
+            )
+
+    logger.info(
+        f"[hybrid] rank={model_shard_meta.device_rank} setup complete: "
+        f"{len(layers)} layers [{start_layer}..{end_layer}), "
+        f"first={type(layers[0]).__name__}, last={type(layers[-1]).__name__}"
+    )
 
     _set_layers(model, layers)
     return patch_pipeline_model(model, group)
