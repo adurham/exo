@@ -223,22 +223,17 @@ class PipelineFirstLayer(CustomMlxLayer):
 
 
 def _link_cache_to_send(_cache: Any, send_output: mx.array) -> None:
-    """Link ALL cache components (keys AND values) to the send output via mx.depends.
+    """Link cache keys to the send output via mx.depends.
 
-    For QuantizedKVCache, keys/values are tuples (data, scales, biases).
-    ALL components must be linked — not just data — because the fused quantized
-    SDPA kernel reads all 6 arrays in a single dispatch. Without full linking,
-    the evaluator may schedule the next step's fused kernel before the current
-    step's send completes, causing pipeline deadlocks.
+    Creates a minimal dependency edge so the evaluator won't schedule the
+    next step's attention before the current step's send completes.
+    For QuantizedKVCache (tuple), linking just the data element is sufficient
+    since all tuple components are produced together.
     """
     if isinstance(_cache.keys, mx.array):
         _cache.keys = mx.depends(_cache.keys, send_output)  # type: ignore
     elif isinstance(_cache.keys, tuple):
-        _cache.keys = tuple(mx.depends(k, send_output) for k in _cache.keys)  # type: ignore
-    if isinstance(_cache.values, mx.array):
-        _cache.values = mx.depends(_cache.values, send_output)  # type: ignore
-    elif isinstance(_cache.values, tuple):
-        _cache.values = tuple(mx.depends(v, send_output) for v in _cache.values)  # type: ignore
+        _cache.keys = (mx.depends(_cache.keys[0], send_output), *_cache.keys[1:])  # type: ignore
 
 
 class PipelineLastLayer(CustomMlxLayer):
