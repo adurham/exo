@@ -636,21 +636,19 @@ def generate_step(
         _step_counter[0] += 1
 
         with mx.stream(generation_stream):
-            # In-graph barrier for UC RDMA race prevention (decode mode only).
+            # In-graph barrier for UC RDMA race prevention (all pipeline steps).
             # UC silently drops sends if the downstream recv hasn't been posted.
             # By embedding an all_sum barrier into the computation graph via
             # mx.depends, all nodes complete the barrier before any recv/send
             # ops are scheduled — structurally guaranteeing recv-before-send
             # within a single mx.eval call (no Python-level timing gap).
+            # Runs in both prefill and decode (including warmup) — the race
+            # exists whenever pipeline sends/recvs are in the forward pass.
             _pp_group = (
                 getattr(model, '_hybrid_pipeline_group', None)
                 or getattr(model, '_pipeline_group', None)
             )
-            _pp_decode = (
-                getattr(model, '_hybrid_decode_mode', False)
-                or getattr(model, '_pipeline_decode_mode', False)
-            )
-            if _pp_group is not None and _pp_decode:
+            if _pp_group is not None and _pp_group.size() > 1:
                 _barrier = mx.distributed.all_sum(mx.zeros(1), group=_pp_group)
                 input_tokens = mx.depends(input_tokens, _barrier)
                 if input_embeddings is not None:
