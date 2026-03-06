@@ -11,6 +11,7 @@ from exo.shared.types.topology import Cycle, RDMAConnection, SocketConnection
 from exo.shared.types.worker.runners import RunnerId, ShardAssignments
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
+    HybridShardMetadata,
     PipelineShardMetadata,
     Sharding,
     ShardMetadata,
@@ -273,6 +274,131 @@ def get_shard_assignments_for_tensor_parallel(
     return shard_assignments
 
 
+def get_shard_assignments_for_hybrid_parallel(
+    model_card: ModelCard,
+    cycle: Cycle,
+    node_memory: Mapping[NodeId, MemoryUsage],
+) -> ShardAssignments:
+    """Create shard assignments for hybrid tensor + pipeline parallel execution.
+
+    The top N-1 nodes by available RAM form a TP sub-group (sharing the same
+    layers via all-reduce).  The remaining node becomes the PP tail with its
+    own disjoint layer range.
+    """
+    _validate_cycle(cycle)
+    world_size = len(cycle)
+    if world_size < 3:
+        raise ValueError(
+            "Hybrid TP+PP requires at least 3 nodes (2 TP + 1 PP)"
+        )
+
+    total_memory = _compute_total_memory(cycle.node_ids, node_memory)
+
+    # Sort nodes by RAM descending — top N-1 form TP group, last is PP tail
+    sorted_nodes = sorted(
+        cycle.node_ids,
+        key=lambda nid: node_memory[nid].ram_available,
+        reverse=True,
+    )
+    tp_node_ids = sorted_nodes[:-1]
+    pp_node_ids = sorted_nodes[-1:]
+
+    tp_size = len(tp_node_ids)
+    pp_size = 2  # always 2 stages: TP group = stage 0, PP tail = stage 1
+
+    # Compute collective memory for each group
+    tp_memory = sum(
+        (node_memory[nid].ram_available for nid in tp_node_ids),
+        start=Memory(),
+    )
+    pp_memory = sum(
+        (node_memory[nid].ram_available for nid in pp_node_ids),
+        start=Memory(),
+    )
+
+    # Allocate layers proportionally between the two pipeline stages
+    stage_layer_counts = allocate_layers_proportionally(
+        total_layers=model_card.n_layers,
+        memory_fractions=[
+            tp_memory / total_memory,
+            pp_memory / total_memory,
+        ],
+    )
+    tp_layers = stage_layer_counts[0]
+    pp_layers = stage_layer_counts[1]
+
+    # TP group: layers [0, tp_layers), PP tail: layers [tp_layers, total)
+    tp_start, tp_end = 0, tp_layers
+    pp_start, pp_end = tp_layers, tp_layers + pp_layers
+
+    # Validate memory for PP tail (TP nodes share weights so per-node cost is lower)
+    total_storage = model_card.storage_size
+    total_layers = model_card.n_layers
+    pp_required = (total_storage * pp_layers) // total_layers
+    pp_available = node_memory[pp_node_ids[0]].ram_available
+    if pp_required > pp_available:
+        raise ValueError(
+            f"PP tail node has insufficient memory: "
+            f"requires {pp_required.in_gb:.2f} GB for {pp_layers} layers, "
+            f"but only has {pp_available.in_gb:.2f} GB available"
+        )
+
+    runner_to_shard: dict[RunnerId, ShardMetadata] = {}
+    node_to_runner: dict[NodeId, RunnerId] = {}
+
+    # Assign device_rank: TP nodes first (rank 0..tp_size-1), PP tail last
+    # TP-master is device_rank=0
+    tp_master_rank = 0
+    pp_tail_rank = tp_size  # device_rank for the PP tail node
+
+    for tp_rank, node_id in enumerate(tp_node_ids):
+        device_rank = tp_rank
+        shard = HybridShardMetadata(
+            model_card=model_card,
+            device_rank=device_rank,
+            world_size=world_size,
+            start_layer=tp_start,
+            end_layer=tp_end,
+            n_layers=model_card.n_layers,
+            tp_size=tp_size,
+            tp_rank=tp_rank,
+            pp_rank=0,
+            pp_size=pp_size,
+            # Only TP-master sends to PP tail
+            pipeline_send_to=pp_tail_rank if tp_rank == 0 else None,
+            pipeline_recv_from=None,
+        )
+        runner_id = RunnerId()
+        runner_to_shard[runner_id] = shard
+        node_to_runner[node_id] = runner_id
+
+    for i, node_id in enumerate(pp_node_ids):
+        device_rank = pp_tail_rank + i
+        shard = HybridShardMetadata(
+            model_card=model_card,
+            device_rank=device_rank,
+            world_size=world_size,
+            start_layer=pp_start,
+            end_layer=pp_end,
+            n_layers=model_card.n_layers,
+            tp_size=tp_size,
+            tp_rank=-1,  # not in TP group
+            pp_rank=1,
+            pp_size=pp_size,
+            pipeline_send_to=None,
+            pipeline_recv_from=tp_master_rank,
+        )
+        runner_id = RunnerId()
+        runner_to_shard[runner_id] = shard
+        node_to_runner[node_id] = runner_id
+
+    return ShardAssignments(
+        model_id=model_card.model_id,
+        runner_to_shard=runner_to_shard,
+        node_to_runner=node_to_runner,
+    )
+
+
 def get_shard_assignments(
     model_card: ModelCard,
     cycle: Cycle,
@@ -290,6 +416,12 @@ def get_shard_assignments(
             return get_shard_assignments_for_tensor_parallel(
                 model_card=model_card,
                 cycle=cycle,
+            )
+        case Sharding.Hybrid:
+            return get_shard_assignments_for_hybrid_parallel(
+                model_card=model_card,
+                cycle=cycle,
+                node_memory=node_memory,
             )
 
 

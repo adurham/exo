@@ -53,7 +53,7 @@ from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 
 from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.logging import logger
-from exo.shared.types.worker.shards import PipelineShardMetadata
+from exo.shared.types.worker.shards import HybridShardMetadata, PipelineShardMetadata
 
 if TYPE_CHECKING:
     from mlx_lm.models.cache import Cache
@@ -311,15 +311,128 @@ class PipelineLastLayer(CustomMlxLayer):
         return output
 
 
+class HybridPipelineLastLayer(CustomMlxLayer):
+    """Last layer of the TP-master in hybrid mode — sends output to PP tail."""
+
+    def __init__(
+        self,
+        original_layer: _LayerCallable,
+        r: int,
+        s: int,
+        group: mx.distributed.Group,
+        send_to: int,
+    ):
+        super().__init__(original_layer)
+        self.r: int = r
+        self.s: int = s
+        self.group = group
+        self.send_to: int = send_to
+        self.original_layer_signature = signature(self.original_layer.__call__)
+        self.is_prefill: bool = False
+        self.queue_sends: bool = False
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        cache = self.original_layer_signature.bind_partial(
+            x, *args, **kwargs
+        ).arguments.get("cache", None)
+
+        if EXO_TRACING_ENABLED:
+            t0 = time.perf_counter()
+        output: mx.array = self.original_layer(x, *args, **kwargs)
+        mx.eval(output)
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.compute_us += int(
+                (time.perf_counter() - t0) * 1_000_000
+            )
+
+        if EXO_TRACING_ENABLED:
+            t_send = time.perf_counter()
+        if self.queue_sends:
+            _pending_prefill_sends.append(
+                (output, self.send_to, self.group)
+            )
+        else:
+            output = mx.distributed.send(
+                output, self.send_to, group=self.group
+            )
+        if cache is not None:
+            _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
+            if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
+                _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+        mx.eval(output)
+        if cache is not None and hasattr(_cache, "keys"):  # type: ignore
+            mx.eval(_cache.keys)  # type: ignore
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.send_us += int(
+                (time.perf_counter() - t_send) * 1_000_000
+            )
+
+        # Decode: all ranks must participate in all_gather for token sync
+        if not self.is_prefill:
+            if EXO_TRACING_ENABLED:
+                t_ag = time.perf_counter()
+            output = mx.distributed.all_gather(output, group=self.group)[
+                -output.shape[0] :
+            ]
+            mx.eval(output)
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.all_gather_us += int(
+                    (time.perf_counter() - t_ag) * 1_000_000
+                )
+
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.step_count += 1
+        return output
+
+
+class HybridPipelinePassthroughLayer(CustomMlxLayer):
+    """Last layer of a TP non-master node — no send, just all_gather for decode sync."""
+
+    def __init__(
+        self,
+        original_layer: _LayerCallable,
+        group: mx.distributed.Group,
+    ):
+        super().__init__(original_layer)
+        self.group = group
+        self.is_prefill: bool = False
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        if EXO_TRACING_ENABLED:
+            t0 = time.perf_counter()
+        output: mx.array = self.original_layer(x, *args, **kwargs)
+        mx.eval(output)
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.compute_us += int(
+                (time.perf_counter() - t0) * 1_000_000
+            )
+
+        if not self.is_prefill:
+            if EXO_TRACING_ENABLED:
+                t_ag = time.perf_counter()
+            output = mx.distributed.all_gather(output, group=self.group)[
+                -output.shape[0] :
+            ]
+            mx.eval(output)
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.all_gather_us += int(
+                    (time.perf_counter() - t_ag) * 1_000_000
+                )
+
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.step_count += 1
+        return output
+
+
 def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
-        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
             layer.is_prefill = is_prefill
 
 
 def set_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
     for layer in model.layers:  # type: ignore
-        if isinstance(layer, PipelineLastLayer):
+        if isinstance(layer, (PipelineLastLayer, HybridPipelineLastLayer)):
             layer.queue_sends = queue_sends
 
 
@@ -474,6 +587,84 @@ def pipeline_auto_parallel(
         "Expected a list of layers after auto-parallel initialisation"
     )
 
+    return patch_pipeline_model(model, group)
+
+
+def hybrid_auto_parallel(
+    model: nn.Module,
+    group: mx.distributed.Group,
+    model_shard_meta: HybridShardMetadata,
+    timeout_seconds: float,
+    on_timeout: TimeoutCallback | None,
+    on_layer_loaded: LayerLoadedCallback | None,
+) -> nn.Module:
+    """Hybrid tensor + pipeline parallelism.
+
+    TP nodes (tp_rank >= 0) share the same layer range and shard weights via
+    all-reduce within a TP sub-group created by group.split().
+    The PP tail (tp_rank == -1) owns a disjoint layer range and communicates
+    with the TP-master via send/recv.
+    """
+    is_tp_node = model_shard_meta.tp_rank >= 0
+    tp_color = 0 if is_tp_node else 1
+    tp_group = group.split(tp_color)
+
+    # Apply tensor parallelism to TP nodes
+    if is_tp_node and tp_group.size() > 1:
+        model = tensor_auto_parallel(
+            model, tp_group, timeout_seconds, on_timeout, on_layer_loaded
+        )
+
+    inner_model_instance = get_inner_model(model)
+    all_layers = get_layers(inner_model_instance)
+
+    start_layer = model_shard_meta.start_layer
+    end_layer = model_shard_meta.end_layer
+    layers = all_layers[start_layer:end_layer]
+
+    # PP tail needs to eval its own layers (TP nodes already eval'd in tensor_auto_parallel)
+    if not is_tp_node:
+        total = len(layers)
+        for i, layer in enumerate(layers):
+            mx.eval(layer)
+            if on_layer_loaded is not None:
+                on_layer_loaded(i, total)
+
+    # Wrap pipeline boundaries
+    # PP tail's first layer receives from TP-master
+    if model_shard_meta.pipeline_recv_from is not None:
+        layers[0] = PipelineFirstLayer(
+            layers[0], model_shard_meta.device_rank, group=group
+        )
+
+    # TP-master's last layer sends to PP tail + participates in decode all_gather
+    if model_shard_meta.pipeline_send_to is not None:
+        layers[-1] = HybridPipelineLastLayer(
+            layers[-1],
+            model_shard_meta.device_rank,
+            model_shard_meta.world_size,
+            group=group,
+            send_to=model_shard_meta.pipeline_send_to,
+        )
+    # TP non-master: no send, but must participate in decode all_gather
+    elif is_tp_node and model_shard_meta.pipeline_send_to is None:
+        layers[-1] = HybridPipelinePassthroughLayer(
+            layers[-1],
+            group=group,
+        )
+
+    # PP tail's last layer is the final pipeline stage — needs all_gather for decode
+    if model_shard_meta.pp_rank == model_shard_meta.pp_size - 1:
+        # Only wrap if not already wrapped by one of the above
+        if not isinstance(layers[-1], (HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
+            layers[-1] = PipelineLastLayer(
+                layers[-1],
+                model_shard_meta.device_rank,
+                model_shard_meta.world_size,
+                group=group,
+            )
+
+    _set_layers(model, layers)
     return patch_pipeline_model(model, group)
 
 

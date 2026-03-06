@@ -49,6 +49,7 @@ from exo.shared.types.worker.instances import (
 )
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
+    HybridShardMetadata,
     PipelineShardMetadata,
     ShardMetadata,
     TensorShardMetadata,
@@ -59,6 +60,7 @@ from exo.worker.engines.mlx.auto_parallel import (
     eval_with_timeout,
     get_inner_model,
     get_layers,
+    hybrid_auto_parallel,
     pipeline_auto_parallel,
     tensor_auto_parallel,
 )
@@ -69,15 +71,17 @@ Group = mx.distributed.Group
 
 
 def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
+    if isinstance(model_shard_meta, HybridShardMetadata):
+        divisor = model_shard_meta.tp_size if model_shard_meta.tp_rank >= 0 else 1
+    elif isinstance(model_shard_meta, PipelineShardMetadata):
+        divisor = 1
+    else:
+        divisor = model_shard_meta.world_size
     return Memory.from_float_kb(
         (model_shard_meta.end_layer - model_shard_meta.start_layer)
         / model_shard_meta.n_layers
         * model_shard_meta.model_card.storage_size.in_kb
-        / (
-            1
-            if isinstance(model_shard_meta, PipelineShardMetadata)
-            else model_shard_meta.world_size
-        )
+        / divisor
     )
 
 
@@ -250,6 +254,11 @@ def shard_and_load(
                 model, group, shard_metadata, on_layer_loaded=on_layer_loaded
             )
             eval_with_timeout(model.parameters(), timeout_seconds, on_timeout)
+        case HybridShardMetadata():
+            logger.info(f"loading model from {model_path} with hybrid TP+PP parallelism")
+            model = hybrid_auto_parallel(
+                model, group, shard_metadata, timeout_seconds, on_timeout, on_layer_loaded
+            )
         case CfgShardMetadata():
             raise ValueError(
                 "CfgShardMetadata is not supported for text model loading - "

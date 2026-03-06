@@ -23,6 +23,7 @@ from exo.shared.types.profiling import (
 from exo.shared.types.topology import Connection, SocketConnection
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
+    HybridShardMetadata,
     PipelineShardMetadata,
     Sharding,
 )
@@ -682,3 +683,123 @@ class TestCfgParallelPlacement:
         # First shard starts at 0, last shard ends at 57
         assert layer_ranges[0][0] == 0
         assert layer_ranges[-1][1] == 57
+
+
+class TestHybridParallelPlacement:
+    def _create_ring_topology(self, node_ids: list[NodeId]) -> Topology:
+        topology = Topology()
+        for node_id in node_ids:
+            topology.add_node(node_id)
+        for i, node_id in enumerate(node_ids):
+            next_node = node_ids[(i + 1) % len(node_ids)]
+            conn = Connection(
+                source=node_id,
+                sink=next_node,
+                edge=create_socket_connection(i + 1),
+            )
+            topology.add_connection(conn)
+        return topology
+
+    def test_three_nodes_assigns_tp_and_pp(self):
+        """3 nodes: 2 large → TP group, 1 small → PP tail."""
+        studio1 = NodeId()
+        studio2 = NodeId()
+        macbook = NodeId()
+
+        topology = self._create_ring_topology([studio1, studio2, macbook])
+        cycles = [c for c in topology.get_cycles() if len(c) == 3]
+        cycle = cycles[0]
+
+        node_memory = {
+            studio1: create_node_memory(1280 * 1024),  # 1280 KB
+            studio2: create_node_memory(1280 * 1024),  # 1280 KB
+            macbook: create_node_memory(360 * 1024),   # 360 KB
+        }
+
+        model_card = ModelCard(
+            model_id=ModelId("test-hybrid-model"),
+            n_layers=62,
+            storage_size=Memory.from_kb(1000),
+            hidden_size=3072,
+            supports_tensor=True,
+            tasks=[ModelTask.TextGeneration],
+        )
+
+        assignments = get_shard_assignments(
+            model_card, cycle, Sharding.Hybrid, node_memory=node_memory
+        )
+
+        shards = list(assignments.runner_to_shard.values())
+        assert len(shards) == 3
+
+        # All shards should be HybridShardMetadata
+        for shard in shards:
+            assert isinstance(shard, HybridShardMetadata)
+
+        tp_shards = [s for s in shards if isinstance(s, HybridShardMetadata) and s.tp_rank >= 0]
+        pp_shards = [s for s in shards if isinstance(s, HybridShardMetadata) and s.tp_rank == -1]
+
+        assert len(tp_shards) == 2
+        assert len(pp_shards) == 1
+
+        # TP nodes share the same layer range
+        assert tp_shards[0].start_layer == tp_shards[1].start_layer
+        assert tp_shards[0].end_layer == tp_shards[1].end_layer
+        assert tp_shards[0].start_layer == 0
+
+        # PP tail has disjoint layers starting where TP ends
+        pp_shard = pp_shards[0]
+        assert pp_shard.start_layer == tp_shards[0].end_layer
+        assert pp_shard.end_layer == 62
+
+        # Layer ranges cover all layers
+        total_layers = tp_shards[0].end_layer - tp_shards[0].start_layer + pp_shard.end_layer - pp_shard.start_layer
+        assert total_layers == 62
+
+        # TP metadata
+        for s in tp_shards:
+            assert s.tp_size == 2
+            assert s.pp_rank == 0
+            assert s.pp_size == 2
+
+        # PP metadata
+        assert pp_shard.tp_rank == -1
+        assert pp_shard.pp_rank == 1
+        assert pp_shard.pp_size == 2
+
+        # Pipeline communication: TP-master sends to PP tail
+        tp_master = next(s for s in tp_shards if s.tp_rank == 0)
+        assert tp_master.pipeline_send_to == pp_shard.device_rank
+        assert pp_shard.pipeline_recv_from == tp_master.device_rank
+
+        # Non-master TP node doesn't send
+        tp_non_master = next(s for s in tp_shards if s.tp_rank == 1)
+        assert tp_non_master.pipeline_send_to is None
+
+    def test_two_nodes_raises(self):
+        """Hybrid requires >= 3 nodes."""
+        node_a = NodeId()
+        node_b = NodeId()
+
+        topology = self._create_ring_topology([node_a, node_b])
+        cycles = [c for c in topology.get_cycles() if len(c) == 2]
+        cycle = cycles[0]
+
+        node_memory = {
+            node_a: create_node_memory(128_000 * 1024),
+            node_b: create_node_memory(128_000 * 1024),
+        }
+
+        model_card = ModelCard(
+            model_id=ModelId("test-model"),
+            n_layers=62,
+            storage_size=Memory.from_kb(1000),
+            hidden_size=3072,
+            supports_tensor=True,
+            tasks=[ModelTask.TextGeneration],
+        )
+
+        with pytest.raises(ValueError, match="at least 3 nodes"):
+            get_shard_assignments(
+                model_card, cycle, Sharding.Hybrid, node_memory=node_memory
+            )

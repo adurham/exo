@@ -30,6 +30,8 @@ from exo.shared.types.worker.runner_response import (
     GenerationResponse,
 )
 from exo.worker.engines.mlx.auto_parallel import (
+    HybridPipelineLastLayer,
+    HybridPipelinePassthroughLayer,
     PipelineFirstLayer,
     PipelineLastLayer,
     clear_prefill_sends,
@@ -70,7 +72,7 @@ class PrefillCancelled(BaseException):
 
 def _has_pipeline_communication_layer(model: Model):
     for layer in model.layers:
-        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
             return True
     return False
 

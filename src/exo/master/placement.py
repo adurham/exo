@@ -106,6 +106,23 @@ def place_instance(
             "Pipeline parallelism is not supported for DeepSeek V3.1 (8-bit)"
         )
 
+    if command.sharding == Sharding.Hybrid:
+        if not command.model_card.supports_tensor:
+            raise ValueError(
+                f"Requested Hybrid sharding but this model does not support tensor parallelism: {command.model_card.model_id}"
+            )
+        # Hybrid TP+PP requires at least 3 nodes (2 TP + 1 PP)
+        cycles_with_sufficient_memory = [
+            cycle
+            for cycle in cycles_with_sufficient_memory
+            if len(cycle) >= 3 and command.model_card.hidden_size % (len(cycle) - 1) == 0
+        ]
+        if not cycles_with_sufficient_memory:
+            raise ValueError(
+                f"No hybrid sharding found for model with hidden_size {command.model_card.hidden_size} — "
+                f"need cycles with >= 3 nodes where hidden_size divides evenly by (N-1) TP ranks"
+            )
+
     smallest_cycles = get_smallest_cycles(cycles_with_sufficient_memory)
 
     smallest_rdma_cycles = [
