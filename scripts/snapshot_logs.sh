@@ -29,8 +29,8 @@ for NODE in "${NODES[@]}"; do
         echo "$LINES lines ($SIZE)"
 
         # Extract key diagnostics
-        CRASHES=$(grep -c "SIGABRT\|Traceback\|CRITICAL\|panic\|assertion" "$OUTFILE" 2>/dev/null || echo "0")
-        DEADLOCKS=$(grep -c "deadlock\|DEADLOCK\|timed out waiting" "$OUTFILE" 2>/dev/null || echo "0")
+        CRASHES=$(grep -c "SIGABRT\|Traceback\|CRITICAL\|panic\|assertion" "$OUTFILE" 2>/dev/null) || CRASHES=0
+        DEADLOCKS=$(grep -c "deadlock\|DEADLOCK\|timed out waiting" "$OUTFILE" 2>/dev/null) || DEADLOCKS=0
         if [ "$CRASHES" -gt 0 ] || [ "$DEADLOCKS" -gt 0 ]; then
             echo "    !! $CRASHES crash indicators, $DEADLOCKS deadlock indicators"
         fi

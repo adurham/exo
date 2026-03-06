@@ -1,29 +1,24 @@
-// Folder-specific settings
-//
-// For a full list of overridable settings, and general information on folder-specific settings,
-// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
 {
-  "lsp": {
-    "nix_python": {
-      "binary": {
-        "path": "nix",
-        "arguments": [
-          "run",
-          "--quiet",
-          "--no-warn-dirty",
-          "--no-allow-import-from-derivation",
-          "--print-build-logs",
-          "never",
-          "${projectRoot}#python-lsp",
-          "--",
-          "--stdio"
-        ]
-      }
-    }
-  },
-  "languages": {
-    "Python": {
-      "language_servers": ["nix_python"]
-    }
-  }
+	"context_servers": {
+		"task-master-ai": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"task-master-ai"
+			],
+			"env": {
+				"TASK_MASTER_TOOLS": "core",
+				"ANTHROPIC_API_KEY": "YOUR_ANTHROPIC_API_KEY_HERE",
+				"PERPLEXITY_API_KEY": "YOUR_PERPLEXITY_API_KEY_HERE",
+				"OPENAI_API_KEY": "YOUR_OPENAI_KEY_HERE",
+				"GOOGLE_API_KEY": "YOUR_GOOGLE_KEY_HERE",
+				"XAI_API_KEY": "YOUR_XAI_KEY_HERE",
+				"OPENROUTER_API_KEY": "YOUR_OPENROUTER_KEY_HERE",
+				"MISTRAL_API_KEY": "YOUR_MISTRAL_KEY_HERE",
+				"AZURE_OPENAI_API_KEY": "YOUR_AZURE_KEY_HERE",
+				"OLLAMA_API_KEY": "YOUR_OLLAMA_API_KEY_HERE"
+			},
+			"source": "custom"
+		}
+	}
 }

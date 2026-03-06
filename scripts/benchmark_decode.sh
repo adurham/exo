@@ -50,7 +50,7 @@ echo "  $RUNNERS_READY runners ready"
 CLUSTER_COMMIT=$(ssh macstudio-m4-1 "git -C ~/repos/exo rev-parse --short HEAD" 2>/dev/null || echo "unknown")
 
 # Collect results in arrays
-declare -a R_CTX R_TTFT R_DECODE_TPS R_STATUS
+declare -a R_CTX R_TTFT R_DECODE_TPS R_PREFILL_TPS R_TOTAL R_STATUS
 
 run_at_context() {
     local target_ctx=$1
@@ -135,8 +135,10 @@ t_end = time.time()
 ttft = round(t_first_token - t_start, 2) if t_first_token else -1
 decode_time = (t_end - t_first_token) if t_first_token else 0
 tps = round(token_count / decode_time, 1) if decode_time > 0 else 0
+total_time = round(t_end - t_start, 2)
+prefill_tps = round($target_ctx / ttft, 1) if ttft and ttft > 0 else 0
 
-print(json.dumps({"status": "OK", "ttft": ttft, "tps": tps, "tokens": token_count}))
+print(json.dumps({"status": "OK", "ttft": ttft, "tps": tps, "tokens": token_count, "total_time": total_time, "prefill_tps": prefill_tps}))
 PYEOF
     )
 
@@ -144,14 +146,18 @@ PYEOF
     status=$(echo "$result" | python3 -c 'import sys,json; print(json.load(sys.stdin)["status"])' 2>/dev/null || echo "FAIL")
     ttft=$(echo "$result" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("ttft","?"))' 2>/dev/null || echo "?")
     tps=$(echo "$result" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("tps","?"))' 2>/dev/null || echo "?")
+    prefill_tps=$(echo "$result" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("prefill_tps","?"))' 2>/dev/null || echo "?")
+    total_time=$(echo "$result" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("total_time","?"))' 2>/dev/null || echo "?")
 
     R_CTX[$idx]="$target_ctx"
     R_TTFT[$idx]="$ttft"
     R_DECODE_TPS[$idx]="$tps"
+    R_PREFILL_TPS[$idx]="$prefill_tps"
+    R_TOTAL[$idx]="$total_time"
     R_STATUS[$idx]="$status"
 
     if [ "$status" = "OK" ]; then
-        echo "  TTFT: ${ttft}s | Decode: ${tps} tok/s"
+        echo "  TTFT: ${ttft}s | Prefill: ${prefill_tps} tok/s | Decode: ${tps} tok/s | Total: ${total_time}s"
     else
         local error
         error=$(echo "$result" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("error","unknown"))' 2>/dev/null || echo "unknown")
@@ -187,14 +193,16 @@ cat > "$RESULTS_FILE" <<REPORT
 - **Decode tokens per run**: $DECODE_TOKENS
 - **Date**: $(date)
 
-| Context | TTFT (s) | Decode (tok/s) | Status |
-|---------|----------|----------------|--------|
+| Context | TTFT (s) | Prefill (tok/s) | Decode (tok/s) | Total (s) | Status |
+|---------|----------|-----------------|----------------|-----------|--------|
 REPORT
 
 for i in "${!CONTEXT_SIZES[@]}"; do
     ctx="${R_CTX[$i]:-${CONTEXT_SIZES[$i]}}"
     ttft="${R_TTFT[$i]:-?}"
     tps="${R_DECODE_TPS[$i]:-?}"
+    prefill_tps="${R_PREFILL_TPS[$i]:-?}"
+    total_time="${R_TOTAL[$i]:-?}"
     status="${R_STATUS[$i]:-?}"
     # Format context as "10K", "100K" etc
     if [ "$ctx" -ge 1000 ]; then
@@ -202,7 +210,7 @@ for i in "${!CONTEXT_SIZES[@]}"; do
     else
         ctx_label="$ctx"
     fi
-    echo "| ~${ctx_label} | ${ttft} | ${tps} | ${status} |" >> "$RESULTS_FILE"
+    echo "| ~${ctx_label} | ${ttft} | ${prefill_tps} | ${tps} | ${total_time} | ${status} |" >> "$RESULTS_FILE"
 done
 
 echo "" >> "$RESULTS_FILE"
@@ -213,4 +221,3 @@ cat "$RESULTS_FILE"
 
 echo ""
 echo "Results saved to: $RESULTS_FILE"
-REPORT
