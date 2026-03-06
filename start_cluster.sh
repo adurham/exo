@@ -191,8 +191,12 @@ done
 
 if [ "$RDMA_HEALTHY" = false ]; then
     echo ""
-    echo "ERROR: One or more active-link RDMA ports are DOWN. Fix cables and retry."
-    exit 1
+    if [ "${SKIP_RDMA_PORT_CHECK:-0}" = "1" ]; then
+        echo "WARNING: RDMA ports are DOWN but SKIP_RDMA_PORT_CHECK=1 is set. Continuing (fresh boot assumed)."
+    else
+        echo "ERROR: One or more active-link RDMA ports are DOWN. Fix cables and retry."
+        exit 1
+    fi
 else
     echo "  All active-link RDMA ports active \u2713"
 fi
@@ -391,11 +395,11 @@ for NODE in "${NODES[@]}"; do
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo.main -v > ~/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo -v > ~/exo.log 2>&1'"
     elif [ "$NODE" == "macstudio-m4-2" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main -v > ~/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo -v > ~/exo.log 2>&1'"
     else
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo.main -v > ~/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo -v > ~/exo.log 2>&1'"
     fi
 done
 
