@@ -20,7 +20,6 @@ from exo.shared.types.events import (
     IndexedEvent,
     InputChunkReceived,
     NodeDownloadProgress,
-    LocalForwarderEvent,
     NodeGatheredInfo,
     TaskCreated,
     TaskStatusUpdated,
@@ -50,9 +49,6 @@ from exo.worker.plan import plan
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
 
 
-from exo.shared.constants import EXO_FILE_SERVER_PORT
-from exo.worker.file_server import FileServer
-
 class Worker:
     def __init__(
         self,
@@ -74,7 +70,6 @@ class Worker:
         self.state: State = State()
         self.runners: dict[RunnerId, RunnerSupervisor] = {}
         self._tg: TaskGroup = TaskGroup()
-        self.file_server = FileServer(port=EXO_FILE_SERVER_PORT)
 
         self._system_id = SystemId()
 
@@ -83,7 +78,6 @@ class Worker:
         self.input_chunk_counts: dict[CommandId, int] = {}
 
         self._download_backoff: KeyedBackoff[ModelId] = KeyedBackoff(base=0.5, cap=10.0)
-        self._completion_event = anyio.Event()
 
     async def run(self):
         logger.info("Starting Worker")
@@ -98,36 +92,14 @@ class Worker:
                 tg.start_soon(self.plan_step)
                 tg.start_soon(self._event_applier)
                 tg.start_soon(self._poll_connection_updates)
-                tg.start_soon(self.file_server.start)
-                tg.start_soon(self._log_network_status)
         finally:
             # Actual shutdown code - waits for all tasks to complete before executing.
             logger.info("Stopping Worker")
-            await self.file_server.stop()
             self.event_sender.close()
             self.command_sender.close()
             self.download_command_sender.close()
             for runner in self.runners.values():
                 runner.shutdown()
-            self._completion_event.set()
-
-    async def _log_network_status(self):
-        import subprocess
-        while True:
-            try:
-                # Synchronous run is acceptable for quick ifconfig checks in debug mode
-                res = subprocess.run(["ifconfig", "en2"], capture_output=True, text=True)
-                if res.returncode == 0:
-                    ips = [l.strip() for l in res.stdout.split('\n') if "inet " in l]
-                    logger.info(f"Network Watchdog (en2): {ips}")
-                else:
-                    logger.debug("Network Watchdog: en2 not found or error")
-            except Exception as e:
-                logger.error(f"Network Watchdog Error: {e}")
-            await anyio.sleep(10)
-
-    async def wait_until_stopped(self):
-        await self._completion_event.wait()
 
     async def _forward_info(self, recv: Receiver[GatheredInfo]):
         with recv as info_stream:
@@ -168,8 +140,6 @@ class Worker:
                 self.state.instances,
                 self.state.runners,
                 self.state.tasks,
-                self.state.topology,
-                self.state.node_network,
                 self.input_chunk_buffer,
                 self.input_chunk_counts,
             )
@@ -196,7 +166,7 @@ class Worker:
                             task_id=task.task_id, task_status=TaskStatus.Complete
                         )
                     )
-                case DownloadModel(shard_metadata=shard, repo_url=repo_url):
+                case DownloadModel(shard_metadata=shard):
                     model_id = shard.model_card.model_id
                     self._download_backoff.record_attempt(model_id)
 
@@ -211,7 +181,7 @@ class Worker:
                                     node_id=self.node_id,
                                     shard_metadata=shard,
                                     model_directory=str(found_path),
-                                    total_bytes=shard.model_card.storage_size,
+                                    total=shard.model_card.storage_size,
                                     read_only=True,
                                 )
                             )
@@ -229,7 +199,6 @@ class Worker:
                                 command=StartDownload(
                                     target_node_id=self.node_id,
                                     shard_metadata=shard,
-                                    repo_url=repo_url,
                                 ),
                             )
                         )
@@ -255,10 +224,7 @@ class Worker:
                 case CancelTask(
                     cancelled_task_id=cancelled_task_id, runner_id=runner_id
                 ):
-                    try:
-                        await self.runners[runner_id].cancel_task(cancelled_task_id)
-                    except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-                        logger.warning(f"Runner {runner_id} already dead, skipping cancel of {cancelled_task_id}")
+                    await self.runners[runner_id].cancel_task(cancelled_task_id)
                     await self.event_sender.send(
                         TaskStatusUpdated(
                             task_id=task.task_id, task_status=TaskStatus.Complete
@@ -324,7 +290,6 @@ class Worker:
         self._tg.start_soon(runner.run)
         return runner
 
-
     async def _poll_connection_updates(self):
         while True:
             edges = set(
@@ -347,7 +312,7 @@ class Worker:
                     else Multiaddr(address=f"/ip6/{ip}/tcp/52415"),
                 )
                 if edge not in edges:
-                    logger.info(f"Ping discovered new edge: {edge} to {nid}. Sending TopologyEdgeCreated.")
+                    logger.debug(f"ping discovered {edge=}")
                     await self.event_sender.send(
                         TopologyEdgeCreated(
                             conn=Connection(source=self.node_id, sink=nid, edge=edge)

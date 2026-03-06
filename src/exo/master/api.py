@@ -73,6 +73,7 @@ from exo.shared.types.api import (
     BenchChatCompletionResponse,
     BenchImageGenerationResponse,
     BenchImageGenerationTaskParams,
+    CancelCommandResponse,
     ChatCompletionChoice,
     ChatCompletionMessage,
     ChatCompletionRequest,
@@ -81,6 +82,8 @@ from exo.shared.types.api import (
     CreateInstanceResponse,
     DeleteDownloadResponse,
     DeleteInstanceResponse,
+    DeleteTracesRequest,
+    DeleteTracesResponse,
     ErrorInfo,
     ErrorResponse,
     FinishReason,
@@ -320,6 +323,7 @@ class API:
         self.app.get("/images/{image_id}")(self.get_image)
         self.app.post("/v1/messages", response_model=None)(self.claude_messages)
         self.app.post("/v1/responses", response_model=None)(self.openai_responses)
+        self.app.post("/v1/cancel/{command_id}")(self.cancel_command)
 
         # Ollama API
         self.app.head("/ollama/")(self.ollama_version)
@@ -340,6 +344,7 @@ class API:
         self.app.post("/download/start")(self.start_download)
         self.app.delete("/download/{node_id}/{model_id:path}")(self.delete_download)
         self.app.get("/v1/traces")(self.list_traces)
+        self.app.post("/v1/traces/delete")(self.delete_traces)
         self.app.get("/v1/traces/{task_id}")(self.get_trace)
         self.app.get("/v1/traces/{task_id}/stats")(self.get_trace_stats)
         self.app.get("/v1/traces/{task_id}/raw")(self.get_trace_raw)
@@ -442,7 +447,7 @@ class API:
                 status_code=400, detail=f"Failed to load model card: {exc}"
             ) from exc
         instance_combinations: list[tuple[Sharding, InstanceMeta, int]] = []
-        for sharding in (Sharding.Pipeline, Sharding.Tensor, Sharding.Hybrid):
+        for sharding in (Sharding.Pipeline, Sharding.Tensor):
             for instance_meta in (InstanceMeta.MlxRing, InstanceMeta.MlxJaccl):
                 instance_combinations.extend(
                     [
@@ -562,6 +567,25 @@ class API:
             message="Command received.",
             command_id=command.command_id,
             instance_id=instance_id,
+        )
+
+    async def cancel_command(self, command_id: CommandId) -> CancelCommandResponse:
+        """Cancel an active command by closing its stream and notifying workers."""
+        sender = self._text_generation_queues.get(
+            command_id
+        ) or self._image_generation_queues.get(command_id)
+        if sender is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Command not found or already completed",
+            )
+
+        await self._send(TaskCancelled(cancelled_command_id=command_id))
+        sender.close()
+
+        return CancelCommandResponse(
+            message="Command cancelled.",
+            command_id=command_id,
         )
 
     async def _token_chunk_stream(
@@ -1516,7 +1540,7 @@ class API:
                     name=card.model_id.short(),
                     description="",
                     tags=[],
-                    storage_size_megabytes=int(card.storage_size.in_mb),
+                    storage_size_megabytes=card.storage_size.in_mb,
                     supports_tensor=card.supports_tensor,
                     tasks=[task.value for task in card.tasks],
                     is_custom=is_custom_card(card.model_id),
@@ -1707,8 +1731,12 @@ class API:
         await self._send_download(command)
         return DeleteDownloadResponse(command_id=command.command_id)
 
-    def _get_trace_path(self, task_id: str) -> Path:
-        return EXO_TRACING_CACHE_DIR / f"trace_{task_id}.json"
+    @staticmethod
+    def _get_trace_path(task_id: str) -> Path:
+        trace_path = EXO_TRACING_CACHE_DIR / f"trace_{task_id}.json"
+        if not trace_path.resolve().is_relative_to(EXO_TRACING_CACHE_DIR.resolve()):
+            raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}")
+        return trace_path
 
     async def list_traces(self) -> TraceListResponse:
         traces: list[TraceListItem] = []
@@ -1806,6 +1834,18 @@ class API:
             media_type="application/json",
             filename=f"trace_{task_id}.json",
         )
+
+    async def delete_traces(self, request: DeleteTracesRequest) -> DeleteTracesResponse:
+        deleted: list[str] = []
+        not_found: list[str] = []
+        for task_id in request.task_ids:
+            trace_path = self._get_trace_path(task_id)
+            if trace_path.exists():
+                trace_path.unlink()
+                deleted.append(task_id)
+            else:
+                not_found.append(task_id)
+        return DeleteTracesResponse(deleted=deleted, not_found=not_found)
 
     async def get_onboarding(self) -> JSONResponse:
         return JSONResponse({"completed": ONBOARDING_COMPLETE_FILE.exists()})

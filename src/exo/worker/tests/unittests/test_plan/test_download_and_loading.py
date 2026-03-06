@@ -8,12 +8,6 @@ from exo.shared.types.worker.runners import (
     RunnerConnected,
     RunnerIdle,
 )
-from exo.shared.topology import Topology
-from exo.shared.types.multiaddr import Multiaddr
-from exo.shared.types.profiling import NodeNetworkInfo, NetworkInterfaceInfo
-from exo.shared.types.topology import SocketConnection, Connection
-from exo.shared.constants import EXO_FILE_SERVER_PORT
-from exo.shared.constants import EXO_FILE_SERVER_PORT
 from exo.worker.tests.constants import (
     INSTANCE_1_ID,
     MODEL_A_ID,
@@ -58,8 +52,6 @@ def test_plan_requests_download_when_waiting_and_shard_not_downloaded():
         instances=instances,
         all_runners=all_runners,
         tasks={},
-        topology=Topology(),
-        node_network={},
     )
 
     assert isinstance(result, plan_mod.DownloadModel)
@@ -98,14 +90,10 @@ def test_plan_loads_model_when_all_shards_downloaded_and_waiting():
 
     global_download_status = {
         NODE_A: [
-            DownloadCompleted(
-                shard_metadata=shard1, node_id=NODE_A, total_bytes=Memory()
-            )
+            DownloadCompleted(shard_metadata=shard1, node_id=NODE_A, total=Memory())
         ],
         NODE_B: [
-            DownloadCompleted(
-                shard_metadata=shard2, node_id=NODE_B, total_bytes=Memory()
-            )
+            DownloadCompleted(shard_metadata=shard2, node_id=NODE_B, total=Memory())
         ],
     }
 
@@ -116,8 +104,6 @@ def test_plan_loads_model_when_all_shards_downloaded_and_waiting():
         instances=instances,
         all_runners=all_runners,
         tasks={},
-        topology=Topology(),
-        node_network={},
     )
 
     assert isinstance(result, LoadModel)
@@ -129,7 +115,7 @@ def test_plan_does_not_request_download_when_shard_already_downloaded():
     If the local shard already has a DownloadCompleted entry, plan()
     should not re-emit DownloadModel while global state is still catching up.
     """
-    shard = get_pipeline_shard_metadata(model_id=MODEL_A_ID, device_rank=0)
+    shard = get_pipeline_shard_metadata(MODEL_A_ID, device_rank=0)
     instance = get_mlx_ring_instance(
         instance_id=INSTANCE_1_ID,
         model_id=MODEL_A_ID,
@@ -148,9 +134,7 @@ def test_plan_does_not_request_download_when_shard_already_downloaded():
     # Global state shows shard is downloaded for NODE_A
     global_download_status: dict[NodeId, list[DownloadProgress]] = {
         NODE_A: [
-            DownloadCompleted(
-                shard_metadata=shard, node_id=NODE_A, total_bytes=Memory()
-            )
+            DownloadCompleted(shard_metadata=shard, node_id=NODE_A, total=Memory())
         ],
         NODE_B: [],
     }
@@ -162,8 +146,6 @@ def test_plan_does_not_request_download_when_shard_already_downloaded():
         instances=instances,
         all_runners=all_runners,
         tasks={},
-        topology=Topology(),
-        node_network={},
     )
 
     assert not isinstance(result, plan_mod.DownloadModel)
@@ -199,9 +181,7 @@ def test_plan_does_not_load_model_until_all_shards_downloaded_globally():
 
     global_download_status = {
         NODE_A: [
-            DownloadCompleted(
-                shard_metadata=shard1, node_id=NODE_A, total_bytes=Memory()
-            )
+            DownloadCompleted(shard_metadata=shard1, node_id=NODE_A, total=Memory())
         ],
         NODE_B: [],  # NODE_B has no downloads completed yet
     }
@@ -213,22 +193,16 @@ def test_plan_does_not_load_model_until_all_shards_downloaded_globally():
         instances=instances,
         all_runners=all_runners,
         tasks={},
-        topology=Topology(),
-        node_network={},
     )
 
     assert result is None
 
     global_download_status = {
         NODE_A: [
-            DownloadCompleted(
-                shard_metadata=shard1, node_id=NODE_A, total_bytes=Memory()
-            )
+            DownloadCompleted(shard_metadata=shard1, node_id=NODE_A, total=Memory())
         ],
         NODE_B: [
-            DownloadCompleted(
-                shard_metadata=shard2, node_id=NODE_B, total_bytes=Memory()
-            )
+            DownloadCompleted(shard_metadata=shard2, node_id=NODE_B, total=Memory())
         ],  # NODE_B has no downloads completed yet
     }
 
@@ -239,75 +213,6 @@ def test_plan_does_not_load_model_until_all_shards_downloaded_globally():
         instances=instances,
         all_runners=all_runners,
         tasks={},
-        topology=Topology(),
-        node_network={},
     )
 
     assert result is not None
-
-
-def test_plan_requests_p2p_download_from_peer_when_peer_has_model():
-    """
-    When a peer has the model, plan() should emit DownloadModel with repo_url
-    pointing to the peer.
-    """
-    shard = get_pipeline_shard_metadata(model_id=MODEL_A_ID, device_rank=0)
-    instance = get_mlx_ring_instance(
-        instance_id=INSTANCE_1_ID,
-        model_id=MODEL_A_ID,
-        node_to_runner={NODE_A: RUNNER_1_ID, NODE_B: RUNNER_2_ID},
-        runner_to_shard={RUNNER_1_ID: shard, RUNNER_2_ID: shard}, # Assume same shard or full model available
-    )
-    bound_instance = BoundInstance(
-        instance=instance, bound_runner_id=RUNNER_1_ID, bound_node_id=NODE_A
-    )
-    runner = FakeRunnerSupervisor(bound_instance=bound_instance, status=RunnerIdle())
-
-    runners = {RUNNER_1_ID: runner}
-    instances = {INSTANCE_1_ID: instance}
-    all_runners = {RUNNER_1_ID: RunnerIdle(), RUNNER_2_ID: RunnerIdle()}
-
-    # NODE_B has the model
-    global_download_status = {
-        NODE_A: [],
-        NODE_B: [
-            DownloadCompleted(
-                shard_metadata=shard, node_id=NODE_B, total_bytes=Memory()
-            )
-        ],
-    }
-
-    # Setup topology with Thunderbolt connection
-    topology = Topology()
-    topology.add_node(NODE_A)
-    topology.add_node(NODE_B)
-    
-    tb_ip = "10.0.0.2"
-    conn = SocketConnection(
-        sink_multiaddr=Multiaddr(address=f"/ip4/{tb_ip}/tcp/5678")
-    )
-    topology.add_connection(Connection(source=NODE_A, sink=NODE_B, edge=conn))
-
-    node_network = {
-        NODE_B: NodeNetworkInfo(
-            interfaces=[
-                NetworkInterfaceInfo(ip_address=tb_ip, name="tb0", interface_type="thunderbolt")
-            ]
-        )
-    }
-
-    result = plan_mod.plan(
-        node_id=NODE_A,
-        runners=runners,  # type: ignore
-        global_download_status=global_download_status,
-        instances=instances,
-        all_runners=all_runners,
-        tasks={},
-        topology=topology,
-        node_network=node_network,
-    )
-
-    assert isinstance(result, plan_mod.DownloadModel)
-    assert result.instance_id == INSTANCE_1_ID
-    assert result.shard_metadata == shard
-    assert result.repo_url == f"http://{tb_ip}:{EXO_FILE_SERVER_PORT}"

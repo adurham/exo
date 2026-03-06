@@ -24,7 +24,7 @@ from exo.shared.types.worker.downloads import (
     DownloadOngoing,
     DownloadProgress,
 )
-from exo.shared.types.worker.instances import BoundInstance, MlxJacclInstance, MlxRingInstance, Instance, InstanceId
+from exo.shared.types.worker.instances import BoundInstance, Instance, InstanceId
 from exo.shared.types.worker.runners import (
     RunnerConnected,
     RunnerConnecting,
@@ -38,57 +38,7 @@ from exo.shared.types.worker.runners import (
     RunnerStatus,
     RunnerWarmingUp,
 )
-from exo.shared.constants import EXO_FILE_SERVER_PORT
-from exo.shared.topology import Topology
-from exo.shared.types.profiling import NodeNetworkInfo
-from exo.shared.types.topology import SocketConnection
 from exo.worker.runner.runner_supervisor import RunnerSupervisor
-
-
-def _get_best_peer_ip(
-    node_id: NodeId,
-    peer_id: NodeId,
-    topology: Topology,
-    node_network: Mapping[NodeId, NodeNetworkInfo],
-) -> str | None:
-    other_network = node_network.get(peer_id, NodeNetworkInfo())
-    
-    # Get all IPv4 addresses from the peer's network info
-    ips = [
-        iface.ip_address 
-        for iface in other_network.interfaces 
-        if iface.ip_address and ":" not in iface.ip_address
-    ]
-    
-    if not ips:
-        # Fallback to topology connections if node_network is empty
-        connections = topology.get_all_connections_between(node_id, peer_id)
-        ips = [
-            conn.sink_multiaddr.ip_address 
-            for conn in connections 
-            if isinstance(conn, SocketConnection)
-        ]
-        
-    if not ips:
-        return None
-
-    ip_to_type = {
-        iface.ip_address: iface.interface_type for iface in other_network.interfaces
-    }
-    
-    # Priority: Interface Type (Thunderbolt=0)
-    priority = {
-        "thunderbolt": 0,
-        "ethernet": 1,
-        "maybe_ethernet": 2,
-        "wifi": 3,
-        "unknown": 4,
-    }
-    
-    def get_priority(ip: str) -> int:
-        return priority.get(ip_to_type.get(ip, "unknown"), 4)
-
-    return min(ips, key=get_priority)
 
 
 def plan(
@@ -99,8 +49,6 @@ def plan(
     instances: Mapping[InstanceId, Instance],
     all_runners: Mapping[RunnerId, RunnerStatus],  # all global
     tasks: Mapping[TaskId, Task],
-    topology: Topology,
-    node_network: Mapping[NodeId, NodeNetworkInfo],
     input_chunk_buffer: Mapping[CommandId, dict[int, str]] | None = None,
     input_chunk_counts: Mapping[CommandId, int] | None = None,
 ) -> Task | None:
@@ -109,7 +57,7 @@ def plan(
         _cancel_tasks(runners, tasks)
         or _kill_runner(runners, all_runners, instances)
         or _create_runner(node_id, runners, instances)
-        or _model_needs_download(node_id, runners, global_download_status, instances, topology, node_network)
+        or _model_needs_download(node_id, runners, global_download_status)
         or _init_distributed_backend(runners, all_runners)
         or _load_model(runners, all_runners, global_download_status)
         or _ready_to_warmup(runners, all_runners)
@@ -168,9 +116,6 @@ def _model_needs_download(
     node_id: NodeId,
     runners: Mapping[RunnerId, RunnerSupervisor],
     global_download_status: Mapping[NodeId, Sequence[DownloadProgress]],
-    instances: Mapping[InstanceId, Instance],
-    topology: Topology,
-    node_network: Mapping[NodeId, NodeNetworkInfo],
 ) -> DownloadModel | None:
     local_downloads = global_download_status.get(node_id, [])
     download_status = {
@@ -178,88 +123,19 @@ def _model_needs_download(
     }
 
     for runner in runners.values():
-        shard = runner.bound_instance.bound_shard
-        model_id = shard.model_card.model_id
-        
-        # Check if we already have the model or are downloading it
-        if not isinstance(runner.status, RunnerIdle):
-            continue
-            
-        if model_id in download_status and isinstance(
-            download_status[model_id],
-            (DownloadOngoing, DownloadCompleted, DownloadFailed),
+        model_id = runner.bound_instance.bound_shard.model_card.model_id
+        if isinstance(runner.status, RunnerIdle) and (
+            model_id not in download_status
+            or not isinstance(
+                download_status[model_id],
+                (DownloadOngoing, DownloadCompleted, DownloadFailed),
+            )
         ):
-             # We don't invalidate download_status randomly in case a file gets deleted on disk
-             # But if it failed, we might want to retry? For now, logic stays same: if failed, we don't auto-retry immediately here to avoid loops
-             continue
-
-        # Logic for P2P
-        instance = runner.bound_instance.instance
-        if not instance:
-             # Should not happen
-             return DownloadModel(
+            # We don't invalidate download_status randomly in case a file gets deleted on disk
+            return DownloadModel(
                 instance_id=runner.bound_instance.instance.instance_id,
-                shard_metadata=shard,
+                shard_metadata=runner.bound_instance.bound_shard,
             )
-
-        # 1. Determine Leader
-        participating_nodes = sorted(instance.shard_assignments.node_to_runner.keys())
-        leader_node_id = participating_nodes[0]
-        
-        # 2. Check if anyone has it
-        peer_with_model: NodeId | None = None
-        for peer_id in participating_nodes:
-            if peer_id == node_id:
-                continue
-            peer_downloads = global_download_status.get(peer_id, [])
-            if any(
-                isinstance(dp, DownloadCompleted) and dp.shard_metadata.model_card.model_id == model_id
-                for dp in peer_downloads
-            ):
-                peer_with_model = peer_id
-                break
-        
-        # 3. Construct repo_url if we found a peer
-        repo_url: str | None = None
-        if peer_with_model:
-            # 1. Try to use the IP assigned in the instance configuration (Ring)
-            best_ip = None
-            if isinstance(instance, MlxRingInstance):
-                hosts = instance.hosts_by_node.get(peer_with_model)
-                if hosts and len(hosts) > 0:
-                    best_ip = hosts[0].ip
-            elif isinstance(instance, MlxJacclInstance):
-                coordinator = instance.jaccl_coordinators.get(peer_with_model)
-                if coordinator:
-                    best_ip = coordinator.split(":")[0]
-
-            # 2. Fallback to best peer discovery
-            if not best_ip:
-                best_ip = _get_best_peer_ip(node_id, peer_with_model, topology, node_network)
-
-            if best_ip:
-                repo_url = f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"
-        
-        # 4. Decide action
-        if repo_url:
-             # Download from peer
-             return DownloadModel(
-                instance_id=instance.instance_id,
-                shard_metadata=shard,
-                repo_url=repo_url
-            )
-        
-        if node_id == leader_node_id:
-             # I am leader, and no one else has it -> Download from HF
-             return DownloadModel(
-                instance_id=instance.instance_id,
-                shard_metadata=shard,
-            )
-        else:
-             # I am follower, and leader (or anyone) doesn't have it yet -> Wait
-             continue
-
-    return None
 
 
 def _init_distributed_backend(
@@ -421,10 +297,10 @@ def _pending_tasks(
             # the task status _should_ be set to completed by the LAST runner
             # it is currently set by the first
             # this is definitely a hack
-            if task.task_id in runner.completed:
+            if task.task_id in runner.completed or task.task_id in runner.in_progress:
                 continue
 
-            if isinstance(runner.status, RunnerReady) and all(
+            if isinstance(runner.status, (RunnerReady, RunnerRunning)) and all(
                 isinstance(all_runners[global_runner_id], (RunnerReady, RunnerRunning))
                 for global_runner_id in runner.bound_instance.instance.shard_assignments.runner_to_shard
             ):

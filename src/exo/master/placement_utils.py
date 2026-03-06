@@ -1,4 +1,3 @@
-import os
 from collections.abc import Generator, Mapping
 
 from loguru import logger
@@ -12,7 +11,6 @@ from exo.shared.types.topology import Cycle, RDMAConnection, SocketConnection
 from exo.shared.types.worker.runners import RunnerId, ShardAssignments
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
-    HybridShardMetadata,
     PipelineShardMetadata,
     Sharding,
     ShardMetadata,
@@ -46,13 +44,6 @@ def get_smallest_cycles(
     return [cycle for cycle in cycles if len(cycle) == min_nodes]
 
 
-def get_largest_cycles(
-    cycles: list[Cycle],
-) -> list[Cycle]:
-    max_nodes = max(len(cycle) for cycle in cycles)
-    return [cycle for cycle in cycles if len(cycle) == max_nodes]
-
-
 def allocate_layers_proportionally(
     total_layers: int,
     memory_fractions: list[float],
@@ -71,7 +62,7 @@ def allocate_layers_proportionally(
     result = [int(r) for r in raw]
     by_remainder = sorted(range(n), key=lambda i: raw[i] - result[i], reverse=True)
     for i in range(total_layers - sum(result)):
-        result[by_remainder[i % n]] += 1
+        result[by_remainder[i]] += 1
 
     # Ensure minimum 1 per node by taking from the largest
     for i in range(n):
@@ -108,144 +99,25 @@ def _allocate_and_validate_layers(
     total_memory: Memory,
     model_card: ModelCard,
 ) -> list[int]:
-    # --- Manual Layer Split Override ---
-    manual_split = os.getenv("EXO_LAYER_SPLIT", "")
-    if manual_split:
-        parts = [int(x.strip()) for x in manual_split.split(",")]
-        if len(parts) != len(node_ids):
-            logger.warning(
-                f"EXO_LAYER_SPLIT has {len(parts)} values but {len(node_ids)} nodes; ignoring override"
-            )
-        elif sum(parts) != model_card.n_layers:
-            logger.warning(
-                f"EXO_LAYER_SPLIT sums to {sum(parts)} but model has {model_card.n_layers} layers; ignoring override"
-            )
-        else:
-            logger.info(f"Using manual layer split: {parts} (EXO_LAYER_SPLIT)")
-            return parts
-
-    # --- Robust Model-Aware Memory Budgeting ---
-    system_reserve = float(
-        os.getenv("EXO_SYSTEM_RESERVE", "0.10")
-    )  # 10% for macOS/System
-    wired_limit_pct = float(
-        os.getenv("EXO_WIRED_LIMIT_PCT", "0.85")
-    )  # 85% for macOS GPU wired limit
-
-    # Runtime overhead factor: accounts for MLX computation graphs, Metal
-    # buffers, MoE activation patterns, and other GPU memory that isn't
-    # captured by weight size + KV cache alone.  Empirically, MoE models
-    # use ~1.25-1.5x their on-disk weight size in runtime GPU memory.
-    runtime_overhead = float(
-        os.getenv("EXO_RUNTIME_OVERHEAD_FACTOR", "1.25")
-    )
-    kv_safety_factor = 1.2
-
-    kv_bytes_per_token_per_layer = 2 * model_card.num_kv_heads * model_card.head_dim * 2
-
-    # Budget KV for the model's max context length. If all nodes are overloaded
-    # at this budget, the proportional allocation (based on capped memory) still
-    # gives a sensible split. Override with EXO_PLACEMENT_TARGET_CONTEXT if needed.
-    fallback_context = 50000
-    target_context = int(
-        os.getenv("EXO_PLACEMENT_TARGET_CONTEXT", "0")
-    )
-    effective_context = target_context if target_context > 0 else model_card.max_context_length
-    if effective_context <= 0:
-        effective_context = fallback_context
-
-    kv_mem_per_layer_bytes = (
-        kv_bytes_per_token_per_layer * effective_context * kv_safety_factor
-    )
-    weight_mem_per_layer_bytes = (
-        model_card.storage_size.in_bytes / model_card.n_layers * runtime_overhead
-    )
-    total_mem_per_layer_bytes = weight_mem_per_layer_bytes + kv_mem_per_layer_bytes
-
-    def get_capped_available_memory(node_id: NodeId) -> int:
-        mem = node_memory[node_id]
-        # Cap 1: Standard system reserve from available
-        available = int(mem.ram_available.in_bytes * (1.0 - system_reserve))
-        # Cap 2: OS-level hard boundary for wired memory (e.g. macOS 75%)
-        wired_ceiling = int(
-            mem.ram_total.in_bytes * wired_limit_pct * (1.0 - system_reserve)
-        )
-        return min(available, wired_ceiling)
-
-    # Use capped memory (not raw ram_available) for proportional allocation.
-    # Raw ram_available varies with OS state; capped values account for system
-    # reserve and macOS wired limit, giving consistent results.
-    capped_memories = [get_capped_available_memory(nid) for nid in node_ids]
-    total_capped = sum(capped_memories)
-    if total_capped == 0:
-        total_capped = 1  # avoid division by zero
-
-    logger.info(
-        f"Placement budget: {weight_mem_per_layer_bytes/1e9:.2f}GB weights/layer + "
-        f"{kv_mem_per_layer_bytes/1e9:.2f}GB KV/layer ({effective_context} ctx) = "
-        f"{total_mem_per_layer_bytes/1e9:.2f}GB/layer × {model_card.n_layers} layers"
-    )
-    for i, nid in enumerate(node_ids):
-        logger.info(
-            f"  Node {i} ({nid[:12]}...): "
-            f"available={node_memory[nid].ram_available.in_bytes/1e9:.1f}GB, "
-            f"capped={capped_memories[i]/1e9:.1f}GB, "
-            f"max_layers={int(capped_memories[i] / total_mem_per_layer_bytes)}"
-        )
-
-    # 1. Initial Proportional Allocation (based on capped memory)
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
-        memory_fractions=[cm / total_capped for cm in capped_memories],
+        memory_fractions=[
+            node_memory[node_id].ram_available / total_memory for node_id in node_ids
+        ],
     )
-    logger.info(f"Initial proportional allocation: {layer_allocations}")
 
-    # 2. Redistribution Loop: Move layers from overloaded nodes to underloaded nodes
-    max_iterations = model_card.n_layers  # Safety break
-    redistributed = 0
-    for _ in range(max_iterations):
-        overloaded_idx = -1
-        for i, node_id in enumerate(node_ids):
-            available = capped_memories[i]
-            required = int(total_mem_per_layer_bytes * layer_allocations[i])
-            if required > available and layer_allocations[i] > 1:
-                overloaded_idx = i
-                break
-
-        if overloaded_idx == -1:
-            break  # Everyone fits!
-
-        # Find the node with the MOST relative headroom to take the layer
-        best_target_idx = -1
-        max_headroom = -1
-        for i, node_id in enumerate(node_ids):
-            if i == overloaded_idx:
-                continue
-            available = capped_memories[i]
-            required = int(total_mem_per_layer_bytes * (layer_allocations[i] + 1))
-            headroom = available - required
-            if headroom > max_headroom:
-                max_headroom = headroom
-                best_target_idx = i
-
-        if best_target_idx != -1:
-            layer_allocations[overloaded_idx] -= 1
-            layer_allocations[best_target_idx] += 1
-            redistributed += 1
-        else:
-            logger.warning(
-                f"Cannot redistribute layers from overloaded node {overloaded_idx} "
-                f"(no node has enough headroom). Using best-effort allocation."
+    total_storage = model_card.storage_size
+    total_layers = model_card.n_layers
+    for i, node_id in enumerate(node_ids):
+        node_layers = layer_allocations[i]
+        required_memory = (total_storage * node_layers) // total_layers
+        available_memory = node_memory[node_id].ram_available
+        if required_memory > available_memory:
+            raise ValueError(
+                f"Node {i} ({node_id}) has insufficient memory: "
+                f"requires {required_memory.in_gb:.2f} GB for {node_layers} layers, "
+                f"but only has {available_memory.in_gb:.2f} GB available"
             )
-            break
-
-    if redistributed > 0:
-        logger.info(
-            f"Redistributed {redistributed} layers for {effective_context}-token context. "
-            f"Final allocation: {layer_allocations}"
-        )
-    else:
-        logger.info(f"Final allocation (no redistribution needed): {layer_allocations}")
 
     return layer_allocations
 
@@ -401,164 +273,23 @@ def get_shard_assignments_for_tensor_parallel(
     return shard_assignments
 
 
-def get_shard_assignments_for_hybrid_parallel(
-    model_card: ModelCard,
-    cycle: Cycle,
-    node_memory: Mapping[NodeId, MemoryUsage],
-) -> tuple[ShardAssignments, Cycle]:
-    """Create shard assignments for hybrid tensor + pipeline parallel execution.
-
-    The nodes with the most memory form a TP group (they share the same layers
-    and split each layer's compute via all-reduce).  The remaining node(s) form
-    the PP tail with their own disjoint layer range.
-
-    Topology:  TP-group (all-reduce per layer) → PP-tail (pipeline send/recv)
-
-    Returns both the shard assignments and a reordered Cycle where TP nodes
-    occupy the lowest ranks (0..tp_size-1) and PP tail nodes follow.  The
-    caller must use the reordered cycle for coordinator/devices setup so that
-    JACCL ranks match the shard metadata.
-    """
-    _validate_cycle(cycle)
-    world_size = len(cycle)
-    if world_size < 3:
-        raise ValueError("Hybrid TP+PP requires at least 3 nodes (2 TP + 1 PP)")
-
-    # Sort nodes by available memory descending; top N-1 form the TP group.
-    nodes_by_memory = sorted(
-        cycle.node_ids,
-        key=lambda nid: node_memory[nid].ram_available.in_bytes,
-        reverse=True,
-    )
-    tp_size = world_size - 1  # e.g. 2 Studios
-    tp_node_ids = nodes_by_memory[:tp_size]
-    pp_tail_node_ids = nodes_by_memory[tp_size:]  # e.g. MacBook
-
-    # --- Reorder cycle: TP nodes first, PP tail last ---
-    # This ensures TP nodes always get the lowest ranks (0..tp_size-1)
-    # and data flows logically: TP group → PP tail.
-    reordered_node_ids = tp_node_ids + pp_tail_node_ids
-    reordered_cycle = Cycle(node_ids=reordered_node_ids)
-
-    # --- Layer allocation ---
-    wired_limit_pct = float(os.getenv("EXO_WIRED_LIMIT_PCT", "0.75"))
-
-    def get_wired_capacity(node_id: NodeId) -> int:
-        mem = node_memory[node_id]
-        # Same logic as PP: don't allocate more than the wired boundary permits
-        available = mem.ram_available.in_bytes
-        wired_ceiling = int(mem.ram_total.in_bytes * wired_limit_pct)
-        return min(available, wired_ceiling)
-
-    # TP group acts as one unit: combined memory for its share of layers.
-    tp_memory_bytes = sum(get_wired_capacity(nid) for nid in tp_node_ids)
-    pp_memory_bytes = sum(get_wired_capacity(nid) for nid in pp_tail_node_ids)
-
-    total_memory_bytes = tp_memory_bytes + pp_memory_bytes
-    if total_memory_bytes == 0:
-        raise ValueError("Total available memory is 0")
-
-    total_layers = model_card.n_layers
-    tp_layers = round(total_layers * tp_memory_bytes / total_memory_bytes)
-    tp_layers = max(tp_layers, 1)
-    tp_layers = min(tp_layers, total_layers - len(pp_tail_node_ids))
-    pp_layers = total_layers - tp_layers
-
-    # The maximum layers the PP tail can handle is now calculated natively
-    # through the dynamically capped `pp_memory_bytes` fraction. No hardcoded limit.
-
-    logger.info(
-        f"Hybrid placement: {tp_size} TP nodes × {tp_layers} shared layers, "
-        f"{len(pp_tail_node_ids)} PP tail node(s) × {pp_layers} layers "
-        f"(dynamically memory-capped)"
-    )
-
-    # --- Build shard assignments ---
-    runner_to_shard: dict[RunnerId, ShardMetadata] = {}
-    node_to_runner: dict[NodeId, RunnerId] = {}
-
-    # Ranks follow the reordered cycle: TP nodes = 0..tp_size-1, PP = tp_size..
-    tp_master_global_rank = 0  # TP master is always rank 0
-    pp_tail_first_global_rank = tp_size  # PP tail starts after TP group
-
-    # TP nodes: all share layers [0, tp_layers)
-    for tp_rank, nid in enumerate(tp_node_ids):
-        global_rank = tp_rank  # ranks 0..tp_size-1
-        shard = HybridShardMetadata(
-            model_card=model_card,
-            device_rank=global_rank,
-            world_size=world_size,
-            start_layer=0,
-            end_layer=tp_layers,
-            n_layers=total_layers,
-            tp_size=tp_size,
-            tp_rank=tp_rank,
-            pp_rank=0,
-            pp_size=2,
-            # Only TP-master (tp_rank=0) sends downstream
-            pipeline_send_to=pp_tail_first_global_rank if tp_rank == 0 else None,
-            pipeline_recv_from=None,
-        )
-        runner_id = RunnerId()
-        runner_to_shard[runner_id] = shard
-        node_to_runner[nid] = runner_id
-
-    # PP tail nodes: own layers [tp_layers, total_layers)
-    for pp_idx, nid in enumerate(pp_tail_node_ids):
-        global_rank = tp_size + pp_idx  # ranks tp_size..
-        shard = HybridShardMetadata(
-            model_card=model_card,
-            device_rank=global_rank,
-            world_size=world_size,
-            start_layer=tp_layers,
-            end_layer=total_layers,
-            n_layers=total_layers,
-            tp_size=0,  # Not in TP group
-            tp_rank=-1,
-            pp_rank=1,
-            pp_size=2,
-            pipeline_send_to=None,  # Last stage
-            pipeline_recv_from=tp_master_global_rank,
-        )
-        runner_id = RunnerId()
-        runner_to_shard[runner_id] = shard
-        node_to_runner[nid] = runner_id
-
-    return ShardAssignments(
-        model_id=model_card.model_id,
-        runner_to_shard=runner_to_shard,
-        node_to_runner=node_to_runner,
-    ), reordered_cycle
-
-
 def get_shard_assignments(
     model_card: ModelCard,
     cycle: Cycle,
     sharding: Sharding,
     node_memory: Mapping[NodeId, MemoryUsage],
-) -> tuple[ShardAssignments, Cycle | None]:
-    """Return shard assignments and optionally a reordered cycle.
-
-    For hybrid mode, the cycle is reordered so TP nodes get the lowest ranks.
-    For other modes, the second element is None (cycle order unchanged).
-    """
+) -> ShardAssignments:
     match sharding:
         case Sharding.Pipeline:
             return get_shard_assignments_for_pipeline_parallel(
                 model_card=model_card,
                 cycle=cycle,
                 node_memory=node_memory,
-            ), None
+            )
         case Sharding.Tensor:
             return get_shard_assignments_for_tensor_parallel(
                 model_card=model_card,
                 cycle=cycle,
-            ), None
-        case Sharding.Hybrid:
-            return get_shard_assignments_for_hybrid_parallel(
-                model_card=model_card,
-                cycle=cycle,
-                node_memory=node_memory,
             )
 
 
@@ -588,9 +319,7 @@ def get_mlx_jaccl_devices_matrix(
                     break
             else:
                 raise ValueError(
-                    f"No RDMA connection from {node_i} to {node_j} "
-                    f"(interface may be PORT_DOWN). Check Thunderbolt cables "
-                    f"and run 'ibv_devinfo' on affected nodes."
+                    "Current jaccl backend requires all-to-all RDMA connections"
                 )
 
     return matrix
@@ -616,61 +345,37 @@ def _find_ip_prioritised(
 ) -> str | None:
     """Find an IP address between nodes with prioritization.
 
-    Priority: 192.168.200.x > thunderbolt > ethernet > wifi > unknown
+    Priority: ethernet > wifi > unknown > thunderbolt
     """
-    other_network_info = node_network.get(other_node_id, NodeNetworkInfo())
-
-    # Get all IPv4 addresses from the peer's network info
-    network_ip_map = {
-        iface.ip_address: iface
-        for iface in other_network_info.interfaces
-        if iface.ip_address and ":" not in iface.ip_address
-    }
-
-    # Check for direct connections first
-    topology_ips = set(_find_connection_ip(node_id, other_node_id, cycle_digraph))
-
-    # Filter network IPs by topology connections if any exist
-    candidate_ips = [ip for ip in network_ip_map if ip in topology_ips]
-
-    # If no overlap or no topology connections, fall back to all network IPs
-    if not candidate_ips:
-        candidate_ips = list(network_ip_map.keys())
-
-    # If still no IPs (no network info), use topology IPs
-    if not candidate_ips:
-        candidate_ips = list(topology_ips)
-
-    if not candidate_ips:
+    ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
+    if not ips:
         return None
-
+    other_network = node_network.get(other_node_id, NodeNetworkInfo())
     ip_to_type = {
-        iface.ip_address: iface.interface_type
-        for iface in other_network_info.interfaces
+        iface.ip_address: iface.interface_type for iface in other_network.interfaces
     }
+
     # Ring should prioritise fastest connection. As a best-effort, we prioritise TB.
+    # TODO: Profile and get actual connection speeds.
     if ring:
         priority = {
             "thunderbolt": 0,
-            "ethernet": 1,
-            "maybe_ethernet": 2,
+            "maybe_ethernet": 1,
+            "ethernet": 2,
             "wifi": 3,
             "unknown": 4,
         }
-    # RDMA prefers ethernet coordinator unless lightning fast thunderbolt is available
+
+    # RDMA prefers ethernet coordinator
     else:
         priority = {
-            "thunderbolt": 0,
-            "ethernet": 1,
-            "wifi": 2,
+            "ethernet": 0,
+            "wifi": 1,
+            "unknown": 2,
             "maybe_ethernet": 3,
-            "unknown": 4,
+            "thunderbolt": 4,
         }
-
-    def get_priority(ip: str) -> int:
-        return priority.get(ip_to_type.get(ip, "unknown"), 4)
-
-    return min(candidate_ips, key=get_priority)
+    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 2))
 
 
 def get_mlx_ring_hosts_by_node(
@@ -738,7 +443,6 @@ def get_mlx_jaccl_coordinators(
 
     def get_ip_for_node(n: NodeId) -> str:
         if n == coordinator:
-            # The coordinator itself should bind to all interfaces
             return "0.0.0.0"
 
         ip = _find_ip_prioritised(

@@ -21,6 +21,10 @@ from exo.shared.types.commands import (
     StartDownload,
 )
 from exo.shared.types.common import NodeId
+from exo.shared.types.events import (
+    Event,
+    NodeDownloadProgress,
+)
 from exo.shared.types.worker.downloads import (
     DownloadCompleted,
     DownloadFailed,
@@ -28,11 +32,6 @@ from exo.shared.types.worker.downloads import (
     DownloadPending,
     DownloadProgress,
 )
-from exo.shared.types.events import (
-    Event,
-    NodeDownloadProgress,
-)
-
 from exo.shared.types.worker.shards import PipelineShardMetadata, ShardMetadata
 from exo.utils.channels import Receiver, Sender
 from exo.utils.task_group import TaskGroup
@@ -71,7 +70,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=callback_shard,
                 node_id=self.node_id,
-                total_bytes=progress.total_bytes,
+                total=progress.total,
                 model_directory=self._model_dir(model_id),
             )
             self.download_status[model_id] = completed
@@ -123,8 +122,8 @@ class DownloadCoordinator:
                     continue
 
                 match cmd.command:
-                    case StartDownload(shard_metadata=shard, repo_url=repo_url):
-                        await self._start_download(shard, repo_url)
+                    case StartDownload(shard_metadata=shard):
+                        await self._start_download(shard)
                     case DeleteDownload(model_id=model_id):
                         await self._delete_download(model_id)
                     case CancelDownload(model_id=model_id):
@@ -135,9 +134,7 @@ class DownloadCoordinator:
             logger.info(f"Cancelling download for {model_id}")
             self.active_downloads.pop(model_id).cancel()
 
-    async def _start_download(
-        self, shard: ShardMetadata, repo_url: str | None = None
-    ) -> None:
+    async def _start_download(self, shard: ShardMetadata) -> None:
         model_id = shard.model_card.model_id
 
         # Check if already downloading, complete, or recently failed
@@ -158,7 +155,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=shard,
                 node_id=self.node_id,
-                total_bytes=shard.model_card.storage_size,
+                total=shard.model_card.storage_size,
                 model_directory=str(found_path),
                 read_only=True,
             )
@@ -186,7 +183,7 @@ class DownloadCoordinator:
             completed = DownloadCompleted(
                 shard_metadata=shard,
                 node_id=self.node_id,
-                total_bytes=initial_progress.total_bytes,
+                total=initial_progress.total,
                 model_directory=self._model_dir(model_id),
             )
             self.download_status[model_id] = completed
@@ -210,13 +207,10 @@ class DownloadCoordinator:
             return
 
         # Start actual download
-        self._start_download_task(shard, initial_progress, repo_url)
+        self._start_download_task(shard, initial_progress)
 
     def _start_download_task(
-        self,
-        shard: ShardMetadata,
-        initial_progress: RepoDownloadProgress,
-        repo_url: str | None = None,
+        self, shard: ShardMetadata, initial_progress: RepoDownloadProgress
     ) -> None:
         model_id = shard.model_card.model_id
 
@@ -234,9 +228,7 @@ class DownloadCoordinator:
 
         async def download_wrapper() -> None:
             try:
-                await self.shard_downloader.ensure_shard(
-                    shard, repo_url=repo_url
-                )
+                await self.shard_downloader.ensure_shard(shard)
             except Exception as e:
                 logger.error(f"Download failed for {model_id}: {e}")
                 failed = DownloadFailed(
@@ -314,21 +306,21 @@ class DownloadCoordinator:
                         status: DownloadProgress = DownloadCompleted(
                             node_id=self.node_id,
                             shard_metadata=progress.shard,
-                            total_bytes=progress.total_bytes,
+                            total=progress.total,
                             model_directory=self._model_dir(
                                 progress.shard.model_card.model_id
                             ),
                         )
                     elif progress.status in ["in_progress", "not_started"]:
-                        if progress.downloaded_bytes_this_session.in_bytes == 0:
+                        if progress.downloaded_this_session.in_bytes == 0:
                             status = DownloadPending(
                                 node_id=self.node_id,
                                 shard_metadata=progress.shard,
                                 model_directory=self._model_dir(
                                     progress.shard.model_card.model_id
                                 ),
-                                downloaded=progress.downloaded_bytes,
-                                total=progress.total_bytes,
+                                downloaded=progress.downloaded,
+                                total=progress.total,
                             )
                         else:
                             status = DownloadOngoing(
@@ -372,7 +364,7 @@ class DownloadCoordinator:
                             path_completed: DownloadProgress = DownloadCompleted(
                                 node_id=self.node_id,
                                 shard_metadata=path_shard,
-                                total_bytes=card.storage_size,
+                                total=card.storage_size,
                                 model_directory=str(found),
                                 read_only=True,
                             )

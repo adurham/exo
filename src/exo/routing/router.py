@@ -1,7 +1,6 @@
 from copy import copy
 from itertools import count
 from math import inf
-import os
 from os import PathLike
 from pathlib import Path
 from typing import cast
@@ -13,14 +12,13 @@ from anyio import (
     sleep_forever,
 )
 from exo_pyo3_bindings import (
+    AllQueuesFullError,
     Keypair,
     MessageTooLargeError,
     NetworkingHandle,
     NoPeersSubscribedToTopicError,
-    AllQueuesFullError,
     PyFromSwarm,
 )
-import base58
 from filelock import FileLock
 from loguru import logger
 
@@ -148,27 +146,8 @@ class Router:
 
         return recv
 
-    async def dial(self, peer_id: str, multiaddr: str):
-        await self._net.dial(peer_id, multiaddr)
-
-    async def _bootstrap_discovery(self):
-        # Bootstrap from environment variables if set
-        discovery_peers = os.environ.get("EXO_DISCOVERY_PEERS", "")
-        if discovery_peers:
-            for peer in discovery_peers.split(","):
-                try:
-                    parts = peer.split("/p2p/")
-                    if len(parts) == 2:
-                        addr = parts[0]
-                        peer_id_str = parts[1]
-                        await self.dial(peer_id_str, addr)
-                        logger.info(f"Dialed static peer {peer_id_str} at {addr}")
-                except Exception as e:
-                    logger.error(f"Failed to dial static peer {peer}: {e}")
-
     async def run(self):
         logger.debug("Starting Router")
-
         try:
             async with self._tg as tg:
                 for topic in self.topic_routers:
@@ -179,10 +158,6 @@ class Router:
                 # subscribe to pending topics
                 for topic in self.topic_routers:
                     await self._networking_subscribe(topic)
-                
-                # dial static peers after networking has started
-                tg.start_soon(self._bootstrap_discovery)
-
                 # Router only shuts down if you cancel it.
                 await sleep_forever()
         finally:
@@ -263,14 +238,10 @@ def get_node_id_keypair(
     Obtain the :class:`PeerId` by from it.
     """
     # TODO(evan): bring back node id persistence once we figure out how to deal with duplicates
-    # TODO(evan): bring back node id persistence once we figure out how to deal with duplicates
     return Keypair.generate()
 
     def lock_path(path: str | bytes | PathLike[str] | PathLike[bytes]) -> Path:
         return Path(str(path) + ".lock")
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
 
     # operate with cross-process lock to avoid race conditions
     with FileLock(lock_path(path)):

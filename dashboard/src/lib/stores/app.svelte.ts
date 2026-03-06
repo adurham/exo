@@ -167,7 +167,7 @@ export interface ModelDownloadStatus {
 // Placement preview from the API
 export interface PlacementPreview {
   model_id: string;
-  sharding: "Pipeline" | "Tensor" | "Hybrid";
+  sharding: "Pipeline" | "Tensor";
   instance_meta: "MlxRing" | "MlxJaccl";
   instance: unknown | null;
   memory_delta_by_node: Record<string, number> | null;
@@ -249,6 +249,11 @@ interface RawStateResponse {
   >;
   // Thunderbolt bridge cycles (nodes with bridge enabled forming loops)
   thunderboltBridgeCycles?: string[][];
+  // Disk usage per node
+  nodeDisk?: Record<
+    string,
+    { total: { inBytes: number }; available: { inBytes: number } }
+  >;
 }
 
 export interface MessageAttachment {
@@ -312,14 +317,14 @@ const IMAGE_PARAMS_STORAGE_KEY = "exo-image-generation-params";
 export interface ImageGenerationParams {
   // Basic params
   size:
-  | "auto"
-  | "512x512"
-  | "768x768"
-  | "1024x1024"
-  | "1024x768"
-  | "768x1024"
-  | "1024x1536"
-  | "1536x1024";
+    | "auto"
+    | "512x512"
+    | "768x768"
+    | "1024x1024"
+    | "1024x768"
+    | "768x1024"
+    | "1024x1536"
+    | "1536x1024";
   quality: "low" | "medium" | "high";
   outputFormat: "png" | "jpeg";
   numImages: number;
@@ -928,7 +933,6 @@ class AppStore {
       const [shardTag] = this.getTaggedValue(firstShardWrapped);
       if (shardTag === "PipelineShardMetadata") sharding = "Pipeline";
       else if (shardTag === "TensorShardMetadata") sharding = "Tensor";
-      else if (shardTag === "HybridShardMetadata") sharding = "Hybrid";
       else if (shardTag === "PrefillDecodeShardMetadata")
         sharding = "Prefill/Decode";
     }
@@ -2636,8 +2640,8 @@ class AppStore {
           ...(params.guidance !== null && { guidance: params.guidance }),
           ...(params.negativePrompt !== null &&
             params.negativePrompt.trim() !== "" && {
-            negative_prompt: params.negativePrompt,
-          }),
+              negative_prompt: params.negativePrompt,
+            }),
           ...(params.numSyncSteps !== null && {
             num_sync_steps: params.numSyncSteps,
           }),
@@ -2909,8 +2913,8 @@ class AppStore {
             ...(params.guidance !== null && { guidance: params.guidance }),
             ...(params.negativePrompt !== null &&
               params.negativePrompt.trim() !== "" && {
-              negative_prompt: params.negativePrompt,
-            }),
+                negative_prompt: params.negativePrompt,
+              }),
             ...(params.numSyncSteps !== null && {
               num_sync_steps: params.numSyncSteps,
             }),
@@ -3155,6 +3159,23 @@ class AppStore {
   }
 
   /**
+   * Delete traces by task IDs
+   */
+  async deleteTraces(
+    taskIds: string[],
+  ): Promise<{ deleted: string[]; notFound: string[] }> {
+    const response = await fetch("/v1/traces/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskIds }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to delete traces: ${response.status}`);
+    }
+    return await response.json();
+  }
+
+  /**
    * Get the URL for the raw trace file (for Perfetto)
    */
   getTraceRawUrl(taskId: string): string {
@@ -3297,3 +3318,5 @@ export const fetchTraceStats = (taskId: string) =>
   appStore.fetchTraceStats(taskId);
 export const getTraceRawUrl = (taskId: string) =>
   appStore.getTraceRawUrl(taskId);
+export const deleteTraces = (taskIds: string[]) =>
+  appStore.deleteTraces(taskIds);

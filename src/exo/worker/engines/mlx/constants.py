@@ -4,27 +4,22 @@
 import os
 
 
-def _get_kv_bits() -> int | None:
-    bits = os.environ.get("EXO_KV_BITS", "none")
-    if bits.lower() in ("none", "null", "false"):
-        return None
-    return int(bits)
-
-KV_GROUP_SIZE: int | None = 32
-KV_BITS: int | None = _get_kv_bits()
-ATTENTION_KV_BITS: int | None = _get_kv_bits()
-def _get_int_or_none(env_var: str, default: str) -> int | None:
-    val = os.environ.get(env_var, default)
+def _int_or_none(env: str, default: int | None) -> int | None:
+    val = os.environ.get(env, "")
     if not val or val.lower() in ("none", "null", "false"):
-        return None
+        return default
     return int(val)
 
+
+KV_GROUP_SIZE: int | None = 32
+KV_BITS: int | None = _int_or_none("EXO_KV_BITS", None)
+ATTENTION_KV_BITS: int | None = _int_or_none("EXO_KV_BITS", 4)
 MAX_TOKENS: int = 32168
-MAX_KV_SIZE: int | None = _get_int_or_none("EXO_MAX_KV_SIZE", "none")
-KEEP_KV_SIZE: int | None = _get_int_or_none("EXO_KEEP_KV_SIZE", "none")
+MAX_KV_SIZE: int | None = _int_or_none("EXO_MAX_KV_SIZE", 3200)
+KEEP_KV_SIZE: int | None = _int_or_none("EXO_KEEP_KV_SIZE", 1600)
 QUANTIZE_MODEL_MODE: str | None = "affine"
 CACHE_GROUP_SIZE: int = 64
-KV_CACHE_BITS: int | None = _get_kv_bits()
+KV_CACHE_BITS: int | None = _int_or_none("EXO_KV_BITS", None)
 
 DEFAULT_TOP_LOGPROBS: int = 5
 

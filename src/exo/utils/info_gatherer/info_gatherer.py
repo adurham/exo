@@ -9,7 +9,8 @@ from typing import Self, cast
 
 import anyio
 from anyio import fail_after, open_process, to_thread
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from anyio.streams.buffered import BufferedByteReceiveStream
+from anyio.streams.text import TextReceiveStream
 from loguru import logger
 from pydantic import ValidationError
 
@@ -374,7 +375,7 @@ class InfoGatherer:
     interface_watcher_interval: float | None = 10
     misc_poll_interval: float | None = 60
     system_profiler_interval: float | None = 5 if IS_DARWIN else None
-    memory_poll_rate: float | None = 1
+    memory_poll_rate: float | None = None if IS_DARWIN else 1
     macmon_interval: float | None = 1 if IS_DARWIN else None
     thunderbolt_bridge_poll_interval: float | None = 10 if IS_DARWIN else None
     static_info_poll_interval: float | None = 60
@@ -385,12 +386,7 @@ class InfoGatherer:
     async def run(self):
         async with self._tg as tg:
             if IS_DARWIN:
-                import os
-                
-                cargo_macmon = os.path.expanduser("~/.cargo/bin/macmon")
-                macmon_path = cargo_macmon if os.path.exists(cargo_macmon) else shutil.which("macmon")
-                
-                if macmon_path is not None:
+                if (macmon_path := shutil.which("macmon")) is not None:
                     tg.start_soon(self._monitor_macmon, macmon_path)
                 else:
                     # macmon not installed — fall back to psutil for memory
@@ -535,35 +531,33 @@ class InfoGatherer:
         # macmon pipe --interval [interval in ms]
         while True:
             try:
-                import subprocess
-                p = subprocess.Popen(
+                async with await open_process(
                     [
                         macmon_path,
                         "pipe",
                         "--interval",
-                        str(int(self.macmon_interval * 1000)),
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                        str(self.macmon_interval * 1000),
+                    ]
+                ) as p:
+                    if not p.stdout:
+                        logger.critical("MacMon closed stdout")
+                        return
+                    async for text in TextReceiveStream(
+                        BufferedByteReceiveStream(p.stdout)
+                    ):
+                        await self.info_sender.send(MacmonMetrics.from_raw_json(text))
+            except CalledProcessError as e:
+                stderr_msg = "no stderr"
+                stderr_output = cast(bytes | str | None, e.stderr)
+                if stderr_output is not None:
+                    stderr_msg = (
+                        stderr_output.decode()
+                        if isinstance(stderr_output, bytes)
+                        else str(stderr_output)
+                    )
+                logger.warning(
+                    f"MacMon failed with return code {e.returncode}: {stderr_msg}"
                 )
-                if not p.stdout:
-                    logger.critical("MacMon closed stdout")
-                    return
-                
-                try:
-                    while p.poll() is None:
-                        line = await to_thread.run_sync(p.stdout.readline)
-                        if not line:
-                            break
-                        line_str = line.decode("utf-8").strip()
-                        if line_str.startswith("{"):
-                            try:
-                                await self.info_sender.send(MacmonMetrics.from_raw_json(line_str))
-                            except Exception as parse_e:
-                                pass
-                finally:
-                    p.terminate()
-                    p.wait(timeout=1.0)
             except Exception as e:
-                logger.opt(exception=e).warning("Error in memory monitor")
+                logger.warning(f"Error in macmon monitor: {e}")
             await anyio.sleep(self.macmon_interval)

@@ -6,12 +6,11 @@ from typing import Sequence
 from exo.master.placement_utils import (
     Cycle,
     filter_cycles_by_memory,
-    get_largest_cycles,
     get_mlx_jaccl_coordinators,
     get_mlx_jaccl_devices_matrix,
     get_mlx_ring_hosts_by_node,
     get_shard_assignments,
-    get_largest_cycles,
+    get_smallest_cycles,
 )
 from exo.shared.models.model_cards import ModelId
 from exo.shared.topology import Topology
@@ -107,58 +106,46 @@ def place_instance(
             "Pipeline parallelism is not supported for DeepSeek V3.1 (8-bit)"
         )
 
-    # Prefer the largest cycle so all available nodes participate.
-    # More nodes = more aggregate memory = longer context support.
-    largest_cycles = get_largest_cycles(cycles_with_sufficient_memory)
+    smallest_cycles = get_smallest_cycles(cycles_with_sufficient_memory)
 
-    largest_rdma_cycles = [
-        cycle for cycle in largest_cycles if topology.is_rdma_cycle(cycle)
+    smallest_rdma_cycles = [
+        cycle for cycle in smallest_cycles if topology.is_rdma_cycle(cycle)
     ]
 
     if command.instance_meta == InstanceMeta.MlxJaccl:
-        if not largest_rdma_cycles:
+        if not smallest_rdma_cycles:
             raise ValueError(
                 "Requested RDMA (MlxJaccl) but no RDMA-connected cycles available"
             )
-        largest_cycles = largest_rdma_cycles
+        smallest_cycles = smallest_rdma_cycles
 
     cycles_with_leaf_nodes: list[Cycle] = [
         cycle
-        for cycle in largest_cycles
+        for cycle in smallest_cycles
         if any(topology.node_is_leaf(node_id) for node_id in cycle)
     ]
 
     selected_cycle = max(
-        cycles_with_leaf_nodes if cycles_with_leaf_nodes != [] else largest_cycles,
+        cycles_with_leaf_nodes if cycles_with_leaf_nodes != [] else smallest_cycles,
         key=lambda cycle: sum(
             (node_memory[node_id].ram_available for node_id in cycle),
             start=Memory(),
         ),
     )
 
-    # Sort cycle nodes deterministically so pipeline rank assignment is stable
-    # across instances.  rx.simple_cycles() does not guarantee node ordering,
-    # which can cause RDMA send/recv topology mismatches between warmup and
-    # real generation if ranks shift.
-    selected_cycle = Cycle(node_ids=sorted(selected_cycle.node_ids))
-
     # Single-node: force Pipeline/Ring (Tensor and Jaccl require multi-node)
     if len(selected_cycle) == 1:
         command.instance_meta = InstanceMeta.MlxRing
         command.sharding = Sharding.Pipeline
 
-    shard_assignments, reordered_cycle = get_shard_assignments(
+    shard_assignments = get_shard_assignments(
         command.model_card, selected_cycle, command.sharding, node_memory
     )
 
-    # Use the reordered cycle if the sharding strategy provides one (e.g. hybrid
-    # mode reorders so TP nodes get the lowest ranks).  Otherwise keep original.
-    effective_cycle = reordered_cycle or selected_cycle
-    cycle_digraph: Topology = topology.get_subgraph_from_nodes(effective_cycle.node_ids)
+    cycle_digraph: Topology = topology.get_subgraph_from_nodes(selected_cycle.node_ids)
 
     instance_id = InstanceId()
     target_instances = dict(deepcopy(current_instances))
-
 
     match command.instance_meta:
         case InstanceMeta.MlxJaccl:
@@ -178,7 +165,7 @@ def place_instance(
             coordinator_node_id = zero_node_ids[0]
 
             mlx_jaccl_devices = get_mlx_jaccl_devices_matrix(
-                [node_id for node_id in effective_cycle],
+                [node_id for node_id in selected_cycle],
                 cycle_digraph,
             )
             mlx_jaccl_coordinators = get_mlx_jaccl_coordinators(
@@ -196,7 +183,7 @@ def place_instance(
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
             hosts_by_node = get_mlx_ring_hosts_by_node(
-                selected_cycle=effective_cycle,
+                selected_cycle=selected_cycle,
                 cycle_digraph=cycle_digraph,
                 ephemeral_port=ephemeral_port,
                 node_network=node_network,

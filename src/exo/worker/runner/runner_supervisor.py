@@ -12,13 +12,22 @@ from anyio import (
 )
 from loguru import logger
 
+from exo.shared.types.chunks import ErrorChunk
 from exo.shared.types.events import (
+    ChunkGenerated,
     Event,
     RunnerStatusUpdated,
     TaskAcknowledged,
     TaskStatusUpdated,
 )
-from exo.shared.types.tasks import Task, TaskId, TaskStatus
+from exo.shared.types.tasks import (
+    ImageEdits,
+    ImageGeneration,
+    Task,
+    TaskId,
+    TaskStatus,
+    TextGeneration,
+)
 from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runners import (
     RunnerConnecting,
@@ -52,6 +61,7 @@ class RunnerSupervisor:
     _tg: TaskGroup = field(default_factory=TaskGroup, init=False)
     status: RunnerStatus = field(default_factory=RunnerIdle, init=False)
     pending: dict[TaskId, anyio.Event] = field(default_factory=dict, init=False)
+    in_progress: dict[TaskId, Task] = field(default_factory=dict, init=False)
     completed: set[TaskId] = field(default_factory=set, init=False)
     cancelled: set[TaskId] = field(default_factory=set, init=False)
     _cancel_watch_runner: anyio.CancelScope = field(
@@ -106,14 +116,14 @@ class RunnerSupervisor:
     def shutdown(self):
         logger.info("Runner supervisor shutting down")
         self._tg.cancel_tasks()
+        if not self._cancel_watch_runner.cancel_called:
+            self._cancel_watch_runner.cancel()
         with contextlib.suppress(ClosedResourceError):
             self._ev_recv.close()
         with contextlib.suppress(ClosedResourceError):
             self._task_sender.close()
         with contextlib.suppress(ClosedResourceError):
             self._event_sender.close()
-        if not self._cancel_watch_runner.cancel_called:
-            self._cancel_watch_runner.cancel()
         with contextlib.suppress(ClosedResourceError):
             self._cancel_sender.send(TaskId("CANCEL_CURRENT_TASK"))
         with contextlib.suppress(ClosedResourceError):
@@ -147,9 +157,11 @@ class RunnerSupervisor:
         logger.info(f"Starting task {task}")
         event = anyio.Event()
         self.pending[task.task_id] = event
+        self.in_progress[task.task_id] = task
         try:
             await self._task_sender.send_async(task)
         except ClosedResourceError:
+            self.in_progress.pop(task.task_id, None)
             logger.warning(f"Task {task} dropped, runner closed communication.")
             return
         await event.wait()
@@ -157,10 +169,17 @@ class RunnerSupervisor:
     async def cancel_task(self, task_id: TaskId):
         if task_id in self.completed:
             logger.info(f"Unable to cancel {task_id} as it has been completed")
+            self.cancelled.add(task_id)
             return
         self.cancelled.add(task_id)
         with anyio.move_on_after(0.5) as scope:
-            await self._cancel_sender.send_async(task_id)
+            try:
+                await self._cancel_sender.send_async(task_id)
+            except ClosedResourceError:
+                # typically occurs when trying to shut down a failed instance
+                logger.warning(
+                    f"Cancelling task {task_id} failed, runner closed communication"
+                )
         if scope.cancel_called:
             logger.error("RunnerSupervisor cancel pipe blocked")
             await self._check_runner(TimeoutError("cancel pipe blocked"))
@@ -189,6 +208,7 @@ class RunnerSupervisor:
                                 RunnerShuttingDown,
                             ),
                         )
+                        self.in_progress.pop(event.task_id, None)
                         self.completed.add(event.task_id)
                     await self._event_sender.send(event)
         except (ClosedResourceError, BrokenResourceError) as e:
@@ -232,6 +252,22 @@ class RunnerSupervisor:
             cause = f"exitcode={rc}"
 
         logger.opt(exception=e).error(f"Runner terminated with {cause}")
+
+        for task in self.in_progress.values():
+            if isinstance(task, (TextGeneration, ImageGeneration, ImageEdits)):
+                with anyio.CancelScope(shield=True):
+                    await self._event_sender.send(
+                        ChunkGenerated(
+                            command_id=task.command_id,
+                            chunk=ErrorChunk(
+                                model=self.shard_metadata.model_card.model_id,
+                                error_message=(
+                                    "Runner shutdown before completing command "
+                                    f"({cause})"
+                                ),
+                            ),
+                        )
+                    )
 
         try:
             self.status = RunnerFailed(error_message=f"Terminated ({cause})")

@@ -6,8 +6,6 @@ from functools import partial
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from mlx.utils import tree_map
-
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.nn.layers.distributed import (
@@ -18,6 +16,7 @@ from mlx.nn.layers.distributed import (
 from mlx_lm.models.base import (
     scaled_dot_product_attention,  # pyright: ignore[reportUnknownVariableType]
 )
+from mlx_lm.models.cache import ArraysCache, KVCache
 from mlx_lm.models.deepseek_v3 import DeepseekV3MLP
 from mlx_lm.models.deepseek_v3 import Model as DeepseekV3Model
 from mlx_lm.models.deepseek_v32 import DeepseekV32MLP
@@ -33,54 +32,24 @@ from mlx_lm.models.llama import Model as LlamaModel
 from mlx_lm.models.minimax import MiniMaxAttention
 from mlx_lm.models.minimax import Model as MiniMaxModel
 from mlx_lm.models.ministral3 import Model as Ministral3Model
+from mlx_lm.models.qwen3_5 import DecoderLayer as Qwen3_5DecoderLayer
+from mlx_lm.models.qwen3_5 import Model as Qwen3_5TextModel
+from mlx_lm.models.qwen3_5 import Qwen3_5TextModel as Qwen3_5TextModelInner
+from mlx_lm.models.qwen3_5 import SparseMoeBlock as Qwen3_5SparseMoeBlock
+from mlx_lm.models.qwen3_5_moe import Model as Qwen3_5MoeModel
 from mlx_lm.models.qwen3_moe import Model as Qwen3MoeModel
 from mlx_lm.models.qwen3_moe import Qwen3MoeDecoderLayer, Qwen3MoeSparseMoeBlock
 from mlx_lm.models.qwen3_next import Model as Qwen3NextModel
-from mlx_lm.models.qwen3_next import Qwen3NextDecoderLayer, Qwen3NextSparseMoeBlock
+from mlx_lm.models.qwen3_next import (
+    Qwen3NextDecoderLayer,
+    Qwen3NextGatedDeltaNet,
+    Qwen3NextSparseMoeBlock,
+)
 from mlx_lm.models.step3p5 import Model as Step35Model
 from mlx_lm.models.step3p5 import Step3p5MLP as Step35MLP
 from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 
 from exo.shared.logging import logger
-import datetime as _dt
-import time as _time
-
-_tp_debug = os.environ.get("EXO_TP_DEBUG", "0") == "1"
-_tp_layer_counter = 0  # auto-incrementing layer ID for debug logs
-
-# Per-layer profiling: forces mx.eval() after each layer to measure real GPU time.
-# Slower than normal execution, but gives accurate relative breakdown.
-PROFILE_LAYERS = os.environ.get("EXO_PROFILE_LAYERS", "0") == "1"
-
-
-class _LayerProfiler:
-    """Accumulates per-layer timing data across decode steps."""
-
-    def __init__(self) -> None:
-        self._current: dict[str, float] = {}
-        self._steps: list[dict[str, float]] = []
-
-    def record(self, key: str, ms: float) -> None:
-        self._current[key] = ms
-
-    def end_step(self) -> None:
-        if self._current:
-            self._steps.append(self._current)
-            self._current = {}
-
-    def get_and_clear(self) -> list[dict[str, float]]:
-        data = list(self._steps)
-        self._steps.clear()
-        return data
-
-
-layer_profiler = _LayerProfiler()
-
-def _dbg(msg: str) -> None:
-    """Write debug trace directly to file (bypasses loguru and subprocess stdout issues)."""
-    with open("/tmp/exo_tp_debug.log", "a") as f:
-        f.write(f"{_dt.datetime.now().isoformat()} {msg}\n")
-        f.flush()
 from exo.shared.types.worker.shards import PipelineShardMetadata
 
 if TYPE_CHECKING:
@@ -90,10 +59,19 @@ TimeoutCallback = Callable[[], None]
 LayerLoadedCallback = Callable[[int, int], None]  # (layers_loaded, total_layers)
 
 
+_pending_prefill_sends: list[tuple[mx.array, int, mx.distributed.Group]] = []
 
-from concurrent.futures import ThreadPoolExecutor
 
-_watchdog_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="watchdog")
+def flush_prefill_sends() -> None:
+    for output, dst, group in _pending_prefill_sends:
+        sent = mx.distributed.send(output, dst, group=group)
+        mx.async_eval(sent)
+    _pending_prefill_sends.clear()
+
+
+def clear_prefill_sends() -> None:
+    # Discard pending sends (e.g. on cancellation).
+    _pending_prefill_sends.clear()
 
 
 def eval_with_timeout(
@@ -119,7 +97,8 @@ def eval_with_timeout(
                 on_timeout()
             os._exit(1)
 
-    _watchdog_executor.submit(watchdog)
+    watchdog_thread = threading.Thread(target=watchdog, daemon=True)
+    watchdog_thread.start()
 
     try:
         mx.eval(mlx_item)  # pyright: ignore[reportAny]
@@ -160,85 +139,26 @@ class CustomMlxLayer(nn.Module):
                 return getattr(original_layer, name)
 
 
-class _ProfiledLayerWrapper(CustomMlxLayer):
-    """Wraps a middle layer to force eval and measure real GPU time."""
-
-    def __init__(self, original_layer: _LayerCallable, label: str):
-        super().__init__(original_layer)
-        self._label = label
-
-    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        mx.eval(x)
-        t0 = _time.perf_counter()
-        out: mx.array = self.original_layer(x, *args, **kwargs)
-        mx.eval(out)
-        layer_profiler.record(self._label, (_time.perf_counter() - t0) * 1000)
-        return out
-
-
 class PipelineFirstLayer(CustomMlxLayer):
     def __init__(
         self,
         original_layer: _LayerCallable,
         r: int,
         group: mx.distributed.Group,
-        recv_from: int | None = None,
     ):
         super().__init__(original_layer)
         self.r: int = r
-        self.recv_from: int = recv_from if recv_from is not None else (r - 1)
         self.group = group
         self.is_prefill: bool = False
-        self.chunked_prefill = os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1"
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
-            if PROFILE_LAYERS:
-                mx.eval(x)
-                _t_recv0 = _time.perf_counter()
-            _recv = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            # recv_like creates a graph leaf (no inputs), so it can be
-            # evaluated before the barrier.  Adding x as a dependency
-            # forces the evaluator to dispatch the barrier's all_sum
-            # on the CPU stream before this recv — preventing deadlock.
-            x = mx.depends(_recv, x)
-            if PROFILE_LAYERS:
-                mx.eval(x)
-                layer_profiler.record("recv", (_time.perf_counter() - _t_recv0) * 1000)
-            elif self.is_prefill and self.chunked_prefill:
-                # Upstream Chunked Prefill: block Python thread until recv completes.
-                # Safe for memory-constrained edge devices but halts pipeline throughput.
-                t0 = _time.monotonic()
-                mx.eval(x)
-                elapsed = _time.monotonic() - t0
-                logger.debug(f"[PIPELINE-RECV-EVAL] rank={self.r} recv eval took {elapsed:.3f}s (prefill)")
-                
-            # DEFERRED EVAL (Default): Do not manually mx.eval(x) here.
-            # Eager evaluation blocks the Python thread which delays building TP all_sum graphs.
-            # This causes node 0 to Timeout while waiting for node 1 to participate in TP.
-            logger.debug(f"[PIPELINE-RECV] rank={self.r} recv posted (is_prefill={self.is_prefill})")
-        if PROFILE_LAYERS:
+            # We want to avoid GPU timeout errors by evalling the distributed operation
+            # so that it stays on CPU, which does not have a timeout.
             mx.eval(x)
-            _t_compute0 = _time.perf_counter()
-            out = self.original_layer(x, *args, **kwargs)
-            mx.eval(out)
-            layer_profiler.record("layer_first", (_time.perf_counter() - _t_compute0) * 1000)
-            return out
+            x = mx.distributed.recv_like(x, (self.r - 1), group=self.group)
+            mx.eval(x)
         return self.original_layer(x, *args, **kwargs)
-
-
-def _link_cache_to_send(_cache: Any, send_output: mx.array) -> None:
-    """Link cache keys to the send output via mx.depends.
-
-    Creates a minimal dependency edge so the evaluator won't schedule the
-    next step's attention before the current step's send completes.
-    For QuantizedKVCache (tuple), linking just the data element is sufficient
-    since all tuple components are produced together.
-    """
-    if isinstance(_cache.keys, mx.array):
-        _cache.keys = mx.depends(_cache.keys, send_output)  # type: ignore
-    elif isinstance(_cache.keys, tuple):
-        _cache.keys = (mx.depends(_cache.keys[0], send_output), *_cache.keys[1:])  # type: ignore
 
 
 class PipelineLastLayer(CustomMlxLayer):
@@ -255,88 +175,57 @@ class PipelineLastLayer(CustomMlxLayer):
         self.group = group
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
-        self.chunked_prefill = os.environ.get("EXO_CHUNKED_PREFILL", "0") == "1"
-        self._pending_sends: list[mx.array] = []
+        self.queue_sends: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         cache = self.original_layer_signature.bind_partial(
             x, *args, **kwargs
         ).arguments.get("cache", None)
 
-        logger.info(f"[PIPELINE-LAST] rank={self.r} entering (is_prefill={self.is_prefill}, x.shape={x.shape})")
-        if PROFILE_LAYERS:
-            mx.eval(x)
-            _t_compute0 = _time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
-        logger.info(f"[PIPELINE-LAST] rank={self.r} layer done (output.shape={output.shape})")
-        if PROFILE_LAYERS:
-            mx.eval(output)
-            layer_profiler.record("layer_last", (_time.perf_counter() - _t_compute0) * 1000)
+
+        # Eval layer output to materialize it before send — this splits the graph
+        # so the send is isolated and the receiving rank's recv can complete.
+        mx.eval(output)
 
         if self.r != self.s - 1:
-            if PROFILE_LAYERS:
-                _t_send0 = _time.perf_counter()
-            output = mx.distributed.send(
-                output, (self.r + 1) % self.s, group=self.group
-            )
-            logger.info(f"[PIPELINE-LAST] rank={self.r} send created (deferred)")
-            if PROFILE_LAYERS:
-                mx.eval(output)
-                layer_profiler.record("send", (_time.perf_counter() - _t_send0) * 1000)
-
-            elif self.is_prefill and self.chunked_prefill:
-                # Upstream Chunked Prefill: force eager evaluation of send and cache state.
-                t0 = _time.monotonic()
-                mx.eval(output)
-                elapsed = _time.monotonic() - t0
-                logger.info(f"[PIPELINE-SEND-EVAL] rank={self.r} send eval took {elapsed:.3f}s (prefill={self.is_prefill})")
-
-                if cache is not None:
-                    _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    _link_cache_to_send(_cache, output)
-                    t1 = _time.monotonic()
-                    mx.eval(_cache.keys)  # type: ignore
-                    elapsed2 = _time.monotonic() - t1
-                    logger.debug(f"[PIPELINE-CACHE-EVAL] rank={self.r} cache eval took {elapsed2:.3f}s (prefill)")
+            if self.queue_sends:
+                _pending_prefill_sends.append(
+                    (output, (self.r + 1) % self.s, self.group)
+                )
             else:
-                # DEFERRED SEND (Default): Queue send array so central generation loop evaluates it
-                # via _drain_pending_sends. Eager eval blocks Python graph formulation.
-                self._pending_sends.append(output)
+                output = mx.distributed.send(
+                    output, (self.r + 1) % self.s, group=self.group
+                )
+            if cache is not None:
+                # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
+                # doesn't have .keys directly; access via first sub-cache.
+                _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
+                if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
+                    _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+            mx.eval(output)
+            if cache is not None and hasattr(_cache, "keys"):  # type: ignore
+                mx.eval(_cache.keys)  # type: ignore
 
-                if cache is not None:
-                    # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
-                    # doesn't have .keys directly; access via first sub-cache.
-                    _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    _link_cache_to_send(_cache, output)
-                logger.info(f"[PIPELINE-LAST] rank={self.r} cache linked, pending_sends={len(self._pending_sends)}")
+        if not self.is_prefill:
+            output = mx.distributed.all_gather(output, group=self.group)[
+                -output.shape[0] :
+            ]
+            mx.eval(output)
 
-        # Note: On intermediate ranks (not last), cache state is evaluated
-        # when generate.py processes bulk eval. Moving it here eagerly
-        # doesn't help since there's no downstream node to overlap with.
-
-        # During decode, skip all_gather — only the last rank has correct logits.
-        # Token sync is handled via all_sum in generate.py, transferring ~12 bytes
-        # (one token ID) instead of the full hidden state from all ranks.
         return output
 
 
 def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
-        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, _HybridPipelineLastLayer)):
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
             layer.is_prefill = is_prefill
-    # Toggle hybrid decode mode: token sync only runs during decode (is_prefill=False)
-    if hasattr(model, '_hybrid_pipeline_group'):
-        model._hybrid_decode_mode = not is_prefill  # type: ignore
-    # Toggle pipeline-only decode mode for token sync via all_sum
-    if hasattr(model, '_pipeline_group'):
-        model._pipeline_decode_mode = not is_prefill  # type: ignore
 
 
-def set_pipeline_cache(model: nn.Module, prompt_cache: list) -> None:  # type: ignore
-    """Pass cache reference to PipelineLastLayer for early eval after send."""
+def set_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
     for layer in model.layers:  # type: ignore
         if isinstance(layer, PipelineLastLayer):
-            layer._prompt_cache = prompt_cache
+            layer.queue_sends = queue_sends
 
 
 def get_inner_model(model: nn.Module) -> nn.Module:
@@ -368,6 +257,32 @@ def get_layers(inner_model_instance: nn.Module) -> list[_LayerCallable]:
         raise ValueError("Model must have either a 'layers' or 'h' attribute")
 
     return layers
+
+
+def _patch_qwen35_cache(
+    model: Qwen3_5TextModel,
+    fa_idx: int,
+    has_full_attn: bool,
+    ssm_idx: int,
+    has_linear: bool,
+) -> None:
+    # Hacks to make make_mask happy.
+    original = model.make_cache
+
+    def patched() -> list[ArraysCache | KVCache]:
+        cache: list[ArraysCache | KVCache] = original()
+        if not has_full_attn:
+            entry = cache[fa_idx]
+            orig_make_mask = entry.make_mask
+            entry.make_mask = lambda n, **_kw: orig_make_mask(n)  # type: ignore
+        if not has_linear:
+            orig_ssm_make_mask = cache[ssm_idx].make_mask
+            cache[ssm_idx].make_mask = (  # type: ignore
+                lambda n, **kw: orig_ssm_make_mask(n, **kw) if kw else None  # type: ignore
+            )
+        return cache
+
+    model.make_cache = patched
 
 
 def pipeline_auto_parallel(
@@ -406,12 +321,6 @@ def pipeline_auto_parallel(
         group=group,
     )
 
-    # When profiling, wrap middle layers to force eval and measure per-layer time
-    if PROFILE_LAYERS:
-        for i in range(1, len(layers) - 1):
-            layers[i] = _ProfiledLayerWrapper(layers[i], f"layer_{i}")  # type: ignore
-        logger.info(f"[PROFILE] Layer profiling enabled: rank={device_rank}, {len(layers)} layers")
-
     if isinstance(inner_model_instance, GptOssMoeModel):
         inner_model_instance.layer_types = inner_model_instance.layer_types[  # type: ignore
             start_layer:end_layer
@@ -446,13 +355,25 @@ def pipeline_auto_parallel(
         inner_model_instance._swa_idx = 0 if not sliding_layers else sliding_layers[0]
         inner_model_instance._full_idx = 0 if not full_layers else full_layers[0]
 
-    _set_layers(model, layers)
+    if isinstance(inner_model_instance, Qwen3_5TextModelInner):
+        full_attn_layers = [
+            i for i, layer in enumerate(layers) if not getattr(layer, "is_linear", True)
+        ]
+        linear_layers = [
+            i for i, layer in enumerate(layers) if getattr(layer, "is_linear", False)
+        ]
+        inner_model_instance.fa_idx = full_attn_layers[0] if full_attn_layers else 0
+        inner_model_instance.ssm_idx = linear_layers[0] if linear_layers else 0
+        if not full_attn_layers or not linear_layers:
+            _patch_qwen35_cache(
+                cast(Qwen3_5TextModel, model),
+                fa_idx=inner_model_instance.fa_idx,
+                has_full_attn=bool(full_attn_layers),
+                ssm_idx=inner_model_instance.ssm_idx,
+                has_linear=bool(linear_layers),
+            )
 
-    # Store pipeline metadata so generate_step can do token sync via all_sum
-    # instead of the removed all_gather in PipelineLastLayer.
-    model._pipeline_group = group  # type: ignore
-    model._pipeline_rank = device_rank  # type: ignore
-    model._pipeline_size = world_size  # type: ignore
+    _set_layers(model, layers)
 
     assert isinstance(layers, list), (
         "Expected a list of layers after auto-parallel initialisation"
@@ -472,9 +393,7 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
         *args: object,
         **kwargs: object,
     ) -> mx.array:
-        logger.info("[PATCHED-CALL] entering model forward")
         logits: mx.array = original_call(self, *args, **kwargs)  # type: ignore
-        logger.info(f"[PATCHED-CALL] model forward done (logits.shape={logits.shape})")
         cache = call_signature.bind_partial(self, *args, **kwargs).arguments.get(
             "cache", None
         )
@@ -483,8 +402,8 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
         if cache is not None:
             last = cache[-1]  # type: ignore
             dep_cache = last[0] if hasattr(last, "caches") else last  # type: ignore
-            _link_cache_to_send(dep_cache, logits)
-            logger.info("[PATCHED-CALL] cache linked to logits")
+            if hasattr(dep_cache, "keys") and dep_cache.keys is not None:  # type: ignore
+                dep_cache.keys = mx.depends(dep_cache.keys, logits)  # type: ignore
 
         return logits
 
@@ -512,7 +431,7 @@ def patch_tensor_model[T](model: T) -> T:
         if cache is not None and len(cache) > 0:  # pyright: ignore[reportAny]
             last = cache[-1]  # pyright: ignore[reportAny]
             dep_cache = last[0] if hasattr(last, "caches") else last  # pyright: ignore[reportAny]
-            _link_cache_to_send(dep_cache, logits)
+            dep_cache.keys = mx.depends(dep_cache.keys, logits)  # pyright: ignore[reportAny,reportUnknownMemberType]
 
         return logits
 
@@ -607,7 +526,9 @@ def tensor_auto_parallel(
             all_to_sharded_linear_in_place,
             sharded_to_all_linear_in_place,
         )
-    elif isinstance(model, (Qwen3MoeModel, Qwen3NextModel)):
+    elif isinstance(
+        model, (Qwen3MoeModel, Qwen3NextModel, Qwen3_5TextModel, Qwen3_5MoeModel)
+    ):
         tensor_parallel_sharding_strategy = QwenShardingStrategy(
             group,
             all_to_sharded_linear,
@@ -638,193 +559,6 @@ def tensor_auto_parallel(
         model, timeout_seconds, on_timeout, on_layer_loaded
     )
     return patch_tensor_model(model)
-
-
-def hybrid_auto_parallel(
-    model: nn.Module,
-    group: mx.distributed.Group,
-    shard_meta: "HybridShardMetadata",
-    timeout_seconds: float = 60.0,
-    on_timeout: TimeoutCallback | None = None,
-) -> nn.Module:
-    """Apply hybrid tensor + pipeline parallelism.
-
-    TP nodes: apply tensor sharding (all-reduce per layer) across a sub-group,
-    then slice to shared layers and wrap with pipeline send if TP-master.
-    PP tail nodes: slice to their own layers and wrap with pipeline recv.
-    """
-    from exo.shared.types.worker.shards import HybridShardMetadata  # noqa: F811
-
-    inner = get_inner_model(model)
-    layers = get_layers(inner)
-    all_layers = list(layers)  # full copy before slicing
-
-    # --- Step 1: Create TP sub-group via split ---
-    # Nodes in the TP group (tp_rank >= 0) share a color; PP tail gets a different color.
-    is_tp_node = shard_meta.tp_rank >= 0
-    tp_color = 0 if is_tp_node else 1
-    logger.debug(f"hybrid_auto_parallel: tp_color={tp_color}, is_tp_node={is_tp_node}, tp_rank={shard_meta.tp_rank}")
-
-    try:
-        tp_group = group.split(tp_color)
-        logger.debug(f"group.split({tp_color}) succeeded")
-    except RuntimeError as e:
-        logger.debug(f"group.split({tp_color}) failed: {e}")
-        if not is_tp_node:
-            # PP-only node: split() failed but we don't need the sub-group anyway.
-            # The TP nodes already completed their split successfully.
-            # Use the global group as a stand-in (it won't be used for TP ops).
-            logger.warning(
-                f"group.split(color={tp_color}) failed on PP-only node: {e}. "
-                f"Using global group as singleton stand-in."
-            )
-            tp_group = group
-        else:
-            raise
-
-    logger.info(
-        f"Hybrid parallel: rank={group.rank()}, "
-        f"tp_rank={shard_meta.tp_rank}, tp_size={shard_meta.tp_size}, "
-        f"pp_rank={shard_meta.pp_rank}, layers=[{shard_meta.start_layer}:{shard_meta.end_layer}], "
-        f"send_to={shard_meta.pipeline_send_to}, recv_from={shard_meta.pipeline_recv_from}"
-    )
-
-    # --- Step 2: Apply TP sharding for TP nodes ---
-    if is_tp_node and tp_group.size() > 1:
-        logger.info(
-            f"Applying tensor parallelism (TP group size={tp_group.size()}, "
-            f"TP rank={tp_group.rank()})"
-        )
-        _dbg(f"Entering tensor_auto_parallel with tp_group rank={tp_group.rank()}, size={tp_group.size()}")
-        model = tensor_auto_parallel(model, tp_group, timeout_seconds, on_timeout)
-        _dbg("tensor_auto_parallel completed")
-        # Re-fetch layers after TP modified the model
-        inner = get_inner_model(model)
-        layers = get_layers(inner)
-        all_layers = list(layers)
-
-    # --- Step 3: Slice layers to this node's range ---
-    start, end = shard_meta.start_layer, shard_meta.end_layer
-    _dbg(f"Slicing layers [{start}:{end}]")
-    layers = all_layers[start:end]
-    for i, layer in enumerate(layers):
-        _dbg(f"mx.eval(layer[{start + i}]) starting")
-        mx.eval(layer)  # type: ignore
-        _dbg(f"mx.eval(layer[{start + i}]) done")
-
-    # --- Step 4: Pipeline wrapping ---
-    # Recv from upstream (if we have a pipeline_recv_from)
-    if shard_meta.pipeline_recv_from is not None:
-        layers[0] = PipelineFirstLayer(
-            layers[0], group.rank(), group=group,
-            recv_from=shard_meta.pipeline_recv_from,
-        )
-
-    # Send downstream (if we have a pipeline_send_to) — TP master
-    if shard_meta.pipeline_send_to is not None:
-        layers[-1] = _HybridPipelineLastLayer(
-            layers[-1],
-            group.rank(),
-            shard_meta.world_size,
-            group=group,
-            send_to=[shard_meta.pipeline_send_to],
-        )
-    elif shard_meta.pp_rank == shard_meta.pp_size - 1:
-        # Last pipeline stage: send output to every OTHER rank explicitly.
-        # We CANNOT use all_gather here because the TP nodes don't have a
-        # matching all_gather call — they use _HybridPipelineLastLayer (send-only)
-        # or have no pipeline wrapper at all. Using a collective that requires
-        # all group members when only this node calls it causes a GPU deadlock.
-        other_ranks = [r for r in range(shard_meta.world_size) if r != group.rank()]
-        layers[-1] = _HybridPipelineLastLayer(
-            layers[-1],
-            group.rank(),
-            shard_meta.world_size,
-            group=group,
-            send_to=other_ranks,
-            send_during_prefill=False,  # TP nodes have no matching recv during prefill
-            send_during_decode=False,   # TP nodes have no matching recv during decode
-        )
-    # TP follower: no pipeline wrapper needed (no sends, no recvs)
-
-    _set_layers(model, layers)
-
-    # Store hybrid pipeline metadata on the model for token sync in generate_step.
-    # During decode, TP nodes produce garbage logits (layers are incomplete),
-    # so generate_step must sync the sampled token from the PP tail.
-    is_pp_tail = shard_meta.pp_rank == shard_meta.pp_size - 1
-    model._hybrid_pipeline_group = group  # type: ignore
-    model._hybrid_pipeline_is_pp_tail = is_pp_tail  # type: ignore
-    model._hybrid_decode_mode = False  # type: ignore  # Starts as False; set_pipeline_prefill toggles it
-    # Store pipeline send/recv targets for prefill coordination signal.
-    # PP head sends a tiny "ready" signal after its eval (send dispatched),
-    # PP tail waits for this signal before submitting its eval (recv).
-    model._hybrid_pipeline_send_to = shard_meta.pipeline_send_to  # type: ignore
-    model._hybrid_pipeline_recv_from = shard_meta.pipeline_recv_from  # type: ignore
-
-    return patch_pipeline_model(model, group)
-
-
-class _HybridPipelineLastLayer(CustomMlxLayer):
-    """Pipeline last layer for hybrid mode: sends output to explicit target ranks.
-
-    Unlike PipelineLastLayer which uses all_gather (a collective requiring ALL
-    group members), this layer uses point-to-point send() to each target.
-    This avoids deadlocks in hybrid mode where not all nodes have matching
-    collective calls.
-
-    Args:
-        send_during_prefill: If False, sends are skipped during prefill (used by
-            the PP tail, since TP nodes have no matching recv during prefill).
-        send_during_decode: If False, sends are skipped during decode (used by
-            the PP tail, since TP nodes have no matching recv during decode).
-    """
-
-    def __init__(
-        self,
-        original_layer: _LayerCallable,
-        r: int,
-        s: int,
-        group: mx.distributed.Group,
-        send_to: list[int],
-        send_during_prefill: bool = True,
-        send_during_decode: bool = True,
-    ):
-        super().__init__(original_layer)
-        self.r: int = r
-        self.s: int = s
-        self.group = group
-        self.send_to = send_to
-        self.send_during_prefill = send_during_prefill
-        self.send_during_decode = send_during_decode
-        self.original_layer_signature = signature(self.original_layer.__call__)
-        self.is_prefill: bool = False
-        self._pending_sends: list[mx.array] = []
-
-    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        output: mx.array = self.original_layer(x, *args, **kwargs)
-
-        # Skip sends when this layer shouldn't send in the current phase
-        if self.is_prefill and not self.send_during_prefill:
-            return output
-        if not self.is_prefill and not self.send_during_decode:
-            return output
-
-        # DEFERRED SEND: Create lazy send arrays but do NOT eval them here.
-        # Store them so the caller (generate_step) can include them in a
-        # single mx.eval() alongside sampled tokens and token sync.
-        #
-        # Why not mx.eval(output) or mx.async_eval(sent)?
-        #   - mx.eval(output) blocks rank 0 at send (waiting for rank 2's recv)
-        #     while rank 1 races ahead to all_sum(full_group) → deadlock
-        #   - mx.async_eval(sent) submits TP all_sums on a background thread,
-        #     then mx.eval(sampled) re-submits them on the main thread → GPU Timeout
-        for target in self.send_to:
-            logger.debug(f"[PIPELINE-SEND] rank={self.r} -> {target}, shape={output.shape}, prefill={self.is_prefill}")
-            sent = mx.distributed.send(output, target, group=self.group)
-            self._pending_sends.append(sent)
-
-        return output
 
 
 class TensorParallelShardingStrategy(ABC):
@@ -890,14 +624,7 @@ def _set_layers(model: nn.Module, layers: list[_LayerCallable]) -> None:
 
         # Update DeepSeek V3 specific parameters when layers are shrunk
         if isinstance(
-            model,
-            (
-                DeepseekV3Model,
-                DeepseekV32Model,
-                Glm4MoeModel,
-                KimiK25Model,
-                MiniMaxModel,
-            ),
+            model, (DeepseekV3Model, DeepseekV32Model, Glm4MoeModel, KimiK25Model)
         ) and hasattr(inner_model_instance, "num_layers"):
             logger.info(
                 f"Setting num_layers to {len(layers)} for model {model.model.__class__.__name__}"
@@ -991,27 +718,13 @@ class ShardedMoE(CustomMlxLayer):
     def __init__(self, layer: _LayerCallable):
         super().__init__(layer)
         self.sharding_group: mx.distributed.Group | None = None
-        global _tp_layer_counter
-        self._moe_id = _tp_layer_counter
-        _tp_layer_counter += 1
 
     def __call__(self, x: mx.array) -> mx.array:
-        if _tp_debug:
-            _t0 = _time.perf_counter()
+        if self.sharding_group is not None:
+            x = sum_gradients(self.sharding_group)(x)
         y = self.original_layer.__call__(x)
-        if _tp_debug:
-            _t1 = _time.perf_counter()
         if self.sharding_group is not None:
             y = mx.distributed.all_sum(y, group=self.sharding_group)
-        if _tp_debug:
-            _t2 = _time.perf_counter()
-            _dbg(
-                f"[MoE {self._moe_id}] "
-                f"compute={(_t1-_t0)*1000:.1f}ms "
-                f"all_sum={(_t2-_t1)*1000:.1f}ms "
-                f"total={(_t2-_t0)*1000:.1f}ms "
-                f"x.shape={x.shape}"
-            )
         return y
 
 
@@ -1087,9 +800,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
     def __init__(self, layer: _LayerCallable, group: mx.distributed.Group):
         super().__init__(layer)
         self.group = group
-        global _tp_layer_counter
-        self._attn_id = _tp_layer_counter
-        _tp_layer_counter += 1
 
     def __call__(
         self,
@@ -1097,9 +807,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         mask: mx.array | None = None,
         cache: "Cache | None" = None,
     ) -> mx.array:
-        if _tp_debug:
-            _t0 = _time.perf_counter()
-
         batch_dim, seq_dim, _ = x.shape
 
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
@@ -1107,9 +814,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         queries: mx.array = self._original_layer.q_proj(x)
         keys: mx.array = self._original_layer.k_proj(x)
         values: mx.array = self._original_layer.v_proj(x)
-
-        if _tp_debug:
-            _t1 = _time.perf_counter()
 
         if getattr(self, "use_qk_norm", False):
             q_dim = queries.shape[-1]
@@ -1137,9 +841,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             # Split back and take this rank's portion
             queries = mx.split(queries, n, axis=-1)[self.group.rank()]
             keys = mx.split(keys, n, axis=-1)[self.group.rank()]
-
-        if _tp_debug:
-            _t2 = _time.perf_counter()
 
         queries = queries.reshape(
             batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
@@ -1170,24 +871,7 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
 
         output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
 
-        if _tp_debug:
-            _t3 = _time.perf_counter()
-
-        result = self._original_layer.o_proj(output)
-
-        if _tp_debug:
-            _t4 = _time.perf_counter()
-            _dbg(
-                f"[Attn {self._attn_id}] "
-                f"qkv_proj={(_t1-_t0)*1000:.1f}ms "
-                f"qk_norm={(_t2-_t1)*1000:.1f}ms "
-                f"sdpa={(_t3-_t2)*1000:.1f}ms "
-                f"o_proj+allsum={(_t4-_t3)*1000:.1f}ms "
-                f"total={(_t4-_t0)*1000:.1f}ms "
-                f"seq={seq_dim}"
-            )
-
-        return result
+        return self._original_layer.o_proj(output)
 
 
 class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
@@ -1201,11 +885,7 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
         model = cast(MiniMaxModel, model)
         total = len(model.layers)
         for i, layer in enumerate(model.layers):
-            _dbg(f"MiniMax shard layer {i}/{total}: eval_with_timeout starting")
-            eval_with_timeout(
-                layer.parameters(), timeout_seconds / total, on_timeout
-            )
-            _dbg(f"MiniMax shard layer {i}/{total}: eval done, sharding attention")
+            eval_with_timeout(layer.parameters(), timeout_seconds / total, on_timeout)
             # Shard the self attention
             layer.self_attn.q_proj = self.all_to_sharded_linear(layer.self_attn.q_proj)
             layer.self_attn.k_proj = self.all_to_sharded_linear(layer.self_attn.k_proj)
@@ -1229,9 +909,7 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
             )
             layer.block_sparse_moe = ShardedMoE(layer.block_sparse_moe)  # pyright: ignore[reportAttributeAccessIssue, reportArgumentType]
             layer.block_sparse_moe.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
-            _dbg(f"MiniMax shard layer {i}/{total}: mx.eval(layer) starting")
             mx.eval(layer)
-            _dbg(f"MiniMax shard layer {i}/{total}: mx.eval(layer) done")
             if on_layer_loaded is not None:
                 on_layer_loaded(i, total)
         return model
@@ -1245,7 +923,9 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
         on_timeout: TimeoutCallback | None,
         on_layer_loaded: LayerLoadedCallback | None,
     ) -> nn.Module:
-        model = cast(Qwen3MoeModel | Qwen3NextModel, model)
+        model = cast(
+            Qwen3MoeModel | Qwen3NextModel | Qwen3_5TextModel | Qwen3_5MoeModel, model
+        )
         total = len(model.layers)
         for i, layer in enumerate(model.layers):
             eval_with_timeout(layer.parameters(), timeout_seconds / total, on_timeout)
@@ -1266,16 +946,39 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
                 layer.self_attn.n_heads //= self.N
                 layer.self_attn.n_kv_heads //= self.N
             else:
-                assert isinstance(layer, Qwen3NextDecoderLayer)
+                assert isinstance(layer, (Qwen3NextDecoderLayer, Qwen3_5DecoderLayer))
                 if hasattr(layer, "linear_attn"):
                     linear_attn = layer.linear_attn
 
-                    linear_attn.in_proj_qkvz = self.all_to_sharded_linear(
-                        linear_attn.in_proj_qkvz
-                    )
-                    linear_attn.in_proj_ba = self.all_to_sharded_linear(
-                        linear_attn.in_proj_ba
-                    )
+                    if isinstance(linear_attn, Qwen3NextGatedDeltaNet):
+                        # Qwen3-Next: combined projections
+                        linear_attn.in_proj_qkvz = self.all_to_sharded_linear(
+                            linear_attn.in_proj_qkvz
+                        )
+                        linear_attn.in_proj_ba = self.all_to_sharded_linear(
+                            linear_attn.in_proj_ba
+                        )
+                    else:
+                        # Qwen3.5: separate projections
+                        # in_proj_qkv has sections [q(key_dim), k(key_dim), v(value_dim)]
+                        # that must be split section-aware, not as a contiguous block
+                        key_dim = linear_attn.key_dim
+                        value_dim = linear_attn.value_dim
+                        linear_attn.in_proj_qkv = shard_linear(
+                            linear_attn.in_proj_qkv,
+                            "all-to-sharded",
+                            segments=[key_dim, key_dim + key_dim],
+                            group=self.group,
+                        )
+                        linear_attn.in_proj_z = self.all_to_sharded_linear(
+                            linear_attn.in_proj_z
+                        )
+                        linear_attn.in_proj_b = self.all_to_sharded_linear(
+                            linear_attn.in_proj_b
+                        )
+                        linear_attn.in_proj_a = self.all_to_sharded_linear(
+                            linear_attn.in_proj_a
+                        )
                     linear_attn.out_proj = self.sharded_to_all_linear(
                         linear_attn.out_proj
                     )
@@ -1337,11 +1040,20 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
                     layer.self_attn.num_key_value_heads //= self.N
 
             # Shard the MoE.
-            if isinstance(layer.mlp, (Qwen3MoeSparseMoeBlock, Qwen3NextSparseMoeBlock)):
+            if isinstance(
+                layer.mlp,
+                (
+                    Qwen3MoeSparseMoeBlock,
+                    Qwen3NextSparseMoeBlock,
+                    Qwen3_5SparseMoeBlock,
+                ),
+            ):
                 self.all_to_sharded_linear_in_place(layer.mlp.switch_mlp.gate_proj)
                 self.sharded_to_all_linear_in_place(layer.mlp.switch_mlp.down_proj)
                 self.all_to_sharded_linear_in_place(layer.mlp.switch_mlp.up_proj)
-                if isinstance(layer.mlp, Qwen3NextSparseMoeBlock):
+                if isinstance(
+                    layer.mlp, (Qwen3NextSparseMoeBlock, Qwen3_5SparseMoeBlock)
+                ):
                     self.all_to_sharded_linear_in_place(
                         layer.mlp.shared_expert.gate_proj
                     )

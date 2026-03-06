@@ -2,19 +2,7 @@ import argparse
 import multiprocessing as mp
 import os
 import resource
-import faulthandler
 import signal
-try:
-    import uvloop
-    uvloop.install()
-except ImportError:
-    pass
-
-faulthandler.enable()
-if hasattr(signal, "SIGQUIT"):
-    faulthandler.register(signal.SIGQUIT)
-
-
 from dataclasses import dataclass, field
 from typing import Self
 
@@ -188,6 +176,17 @@ class Node:
                 # - Shutdown and re-create the worker
                 # - Shut down and re-create the API
 
+                if result.is_new_master:
+                    await anyio.sleep(0)
+                    self.event_router.shutdown()
+                    self.event_router = EventRouter(
+                        result.session_id,
+                        self.router.sender(topics.COMMANDS),
+                        self.router.receiver(topics.GLOBAL_EVENTS),
+                        self.router.sender(topics.LOCAL_EVENTS),
+                    )
+                    self._tg.start_soon(self.event_router.run)
+
                 if (
                     result.session_id.master_node_id == self.node_id
                     and self.master is not None
@@ -224,14 +223,6 @@ class Node:
                         f"Node {result.session_id.master_node_id} elected master"
                     )
                 if result.is_new_master:
-                    await anyio.sleep(0)
-                    self.event_router.shutdown()
-                    self.event_router = EventRouter(
-                        result.session_id,
-                        self.router.sender(topics.COMMANDS),
-                        self.router.receiver(topics.GLOBAL_EVENTS),
-                        self.router.sender(topics.LOCAL_EVENTS),
-                    )
                     if self.download_coordinator:
                         self.download_coordinator.shutdown()
                         self.download_coordinator = DownloadCoordinator(
@@ -246,7 +237,6 @@ class Node:
                         self._tg.start_soon(self.download_coordinator.run)
                     if self.worker:
                         self.worker.shutdown()
-                        await self.worker.wait_until_stopped()
                         # TODO: add profiling etc to resource monitor
                         self.worker = Worker(
                             self.node_id,
@@ -260,12 +250,6 @@ class Node:
                         self._tg.start_soon(self.worker.run)
                     if self.api:
                         self.api.reset(result.won_clock, self.event_router.receiver())
-                    # Start EventRouter AFTER all receivers are created.
-                    # Starting it earlier causes a race: events drain from the
-                    # OrderedBuffer while internal_outbound is still empty
-                    # (especially during `await worker.wait_until_stopped()`),
-                    # so workers/API never see those events and crash on desync.
-                    self._tg.start_soon(self.event_router.run)
                 else:
                     if self.api:
                         self.api.unpause(result.won_clock)
@@ -288,10 +272,10 @@ def main():
 
     # Set FAST_SYNCH override env var for runner subprocesses
     if args.fast_synch is True:
-        os.environ["EXO_FAST_SYNCH"] = "1"
+        os.environ["EXO_FAST_SYNCH"] = "on"
         logger.info("FAST_SYNCH forced ON")
     elif args.fast_synch is False:
-        os.environ["EXO_FAST_SYNCH"] = "0"
+        os.environ["EXO_FAST_SYNCH"] = "off"
         logger.info("FAST_SYNCH forced OFF")
 
     node = anyio.run(Node.create, args)
@@ -386,6 +370,3 @@ class Args(CamelCaseModel):
 
         args = parser.parse_args()
         return cls(**vars(args))  # pyright: ignore[reportAny] - We are intentionally validating here, we can't do it statically
-
-if __name__ == "__main__":
-    main()

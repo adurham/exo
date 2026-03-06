@@ -15,8 +15,7 @@ from mlx_lm.models.cache import (
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.types.memory import Memory
-from exo.shared.types.mlx import KVCacheType
-from exo.worker.engines.mlx import Model
+from exo.shared.types.mlx import KVCacheType, Model
 from exo.worker.engines.mlx.constants import CACHE_GROUP_SIZE, KV_CACHE_BITS
 from exo.worker.runner.bootstrap import logger
 
@@ -26,7 +25,7 @@ import math
 # Fraction of device memory above which LRU eviction kicks in.
 # Smaller machines need more aggressive eviction.
 def _default_memory_threshold() -> float:
-    total_gb = psutil.virtual_memory().total / (1024**3)
+    total_gb = Memory.from_bytes(psutil.virtual_memory().total).in_gb
     if total_gb >= 128:
         return 0.85
     if total_gb >= 64:
@@ -333,9 +332,9 @@ def trim_cache(
             if snapshot is not None and snapshot.states[i] is not None:
                 cache[i] = deepcopy(snapshot.states[i])  # type: ignore
             else:
-                c.state = [None] * len(c.state)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+                c.state = [None] * len(c.state)
         else:
-            c.trim(num_tokens)  # pyright: ignore[reportUnknownMemberType]
+            c.trim(num_tokens)
 
 
 def encode_prompt(tokenizer: TokenizerWrapper, prompt: str) -> mx.array:

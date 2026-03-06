@@ -33,11 +33,6 @@ pub enum ToSwarm {
         data: Vec<u8>,
         result_sender: oneshot::Sender<Result<gossipsub::MessageId, gossipsub::PublishError>>,
     },
-    Dial {
-        peer_id: String,
-        addr: String,
-        result_sender: oneshot::Sender<Result<(), String>>,
-    },
 }
 pub enum FromSwarm {
     Message {
@@ -116,19 +111,6 @@ fn on_message(swarm: &mut libp2p::Swarm<Behaviour>, message: ToSwarm) {
                 .gossipsub
                 .publish(gossipsub::IdentTopic::new(topic), data);
             _ = result_sender.send(result);
-        }
-        ToSwarm::Dial { peer_id, addr, result_sender } => {
-            let multiaddr_str = format!("{addr}/p2p/{peer_id}");
-            let multiaddr: Result<libp2p::Multiaddr, _> = multiaddr_str.parse();
-            match multiaddr {
-                Ok(ma) => {
-                    let result = swarm.dial(ma).map_err(|e| e.to_string());
-                    _ = result_sender.send(result);
-                }
-                Err(e) => {
-                    _ = result_sender.send(Err(e.to_string()));
-                }
-            }
         }
     }
 }
@@ -281,7 +263,7 @@ mod behaviour {
         gossipsub::Behaviour::new(
             MessageAuthenticity::Signed(keypair.clone()),
             ConfigBuilder::default()
-                .max_transmit_size(100 * 1024 * 1024) // Increased to 100MB for massive 100k+ token JSON payloads
+                .max_transmit_size(1024 * 1024)
                 .validation_mode(ValidationMode::Strict)
                 .build()
                 .expect("the configuration should always be valid"),

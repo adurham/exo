@@ -264,22 +264,6 @@
 
   // ── Steps 1-5 animation state: cinematic SVG story ──
   const SIMULATED_STUDIO_GB = 256; // simulated Mac Studio memory
-
-  // User device info from topology — uses /node_id to find our own node
-  const userDeviceInfo = $derived.by(() => {
-    if (!data || Object.keys(data.nodes).length === 0) {
-      return { name: "MacBook Pro", memoryGB: 36, deviceType: "macbook pro" };
-    }
-    const ourNode = localNodeId ? data.nodes[localNodeId] : undefined;
-    const node = ourNode ?? Object.values(data.nodes)[0];
-    const totalMem =
-      node.macmon_info?.memory?.ram_total ?? node.system_info?.memory ?? 0;
-    const memGB = Math.round(totalMem / (1024 * 1024 * 1024));
-    const name = node.friendly_name || "Your Mac";
-    const modelId = (node.system_info?.model_id || "macbook pro").toLowerCase();
-    return { name, memoryGB: memGB || 36, deviceType: modelId };
-  });
-
   const onboardingCombinedGB = $derived(
     userDeviceInfo.memoryGB + SIMULATED_STUDIO_GB,
   );
@@ -305,6 +289,21 @@
       deduped.push(m);
     }
     return deduped.slice(0, 3);
+  });
+
+  // User device info from topology — uses /node_id to find our own node
+  const userDeviceInfo = $derived.by(() => {
+    if (!data || Object.keys(data.nodes).length === 0) {
+      return { name: "MacBook Pro", memoryGB: 36, deviceType: "macbook pro" };
+    }
+    const ourNode = localNodeId ? data.nodes[localNodeId] : undefined;
+    const node = ourNode ?? Object.values(data.nodes)[0];
+    const totalMem =
+      node.macmon_info?.memory?.ram_total ?? node.system_info?.memory ?? 0;
+    const memGB = Math.round(totalMem / (1024 * 1024 * 1024));
+    const name = node.friendly_name || "Your Mac";
+    const modelId = (node.system_info?.model_id || "macbook pro").toLowerCase();
+    return { name, memoryGB: memGB || 36, deviceType: modelId };
   });
 
   let showContinueButton = $state(false);
@@ -827,14 +826,14 @@
     if (!model?.tasks) return false;
     return model.tasks.includes("ImageToImage");
   }
-  let selectedSharding = $state<"Pipeline" | "Tensor" | "Hybrid">("Pipeline");
+  let selectedSharding = $state<"Pipeline" | "Tensor">("Pipeline");
   type InstanceMeta = "MlxRing" | "MlxJaccl";
 
   // Launch defaults persistence
   const LAUNCH_DEFAULTS_KEY = "exo-launch-defaults-v2";
   interface LaunchDefaults {
     modelId: string | null;
-    sharding: "Pipeline" | "Tensor" | "Hybrid";
+    sharding: "Pipeline" | "Tensor";
     instanceType: InstanceMeta;
     minNodes: number;
   }
@@ -1438,10 +1437,8 @@
     if (!progress || typeof progress !== "object") return null;
 
     const prog = progress as Record<string, unknown>;
-    const totalBytes = getBytes(prog.total_bytes ?? prog.totalBytes);
-    const downloadedBytes = getBytes(
-      prog.downloaded_bytes ?? prog.downloadedBytes,
-    );
+    const totalBytes = getBytes(prog.total);
+    const downloadedBytes = getBytes(prog.downloaded);
     const speed = (prog.speed as number) ?? 0;
     const completedFiles =
       (prog.completed_files as number) ?? (prog.completedFiles as number) ?? 0;
@@ -1454,8 +1451,8 @@
     for (const [fileName, fileData] of Object.entries(filesObj)) {
       if (!fileData || typeof fileData !== "object") continue;
       const fd = fileData as Record<string, unknown>;
-      const fTotal = getBytes(fd.total_bytes ?? fd.totalBytes);
-      const fDownloaded = getBytes(fd.downloaded_bytes ?? fd.downloadedBytes);
+      const fTotal = getBytes(fd.total);
+      const fDownloaded = getBytes(fd.downloaded);
       files.push({
         name: fileName,
         totalBytes: fTotal,
@@ -1879,7 +1876,6 @@
     if (typeof value === "number") return value;
     if (value && typeof value === "object") {
       const v = value as Record<string, unknown>;
-      if (typeof v.in_bytes === "number") return v.in_bytes;
       if (typeof v.inBytes === "number") return v.inBytes;
     }
     return 0;
@@ -1989,7 +1985,6 @@
       const [shardTag] = getTagged(firstShardWrapped);
       if (shardTag === "PipelineShardMetadata") sharding = "Pipeline";
       else if (shardTag === "TensorShardMetadata") sharding = "Tensor";
-      else if (shardTag === "HybridShardMetadata") sharding = "Hybrid";
       else if (shardTag === "PrefillDecodeShardMetadata")
         sharding = "Prefill/Decode";
     }
@@ -5627,30 +5622,6 @@
                         </span>
                         Tensor
                       </button>
-                      <button
-                        onclick={() => {
-                          selectedSharding = "Hybrid";
-                          saveLaunchDefaults();
-                        }}
-                        class="flex items-center gap-2 py-1.5 px-3 text-xs font-mono border rounded transition-all duration-200 cursor-pointer {selectedSharding ===
-                        'Hybrid'
-                          ? 'bg-transparent text-exo-yellow border-exo-yellow'
-                          : 'bg-transparent text-white/70 border-exo-medium-gray/50 hover:border-exo-yellow/50'}"
-                        title="Hybrid TP+PP: tensor parallel on high-memory nodes, pipeline to remaining"
-                      >
-                        <span
-                          class="w-3 h-3 rounded-full border-2 flex items-center justify-center {selectedSharding ===
-                          'Hybrid'
-                            ? 'border-exo-yellow'
-                            : 'border-exo-medium-gray'}"
-                        >
-                          {#if selectedSharding === "Hybrid"}
-                            <span class="w-1.5 h-1.5 rounded-full bg-exo-yellow"
-                            ></span>
-                          {/if}
-                        </span>
-                        Hybrid
-                      </button>
                     </div>
                   </div>
 
@@ -6079,12 +6050,11 @@
               </div>
 
               <div
-                class="relative aspect-square bg-exo-dark-gray rounded-lg overflow-hidden"
+                class="relative aspect-square bg-exo-dark-gray rounded-lg overflow-hidden pointer-events-none"
               >
                 <TopologyGraph
                   highlightedNodes={highlightedNodes()}
                   filteredNodes={nodeFilter}
-                  onNodeClick={togglePreviewNodeFilter}
                 />
 
                 {@render clusterWarningsCompact()}

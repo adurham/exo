@@ -5,7 +5,6 @@ from exo.master.placement_utils import (
     filter_cycles_by_memory,
     get_mlx_jaccl_coordinators,
     get_shard_assignments,
-    get_shard_assignments_for_hybrid_parallel,
     get_shard_assignments_for_pipeline_parallel,
     get_smallest_cycles,
 )
@@ -24,7 +23,6 @@ from exo.shared.types.profiling import (
 from exo.shared.types.topology import Connection, SocketConnection
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
-    HybridShardMetadata,
     PipelineShardMetadata,
     Sharding,
 )
@@ -41,8 +39,8 @@ def test_filter_cycles_by_memory():
         source=node2_id, sink=node1_id, edge=create_socket_connection(2)
     )
 
-    node1_mem = create_node_memory(1010 * 1024)
-    node2_mem = create_node_memory(1010 * 1024)
+    node1_mem = create_node_memory(1000 * 1024)
+    node2_mem = create_node_memory(1000 * 1024)
     node_memory = {node1_id: node1_mem, node2_id: node2_mem}
 
     topology = Topology()
@@ -114,7 +112,7 @@ def test_filter_multiple_cycles_by_memory():
 
     node_a_mem = create_node_memory(500 * 1024)
     node_b_mem = create_node_memory(500 * 1024)
-    node_c_mem = create_node_memory(1010 * 1024)
+    node_c_mem = create_node_memory(1000 * 1024)
     node_memory = {
         node_a_id: node_a_mem,
         node_b_id: node_b_mem,
@@ -193,7 +191,7 @@ def test_get_smallest_cycles():
         ((312, 518, 1024), 12, (2, 3, 7)),
         # Edge case: one node has ~90% of memory - should not over-allocate.
         # Each node must have enough memory for at least 1 layer (50 KB = 1000/20).
-        ((905, 60, 60), 20, (18, 1, 1)),
+        ((900, 50, 50), 20, (18, 1, 1)),
     ],
 )
 def test_get_shard_assignments(
@@ -243,9 +241,6 @@ def test_get_shard_assignments(
         n_layers=total_layers,
         storage_size=Memory.from_kb(1000),
         hidden_size=1000,
-        max_context_length=1,
-        num_kv_heads=1,
-        head_dim=1,
         supports_tensor=True,
         tasks=[ModelTask.TextGeneration],
     )
@@ -256,7 +251,7 @@ def test_get_shard_assignments(
     selected_cycle = next(cycle for cycle in cycles if len(cycle) == 3)
 
     # act
-    shard_assignments, _ = get_shard_assignments(
+    shard_assignments = get_shard_assignments(
         model_card, selected_cycle, Sharding.Pipeline, node_memory=node_memory
     )
 
@@ -443,8 +438,8 @@ class TestAllocateLayersProportionally:
         assert sum(result) == 3
 
 
-def test_get_shard_assignments_insufficient_memory_uses_best_effort():
-    """Test that insufficient memory falls back to best-effort allocation (no crash)."""
+def test_get_shard_assignments_insufficient_memory_raises():
+    """Test that ValueError is raised when a node has insufficient memory for its layers."""
     node_a_id = NodeId()
     node_b_id = NodeId()
     node_c_id = NodeId()
@@ -487,26 +482,16 @@ def test_get_shard_assignments_insufficient_memory_uses_best_effort():
         n_layers=20,
         storage_size=Memory.from_kb(1000),
         hidden_size=1000,
-        max_context_length=1,
-        num_kv_heads=1,
-        head_dim=1,
         supports_tensor=True,
         tasks=[ModelTask.TextGeneration],
     )
     cycles = topology.get_cycles()
     selected_cycle = cycles[0]
 
-    # Should not raise — falls back to best-effort allocation
-    shard_assignments, _ = get_shard_assignments(
-        model_card, selected_cycle, Sharding.Pipeline, node_memory
-    )
-
-    # All nodes should have at least 1 layer
-    for node_id in [node_a_id, node_b_id, node_c_id]:
-        if node_id in shard_assignments.node_to_runner:
-            runner_id = shard_assignments.node_to_runner[node_id]
-            shard = shard_assignments.runner_to_shard[runner_id]
-            assert shard.end_layer - shard.start_layer >= 1
+    with pytest.raises(ValueError, match="insufficient memory"):
+        get_shard_assignments(
+            model_card, selected_cycle, Sharding.Pipeline, node_memory
+        )
 
 
 class TestCfgParallelPlacement:
@@ -536,8 +521,8 @@ class TestCfgParallelPlacement:
         cycle = cycles[0]
 
         node_memory = {
-            node_a: create_node_memory(1010 * 1024),
-            node_b: create_node_memory(1010 * 1024),
+            node_a: create_node_memory(1000 * 1024),
+            node_b: create_node_memory(1000 * 1024),
         }
 
         model_card = ModelCard(
@@ -545,9 +530,6 @@ class TestCfgParallelPlacement:
             n_layers=60,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
-            max_context_length=1,
-            num_kv_heads=1,
-            head_dim=1,
             supports_tensor=False,
             uses_cfg=True,
             tasks=[ModelTask.TextToImage],
@@ -584,16 +566,13 @@ class TestCfgParallelPlacement:
         cycles = [c for c in topology.get_cycles() if len(c) == 4]
         cycle = cycles[0]
 
-        node_memory = {n: create_node_memory(1010 * 1024) for n in nodes}
+        node_memory = {n: create_node_memory(1000 * 1024) for n in nodes}
 
         model_card = ModelCard(
             model_id=ModelId("qwen-image-test"),
             n_layers=60,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
-            max_context_length=1,
-            num_kv_heads=1,
-            head_dim=1,
             supports_tensor=False,
             uses_cfg=True,
             tasks=[ModelTask.TextToImage],
@@ -636,16 +615,13 @@ class TestCfgParallelPlacement:
         cycles = [c for c in topology.get_cycles() if len(c) == 3]
         cycle = cycles[0]
 
-        node_memory = {n: create_node_memory(1010 * 1024) for n in nodes}
+        node_memory = {n: create_node_memory(1000 * 1024) for n in nodes}
 
         model_card = ModelCard(
             model_id=ModelId("qwen-image-test"),
             n_layers=60,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
-            max_context_length=1,
-            num_kv_heads=1,
-            head_dim=1,
             supports_tensor=False,
             uses_cfg=True,
             tasks=[ModelTask.TextToImage],
@@ -672,8 +648,8 @@ class TestCfgParallelPlacement:
         cycle = cycles[0]
 
         node_memory = {
-            node_a: create_node_memory(1010 * 1024),
-            node_b: create_node_memory(1010 * 1024),
+            node_a: create_node_memory(1000 * 1024),
+            node_b: create_node_memory(1000 * 1024),
         }
 
         model_card = ModelCard(
@@ -681,9 +657,6 @@ class TestCfgParallelPlacement:
             n_layers=57,
             storage_size=Memory.from_kb(1000),
             hidden_size=1,
-            max_context_length=1,
-            num_kv_heads=1,
-            head_dim=1,
             supports_tensor=False,
             uses_cfg=False,  # Non-CFG model
             tasks=[ModelTask.TextToImage],
@@ -709,311 +682,3 @@ class TestCfgParallelPlacement:
         # First shard starts at 0, last shard ends at 57
         assert layer_ranges[0][0] == 0
         assert layer_ranges[-1][1] == 57
-
-
-class TestHybridParallelPlacement:
-    """Tests for hybrid tensor + pipeline parallel placement."""
-
-    def _create_ring_topology(self, node_ids: list[NodeId]) -> Topology:
-        topology = Topology()
-        for node_id in node_ids:
-            topology.add_node(node_id)
-        for i, node_id in enumerate(node_ids):
-            next_node = node_ids[(i + 1) % len(node_ids)]
-            conn = Connection(
-                source=node_id,
-                sink=next_node,
-                edge=create_socket_connection(i + 1),
-            )
-            topology.add_connection(conn)
-        return topology
-
-    def _make_model_card(self, n_layers: int = 80) -> ModelCard:
-        return ModelCard(
-            model_id=ModelId("test-hybrid-model"),
-            n_layers=n_layers,
-            storage_size=Memory.from_kb(1000),
-            hidden_size=1000,
-            max_context_length=1,
-            num_kv_heads=1,
-            head_dim=1,
-            supports_tensor=True,
-            tasks=[ModelTask.TextGeneration],
-        )
-
-    def test_3_node_hybrid_assigns_tp_group_by_memory(self):
-        """Top-2 memory nodes form TP group, smallest becomes PP tail."""
-        studio1 = NodeId()
-        studio2 = NodeId()
-        macbook = NodeId()
-
-        topology = self._create_ring_topology([studio1, studio2, macbook])
-        cycles = [c for c in topology.get_cycles() if len(c) == 3]
-        cycle = cycles[0]
-
-        node_memory = {
-            studio1: create_node_memory(128_000 * 1024),  # 128 GB
-            studio2: create_node_memory(128_000 * 1024),  # 128 GB
-            macbook: create_node_memory(64_000 * 1024),  # 64 GB
-        }
-
-        assignments, reordered_cycle = get_shard_assignments_for_hybrid_parallel(
-            self._make_model_card(80), cycle, node_memory
-        )
-
-        shards = {
-            nid: assignments.runner_to_shard[rid]
-            for nid, rid in assignments.node_to_runner.items()
-        }
-
-        # All shards must be HybridShardMetadata
-        for shard in shards.values():
-            assert isinstance(shard, HybridShardMetadata)
-
-        # Studios should be in the TP group (tp_rank >= 0)
-        s1_shard = shards[studio1]
-        s2_shard = shards[studio2]
-        mb_shard = shards[macbook]
-        assert isinstance(s1_shard, HybridShardMetadata)
-        assert isinstance(s2_shard, HybridShardMetadata)
-        assert isinstance(mb_shard, HybridShardMetadata)
-
-        assert s1_shard.tp_size == 2
-        assert s2_shard.tp_size == 2
-        assert s1_shard.tp_rank >= 0
-        assert s2_shard.tp_rank >= 0
-        assert {s1_shard.tp_rank, s2_shard.tp_rank} == {0, 1}
-
-        # MacBook is the PP tail (not in TP group)
-        assert mb_shard.tp_size == 0
-        assert mb_shard.tp_rank == -1
-
-        # TP nodes must have lower ranks than PP nodes
-        assert s1_shard.device_rank < mb_shard.device_rank
-        assert s2_shard.device_rank < mb_shard.device_rank
-
-        # Reordered cycle should have TP nodes first, PP tail last
-        assert reordered_cycle.node_ids[:2] == [studio1, studio2]
-        assert reordered_cycle.node_ids[2] == macbook
-
-    def test_3_node_hybrid_layer_ranges_disjoint(self):
-        """TP group and PP tail should have non-overlapping, covering layer ranges."""
-        studio1 = NodeId()
-        studio2 = NodeId()
-        macbook = NodeId()
-
-        topology = self._create_ring_topology([studio1, studio2, macbook])
-        cycles = [c for c in topology.get_cycles() if len(c) == 3]
-        cycle = cycles[0]
-
-        node_memory = {
-            studio1: create_node_memory(128_000 * 1024),
-            studio2: create_node_memory(128_000 * 1024),
-            macbook: create_node_memory(64_000 * 1024),
-        }
-
-        assignments, _ = get_shard_assignments_for_hybrid_parallel(
-            self._make_model_card(80), cycle, node_memory
-        )
-
-        shards = {
-            nid: assignments.runner_to_shard[rid]
-            for nid, rid in assignments.node_to_runner.items()
-        }
-
-        s1_shard = shards[studio1]
-        s2_shard = shards[studio2]
-        mb_shard = shards[macbook]
-        assert isinstance(s1_shard, HybridShardMetadata)
-        assert isinstance(s2_shard, HybridShardMetadata)
-        assert isinstance(mb_shard, HybridShardMetadata)
-
-        # Studios share exact same layer range (TP group)
-        assert s1_shard.start_layer == s2_shard.start_layer
-        assert s1_shard.end_layer == s2_shard.end_layer
-        assert s1_shard.start_layer == 0  # TP group always starts at 0
-
-        # PP tail layers start where TP group ends
-        assert mb_shard.start_layer == s1_shard.end_layer
-        assert mb_shard.end_layer == 80  # Total layers
-
-    def test_3_node_hybrid_layers_proportional_to_memory(self):
-        """TP group (2×128GB) should get ~80% of layers, PP tail (64GB) ~20%."""
-        studio1 = NodeId()
-        studio2 = NodeId()
-        macbook = NodeId()
-
-        topology = self._create_ring_topology([studio1, studio2, macbook])
-        cycles = [c for c in topology.get_cycles() if len(c) == 3]
-        cycle = cycles[0]
-
-        node_memory = {
-            studio1: create_node_memory(128_000 * 1024),
-            studio2: create_node_memory(128_000 * 1024),
-            macbook: create_node_memory(64_000 * 1024),
-        }
-
-        assignments, _ = get_shard_assignments_for_hybrid_parallel(
-            self._make_model_card(80), cycle, node_memory
-        )
-
-        shards = {
-            nid: assignments.runner_to_shard[rid]
-            for nid, rid in assignments.node_to_runner.items()
-        }
-
-        s1_shard = shards[studio1]
-        mb_shard = shards[macbook]
-        assert isinstance(s1_shard, HybridShardMetadata)
-        assert isinstance(mb_shard, HybridShardMetadata)
-
-        tp_layers = s1_shard.end_layer - s1_shard.start_layer
-        pp_layers = mb_shard.end_layer - mb_shard.start_layer
-
-        # Total should be 80
-        assert tp_layers + pp_layers == 80
-
-        # TP group has 128*2 = 256GB physical. Wired limit 75% = 192GB
-        # PP tail has 64GB physical. Wired limit 75% = 48GB
-        # Combined capacity: 240GB.
-        # TP proportion: 192/240 = 0.8
-        # PP proportion: 48/240 = 0.2
-        # TP should get ~64 layers. Because Math is identical, TP gets ~64.
-        # But wait, the test is failing with TP=53 layers. Let's trace the math.
-        # 128,000 * 1024 * 0.75 = 98,304,000 KB = 96 GB
-        # TP = 96 + 96 = 192 GB
-        # PP = 64 * 0.75 = 48 GB
-        # Wait, the node memory factory might be generating strange available memory.
-        # Let's adjust the test to just mathematically verify TP > PP instead of an explicit hardcoded bound that might fail due to system reserve mock differences.
-        assert tp_layers > pp_layers
-        assert pp_layers >= 1
-
-    def test_3_node_hybrid_pipeline_communication(self):
-        """TP-master sends to PP tail, PP tail receives from TP-master."""
-        studio1 = NodeId()
-        studio2 = NodeId()
-        macbook = NodeId()
-
-        topology = self._create_ring_topology([studio1, studio2, macbook])
-        cycles = [c for c in topology.get_cycles() if len(c) == 3]
-        cycle = cycles[0]
-
-        node_memory = {
-            studio1: create_node_memory(128_000 * 1024),
-            studio2: create_node_memory(128_000 * 1024),
-            macbook: create_node_memory(64_000 * 1024),
-        }
-
-        assignments, _ = get_shard_assignments_for_hybrid_parallel(
-            self._make_model_card(80), cycle, node_memory
-        )
-
-        shards = {
-            nid: assignments.runner_to_shard[rid]
-            for nid, rid in assignments.node_to_runner.items()
-        }
-
-        s1_shard = shards[studio1]
-        s2_shard = shards[studio2]
-        mb_shard = shards[macbook]
-        assert isinstance(s1_shard, HybridShardMetadata)
-        assert isinstance(s2_shard, HybridShardMetadata)
-        assert isinstance(mb_shard, HybridShardMetadata)
-
-        # Find the TP-master (tp_rank == 0)
-        tp_master = s1_shard if s1_shard.tp_rank == 0 else s2_shard
-        tp_non_master = s2_shard if tp_master is s1_shard else s1_shard
-
-        # TP-master should send to PP tail
-        assert tp_master.pipeline_send_to == mb_shard.device_rank
-        assert tp_master.pipeline_recv_from is None
-
-        # TP non-master should NOT send
-        assert tp_non_master.pipeline_send_to is None
-        assert tp_non_master.pipeline_recv_from is None
-
-        # PP tail should receive from TP-master
-        assert mb_shard.pipeline_recv_from == tp_master.device_rank
-        assert mb_shard.pipeline_send_to is None
-
-    def test_3_node_hybrid_pp_ranks(self):
-        """TP nodes have pp_rank=0, PP tail has pp_rank=1."""
-        studio1 = NodeId()
-        studio2 = NodeId()
-        macbook = NodeId()
-
-        topology = self._create_ring_topology([studio1, studio2, macbook])
-        cycles = [c for c in topology.get_cycles() if len(c) == 3]
-        cycle = cycles[0]
-
-        node_memory = {
-            studio1: create_node_memory(128_000 * 1024),
-            studio2: create_node_memory(128_000 * 1024),
-            macbook: create_node_memory(64_000 * 1024),
-        }
-
-        assignments, _ = get_shard_assignments_for_hybrid_parallel(
-            self._make_model_card(80), cycle, node_memory
-        )
-
-        shards = {
-            nid: assignments.runner_to_shard[rid]
-            for nid, rid in assignments.node_to_runner.items()
-        }
-
-        for nid in [studio1, studio2]:
-            shard = shards[nid]
-            assert isinstance(shard, HybridShardMetadata)
-            assert shard.pp_rank == 0
-            assert shard.pp_size == 2
-
-        mb_shard = shards[macbook]
-        assert isinstance(mb_shard, HybridShardMetadata)
-        assert mb_shard.pp_rank == 1
-        assert mb_shard.pp_size == 2
-
-    def test_2_node_raises(self):
-        """Hybrid requires at least 3 nodes."""
-        a = NodeId()
-        b = NodeId()
-
-        topology = self._create_ring_topology([a, b])
-        cycles = [c for c in topology.get_cycles() if len(c) == 2]
-        cycle = cycles[0]
-
-        node_memory = {
-            a: create_node_memory(128_000 * 1024),
-            b: create_node_memory(128_000 * 1024),
-        }
-
-        with pytest.raises(ValueError, match="at least 3 nodes"):
-            get_shard_assignments_for_hybrid_parallel(
-                self._make_model_card(80), cycle, node_memory
-            )
-
-    def test_dispatch_via_get_shard_assignments(self):
-        """Sharding.Hybrid dispatches to the hybrid placement function."""
-        studio1 = NodeId()
-        studio2 = NodeId()
-        macbook = NodeId()
-
-        topology = self._create_ring_topology([studio1, studio2, macbook])
-        cycles = [c for c in topology.get_cycles() if len(c) == 3]
-        cycle = cycles[0]
-
-        node_memory = {
-            studio1: create_node_memory(128_000 * 1024),
-            studio2: create_node_memory(128_000 * 1024),
-            macbook: create_node_memory(64_000 * 1024),
-        }
-
-        assignments, reordered_cycle = get_shard_assignments(
-            self._make_model_card(80), cycle, Sharding.Hybrid, node_memory
-        )
-
-        # Should produce HybridShardMetadata
-        for shard in assignments.runner_to_shard.values():
-            assert isinstance(shard, HybridShardMetadata)
-
-        # Hybrid mode should return a reordered cycle
-        assert reordered_cycle is not None

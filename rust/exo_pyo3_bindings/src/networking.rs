@@ -273,8 +273,9 @@ impl PyNetworkingHandle {
             .allow_threads_py() // allow-threads-aware async call
             .await?;
 
-        // wait for response & return any errors
-        rx.allow_threads_py() // allow-threads-aware async call
+        // wait for response & return any errors => ignore messageID for now!!!
+        let _ = rx
+            .allow_threads_py() // allow-threads-aware async call
             .await
             .map_err(|_| PyErr::receiver_channel_closed())?
             .map_err(|e| match e {
@@ -286,20 +287,6 @@ impl PyNetworkingHandle {
                 e => PyRuntimeError::new_err(e.to_string()),
             })?;
         Ok(())
-    }
-
-    /// Dial a peer given their ID and multiaddress async.
-    async fn dial(&self, peer_id: String, addr: String) -> PyResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.to_swarm
-            .send_py(ToSwarm::Dial { peer_id, addr, result_sender: tx })
-            .allow_threads_py()
-            .await?;
-
-        rx.allow_threads_py()
-            .await
-            .map_err(|_| PyErr::receiver_channel_closed())?
-            .map_err(PyRuntimeError::new_err)
     }
 }
 

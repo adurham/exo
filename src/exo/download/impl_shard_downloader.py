@@ -19,9 +19,7 @@ def exo_shard_downloader(
     max_parallel_downloads: int = 8, offline: bool = False
 ) -> ShardDownloader:
     return SingletonShardDownloader(
-        CachedShardDownloader(
-            ResumableShardDownloader(max_parallel_downloads, offline=offline)
-        )
+        ResumableShardDownloader(max_parallel_downloads, offline=offline)
     )
 
 
@@ -61,58 +59,17 @@ class SingletonShardDownloader(ShardDownloader):
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
-        self,
-        shard: ShardMetadata,
-        config_only: bool = False,
-        repo_url: str | None = None,
+        self, shard: ShardMetadata, config_only: bool = False
     ) -> Path:
         if shard not in self.active_downloads:
             self.active_downloads[shard] = asyncio.create_task(
-                self.shard_downloader.ensure_shard(shard, config_only, repo_url)
+                self.shard_downloader.ensure_shard(shard, config_only)
             )
         try:
             return await self.active_downloads[shard]
         finally:
             if shard in self.active_downloads and self.active_downloads[shard].done():
                 del self.active_downloads[shard]
-
-    async def get_shard_download_status(
-        self,
-    ) -> AsyncIterator[tuple[Path, RepoDownloadProgress]]:
-        async for path, status in self.shard_downloader.get_shard_download_status():
-            yield path, status
-
-    async def get_shard_download_status_for_shard(
-        self, shard: ShardMetadata
-    ) -> RepoDownloadProgress:
-        return await self.shard_downloader.get_shard_download_status_for_shard(shard)
-
-
-class CachedShardDownloader(ShardDownloader):
-    def __init__(self, shard_downloader: ShardDownloader):
-        self.shard_downloader = shard_downloader
-        self.cache: dict[tuple[str, ShardMetadata], Path] = {}
-
-    def on_progress(
-        self,
-        callback: Callable[[ShardMetadata, RepoDownloadProgress], Awaitable[None]],
-    ) -> None:
-        self.shard_downloader.on_progress(callback)
-
-    async def ensure_shard(
-        self,
-        shard: ShardMetadata,
-        config_only: bool = False,
-        repo_url: str | None = None,
-    ) -> Path:
-        if (shard.model_card.model_id, shard) in self.cache:
-            return self.cache[(shard.model_card.model_id, shard)]
-
-        target_dir = await self.shard_downloader.ensure_shard(
-            shard, config_only, repo_url
-        )
-        self.cache[(shard.model_card.model_id, shard)] = target_dir
-        return target_dir
 
     async def get_shard_download_status(
         self,
@@ -147,10 +104,7 @@ class ResumableShardDownloader(ShardDownloader):
         self.on_progress_callbacks.append(callback)
 
     async def ensure_shard(
-        self,
-        shard: ShardMetadata,
-        config_only: bool = False,
-        repo_url: str | None = None,
+        self, shard: ShardMetadata, config_only: bool = False
     ) -> Path:
         allow_patterns = ["config.json"] if config_only else None
 
@@ -159,7 +113,6 @@ class ResumableShardDownloader(ShardDownloader):
             self.on_progress_wrapper,
             max_parallel_downloads=self.max_parallel_downloads,
             allow_patterns=allow_patterns,
-            repo_url=repo_url,
             skip_internet=self.offline,
         )
         return target_dir

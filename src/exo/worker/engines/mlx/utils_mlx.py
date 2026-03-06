@@ -24,9 +24,7 @@ from mlx_lm.models.deepseek_v3 import DeepseekV3Model
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.models.model_cards import ModelId
-from exo.worker.engines.mlx.constants import (
-    TRUST_REMOTE_CODE,
-)
+from exo.worker.engines.mlx.constants import TRUST_REMOTE_CODE
 
 try:
     from mlx_lm.tokenizer_utils import load_tokenizer
@@ -42,6 +40,7 @@ from pydantic import RootModel
 from exo.download.download_utils import build_model_path
 from exo.shared.types.common import Host
 from exo.shared.types.memory import Memory
+from exo.shared.types.mlx import Model
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.instances import (
     BoundInstance,
@@ -50,26 +49,22 @@ from exo.shared.types.worker.instances import (
 )
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
-    HybridShardMetadata,
     PipelineShardMetadata,
     ShardMetadata,
     TensorShardMetadata,
 )
-from exo.worker.engines.mlx import Model
 from exo.worker.engines.mlx.auto_parallel import (
     LayerLoadedCallback,
     TimeoutCallback,
     eval_with_timeout,
     get_inner_model,
     get_layers,
-    hybrid_auto_parallel,
     pipeline_auto_parallel,
     tensor_auto_parallel,
 )
 from exo.worker.runner.bootstrap import logger
 
 Group = mx.distributed.Group
-# Removed restrictive setrlimit (2048/4096) to allow higher system limits for RDMA
 
 
 def get_weights_size(model_shard_meta: ShardMetadata) -> Memory:
@@ -103,14 +98,6 @@ def mlx_distributed_init(
     """
     rank = bound_instance.bound_shard.device_rank
     logger.info(f"Starting initialization for rank {rank}")
-
-    if mx.metal.is_available():
-        device_info = mx.metal.device_info()
-        max_rec_size = int(device_info["max_recommended_working_set_size"])
-        ratio = float(os.getenv("EXO_MLX_WIRED_LIMIT_RATIO") or "0.75")
-        limit = int(max_rec_size * ratio)
-        mx.set_wired_limit(limit)
-        logger.info(f"Set MLX wired limit to {limit / 1024**3:.2f} GB ({ratio:.0%} of max recommended)")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         coordination_file = str(
@@ -151,51 +138,10 @@ def mlx_distributed_init(
                 logger.info(
                     f"rank {rank} MLX_IBV_DEVICES: {coordination_file} with devices: {jaccl_devices_json}"
                 )
-                try:
-                    with open(coordination_file, "r") as f:
-                        logger.info(f"rank {rank} MLX_IBV_DEVICES content readback: {f.read()}")
-                except Exception as e:
-                    logger.error(f"Failed to read MLX_IBV_DEVICES file: {e}")
-
                 logger.info(f"rank {rank} MLX_JACCL_COORDINATOR: {jaccl_coordinator}")
                 os.environ["MLX_IBV_DEVICES"] = coordination_file
                 os.environ["MLX_RANK"] = str(rank)
                 os.environ["MLX_JACCL_COORDINATOR"] = jaccl_coordinator
-                os.environ["IBV_FORK_SAFE"] = "1"
-                
-                # Diagnostics
-                try:
-                    import resource
-                    soft, hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
-                    logger.info(f"RLIMIT_MEMLOCK: soft={soft}, hard={hard}")
-                    logger.info(f"IBV_FORK_SAFE: {os.environ.get('IBV_FORK_SAFE', 'Not Set')}")
-                    logger.info(f"Connecting to coordinator: {jaccl_coordinator}")
-                except Exception as e:
-                    logger.error(f"Failed to log diagnostics: {e}")
-
-                # Apply wired limit
-                max_rec_size = int(mx.metal.device_info()["max_recommended_working_set_size"])
-                if os.getenv("EXO_MLX_WIRED_LIMIT_RATIO"):
-                    ratio = float(os.environ["EXO_MLX_WIRED_LIMIT_RATIO"])
-                    safe_limit = int(max_rec_size * ratio)
-                    logger.info(f"Using manual MLX wired limit ratio: {ratio} -> {safe_limit / 1e9:.2f} GB")
-                else:
-                    # Dynamic calculation
-                    try:
-                        shard_size = get_weights_size(bound_instance.bound_shard).in_bytes
-                        # Add 30% buffer for KV cache, activations, and scratch
-                        needed = int(shard_size * 1.3)
-                        # Clamp to 85% of system max to leave room for OS/RDMA
-                        system_safe_cap = int(max_rec_size * 0.85)
-                        safe_limit = min(needed, system_safe_cap)
-                        logger.info(f"Dynamic wired limit: Model={shard_size/1e9:.2f}GB, Needed={needed/1e9:.2f}GB, Cap={system_safe_cap/1e9:.2f}GB -> Set={safe_limit/1e9:.2f}GB")
-                    except Exception as e:
-                        logger.error(f"Failed to calculate dynamic wired limit: {e}. Fallback to 0.75 default.")
-                        safe_limit = int(max_rec_size * 0.75)
-
-                mx.set_wired_limit(safe_limit)
-                logger.info(f"Set MLX wired limit to {safe_limit / 1e9:.2f} GB")
-
                 group = mx.distributed.init(backend="jaccl", strict=True)
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
@@ -261,6 +207,8 @@ def load_mlx_items(
 
     set_wired_limit_for_model(get_weights_size(bound_instance.bound_shard))
 
+    mx.clear_cache()
+
     return cast(Model, model), tokenizer
 
 
@@ -299,11 +247,11 @@ def shard_and_load(
 
     # Estimate timeout based on model size (5x default for large queued workloads)
     base_timeout = float(os.environ.get("EXO_MODEL_LOAD_TIMEOUT", "300"))
-    model_size_gb = get_weights_size(shard_metadata).in_bytes / (1024**3)
-    timeout_seconds = base_timeout + model_size_gb
+    model_size = get_weights_size(shard_metadata)
+    timeout_seconds = base_timeout + model_size.in_gb
     logger.info(
         f"Evaluating model parameters with timeout of {timeout_seconds:.0f}s "
-        f"(model size: {model_size_gb:.1f}GB)"
+        f"(model size: {model_size.in_gb:.1f}GB)"
     )
 
     match shard_metadata:
@@ -323,13 +271,6 @@ def shard_and_load(
                 "CfgShardMetadata is not supported for text model loading - "
                 "this metadata type is only for image generation models"
             )
-        case HybridShardMetadata():
-            logger.info(f"loading model from {model_path} with hybrid TP+PP")
-            model = hybrid_auto_parallel(
-                model, group, shard_metadata,
-                timeout_seconds, on_timeout,
-            )
-            eval_with_timeout(model.parameters(), timeout_seconds, on_timeout)
 
     # TODO: Do we need this?
     mx.eval(model)
@@ -337,19 +278,19 @@ def shard_and_load(
     logger.debug("SHARDED")
     logger.debug(model)
 
-    # Synchronize processes before generation to avoid timeout.
-    # Skip for hybrid mode: group.split() creates TP sub-rings which disrupts
-    # all_sum on the parent ring. Hybrid mode synchronizes naturally via
-    # pipeline send/recv during inference.
-    if not isinstance(shard_metadata, HybridShardMetadata):
-        mx_barrier(group)
+    # Synchronize processes before generation to avoid timeout
+    mx_barrier(group)
 
     return model, tokenizer
 
 
 def get_tokenizer(model_path: Path, shard_metadata: ShardMetadata) -> TokenizerWrapper:
     """Load tokenizer for a model shard. Delegates to load_tokenizer_for_model_id."""
-    return load_tokenizer_for_model_id(shard_metadata.model_card.model_id, model_path)
+    return load_tokenizer_for_model_id(
+        shard_metadata.model_card.model_id,
+        model_path,
+        trust_remote_code=shard_metadata.model_card.trust_remote_code,
+    )
 
 
 def get_eos_token_ids_for_model(model_id: ModelId) -> list[int] | None:
@@ -375,21 +316,16 @@ def get_eos_token_ids_for_model(model_id: ModelId) -> list[int] | None:
     elif "glm" in model_id_lower:
         # For GLM-4.5 and older
         return [151336, 151329, 151338]
-    elif "qwen" in model_id_lower:
-        return [151643, 151644, 151645]
-    elif "llama-3" in model_id_lower:
-        return [128001, 128009]
-    elif "phi-3" in model_id_lower:
-        return [32000, 32001, 32007]
-    elif "minimax" in model_id_lower:
-        return [200020, 200021]
     elif "gpt-oss" in model_id_lower:
         return [200002, 200012]
+    elif "qwen3.5" in model_id_lower or "qwen-3.5" in model_id_lower:
+        # For Qwen3.5: 248046 (<|im_end|>), 248044 (<|endoftext|>)
+        return [248046, 248044]
     return None
 
 
 def load_tokenizer_for_model_id(
-    model_id: ModelId, model_path: Path
+    model_id: ModelId, model_path: Path, *, trust_remote_code: bool = TRUST_REMOTE_CODE
 ) -> TokenizerWrapper:
     """
     Load tokenizer for a model given its ID and local path.
@@ -458,7 +394,7 @@ def load_tokenizer_for_model_id(
 
     tokenizer = load_tokenizer(
         model_path,
-        tokenizer_config_extra={"trust_remote_code": TRUST_REMOTE_CODE},
+        tokenizer_config_extra={"trust_remote_code": trust_remote_code},
         eos_token_ids=eos_token_ids,
     )
 
@@ -618,6 +554,8 @@ def apply_chat_template(
         # Jinja ignores unknown variables, so passing both is safe.
         extra_kwargs["enable_thinking"] = task_params.enable_thinking
         extra_kwargs["thinking"] = task_params.enable_thinking
+    if task_params.reasoning_effort is not None:
+        extra_kwargs["reasoning_effort"] = task_params.reasoning_effort
 
     patched_template: str | None = None
     if task_params.tools:
@@ -732,18 +670,17 @@ def set_wired_limit_for_model(model_size: Memory):
     if not mx.metal.is_available():
         return
 
-    model_bytes = model_size.in_bytes
-    max_rec_size = int(mx.metal.device_info()["max_recommended_working_set_size"])
-    if model_bytes > 0.9 * max_rec_size:
-        model_mb = model_bytes // 2**20
-        max_rec_mb = max_rec_size // 2**20
+    max_rec_size = Memory.from_bytes(
+        int(mx.device_info()["max_recommended_working_set_size"])
+    )
+    if model_size > 0.9 * max_rec_size:
         logger.warning(
-            f"Generating with a model that requires {model_mb} MB "
-            f"which is close to the maximum recommended size of {max_rec_mb} "
+            f"Generating with a model that requires {model_size.in_float_mb:.1f} MB "
+            f"which is close to the maximum recommended size of {max_rec_size.in_float_mb:.1f} "
             "MB. This can be slow. See the documentation for possible work-arounds: "
             "https://github.com/ml-explore/mlx-lm/tree/main#large-models"
         )
-    mx.set_wired_limit(max_rec_size)
+    mx.set_wired_limit(max_rec_size.in_bytes)
     logger.info(f"Wired limit set to {max_rec_size}.")
 
 
