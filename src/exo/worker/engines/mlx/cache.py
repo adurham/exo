@@ -447,7 +447,7 @@ def make_kv_cache(
         return model.make_cache()  # type: ignore
 
     if max_kv_size is None:
-        if KV_BITS is None:
+        if KV_BITS is None or KV_BITS >= 16:
             logger.info("Using default KV cache")
             return [KVCache() for _ in model.layers]
         else:
