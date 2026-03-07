@@ -36,8 +36,8 @@ for iid, inst in d.get("instances", {}).items():
         total += len(inner.get("shardAssignments", {}).get("runnerToShard", {}))
 print(total)
 ' 2>/dev/null || echo "0")
-if [ "$NODE_COUNT" -lt 3 ]; then
-    echo "ERROR: Only $NODE_COUNT runners in cluster (need 3). Is the cluster running?"
+if [ "$NODE_COUNT" -lt 2 ]; then
+    echo "ERROR: Only $NODE_COUNT runners in cluster (need at least 2). Is the cluster running?"
     exit 1
 fi
 echo "  $NODE_COUNT runners online"
