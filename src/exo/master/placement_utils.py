@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator, Mapping
 
 from loguru import logger
@@ -326,6 +327,29 @@ def get_shard_assignments_for_hybrid_parallel(
     )
     tp_layers = stage_layer_counts[0]
     pp_layers = stage_layer_counts[1]
+
+    # EXO_PP_LAYER_OFFSET: shift layers away from (negative) or toward (positive)
+    # the PP tail node. E.g. -2 moves 2 layers from PP to TP.
+    pp_offset = int(os.environ.get("EXO_PP_LAYER_OFFSET", "0"))
+    if pp_offset != 0:
+        new_pp = pp_layers + pp_offset
+        if new_pp < 1:
+            raise ValueError(
+                f"EXO_PP_LAYER_OFFSET={pp_offset} would leave PP tail with "
+                f"{new_pp} layers (need at least 1)"
+            )
+        new_tp = model_card.n_layers - new_pp
+        if new_tp < 1:
+            raise ValueError(
+                f"EXO_PP_LAYER_OFFSET={pp_offset} would leave TP group with "
+                f"{new_tp} layers (need at least 1)"
+            )
+        logger.info(
+            f"EXO_PP_LAYER_OFFSET={pp_offset}: adjusting split from "
+            f"{tp_layers}/{pp_layers} to {new_tp}/{new_pp}"
+        )
+        tp_layers = new_tp
+        pp_layers = new_pp
 
     # TP group: layers [0, tp_layers), PP tail: layers [tp_layers, total)
     tp_start, tp_end = 0, tp_layers
