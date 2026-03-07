@@ -993,6 +993,18 @@ def tensor_auto_parallel(
     model = tensor_parallel_sharding_strategy.shard_model(
         model, timeout_seconds, on_timeout, on_layer_loaded
     )
+
+    # Wrap every layer with tracing for per-layer timing (same as hybrid path)
+    if EXO_TRACING_ENABLED:
+        inner = get_inner_model(model)
+        layers = getattr(inner, "layers", None) or getattr(inner, "h", None)
+        if layers is not None:
+            rank = group.rank()
+            for i in range(len(layers)):
+                if not isinstance(layers[i], TracingLayerWrapper):
+                    layers[i] = TracingLayerWrapper(layers[i], rank, i)
+            logger.info(f"[tensor_auto_parallel] wrapped {len(layers)} layers with TracingLayerWrapper (rank={rank})")
+
     return patch_tensor_model(model)
 
 
