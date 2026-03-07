@@ -275,7 +275,15 @@ class CustomMlxLayer(nn.Module):
 
 
 class TracingLayerWrapper(CustomMlxLayer):
-    """Wraps a layer to log entry/exit for deadlock diagnosis."""
+    """Wraps a layer to log forward-pass boundaries for deadlock diagnosis.
+
+    NOTE: Per-layer timing only measures graph-build time (MLX is lazy).
+    Actual GPU time is measured by the per-decode-step timer in generate.py.
+    Only the first and last layer log, to show forward-pass start/end.
+    """
+
+    # Shared across all layers on this rank to track forward-pass boundaries
+    _num_layers: int = 0
 
     def __init__(self, original_layer: _LayerCallable, rank: int, layer_idx: int):
         super().__init__(original_layer)
@@ -283,12 +291,11 @@ class TracingLayerWrapper(CustomMlxLayer):
         self._trace_idx = layer_idx
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        layer_type = type(self.original_layer).__name__
-        logger.info(f"[trace R{self._trace_rank}] layer {self._trace_idx} ({layer_type}) ENTER x.shape={x.shape}")
-        t0 = time.perf_counter()
+        if self._trace_idx == 0:
+            logger.info(f"[trace R{self._trace_rank}] forward pass START x.shape={x.shape}")
         result = self.original_layer(x, *args, **kwargs)
-        dt_ms = (time.perf_counter() - t0) * 1000
-        logger.info(f"[trace R{self._trace_rank}] layer {self._trace_idx} ({layer_type}) EXIT {dt_ms:.1f}ms")
+        if self._trace_idx == TracingLayerWrapper._num_layers - 1:
+            logger.info(f"[trace R{self._trace_rank}] forward pass END (layer {self._trace_idx})")
         return result
 
 
@@ -799,13 +806,14 @@ def hybrid_auto_parallel(
                 group=group,
             )
 
-    # Wrap every layer with tracing for deadlock diagnosis
-    for i in range(len(layers)):
-        # Don't double-wrap layers that are already TracingLayerWrapper
-        if not isinstance(layers[i], TracingLayerWrapper):
-            layers[i] = TracingLayerWrapper(
-                layers[i], model_shard_meta.device_rank, start_layer + i
-            )
+    # Wrap layers with tracing for forward-pass boundary logging
+    if EXO_TRACING_ENABLED:
+        TracingLayerWrapper._num_layers = len(layers)
+        for i in range(len(layers)):
+            if not isinstance(layers[i], TracingLayerWrapper):
+                layers[i] = TracingLayerWrapper(
+                    layers[i], model_shard_meta.device_rank, start_layer + i
+                )
 
     logger.info(
         f"[hybrid] rank={model_shard_meta.device_rank} setup complete: "
@@ -994,12 +1002,13 @@ def tensor_auto_parallel(
         model, timeout_seconds, on_timeout, on_layer_loaded
     )
 
-    # Wrap every layer with tracing for per-layer timing (same as hybrid path)
+    # Wrap layers with tracing for forward-pass boundary logging
     if EXO_TRACING_ENABLED:
         inner = get_inner_model(model)
         layers = getattr(inner, "layers", None) or getattr(inner, "h", None)
         if layers is not None:
             rank = group.rank()
+            TracingLayerWrapper._num_layers = len(layers)
             for i in range(len(layers)):
                 if not isinstance(layers[i], TracingLayerWrapper):
                     layers[i] = TracingLayerWrapper(layers[i], rank, i)
@@ -1258,13 +1267,9 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
 
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
 
-        if EXO_TRACING_ENABLED:
-            logger.info(f"[WrappedMiniMaxAttn] projections start x.shape={x.shape}")
         queries: mx.array = self._original_layer.q_proj(x)
         keys: mx.array = self._original_layer.k_proj(x)
         values: mx.array = self._original_layer.v_proj(x)
-        if EXO_TRACING_ENABLED:
-            logger.info(f"[WrappedMiniMaxAttn] projections done q={queries.shape} k={keys.shape} v={values.shape}")
 
         if getattr(self, "use_qk_norm", False):
             q_dim = queries.shape[-1]
@@ -1274,17 +1279,11 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             qk = mx.concatenate(
                 [queries, keys], axis=-1
             )  # (batch_dim, seq_dim, q_dim + k_dim)
-            if EXO_TRACING_ENABLED:
-                logger.info(f"[WrappedMiniMaxAttn] calling all_gather qk.shape={qk.shape} group.size={n}")
             qk = mx.distributed.all_gather(
                 qk, group=self.group
             )  # (n*batch_dim, seq_dim, q_dim + k_dim)
-            if EXO_TRACING_ENABLED:
-                logger.info(f"[WrappedMiniMaxAttn] all_gather returned qk.shape={qk.shape}")
 
             qk = qk.reshape(n, batch_dim, seq_dim, q_dim + k_dim).transpose(1, 2, 0, 3)
-            if EXO_TRACING_ENABLED:
-                logger.info(f"[WrappedMiniMaxAttn] reshape+transpose done qk.shape={qk.shape}")
             queries = qk[..., :q_dim].reshape(
                 batch_dim, seq_dim, -1
             )  # (batch_dim, seq_dim, n * q_dim)
@@ -1292,18 +1291,12 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
                 batch_dim, seq_dim, -1
             )  # (batch_dim, seq_dim, n * k_dim)
 
-            if EXO_TRACING_ENABLED:
-                logger.info(f"[WrappedMiniMaxAttn] pre-norm q={queries.shape} k={keys.shape}")
             queries = self._original_layer.q_norm(queries)
             keys = self._original_layer.k_norm(keys)
-            if EXO_TRACING_ENABLED:
-                logger.info("[WrappedMiniMaxAttn] post-norm, splitting")
 
             # Split back and take this rank's portion
             queries = mx.split(queries, n, axis=-1)[self.group.rank()]
             keys = mx.split(keys, n, axis=-1)[self.group.rank()]
-            if EXO_TRACING_ENABLED:
-                logger.info(f"[WrappedMiniMaxAttn] split done q={queries.shape} k={keys.shape}")
 
         queries = queries.reshape(
             batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
@@ -1314,8 +1307,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         values = values.reshape(
             batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
         ).transpose(0, 2, 1, 3)
-        if EXO_TRACING_ENABLED:
-            logger.info(f"[WrappedMiniMaxAttn] head reshape done q={queries.shape}")
 
         if cache is not None:
             queries = self._original_layer.rope(queries, offset=cache.offset)
@@ -1324,8 +1315,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         else:
             queries = self._original_layer.rope(queries)
             keys = self._original_layer.rope(keys)
-        if EXO_TRACING_ENABLED:
-            logger.info("[WrappedMiniMaxAttn] rope+cache done, calling SDPA")
 
         output = scaled_dot_product_attention(
             queries,
@@ -1335,8 +1324,6 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             scale=self._original_layer.scale,  # type: ignore
             mask=mask,
         )
-        if EXO_TRACING_ENABLED:
-            logger.info(f"[WrappedMiniMaxAttn] SDPA done output.shape={output.shape}")
 
         output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
 
