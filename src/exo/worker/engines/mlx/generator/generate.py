@@ -263,7 +263,8 @@ def prefill(
     if EXO_TRACING_ENABLED:
         barrier_ms = (time.perf_counter() - t_barrier) * 1000
         logger.info(f"Pre-prefill barrier: {barrier_ms:.1f}ms")
-    logger.info("Starting prefill")
+    if EXO_TRACING_ENABLED:
+        logger.info("Starting prefill")
 
     is_pipeline = _has_pipeline_communication_layer(model)
 
@@ -381,7 +382,8 @@ def warmup_inference(
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
-        logger.info("Generated warmup token: " + str(_r.text))
+        if EXO_TRACING_ENABLED:
+            logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
 
     if EXO_TRACING_ENABLED:
@@ -573,7 +575,8 @@ def mlx_generate(
     if EXO_TRACING_ENABLED:
         decode_barrier_ms = (time.perf_counter() - t_barrier) * 1000
         logger.info(f"Pre-decode barrier: {decode_barrier_ms:.1f}ms")
-    logger.info("Starting decode")
+    if EXO_TRACING_ENABLED:
+        logger.info("Starting decode")
 
     for completion_tokens, out in enumerate(
         stream_generate(

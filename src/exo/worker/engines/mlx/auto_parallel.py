@@ -315,18 +315,13 @@ class PipelineFirstLayer(CustomMlxLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
-            # We want to avoid GPU timeout errors by evalling the distributed operation
-            # so that it stays on CPU, which does not have a timeout.
             if EXO_TRACING_ENABLED:
                 t0 = time.perf_counter()
-            logger.info(f"[PipelineFirstLayer r={self.r}] pre-eval x")
             mx.eval(x)
-            logger.info(f"[PipelineFirstLayer r={self.r}] recv_like from {self.recv_from}")
             if EXO_TRACING_ENABLED:
                 t1 = time.perf_counter()
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
             mx.eval(x)
-            logger.info(f"[PipelineFirstLayer r={self.r}] recv complete")
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
                 _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
@@ -356,13 +351,11 @@ class PipelineLastLayer(CustomMlxLayer):
 
         if EXO_TRACING_ENABLED:
             t0 = time.perf_counter()
-        logger.info(f"[PipelineLastLayer r={self.r} s={self.s}] computing layer")
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         # Eval layer output to materialize it before send — this splits the graph
         # so the send is isolated and the receiving rank's recv can complete.
         mx.eval(output)
-        logger.info(f"[PipelineLastLayer r={self.r}] eval complete")
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
@@ -376,13 +369,10 @@ class PipelineLastLayer(CustomMlxLayer):
                     (output, (self.r + 1) % self.s, self.group)
                 )
             else:
-                logger.info(f"[PipelineLastLayer r={self.r}] send to {(self.r + 1) % self.s}")
                 output = mx.distributed.send(
                     output, (self.r + 1) % self.s, group=self.group
                 )
             if cache is not None:
-                # CacheList (used by MLA models like DeepSeekV32, GLM MoE DSA)
-                # doesn't have .keys directly; access via first sub-cache.
                 _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
                 if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
                     _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
@@ -395,14 +385,12 @@ class PipelineLastLayer(CustomMlxLayer):
                 )
 
         if not self.is_prefill:
-            logger.info(f"[PipelineLastLayer r={self.r}] all_gather (is_prefill={self.is_prefill})")
             if EXO_TRACING_ENABLED:
                 t_ag = time.perf_counter()
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
             mx.eval(output)
-            logger.info(f"[PipelineLastLayer r={self.r}] all_gather complete")
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.all_gather_us += int(
                     (time.perf_counter() - t_ag) * 1_000_000
@@ -440,11 +428,8 @@ class HybridPipelineLastLayer(CustomMlxLayer):
 
         if EXO_TRACING_ENABLED:
             t0 = time.perf_counter()
-        logger.info(f"[HybridPipelineLastLayer r={self.r}] computing last TP layer")
         output: mx.array = self.original_layer(x, *args, **kwargs)
-        logger.info(f"[HybridPipelineLastLayer r={self.r}] eval output (triggers TP all_sum chain)")
         mx.eval(output)
-        logger.info(f"[HybridPipelineLastLayer r={self.r}] eval complete")
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
@@ -457,7 +442,6 @@ class HybridPipelineLastLayer(CustomMlxLayer):
                 (output, self.send_to, self.group)
             )
         else:
-            logger.info(f"[HybridPipelineLastLayer r={self.r}] send to {self.send_to}")
             output = mx.distributed.send(
                 output, self.send_to, group=self.group
             )
@@ -466,7 +450,6 @@ class HybridPipelineLastLayer(CustomMlxLayer):
             if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
                 _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
         mx.eval(output)
-        logger.info(f"[HybridPipelineLastLayer r={self.r}] send eval complete")
         if cache is not None and hasattr(_cache, "keys"):  # type: ignore
             mx.eval(_cache.keys)  # type: ignore
         if EXO_TRACING_ENABLED:
@@ -476,14 +459,12 @@ class HybridPipelineLastLayer(CustomMlxLayer):
 
         # Decode: all ranks must participate in all_gather for token sync
         if not self.is_prefill:
-            logger.info(f"[HybridPipelineLastLayer r={self.r}] all_gather (is_prefill={self.is_prefill})")
             if EXO_TRACING_ENABLED:
                 t_ag = time.perf_counter()
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
             mx.eval(output)
-            logger.info(f"[HybridPipelineLastLayer r={self.r}] all_gather complete")
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.all_gather_us += int(
                     (time.perf_counter() - t_ag) * 1_000_000
@@ -509,25 +490,20 @@ class HybridPipelinePassthroughLayer(CustomMlxLayer):
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if EXO_TRACING_ENABLED:
             t0 = time.perf_counter()
-        logger.info("[HybridPipelinePassthroughLayer] computing last TP layer")
         output: mx.array = self.original_layer(x, *args, **kwargs)
-        logger.info("[HybridPipelinePassthroughLayer] eval output (triggers TP all_sum chain)")
         mx.eval(output)
-        logger.info("[HybridPipelinePassthroughLayer] eval complete")
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
             )
 
         if not self.is_prefill:
-            logger.info(f"[HybridPipelinePassthroughLayer] all_gather (is_prefill={self.is_prefill})")
             if EXO_TRACING_ENABLED:
                 t_ag = time.perf_counter()
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
             mx.eval(output)
-            logger.info("[HybridPipelinePassthroughLayer] all_gather complete")
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.all_gather_us += int(
                     (time.perf_counter() - t_ag) * 1_000_000
@@ -731,7 +707,8 @@ def hybrid_auto_parallel(
     is_tp_node = model_shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
 
-    enable_distributed_tracing(model_shard_meta.device_rank)
+    if EXO_TRACING_ENABLED:
+        enable_distributed_tracing(model_shard_meta.device_rank)
 
     logger.info(
         f"[hybrid] rank={model_shard_meta.device_rank} tp_rank={model_shard_meta.tp_rank} "

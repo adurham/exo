@@ -538,7 +538,8 @@ def apply_chat_template(
         )
         if partial_assistant_content:
             prompt += partial_assistant_content
-        logger.info(prompt)
+        if EXO_TRACING_ENABLED:
+            logger.info(f"Prompt ({len(prompt)} chars): {prompt[:200]}...")
         return prompt
 
     extra_kwargs: dict[str, Any] = {}
@@ -575,7 +576,8 @@ def apply_chat_template(
     if partial_assistant_content:
         prompt += partial_assistant_content
 
-    logger.info(prompt)
+    if EXO_TRACING_ENABLED:
+        logger.info(f"Prompt ({len(prompt)} chars): {prompt[:200]}...")
 
     return prompt
 
