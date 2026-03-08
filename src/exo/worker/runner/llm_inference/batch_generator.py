@@ -182,6 +182,22 @@ class SequentialGenerator(InferenceGenerator):
         assert self._active is not None
 
         task, mlx_gen, queue, output_generator = self._active
+
+        # If the active task was cancelled via the pipe, stop it
+        # immediately rather than wasting compute on another token.
+        if task.task_id in self._cancelled_tasks or TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks:
+            self._cancelled_tasks.discard(task.task_id)
+            self._cancelled_tasks.discard(TaskId("CANCEL_CURRENT_TASK"))
+            self._active = None
+            if self._queue:
+                self._start_next()
+            cancelled = list(self._cancelled_tasks)
+            self._cancelled_tasks.clear()
+            return itertools.chain(
+                [(task.task_id, Cancelled())],
+                ((tid, Cancelled()) for tid in cancelled),
+            )
+
         response = None
         try:
             queue.push(next(mlx_gen))
@@ -189,7 +205,6 @@ class SequentialGenerator(InferenceGenerator):
         except PrefillCancelled:
             response = Cancelled()
             self._active = None
-            # Remove from _cancelled_tasks so it isn't yielded twice
             self._cancelled_tasks.discard(task.task_id)
             self._cancelled_tasks.discard(TaskId("CANCEL_CURRENT_TASK"))
             if self._queue:
@@ -203,9 +218,11 @@ class SequentialGenerator(InferenceGenerator):
             self._send_error(task, e)
             self._active = None
             raise
+        cancelled = list(self._cancelled_tasks)
+        self._cancelled_tasks.clear()
         return itertools.chain(
             [] if response is None else [(task.task_id, response)],
-            map(lambda task: (task, Cancelled()), self._cancelled_tasks),
+            ((tid, Cancelled()) for tid in cancelled),
         )
 
     def _start_next(self) -> None:

@@ -312,9 +312,12 @@ class Runner:
                         self.send_task_status(task_id, TaskStatus.Complete)
                         finished.append(task_id)
                     case _:
-                        self.send_response(
-                            result, self.active_tasks[task_id].command_id
-                        )
+                        task = self.active_tasks.get(task_id)
+                        if task is None:
+                            # Task was already cancelled/finished but the
+                            # generator still yielded a trailing response.
+                            continue
+                        self.send_response(result, task.command_id)
 
             for task_id in finished:
                 self.active_tasks.pop(task_id, None)
