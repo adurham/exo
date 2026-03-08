@@ -314,7 +314,7 @@ class Runner:
                         )
 
             for task_id in finished:
-                del self.active_tasks[task_id]
+                self.active_tasks.pop(task_id, None)
 
             try:
                 task = self.task_receiver.receive_nowait()

@@ -201,7 +201,15 @@ class SequentialGenerator(InferenceGenerator):
         try:
             queue.push(next(mlx_gen))
             response = next(output_generator)
-        except (StopIteration, PrefillCancelled):
+        except PrefillCancelled:
+            response = Cancelled()
+            self._active = None
+            # Remove from _cancelled_tasks so it isn't yielded twice
+            self._cancelled_tasks.discard(task.task_id)
+            self._cancelled_tasks.discard(TaskId("CANCEL_CURRENT_TASK"))
+            if self._queue:
+                self._start_next()
+        except StopIteration:
             response = Finished()
             self._active = None
             if self._queue:
