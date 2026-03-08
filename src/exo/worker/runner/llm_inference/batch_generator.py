@@ -112,6 +112,7 @@ class SequentialGenerator(InferenceGenerator):
     device_rank: int
     cancel_receiver: MpReceiver[TaskId]
     event_sender: MpSender[Event]
+    heartbeat: object | None = None
     check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
@@ -273,6 +274,8 @@ class SequentialGenerator(InferenceGenerator):
                 )
 
         def distributed_prompt_progress_callback() -> None:
+            if self.heartbeat is not None:
+                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
             if EXO_TRACING_ENABLED:
                 t0 = time.perf_counter()
             self._cancelled_tasks.update(self.cancel_receiver.collect())
@@ -293,6 +296,8 @@ class SequentialGenerator(InferenceGenerator):
 
         def on_generation_token() -> None:
             nonlocal tokens_since_cancel_check
+            if self.heartbeat is not None:
+                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
             tokens_since_cancel_check += 1
             if tokens_since_cancel_check >= self.check_for_cancel_every:
                 tokens_since_cancel_check = 0

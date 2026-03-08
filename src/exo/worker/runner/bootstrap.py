@@ -17,6 +17,7 @@ def entrypoint(
     task_receiver: MpReceiver[Task],
     cancel_receiver: MpReceiver[TaskId],
     _logger: "loguru.Logger",
+    heartbeat: "object | None" = None,
 ) -> None:
     global logger
     logger = _logger
@@ -42,7 +43,8 @@ def entrypoint(
             from exo.worker.runner.llm_inference.runner import Runner
 
             runner = Runner(
-                bound_instance, event_sender, task_receiver, cancel_receiver
+                bound_instance, event_sender, task_receiver, cancel_receiver,
+                heartbeat=heartbeat,
             )
             runner.main()
 

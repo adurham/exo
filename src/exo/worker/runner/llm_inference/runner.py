@@ -80,6 +80,8 @@ class Runner:
         event_sender: MpSender[Event],
         task_receiver: MpReceiver[Task],
         cancel_receiver: MpReceiver[TaskId],
+        *,
+        heartbeat: object | None = None,
     ):
         self.event_sender = event_sender
         self.task_receiver = task_receiver
@@ -106,7 +108,8 @@ class Runner:
         self.setup_start_time = time.time()
 
         self.generator: Builder | InferenceGenerator = Builder(
-            self.model_id, self.event_sender, self.cancel_receiver
+            self.model_id, self.event_sender, self.cancel_receiver,
+            heartbeat=heartbeat,
         )
 
         self.seen: set[TaskId] = set()
@@ -402,6 +405,7 @@ class Builder:
     model_id: ModelId
     event_sender: MpSender[Event]
     cancel_receiver: MpReceiver[TaskId]
+    heartbeat: object | None = None
     inference_model: Model | None = None
     tokenizer: TokenizerWrapper | None = None
     tool_parser: ToolParser | None = None
@@ -425,4 +429,5 @@ class Builder:
             device_rank=0 if self.group is None else self.group.rank(),
             cancel_receiver=self.cancel_receiver,
             event_sender=self.event_sender,
+            heartbeat=self.heartbeat,
         )

@@ -1,8 +1,9 @@
 import contextlib
 import multiprocessing as mp
 import signal
+import time
 from dataclasses import dataclass, field
-from typing import Self
+from typing import Any, Self
 
 import anyio
 from anyio import (
@@ -44,8 +45,7 @@ from exo.utils.channels import MpReceiver, MpSender, Sender, mp_channel
 from exo.utils.task_group import TaskGroup
 from exo.worker.runner.bootstrap import entrypoint
 
-PREFILL_TIMEOUT_SECONDS = 60
-DECODE_TIMEOUT_SECONDS = 5
+HEARTBEAT_TIMEOUT_SECONDS = 30
 
 
 @dataclass(eq=False)
@@ -58,6 +58,7 @@ class RunnerSupervisor:
     _task_sender: MpSender[Task]
     _event_sender: Sender[Event]
     _cancel_sender: MpSender[TaskId]
+    _heartbeat: Any  # mp.Value("d") - shared monotonic timestamp
     _tg: TaskGroup = field(default_factory=TaskGroup, init=False)
     status: RunnerStatus = field(default_factory=RunnerIdle, init=False)
     pending: dict[TaskId, anyio.Event] = field(default_factory=dict, init=False)
@@ -79,6 +80,7 @@ class RunnerSupervisor:
         ev_send, ev_recv = mp_channel[Event]()
         task_sender, task_recv = mp_channel[Task]()
         cancel_sender, cancel_recv = mp_channel[TaskId]()
+        heartbeat = mp.Value("d", time.monotonic())
 
         runner_process = mp.Process(
             target=entrypoint,
@@ -88,6 +90,7 @@ class RunnerSupervisor:
                 task_recv,
                 cancel_recv,
                 logger,
+                heartbeat,
             ),
             daemon=True,
         )
@@ -103,6 +106,7 @@ class RunnerSupervisor:
             _task_sender=task_sender,
             _cancel_sender=cancel_sender,
             _event_sender=event_sender,
+            _heartbeat=heartbeat,
         )
 
         return self
@@ -190,6 +194,8 @@ class RunnerSupervisor:
                 async for event in events:
                     if isinstance(event, RunnerStatusUpdated):
                         self.status = event.runner_status
+                        if isinstance(self.status, (RunnerRunning, RunnerWarmingUp)):
+                            self._heartbeat.value = time.monotonic()  # pyright: ignore[reportAny]
                     if isinstance(event, TaskAcknowledged):
                         self.pending.pop(event.task_id).set()
                         continue
@@ -229,6 +235,21 @@ class RunnerSupervisor:
                 await anyio.sleep(5)
                 if not self.runner_process.is_alive():
                     await self._check_runner(RuntimeError("Runner found to be dead"))
+                    return
+                if isinstance(self.status, (RunnerRunning, RunnerWarmingUp)):
+                    stale: float = time.monotonic() - self._heartbeat.value  # pyright: ignore[reportAny]
+                    if stale > HEARTBEAT_TIMEOUT_SECONDS:
+                        logger.error(
+                            f"Runner heartbeat stale for {stale:.1f}s, "
+                            "killing deadlocked process"
+                        )
+                        self.runner_process.terminate()
+                        await self._check_runner(
+                            RuntimeError(
+                                f"Runner deadlocked (no heartbeat for {stale:.1f}s)"
+                            )
+                        )
+                        return
 
     async def _check_runner(self, e: Exception) -> None:
         if not self._cancel_watch_runner.cancel_called:
