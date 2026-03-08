@@ -274,22 +274,12 @@ class SequentialGenerator(InferenceGenerator):
                 )
 
         def distributed_prompt_progress_callback() -> None:
+            # Heartbeat only — no collective ops during prefill.
+            # Collective ops (all_sum/all_gather) before the model's
+            # mx.eval() can corrupt JACCL RDMA state and deadlock
+            # the subsequent all_reduce ops in TP layers.
             if self.heartbeat is not None:
                 self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
-            if EXO_TRACING_ENABLED:
-                t0 = time.perf_counter()
-            self._cancelled_tasks.update(self.cancel_receiver.collect())
-            want_to_cancel = (task.task_id in self._cancelled_tasks) or (
-                TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks
-            )
-            if mx_any(want_to_cancel, self.group):
-                raise PrefillCancelled()
-
-            if EXO_TRACING_ENABLED:
-                logger.info(
-                    f"distributed_prompt_progress_callback took "
-                    f"{(time.perf_counter() - t0) * 1000:.1f}ms"
-                )
 
         tokens_since_cancel_check = self.check_for_cancel_every
 

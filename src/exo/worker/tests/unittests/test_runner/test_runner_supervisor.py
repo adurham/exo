@@ -59,6 +59,7 @@ async def test_check_runner_emits_error_chunk_for_inflight_text_generation() -> 
         _task_sender=task_sender,
         _event_sender=event_sender,
         _cancel_sender=cancel_sender,
+        _heartbeat=mp.Value("d", 0.0),
     )
 
     command_id = CommandId("cmd-a")
