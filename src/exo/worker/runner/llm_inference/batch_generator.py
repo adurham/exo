@@ -285,7 +285,6 @@ class SequentialGenerator(InferenceGenerator):
             if mx_any(want_to_cancel, self.group):
                 raise PrefillCancelled()
 
-            self.agree_on_tasks()
             if EXO_TRACING_ENABLED:
                 logger.info(
                     f"distributed_prompt_progress_callback took "
@@ -310,7 +309,6 @@ class SequentialGenerator(InferenceGenerator):
                 if mx_any(want_to_cancel, self.group):
                     raise PrefillCancelled()
 
-                self.agree_on_tasks()
                 if EXO_TRACING_ENABLED:
                     logger.info(
                         f"on_generation_token cancel check took "
