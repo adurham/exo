@@ -1,5 +1,4 @@
 import itertools
-import math
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -27,7 +26,6 @@ from exo.worker.engines.mlx.generator.generate import (
 from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
-    mx_any,
 )
 from exo.worker.runner.bootstrap import logger
 
@@ -113,7 +111,6 @@ class SequentialGenerator(InferenceGenerator):
     cancel_receiver: MpReceiver[TaskId]
     event_sender: MpSender[Event]
     heartbeat: object | None = None
-    check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
@@ -148,22 +145,6 @@ class SequentialGenerator(InferenceGenerator):
             )
         else:
             logger.info(f"warmed up by generating {toks} tokens")
-        check_for_cancel_every = min(
-            math.ceil(toks / min(time.monotonic() - t, 0.001)), 100
-        )
-        if self.group is not None:
-            self.check_for_cancel_every = int(
-                mx.max(
-                    mx.distributed.all_gather(
-                        mx.array([check_for_cancel_every]),
-                        group=self.group,
-                    )
-                ).item()
-            )
-
-        logger.info(
-            f"runner checking for cancellation every {check_for_cancel_every} tokens"
-        )
 
     def submit(
         self,
@@ -187,6 +168,9 @@ class SequentialGenerator(InferenceGenerator):
     ) -> Iterable[
         tuple[TaskId, GenerationResponse | ToolCallResponse | Cancelled | Finished]
     ]:
+        # Drain cancel pipe — no collective ops, just local pipe read.
+        self._cancelled_tasks.update(self.cancel_receiver.collect())
+
         if self._active is None:
             self.agree_on_tasks()
 
@@ -281,29 +265,15 @@ class SequentialGenerator(InferenceGenerator):
             if self.heartbeat is not None:
                 self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
 
-        tokens_since_cancel_check = self.check_for_cancel_every
-
         def on_generation_token() -> None:
-            nonlocal tokens_since_cancel_check
+            # Heartbeat only — no collective ops during decode.
+            # mx.async_eval() of the next token may be running
+            # concurrently on the GPU (all_reduce for TP), so any
+            # collective op here (all_sum for mx_any) conflicts with
+            # JACCL RDMA and can deadlock.
+            # Cancel is checked between requests in step() instead.
             if self.heartbeat is not None:
                 self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
-            tokens_since_cancel_check += 1
-            if tokens_since_cancel_check >= self.check_for_cancel_every:
-                tokens_since_cancel_check = 0
-                if EXO_TRACING_ENABLED:
-                    t0 = time.perf_counter()
-                self._cancelled_tasks.update(self.cancel_receiver.collect())
-                want_to_cancel = (task.task_id in self._cancelled_tasks) or (
-                    TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks
-                )
-                if mx_any(want_to_cancel, self.group):
-                    raise PrefillCancelled()
-
-                if EXO_TRACING_ENABLED:
-                    logger.info(
-                        f"on_generation_token cancel check took "
-                        f"{(time.perf_counter() - t0) * 1000:.1f}ms"
-                    )
 
         return mlx_generate(
             model=self.model,
