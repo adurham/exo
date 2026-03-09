@@ -740,11 +740,11 @@ def hybrid_auto_parallel(
 
     # PP tail needs to eval its own layers (TP nodes already eval'd in tensor_auto_parallel)
     if not is_tp_node:
-        total = len(layers)
+        full_model_layers = len(all_layers)
         for i, layer in enumerate(layers):
             mx.eval(layer)
             if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+                on_layer_loaded(start_layer + i, full_model_layers)
 
     # Wrap pipeline boundaries
     # PP tail's first layer receives from TP-master
