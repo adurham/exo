@@ -124,6 +124,8 @@ class ClaudeUsage(BaseModel, frozen=True):
 
     input_tokens: int
     output_tokens: int
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 class ClaudeMessagesResponse(BaseModel, frozen=True):
@@ -207,6 +209,7 @@ class ClaudeContentBlockStopEvent(BaseModel, frozen=True):
 class ClaudeMessageDeltaUsage(BaseModel, frozen=True):
     """Usage in message_delta event."""
 
+    input_tokens: int = 0
     output_tokens: int
 
 

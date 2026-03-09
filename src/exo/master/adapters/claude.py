@@ -398,9 +398,11 @@ async def generate_claude_stream(
         if chunk.finish_reason is not None:
             stop_reason = finish_reason_to_claude_stop_reason(chunk.finish_reason)
 
-    # Use actual token count from usage if available
+    # Use actual token counts from usage if available
+    input_tokens = 0
     if last_usage is not None:
         output_tokens = last_usage.completion_tokens
+        input_tokens = last_usage.prompt_tokens
 
     # Close any open blocks
     if thinking_block_started and text_block_index == -1:
@@ -422,7 +424,7 @@ async def generate_claude_stream(
     # message_delta
     message_delta = ClaudeMessageDeltaEvent(
         delta=ClaudeMessageDelta(stop_reason=stop_reason),
-        usage=ClaudeMessageDeltaUsage(output_tokens=output_tokens),
+        usage=ClaudeMessageDeltaUsage(input_tokens=input_tokens, output_tokens=output_tokens),
     )
     yield f"event: message_delta\ndata: {message_delta.model_dump_json()}\n\n"
 
