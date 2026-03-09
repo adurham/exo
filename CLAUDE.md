@@ -24,6 +24,9 @@ Use the `justfile` for all standard workflows:
 - ruff has ~23 pre-existing errors.
 - Rust binding test `test_sleep_on_multiple_items` fails currently (pytest ignores Rust inherently).
 
+## Deployment Rule (MANDATORY)
+**Every code change MUST be committed and pushed to `origin/main` IMMEDIATELY after writing it.** Do not wait for the user to ask. Do not batch changes. Do not leave uncommitted code sitting in the working tree. The cluster nodes deploy from `origin/main` — uncommitted or unpushed code does not exist as far as the cluster is concerned. If you tell the user code is ready to test, it MUST already be pushed. No exceptions.
+
 ## Coding Conventions
 - **Purity:** Pure functions preferred; use classes only to safely encapsulate mutable state.
 - **Typing (Strict):** Python ≥3.13. Use `NewType` for structural disambiguation, `Literal` over enums, exhaustive `match`.
