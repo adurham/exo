@@ -169,6 +169,12 @@ def pipeline_parallel_prefill(
 
                 flush_prefill_sends()
 
+                # Force incremental eval to prevent lazy graph accumulation.
+                # Pipeline tail ranks have no pending sends, so flush_prefill_sends
+                # is a no-op — without this, all computation defers to the final
+                # mx.eval, causing 90s+ blocks and heartbeat timeouts.
+                mx.async_eval(*[c.state for c in _prompt_cache])  # type: ignore
+
                 prompt_progress_callback(processed, total)
 
             for _ in range(n_trailing):
