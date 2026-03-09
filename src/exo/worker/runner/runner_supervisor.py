@@ -241,12 +241,12 @@ class RunnerSupervisor:
                     if stale > HEARTBEAT_TIMEOUT_SECONDS:
                         logger.error(
                             f"Runner heartbeat stale for {stale:.1f}s, "
-                            "killing deadlocked process"
+                            "killing unresponsive process"
                         )
                         self.runner_process.terminate()
                         await self._check_runner(
                             RuntimeError(
-                                f"Runner deadlocked (no heartbeat for {stale:.1f}s)"
+                                f"Runner unresponsive (no heartbeat for {stale:.1f}s)"
                             )
                         )
                         return
