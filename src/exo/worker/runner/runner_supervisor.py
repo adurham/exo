@@ -45,7 +45,7 @@ from exo.utils.channels import MpReceiver, MpSender, Sender, mp_channel
 from exo.utils.task_group import TaskGroup
 from exo.worker.runner.bootstrap import entrypoint
 
-HEARTBEAT_TIMEOUT_SECONDS = 30
+HEARTBEAT_TIMEOUT_SECONDS = 90
 
 
 @dataclass(eq=False)

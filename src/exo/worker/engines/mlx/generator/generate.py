@@ -267,6 +267,10 @@ def prefill(
     if EXO_TRACING_ENABLED:
         logger.info("Starting prefill")
 
+    # Touch heartbeat: mx_barrier can block for seconds waiting for other ranks.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
+
     is_pipeline = _has_pipeline_communication_layer(model)
 
     prefill_step_size = 4096
@@ -533,6 +537,10 @@ def mlx_generate(
                 f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
             )
 
+    # Touch heartbeat: cache lookup deepcopy of large KV state can take 10s+ seconds.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
+
     # Pre-size KV cache step to avoid reallocation spikes during decode.
     # Default step=256 causes a full-cache copy every 256 tokens; at 100K
     # context each copy costs ~160ms. Setting step to cover the full expected
@@ -588,6 +596,10 @@ def mlx_generate(
     think_start = tokenizer.think_start
     think_end = tokenizer.think_end
 
+    # Touch heartbeat: prefill may have taken many seconds.
+    if on_generation_token is not None:
+        on_generation_token()
+
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
         t_barrier = time.perf_counter()
@@ -595,6 +607,11 @@ def mlx_generate(
     if EXO_TRACING_ENABLED:
         decode_barrier_ms = (time.perf_counter() - t_barrier) * 1000
         logger.info(f"Pre-decode barrier: {decode_barrier_ms:.1f}ms")
+
+    # Touch heartbeat: pre-decode barrier can block waiting for other ranks.
+    if on_generation_token is not None:
+        on_generation_token()
+
     if EXO_TRACING_ENABLED:
         logger.info("Starting decode")
 
