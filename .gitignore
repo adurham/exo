@@ -37,7 +37,7 @@ hosts_*.json
 bench/**/*.json
 
 # tmp
-tmp/models
+tmp/
 
 # Logs
 logs
