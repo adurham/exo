@@ -13,7 +13,7 @@ from mlx_lm.models.cache import ArraysCache, RotatingKVCache
 from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
-from exo.shared.constants import EXO_TRACING_ENABLED
+from exo.shared.constants import EXO_MAX_CONTEXT_TOKENS, EXO_TRACING_ENABLED
 from exo.shared.types.api import (
     CompletionTokensDetails,
     FinishReason,
@@ -530,6 +530,11 @@ def mlx_generate(
         distributed_prompt_progress_callback()
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
+
+    if EXO_MAX_CONTEXT_TOKENS is not None and len(all_prompt_tokens) > EXO_MAX_CONTEXT_TOKENS:
+        raise ValueError(
+            f"prompt is too long: {len(all_prompt_tokens)} tokens > {EXO_MAX_CONTEXT_TOKENS} token context limit"
+        )
 
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench

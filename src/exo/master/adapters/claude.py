@@ -17,6 +17,8 @@ from exo.shared.types.claude_api import (
     ClaudeContentBlockDeltaEvent,
     ClaudeContentBlockStartEvent,
     ClaudeContentBlockStopEvent,
+    ClaudeErrorDetail,
+    ClaudeErrorResponse,
     ClaudeInputJsonDelta,
     ClaudeMessageDelta,
     ClaudeMessageDeltaEvent,
@@ -248,7 +250,11 @@ async def collect_claude_response(
             stop_reason = finish_reason_to_claude_stop_reason(chunk.finish_reason)
 
     if error_message is not None:
-        raise ValueError(error_message)
+        error_type = "invalid_request_error" if "too long" in error_message or "context limit" in error_message else "api_error"
+        yield ClaudeErrorResponse(
+            error=ClaudeErrorDetail(type=error_type, message=error_message)
+        ).model_dump_json()
+        return
 
     combined_text = "".join(text_parts)
     combined_thinking = "".join(thinking_parts)
@@ -317,7 +323,12 @@ async def generate_claude_stream(
             continue
 
         if isinstance(chunk, ErrorChunk):
-            # Close text block and bail
+            error_msg = chunk.error_message or "Internal server error"
+            error_type = "invalid_request_error" if "too long" in error_msg or "context limit" in error_msg else "api_error"
+            error_resp = ClaudeErrorResponse(
+                error=ClaudeErrorDetail(type=error_type, message=error_msg)
+            )
+            yield f"event: error\ndata: {error_resp.model_dump_json()}\n\n"
             break
 
         last_usage = chunk.usage or last_usage

@@ -54,6 +54,7 @@ from exo.shared.constants import (
     EXO_EVENT_LOG_DIR,
     EXO_IMAGE_CACHE_DIR,
     EXO_MAX_CHUNK_SIZE,
+    EXO_MAX_CONTEXT_TOKENS,
     EXO_TRACING_CACHE_DIR,
 )
 from exo.shared.election import ElectionMessage
@@ -1539,6 +1540,7 @@ class API:
                     hugging_face_id=card.model_id,
                     name=card.model_id.short(),
                     description="",
+                    context_length=EXO_MAX_CONTEXT_TOKENS or 0,
                     tags=[],
                     storage_size_megabytes=card.storage_size.in_mb,
                     supports_tensor=card.supports_tensor,

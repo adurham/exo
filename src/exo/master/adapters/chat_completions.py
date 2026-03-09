@@ -176,11 +176,13 @@ async def generate_chat_stream(
                 yield f": prefill_progress {chunk.model_dump_json()}\n\n"
 
             case ErrorChunk():
+                error_msg = chunk.error_message or "Internal server error"
+                is_context_error = "too long" in error_msg or "context limit" in error_msg
                 error_response = ErrorResponse(
                     error=ErrorInfo(
-                        message=chunk.error_message or "Internal server error",
-                        type="InternalServerError",
-                        code=500,
+                        message=error_msg,
+                        type="invalid_request_error" if is_context_error else "server_error",
+                        code=400 if is_context_error else 500,
                     )
                 )
                 yield f"data: {error_response.model_dump_json()}\n\n"
@@ -315,7 +317,16 @@ async def collect_chat_response(
                 finish_reason = chunk.finish_reason
 
     if error_message is not None:
-        raise ValueError(error_message)
+        is_context_error = "too long" in error_message or "context limit" in error_message
+        error_response = ErrorResponse(
+            error=ErrorInfo(
+                message=error_message,
+                type="invalid_request_error" if is_context_error else "server_error",
+                code=400 if is_context_error else 500,
+            )
+        )
+        yield error_response.model_dump_json()
+        return
 
     combined_text = "".join(text_parts)
     combined_thinking = "".join(thinking_parts) if thinking_parts else None

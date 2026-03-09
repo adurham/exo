@@ -242,3 +242,29 @@ ClaudeStreamEvent = (
     | ClaudeMessageDeltaEvent
     | ClaudeMessageStopEvent
 )
+
+
+# Anthropic API error format
+ClaudeErrorType = Literal[
+    "invalid_request_error",
+    "authentication_error",
+    "permission_error",
+    "not_found_error",
+    "rate_limit_error",
+    "api_error",
+    "overloaded_error",
+]
+
+
+class ClaudeErrorDetail(BaseModel, frozen=True):
+    """Error detail in Anthropic API error response."""
+
+    type: ClaudeErrorType
+    message: str
+
+
+class ClaudeErrorResponse(BaseModel, frozen=True):
+    """Anthropic API error response format."""
+
+    type: Literal["error"] = "error"
+    error: ClaudeErrorDetail

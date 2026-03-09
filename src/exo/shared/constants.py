@@ -84,3 +84,13 @@ EXO_ENABLE_IMAGE_MODELS = (
 EXO_OFFLINE = os.getenv("EXO_OFFLINE", "false").lower() == "true"
 
 EXO_TRACING_ENABLED = os.getenv("EXO_TRACING_ENABLED", "false").lower() == "true"
+
+
+def _int_or_none(env: str, default: int | None) -> int | None:
+    val = os.environ.get(env, "")
+    if not val or val.lower() in ("none", "null", "false"):
+        return default
+    return int(val)
+
+
+EXO_MAX_CONTEXT_TOKENS: int | None = _int_or_none("EXO_MAX_CONTEXT_TOKENS", None)
