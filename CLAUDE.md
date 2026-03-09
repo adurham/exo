@@ -25,7 +25,7 @@ Use the `justfile` for all standard workflows:
 - Rust binding test `test_sleep_on_multiple_items` fails currently (pytest ignores Rust inherently).
 
 ## Deployment Rule (MANDATORY)
-**Every code change MUST be committed and pushed to `origin/main` IMMEDIATELY after writing it.** Do not wait for the user to ask. Do not batch changes. Do not leave uncommitted code sitting in the working tree. The cluster nodes deploy from `origin/main` — uncommitted or unpushed code does not exist as far as the cluster is concerned. If you tell the user code is ready to test, it MUST already be pushed. No exceptions.
+**Before telling the user code is ready to test or deploy, it MUST be committed and pushed to `origin/main`.** The cluster nodes deploy from `origin/main` — uncommitted or unpushed code does not exist as far as the cluster is concerned. Never say "ready to test" or "ready to deploy" with unpushed changes in the working tree. No exceptions.
 
 ## Coding Conventions
 - **Purity:** Pure functions preferred; use classes only to safely encapsulate mutable state.
