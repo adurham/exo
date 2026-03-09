@@ -187,6 +187,10 @@ def pipeline_parallel_prefill(
             quantize_cache_fn(_prompt_cache)
         flush_prefill_sends()
 
+    # Touch heartbeat: model() calls above can take seconds.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
+
     assert _prompt_cache is not None
     if EXO_TRACING_ENABLED:
         t_cache_eval = time.perf_counter()
@@ -197,6 +201,10 @@ def pipeline_parallel_prefill(
         logger.info(
             f"[R{rank}] Prefill post-loop: {post_ms:.1f}ms (cache eval: {cache_eval_ms:.1f}ms)"
         )
+
+    # Touch heartbeat: mx.eval on cache states can take 10s+ seconds.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
 
     # Final callback matching generate_step
     prompt_progress_callback(total, total)
@@ -329,6 +337,10 @@ def prefill(
             c.trim(2)
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
+
+    # Touch heartbeat: cache deepcopy/trim above can take 10s+ seconds at large context.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
 
     elapsed = time.perf_counter() - start_time
     tokens_per_sec = num_tokens / elapsed if elapsed > 0 else 0.0
@@ -782,6 +794,9 @@ def mlx_generate(
         )
 
         if is_done:
+            # Touch heartbeat: KV cache update above can take 10s+ seconds.
+            if on_generation_token is not None:
+                on_generation_token()
             if EXO_TRACING_ENABLED:
                 t_barrier = time.perf_counter()
             mx_barrier(group)
@@ -789,6 +804,9 @@ def mlx_generate(
                 logger.info(
                     f"Post-decode barrier: {(time.perf_counter() - t_barrier) * 1000:.1f}ms"
                 )
+            # Touch heartbeat: post-decode barrier can block waiting for other ranks.
+            if on_generation_token is not None:
+                on_generation_token()
             break
 
         # Limit accumulated_text to what's needed for stop sequence detection
