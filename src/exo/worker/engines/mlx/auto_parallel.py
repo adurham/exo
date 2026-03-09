@@ -707,9 +707,6 @@ def hybrid_auto_parallel(
     is_tp_node = model_shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
 
-    if EXO_TRACING_ENABLED:
-        enable_distributed_tracing(model_shard_meta.device_rank)
-
     logger.info(
         f"[hybrid] rank={model_shard_meta.device_rank} tp_rank={model_shard_meta.tp_rank} "
         f"pp_rank={model_shard_meta.pp_rank} is_tp={is_tp_node} color={tp_color} "
@@ -782,15 +779,6 @@ def hybrid_auto_parallel(
                 model_shard_meta.world_size,
                 group=group,
             )
-
-    # Wrap layers with tracing for forward-pass boundary logging
-    if EXO_TRACING_ENABLED:
-        TracingLayerWrapper._num_layers = len(layers)
-        for i in range(len(layers)):
-            if not isinstance(layers[i], TracingLayerWrapper):
-                layers[i] = TracingLayerWrapper(
-                    layers[i], model_shard_meta.device_rank, start_layer + i
-                )
 
     logger.info(
         f"[hybrid] rank={model_shard_meta.device_rank} setup complete: "
@@ -978,18 +966,6 @@ def tensor_auto_parallel(
     model = tensor_parallel_sharding_strategy.shard_model(
         model, timeout_seconds, on_timeout, on_layer_loaded
     )
-
-    # Wrap layers with tracing for forward-pass boundary logging
-    if EXO_TRACING_ENABLED:
-        inner = get_inner_model(model)
-        layers = getattr(inner, "layers", None) or getattr(inner, "h", None)
-        if layers is not None:
-            rank = group.rank()
-            TracingLayerWrapper._num_layers = len(layers)
-            for i in range(len(layers)):
-                if not isinstance(layers[i], TracingLayerWrapper):
-                    layers[i] = TracingLayerWrapper(layers[i], rank, i)
-            logger.info(f"[tensor_auto_parallel] wrapped {len(layers)} layers with TracingLayerWrapper (rank={rank})")
 
     return patch_tensor_model(model)
 

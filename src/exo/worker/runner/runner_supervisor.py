@@ -221,6 +221,8 @@ class RunnerSupervisor:
                         self.completed.add(event.task_id)
                     # Fast-path: deliver ChunkGenerated directly to local API,
                     # bypassing the 2-hop master event pipeline round-trip.
+                    # ChunkGenerated is a state pass-through (apply.py) so the
+                    # master doesn't need to see it when local delivery succeeds.
                     if (
                         isinstance(event, ChunkGenerated)
                         and self._local_chunk_sender is not None
@@ -229,6 +231,7 @@ class RunnerSupervisor:
                             ClosedResourceError, BrokenResourceError
                         ):
                             await self._local_chunk_sender.send(event)
+                        continue
                     await self._event_sender.send(event)
         except (ClosedResourceError, BrokenResourceError) as e:
             await self._check_runner(e)

@@ -405,8 +405,6 @@ def warmup_inference(
         kv_group_size=KV_GROUP_SIZE,
         kv_bits=KV_BITS,
     ):
-        if EXO_TRACING_ENABLED:
-            logger.info("Generated warmup token: " + str(_r.text))
         tokens_generated += 1
 
     if EXO_TRACING_ENABLED:
