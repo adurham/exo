@@ -502,7 +502,10 @@ def mlx_generate(
     # identical conversations produce identical tokens regardless of session metadata.
     prompt = normalize_prompt_for_cache(prompt)
 
-    # Encode prompt once at the top and fix unmatched think tags
+    # Encode prompt once at the top and fix unmatched think tags.
+    # Touch heartbeat: tokenization of large prompts (90K+ tokens) can take seconds.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
 
@@ -511,7 +514,10 @@ def mlx_generate(
     if is_bench:
         kv_prefix_cache = None
 
-    # Use prefix cache if available, otherwise create fresh cache
+    # Use prefix cache if available, otherwise create fresh cache.
+    # Touch heartbeat: cache lookup deepcopies KV state which can be slow.
+    if distributed_prompt_progress_callback is not None:
+        distributed_prompt_progress_callback()
     prefix_hit_length = 0
     matched_index: int | None = None
     if kv_prefix_cache is None:

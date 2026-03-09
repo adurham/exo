@@ -112,6 +112,10 @@ class SequentialGenerator(InferenceGenerator):
     event_sender: MpSender[Event]
     heartbeat: object | None = None
 
+    def _touch_heartbeat(self) -> None:
+        if self.heartbeat is not None:
+            self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
     _queue: deque[TextGeneration] = field(default_factory=deque, init=False)
@@ -279,8 +283,7 @@ class SequentialGenerator(InferenceGenerator):
             # Collective ops (all_sum/all_gather) before the model's
             # mx.eval() can corrupt JACCL RDMA state and deadlock
             # the subsequent all_reduce ops in TP layers.
-            if self.heartbeat is not None:
-                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+            self._touch_heartbeat()
 
         def on_generation_token() -> None:
             # Heartbeat only — no collective ops during decode.
@@ -289,8 +292,11 @@ class SequentialGenerator(InferenceGenerator):
             # collective op here (all_sum for mx_any) conflicts with
             # JACCL RDMA and can deadlock.
             # Cancel is checked between requests in step() instead.
-            if self.heartbeat is not None:
-                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+            self._touch_heartbeat()
+
+        # Touch heartbeat before mlx_generate — tokenization, cache lookup,
+        # and deepcopy can take tens of seconds on large prompts.
+        self._touch_heartbeat()
 
         return mlx_generate(
             model=self.model,
