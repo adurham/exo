@@ -165,7 +165,6 @@ async def generate_chat_stream(
     chunk_stream: AsyncGenerator[
         PrefillProgressChunk | ErrorChunk | ToolCallChunk | TokenChunk, None
     ],
-    include_usage: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Generate Chat Completions API streaming events from chunks."""
     last_usage: Usage | None = None
@@ -213,17 +212,17 @@ async def generate_chat_stream(
                             finish_reason="tool_calls",
                         )
                     ],
-                    usage=None if include_usage else last_usage,
+                    usage=last_usage,
                 )
                 tool_response_dict = cast(dict[str, Any], json.loads(tool_response.model_dump_json()))
-                if last_usage is not None and not include_usage:
+                if last_usage is not None:
                     if "usage" not in tool_response_dict or tool_response_dict["usage"] is None:
                         tool_response_dict["usage"] = json.loads(last_usage.model_dump_json())
                     tool_response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
                     tool_response_dict["usage"]["output_tokens"] = last_usage.completion_tokens
 
                 yield f"data: {json.dumps(tool_response_dict, separators=(',', ':'))}\n\n"
-                if include_usage and last_usage is not None:
+                if last_usage is not None:
                     usage_chunk = _make_usage_chunk(command_id, chunk.model, last_usage)
                     yield f"data: {json.dumps(usage_chunk, separators=(',', ':'))}\n\n"
                 yield "data: [DONE]\n\n"
@@ -233,12 +232,12 @@ async def generate_chat_stream(
                 last_usage = chunk.usage or last_usage
 
                 chunk_response = chunk_to_response(chunk, command_id)
-                if chunk.finish_reason is not None and not include_usage:
+                if chunk.finish_reason is not None:
                     chunk_response = chunk_response.model_copy(
                         update={"usage": last_usage}
                     )
                 chunk_response_dict = cast(dict[str, Any], json.loads(chunk_response.model_dump_json()))
-                if chunk.finish_reason is not None and last_usage is not None and not include_usage:
+                if chunk.finish_reason is not None and last_usage is not None:
                     if "usage" not in chunk_response_dict or chunk_response_dict["usage"] is None:
                         chunk_response_dict["usage"] = json.loads(last_usage.model_dump_json())
                     chunk_response_dict["usage"]["input_tokens"] = last_usage.prompt_tokens
@@ -247,7 +246,9 @@ async def generate_chat_stream(
                 yield f"data: {json.dumps(chunk_response_dict, separators=(',', ':'))}\n\n"
 
                 if chunk.finish_reason is not None:
-                    if include_usage and last_usage is not None:
+                    # Always emit a separate usage chunk (OpenAI stream_options.include_usage convention).
+                    # Clients that don't expect it will ignore the extra chunk before [DONE].
+                    if last_usage is not None:
                         usage_chunk = _make_usage_chunk(command_id, chunk.model, last_usage)
                         yield f"data: {json.dumps(usage_chunk, separators=(',', ':'))}\n\n"
                     yield "data: [DONE]\n\n"
