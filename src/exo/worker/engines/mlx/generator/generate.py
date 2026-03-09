@@ -527,6 +527,15 @@ def mlx_generate(
                 f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
             )
 
+    # Pre-size KV cache step to avoid reallocation spikes during decode.
+    # Default step=256 causes a full-cache copy every 256 tokens; at 100K
+    # context each copy costs ~160ms. Setting step to cover the full expected
+    # sequence eliminates all mid-generation reallocations.
+    max_tokens_estimate = (task.max_output_tokens or MAX_TOKENS) + len(all_prompt_tokens)
+    for c in caches:
+        if hasattr(c, "step"):
+            c.step = max_tokens_estimate
+
     logits_processors: list[Callable[[mx.array, mx.array], mx.array]] = []
     if is_bench:
         # Only sample length eos tokens
