@@ -17,6 +17,7 @@ from exo.worker.engines.mlx.cache import (
     encode_prompt,
     get_prefix_length,
     make_kv_cache,
+    normalize_prompt_for_cache,
 )
 from exo.worker.engines.mlx.generator.generate import mlx_generate, prefill
 from exo.worker.engines.mlx.utils_mlx import apply_chat_template
@@ -28,6 +29,50 @@ from exo.worker.tests.unittests.test_mlx.conftest import (
 
 def _check_model_exists() -> bool:
     return DEFAULT_GPT_OSS_CONFIG.model_path.exists()
+
+
+class TestNormalizePromptForCache:
+    def test_strips_think_blocks(self):
+        prompt = "Hello <think>some reasoning</think>world"
+        assert normalize_prompt_for_cache(prompt) == "Hello world"
+
+    def test_strips_multiline_think_blocks(self):
+        prompt = "Before<think>\nline1\nline2\n</think>After"
+        assert normalize_prompt_for_cache(prompt) == "BeforeAfter"
+
+    def test_strips_multiple_think_blocks(self):
+        prompt = "A<think>r1</think>B<think>r2</think>C"
+        assert normalize_prompt_for_cache(prompt) == "ABC"
+
+    def test_no_think_blocks_unchanged(self):
+        prompt = "Hello world, no thinking here"
+        assert normalize_prompt_for_cache(prompt) == prompt
+
+    def test_volatile_patterns_still_replaced(self):
+        prompt = "cch=abc123; ccid=550e8400-e29b-41d4-a716-446655440000;"
+        result = normalize_prompt_for_cache(prompt)
+        assert result == "cch=0; ccid=0;"
+
+    def test_think_and_volatile_combined(self):
+        prompt = "cch=ff; <think>reasoning</think> rest"
+        result = normalize_prompt_for_cache(prompt)
+        assert result == "cch=0;  rest"
+
+    def test_with_without_thinking_produce_same_output(self):
+        """The exact scenario that caused 99% → 21% cache hit regression."""
+        with_thinking = (
+            "System prompt here.\n"
+            "User: Hello\n"
+            "Assistant: <think>Let me reason about this.</think>I'll help you.\n"
+            "User: Tell me more"
+        )
+        without_thinking = (
+            "System prompt here.\n"
+            "User: Hello\n"
+            "Assistant: I'll help you.\n"
+            "User: Tell me more"
+        )
+        assert normalize_prompt_for_cache(with_thinking) == normalize_prompt_for_cache(without_thinking)
 
 
 class TestGetPrefixLength:
