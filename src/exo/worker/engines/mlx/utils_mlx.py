@@ -717,7 +717,9 @@ def mx_barrier(group: Group | None):
         return
     if EXO_TRACING_ENABLED:
         t0 = time.perf_counter()
-    mx.eval(
+    from exo.worker.engines.mlx.auto_parallel import _guarded_eval
+
+    _guarded_eval(
         mx.distributed.all_sum(
             mx.array(1.0), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
         )

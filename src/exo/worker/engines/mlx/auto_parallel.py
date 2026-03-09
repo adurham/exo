@@ -3,10 +3,11 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import partial
 from inspect import signature
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Iterator, Protocol, cast
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -241,6 +242,83 @@ def eval_with_timeout(
         completed.set()
 
 
+DISTRIBUTED_OP_TIMEOUT = 60.0
+
+
+class DistributedOpWatchdog:
+    """Kills the runner process if any distributed mx.eval exceeds the timeout.
+
+    Uses a single daemon thread that polls every 2s.  Pipeline layers call
+    arm()/disarm() (via ``guarded()``) around blocking ``mx.eval()`` calls
+    that depend on distributed ops (recv, send, all_gather, all_sum).
+
+    When the deadline is exceeded the watchdog logs an error and calls
+    ``os._exit(1)`` to hard-terminate the runner process.  The supervisor
+    will then detect the death and propagate ``RunnerFailed``.
+    """
+
+    def __init__(self, timeout: float = DISTRIBUTED_OP_TIMEOUT):
+        self._timeout = timeout
+        self._deadline: float = float("inf")
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def arm(self) -> None:
+        self._deadline = time.monotonic() + self._timeout
+
+    def disarm(self) -> None:
+        self._deadline = float("inf")
+
+    @contextmanager
+    def guarded(self) -> Iterator[None]:
+        self.arm()
+        try:
+            yield
+        finally:
+            self.disarm()
+
+    def _run(self) -> None:
+        while True:
+            time.sleep(2.0)
+            if time.monotonic() > self._deadline:
+                logger.error(
+                    f"Distributed operation timed out after {self._timeout:.0f}s — "
+                    "peer process likely dead. Terminating runner to allow recovery."
+                )
+                os._exit(1)
+
+
+_distributed_watchdog: DistributedOpWatchdog | None = None
+
+
+def init_distributed_watchdog(timeout: float = DISTRIBUTED_OP_TIMEOUT) -> None:
+    """Initialise the per-process distributed-op watchdog (idempotent)."""
+    global _distributed_watchdog
+    if _distributed_watchdog is None:
+        _distributed_watchdog = DistributedOpWatchdog(timeout)
+
+
+def get_distributed_watchdog() -> DistributedOpWatchdog | None:
+    return _distributed_watchdog
+
+
+def _guarded_eval(*args: Any) -> None:  # pyright: ignore[reportAny]
+    """``mx.eval`` protected by the distributed-operation watchdog.
+
+    If the watchdog has been initialised, arms/disarms the deadline around the
+    eval.  Otherwise falls back to a plain ``mx.eval``.
+    """
+    wd = _distributed_watchdog
+    if wd is not None:
+        wd.arm()
+        try:
+            mx.eval(*args)  # pyright: ignore[reportAny]
+        finally:
+            wd.disarm()
+    else:
+        mx.eval(*args)  # pyright: ignore[reportAny]
+
+
 class _LayerCallable(Protocol):
     """Structural type that any compatible layer must satisfy.
 
@@ -321,7 +399,7 @@ class PipelineFirstLayer(CustomMlxLayer):
             if EXO_TRACING_ENABLED:
                 t1 = time.perf_counter()
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-            mx.eval(x)
+            _guarded_eval(x)
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
                 _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
@@ -355,7 +433,7 @@ class PipelineLastLayer(CustomMlxLayer):
 
         # Eval layer output to materialize it before send — this splits the graph
         # so the send is isolated and the receiving rank's recv can complete.
-        mx.eval(output)
+        _guarded_eval(output)
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
@@ -376,9 +454,9 @@ class PipelineLastLayer(CustomMlxLayer):
                 _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
                 if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
                     _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
-            mx.eval(output)
+            _guarded_eval(output)
             if cache is not None and hasattr(_cache, "keys"):  # type: ignore
-                mx.eval(_cache.keys)  # type: ignore
+                _guarded_eval(_cache.keys)  # type: ignore
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.send_us += int(
                     (time.perf_counter() - t_send) * 1_000_000
@@ -390,7 +468,7 @@ class PipelineLastLayer(CustomMlxLayer):
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
-            mx.eval(output)
+            _guarded_eval(output)
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.all_gather_us += int(
                     (time.perf_counter() - t_ag) * 1_000_000
@@ -429,7 +507,7 @@ class HybridPipelineLastLayer(CustomMlxLayer):
         if EXO_TRACING_ENABLED:
             t0 = time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
-        mx.eval(output)
+        _guarded_eval(output)
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
@@ -449,9 +527,9 @@ class HybridPipelineLastLayer(CustomMlxLayer):
             _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
             if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
                 _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
-        mx.eval(output)
+        _guarded_eval(output)
         if cache is not None and hasattr(_cache, "keys"):  # type: ignore
-            mx.eval(_cache.keys)  # type: ignore
+            _guarded_eval(_cache.keys)  # type: ignore
         if EXO_TRACING_ENABLED:
             _pipeline_timings.send_us += int(
                 (time.perf_counter() - t_send) * 1_000_000
@@ -464,7 +542,7 @@ class HybridPipelineLastLayer(CustomMlxLayer):
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
-            mx.eval(output)
+            _guarded_eval(output)
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.all_gather_us += int(
                     (time.perf_counter() - t_ag) * 1_000_000
@@ -491,7 +569,7 @@ class HybridPipelinePassthroughLayer(CustomMlxLayer):
         if EXO_TRACING_ENABLED:
             t0 = time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
-        mx.eval(output)
+        _guarded_eval(output)
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
@@ -503,7 +581,7 @@ class HybridPipelinePassthroughLayer(CustomMlxLayer):
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
-            mx.eval(output)
+            _guarded_eval(output)
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.all_gather_us += int(
                     (time.perf_counter() - t_ag) * 1_000_000
@@ -704,6 +782,8 @@ def hybrid_auto_parallel(
     The PP tail (tp_rank == -1) owns a disjoint layer range and communicates
     with the TP-master via send/recv.
     """
+    init_distributed_watchdog()
+
     is_tp_node = model_shard_meta.tp_rank >= 0
     tp_color = 0 if is_tp_node else 1
 
@@ -854,6 +934,8 @@ def tensor_auto_parallel(
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
 ) -> nn.Module:
+    init_distributed_watchdog()
+
     all_to_sharded_linear = partial(
         shard_linear,
         sharding="all-to-sharded",

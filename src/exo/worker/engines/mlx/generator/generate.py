@@ -200,7 +200,9 @@ def pipeline_parallel_prefill(
     assert _prompt_cache is not None
     if EXO_TRACING_ENABLED:
         t_cache_eval = time.perf_counter()
-    mx.eval([c.state for c in _prompt_cache])  # type: ignore
+    from exo.worker.engines.mlx.auto_parallel import _guarded_eval
+
+    _guarded_eval([c.state for c in _prompt_cache])  # type: ignore
     if EXO_TRACING_ENABLED:
         cache_eval_ms = (time.perf_counter() - t_cache_eval) * 1000
         post_ms = (time.perf_counter() - t_post) * 1000
