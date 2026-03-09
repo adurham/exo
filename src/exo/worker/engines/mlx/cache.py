@@ -374,24 +374,13 @@ _VOLATILE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r'ccid=[a-fA-F0-9\-]+;'), 'ccid=0;'),      # Claude Code conversation ID
 ]
 
-# Matches thinking blocks (including multiline) in the prompt.
-# Clients may inconsistently include/strip previous assistant reasoning,
-# causing catastrophic cache misses (e.g. 99% → 21% hit rate).  Stripping
-# these blocks from the model input makes the KV cache stable regardless
-# of client behaviour — previous-turn reasoning doesn't help the model anyway.
-# Covers both standard (<think>) and longcat (<longcat_think>) thinking tags.
-_THINK_BLOCK_RE = re.compile(r'<(?:longcat_)?think>.*?</(?:longcat_)?think>', re.DOTALL)
-
-
 def normalize_prompt_for_cache(prompt: str) -> str:
     """Normalize a prompt for stable KV-cache matching.
 
-    1. Strips <think>…</think> blocks from prior assistant turns so the model
-       (and cache) never depend on whether the client forwarded reasoning.
-    2. Replaces volatile session metadata (content hashes, conversation IDs)
-       with fixed placeholders so different sessions produce identical tokens.
+    Replaces volatile session metadata (content hashes, conversation IDs)
+    with fixed placeholders so different sessions produce identical tokens.
     """
-    normalized = _THINK_BLOCK_RE.sub('', prompt)
+    normalized = prompt
     for pattern, replacement in _VOLATILE_PATTERNS:
         normalized = pattern.sub(replacement, normalized)
     return normalized
