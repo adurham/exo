@@ -366,24 +366,25 @@ def cache_length(cache: KVCacheType) -> int:
     return max(_entry_length(c) for c in cache)
 
 
-# Volatile patterns stripped from prompts before cache comparison.
+# Volatile patterns replaced with fixed placeholders before cache comparison.
 # Each pattern should match the full volatile token (e.g., 'cch=abc123;').
-_VOLATILE_PATTERNS = [
-    re.compile(r'cch=[a-fA-F0-9]+;'),      # Claude Code content-cache hash
-    re.compile(r'ccid=[a-fA-F0-9\-]+;'),   # Claude Code conversation ID
+# We replace with fixed values (not strip) to preserve tokenization structure.
+_VOLATILE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r'cch=[a-fA-F0-9]+;'), 'cch=0;'),          # Claude Code content-cache hash
+    (re.compile(r'ccid=[a-fA-F0-9\-]+;'), 'ccid=0;'),      # Claude Code conversation ID
 ]
 
 
 def normalize_prompt_for_cache(prompt: str) -> str:
-    """Strip volatile, semantically-irrelevant tokens from a prompt.
+    """Replace volatile, semantically-irrelevant tokens in a prompt with fixed placeholders.
 
-    Removes patterns like 'cch=abc123;' that change every request but
-    have no effect on model behavior. This allows the KV prefix cache
-    to match prompts that differ only in these volatile sections.
+    Replaces patterns like 'cch=abc123;' with 'cch=0;' so that prompts
+    differing only in volatile sections produce identical tokens. The model
+    sees the normalized prompt, which is semantically equivalent.
     """
     normalized = prompt
-    for pattern in _VOLATILE_PATTERNS:
-        normalized = pattern.sub('', normalized)
+    for pattern, replacement in _VOLATILE_PATTERNS:
+        normalized = pattern.sub(replacement, normalized)
     return normalized
 
 

@@ -46,6 +46,7 @@ from exo.worker.engines.mlx.cache import (
     encode_prompt,
     has_non_kv_caches,
     make_kv_cache,
+    normalize_prompt_for_cache,
     snapshot_ssm_states,
 )
 from exo.worker.engines.mlx.constants import (
@@ -497,6 +498,10 @@ def mlx_generate(
     seed = task.seed or 42
     mx.random.seed(seed)
 
+    # Normalize volatile patterns (session IDs, hashes) before encoding so that
+    # identical conversations produce identical tokens regardless of session metadata.
+    prompt = normalize_prompt_for_cache(prompt)
+
     # Encode prompt once at the top and fix unmatched think tags
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
@@ -703,6 +708,11 @@ def mlx_generate(
                     if len(all_prompt_tokens) > 0
                     else 0.0
                 )
+                # Use prompt-only tokens for cache comparison (normalized_tokens).
+                # The full KV cache (prompt + response) is stored, but comparisons
+                # use only the prompt portion. Response tokens get re-tokenized
+                # differently in the next turn's chat template, causing mismatches
+                # if included in the comparison key.
                 if (
                     matched_index is not None
                     and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
@@ -713,10 +723,12 @@ def mlx_generate(
                         caches,
                         cache_snapshots,
                         restore_pos=prefix_hit_length,
+                        normalized_tokens=all_prompt_tokens,
                     )
                 else:
                     kv_prefix_cache.add_kv_cache(
-                        full_prompt_tokens, caches, cache_snapshots
+                        full_prompt_tokens, caches, cache_snapshots,
+                        normalized_tokens=all_prompt_tokens,
                     )
                 if EXO_TRACING_ENABLED:
                     logger.info(
