@@ -309,8 +309,9 @@ async def generate_claude_stream(
     ],
 ) -> AsyncGenerator[str, None]:
     """Generate Claude Messages API streaming events from TokenChunks."""
-    # Emit message_start immediately (input_tokens populated at message_delta)
-    yield _message_start_event(command_id, model, 0)
+    # Defer message_start until the first real chunk so we can populate input_tokens
+    # from the first token's Usage (which carries prompt_tokens).
+    message_start_emitted = False
 
     output_tokens = 0
     stop_reason: ClaudeStopReason | None = None
@@ -328,6 +329,9 @@ async def generate_claude_stream(
             continue
 
         if isinstance(chunk, ErrorChunk):
+            if not message_start_emitted:
+                message_start_emitted = True
+                yield _message_start_event(command_id, model, 0)
             error_msg = chunk.error_message or "Internal server error"
             error_type = "invalid_request_error" if "too long" in error_msg or "context limit" in error_msg else "api_error"
             error_resp = ClaudeErrorResponse(
@@ -337,6 +341,12 @@ async def generate_claude_stream(
             break
 
         last_usage = chunk.usage or last_usage
+
+        # Emit message_start on first real token/tool chunk with actual input_tokens
+        if not message_start_emitted:
+            message_start_emitted = True
+            input_tokens = last_usage.prompt_tokens if last_usage else 0
+            yield _message_start_event(command_id, model, input_tokens)
 
         if isinstance(chunk, ToolCallChunk):
             stop_reason = "tool_use"
@@ -419,6 +429,10 @@ async def generate_claude_stream(
     if last_usage is not None:
         output_tokens = last_usage.completion_tokens
         input_tokens = last_usage.prompt_tokens
+
+    # Emit message_start if no real chunks arrived (e.g. empty response)
+    if not message_start_emitted:
+        yield _message_start_event(command_id, model, input_tokens)
 
     # Close any open blocks
     if thinking_block_started and text_block_index == -1:

@@ -614,6 +614,8 @@ def mlx_generate(
     generated_text_parts: list[str] = []
     generation_start_time = time.perf_counter()
     usage: Usage | None = None
+    total_prompt_tokens = len(all_prompt_tokens)
+    first_token_emitted = False
     in_thinking = False
     reasoning_tokens = 0
     think_start = tokenizer.think_start
@@ -698,7 +700,6 @@ def mlx_generate(
                     f"Model generated unexpected finish_reason: {out.finish_reason}"
                 )
 
-            total_prompt_tokens = len(all_prompt_tokens)
             usage = Usage(
                 prompt_tokens=total_prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -708,6 +709,22 @@ def mlx_generate(
                 ),
                 completion_tokens_details=CompletionTokensDetails(
                     reasoning_tokens=reasoning_tokens
+                ),
+            )
+
+        # Emit prompt_tokens on the first token so streaming adapters can
+        # populate input_tokens in message_start without waiting for the final chunk.
+        if not first_token_emitted and not is_done:
+            first_token_emitted = True
+            usage = Usage(
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=0,
+                total_tokens=total_prompt_tokens,
+                prompt_tokens_details=PromptTokensDetails(
+                    cached_tokens=prefix_hit_length
+                ),
+                completion_tokens_details=CompletionTokensDetails(
+                    reasoning_tokens=0
                 ),
             )
 
@@ -803,6 +820,11 @@ def mlx_generate(
             stats=stats,
             usage=usage,
         )
+
+        # Reset usage after first-token emission so only the first and final
+        # tokens carry Usage objects. This avoids per-token overhead.
+        if usage is not None and not is_done:
+            usage = None
 
         if is_done:
             # Touch heartbeat: KV cache update above can take 10s+ seconds.
