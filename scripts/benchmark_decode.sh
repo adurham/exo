@@ -120,7 +120,10 @@ try:
                     break
                 try:
                     data = json.loads(data_str)
-                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    choices = data.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
                     if delta.get("content") or delta.get("reasoning_content"):
                         if t_first_token is None:
                             t_first_token = time.time()
