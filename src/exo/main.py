@@ -21,7 +21,8 @@ from exo.shared.constants import EXO_LOG
 from exo.shared.election import Election, ElectionResult
 from exo.shared.logging import logger_cleanup, logger_setup
 from exo.shared.types.common import NodeId, SessionId
-from exo.utils.channels import Receiver, channel
+from exo.shared.types.events import ChunkGenerated
+from exo.utils.channels import Receiver, Sender, channel
 from exo.utils.pydantic_ext import CamelCaseModel
 from exo.utils.task_group import TaskGroup
 from exo.worker.main import Worker
@@ -40,6 +41,7 @@ class Node:
 
     node_id: NodeId
     offline: bool
+    local_chunk_sender: Sender[ChunkGenerated] | None = None
     _tg: TaskGroup = field(init=False, default_factory=TaskGroup)
 
     @classmethod
@@ -75,6 +77,13 @@ class Node:
         else:
             download_coordinator = None
 
+        # Local fast-path for chunk delivery: bypasses the 2-hop master
+        # event pipeline so streaming tokens reach the API immediately.
+        local_chunk_send: Sender[ChunkGenerated] | None = None
+        local_chunk_recv: Receiver[ChunkGenerated] | None = None
+        if args.spawn_api and not args.no_worker:
+            local_chunk_send, local_chunk_recv = channel[ChunkGenerated]()
+
         if args.spawn_api:
             api = API(
                 node_id,
@@ -83,6 +92,7 @@ class Node:
                 command_sender=router.sender(topics.COMMANDS),
                 download_command_sender=router.sender(topics.DOWNLOAD_COMMANDS),
                 election_receiver=router.receiver(topics.ELECTION_MESSAGES),
+                local_chunk_receiver=local_chunk_recv,
             )
         else:
             api = None
@@ -94,6 +104,7 @@ class Node:
                 event_sender=event_router.sender(),
                 command_sender=router.sender(topics.COMMANDS),
                 download_command_sender=router.sender(topics.DOWNLOAD_COMMANDS),
+                local_chunk_sender=local_chunk_send,
             )
         else:
             worker = None
@@ -134,6 +145,7 @@ class Node:
             api,
             node_id,
             args.offline,
+            local_chunk_sender=local_chunk_send,
         )
 
     async def run(self):
@@ -246,6 +258,7 @@ class Node:
                             download_command_sender=self.router.sender(
                                 topics.DOWNLOAD_COMMANDS
                             ),
+                            local_chunk_sender=self.local_chunk_sender,
                         )
                         self._tg.start_soon(self.worker.run)
                     if self.api:

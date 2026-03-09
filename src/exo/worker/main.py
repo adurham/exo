@@ -16,6 +16,7 @@ from exo.shared.types.commands import (
 )
 from exo.shared.types.common import CommandId, NodeId, SystemId
 from exo.shared.types.events import (
+    ChunkGenerated,
     Event,
     IndexedEvent,
     InputChunkReceived,
@@ -60,12 +61,14 @@ class Worker:
         # but I think it's the correct way to be thinking about commands
         command_sender: Sender[ForwarderCommand],
         download_command_sender: Sender[ForwarderDownloadCommand],
+        local_chunk_sender: Sender[ChunkGenerated] | None = None,
     ):
         self.node_id: NodeId = node_id
         self.event_receiver = event_receiver
         self.event_sender = event_sender
         self.command_sender = command_sender
         self.download_command_sender = download_command_sender
+        self.local_chunk_sender = local_chunk_sender
 
         self.state: State = State()
         self.runners: dict[RunnerId, RunnerSupervisor] = {}
@@ -285,6 +288,7 @@ class Worker:
         runner = RunnerSupervisor.create(
             bound_instance=task.bound_instance,
             event_sender=self.event_sender.clone(),
+            local_chunk_sender=self.local_chunk_sender,
         )
         self.runners[task.bound_instance.bound_runner_id] = runner
         self._tg.start_soon(runner.run)

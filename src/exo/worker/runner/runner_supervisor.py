@@ -59,6 +59,7 @@ class RunnerSupervisor:
     _event_sender: Sender[Event]
     _cancel_sender: MpSender[TaskId]
     _heartbeat: Any  # mp.Value("d") - shared monotonic timestamp
+    _local_chunk_sender: Sender[ChunkGenerated] | None = None
     _tg: TaskGroup = field(default_factory=TaskGroup, init=False)
     status: RunnerStatus = field(default_factory=RunnerIdle, init=False)
     pending: dict[TaskId, anyio.Event] = field(default_factory=dict, init=False)
@@ -75,6 +76,7 @@ class RunnerSupervisor:
         *,
         bound_instance: BoundInstance,
         event_sender: Sender[Event],
+        local_chunk_sender: Sender[ChunkGenerated] | None = None,
         initialize_timeout: float = 400,
     ) -> Self:
         ev_send, ev_recv = mp_channel[Event]()
@@ -107,6 +109,7 @@ class RunnerSupervisor:
             _cancel_sender=cancel_sender,
             _event_sender=event_sender,
             _heartbeat=heartbeat,
+            _local_chunk_sender=local_chunk_sender,
         )
 
         return self
@@ -216,6 +219,16 @@ class RunnerSupervisor:
                         )
                         self.in_progress.pop(event.task_id, None)
                         self.completed.add(event.task_id)
+                    # Fast-path: deliver ChunkGenerated directly to local API,
+                    # bypassing the 2-hop master event pipeline round-trip.
+                    if (
+                        isinstance(event, ChunkGenerated)
+                        and self._local_chunk_sender is not None
+                    ):
+                        with contextlib.suppress(
+                            ClosedResourceError, BrokenResourceError
+                        ):
+                            await self._local_chunk_sender.send(event)
                     await self._event_sender.send(event)
         except (ClosedResourceError, BrokenResourceError) as e:
             await self._check_runner(e)
