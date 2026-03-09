@@ -717,6 +717,8 @@ def mlx_generate(
                 prompt_tokens=total_prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_prompt_tokens + completion_tokens,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=prefix_hit_length),
+                completion_tokens_details=CompletionTokensDetails(reasoning_tokens=reasoning_tokens),
             )
 
         # Extract logprobs from the full vocabulary logprobs array
