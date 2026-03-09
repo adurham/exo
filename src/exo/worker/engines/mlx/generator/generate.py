@@ -613,6 +613,7 @@ def mlx_generate(
     accumulated_text = ""
     generated_text_parts: list[str] = []
     generation_start_time = time.perf_counter()
+    total_prompt_tokens = len(all_prompt_tokens)
     usage: Usage | None = None
     in_thinking = False
     reasoning_tokens = 0
@@ -698,7 +699,6 @@ def mlx_generate(
                     f"Model generated unexpected finish_reason: {out.finish_reason}"
                 )
 
-            total_prompt_tokens = len(all_prompt_tokens)
             usage = Usage(
                 prompt_tokens=total_prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -709,6 +709,14 @@ def mlx_generate(
                 completion_tokens_details=CompletionTokensDetails(
                     reasoning_tokens=reasoning_tokens
                 ),
+            )
+        else:
+            # Report prompt_tokens on every chunk so streaming clients
+            # can show accurate context usage before generation finishes.
+            usage = Usage(
+                prompt_tokens=total_prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_prompt_tokens + completion_tokens,
             )
 
         # Extract logprobs from the full vocabulary logprobs array

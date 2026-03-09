@@ -288,6 +288,19 @@ async def collect_claude_response(
     return
 
 
+def _message_start_event(command_id: CommandId, model: str, input_tokens: int) -> str:
+    """Build a message_start SSE event with the given input token count."""
+    msg = ClaudeMessageStart(
+        id=f"msg_{command_id}",
+        model=model,
+        content=[],
+        stop_reason=None,
+        usage=ClaudeUsage(input_tokens=input_tokens, output_tokens=0),
+    )
+    event = ClaudeMessageStartEvent(message=msg)
+    return f"event: message_start\ndata: {event.model_dump_json()}\n\n"
+
+
 async def generate_claude_stream(
     command_id: CommandId,
     model: str,
@@ -296,21 +309,11 @@ async def generate_claude_stream(
     ],
 ) -> AsyncGenerator[str, None]:
     """Generate Claude Messages API streaming events from TokenChunks."""
-    # Initial message_start event
-    initial_message = ClaudeMessageStart(
-        id=f"msg_{command_id}",
-        model=model,
-        content=[],
-        stop_reason=None,
-        usage=ClaudeUsage(input_tokens=0, output_tokens=0),
-    )
-    start_event = ClaudeMessageStartEvent(message=initial_message)
-    yield f"event: message_start\ndata: {start_event.model_dump_json()}\n\n"
-
     output_tokens = 0
     stop_reason: ClaudeStopReason | None = None
     last_usage: Usage | None = None
     next_block_index = 0
+    message_started = False
 
     # Track whether we've started thinking/text blocks
     thinking_block_started = False
@@ -323,6 +326,10 @@ async def generate_claude_stream(
             continue
 
         if isinstance(chunk, ErrorChunk):
+            # Emit message_start if not yet sent so client has a valid stream
+            if not message_started:
+                yield _message_start_event(command_id, model, 0)
+                message_started = True
             error_msg = chunk.error_message or "Internal server error"
             error_type = "invalid_request_error" if "too long" in error_msg or "context limit" in error_msg else "api_error"
             error_resp = ClaudeErrorResponse(
@@ -332,6 +339,12 @@ async def generate_claude_stream(
             break
 
         last_usage = chunk.usage or last_usage
+
+        # Defer message_start until first real chunk so we have input_tokens
+        if not message_started:
+            input_tokens = last_usage.prompt_tokens if last_usage else 0
+            yield _message_start_event(command_id, model, input_tokens)
+            message_started = True
 
         if isinstance(chunk, ToolCallChunk):
             stop_reason = "tool_use"
@@ -408,6 +421,10 @@ async def generate_claude_stream(
 
         if chunk.finish_reason is not None:
             stop_reason = finish_reason_to_claude_stop_reason(chunk.finish_reason)
+
+    # Emit message_start if stream ended before any data chunks
+    if not message_started:
+        yield _message_start_event(command_id, model, 0)
 
     # Use actual token counts from usage if available
     input_tokens = 0
