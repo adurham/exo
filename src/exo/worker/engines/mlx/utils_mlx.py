@@ -522,6 +522,15 @@ def apply_chat_template(
                 continue
             formatted_messages.append({"role": msg.role, "content": msg.content})
 
+    # Strip reasoning_content from previous assistant messages for stable KV-cache
+    # matching.  Clients may inconsistently include/strip assistant reasoning across
+    # turns, causing catastrophic cache misses (e.g. 99% → 21% hit rate).  The chat
+    # template preserves <think></think> structure with empty content, so the model
+    # still sees valid thinking markers.
+    for msg in formatted_messages:
+        if msg.get("role") == "assistant" and "reasoning_content" in msg:
+            msg["reasoning_content"] = None
+
     # For assistant prefilling, append content after templating to avoid a closing turn token.
     partial_assistant_content: str | None = None
     if formatted_messages and formatted_messages[-1].get("role") == "assistant":
