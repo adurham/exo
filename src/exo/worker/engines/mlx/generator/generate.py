@@ -892,6 +892,7 @@ def mlx_generate(
             finish_reason=finish_reason,
             stats=stats,
             usage=usage,
+            is_thinking=in_thinking,
         )
 
         # Reset usage after first-token emission so only the first and final

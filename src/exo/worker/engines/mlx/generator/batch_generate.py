@@ -359,6 +359,7 @@ class ExoBatchGenerator:
                         finish_reason=finish_reason,
                         stats=stats,
                         usage=usage,
+                        is_thinking=state.in_thinking,
                     ),
                 )
             )
