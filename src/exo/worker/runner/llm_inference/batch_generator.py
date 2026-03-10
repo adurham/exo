@@ -409,11 +409,25 @@ class BatchGenerator(InferenceGenerator):
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
 
+    def _drain_local_cancellations(self) -> None:
+        """Drain cancel pipe locally — no collective ops.
+
+        Same rationale as SequentialGenerator: collective ops in callbacks
+        or between RDMA-heavy steps can collide with JACCL.
+        """
+        for task_id in self.cancel_receiver.collect():
+            if task_id == CANCEL_ALL_TASKS:
+                self._cancelled_tasks.add(CANCEL_ALL_TASKS)
+            else:
+                self._cancelled_tasks.add(task_id)
+
     def step(
         self,
     ) -> Iterable[
         tuple[TaskId, GenerationResponse | ToolCallResponse | Cancelled | Finished]
     ]:
+        self._drain_local_cancellations()
+
         if not self._queue:
             self.agree_on_tasks()
 
