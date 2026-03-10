@@ -432,6 +432,20 @@ class BatchGenerator(InferenceGenerator):
     ]:
         self._drain_local_cancellations()
 
+        # Use mx_any so ALL TP peers agree on cancellation before
+        # the next model forward pass (all_reduce).  Without this,
+        # one peer may cancel and exit the generation loop while the
+        # other is still in all_reduce → deadlock.
+        if mx_any(bool(self._cancelled_tasks), self.group):
+            if not self._cancelled_tasks:
+                # Another peer has cancels but we don't yet.
+                # In TP mode all peers share the same active task set,
+                # so cancelling everything keeps them in sync.
+                self._cancelled_tasks.add(CANCEL_ALL_TASKS)
+            early_cancelled = self._apply_cancellations()
+        else:
+            early_cancelled = []
+
         if not self._queue:
             self.agree_on_tasks()
 
@@ -462,7 +476,7 @@ class BatchGenerator(InferenceGenerator):
             self._active_tasks[uid] = (task, queue, output_generator)
 
         if not self._mlx_gen.has_work:
-            return self._apply_cancellations()
+            return early_cancelled
 
         results = self._mlx_gen.step()
 
@@ -486,7 +500,7 @@ class BatchGenerator(InferenceGenerator):
                 output.append((task.task_id, Finished()))
                 del self._active_tasks[uid]
 
-        return itertools.chain(output, self._apply_cancellations())
+        return itertools.chain(early_cancelled, output, self._apply_cancellations())
 
     def _apply_cancellations(
         self,
