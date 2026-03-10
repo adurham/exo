@@ -529,24 +529,18 @@ class BatchGenerator(InferenceGenerator):
                 )
 
         def distributed_prompt_progress_callback() -> None:
-            self.agree_on_cancellations()
-            if self.should_cancel(task.task_id):
-                raise PrefillCancelled()
-
-            self.agree_on_tasks()
-
-        tokens_since_cancel_check = self.check_for_cancel_every
+            # Heartbeat only — no collective ops during prefill.
+            # Pipeline parallel prefill uses its own RDMA collective ops
+            # (all_gather for TP layers); injecting additional collective
+            # ops (all_sum/all_gather for cancellation) collides with
+            # JACCL RDMA and causes wc status=1 errors + deadlock.
+            if self.heartbeat is not None:
+                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
 
         def on_generation_token() -> None:
-            nonlocal tokens_since_cancel_check
-            tokens_since_cancel_check += 1
-            if tokens_since_cancel_check >= self.check_for_cancel_every:
-                tokens_since_cancel_check = 0
-                self.agree_on_cancellations()
-                if self.should_cancel(task.task_id):
-                    self._cancelled_tasks.add(task.task_id)
-
-                self.agree_on_tasks()
+            # Heartbeat only — same RDMA collision risk during decode.
+            if self.heartbeat is not None:
+                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
 
         return self._mlx_gen.submit(
             task_params=task.task_params,
