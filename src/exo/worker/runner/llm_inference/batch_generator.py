@@ -18,6 +18,7 @@ from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse, ToolCallResponse
 from exo.utils.channels import MpReceiver, MpSender
 from exo.worker.engines.mlx.cache import KVPrefixCache
+from exo.worker.engines.mlx.auto_parallel import _guarded_eval
 from exo.worker.engines.mlx.generator.generate import (
     PrefillCancelled,
     mlx_generate,
@@ -332,10 +333,9 @@ def mx_all_gather_tasks(
     uuid_byte_length = 36
 
     n_tasks = len(tasks)
-    all_counts = cast(
-        list[int],
-        mx.distributed.all_gather(mx.array([n_tasks]), group=group).tolist(),
-    )
+    counts_arr = mx.distributed.all_gather(mx.array([n_tasks]), group=group)
+    _guarded_eval(counts_arr)
+    all_counts = cast(list[int], counts_arr.tolist())
     max_tasks = max(all_counts)
     world_size: int = 1 if group is None else group.size()
 
@@ -345,12 +345,11 @@ def mx_all_gather_tasks(
     padded = [encode_task_id(task.task_id) for task in tasks] + [
         [0] * uuid_byte_length
     ] * (max_tasks - n_tasks)
-    gathered = cast(
-        list[list[list[int]]],
-        mx.distributed.all_gather(mx.array(padded), group=group)
-        .reshape(world_size, max_tasks, -1)
-        .tolist(),
+    gathered_arr = mx.distributed.all_gather(mx.array(padded), group=group).reshape(
+        world_size, max_tasks, -1
     )
+    _guarded_eval(gathered_arr)
+    gathered = cast(list[list[list[int]]], gathered_arr.tolist())
     all_task_ids: list[list[TaskId]] = [
         [decode_task_id(encoded_task_id) for encoded_task_id in rank_tasks[:count]]
         for rank_tasks, count in zip(gathered, all_counts, strict=True)
