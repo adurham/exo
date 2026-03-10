@@ -71,6 +71,7 @@ from .tool_parsers import make_mlx_parser
 
 class ExitCode(str, Enum):
     AllTasksComplete = "AllTasksComplete"
+    Continue = "Continue"
     Shutdown = "Shutdown"
 
 
@@ -271,10 +272,26 @@ class Runner:
         self.send_task_status(task.task_id, TaskStatus.Complete)
         self.update_status(RunnerShutdown())
 
-    def submit_text_generation(self, task: TextGeneration):
+    def submit_text_generation(self, task: TextGeneration) -> bool:
         assert isinstance(self.generator, InferenceGenerator)
-        self.active_tasks[task.task_id] = task
-        self.generator.submit(task)
+        try:
+            self.active_tasks[task.task_id] = task
+            self.generator.submit(task)
+            return True
+        except ValueError as e:
+            logger.warning(f"Task {task.task_id} rejected: {e}")
+            self.active_tasks.pop(task.task_id, None)
+            self.event_sender.send(
+                ChunkGenerated(
+                    command_id=task.command_id,
+                    chunk=ErrorChunk(
+                        error_message=str(e),
+                        model=self.model_id,
+                    ),
+                )
+            )
+            self.send_task_status(task.task_id, TaskStatus.Complete)
+            return False
 
     def handle_generation_tasks(self, starting_task: TextGeneration):
         assert isinstance(self.current_status, RunnerReady)
@@ -286,7 +303,9 @@ class Runner:
         self.acknowledge_task(starting_task)
         self.seen.add(starting_task.task_id)
 
-        self.submit_text_generation(starting_task)
+        if not self.submit_text_generation(starting_task):
+            self.update_status(RunnerReady())
+            return ExitCode.Continue
 
         while self.active_tasks:
             results = self.generator.step()

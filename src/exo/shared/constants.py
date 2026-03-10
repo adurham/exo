@@ -98,7 +98,7 @@ def _int_or_none(env: str, default: int | None) -> int | None:
 EXO_MAX_CONTEXT_TOKENS: int | None = _int_or_none("EXO_MAX_CONTEXT_TOKENS", None)
 
 # Context token limit applied to requests that required model fallback (subagents).
-# Defaults to EXO_MAX_CONTEXT_TOKENS / 4 when unset.
+# Defaults to EXO_MAX_CONTEXT_TOKENS / 3 when unset.
 EXO_SUBAGENT_MAX_CONTEXT_TOKENS: int | None = _int_or_none(
     "EXO_SUBAGENT_MAX_CONTEXT_TOKENS", None
 )

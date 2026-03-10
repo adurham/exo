@@ -804,7 +804,7 @@ class API:
 
             subagent_limit = EXO_SUBAGENT_MAX_CONTEXT_TOKENS
             if subagent_limit is None and EXO_MAX_CONTEXT_TOKENS is not None:
-                subagent_limit = EXO_MAX_CONTEXT_TOKENS // 4
+                subagent_limit = EXO_MAX_CONTEXT_TOKENS // 3
 
             if subagent_limit is not None:
                 logger.info(
