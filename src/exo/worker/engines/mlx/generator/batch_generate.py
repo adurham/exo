@@ -102,6 +102,15 @@ class ExoBatchGenerator:
         distributed_prompt_progress_callback: Callable[[], None] | None = None,
         on_generation_token: Callable[[], None] | None = None,
     ) -> int:
+        from exo.worker.engines.mlx.cache import get_memory_used_percentage, MEMORY_THRESHOLD
+
+        mem_used = get_memory_used_percentage()
+        if mem_used > MEMORY_THRESHOLD:
+            raise ValueError(
+                f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
+                f"cannot accept new request"
+            )
+
         all_prompt_tokens = encode_prompt(self.tokenizer, prompt)
         all_prompt_tokens = fix_unmatched_think_end_tokens(
             all_prompt_tokens, self.tokenizer

@@ -35,8 +35,8 @@ def _default_memory_threshold() -> float:
     return 0.70
 
 
-_MEMORY_THRESHOLD = float(
-    os.environ.get("EXO_MEMORY_THRESHOLD", _default_memory_threshold())
+MEMORY_THRESHOLD = float(
+    os.environ.get("EXOMEMORY_THRESHOLD", _default_memory_threshold())
 )
 
 
@@ -255,6 +255,16 @@ class KVPrefixCache:
             return make_kv_cache(model), prompt_tokens, None
 
         cached_length = cache_length(self.caches[best_index])
+
+        # Before deepcopy, check if memory is too high.  The deepcopy
+        # temporarily doubles the KV cache memory and can OOM the machine.
+        if not _MOVE_CACHE and get_memory_used_percentage() > MEMORY_THRESHOLD:
+            logger.warning(
+                f"Skipping KV cache hit ({restore_pos} tokens) — memory pressure "
+                f"too high ({get_memory_used_percentage():.0%}), using fresh cache"
+            )
+            return make_kv_cache(model), prompt_tokens, None
+
         if _MOVE_CACHE:
             # Move cache out instead of deepcopy to avoid having two full
             # KV caches in memory simultaneously.  Safe only with a single
@@ -295,7 +305,7 @@ class KVPrefixCache:
         # deadlock against JACCL RDMA ops in the TP forward pass.
         while len(self.caches) > 0 and (
             len(self.caches) >= _MAX_ENTRIES
-            or get_memory_used_percentage() > _MEMORY_THRESHOLD
+            or get_memory_used_percentage() > MEMORY_THRESHOLD
         ):
             # Find lowest-value entry
             min_value = float('inf')

@@ -536,6 +536,15 @@ def mlx_generate(
     distributed_prompt_progress_callback: Callable[[], None] | None = None,
     on_generation_token: Callable[[], None] | None = None,
 ) -> Generator[GenerationResponse]:
+    from exo.worker.engines.mlx.cache import get_memory_used_percentage, MEMORY_THRESHOLD
+
+    mem_used = get_memory_used_percentage()
+    if mem_used > MEMORY_THRESHOLD:
+        raise ValueError(
+            f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
+            f"cannot accept new request"
+        )
+
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
     # TODO: Randomise task seed and set in taskparams, instead of hard coding as 42.
