@@ -349,6 +349,7 @@ class BatchGenerator(InferenceGenerator):
     device_rank: int
     cancel_receiver: MpReceiver[TaskId]
     event_sender: MpSender[Event]
+    heartbeat: object | None = None
     check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
