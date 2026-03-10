@@ -18,7 +18,7 @@
 : "${MLX_JACCL_FRAME_SIZE:=4096}"
 : "${EXO_KV_BITS:=16}"
 : "${EXO_PP_LAYER_OFFSET:=0}"
-: "${EXO_MAX_CONTEXT_TOKENS:=130000}"
+: "${EXO_MAX_CONTEXT_TOKENS:=160000}"
 : "${EXO_COMPILE_DECODE:=0}"
 # Disabled: subagent model remapping causes OOM on MacBook when both
 # root and subagent conversations compete for KV cache memory.
@@ -294,9 +294,9 @@ for NODE in "${NODES[@]}"; do
     echo "Preparing $NODE..."
     echo "Setting Metal memory limit on $NODE..."
     if [[ "$NODE" == *"macbook"* ]]; then
-        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=31000"
+        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=32000"
     else
-        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=115000"
+        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=124000"
     fi
     
     echo "Killing existing Exo processes on $NODE..."
