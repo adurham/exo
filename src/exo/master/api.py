@@ -747,18 +747,37 @@ class API:
     async def _resolve_and_validate_text_model(self, model_id: ModelId) -> ModelId:
         """Validate a text model exists and return the resolved model ID.
 
+        Falls back to the sole active model when only one is loaded and the
+        requested model is not found (e.g. a client hard-codes a model name
+        that doesn't exist on the cluster).
         Raises HTTPException 404 if no instance is found for the model.
         """
-        if not any(
+        if any(
             instance.shard_assignments.model_id == model_id
             for instance in self.state.instances.values()
         ):
-            await self._trigger_notify_user_to_download_model(model_id)
-            raise HTTPException(
-                status_code=404,
-                detail=f"No instance found for model {model_id}",
+            return model_id
+
+        # Fallback: if exactly one model is active, use it regardless of
+        # what the client asked for.  This lets generic clients (e.g. Claude
+        # Code subagents requesting "claude-sonnet-4-6") work against a
+        # single-model cluster without configuration.
+        active_models = {
+            instance.shard_assignments.model_id
+            for instance in self.state.instances.values()
+        }
+        if len(active_models) == 1:
+            resolved = next(iter(active_models))
+            logger.info(
+                f"Model {model_id} not found, falling back to {resolved}"
             )
-        return model_id
+            return resolved
+
+        await self._trigger_notify_user_to_download_model(model_id)
+        raise HTTPException(
+            status_code=404,
+            detail=f"No instance found for model {model_id}",
+        )
 
     async def _validate_image_model(self, model: ModelId) -> ModelId:
         """Validate model exists and return resolved model ID.
