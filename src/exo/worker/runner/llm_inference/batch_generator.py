@@ -234,6 +234,11 @@ class SequentialGenerator(InferenceGenerator):
             self._active = None
             if self._queue:
                 self._start_next()
+        except ValueError as e:
+            logger.warning(f"Task {task.task_id} rejected: {e}")
+            self._send_error(task, e)
+            self._active = None
+            response = Finished()
         except Exception as e:
             self._send_error(task, e)
             self._active = None
@@ -252,6 +257,10 @@ class SequentialGenerator(InferenceGenerator):
         task = self._queue.popleft()
         try:
             mlx_gen = self._build_generator(task)
+        except ValueError as e:
+            logger.warning(f"Task {task.task_id} rejected during build: {e}")
+            self._send_error(task, e)
+            return
         except Exception as e:
             self._send_error(task, e)
             raise
@@ -469,6 +478,10 @@ class BatchGenerator(InferenceGenerator):
             try:
                 uid = self._start_task(task)
             except PrefillCancelled:
+                continue
+            except ValueError as e:
+                logger.warning(f"Task {task.task_id} rejected: {e}")
+                self._send_error(task, e)
                 continue
             except Exception as e:
                 self._send_error(task, e)
