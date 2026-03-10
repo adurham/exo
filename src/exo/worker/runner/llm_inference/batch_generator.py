@@ -169,13 +169,13 @@ class SequentialGenerator(InferenceGenerator):
             logger.info(f"agree_on_tasks took {(time.perf_counter() - t0) * 1000:.1f}ms")
 
     def _drain_local_cancellations(self) -> None:
-        """Drain cancel pipe locally — no collective ops.
+        """Drain cancel pipe locally — no collective ops here.
 
-        SequentialGenerator is used for TP mode where all ranks execute the
-        same model forward pass with all_reduce.  Injecting extra collective
-        ops (all_sum / all_gather) between forward-pass steps can deadlock
-        against JACCL RDMA.  Cancel signals arrive on all ranks from the
-        same source, so local drain is sufficient.
+        Cancel signals are drained from the local pipe without any
+        collective ops.  The actual cancel *decision* is made collectively
+        via mx_any in step() so that all TP peers agree at the same step
+        boundary and no peer moves to agree_on_tasks while another is
+        still in a decode all_reduce.
         """
         for task_id in self.cancel_receiver.collect():
             if task_id == CANCEL_ALL_TASKS:
@@ -203,7 +203,11 @@ class SequentialGenerator(InferenceGenerator):
 
         task, mlx_gen, queue, output_generator = self._active
 
-        if self.should_cancel(task.task_id):
+        # Use mx_any so ALL TP peers agree on cancellation at the same step
+        # boundary.  Without this, one peer may cancel and move to
+        # agree_on_tasks (all_gather) while the other is still in a decode
+        # all_reduce → mismatched collective ops → deadlock.
+        if mx_any(self.should_cancel(task.task_id), self.group):
             self._cancelled_tasks.discard(task.task_id)
             self._cancelled_tasks.discard(CANCEL_ALL_TASKS)
             self._active = None
