@@ -66,6 +66,7 @@ class _EngineTask:
     in_thinking: bool = False
     reasoning_tokens: int = 0
     first_token_emitted: bool = False
+    effective_max_context: int | None = None
 
 
 @dataclass(eq=False)
@@ -106,9 +107,11 @@ class ExoBatchGenerator:
             all_prompt_tokens, self.tokenizer
         )
 
-        if EXO_MAX_CONTEXT_TOKENS is not None and len(all_prompt_tokens) > EXO_MAX_CONTEXT_TOKENS:
+        effective_max_context = task_params.max_context_tokens or EXO_MAX_CONTEXT_TOKENS
+
+        if effective_max_context is not None and len(all_prompt_tokens) > effective_max_context:
             raise ValueError(
-                f"prompt is too long: {len(all_prompt_tokens)} tokens > {EXO_MAX_CONTEXT_TOKENS} token context limit"
+                f"prompt is too long: {len(all_prompt_tokens)} tokens > {effective_max_context} token context limit"
             )
 
         is_bench = task_params.bench
@@ -192,8 +195,8 @@ class ExoBatchGenerator:
             logits_processors = [ban_token_ids(eos_ids)] + logits_processors
 
         max_tokens = task_params.max_output_tokens or MAX_TOKENS
-        if EXO_MAX_CONTEXT_TOKENS is not None:
-            remaining = EXO_MAX_CONTEXT_TOKENS - len(all_prompt_tokens)
+        if effective_max_context is not None:
+            remaining = effective_max_context - len(all_prompt_tokens)
             if remaining < max_tokens:
                 logger.info(f"Clamping max_tokens from {max_tokens} to {remaining} (context budget)")
                 max_tokens = max(1, remaining)
@@ -219,6 +222,7 @@ class ExoBatchGenerator:
             cache_snapshots=cache_snapshots or None,
             on_generation_token=on_generation_token,
             generation_start_time=time.perf_counter(),
+            effective_max_context=effective_max_context,
         )
 
         return uid
@@ -282,9 +286,9 @@ class ExoBatchGenerator:
 
             # Stop generation if total context (prompt + completion) exceeds limit.
             if (
-                EXO_MAX_CONTEXT_TOKENS is not None
+                state.effective_max_context is not None
                 and finish_reason is None
-                and len(state.all_prompt_tokens) + state.completion_tokens >= EXO_MAX_CONTEXT_TOKENS
+                and len(state.all_prompt_tokens) + state.completion_tokens >= state.effective_max_context
             ):
                 finish_reason = "context_window_exceeded"
 

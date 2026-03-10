@@ -170,6 +170,7 @@ from exo.shared.types.openai_responses import (
     ResponsesResponse,
 )
 from exo.shared.types.state import State
+from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.downloads import DownloadCompleted
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
 from exo.shared.types.worker.shards import Sharding
@@ -699,10 +700,7 @@ class API:
     ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI Chat Completions API - adapter."""
         task_params = chat_request_to_text_generation(payload)
-        resolved_model = await self._resolve_and_validate_text_model(
-            ModelId(task_params.model)
-        )
-        task_params = task_params.model_copy(update={"model": resolved_model})
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -733,10 +731,7 @@ class API:
         self, payload: BenchChatCompletionRequest
     ) -> BenchChatCompletionResponse:
         task_params = chat_request_to_text_generation(payload)
-        resolved_model = await self._resolve_and_validate_text_model(
-            ModelId(task_params.model)
-        )
-        task_params = task_params.model_copy(update={"model": resolved_model})
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         task_params = task_params.model_copy(update={"stream": False, "bench": True})
 
@@ -745,8 +740,10 @@ class API:
 
         return await self._collect_text_generation_with_stats(command.command_id)
 
-    async def _resolve_and_validate_text_model(self, model_id: ModelId) -> ModelId:
-        """Validate a text model exists and return the resolved model ID.
+    async def _resolve_and_validate_text_model(
+        self, model_id: ModelId
+    ) -> tuple[ModelId, bool]:
+        """Validate a text model exists and return (resolved_model_id, was_fallback).
 
         Resolution order:
         1. Exact match against active instances.
@@ -758,7 +755,7 @@ class API:
             instance.shard_assignments.model_id == model_id
             for instance in self.state.instances.values()
         ):
-            return model_id
+            return model_id, False
 
         from exo.shared.constants import EXO_DEFAULT_MODEL
 
@@ -774,7 +771,7 @@ class API:
                 logger.info(
                     f"Model {model_id} not found, using EXO_DEFAULT_MODEL={default}"
                 )
-                return default
+                return default, True
 
         # Implicit fallback: sole active model.
         if len(active_models) == 1:
@@ -782,13 +779,40 @@ class API:
             logger.info(
                 f"Model {model_id} not found, falling back to {resolved}"
             )
-            return resolved
+            return resolved, True
 
         await self._trigger_notify_user_to_download_model(model_id)
         raise HTTPException(
             status_code=404,
             detail=f"No instance found for model {model_id}",
         )
+
+    async def _resolve_model_and_apply_limits(
+        self, task_params: TextGenerationTaskParams
+    ) -> TextGenerationTaskParams:
+        """Resolve the model and apply subagent context limits when applicable."""
+        resolved_model, was_fallback = await self._resolve_and_validate_text_model(
+            ModelId(task_params.model)
+        )
+        updates: dict[str, ModelId | int] = {"model": resolved_model}
+
+        if was_fallback:
+            from exo.shared.constants import (
+                EXO_MAX_CONTEXT_TOKENS,
+                EXO_SUBAGENT_MAX_CONTEXT_TOKENS,
+            )
+
+            subagent_limit = EXO_SUBAGENT_MAX_CONTEXT_TOKENS
+            if subagent_limit is None and EXO_MAX_CONTEXT_TOKENS is not None:
+                subagent_limit = EXO_MAX_CONTEXT_TOKENS // 4
+
+            if subagent_limit is not None:
+                logger.info(
+                    f"Subagent detected: setting max_context_tokens={subagent_limit}"
+                )
+                updates["max_context_tokens"] = subagent_limit
+
+        return task_params.model_copy(update=updates)
 
     async def _validate_image_model(self, model: ModelId) -> ModelId:
         """Validate model exists and return resolved model ID.
@@ -1319,10 +1343,7 @@ class API:
     ) -> ClaudeMessagesResponse | StreamingResponse:
         """Claude Messages API - adapter."""
         task_params = claude_request_to_text_generation(payload)
-        resolved_model = await self._resolve_and_validate_text_model(
-            ModelId(task_params.model)
-        )
-        task_params = task_params.model_copy(update={"model": resolved_model})
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1356,8 +1377,7 @@ class API:
     ) -> ResponsesResponse | StreamingResponse:
         """OpenAI Responses API."""
         task_params = responses_request_to_text_generation(payload)
-        resolved_model = await self._resolve_and_validate_text_model(task_params.model)
-        task_params = task_params.model_copy(update={"model": resolved_model})
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1398,10 +1418,7 @@ class API:
         body = await request.body()
         payload = OllamaChatRequest.model_validate_json(body)
         task_params = ollama_request_to_text_generation(payload)
-        resolved_model = await self._resolve_and_validate_text_model(
-            ModelId(task_params.model)
-        )
-        task_params = task_params.model_copy(update={"model": resolved_model})
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1435,10 +1452,7 @@ class API:
         body = await request.body()
         payload = OllamaGenerateRequest.model_validate_json(body)
         task_params = ollama_generate_request_to_text_generation(payload)
-        resolved_model = await self._resolve_and_validate_text_model(
-            ModelId(task_params.model)
-        )
-        task_params = task_params.model_copy(update={"model": resolved_model})
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)

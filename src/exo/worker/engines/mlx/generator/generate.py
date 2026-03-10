@@ -553,9 +553,12 @@ def mlx_generate(
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
 
-    if EXO_MAX_CONTEXT_TOKENS is not None and len(all_prompt_tokens) > EXO_MAX_CONTEXT_TOKENS:
+    # Per-request limit overrides the global default when set (e.g. subagents).
+    effective_max_context = task.max_context_tokens or EXO_MAX_CONTEXT_TOKENS
+
+    if effective_max_context is not None and len(all_prompt_tokens) > effective_max_context:
         raise ValueError(
-            f"prompt is too long: {len(all_prompt_tokens)} tokens > {EXO_MAX_CONTEXT_TOKENS} token context limit"
+            f"prompt is too long: {len(all_prompt_tokens)} tokens > {effective_max_context} token context limit"
         )
 
     # Do not use the prefix cache if we are trying to do benchmarks.
@@ -591,8 +594,8 @@ def mlx_generate(
     # context each copy costs ~160ms. Setting step to cover the full expected
     # sequence eliminates all mid-generation reallocations.
     max_output = task.max_output_tokens or MAX_TOKENS
-    if EXO_MAX_CONTEXT_TOKENS is not None:
-        max_output = min(max_output, EXO_MAX_CONTEXT_TOKENS - len(all_prompt_tokens))
+    if effective_max_context is not None:
+        max_output = min(max_output, effective_max_context - len(all_prompt_tokens))
     max_tokens_estimate = max_output + len(all_prompt_tokens)
     for c in caches:
         if hasattr(c, "step"):
@@ -670,8 +673,8 @@ def mlx_generate(
     last_token = prompt_tokens[-2:]
 
     max_tokens = task.max_output_tokens or MAX_TOKENS
-    if EXO_MAX_CONTEXT_TOKENS is not None:
-        remaining = EXO_MAX_CONTEXT_TOKENS - len(all_prompt_tokens)
+    if effective_max_context is not None:
+        remaining = effective_max_context - len(all_prompt_tokens)
         if remaining < max_tokens:
             logger.info(f"Clamping max_tokens from {max_tokens} to {remaining} (context budget)")
             max_tokens = max(1, remaining)
@@ -751,9 +754,9 @@ def mlx_generate(
 
         # Stop generation if total context (prompt + completion) exceeds limit.
         if (
-            EXO_MAX_CONTEXT_TOKENS is not None
+            effective_max_context is not None
             and finish_reason is None
-            and total_prompt_tokens + completion_tokens >= EXO_MAX_CONTEXT_TOKENS
+            and total_prompt_tokens + completion_tokens >= effective_max_context
         ):
             finish_reason = "context_window_exceeded"
 
