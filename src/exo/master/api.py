@@ -1709,13 +1709,12 @@ class API:
                             await queue.send(event.chunk)
                         except BrokenResourceError:
                             self._image_generation_queues.pop(event.command_id, None)
-                    # Skip text chunk delivery here if local fast-path is active;
-                    # _apply_local_chunks delivers them directly without the
-                    # master round-trip delay.
-                    if self.local_chunk_receiver is None and (
-                        queue := self._text_generation_queues.get(
-                            event.command_id, None
-                        )
+                    # Deliver text chunks from the event pipeline.  When the
+                    # local fast-path is active, the *local* worker's chunks
+                    # bypass this path (they go through _apply_local_chunks),
+                    # but chunks from *remote* workers still arrive here.
+                    if queue := self._text_generation_queues.get(
+                        event.command_id, None
                     ):
                         assert not isinstance(event.chunk, ImageChunk)
                         try:
