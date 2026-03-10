@@ -84,6 +84,9 @@ _MIN_OVERLAP_TO_DEDUP = 0.90
 _MAX_ENTRIES = int(os.environ.get("EXO_KV_CACHE_MAX_ENTRIES", "4"))
 # Mismatches in first N tokens are flagged as likely volatile patterns
 _VOLATILE_DETECTION_THRESHOLD = 100
+# When True, get_kv_cache moves the cache out instead of deepcopying.
+# Safe only when EXO_MAX_CONCURRENT_REQUESTS=1 (single consumer).
+_MOVE_CACHE = os.environ.get("EXO_KV_CACHE_MOVE", "0") == "1"
 
 
 class KVPrefixCache:
@@ -125,7 +128,7 @@ class KVPrefixCache:
                     # New entry is longer or same — replace the existing one
                     _t0 = _time.perf_counter()
                     self.prompts[i] = compare_tokens
-                    self.caches[i] = deepcopy(cache)
+                    self.caches[i] = cache if _MOVE_CACHE else deepcopy(cache)
                     self._snapshots[i] = ssm_snapshots
                     self._access_counter += 1
                     self._last_used[i] = self._access_counter
@@ -133,7 +136,7 @@ class KVPrefixCache:
                     _dt = (_time.perf_counter() - _t0) * 1000
                     logger.info(
                         f"KV cache dedup-replaced entry {i}: {cached_len} -> {new_len} tokens "
-                        f"({overlap:.0%} overlap, copy={_dt:.0f}ms)"
+                        f"({overlap:.0%} overlap, save={_dt:.0f}ms)"
                     )
                 else:
                     # Existing entry is longer — just bump its access
@@ -147,16 +150,15 @@ class KVPrefixCache:
                 return
 
         self._evict_if_needed()
-        # Store normalized tokens for comparison, original tokens for reference
         _t0 = _time.perf_counter()
         self.prompts.append(compare_tokens)
-        self.caches.append(deepcopy(cache))
+        self.caches.append(cache if _MOVE_CACHE else deepcopy(cache))
         self._snapshots.append(ssm_snapshots)
         self._access_counter += 1
         self._last_used.append(self._access_counter)
         self._access_counts.append(1)
         _dt = (_time.perf_counter() - _t0) * 1000
-        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (entries={len(self.caches)}, copy={_dt:.0f}ms)")
+        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (entries={len(self.caches)}, save={_dt:.0f}ms)")
 
     def update_kv_cache(
         self,
@@ -178,13 +180,13 @@ class KVPrefixCache:
         # Store normalized tokens for comparison, like add_kv_cache
         _t0 = _time.perf_counter()
         self.prompts[index] = normalized_tokens if normalized_tokens is not None else prompt_tokens
-        self.caches[index] = deepcopy(cache)
+        self.caches[index] = cache if _MOVE_CACHE else deepcopy(cache)
         self._snapshots[index] = merged or None
         self._access_counter += 1
         self._last_used[index] = self._access_counter
         self._access_counts[index] += 1
         _dt = (_time.perf_counter() - _t0) * 1000
-        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens (copy={_dt:.0f}ms)")
+        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens (save={_dt:.0f}ms)")
 
     def _get_snapshot(
         self, entry_index: int, target_token_count: int
@@ -252,8 +254,16 @@ class KVPrefixCache:
         if restore_snap is None and has_ssm:
             return make_kv_cache(model), prompt_tokens, None
 
-        prompt_cache = deepcopy(self.caches[best_index])
         cached_length = cache_length(self.caches[best_index])
+        if _MOVE_CACHE:
+            # Move cache out instead of deepcopy to avoid having two full
+            # KV caches in memory simultaneously.  Safe only with a single
+            # concurrent consumer (EXO_MAX_CONCURRENT_REQUESTS=1).
+            prompt_cache = self.caches[best_index]
+            self.caches[best_index] = None  # type: ignore[assignment]
+        else:
+            prompt_cache = deepcopy(self.caches[best_index])
+
         tokens_to_trim = cached_length - restore_pos
         if tokens_to_trim > 0:
             trim_cache(prompt_cache, tokens_to_trim, restore_snap)
@@ -263,7 +273,6 @@ class KVPrefixCache:
                     c.offset = restore_pos
 
         self._access_counter += 1
-        self._last_used[best_index] = self._access_counter
         # Return remaining from ORIGINAL prompt tokens (for actual computation)
         remaining = prompt_tokens[restore_pos:]
 
