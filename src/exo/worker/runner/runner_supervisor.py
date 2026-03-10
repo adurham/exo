@@ -22,6 +22,7 @@ from exo.shared.types.events import (
     TaskStatusUpdated,
 )
 from exo.shared.types.tasks import (
+    CANCEL_ALL_TASKS,
     ImageEdits,
     ImageGeneration,
     Task,
@@ -132,7 +133,7 @@ class RunnerSupervisor:
         with contextlib.suppress(ClosedResourceError):
             self._event_sender.close()
         with contextlib.suppress(ClosedResourceError):
-            self._cancel_sender.send(TaskId("CANCEL_CURRENT_TASK"))
+            self._cancel_sender.send(CANCEL_ALL_TASKS)
         with contextlib.suppress(ClosedResourceError):
             self._cancel_sender.close()
         self.runner_process.join(5)

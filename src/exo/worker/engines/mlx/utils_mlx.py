@@ -41,6 +41,7 @@ from exo.download.download_utils import build_model_path
 from exo.shared.types.common import Host
 from exo.shared.types.memory import Memory
 from exo.shared.types.mlx import Model
+from exo.shared.types.tasks import TaskId, TextGeneration
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.instances import (
     BoundInstance,
@@ -701,12 +702,14 @@ def mlx_cleanup(
 def mx_any(bool_: bool, group: Group | None) -> bool:
     if group is None:
         return bool_
+    from exo.worker.engines.mlx.auto_parallel import _guarded_eval
+
     if EXO_TRACING_ENABLED:
         t0 = time.perf_counter()
     num_true = mx.distributed.all_sum(
         mx.array(bool_), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
     )
-    mx.eval(num_true)
+    _guarded_eval(num_true)
     if EXO_TRACING_ENABLED:
         logger.info(f"mx_any took {(time.perf_counter() - t0) * 1000:.1f}ms")
     return num_true.item() > 0
@@ -764,3 +767,59 @@ def _parse_kimi_tool_calls(text: str):
         return [_parse_single_tool(match) for match in tool_matches]  # pyright: ignore[reportAny]
     else:
         return [_parse_single_tool(text)]
+
+
+def mx_all_gather_tasks(
+    tasks: list[TextGeneration],
+    group: mx.distributed.Group | None,
+) -> tuple[list[TextGeneration], list[TextGeneration]]:
+    def encode_task_id(task_id: TaskId) -> list[int]:
+        utf8_task_id = task_id.encode()
+        return [
+            int.from_bytes(utf8_task_id[i : i + 1]) for i in range(len(utf8_task_id))
+        ]
+
+    def decode_task_id(encoded_task_id: list[int]) -> TaskId:
+        return TaskId(
+            bytes.decode(b"".join((x).to_bytes(length=1) for x in encoded_task_id))
+        )
+
+    uuid_byte_length = 36
+
+    from exo.worker.engines.mlx.auto_parallel import _guarded_eval
+
+    n_tasks = len(tasks)
+    counts_arr = mx.distributed.all_gather(mx.array([n_tasks]), group=group)
+    _guarded_eval(counts_arr)
+    all_counts = cast(list[int], counts_arr.tolist())
+    max_tasks = max(all_counts)
+    world_size: int = 1 if group is None else group.size()
+
+    if max_tasks == 0:
+        return [], []
+
+    padded = [encode_task_id(task.task_id) for task in tasks] + [
+        [0] * uuid_byte_length
+    ] * (max_tasks - n_tasks)
+
+    assert all(len(encoded_task_id) == uuid_byte_length for encoded_task_id in padded)
+
+    gathered_arr = mx.distributed.all_gather(mx.array(padded), group=group).reshape(
+        world_size, max_tasks, -1
+    )
+    _guarded_eval(gathered_arr)
+    gathered = cast(
+        list[list[list[int]]],
+        gathered_arr.tolist(),
+    )
+    all_task_ids: list[list[TaskId]] = [
+        [decode_task_id(encoded_task_id) for encoded_task_id in rank_tasks[:count]]
+        for rank_tasks, count in zip(gathered, all_counts, strict=True)
+    ]
+
+    agreed_ids = set[TaskId].intersection(*(set(tids) for tids in all_task_ids))
+
+    local_tasks = {task.task_id: task for task in tasks}
+    agreed = [local_tasks[tid] for tid in sorted(agreed_ids)]
+    different = [task for task in tasks if task.task_id not in agreed_ids]
+    return agreed, different
