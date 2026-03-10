@@ -436,14 +436,28 @@ class BatchGenerator(InferenceGenerator):
         # the next model forward pass (all_reduce).  Without this,
         # one peer may cancel and exit the generation loop while the
         # other is still in all_reduce → deadlock.
-        if mx_any(bool(self._cancelled_tasks), self.group):
-            if not self._cancelled_tasks:
-                # Another peer has cancels but we don't yet.
+        #
+        # Only consider cancels for tasks still active in the MLX batch —
+        # stale cancels (for already-completed tasks) must not trigger
+        # CANCEL_ALL on other peers, or they'll kill unrelated active tasks.
+        active_task_ids = {
+            task.task_id for _, (task, _, _) in self._active_tasks.items()
+        }
+        has_cancel_all = CANCEL_ALL_TASKS in self._cancelled_tasks
+        has_relevant_cancel = has_cancel_all or bool(
+            self._cancelled_tasks & active_task_ids
+        )
+
+        if mx_any(has_relevant_cancel, self.group):
+            if not has_relevant_cancel:
+                # Another peer has relevant cancels but we don't.
                 # In TP mode all peers share the same active task set,
                 # so cancelling everything keeps them in sync.
                 self._cancelled_tasks.add(CANCEL_ALL_TASKS)
             early_cancelled = self._apply_cancellations()
         else:
+            # Discard stale cancels that don't match any active task.
+            self._cancelled_tasks &= active_task_ids | {CANCEL_ALL_TASKS}
             early_cancelled = []
 
         if not self._queue:
