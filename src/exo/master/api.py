@@ -747,10 +747,11 @@ class API:
     async def _resolve_and_validate_text_model(self, model_id: ModelId) -> ModelId:
         """Validate a text model exists and return the resolved model ID.
 
-        Falls back to the sole active model when only one is loaded and the
-        requested model is not found (e.g. a client hard-codes a model name
-        that doesn't exist on the cluster).
-        Raises HTTPException 404 if no instance is found for the model.
+        Resolution order:
+        1. Exact match against active instances.
+        2. EXO_DEFAULT_MODEL env var (explicit override).
+        3. Sole active model when only one is loaded.
+        Raises HTTPException 404 if none of the above succeed.
         """
         if any(
             instance.shard_assignments.model_id == model_id
@@ -758,14 +759,23 @@ class API:
         ):
             return model_id
 
-        # Fallback: if exactly one model is active, use it regardless of
-        # what the client asked for.  This lets generic clients (e.g. Claude
-        # Code subagents requesting "claude-sonnet-4-6") work against a
-        # single-model cluster without configuration.
+        from exo.shared.constants import EXO_DEFAULT_MODEL
+
         active_models = {
             instance.shard_assignments.model_id
             for instance in self.state.instances.values()
         }
+
+        # Explicit default model configured via env var.
+        if EXO_DEFAULT_MODEL is not None:
+            default = ModelId(EXO_DEFAULT_MODEL)
+            if default in active_models:
+                logger.info(
+                    f"Model {model_id} not found, using EXO_DEFAULT_MODEL={default}"
+                )
+                return default
+
+        # Implicit fallback: sole active model.
         if len(active_models) == 1:
             resolved = next(iter(active_models))
             logger.info(

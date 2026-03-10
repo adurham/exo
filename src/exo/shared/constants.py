@@ -94,3 +94,7 @@ def _int_or_none(env: str, default: int | None) -> int | None:
 
 
 EXO_MAX_CONTEXT_TOKENS: int | None = _int_or_none("EXO_MAX_CONTEXT_TOKENS", None)
+
+# When set, any request for an unknown model silently resolves to this model.
+# When unset (default), falls back to the sole active model if exactly one is loaded.
+EXO_DEFAULT_MODEL: str | None = os.environ.get("EXO_DEFAULT_MODEL", None) or None
