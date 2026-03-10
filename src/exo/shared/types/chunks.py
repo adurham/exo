@@ -23,7 +23,7 @@ class TokenChunk(BaseChunk):
     text: str
     token_id: int
     usage: Usage | None
-    finish_reason: Literal["stop", "length", "content_filter"] | None = None
+    finish_reason: Literal["stop", "length", "content_filter", "context_window_exceeded"] | None = None
     stats: GenerationStats | None = None
     logprob: float | None = None
     top_logprobs: list[TopLogprobItem] | None = None

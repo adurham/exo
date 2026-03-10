@@ -281,7 +281,7 @@ class ExoBatchGenerator:
                 and finish_reason is None
                 and len(state.all_prompt_tokens) + state.completion_tokens >= EXO_MAX_CONTEXT_TOKENS
             ):
-                finish_reason = "length"
+                finish_reason = "context_window_exceeded"
 
             is_done = finish_reason is not None
 

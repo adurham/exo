@@ -20,7 +20,7 @@ class ClaudeToolDefinition(BaseModel, frozen=True):
 
 # Type aliases
 ClaudeRole = Literal["user", "assistant"]
-ClaudeStopReason = Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]
+ClaudeStopReason = Literal["end_turn", "max_tokens", "stop_sequence", "tool_use", "model_context_window_exceeded"]
 
 
 # Content block types

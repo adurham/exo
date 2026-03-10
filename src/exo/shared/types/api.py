@@ -14,7 +14,7 @@ from exo.shared.types.worker.shards import Sharding, ShardMetadata
 from exo.utils.pydantic_ext import CamelCaseModel
 
 FinishReason = Literal[
-    "stop", "length", "tool_calls", "content_filter", "function_call", "error"
+    "stop", "length", "tool_calls", "content_filter", "function_call", "error", "context_window_exceeded"
 ]
 
 

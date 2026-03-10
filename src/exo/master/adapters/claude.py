@@ -53,6 +53,7 @@ def finish_reason_to_claude_stop_reason(
         "tool_calls": "tool_use",
         "content_filter": "end_turn",
         "function_call": "tool_use",
+        "context_window_exceeded": "model_context_window_exceeded",
     }
     return mapping.get(finish_reason, "end_turn")
 
