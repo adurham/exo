@@ -205,7 +205,6 @@ class API:
         download_command_sender: Sender[ForwarderDownloadCommand],
         # This lets us pause the API if an election is running
         election_receiver: Receiver[ElectionMessage],
-        local_chunk_receiver: Receiver[ChunkGenerated] | None = None,
     ) -> None:
         self.state = State()
         self._event_log = DiskEventLog(_API_EVENT_LOG_DIR)
@@ -214,7 +213,6 @@ class API:
         self.download_command_sender = download_command_sender
         self.event_receiver = event_receiver
         self.election_receiver = election_receiver
-        self.local_chunk_receiver = local_chunk_receiver
         self.node_id: NodeId = node_id
         self.last_completed_election: int = 0
         self.port = port
@@ -1666,8 +1664,6 @@ class API:
             async with self._tg as tg:
                 logger.info("Starting API")
                 tg.start_soon(self._apply_state)
-                if self.local_chunk_receiver is not None:
-                    tg.start_soon(self._apply_local_chunks)
                 tg.start_soon(self._pause_on_new_election)
                 tg.start_soon(self._cleanup_expired_images)
                 print_startup_banner(self.port)
@@ -1704,10 +1700,6 @@ class API:
                 event = i_event.event
 
                 if isinstance(event, ChunkGenerated):
-                    logger.debug(
-                        f"event_pipeline chunk: cmd={event.command_id} "
-                        f"chunk_type={type(event.chunk).__name__}"
-                    )
                     if queue := self._image_generation_queues.get(
                         event.command_id, None
                     ):
@@ -1716,10 +1708,6 @@ class API:
                             await queue.send(event.chunk)
                         except BrokenResourceError:
                             self._image_generation_queues.pop(event.command_id, None)
-                    # Deliver text chunks from the event pipeline.  When the
-                    # local fast-path is active, the *local* worker's chunks
-                    # bypass this path (they go through _apply_local_chunks),
-                    # but chunks from *remote* workers still arrive here.
                     if queue := self._text_generation_queues.get(
                         event.command_id, None
                     ):
@@ -1730,30 +1718,6 @@ class API:
                             self._text_generation_queues.pop(event.command_id, None)
                 if isinstance(event, TracesMerged):
                     self._save_merged_trace(event)
-
-    async def _apply_local_chunks(self) -> None:
-        """Fast-path: deliver ChunkGenerated events from the local worker directly
-        to HTTP streaming queues, bypassing the 2-hop master event pipeline."""
-        assert self.local_chunk_receiver is not None
-        with self.local_chunk_receiver as chunks:
-            async for event in chunks:
-                logger.debug(
-                    f"local_chunk: cmd={event.command_id} "
-                    f"queues={list(self._text_generation_queues.keys())} "
-                    f"chunk_type={type(event.chunk).__name__}"
-                )
-                if queue := self._text_generation_queues.get(
-                    event.command_id, None
-                ):
-                    assert not isinstance(event.chunk, ImageChunk)
-                    try:
-                        await queue.send(event.chunk)
-                    except BrokenResourceError:
-                        self._text_generation_queues.pop(event.command_id, None)
-                else:
-                    logger.warning(
-                        f"local_chunk DROPPED: cmd={event.command_id} not in queues"
-                    )
 
     def _save_merged_trace(self, event: TracesMerged) -> None:
         traces = [
