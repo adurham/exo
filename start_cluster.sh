@@ -20,10 +20,8 @@
 : "${EXO_PP_LAYER_OFFSET:=0}"
 : "${EXO_MAX_CONTEXT_TOKENS:=150000}"
 : "${EXO_COMPILE_DECODE:=0}"
-# Disabled: subagent model remapping causes OOM on MacBook when both
-# root and subagent conversations compete for KV cache memory.
-# : "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
-: "${LOG_LEVEL:=DEBUG}"
+: "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
+: "${LOG_LEVEL:=INFO}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
