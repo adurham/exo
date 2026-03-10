@@ -604,6 +604,7 @@ class API:
             self._text_generation_queues[command_id], recv = channel[
                 TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk
             ]()
+            logger.info(f"chunk_stream: queue created for cmd={command_id}")
 
             with recv as token_chunks:
                 async for chunk in token_chunks:
@@ -614,6 +615,7 @@ class API:
                         break
 
         except anyio.get_cancelled_exc_class():
+            logger.info(f"chunk_stream: cancelled cmd={command_id}")
             command = TaskCancelled(cancelled_command_id=command_id)
             with anyio.CancelScope(shield=True):
                 await self.command_sender.send(
@@ -621,6 +623,7 @@ class API:
                 )
             raise
         finally:
+            logger.info(f"chunk_stream: cleanup cmd={command_id}")
             await self._send(TaskFinished(finished_command_id=command_id))
             if command_id in self._text_generation_queues:
                 del self._text_generation_queues[command_id]
@@ -1701,6 +1704,10 @@ class API:
                 event = i_event.event
 
                 if isinstance(event, ChunkGenerated):
+                    logger.debug(
+                        f"event_pipeline chunk: cmd={event.command_id} "
+                        f"chunk_type={type(event.chunk).__name__}"
+                    )
                     if queue := self._image_generation_queues.get(
                         event.command_id, None
                     ):
@@ -1730,6 +1737,11 @@ class API:
         assert self.local_chunk_receiver is not None
         with self.local_chunk_receiver as chunks:
             async for event in chunks:
+                logger.debug(
+                    f"local_chunk: cmd={event.command_id} "
+                    f"queues={list(self._text_generation_queues.keys())} "
+                    f"chunk_type={type(event.chunk).__name__}"
+                )
                 if queue := self._text_generation_queues.get(
                     event.command_id, None
                 ):
@@ -1738,6 +1750,10 @@ class API:
                         await queue.send(event.chunk)
                     except BrokenResourceError:
                         self._text_generation_queues.pop(event.command_id, None)
+                else:
+                    logger.warning(
+                        f"local_chunk DROPPED: cmd={event.command_id} not in queues"
+                    )
 
     def _save_merged_trace(self, event: TracesMerged) -> None:
         traces = [
