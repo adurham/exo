@@ -35,6 +35,7 @@ from exo.worker.engines.mlx.generator.generate import (
     extract_top_logprobs,
     prefill,
 )
+from exo.shared.constants import EXO_MAX_CONTEXT_TOKENS
 from exo.worker.engines.mlx.utils_mlx import fix_unmatched_think_end_tokens
 from exo.worker.runner.bootstrap import logger
 
@@ -104,6 +105,11 @@ class ExoBatchGenerator:
         all_prompt_tokens = fix_unmatched_think_end_tokens(
             all_prompt_tokens, self.tokenizer
         )
+
+        if EXO_MAX_CONTEXT_TOKENS is not None and len(all_prompt_tokens) > EXO_MAX_CONTEXT_TOKENS:
+            raise ValueError(
+                f"prompt is too long: {len(all_prompt_tokens)} tokens > {EXO_MAX_CONTEXT_TOKENS} token context limit"
+            )
 
         is_bench = task_params.bench
 
@@ -268,6 +274,14 @@ class ExoBatchGenerator:
                         text = text_before_stop[chunk_start:]
                         finish_reason = "stop"
                         break
+
+            # Stop generation if total context (prompt + completion) exceeds limit.
+            if (
+                EXO_MAX_CONTEXT_TOKENS is not None
+                and finish_reason is None
+                and len(state.all_prompt_tokens) + state.completion_tokens >= EXO_MAX_CONTEXT_TOKENS
+            ):
+                finish_reason = "length"
 
             is_done = finish_reason is not None
 

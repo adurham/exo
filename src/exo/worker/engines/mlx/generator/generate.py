@@ -741,6 +741,14 @@ def mlx_generate(
                     stop_matched = True
                     break
 
+        # Stop generation if total context (prompt + completion) exceeds limit.
+        if (
+            EXO_MAX_CONTEXT_TOKENS is not None
+            and finish_reason is None
+            and total_prompt_tokens + completion_tokens >= EXO_MAX_CONTEXT_TOKENS
+        ):
+            finish_reason = "length"
+
         is_done = finish_reason is not None
 
         stats: GenerationStats | None = None
