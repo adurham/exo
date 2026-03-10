@@ -190,7 +190,17 @@ class SequentialGenerator(InferenceGenerator):
 
         # If the active task was cancelled via the pipe, stop it
         # immediately rather than wasting compute on another token.
-        if task.task_id in self._cancelled_tasks or TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks:
+        # Cancel must be agreed across TP ranks: the pipe is local so one
+        # rank may see the cancel while the other is about to enter a
+        # forward pass (all_reduce).  A cheap all_sum lets every rank
+        # make the same decision, preventing op-mismatch deadlocks.
+        want_cancel = task.task_id in self._cancelled_tasks or TaskId("CANCEL_CURRENT_TASK") in self._cancelled_tasks
+        if self.group is not None:
+            vote = mx.array([1.0 if want_cancel else 0.0])
+            result = mx.distributed.all_sum(vote, group=self.group)
+            _guarded_eval(result)
+            want_cancel = result.item() > 0
+        if want_cancel:
             self._cancelled_tasks.discard(task.task_id)
             self._cancelled_tasks.discard(TaskId("CANCEL_CURRENT_TASK"))
             self._active = None
