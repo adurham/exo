@@ -634,6 +634,35 @@ def mlx_generate(
     )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
+    # Save the KV cache immediately after prefill so the work is preserved
+    # even if generation is cancelled before completion. This is critical for
+    # large-context requests (/compact) that may take 5+ minutes to prefill
+    # and then get cancelled during decode — without this, the retry has to
+    # re-prefill from scratch.
+    if kv_prefix_cache is not None:
+        hit_ratio = (
+            prefix_hit_length / len(all_prompt_tokens)
+            if len(all_prompt_tokens) > 0
+            else 0.0
+        )
+        if (
+            matched_index is not None
+            and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
+        ):
+            kv_prefix_cache.update_kv_cache(
+                matched_index,
+                all_prompt_tokens,
+                caches,
+                cache_snapshots,
+                restore_pos=prefix_hit_length,
+                normalized_tokens=all_prompt_tokens,
+            )
+        else:
+            kv_prefix_cache.add_kv_cache(
+                all_prompt_tokens, caches, cache_snapshots,
+                normalized_tokens=all_prompt_tokens,
+            )
+
     # stream_generate starts from the last token
     last_token = prompt_tokens[-2:]
 
