@@ -280,10 +280,13 @@ class KVPrefixCache:
         if len(self.caches) == 0:
             return
 
-        # Evict by value (not pure LRU) until below threshold and max entries
+        # Use LOCAL memory pressure only — no distributed all_gather.
+        # This method is called from add_kv_cache which may run inside the
+        # generator (e.g. post-prefill save).  A collective op here can
+        # deadlock against JACCL RDMA ops in the TP forward pass.
         while len(self.caches) > 0 and (
             len(self.caches) >= _MAX_ENTRIES
-            or self.get_memory_used_percentage() > _MEMORY_THRESHOLD
+            or get_memory_used_percentage() > _MEMORY_THRESHOLD
         ):
             # Find lowest-value entry
             min_value = float('inf')

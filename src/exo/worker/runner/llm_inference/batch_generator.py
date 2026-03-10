@@ -129,8 +129,6 @@ class SequentialGenerator(InferenceGenerator):
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
-    _maybe_cancel: list[TextGeneration] = field(default_factory=list, init=False)
-    _all_tasks: dict[TaskId, TextGeneration] = field(default_factory=dict, init=False)
     _queue: deque[TextGeneration] = field(default_factory=deque, init=False)
     _active: (
         tuple[
@@ -158,7 +156,6 @@ class SequentialGenerator(InferenceGenerator):
         task: TextGeneration,
     ) -> None:
         self._cancelled_tasks.discard(CANCEL_ALL_TASKS)
-        self._all_tasks[task.task_id] = task
         self._maybe_queue.append(task)
 
     def agree_on_tasks(self) -> None:
@@ -171,30 +168,28 @@ class SequentialGenerator(InferenceGenerator):
         if EXO_TRACING_ENABLED:
             logger.info(f"agree_on_tasks took {(time.perf_counter() - t0) * 1000:.1f}ms")
 
-    def agree_on_cancellations(self) -> None:
-        """Agree between all ranks about which tasks to cancel."""
-        has_cancel_all = False
+    def _drain_local_cancellations(self) -> None:
+        """Drain cancel pipe locally — no collective ops.
+
+        SequentialGenerator is used for TP mode where all ranks execute the
+        same model forward pass with all_reduce.  Injecting extra collective
+        ops (all_sum / all_gather) between forward-pass steps can deadlock
+        against JACCL RDMA.  Cancel signals arrive on all ranks from the
+        same source, so local drain is sufficient.
+        """
         for task_id in self.cancel_receiver.collect():
             if task_id == CANCEL_ALL_TASKS:
-                has_cancel_all = True
-                continue
-            if task_id in self._all_tasks:
-                self._maybe_cancel.append(self._all_tasks[task_id])
-
-        if mx_any(has_cancel_all, self.group):
-            self._cancelled_tasks.add(CANCEL_ALL_TASKS)
-
-        agreed, different = mx_all_gather_tasks(self._maybe_cancel, self.group)
-        self._cancelled_tasks.update(task.task_id for task in agreed)
-        self._maybe_cancel = list(different)
+                self._cancelled_tasks.add(CANCEL_ALL_TASKS)
+            else:
+                self._cancelled_tasks.add(task_id)
 
     def step(
         self,
     ) -> Iterable[
         tuple[TaskId, GenerationResponse | ToolCallResponse | Cancelled | Finished]
     ]:
-        # Drain cancel pipe — no collective ops, just local pipe read.
-        self.agree_on_cancellations()
+        # Drain cancel pipe locally — no collective ops to avoid TP deadlock.
+        self._drain_local_cancellations()
 
         if self._active is None:
             self.agree_on_tasks()
