@@ -20,7 +20,9 @@
 : "${EXO_PP_LAYER_OFFSET:=0}"
 : "${EXO_MAX_CONTEXT_TOKENS:=130000}"
 : "${EXO_COMPILE_DECODE:=0}"
-: "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
+# Disabled: subagent model remapping causes OOM on MacBook when both
+# root and subagent conversations compete for KV cache memory.
+# : "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
 : "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -384,7 +386,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_KV_BITS=$EXO_KV_BITS"
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
     EXO_ENV="$EXO_ENV EXO_MAX_CONTEXT_TOKENS=$EXO_MAX_CONTEXT_TOKENS"
-    EXO_ENV="$EXO_ENV EXO_DEFAULT_MODEL=$EXO_DEFAULT_MODEL"
+    EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
     EXO_ENV="$EXO_ENV EXO_COMPILE_DECODE=$EXO_COMPILE_DECODE"
     EXO_ENV="$EXO_ENV LOG_LEVEL=$LOG_LEVEL"
 
