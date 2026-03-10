@@ -64,6 +64,7 @@ class _EngineTask:
     generation_start_time: float = 0.0
     in_thinking: bool = False
     reasoning_tokens: int = 0
+    first_token_emitted: bool = False
 
 
 @dataclass(eq=False)
@@ -309,6 +310,22 @@ class ExoBatchGenerator:
                     ),
                     completion_tokens_details=CompletionTokensDetails(
                         reasoning_tokens=state.reasoning_tokens
+                    ),
+                )
+            elif not state.first_token_emitted:
+                # Emit prompt_tokens on the first token so streaming adapters
+                # can populate input_tokens without waiting for the final chunk.
+                state.first_token_emitted = True
+                total_prompt_tokens = len(state.all_prompt_tokens)
+                usage = Usage(
+                    prompt_tokens=total_prompt_tokens,
+                    completion_tokens=0,
+                    total_tokens=total_prompt_tokens,
+                    prompt_tokens_details=PromptTokensDetails(
+                        cached_tokens=state.prefix_hit_length
+                    ),
+                    completion_tokens_details=CompletionTokensDetails(
+                        reasoning_tokens=0
                     ),
                 )
 
