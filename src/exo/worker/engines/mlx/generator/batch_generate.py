@@ -192,6 +192,11 @@ class ExoBatchGenerator:
             logits_processors = [ban_token_ids(eos_ids)] + logits_processors
 
         max_tokens = task_params.max_output_tokens or MAX_TOKENS
+        if EXO_MAX_CONTEXT_TOKENS is not None:
+            remaining = EXO_MAX_CONTEXT_TOKENS - len(all_prompt_tokens)
+            if remaining < max_tokens:
+                logger.info(f"Clamping max_tokens from {max_tokens} to {remaining} (context budget)")
+                max_tokens = max(1, remaining)
 
         uids = self._exo_gen.insert(
             prompts=[last_tokens.tolist()],

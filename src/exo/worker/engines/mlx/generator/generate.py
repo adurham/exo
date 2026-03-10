@@ -590,7 +590,10 @@ def mlx_generate(
     # Default step=256 causes a full-cache copy every 256 tokens; at 100K
     # context each copy costs ~160ms. Setting step to cover the full expected
     # sequence eliminates all mid-generation reallocations.
-    max_tokens_estimate = (task.max_output_tokens or MAX_TOKENS) + len(all_prompt_tokens)
+    max_output = task.max_output_tokens or MAX_TOKENS
+    if EXO_MAX_CONTEXT_TOKENS is not None:
+        max_output = min(max_output, EXO_MAX_CONTEXT_TOKENS - len(all_prompt_tokens))
+    max_tokens_estimate = max_output + len(all_prompt_tokens)
     for c in caches:
         if hasattr(c, "step"):
             c.step = max_tokens_estimate
@@ -667,6 +670,11 @@ def mlx_generate(
     last_token = prompt_tokens[-2:]
 
     max_tokens = task.max_output_tokens or MAX_TOKENS
+    if EXO_MAX_CONTEXT_TOKENS is not None:
+        remaining = EXO_MAX_CONTEXT_TOKENS - len(all_prompt_tokens)
+        if remaining < max_tokens:
+            logger.info(f"Clamping max_tokens from {max_tokens} to {remaining} (context budget)")
+            max_tokens = max(1, remaining)
     accumulated_text = ""
     generated_text_parts: list[str] = []
     generation_start_time = time.perf_counter()
