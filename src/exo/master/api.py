@@ -171,7 +171,7 @@ from exo.shared.types.openai_responses import (
     ResponsesResponse,
 )
 from exo.shared.types.state import State
-from exo.shared.types.text_generation import TextGenerationTaskParams
+from exo.shared.types.text_generation import InputMessage, TextGenerationTaskParams
 from exo.shared.types.worker.downloads import DownloadCompleted
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
 from exo.shared.types.worker.shards import Sharding
@@ -869,33 +869,42 @@ class API:
             # smaller models tend to leak chain-of-thought into responses.
             updates["enable_thinking"] = False
 
-            # Trim bloated system prompt (Claude Code injects CLAUDE.md, MEMORY.md,
-            # skill definitions, etc. into every request — ~40K tokens of overhead).
-            original_len = 0
-            trimmed_len = 0
+            # Trim bloated prompts — Claude Code injects CLAUDE.md, MEMORY.md,
+            # skill definitions, etc. into EVERY message (system AND user) via
+            # <system-reminder> tags. Strip from all locations.
+            trim = self._trim_subagent_system_prompt
+            total_saved = 0
+
             if task_params.instructions:
-                original_len = len(task_params.instructions)
-                trimmed = self._trim_subagent_system_prompt(task_params.instructions)
-                trimmed_len = len(trimmed)
+                original = task_params.instructions
+                trimmed = trim(original)
+                total_saved += len(original) - len(trimmed)
                 updates["instructions"] = trimmed
 
+            # Trim input messages (user-role messages with <system-reminder> blocks)
+            trimmed_input: list[InputMessage] = []
+            for msg in task_params.input:
+                trimmed_content = trim(msg.content)
+                total_saved += len(msg.content) - len(trimmed_content)
+                trimmed_input.append(InputMessage(role=msg.role, content=trimmed_content))
+            updates["input"] = trimmed_input
+
+            # Trim chat_template_messages (system + user messages)
             chat_msgs: list[dict[str, object]] | None = None
             if task_params.chat_template_messages is not None:
-                chat_msgs = [dict(m) for m in task_params.chat_template_messages]
-                for i, msg in enumerate(chat_msgs):
-                    if msg.get("role") == "system":
-                        original_content = str(msg.get("content", ""))
-                        original_len = max(original_len, len(original_content))
-                        trimmed_sys = self._trim_subagent_system_prompt(original_content)
-                        trimmed_len = max(trimmed_len, len(trimmed_sys))
-                        chat_msgs[i] = {**msg, "content": trimmed_sys}
-                        break
+                chat_msgs = []
+                for m in task_params.chat_template_messages:
+                    new_m = dict(m)
+                    content: str = m.get("content", "") or ""
+                    trimmed_content = trim(content)
+                    total_saved += len(content) - len(trimmed_content)
+                    new_m["content"] = trimmed_content
+                    chat_msgs.append(new_m)
                 updates["chat_template_messages"] = chat_msgs
 
-            if original_len > 0:
-                saved = original_len - trimmed_len
+            if total_saved > 0:
                 logger.info(
-                    f"Subagent prompt trimmed: {original_len:,} → {trimmed_len:,} chars ({saved:,} removed, ~{saved // 4:,} tokens saved)"
+                    f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
                 )
 
             # Inject subagent rules into (now-trimmed) system prompt
@@ -921,7 +930,7 @@ class API:
                 updates["chat_template_messages"] = chat_msgs
 
             logger.info(
-                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions'))}"
+                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages'))}"
             )
 
         return task_params.model_copy(update=updates)
