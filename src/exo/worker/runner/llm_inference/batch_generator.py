@@ -499,6 +499,7 @@ class BatchGenerator(InferenceGenerator):
             self.agree_on_tasks()
 
         # Submit any queued tasks to the engine
+        rejected: list[tuple[TaskId, Finished]] = []
         while self._queue and len(self._active_tasks) < EXO_MAX_CONCURRENT_REQUESTS:
             task = self._queue.popleft()
             try:
@@ -508,6 +509,7 @@ class BatchGenerator(InferenceGenerator):
             except ValueError as e:
                 logger.warning(f"Task {task.task_id} rejected: {e}")
                 self._send_error(task, e)
+                rejected.append((task.task_id, Finished()))
                 continue
             except Exception as e:
                 self._send_error(task, e)
@@ -529,7 +531,7 @@ class BatchGenerator(InferenceGenerator):
             self._active_tasks[uid] = (task, queue, output_generator)
 
         if not self._mlx_gen.has_work:
-            return early_cancelled
+            return itertools.chain(early_cancelled, rejected)
 
         results = self._mlx_gen.step()
 
@@ -556,7 +558,7 @@ class BatchGenerator(InferenceGenerator):
         if not self._active_tasks:
             self._reset_heartbeat_timeout()
 
-        return itertools.chain(early_cancelled, output, self._apply_cancellations())
+        return itertools.chain(early_cancelled, rejected, output, self._apply_cancellations())
 
     def _apply_cancellations(
         self,
