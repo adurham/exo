@@ -21,5 +21,7 @@ CACHE_GROUP_SIZE: int = 64
 
 DEFAULT_TOP_LOGPROBS: int = 5
 
+PREFILL_STEP_SIZE: int = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
+
 # TODO: We should really make this opt-in, but Kimi requires trust_remote_code=True
 TRUST_REMOTE_CODE: bool = True

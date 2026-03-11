@@ -408,6 +408,13 @@ for NODE in "${NODES[@]}"; do
         EXO_ENV="$EXO_ENV EXO_LAYER_SPLIT=$EXO_LAYER_SPLIT"
     fi
 
+    # Per-node overrides
+    if [ "$NODE" == "macbook-m4" ]; then
+        # Smaller prefill steps = finer KV cache snapshot granularity for
+        # the memory-constrained MacBook (subagent workloads are 1-10K tokens).
+        EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
+    fi
+
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo -v > ~/exo.log 2>&1'"
     elif [ "$NODE" == "macstudio-m4-2" ]; then
@@ -516,12 +523,29 @@ place_instance_with_retry() {
         http_code=$(echo "$raw_response" | tail -1)
         raw_response=$(echo "$raw_response" | sed '$d')
 
-        # Any valid HTTP response means the API processed the request
-        if [ -n "$http_code" ] && [ "$http_code" -ge 200 ] 2>/dev/null && [ "$http_code" -lt 500 ] 2>/dev/null; then
-            local msg
-            msg=$(echo "$raw_response" | jq -r '.message // .detail // empty' 2>/dev/null)
-            echo "  ${msg:-$raw_response}"
+        # Parse message from response (handles both top-level and nested error formats)
+        local msg
+        msg=$(echo "$raw_response" | jq -r '.message // .error.message // .detail // empty' 2>/dev/null)
+
+        # Success
+        if [ -n "$http_code" ] && [ "$http_code" -ge 200 ] 2>/dev/null && [ "$http_code" -lt 300 ] 2>/dev/null; then
+            echo "  ${msg:-OK}"
             return 0
+        fi
+
+        # These 400s happen when node_memory/node_network aren't populated yet — retryable
+        if echo "$msg" | grep -q "sufficient memory\|devices to be able to communicate"; then
+            if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "  Attempt $attempt/$max_attempts: cluster state still propagating, retrying in 3s..."
+                sleep 3
+                continue
+            fi
+        fi
+
+        # Any other 4xx = real client error, don't retry
+        if [ -n "$http_code" ] && [ "$http_code" -ge 400 ] 2>/dev/null && [ "$http_code" -lt 500 ] 2>/dev/null; then
+            echo "  ERROR (HTTP $http_code): ${msg:-$raw_response}"
+            return 1
         fi
 
         # 5xx or no response — API not ready, safe to retry
@@ -535,30 +559,40 @@ place_instance_with_retry() {
     done
 }
 
+EXPECTED_RUNNERS=0
+
 echo "Creating MiniMax-M2.5-5bit instance on Mac Studios (Tensor / RDMA)..."
-place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-5bit" "{
+if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-5bit" "{
     \"model_id\": \"mlx-community/MiniMax-M2.5-5bit\",
     \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"]
-}"
+}"; then
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
+fi
 
 echo "Creating Qwen3.5-35B-A3B-4bit instance on MacBook (single node)..."
-place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-35B-A3B-4bit" "{
+if place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-35B-A3B-4bit" "{
     \"model_id\": \"mlx-community/Qwen3.5-35B-A3B-4bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxRing\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"]
-}"
+}"; then
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+fi
 
-# Wait for all instances to be ready (2 MiniMax runners + 1 Qwen runner)
-echo -n "Waiting for instances to load..."
+if [ "$EXPECTED_RUNNERS" -eq 0 ]; then
+    echo "ERROR: No instances were created. Check the dashboard."
+    exit 1
+fi
+
+echo -n "Waiting for $EXPECTED_RUNNERS runner(s) to load..."
 INSTANCES_READY=false
 for i in {1..120}; do
     READY_COUNT=$(curl -s "$API/state" | jq '[.runners | to_entries[] | .value | to_entries[] | .key | select(. == "RunnerReady" or . == "RunnerRunning")] | length' 2>/dev/null || echo 0)
-    if [ "$READY_COUNT" -ge 3 ]; then
+    if [ "$READY_COUNT" -ge "$EXPECTED_RUNNERS" ]; then
         echo " All instances ready! ($READY_COUNT runners)"
         INSTANCES_READY=true
         break
@@ -569,7 +603,7 @@ done
 
 if [ "$INSTANCES_READY" = false ]; then
     echo ""
-    echo "WARNING: Not all instances loaded within timeout. Check the dashboard."
+    echo "WARNING: Only $READY_COUNT/$EXPECTED_RUNNERS runners loaded within timeout. Check the dashboard."
 fi
 
 # Final environment export

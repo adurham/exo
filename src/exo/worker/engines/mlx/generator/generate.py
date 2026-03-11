@@ -53,6 +53,7 @@ from exo.worker.engines.mlx.constants import (
     KV_BITS,
     KV_GROUP_SIZE,
     MAX_TOKENS,
+    PREFILL_STEP_SIZE,
 )
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -301,7 +302,7 @@ def prefill(
 
     is_pipeline = _has_pipeline_communication_layer(model)
 
-    prefill_step_size = 4096
+    prefill_step_size = PREFILL_STEP_SIZE
 
     try:
         if is_pipeline and num_tokens >= prefill_step_size:
