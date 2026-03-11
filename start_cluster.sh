@@ -460,5 +460,48 @@ if [ "$CLUSTER_READY" = false ]; then
 fi
 
 
+# 5. Create model instances
+API="http://$M4_1_IP:52415"
+
+echo "Creating Qwen3.5-35B-A3B-4bit instance on MacBook Pro (Tensor / RDMA)..."
+curl -s -X POST "$API/place_instance" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model_id": "mlx-community/Qwen3.5-35B-A3B-4bit",
+        "sharding": "Tensor",
+        "instance_meta": "MlxJaccl",
+        "min_nodes": 1
+    }' | jq -r '.message // .detail // "unknown response"'
+
+echo "Creating MiniMax-M2.5-5bit instance on Mac Studios (Tensor / RDMA)..."
+curl -s -X POST "$API/place_instance" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model_id": "mlx-community/MiniMax-M2.5-5bit",
+        "sharding": "Tensor",
+        "instance_meta": "MlxJaccl",
+        "min_nodes": 2
+    }' | jq -r '.message // .detail // "unknown response"'
+
+# Wait for both instances to be ready
+echo -n "Waiting for instances to load..."
+INSTANCES_READY=false
+for i in {1..120}; do
+    # Count runners in RunnerReady or RunnerRunning state
+    READY_COUNT=$(curl -s "$API/state" | jq '[.runners | to_entries[] | .value | to_entries[] | .key | select(. == "RunnerReady" or . == "RunnerRunning")] | length' 2>/dev/null || echo 0)
+    if [ "$READY_COUNT" -ge 3 ]; then
+        echo " All instances ready! ($READY_COUNT runners)"
+        INSTANCES_READY=true
+        break
+    fi
+    echo -n "."
+    sleep 3
+done
+
+if [ "$INSTANCES_READY" = false ]; then
+    echo ""
+    echo "WARNING: Not all instances loaded within timeout. Check the dashboard."
+fi
+
 # Final environment export
 export IBV_FORK_SAFE=${IBV_FORK_SAFE:-1}
