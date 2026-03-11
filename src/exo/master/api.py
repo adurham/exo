@@ -869,65 +869,52 @@ class API:
             # smaller models tend to leak chain-of-thought into responses.
             updates["enable_thinking"] = False
 
-            # Trim bloated prompts — Claude Code injects CLAUDE.md, MEMORY.md,
-            # skill definitions, etc. into EVERY message (system AND user) via
-            # <system-reminder> tags. Strip from all locations.
+            # Strip bloated prompts — Claude Code injects its full agent system
+            # prompt (~4K chars), CLAUDE.md, MEMORY.md, skill definitions, etc.
+            # into every request.  For subagents on constrained hardware we
+            # replace the entire instructions with our lean subagent rules and
+            # strip tagged blocks from input messages.
             trim = self._trim_subagent_system_prompt
-            total_saved = 0
 
-            if task_params.instructions:
-                original = task_params.instructions
-                trimmed = trim(original)
-                total_saved += len(original) - len(trimmed)
-                updates["instructions"] = trimmed
+            # Replace instructions entirely — the Claude Code agent prompt is
+            # not useful for a small subagent model.
+            original_instructions_len = len(task_params.instructions or "")
+            updates["instructions"] = EXO_SUBAGENT_RULES or ""
 
             # Trim input messages (user-role messages with <system-reminder> blocks)
+            total_input_saved = 0
             trimmed_input: list[InputMessage] = []
             for msg in task_params.input:
                 trimmed_content = trim(msg.content)
-                total_saved += len(msg.content) - len(trimmed_content)
+                total_input_saved += len(msg.content) - len(trimmed_content)
                 trimmed_input.append(InputMessage(role=msg.role, content=trimmed_content))
             updates["input"] = trimmed_input
 
-            # Trim chat_template_messages (system + user messages)
-            chat_msgs: list[dict[str, object]] | None = None
+            # Rebuild chat_template_messages: replace system with our rules,
+            # trim all other messages.
+            chat_msgs: list[dict[str, object]] = []
             if task_params.chat_template_messages is not None:
-                chat_msgs = []
+                found_system = False
                 for m in task_params.chat_template_messages:
                     new_m = dict(m)
-                    content: str = m.get("content", "") or ""
-                    trimmed_content = trim(content)
-                    total_saved += len(content) - len(trimmed_content)
-                    new_m["content"] = trimmed_content
+                    if m.get("role") == "system":
+                        new_m["content"] = EXO_SUBAGENT_RULES or ""
+                        found_system = True
+                    else:
+                        content: str = m.get("content", "") or ""
+                        new_m["content"] = trim(content)
                     chat_msgs.append(new_m)
-                updates["chat_template_messages"] = chat_msgs
+                if not found_system:
+                    chat_msgs.insert(0, {"role": "system", "content": EXO_SUBAGENT_RULES or ""})
+            else:
+                chat_msgs = [{"role": "system", "content": EXO_SUBAGENT_RULES or ""}]
+            updates["chat_template_messages"] = chat_msgs
 
+            total_saved = original_instructions_len + total_input_saved
             if total_saved > 0:
                 logger.info(
                     f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
                 )
-
-            # Inject subagent rules into (now-trimmed) system prompt
-            if EXO_SUBAGENT_RULES:
-                cur_instructions = str(updates.get("instructions") or task_params.instructions or "")
-                updates["instructions"] = (
-                    f"{cur_instructions}\n\n{EXO_SUBAGENT_RULES}" if cur_instructions else EXO_SUBAGENT_RULES
-                )
-
-                if chat_msgs is None:
-                    chat_msgs = [dict(m) for m in task_params.chat_template_messages] if task_params.chat_template_messages else []
-                found_system = False
-                for i, msg in enumerate(chat_msgs):
-                    if msg.get("role") == "system":
-                        chat_msgs[i] = {
-                            **msg,
-                            "content": f"{msg.get('content', '')}\n\n{EXO_SUBAGENT_RULES}",
-                        }
-                        found_system = True
-                        break
-                if not found_system:
-                    chat_msgs.insert(0, {"role": "system", "content": EXO_SUBAGENT_RULES})
-                updates["chat_template_messages"] = chat_msgs
 
             logger.info(
                 f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages'))}"
