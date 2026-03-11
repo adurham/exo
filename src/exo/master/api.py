@@ -757,12 +757,21 @@ class API:
         ):
             return model_id, False
 
-        from exo.shared.constants import EXO_DEFAULT_MODEL
+        from exo.shared.constants import EXO_DEFAULT_MODEL, EXO_SUBAGENT_MODEL
 
         active_models = {
             instance.shard_assignments.model_id
             for instance in self.state.instances.values()
         }
+
+        # Subagent model: route to a dedicated smaller model if configured.
+        if EXO_SUBAGENT_MODEL is not None:
+            subagent = ModelId(EXO_SUBAGENT_MODEL)
+            if subagent in active_models:
+                logger.info(
+                    f"Model {model_id} not found, routing to EXO_SUBAGENT_MODEL={subagent}"
+                )
+                return subagent, True
 
         # Explicit default model configured via env var.
         if EXO_DEFAULT_MODEL is not None:

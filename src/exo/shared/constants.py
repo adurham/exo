@@ -120,3 +120,8 @@ if os.path.isfile(_SUBAGENT_RULES_PATH):
 # When set, any request for an unknown model silently resolves to this model.
 # When unset (default), falls back to the sole active model if exactly one is loaded.
 EXO_DEFAULT_MODEL: str | None = os.environ.get("EXO_DEFAULT_MODEL", None) or None
+
+# When set, subagent requests (was_fallback=True) resolve to this model
+# instead of EXO_DEFAULT_MODEL. Enables routing subagents to a smaller,
+# faster model on a dedicated node.
+EXO_SUBAGENT_MODEL: str | None = os.environ.get("EXO_SUBAGENT_MODEL", None) or None
