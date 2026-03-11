@@ -117,22 +117,6 @@ class ExoBatchGenerator:
     ) -> int:
         from exo.worker.engines.mlx.cache import get_memory_used_percentage, MEMORY_THRESHOLD
 
-        mem_used = get_memory_used_percentage()
-        if mem_used > MEMORY_THRESHOLD:
-            # Evict KV cache entries to free GPU memory before rejecting.
-            if self.kv_prefix_cache is not None:
-                self.kv_prefix_cache.clear()
-                mx.clear_cache()
-                mem_used = get_memory_used_percentage()
-                logger.info(
-                    f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
-                )
-            if mem_used > MEMORY_THRESHOLD:
-                raise ValueError(
-                    f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
-                    f"cannot accept new request"
-                )
-
         all_prompt_tokens = encode_prompt(self.tokenizer, prompt)
         all_prompt_tokens = fix_unmatched_think_end_tokens(
             all_prompt_tokens, self.tokenizer
@@ -150,9 +134,13 @@ class ExoBatchGenerator:
 
         is_bench = task_params.bench
 
+        # Try KV cache lookup BEFORE memory check — reusing the cache means we
+        # only need to prefill the delta, which requires far less memory than a
+        # full prefill after eviction.
         prefix_hit_length = 0
         matched_index: int | None = None
         prompt_tokens = all_prompt_tokens
+        cache_from_prefix = False
 
         if self.kv_prefix_cache is not None and not is_bench:
             cache, remaining_tokens, matched_index = self.kv_prefix_cache.get_kv_cache(
@@ -165,10 +153,28 @@ class ExoBatchGenerator:
                     f"cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
                 )
                 prompt_tokens = remaining_tokens
+                cache_from_prefix = True
             else:
                 cache = make_kv_cache(self.model)
         else:
             cache = make_kv_cache(self.model)
+
+        # Memory check — only evict KV cache if we didn't get a useful hit.
+        if not cache_from_prefix:
+            mem_used = get_memory_used_percentage()
+            if mem_used > MEMORY_THRESHOLD:
+                if self.kv_prefix_cache is not None:
+                    self.kv_prefix_cache.clear()
+                    mx.clear_cache()
+                    mem_used = get_memory_used_percentage()
+                    logger.info(
+                        f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
+                    )
+                if mem_used > MEMORY_THRESHOLD:
+                    raise ValueError(
+                        f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
+                        f"cannot accept new request"
+                    )
 
         seed = task_params.seed if task_params.seed is not None else 42
         mx.random.seed(seed)

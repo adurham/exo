@@ -494,27 +494,64 @@ if [ -z "$M4_1_NODE_ID" ] || [ -z "$M4_2_NODE_ID" ] || [ -z "$MBP_NODE_ID" ]; th
     exit 1
 fi
 
+place_instance_with_retry() {
+    local label="$1"
+    local model_id="$2"
+    local payload="$3"
+    local max_attempts=10
+    for attempt in $(seq 1 $max_attempts); do
+        # Before each attempt, check if an instance for this model already exists
+        local existing
+        existing=$(curl -s "$API/state" | jq -r --arg m "$model_id" \
+            '[.instances | to_entries[] | select(.value.shardAssignments.modelId == $m)] | length' 2>/dev/null)
+        if [ "$existing" != "0" ] && [ -n "$existing" ] && [ "$existing" != "null" ]; then
+            echo "  Instance for $label already exists, skipping."
+            return 0
+        fi
+
+        local http_code raw_response
+        raw_response=$(curl -s -w '\n%{http_code}' -X POST "$API/place_instance" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+        http_code=$(echo "$raw_response" | tail -1)
+        raw_response=$(echo "$raw_response" | sed '$d')
+
+        # Any valid HTTP response means the API processed the request
+        if [ -n "$http_code" ] && [ "$http_code" -ge 200 ] 2>/dev/null && [ "$http_code" -lt 500 ] 2>/dev/null; then
+            local msg
+            msg=$(echo "$raw_response" | jq -r '.message // .detail // empty' 2>/dev/null)
+            echo "  ${msg:-$raw_response}"
+            return 0
+        fi
+
+        # 5xx or no response — API not ready, safe to retry
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            echo "  Attempt $attempt/$max_attempts: API not ready (HTTP $http_code), retrying in 3s..."
+            sleep 3
+        else
+            echo "  ERROR: Failed after $max_attempts attempts. HTTP $http_code: $raw_response"
+            return 1
+        fi
+    done
+}
+
 echo "Creating MiniMax-M2.5-5bit instance on Mac Studios (Tensor / RDMA)..."
-curl -s -X POST "$API/place_instance" \
-    -H "Content-Type: application/json" \
-    -d "{
-        \"model_id\": \"mlx-community/MiniMax-M2.5-5bit\",
-        \"sharding\": \"Tensor\",
-        \"instance_meta\": \"MlxJaccl\",
-        \"min_nodes\": 2,
-        \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"]
-    }" | jq -r '.message // .detail // "unknown response"'
+place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-5bit" "{
+    \"model_id\": \"mlx-community/MiniMax-M2.5-5bit\",
+    \"sharding\": \"Tensor\",
+    \"instance_meta\": \"MlxJaccl\",
+    \"min_nodes\": 2,
+    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"]
+}"
 
 echo "Creating Qwen3.5-35B-A3B-4bit instance on MacBook (single node)..."
-curl -s -X POST "$API/place_instance" \
-    -H "Content-Type: application/json" \
-    -d "{
-        \"model_id\": \"mlx-community/Qwen3.5-35B-A3B-4bit\",
-        \"sharding\": \"Pipeline\",
-        \"instance_meta\": \"MlxRing\",
-        \"min_nodes\": 1,
-        \"node_ids\": [\"$MBP_NODE_ID\"]
-    }" | jq -r '.message // .detail // "unknown response"'
+place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-35B-A3B-4bit" "{
+    \"model_id\": \"mlx-community/Qwen3.5-35B-A3B-4bit\",
+    \"sharding\": \"Pipeline\",
+    \"instance_meta\": \"MlxRing\",
+    \"min_nodes\": 1,
+    \"node_ids\": [\"$MBP_NODE_ID\"]
+}"
 
 # Wait for all instances to be ready (2 MiniMax runners + 1 Qwen runner)
 echo -n "Waiting for instances to load..."

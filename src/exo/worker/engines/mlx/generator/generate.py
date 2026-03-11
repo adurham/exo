@@ -550,21 +550,6 @@ def mlx_generate(
 ) -> Generator[GenerationResponse]:
     from exo.worker.engines.mlx.cache import get_memory_used_percentage, MEMORY_THRESHOLD
 
-    mem_used = get_memory_used_percentage()
-    if mem_used > MEMORY_THRESHOLD:
-        if kv_prefix_cache is not None:
-            kv_prefix_cache.clear()
-            mx.clear_cache()
-            mem_used = get_memory_used_percentage()
-            logger.info(
-                f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
-            )
-        if mem_used > MEMORY_THRESHOLD:
-            raise ValueError(
-                f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
-                f"cannot accept new request"
-            )
-
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
     # TODO: Randomise task seed and set in taskparams, instead of hard coding as 42.
@@ -598,12 +583,15 @@ def mlx_generate(
     if is_bench:
         kv_prefix_cache = None
 
-    # Use prefix cache if available, otherwise create fresh cache.
+    # Try KV cache lookup BEFORE memory check — reusing the cache means we
+    # only need to prefill the delta, which requires far less memory than a
+    # full prefill after eviction.
     # Touch heartbeat: cache lookup deepcopies KV state which can be slow.
     if distributed_prompt_progress_callback is not None:
         distributed_prompt_progress_callback()
     prefix_hit_length = 0
     matched_index: int | None = None
+    cache_from_prefix = False
     if kv_prefix_cache is None:
         caches = make_kv_cache(model=model)
         prompt_tokens = all_prompt_tokens
@@ -616,6 +604,24 @@ def mlx_generate(
             logger.info(
                 f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
             )
+            cache_from_prefix = True
+
+    # Memory check — only evict KV cache if we didn't get a useful hit.
+    if not cache_from_prefix:
+        mem_used = get_memory_used_percentage()
+        if mem_used > MEMORY_THRESHOLD:
+            if kv_prefix_cache is not None:
+                kv_prefix_cache.clear()
+                mx.clear_cache()
+                mem_used = get_memory_used_percentage()
+                logger.info(
+                    f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
+                )
+            if mem_used > MEMORY_THRESHOLD:
+                raise ValueError(
+                    f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
+                    f"cannot accept new request"
+                )
 
     # Touch heartbeat: cache lookup deepcopy of large KV state can take 10s+ seconds.
     if distributed_prompt_progress_callback is not None:
