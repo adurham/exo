@@ -24,7 +24,7 @@
 # Subagent requests route to Qwen on the MacBook for fast, parallel inference.
 : "${EXO_SUBAGENT_MODEL:=mlx-community/Qwen3.5-9B-8bit}"
 : "${EXO_SUBAGENT_MAX_CONTEXT_TOKENS:=50000}"
-: "${EXO_SUBAGENT_MAX_OUTPUT_TOKENS:=3000}"
+: "${EXO_SUBAGENT_MAX_OUTPUT_TOKENS:=8000}"
 : "${EXO_SUBAGENT_TRIM_MESSAGES:=0}"
 : "${LOG_LEVEL:=INFO}"
 export IBV_FORK_SAFE=1

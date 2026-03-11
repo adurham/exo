@@ -11,7 +11,7 @@ Why: Each subagent starts with a fresh, small context and runs 5-10x faster than
 How:
 - Spawn 2-4 subagents IN PARALLEL, each answering ONE specific question
 - Each subagent prompt must be 1-3 sentences — just the question
-- Subagents have a 20K token limit. Tell them: "Do at most 5 tool calls. Return a 1-3 sentence summary."
+- Subagents have a 50K token limit. Tell them: "Do at most 5 tool calls. Return a 1-3 sentence summary."
 - While subagents research, you can write code or plan — do NOT sit idle
 
 ## RULE 2: NEVER BLOAT YOUR CONTEXT
