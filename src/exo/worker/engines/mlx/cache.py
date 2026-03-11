@@ -22,17 +22,16 @@ from exo.worker.runner.bootstrap import logger
 import math
 
 
-# Fraction of device memory above which LRU eviction kicks in.
-# These thresholds must account for model weights as a fixed baseline cost —
-# e.g. a 20GB model on a 36GB machine is already 56% used before any KV cache.
-# The thresholds below leave enough headroom for KV cache + inference activations.
+# Fraction of Metal GPU memory (active / max_recommended_working_set_size)
+# above which LRU eviction kicks in and new requests are rejected.
+# This measures the actual GPU allocator budget, not system RAM.
 def _default_memory_threshold() -> float:
     total_gb = Memory.from_bytes(psutil.virtual_memory().total).in_gb
     if total_gb >= 128:
-        return 0.88
+        return 0.90
     if total_gb >= 64:
         return 0.85
-    return 0.90
+    return 0.80
 
 
 MEMORY_THRESHOLD = float(
@@ -454,8 +453,18 @@ def get_available_memory() -> Memory:
 
 
 def get_memory_used_percentage() -> float:
+    """Return memory usage as a fraction (0.0–1.0).
+
+    On Metal devices, use GPU active memory vs the wired limit — this is the
+    actual constraint that causes OOM aborts.  Falls back to psutil for
+    non-Metal devices.
+    """
+    if mx.metal.is_available():
+        active = mx.get_active_memory() + mx.get_cache_memory()
+        limit = int(mx.device_info().get("max_recommended_working_set_size", 0))
+        if limit > 0:
+            return float(active / limit)
     mem = psutil.virtual_memory()
-    # percent is 0-100
     return float(mem.percent / 100)
 
 
