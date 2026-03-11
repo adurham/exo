@@ -1009,14 +1009,12 @@ class API:
                 )
                 updates["tools"] = slim_tools
 
-            # Always replace instructions with our lean subagent rules.
-            original_instructions_len = len(task_params.instructions or "")
-            updates["instructions"] = EXO_SUBAGENT_RULES or ""
+            if EXO_SUBAGENT_TRIM_MESSAGES:
+                # Replace instructions and trim messages for constrained models.
+                trim = self._trim_subagent_system_prompt
+                original_instructions_len = len(task_params.instructions or "")
+                updates["instructions"] = EXO_SUBAGENT_RULES or ""
 
-            # Optionally strip tagged blocks from input messages.
-            trim = self._trim_subagent_system_prompt if EXO_SUBAGENT_TRIM_MESSAGES else None
-
-            if trim is not None:
                 total_input_saved = 0
                 trimmed_input: list[InputMessage] = []
                 for msg in task_params.input:
@@ -1024,34 +1022,30 @@ class API:
                     total_input_saved += len(msg.content) - len(trimmed_content)
                     trimmed_input.append(InputMessage(role=msg.role, content=trimmed_content))
                 updates["input"] = trimmed_input
-            else:
-                total_input_saved = 0
 
-            # Rebuild chat_template_messages: always replace system with our
-            # rules, optionally trim other messages.
-            chat_msgs: list[dict[str, object]] = []
-            if task_params.chat_template_messages is not None:
-                found_system = False
-                for m in task_params.chat_template_messages:
-                    new_m = dict(m)
-                    if m.get("role") == "system":
-                        new_m["content"] = EXO_SUBAGENT_RULES or ""
-                        found_system = True
-                    elif trim is not None:
-                        content: str = m.get("content", "") or ""
-                        new_m["content"] = trim(content)
-                    chat_msgs.append(new_m)
-                if not found_system:
-                    chat_msgs.insert(0, {"role": "system", "content": EXO_SUBAGENT_RULES or ""})
-            else:
-                chat_msgs = [{"role": "system", "content": EXO_SUBAGENT_RULES or ""}]
-            updates["chat_template_messages"] = chat_msgs
+                chat_msgs: list[dict[str, object]] = []
+                if task_params.chat_template_messages is not None:
+                    found_system = False
+                    for m in task_params.chat_template_messages:
+                        new_m = dict(m)
+                        if m.get("role") == "system":
+                            new_m["content"] = EXO_SUBAGENT_RULES or ""
+                            found_system = True
+                        else:
+                            content: str = m.get("content", "") or ""
+                            new_m["content"] = trim(content)
+                        chat_msgs.append(new_m)
+                    if not found_system:
+                        chat_msgs.insert(0, {"role": "system", "content": EXO_SUBAGENT_RULES or ""})
+                else:
+                    chat_msgs = [{"role": "system", "content": EXO_SUBAGENT_RULES or ""}]
+                updates["chat_template_messages"] = chat_msgs
 
-            total_saved = original_instructions_len + total_input_saved
-            if total_saved > 0:
-                logger.info(
-                    f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
-                )
+                total_saved = original_instructions_len + total_input_saved
+                if total_saved > 0:
+                    logger.info(
+                        f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
+                    )
 
             logger.info(
                 f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages'))}"
