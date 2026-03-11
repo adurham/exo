@@ -110,16 +110,12 @@ EXO_SUBAGENT_MAX_OUTPUT_TOKENS: int | None = _int_or_none(
 )
 
 # Rules injected into the system prompt of subagent requests.
-# Keeps subagent responses concise so they don't bloat the main conversation.
-EXO_SUBAGENT_RULES: str = """
-IMPORTANT RULES — YOU ARE A SUBAGENT WITH LIMITED RESOURCES:
-1. Your output is injected back into a parent conversation. Keep responses CONCISE.
-2. Return ONLY the specific information requested — no preamble, no extras.
-3. Summarize findings in 1-5 sentences. Do NOT dump raw file contents.
-4. Use Grep to search, Glob to find files, Read with offset/limit for specific lines.
-5. Do NOT use Bash for ls, cat, head, tail, or find — use dedicated tools.
-6. You have a hard output token limit. If you hit it, your response will be cut off.
-""".strip()
+# Loaded from exo-subagent-rules.md at the repo root for easy editing.
+_SUBAGENT_RULES_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "exo-subagent-rules.md")
+EXO_SUBAGENT_RULES: str = ""
+if os.path.isfile(_SUBAGENT_RULES_PATH):
+    with open(_SUBAGENT_RULES_PATH) as _f:
+        EXO_SUBAGENT_RULES = _f.read().strip()
 
 # When set, any request for an unknown model silently resolves to this model.
 # When unset (default), falls back to the sole active model if exactly one is loaded.
