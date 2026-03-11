@@ -109,6 +109,13 @@ EXO_SUBAGENT_MAX_OUTPUT_TOKENS: int | None = _int_or_none(
     "EXO_SUBAGENT_MAX_OUTPUT_TOKENS", 10000
 )
 
+# When true, strip <system-reminder> and other tagged blocks from subagent
+# input messages.  Disable when the subagent model has enough context to
+# handle the full prompt from Claude Code.
+EXO_SUBAGENT_TRIM_MESSAGES: bool = os.environ.get(
+    "EXO_SUBAGENT_TRIM_MESSAGES", "true"
+).lower() in ("true", "1", "yes")
+
 # Rules injected into system prompts.
 # Loaded from markdown files at the repo root for easy editing.
 _RULES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..")

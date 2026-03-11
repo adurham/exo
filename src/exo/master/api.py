@@ -1008,29 +1008,28 @@ class API:
                 )
                 updates["tools"] = slim_tools
 
-            # Strip bloated prompts — Claude Code injects its full agent system
-            # prompt (~4K chars), CLAUDE.md, MEMORY.md, skill definitions, etc.
-            # into every request.  For subagents on constrained hardware we
-            # replace the entire instructions with our lean subagent rules and
-            # strip tagged blocks from input messages.
-            trim = self._trim_subagent_system_prompt
+            from exo.shared.constants import EXO_SUBAGENT_TRIM_MESSAGES
 
-            # Replace instructions entirely — the Claude Code agent prompt is
-            # not useful for a small subagent model.
+            # Always replace instructions with our lean subagent rules.
             original_instructions_len = len(task_params.instructions or "")
             updates["instructions"] = EXO_SUBAGENT_RULES or ""
 
-            # Trim input messages (user-role messages with <system-reminder> blocks)
-            total_input_saved = 0
-            trimmed_input: list[InputMessage] = []
-            for msg in task_params.input:
-                trimmed_content = trim(msg.content)
-                total_input_saved += len(msg.content) - len(trimmed_content)
-                trimmed_input.append(InputMessage(role=msg.role, content=trimmed_content))
-            updates["input"] = trimmed_input
+            # Optionally strip tagged blocks from input messages.
+            trim = self._trim_subagent_system_prompt if EXO_SUBAGENT_TRIM_MESSAGES else None
 
-            # Rebuild chat_template_messages: replace system with our rules,
-            # trim all other messages.
+            if trim is not None:
+                total_input_saved = 0
+                trimmed_input: list[InputMessage] = []
+                for msg in task_params.input:
+                    trimmed_content = trim(msg.content)
+                    total_input_saved += len(msg.content) - len(trimmed_content)
+                    trimmed_input.append(InputMessage(role=msg.role, content=trimmed_content))
+                updates["input"] = trimmed_input
+            else:
+                total_input_saved = 0
+
+            # Rebuild chat_template_messages: always replace system with our
+            # rules, optionally trim other messages.
             chat_msgs: list[dict[str, object]] = []
             if task_params.chat_template_messages is not None:
                 found_system = False
@@ -1039,7 +1038,7 @@ class API:
                     if m.get("role") == "system":
                         new_m["content"] = EXO_SUBAGENT_RULES or ""
                         found_system = True
-                    else:
+                    elif trim is not None:
                         content: str = m.get("content", "") or ""
                         new_m["content"] = trim(content)
                     chat_msgs.append(new_m)
