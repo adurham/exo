@@ -826,6 +826,10 @@ class API:
                 if existing is None or existing > cap:
                     updates["max_output_tokens"] = cap
 
+            # Disable thinking for subagents — wastes output tokens and
+            # smaller models tend to leak chain-of-thought into responses.
+            updates["enable_thinking"] = False  # type: ignore[assignment]
+
             # Inject subagent rules into system prompt
             if EXO_SUBAGENT_RULES:
                 existing_instructions = task_params.instructions or ""
