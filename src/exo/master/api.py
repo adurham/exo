@@ -360,6 +360,7 @@ class API:
             sharding=payload.sharding,
             instance_meta=payload.instance_meta,
             min_nodes=payload.min_nodes,
+            required_nodes=set(payload.node_ids) if payload.node_ids else None,
         )
         await self._send(command)
 

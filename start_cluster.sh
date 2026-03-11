@@ -463,25 +463,45 @@ fi
 # 5. Create model instances
 API="http://$M4_1_IP:52415"
 
+# Look up exo node IDs from the cluster state (these differ from libp2p peer IDs)
+echo "Looking up node IDs from cluster state..."
+NODE_STATE=$(curl -s "$API/state")
+
+# Match nodes by friendly name pattern
+MBP_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("MacBook")) | .key')
+M4_1_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-1")) | .key')
+M4_2_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-2")) | .key')
+
+echo "  MacBook Pro: $MBP_NODE_ID"
+echo "  Mac Studio M4-1: $M4_1_NODE_ID"
+echo "  Mac Studio M4-2: $M4_2_NODE_ID"
+
+if [ -z "$MBP_NODE_ID" ] || [ -z "$M4_1_NODE_ID" ] || [ -z "$M4_2_NODE_ID" ]; then
+    echo "ERROR: Could not resolve all node IDs from cluster state."
+    exit 1
+fi
+
 echo "Creating Qwen3.5-35B-A3B-4bit instance on MacBook Pro (Tensor / RDMA)..."
 curl -s -X POST "$API/place_instance" \
     -H "Content-Type: application/json" \
-    -d '{
-        "model_id": "mlx-community/Qwen3.5-35B-A3B-4bit",
-        "sharding": "Tensor",
-        "instance_meta": "MlxJaccl",
-        "min_nodes": 1
-    }' | jq -r '.message // .detail // "unknown response"'
+    -d "{
+        \"model_id\": \"mlx-community/Qwen3.5-35B-A3B-4bit\",
+        \"sharding\": \"Tensor\",
+        \"instance_meta\": \"MlxJaccl\",
+        \"min_nodes\": 1,
+        \"node_ids\": [\"$MBP_NODE_ID\"]
+    }" | jq -r '.message // .detail // "unknown response"'
 
 echo "Creating MiniMax-M2.5-5bit instance on Mac Studios (Tensor / RDMA)..."
 curl -s -X POST "$API/place_instance" \
     -H "Content-Type: application/json" \
-    -d '{
-        "model_id": "mlx-community/MiniMax-M2.5-5bit",
-        "sharding": "Tensor",
-        "instance_meta": "MlxJaccl",
-        "min_nodes": 2
-    }' | jq -r '.message // .detail // "unknown response"'
+    -d "{
+        \"model_id\": \"mlx-community/MiniMax-M2.5-5bit\",
+        \"sharding\": \"Tensor\",
+        \"instance_meta\": \"MlxJaccl\",
+        \"min_nodes\": 2,
+        \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"]
+    }" | jq -r '.message // .detail // "unknown response"'
 
 # Wait for both instances to be ready
 echo -n "Waiting for instances to load..."
