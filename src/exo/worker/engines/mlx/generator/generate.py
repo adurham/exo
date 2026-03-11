@@ -621,6 +621,11 @@ def mlx_generate(
                 f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
             )
         if mem_used > MEMORY_THRESHOLD:
+            # When _MOVE_CACHE is on, get_kv_cache moved the cache out of the
+            # prefix store (set the slot to None).  Put it back before raising
+            # so subsequent requests can still reuse the cached entry.
+            if cache_from_prefix and kv_prefix_cache is not None and matched_index is not None:
+                kv_prefix_cache.restore_moved_cache(matched_index, caches)
             raise ValueError(
                 f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
                 f"cannot accept new request"

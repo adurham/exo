@@ -174,6 +174,8 @@ class ExoBatchGenerator:
                     f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
                 )
             if mem_used > MEMORY_THRESHOLD:
+                if cache_from_prefix and self.kv_prefix_cache is not None and matched_index is not None:
+                    self.kv_prefix_cache.restore_moved_cache(matched_index, cache)
                 raise ValueError(
                     f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
                     f"cannot accept new request"

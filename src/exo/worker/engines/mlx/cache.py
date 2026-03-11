@@ -106,6 +106,16 @@ class KVPrefixCache:
         self._last_used.clear()
         self._access_counts.clear()
 
+    def restore_moved_cache(self, index: int, cache: KVCacheType) -> None:
+        """Put a moved-out cache back into the slot after a rejected request.
+
+        When ``EXO_KV_CACHE_MOVE=1``, ``get_kv_cache`` sets the slot to None
+        to avoid a deepcopy.  If the caller cannot use the cache (e.g. memory
+        rejection) it must call this to restore the entry.
+        """
+        if 0 <= index < len(self.caches) and self.caches[index] is None:
+            self.caches[index] = cache
+
     def add_kv_cache(
         self,
         prompt_tokens: mx.array,
