@@ -2,6 +2,7 @@ import base64
 import contextlib
 import json
 import random
+import re
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 from datetime import datetime, timezone
@@ -796,6 +797,44 @@ class API:
             detail=f"No instance found for model {model_id}",
         )
 
+    @staticmethod
+    def _trim_subagent_system_prompt(content: str) -> str:
+        """Strip bloat injected by Claude Code into subagent system prompts.
+
+        Claude Code injects CLAUDE.md, MEMORY.md, skill definitions, deferred
+        tools lists, and other metadata into every API request — including
+        subagents.  This can push subagent prompts to ~40K tokens, which is
+        far too large for a smaller model on constrained hardware.
+
+        We surgically remove known tag-delimited blocks and skill lists while
+        preserving the core agent instructions the model needs.
+        """
+        # 1. Strip <system-reminder>…</system-reminder> blocks (CLAUDE.md, MEMORY.md, etc.)
+        content = re.sub(
+            r"<system-reminder>.*?</system-reminder>",
+            "",
+            content,
+            flags=re.DOTALL,
+        )
+        # 2. Strip <available-deferred-tools>…</available-deferred-tools>
+        content = re.sub(
+            r"<available-deferred-tools>.*?</available-deferred-tools>",
+            "",
+            content,
+            flags=re.DOTALL,
+        )
+        # 3. Strip skill listing blocks injected into system-reminder tags
+        #    (pattern: "The following skills are available…" through end of list)
+        content = re.sub(
+            r"The following skills are available for use with the Skill tool:.*?(?=\n\n[A-Z]|\Z)",
+            "",
+            content,
+            flags=re.DOTALL,
+        )
+        # Collapse runs of whitespace left behind
+        content = re.sub(r"\n{3,}", "\n\n", content).strip()
+        return content
+
     async def _resolve_model_and_apply_limits(
         self, task_params: TextGenerationTaskParams
     ) -> TextGenerationTaskParams:
@@ -803,7 +842,7 @@ class API:
         resolved_model, was_fallback = await self._resolve_and_validate_text_model(
             ModelId(task_params.model)
         )
-        updates: dict[str, ModelId | int] = {"model": resolved_model}
+        updates: dict[str, object] = {"model": resolved_model}
 
         if was_fallback:
             from exo.shared.constants import (
@@ -828,35 +867,58 @@ class API:
 
             # Disable thinking for subagents — wastes output tokens and
             # smaller models tend to leak chain-of-thought into responses.
-            updates["enable_thinking"] = False  # type: ignore[assignment]
+            updates["enable_thinking"] = False
 
-            # Inject subagent rules into system prompt
-            if EXO_SUBAGENT_RULES:
-                existing_instructions = task_params.instructions or ""
-                new_instructions = (
-                    f"{existing_instructions}\n\n{EXO_SUBAGENT_RULES}"
-                    if existing_instructions
-                    else EXO_SUBAGENT_RULES
+            # Trim bloated system prompt (Claude Code injects CLAUDE.md, MEMORY.md,
+            # skill definitions, etc. into every request — ~40K tokens of overhead).
+            original_len = 0
+            trimmed_len = 0
+            if task_params.instructions:
+                original_len = len(task_params.instructions)
+                trimmed = self._trim_subagent_system_prompt(task_params.instructions)
+                trimmed_len = len(trimmed)
+                updates["instructions"] = trimmed
+
+            chat_msgs: list[dict[str, object]] | None = None
+            if task_params.chat_template_messages is not None:
+                chat_msgs = [dict(m) for m in task_params.chat_template_messages]
+                for i, msg in enumerate(chat_msgs):
+                    if msg.get("role") == "system":
+                        original_content = str(msg.get("content", ""))
+                        original_len = max(original_len, len(original_content))
+                        trimmed_sys = self._trim_subagent_system_prompt(original_content)
+                        trimmed_len = max(trimmed_len, len(trimmed_sys))
+                        chat_msgs[i] = {**msg, "content": trimmed_sys}
+                        break
+                updates["chat_template_messages"] = chat_msgs
+
+            if original_len > 0:
+                saved = original_len - trimmed_len
+                logger.info(
+                    f"Subagent prompt trimmed: {original_len:,} → {trimmed_len:,} chars ({saved:,} removed, ~{saved // 4:,} tokens saved)"
                 )
-                updates["instructions"] = new_instructions  # type: ignore[assignment]
 
-                # Also patch chat_template_messages (used by tokenizer)
-                if task_params.chat_template_messages is not None:
-                    patched_msgs = list(task_params.chat_template_messages)
-                    found_system = False
-                    for i, msg in enumerate(patched_msgs):
-                        if msg.get("role") == "system":
-                            patched_msgs[i] = {
-                                **msg,
-                                "content": f"{msg.get('content', '')}\n\n{EXO_SUBAGENT_RULES}",
-                            }
-                            found_system = True
-                            break
-                    if not found_system:
-                        patched_msgs.insert(
-                            0, {"role": "system", "content": EXO_SUBAGENT_RULES}
-                        )
-                    updates["chat_template_messages"] = patched_msgs  # type: ignore[assignment]
+            # Inject subagent rules into (now-trimmed) system prompt
+            if EXO_SUBAGENT_RULES:
+                cur_instructions = str(updates.get("instructions") or task_params.instructions or "")
+                updates["instructions"] = (
+                    f"{cur_instructions}\n\n{EXO_SUBAGENT_RULES}" if cur_instructions else EXO_SUBAGENT_RULES
+                )
+
+                if chat_msgs is None:
+                    chat_msgs = [dict(m) for m in task_params.chat_template_messages] if task_params.chat_template_messages else []
+                found_system = False
+                for i, msg in enumerate(chat_msgs):
+                    if msg.get("role") == "system":
+                        chat_msgs[i] = {
+                            **msg,
+                            "content": f"{msg.get('content', '')}\n\n{EXO_SUBAGENT_RULES}",
+                        }
+                        found_system = True
+                        break
+                if not found_system:
+                    chat_msgs.insert(0, {"role": "system", "content": EXO_SUBAGENT_RULES})
+                updates["chat_template_messages"] = chat_msgs
 
             logger.info(
                 f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions'))}"
