@@ -76,7 +76,8 @@ def _kill_runner(
             return Shutdown(instance_id=instance_id, runner_id=runner_id)
 
         # Shut down our own runner if it crashed (e.g. signal 6 OOM) so that
-        # _create_runner can restart it on the next plan cycle.
+        # _create_runner can restart it on the next plan cycle.  The worker
+        # gates CreateRunner on a memory check to avoid crash loops.
         if isinstance(runner.status, RunnerFailed):
             return Shutdown(
                 instance_id=runner.bound_instance.instance.instance_id,

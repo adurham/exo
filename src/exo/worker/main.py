@@ -79,6 +79,30 @@ class Worker:
 
         self._download_backoff: KeyedBackoff[ModelId] = KeyedBackoff(base=0.5, cap=10.0)
 
+    @staticmethod
+    def _memory_ok_for_runner() -> bool:
+        """Return True if GPU memory is low enough to safely load a model."""
+        try:
+            import mlx.core as _mx
+
+            if _mx.metal.is_available():
+                active = _mx.get_active_memory() + _mx.get_cache_memory()
+                limit = int(_mx.device_info().get("max_recommended_working_set_size", 0))
+                if limit > 0:
+                    usage = active / limit
+                    # Model weights alone typically consume 50-60% of the budget.
+                    # If memory is above 70% *before* loading, something didn't
+                    # get freed after the crash — restarting would just OOM again.
+                    if usage > 0.70:
+                        logger.info(
+                            f"Memory too high for restart: {usage:.0%} used "
+                            f"({active / 1e9:.1f}GB / {limit / 1e9:.1f}GB)"
+                        )
+                        return False
+        except Exception:
+            pass
+        return True
+
     async def run(self):
         logger.info("Starting Worker")
 
@@ -160,6 +184,11 @@ class Worker:
             # lets not kill the worker if a runner is unresponsive
             match task:
                 case CreateRunner():
+                    if not self._memory_ok_for_runner():
+                        logger.warning(
+                            "Deferring CreateRunner — memory pressure too high after crash"
+                        )
+                        continue
                     self._create_supervisor(task)
                     await self.event_sender.send(
                         TaskStatusUpdated(
