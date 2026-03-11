@@ -1,7 +1,6 @@
 import functools
 import math
 import time
-from copy import deepcopy
 from typing import Callable, Generator, cast, get_args
 
 import mlx.core as mx
@@ -334,19 +333,19 @@ def prefill(
     # Because of needing to roll back arrays cache, we will generate on 2 tokens so trim 1 more.
     if EXO_TRACING_ENABLED:
         t_trim = time.perf_counter()
-    pre_gen = deepcopy(snapshots[-2]) if has_ssm else None
+    pre_gen = snapshots[-2] if has_ssm else None
     for i, c in enumerate(cache):
         if has_ssm and isinstance(c, (ArraysCache, RotatingKVCache)):
             assert pre_gen is not None
             if pre_gen.states[i] is not None:
-                cache[i] = deepcopy(pre_gen.states[i])  # type: ignore
+                cache[i] = pre_gen.states[i]  # type: ignore
         else:
             assert not isinstance(c, (ArraysCache, RotatingKVCache))
             c.trim(2)
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
-    # Touch heartbeat: cache deepcopy/trim above can take 10s+ seconds at large context.
+    # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
         distributed_prompt_progress_callback()
 

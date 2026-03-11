@@ -352,7 +352,8 @@ def trim_cache(
     for i, c in enumerate(cache):
         if isinstance(c, (ArraysCache, RotatingKVCache)):
             if snapshot is not None and snapshot.states[i] is not None:
-                cache[i] = deepcopy(snapshot.states[i])  # type: ignore
+                # Move when safe (single consumer), deepcopy otherwise.
+                cache[i] = snapshot.states[i] if _MOVE_CACHE else deepcopy(snapshot.states[i])  # type: ignore
             else:
                 c.state = [None] * len(c.state)
         else:
