@@ -606,22 +606,25 @@ def mlx_generate(
             )
             cache_from_prefix = True
 
-    # Memory check — only evict KV cache if we didn't get a useful hit.
-    if not cache_from_prefix:
-        mem_used = get_memory_used_percentage()
+    # Memory check.  When we got a cache hit we keep the cached KV and
+    # only need to prefill the delta — but we still reject if memory is
+    # already above the threshold (the delta prefill allocates intermediate
+    # activations that could push Metal over the limit).  When there is no
+    # hit we try evicting first to make room for a full prefill.
+    mem_used = get_memory_used_percentage()
+    if mem_used > MEMORY_THRESHOLD:
+        if not cache_from_prefix and kv_prefix_cache is not None:
+            kv_prefix_cache.clear()
+            mx.clear_cache()
+            mem_used = get_memory_used_percentage()
+            logger.info(
+                f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
+            )
         if mem_used > MEMORY_THRESHOLD:
-            if kv_prefix_cache is not None:
-                kv_prefix_cache.clear()
-                mx.clear_cache()
-                mem_used = get_memory_used_percentage()
-                logger.info(
-                    f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
-                )
-            if mem_used > MEMORY_THRESHOLD:
-                raise ValueError(
-                    f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
-                    f"cannot accept new request"
-                )
+            raise ValueError(
+                f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
+                f"cannot accept new request"
+            )
 
     # Touch heartbeat: cache lookup deepcopy of large KV state can take 10s+ seconds.
     if distributed_prompt_progress_callback is not None:
