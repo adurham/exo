@@ -106,7 +106,7 @@ EXO_SUBAGENT_MAX_CONTEXT_TOKENS: int | None = _int_or_none(
 # Output token limit applied to subagent requests to prevent massive responses
 # from bloating the main conversation context. Defaults to 4096 when unset.
 EXO_SUBAGENT_MAX_OUTPUT_TOKENS: int | None = _int_or_none(
-    "EXO_SUBAGENT_MAX_OUTPUT_TOKENS", 4096
+    "EXO_SUBAGENT_MAX_OUTPUT_TOKENS", 10000
 )
 
 # Rules injected into the system prompt of subagent requests.
