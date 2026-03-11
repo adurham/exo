@@ -17,8 +17,6 @@ from exo.shared.types.claude_api import (
     ClaudeContentBlockDeltaEvent,
     ClaudeContentBlockStartEvent,
     ClaudeContentBlockStopEvent,
-    ClaudeErrorDetail,
-    ClaudeErrorResponse,
     ClaudeInputJsonDelta,
     ClaudeMessageDelta,
     ClaudeMessageDeltaEvent,
@@ -251,11 +249,10 @@ async def collect_claude_response(
             stop_reason = finish_reason_to_claude_stop_reason(chunk.finish_reason)
 
     if error_message is not None:
-        error_type = "invalid_request_error" if "too long" in error_message or "context limit" in error_message else "api_error"
-        yield ClaudeErrorResponse(
-            error=ClaudeErrorDetail(type=error_type, message=error_message)
-        ).model_dump_json()
-        return
+        # Return the error as a normal message so Claude Code can parse it
+        # (an error response object causes '_.input_tokens' crashes).
+        text_parts.append(f"Error: {error_message}")
+        stop_reason = "end_turn"
 
     combined_text = "".join(text_parts)
     combined_thinking = "".join(thinking_parts)
@@ -333,12 +330,26 @@ async def generate_claude_stream(
             if not message_start_emitted:
                 message_start_emitted = True
                 yield _message_start_event(command_id, model, 0)
+            # Emit the error as a normal text block so Claude Code's streaming
+            # parser gets the full message lifecycle (content_block_start/stop,
+            # message_delta with usage, message_stop).  An SSE error event
+            # causes '_.input_tokens' crashes in the client.
             error_msg = chunk.error_message or "Internal server error"
-            error_type = "invalid_request_error" if "too long" in error_msg or "context limit" in error_msg else "api_error"
-            error_resp = ClaudeErrorResponse(
-                error=ClaudeErrorDetail(type=error_type, message=error_msg)
+            if not text_block_started:
+                text_block_started = True
+                text_block_index = next_block_index
+                next_block_index += 1
+                block_start = ClaudeContentBlockStartEvent(
+                    index=text_block_index,
+                    content_block=ClaudeTextBlock(text=""),
+                )
+                yield f"event: content_block_start\ndata: {block_start.model_dump_json()}\n\n"
+            delta_event = ClaudeContentBlockDeltaEvent(
+                index=text_block_index,
+                delta=ClaudeTextDelta(text=f"Error: {error_msg}"),
             )
-            yield f"event: error\ndata: {error_resp.model_dump_json()}\n\n"
+            yield f"event: content_block_delta\ndata: {delta_event.model_dump_json()}\n\n"
+            stop_reason = "end_turn"
             break
 
         last_usage = chunk.usage or last_usage
