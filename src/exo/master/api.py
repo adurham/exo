@@ -801,6 +801,7 @@ class API:
                 EXO_MAX_CONTEXT_TOKENS,
                 EXO_SUBAGENT_MAX_CONTEXT_TOKENS,
                 EXO_SUBAGENT_MAX_OUTPUT_TOKENS,
+                EXO_SUBAGENT_RULES,
             )
 
             subagent_limit = EXO_SUBAGENT_MAX_CONTEXT_TOKENS
@@ -816,8 +817,36 @@ class API:
                 if existing is None or existing > cap:
                     updates["max_output_tokens"] = cap
 
+            # Inject subagent rules into system prompt
+            if EXO_SUBAGENT_RULES:
+                existing_instructions = task_params.instructions or ""
+                new_instructions = (
+                    f"{existing_instructions}\n\n{EXO_SUBAGENT_RULES}"
+                    if existing_instructions
+                    else EXO_SUBAGENT_RULES
+                )
+                updates["instructions"] = new_instructions  # type: ignore[assignment]
+
+                # Also patch chat_template_messages (used by tokenizer)
+                if task_params.chat_template_messages is not None:
+                    patched_msgs = list(task_params.chat_template_messages)
+                    found_system = False
+                    for i, msg in enumerate(patched_msgs):
+                        if msg.get("role") == "system":
+                            patched_msgs[i] = {
+                                **msg,
+                                "content": f"{msg.get('content', '')}\n\n{EXO_SUBAGENT_RULES}",
+                            }
+                            found_system = True
+                            break
+                    if not found_system:
+                        patched_msgs.insert(
+                            0, {"role": "system", "content": EXO_SUBAGENT_RULES}
+                        )
+                    updates["chat_template_messages"] = patched_msgs  # type: ignore[assignment]
+
             logger.info(
-                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k != 'model')}"
+                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions'))}"
             )
 
         return task_params.model_copy(update=updates)
