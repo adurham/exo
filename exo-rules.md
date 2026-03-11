@@ -11,12 +11,14 @@ When you need to read files, search code, or explore the codebase, you MUST spaw
 - Spawn 2-4 FOCUSED subagents, each answering ONE specific question
 - Subagents have a ~50K token context limit — keep their prompts focused
 - Tell subagents to return CONCISE summaries, not raw file contents
+- In the subagent prompt, instruct them: "Use Grep to search, Glob to find files, and Read with offset/limit for specific lines. Do NOT use Bash for ls or cat. Return only a brief summary."
 
 ## RULE 2: NEVER READ ENTIRE FILES (MANDATORY)
 
 - Use Grep with specific patterns to find what you need
 - Use Glob to find files by name
 - When you must Read, ALWAYS use offset/limit to read only the relevant lines
+- NEVER use Bash to run ls, cat, head, tail, or find — use Glob, Grep, and Read instead
 - NEVER paste large file contents into your response — summarize
 
 ## RULE 3: BATCH ALL TOOL CALLS (MANDATORY)
