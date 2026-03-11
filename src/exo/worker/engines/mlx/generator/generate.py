@@ -552,10 +552,18 @@ def mlx_generate(
 
     mem_used = get_memory_used_percentage()
     if mem_used > MEMORY_THRESHOLD:
-        raise ValueError(
-            f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
-            f"cannot accept new request"
-        )
+        if kv_prefix_cache is not None:
+            kv_prefix_cache.clear()
+            mx.clear_cache()
+            mem_used = get_memory_used_percentage()
+            logger.info(
+                f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
+            )
+        if mem_used > MEMORY_THRESHOLD:
+            raise ValueError(
+                f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
+                f"cannot accept new request"
+            )
 
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
