@@ -22,7 +22,7 @@
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
 # Subagent requests route to Qwen on the MacBook for fast, parallel inference.
-: "${EXO_SUBAGENT_MODEL:=mlx-community/Qwen3.5-35B-A3B-4bit}"
+: "${EXO_SUBAGENT_MODEL:=mlx-community/Qwen3.5-9B-8bit}"
 : "${EXO_SUBAGENT_MAX_CONTEXT_TOKENS:=20000}"
 : "${LOG_LEVEL:=INFO}"
 export IBV_FORK_SAFE=1
@@ -572,9 +572,9 @@ if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-5bit" "{
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
-echo "Creating Qwen3.5-35B-A3B-4bit instance on MacBook (single node)..."
-if place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-35B-A3B-4bit" "{
-    \"model_id\": \"mlx-community/Qwen3.5-35B-A3B-4bit\",
+echo "Creating Qwen3.5-9B-8bit instance on MacBook (single node)..."
+if place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-9B-8bit" "{
+    \"model_id\": \"mlx-community/Qwen3.5-9B-8bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxRing\",
     \"min_nodes\": 1,
