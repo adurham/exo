@@ -267,7 +267,7 @@ _SUBAGENT_TOOL_SCHEMAS: dict[str, dict[str, object]] = {
 }
 
 # Ordered list of tools to keep — first ones are most important.
-_SUBAGENT_ALLOWED_TOOLS = ["Bash", "Read", "Grep", "Glob"]
+_SUBAGENT_ALLOWED_TOOLS = ["Read", "Grep", "Glob"]
 
 
 def _slim_subagent_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]:
