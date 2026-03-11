@@ -159,23 +159,27 @@ class ExoBatchGenerator:
         else:
             cache = make_kv_cache(self.model)
 
-        # Memory check.  When we got a cache hit we keep the cached KV and
-        # only need to prefill the delta — but we still reject if memory is
-        # already above the threshold (the delta prefill allocates intermediate
-        # activations that could push Metal over the limit).  When there is no
-        # hit we try evicting first to make room for a full prefill.
+        # Memory check.  If memory is above threshold, always evict the KV
+        # cache (even on a cache hit) and fall back to a fresh prefill.  A
+        # stale cache that blocks all new requests has negative value —
+        # following vLLM's preempt-and-recompute pattern, we sacrifice the
+        # cache to serve the incoming request.
         mem_used = get_memory_used_percentage()
         if mem_used > MEMORY_THRESHOLD:
-            if not cache_from_prefix and self.kv_prefix_cache is not None:
+            if self.kv_prefix_cache is not None:
                 self.kv_prefix_cache.clear()
                 mx.clear_cache()
                 mem_used = get_memory_used_percentage()
                 logger.info(
                     f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
                 )
+            if cache_from_prefix:
+                cache = make_kv_cache(self.model)
+                prompt_tokens = all_prompt_tokens
+                prefix_hit_length = 0
+                matched_index = None
+                cache_from_prefix = False
             if mem_used > MEMORY_THRESHOLD:
-                if cache_from_prefix and self.kv_prefix_cache is not None and matched_index is not None:
-                    self.kv_prefix_cache.restore_moved_cache(matched_index, cache)
                 raise ValueError(
                     f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
                     f"cannot accept new request"
