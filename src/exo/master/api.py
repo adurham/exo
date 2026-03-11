@@ -355,12 +355,50 @@ class API:
         self.app.post("/onboarding")(self.complete_onboarding)
 
     async def place_instance(self, payload: PlaceInstanceParams):
+        if payload.node_ids:
+            # When specific nodes are requested, do placement locally and send
+            # a CreateInstance command (PlaceInstance doesn't support node pinning
+            # over the wire due to strict Pydantic serialization).
+            model_card = await ModelCard.load(payload.model_id)
+            required_nodes = set(payload.node_ids)
+            try:
+                placements = get_instance_placements(
+                    PlaceInstance(
+                        model_card=model_card,
+                        sharding=payload.sharding,
+                        instance_meta=payload.instance_meta,
+                        min_nodes=payload.min_nodes,
+                    ),
+                    node_memory=self.state.node_memory,
+                    node_network=self.state.node_network,
+                    topology=self.state.topology,
+                    current_instances=self.state.instances,
+                    required_nodes=required_nodes,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            current_ids = set(self.state.instances.keys())
+            new_ids = [iid for iid in placements if iid not in current_ids]
+            if len(new_ids) != 1:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Expected exactly one new instance from placement",
+                )
+            instance = placements[new_ids[0]]
+            command = CreateInstance(instance=instance)
+            await self._send(command)
+            return CreateInstanceResponse(
+                message="Command received.",
+                command_id=command.command_id,
+                model_card=model_card,
+            )
+
         command = PlaceInstance(
             model_card=await ModelCard.load(payload.model_id),
             sharding=payload.sharding,
             instance_meta=payload.instance_meta,
             min_nodes=payload.min_nodes,
-            required_nodes=set(payload.node_ids) if payload.node_ids else None,
         )
         await self._send(command)
 
