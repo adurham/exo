@@ -417,19 +417,22 @@ for NODE in "${NODES[@]}"; do
 done
 
 # 4. Health Check / Topology Verification
+# Wait for all 3 nodes AND their identities (friendlyName) to be populated.
+API="http://$M4_1_IP:52415"
+
 echo -n "Waiting for cluster to stabilize..."
 CLUSTER_READY=false
 for i in {1..90}; do
-    response=$(curl -s "http://$M4_1_IP:52415/state")
+    response=$(curl -s "$API/state")
     node_count=$(echo "$response" | jq '.topology.nodes | length' 2>/dev/null)
+    identity_count=$(echo "$response" | jq '.nodeIdentities | length' 2>/dev/null)
 
-    # Handle null or empty node_count to prevent integer expression errors
-    if [ -z "$node_count" ] || [ "$node_count" == "null" ]; then
-        node_count=0
-    fi
+    # Handle null or empty counts
+    if [ -z "$node_count" ] || [ "$node_count" == "null" ]; then node_count=0; fi
+    if [ -z "$identity_count" ] || [ "$identity_count" == "null" ]; then identity_count=0; fi
 
-    if [ "$node_count" -ge 3 ]; then
-        echo " HEALTHY! (Nodes: $node_count)"
+    if [ "$node_count" -ge 3 ] && [ "$identity_count" -ge 3 ]; then
+        echo " HEALTHY! (Nodes: $node_count, Identities: $identity_count)"
         CLUSTER_READY=true
         break
     fi
@@ -441,7 +444,7 @@ if [ "$CLUSTER_READY" = false ]; then
     echo ""
     # Check for the specific pyo3 initialization panic that happens when uv.lock goes out of sync
     PYO3_PANIC=$(ssh macstudio-m4-1 "grep -i 'The Python interpreter is not initialized' ~/exo.log" 2>/dev/null || true)
-    
+
     if [ -n "$PYO3_PANIC" ]; then
         echo "CRITICAL ERROR: Detected a corrupted Rust pyo3 binding state on the primary node!"
         echo "This usually happens when 'uv.lock' changes (e.g. from switching git branches) and the virtual environment gets out of sync."
@@ -461,23 +464,33 @@ fi
 
 
 # 5. Create model instances
-API="http://$M4_1_IP:52415"
 
-# Look up exo node IDs from the cluster state (these differ from libp2p peer IDs)
+# Look up exo node IDs from the cluster state (these differ from libp2p peer IDs).
+# Retry a few times in case identities are still propagating.
 echo "Looking up node IDs from cluster state..."
-NODE_STATE=$(curl -s "$API/state")
+MBP_NODE_ID=""
+M4_1_NODE_ID=""
+M4_2_NODE_ID=""
+for i in {1..15}; do
+    NODE_STATE=$(curl -s "$API/state")
+    MBP_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("MacBook")) | .key')
+    M4_1_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-1")) | .key')
+    M4_2_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-2")) | .key')
 
-# Match nodes by friendly name pattern
-MBP_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("MacBook")) | .key')
-M4_1_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-1")) | .key')
-M4_2_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-2")) | .key')
+    if [ -n "$MBP_NODE_ID" ] && [ -n "$M4_1_NODE_ID" ] && [ -n "$M4_2_NODE_ID" ]; then
+        break
+    fi
+    echo "  Waiting for node identities to propagate..."
+    sleep 2
+done
 
 echo "  MacBook Pro: $MBP_NODE_ID"
 echo "  Mac Studio M4-1: $M4_1_NODE_ID"
 echo "  Mac Studio M4-2: $M4_2_NODE_ID"
 
 if [ -z "$MBP_NODE_ID" ] || [ -z "$M4_1_NODE_ID" ] || [ -z "$M4_2_NODE_ID" ]; then
-    echo "ERROR: Could not resolve all node IDs from cluster state."
+    echo "ERROR: Could not resolve all node IDs from cluster state. Skipping instance creation."
+    echo "Create instances manually from the dashboard."
     exit 1
 fi
 
