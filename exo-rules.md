@@ -1,49 +1,30 @@
-# MANDATORY PERFORMANCE RULES — READ CAREFULLY
+# MANDATORY RULES — LOCAL AI CLUSTER
 
-YOU ARE RUNNING ON A LOCAL AI CLUSTER WITH EXTREMELY LIMITED DECODE SPEED. These rules are NON-NEGOTIABLE. Violating them wastes minutes of the user's time per tool call.
+You are running on a LOCAL AI CLUSTER. Decode speed degrades with context size. These rules prevent you from wasting minutes per response.
 
-Context size = decode speed. Every 1K tokens added to your context costs ~0.33ms per output token. At 100K context, a single tool call response takes 5+ MINUTES. You MUST keep context small.
+## RULE 1: USE SUBAGENTS — NOT DIRECT TOOL CALLS
 
-## RULE 1: SMART TOOL CALL ROUTING (MANDATORY)
+ALWAYS use the Agent tool to spawn subagents for reading files, searching code, and exploring the codebase. Do NOT call Read, Grep, or Glob directly in your main conversation. The ONLY exception is a single targeted Read when you already know the exact file and line numbers.
 
-Your decode speed degrades linearly with context size. Subagents start with fresh, small context and run much faster. Use this decision framework:
+Why: Each subagent starts with a fresh, small context and runs 5-10x faster than your main conversation. A subagent doing 5 tool calls takes less time than you doing 1 tool call at high context.
 
-**Use subagents when ANY of these are true:**
-- You need 3+ tool calls for a research task (file reads, searches, exploration)
-- Your conversation is long (many prior messages/tool results)
-- You have parallel work to do while waiting (e.g., write code while subagent researches)
-- The task is exploratory — you don't know exactly which files/lines you need
+How:
+- Spawn 2-4 subagents IN PARALLEL, each answering ONE specific question
+- Each subagent prompt must be 1-3 sentences — just the question
+- Subagents have a 20K token limit. Tell them: "Do at most 5 tool calls. Return a 1-3 sentence summary."
+- While subagents research, you can write code or plan — do NOT sit idle
 
-**Do it directly (no subagent) when ALL of these are true:**
-- You need 1-2 targeted lookups (you know exactly which file and what to find)
-- Your conversation is still short (early in the session)
-- You have nothing else to do while waiting — sitting idle is worse than just reading
+## RULE 2: NEVER BLOAT YOUR CONTEXT
 
-**Subagent best practices:**
-- Spawn 2-4 FOCUSED subagents in parallel, each answering ONE specific question
-- Subagents have a ~20K token context limit — keep their prompts focused
-- Tell subagents to return CONCISE summaries, not raw file contents
-- In the subagent prompt, instruct them: "Use Grep to search, Glob to find files, and Read with offset/limit for specific lines. Do NOT use Bash for ls or cat. Return only a brief summary."
-- ALWAYS prefer parallel subagents over sequential tool calls at high context
+- NEVER read entire files in your main conversation
+- NEVER paste file contents into your response — summarize in 1-3 sentences
+- NEVER repeat back code the user can already see
+- If a subagent returns detailed results, extract only what matters
 
-## RULE 2: NEVER READ ENTIRE FILES (MANDATORY)
+## RULE 3: BATCH EVERYTHING
 
-- Use Grep with specific patterns to find what you need
-- Use Glob to find files by name
-- When you must Read, ALWAYS use offset/limit to read only the relevant lines
-- NEVER use Bash to run ls, cat, head, tail, or find — use Glob, Grep, and Read instead
-- NEVER paste large file contents into your response — summarize
+Every response you generate costs a full decode cycle. When you need multiple operations, emit them ALL in one response. Never do sequential tool calls when you could do parallel ones.
 
-## RULE 3: BATCH ALL TOOL CALLS (MANDATORY)
+## RULE 4: ACT FAST
 
-Every round-trip costs a full decode cycle (minutes at high context). When you need multiple independent operations, you MUST emit them ALL in a single response. Never do one tool call per turn when you could do five.
-
-## RULE 4: START PRODUCING OUTPUT EARLY (MANDATORY)
-
-Do NOT read the entire codebase before writing code. Read the minimum needed, then start. You can always read more later if needed. Every extra read at high context wastes minutes.
-
-## RULE 5: KEEP MAIN CONTEXT LEAN (MANDATORY)
-
-- Do not repeat back large blocks of code or file contents
-- Summarize findings in 1-3 sentences
-- If a subagent returns detailed results, extract only what you need
+Do NOT over-research. Read the minimum needed, then start writing code. You can always ask a subagent for more info later.
