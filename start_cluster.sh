@@ -21,7 +21,9 @@
 : "${EXO_MAX_CONTEXT_TOKENS:=120000}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
-: "${EXO_SUBAGENT_MODEL:=mlx-community/Qwen3.5-35B-A3B-4bit}"
+# Subagent requests fall back to EXO_DEFAULT_MODEL (MiniMax on Studios).
+# A dedicated Qwen instance on the MacBook was too unreliable.
+#: "${EXO_SUBAGENT_MODEL:=mlx-community/Qwen3.5-35B-A3B-4bit}"
 : "${EXO_SUBAGENT_MAX_CONTEXT_TOKENS:=30000}"
 : "${LOG_LEVEL:=INFO}"
 export IBV_FORK_SAFE=1
@@ -391,7 +393,6 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=1"
     EXO_ENV="$EXO_ENV EXO_COMPILE_DECODE=$EXO_COMPILE_DECODE"
     EXO_ENV="$EXO_ENV EXO_DEFAULT_MODEL=$EXO_DEFAULT_MODEL"
-    EXO_ENV="$EXO_ENV EXO_SUBAGENT_MODEL=$EXO_SUBAGENT_MODEL"
     EXO_ENV="$EXO_ENV EXO_SUBAGENT_MAX_CONTEXT_TOKENS=$EXO_SUBAGENT_MAX_CONTEXT_TOKENS"
     EXO_ENV="$EXO_ENV LOG_LEVEL=$LOG_LEVEL"
 
@@ -463,47 +464,32 @@ if [ "$CLUSTER_READY" = false ]; then
 fi
 
 
-# 5. Create model instances
+# 5. Create MiniMax instance on the Mac Studios
 
-# Look up exo node IDs from the cluster state (these differ from libp2p peer IDs).
-# Retry a few times in case identities are still propagating.
+# Look up Mac Studio node IDs from cluster state (these differ from libp2p peer IDs).
 echo "Looking up node IDs from cluster state..."
-MBP_NODE_ID=""
 M4_1_NODE_ID=""
 M4_2_NODE_ID=""
 for i in {1..15}; do
     NODE_STATE=$(curl -s "$API/state")
-    MBP_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("MacBook")) | .key')
     M4_1_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-1")) | .key')
     M4_2_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-2")) | .key')
 
-    if [ -n "$MBP_NODE_ID" ] && [ -n "$M4_1_NODE_ID" ] && [ -n "$M4_2_NODE_ID" ]; then
+    if [ -n "$M4_1_NODE_ID" ] && [ -n "$M4_2_NODE_ID" ]; then
         break
     fi
     echo "  Waiting for node identities to propagate..."
     sleep 2
 done
 
-echo "  MacBook Pro: $MBP_NODE_ID"
 echo "  Mac Studio M4-1: $M4_1_NODE_ID"
 echo "  Mac Studio M4-2: $M4_2_NODE_ID"
 
-if [ -z "$MBP_NODE_ID" ] || [ -z "$M4_1_NODE_ID" ] || [ -z "$M4_2_NODE_ID" ]; then
-    echo "ERROR: Could not resolve all node IDs from cluster state. Skipping instance creation."
+if [ -z "$M4_1_NODE_ID" ] || [ -z "$M4_2_NODE_ID" ]; then
+    echo "ERROR: Could not resolve Mac Studio node IDs. Skipping instance creation."
     echo "Create instances manually from the dashboard."
     exit 1
 fi
-
-echo "Creating Qwen3.5-35B-A3B-4bit instance on MacBook Pro (Tensor / RDMA)..."
-curl -s -X POST "$API/place_instance" \
-    -H "Content-Type: application/json" \
-    -d "{
-        \"model_id\": \"mlx-community/Qwen3.5-35B-A3B-4bit\",
-        \"sharding\": \"Tensor\",
-        \"instance_meta\": \"MlxJaccl\",
-        \"min_nodes\": 1,
-        \"node_ids\": [\"$MBP_NODE_ID\"]
-    }" | jq -r '.message // .detail // "unknown response"'
 
 echo "Creating MiniMax-M2.5-5bit instance on Mac Studios (Tensor / RDMA)..."
 curl -s -X POST "$API/place_instance" \
@@ -516,14 +502,13 @@ curl -s -X POST "$API/place_instance" \
         \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"]
     }" | jq -r '.message // .detail // "unknown response"'
 
-# Wait for both instances to be ready
-echo -n "Waiting for instances to load..."
+# Wait for instance to be ready (2 runners for 2-node TP)
+echo -n "Waiting for instance to load..."
 INSTANCES_READY=false
 for i in {1..120}; do
-    # Count runners in RunnerReady or RunnerRunning state
     READY_COUNT=$(curl -s "$API/state" | jq '[.runners | to_entries[] | .value | to_entries[] | .key | select(. == "RunnerReady" or . == "RunnerRunning")] | length' 2>/dev/null || echo 0)
-    if [ "$READY_COUNT" -ge 3 ]; then
-        echo " All instances ready! ($READY_COUNT runners)"
+    if [ "$READY_COUNT" -ge 2 ]; then
+        echo " Instance ready! ($READY_COUNT runners)"
         INSTANCES_READY=true
         break
     fi
@@ -533,7 +518,7 @@ done
 
 if [ "$INSTANCES_READY" = false ]; then
     echo ""
-    echo "WARNING: Not all instances loaded within timeout. Check the dashboard."
+    echo "WARNING: Instance did not load within timeout. Check the dashboard."
 fi
 
 # Final environment export
