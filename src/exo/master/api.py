@@ -800,6 +800,7 @@ class API:
             from exo.shared.constants import (
                 EXO_MAX_CONTEXT_TOKENS,
                 EXO_SUBAGENT_MAX_CONTEXT_TOKENS,
+                EXO_SUBAGENT_MAX_OUTPUT_TOKENS,
             )
 
             subagent_limit = EXO_SUBAGENT_MAX_CONTEXT_TOKENS
@@ -807,10 +808,17 @@ class API:
                 subagent_limit = EXO_MAX_CONTEXT_TOKENS // 3
 
             if subagent_limit is not None:
-                logger.info(
-                    f"Subagent detected: setting max_context_tokens={subagent_limit}"
-                )
                 updates["max_context_tokens"] = subagent_limit
+
+            if EXO_SUBAGENT_MAX_OUTPUT_TOKENS is not None:
+                existing = task_params.max_output_tokens
+                cap = EXO_SUBAGENT_MAX_OUTPUT_TOKENS
+                if existing is None or existing > cap:
+                    updates["max_output_tokens"] = cap
+
+            logger.info(
+                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k != 'model')}"
+            )
 
         return task_params.model_copy(update=updates)
 

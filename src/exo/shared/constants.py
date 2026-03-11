@@ -103,6 +103,12 @@ EXO_SUBAGENT_MAX_CONTEXT_TOKENS: int | None = _int_or_none(
     "EXO_SUBAGENT_MAX_CONTEXT_TOKENS", None
 )
 
+# Output token limit applied to subagent requests to prevent massive responses
+# from bloating the main conversation context. Defaults to 4096 when unset.
+EXO_SUBAGENT_MAX_OUTPUT_TOKENS: int | None = _int_or_none(
+    "EXO_SUBAGENT_MAX_OUTPUT_TOKENS", 4096
+)
+
 # When set, any request for an unknown model silently resolves to this model.
 # When unset (default), falls back to the sole active model if exactly one is loaded.
 EXO_DEFAULT_MODEL: str | None = os.environ.get("EXO_DEFAULT_MODEL", None) or None
