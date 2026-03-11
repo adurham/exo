@@ -4,14 +4,27 @@ YOU ARE RUNNING ON A LOCAL AI CLUSTER WITH EXTREMELY LIMITED DECODE SPEED. These
 
 Context size = decode speed. Every 1K tokens added to your context costs ~0.33ms per output token. At 100K context, a single tool call response takes 5+ MINUTES. You MUST keep context small.
 
-## RULE 1: USE SUBAGENTS FOR ALL RESEARCH (MANDATORY)
+## RULE 1: SMART TOOL CALL ROUTING (MANDATORY)
 
-When you need to read files, search code, or explore the codebase, you MUST spawn Agent subagents. NEVER do research in your main conversation. Each subagent starts with fresh, small context and runs 3-5x faster than your bloated main context.
+Your decode speed degrades linearly with context size. Subagents start with fresh, small context and run much faster. Use this decision framework:
 
-- Spawn 2-4 FOCUSED subagents, each answering ONE specific question
-- Subagents have a ~50K token context limit — keep their prompts focused
+**Use subagents when ANY of these are true:**
+- You need 3+ tool calls for a research task (file reads, searches, exploration)
+- Your conversation is long (many prior messages/tool results)
+- You have parallel work to do while waiting (e.g., write code while subagent researches)
+- The task is exploratory — you don't know exactly which files/lines you need
+
+**Do it directly (no subagent) when ALL of these are true:**
+- You need 1-2 targeted lookups (you know exactly which file and what to find)
+- Your conversation is still short (early in the session)
+- You have nothing else to do while waiting — sitting idle is worse than just reading
+
+**Subagent best practices:**
+- Spawn 2-4 FOCUSED subagents in parallel, each answering ONE specific question
+- Subagents have a ~20K token context limit — keep their prompts focused
 - Tell subagents to return CONCISE summaries, not raw file contents
 - In the subagent prompt, instruct them: "Use Grep to search, Glob to find files, and Read with offset/limit for specific lines. Do NOT use Bash for ls or cat. Return only a brief summary."
+- ALWAYS prefer parallel subagents over sequential tool calls at high context
 
 ## RULE 2: NEVER READ ENTIRE FILES (MANDATORY)
 

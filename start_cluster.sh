@@ -23,7 +23,7 @@
 : "${EXO_DEFAULT_MODEL:=mlx-community/MiniMax-M2.5-5bit}"
 # Subagent requests route to Qwen on the MacBook for fast, parallel inference.
 : "${EXO_SUBAGENT_MODEL:=mlx-community/Qwen3.5-35B-A3B-4bit}"
-: "${EXO_SUBAGENT_MAX_CONTEXT_TOKENS:=10000}"
+: "${EXO_SUBAGENT_MAX_CONTEXT_TOKENS:=20000}"
 : "${LOG_LEVEL:=INFO}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
