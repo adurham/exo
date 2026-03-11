@@ -1058,6 +1058,20 @@ class API:
             logger.info(
                 f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages'))}"
             )
+        else:
+            # Main agent — append performance rules to system prompt.
+            from exo.shared.constants import EXO_MAIN_RULES
+
+            if EXO_MAIN_RULES:
+                chat_msgs = list(task_params.chat_template_messages or [])
+                if chat_msgs and chat_msgs[0].get("role") == "system":
+                    chat_msgs[0] = {
+                        **chat_msgs[0],
+                        "content": f"{chat_msgs[0].get('content', '')}\n\n{EXO_MAIN_RULES}",
+                    }
+                else:
+                    chat_msgs.insert(0, {"role": "system", "content": EXO_MAIN_RULES})
+                updates["chat_template_messages"] = chat_msgs
 
         return task_params.model_copy(update=updates)
 

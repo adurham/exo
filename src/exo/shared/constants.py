@@ -109,13 +109,19 @@ EXO_SUBAGENT_MAX_OUTPUT_TOKENS: int | None = _int_or_none(
     "EXO_SUBAGENT_MAX_OUTPUT_TOKENS", 10000
 )
 
-# Rules injected into the system prompt of subagent requests.
-# Loaded from exo-subagent-rules.md at the repo root for easy editing.
-_SUBAGENT_RULES_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "exo-subagent-rules.md")
-EXO_SUBAGENT_RULES: str = ""
-if os.path.isfile(_SUBAGENT_RULES_PATH):
-    with open(_SUBAGENT_RULES_PATH) as _f:
-        EXO_SUBAGENT_RULES = _f.read().strip()
+# Rules injected into system prompts.
+# Loaded from markdown files at the repo root for easy editing.
+_RULES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+
+def _load_rules(filename: str) -> str:
+    path = os.path.join(_RULES_DIR, filename)
+    if os.path.isfile(path):
+        with open(path) as f:
+            return f.read().strip()
+    return ""
+
+EXO_SUBAGENT_RULES: str = _load_rules("exo-subagent-rules.md")
+EXO_MAIN_RULES: str = _load_rules("exo-rules.md")
 
 # When set, any request for an unknown model silently resolves to this model.
 # When unset (default), falls back to the sole active model if exactly one is loaded.
