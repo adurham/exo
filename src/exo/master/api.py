@@ -995,10 +995,11 @@ class API:
             # smaller models tend to leak chain-of-thought into responses.
             updates["enable_thinking"] = False
 
-            # Slim down tool definitions — Claude Code sends ~30K tokens of
-            # verbose tool schemas with every subagent request.  Replace with
-            # minimal schemas for the tools a subagent actually needs.
-            if task_params.tools:
+            from exo.shared.constants import EXO_SUBAGENT_TRIM_MESSAGES
+
+            # Slim down tool definitions only when trimming is enabled.
+            # When trimming is off, pass through the full tools from Claude Code.
+            if EXO_SUBAGENT_TRIM_MESSAGES and task_params.tools:
                 original_tools_chars = sum(len(str(t)) for t in task_params.tools)
                 slim_tools = _slim_subagent_tools(task_params.tools)
                 slim_tools_chars = sum(len(str(t)) for t in slim_tools)
@@ -1007,8 +1008,6 @@ class API:
                     f"~{(original_tools_chars - slim_tools_chars) // 4:,} tokens saved"
                 )
                 updates["tools"] = slim_tools
-
-            from exo.shared.constants import EXO_SUBAGENT_TRIM_MESSAGES
 
             # Always replace instructions with our lean subagent rules.
             original_instructions_len = len(task_params.instructions or "")
