@@ -84,6 +84,7 @@ class Runner:
         cancel_receiver: MpReceiver[TaskId],
         *,
         heartbeat: object | None = None,
+        heartbeat_timeout: object | None = None,
     ):
         self.event_sender = event_sender
         self.task_receiver = task_receiver
@@ -109,6 +110,7 @@ class Runner:
         self.generator: Builder | InferenceGenerator = Builder(
             self.model_id, self.event_sender, self.cancel_receiver,
             heartbeat=heartbeat,
+            heartbeat_timeout=heartbeat_timeout,
         )
 
         self.seen: set[TaskId] = set()
@@ -416,6 +418,7 @@ class Builder:
     event_sender: MpSender[Event]
     cancel_receiver: MpReceiver[TaskId]
     heartbeat: object | None = None
+    heartbeat_timeout: object | None = None
     inference_model: Model | None = None
     tokenizer: TokenizerWrapper | None = None
     group: mx.distributed.Group | None = None
@@ -457,6 +460,8 @@ class Builder:
                 device_rank=device_rank,
                 cancel_receiver=self.cancel_receiver,
                 event_sender=self.event_sender,
+                heartbeat=self.heartbeat,
+                heartbeat_timeout=self.heartbeat_timeout,
             )
         logger.info("using BatchGenerator")
         return BatchGenerator(
@@ -470,4 +475,5 @@ class Builder:
             cancel_receiver=self.cancel_receiver,
             event_sender=self.event_sender,
             heartbeat=self.heartbeat,
+            heartbeat_timeout=self.heartbeat_timeout,
         )

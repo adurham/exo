@@ -49,6 +49,15 @@ from exo.worker.runner.bootstrap import entrypoint
 HEARTBEAT_TIMEOUT_SECONDS = 90
 
 
+def heartbeat_timeout_for_prompt(prompt_tokens: int) -> float:
+    """Scale heartbeat timeout based on prompt size.
+
+    Large prefills can block in a single mx.eval for well over 90s.
+    Allow ~1s per 500 tokens with a floor of HEARTBEAT_TIMEOUT_SECONDS.
+    """
+    return max(HEARTBEAT_TIMEOUT_SECONDS, prompt_tokens / 500)
+
+
 @dataclass(eq=False)
 class RunnerSupervisor:
     shard_metadata: ShardMetadata
@@ -60,6 +69,7 @@ class RunnerSupervisor:
     _event_sender: Sender[Event]
     _cancel_sender: MpSender[TaskId]
     _heartbeat: Any  # mp.Value("d") - shared monotonic timestamp
+    _heartbeat_timeout: Any  # mp.Value("d") - dynamic timeout in seconds
     _tg: TaskGroup = field(default_factory=TaskGroup, init=False)
     status: RunnerStatus = field(default_factory=RunnerIdle, init=False)
     pending: dict[TaskId, anyio.Event] = field(default_factory=dict, init=False)
@@ -82,6 +92,7 @@ class RunnerSupervisor:
         task_sender, task_recv = mp_channel[Task]()
         cancel_sender, cancel_recv = mp_channel[TaskId]()
         heartbeat = mp.Value("d", time.monotonic())
+        heartbeat_timeout = mp.Value("d", HEARTBEAT_TIMEOUT_SECONDS)
 
         runner_process = mp.Process(
             target=entrypoint,
@@ -92,6 +103,7 @@ class RunnerSupervisor:
                 cancel_recv,
                 logger,
                 heartbeat,
+                heartbeat_timeout,
             ),
             daemon=True,
         )
@@ -108,6 +120,7 @@ class RunnerSupervisor:
             _cancel_sender=cancel_sender,
             _event_sender=event_sender,
             _heartbeat=heartbeat,
+            _heartbeat_timeout=heartbeat_timeout,
         )
 
         return self
@@ -244,15 +257,16 @@ class RunnerSupervisor:
                     return
                 if isinstance(self.status, (RunnerRunning, RunnerWarmingUp)):
                     stale: float = time.monotonic() - self._heartbeat.value  # pyright: ignore[reportAny]
-                    if stale > HEARTBEAT_TIMEOUT_SECONDS:
+                    timeout: float = self._heartbeat_timeout.value  # pyright: ignore[reportAny]
+                    if stale > timeout:
                         logger.error(
-                            f"Runner heartbeat stale for {stale:.1f}s, "
+                            f"Runner heartbeat stale for {stale:.1f}s (timeout={timeout:.0f}s), "
                             "killing unresponsive process"
                         )
                         self.runner_process.terminate()
                         await self._check_runner(
                             RuntimeError(
-                                f"Runner unresponsive (no heartbeat for {stale:.1f}s)"
+                                f"Runner unresponsive (no heartbeat for {stale:.1f}s, timeout={timeout:.0f}s)"
                             )
                         )
                         return

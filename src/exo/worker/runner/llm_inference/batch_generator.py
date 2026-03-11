@@ -68,6 +68,25 @@ class InferenceGenerator(ABC):
             or CANCEL_ALL_TASKS in self._cancelled_tasks
         )
 
+    def _touch_heartbeat(self) -> None:
+        hb = getattr(self, "heartbeat", None)
+        if hb is not None:
+            hb.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+
+    def _set_heartbeat_timeout(self, prompt_tokens: int) -> None:
+        """Scale the heartbeat timeout based on prompt size."""
+        ht = getattr(self, "heartbeat_timeout", None)
+        if ht is not None:
+            from exo.worker.runner.runner_supervisor import heartbeat_timeout_for_prompt
+            ht.value = heartbeat_timeout_for_prompt(prompt_tokens)  # pyright: ignore[reportAttributeAccessIssue]
+
+    def _reset_heartbeat_timeout(self) -> None:
+        """Reset heartbeat timeout to default after generation completes."""
+        ht = getattr(self, "heartbeat_timeout", None)
+        if ht is not None:
+            from exo.worker.runner.runner_supervisor import HEARTBEAT_TIMEOUT_SECONDS
+            ht.value = HEARTBEAT_TIMEOUT_SECONDS  # pyright: ignore[reportAttributeAccessIssue]
+
     @abstractmethod
     def warmup(self) -> None: ...
 
@@ -122,10 +141,7 @@ class SequentialGenerator(InferenceGenerator):
     cancel_receiver: MpReceiver[TaskId]
     event_sender: MpSender[Event]
     heartbeat: object | None = None
-
-    def _touch_heartbeat(self) -> None:
-        if self.heartbeat is not None:
-            self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+    heartbeat_timeout: object | None = None
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
@@ -225,6 +241,7 @@ class SequentialGenerator(InferenceGenerator):
         except PrefillCancelled:
             response = Cancelled()
             self._active = None
+            self._reset_heartbeat_timeout()
             self._cancelled_tasks.discard(task.task_id)
             self._cancelled_tasks.discard(CANCEL_ALL_TASKS)
             if self._queue:
@@ -232,16 +249,19 @@ class SequentialGenerator(InferenceGenerator):
         except StopIteration:
             response = Finished()
             self._active = None
+            self._reset_heartbeat_timeout()
             if self._queue:
                 self._start_next()
         except ValueError as e:
             logger.warning(f"Task {task.task_id} rejected: {e}")
             self._send_error(task, e)
             self._active = None
+            self._reset_heartbeat_timeout()
             response = Finished()
         except Exception as e:
             self._send_error(task, e)
             self._active = None
+            self._reset_heartbeat_timeout()
             raise
         return itertools.chain(
             [] if response is None else [(task.task_id, response)],
@@ -330,6 +350,11 @@ class SequentialGenerator(InferenceGenerator):
         # and deepcopy can take tens of seconds on large prompts.
         self._touch_heartbeat()
 
+        # Scale heartbeat timeout for large prompts — prefill can block in
+        # a single mx.eval for well over the default 90s at high context.
+        estimated_tokens = len(prompt) // 4
+        self._set_heartbeat_timeout(estimated_tokens)
+
         return mlx_generate(
             model=self.model,
             tokenizer=self.tokenizer,
@@ -358,6 +383,7 @@ class BatchGenerator(InferenceGenerator):
     cancel_receiver: MpReceiver[TaskId]
     event_sender: MpSender[Event]
     heartbeat: object | None = None
+    heartbeat_timeout: object | None = None
     check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
@@ -527,6 +553,9 @@ class BatchGenerator(InferenceGenerator):
                 output.append((task.task_id, Finished()))
                 del self._active_tasks[uid]
 
+        if not self._active_tasks:
+            self._reset_heartbeat_timeout()
+
         return itertools.chain(early_cancelled, output, self._apply_cancellations())
 
     def _apply_cancellations(
@@ -593,13 +622,15 @@ class BatchGenerator(InferenceGenerator):
             # (all_gather for TP layers); injecting additional collective
             # ops (all_sum/all_gather for cancellation) collides with
             # JACCL RDMA and causes wc status=1 errors + deadlock.
-            if self.heartbeat is not None:
-                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+            self._touch_heartbeat()
 
         def on_generation_token() -> None:
             # Heartbeat only — same RDMA collision risk during decode.
-            if self.heartbeat is not None:
-                self.heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+            self._touch_heartbeat()
+
+        # Scale heartbeat timeout for large prompts.
+        estimated_tokens = len(prompt) // 4
+        self._set_heartbeat_timeout(estimated_tokens)
 
         return self._mlx_gen.submit(
             task_params=task.task_params,

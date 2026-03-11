@@ -19,6 +19,7 @@ def entrypoint(
     cancel_receiver: MpReceiver[TaskId],
     _logger: "loguru.Logger",
     heartbeat: "object | None" = None,
+    heartbeat_timeout: "object | None" = None,
 ) -> None:
     global logger
     logger = _logger
@@ -49,6 +50,7 @@ def entrypoint(
             runner = Runner(
                 bound_instance, event_sender, task_receiver, cancel_receiver,
                 heartbeat=heartbeat,
+                heartbeat_timeout=heartbeat_timeout,
             )
             runner.main()
 
