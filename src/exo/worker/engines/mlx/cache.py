@@ -23,16 +23,16 @@ import math
 
 
 # Fraction of device memory above which LRU eviction kicks in.
-# Smaller machines need more aggressive eviction.
+# These thresholds must account for model weights as a fixed baseline cost —
+# e.g. a 20GB model on a 36GB machine is already 56% used before any KV cache.
+# The thresholds below leave enough headroom for KV cache + inference activations.
 def _default_memory_threshold() -> float:
     total_gb = Memory.from_bytes(psutil.virtual_memory().total).in_gb
     if total_gb >= 128:
-        return 0.85
+        return 0.88
     if total_gb >= 64:
-        return 0.80
-    if total_gb >= 32:
-        return 0.75
-    return 0.70
+        return 0.85
+    return 0.90
 
 
 MEMORY_THRESHOLD = float(

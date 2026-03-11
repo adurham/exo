@@ -70,6 +70,19 @@ class PrefillCancelled(BaseException):
     """Raised when prefill is cancelled via the progress callback."""
 
 
+def _truncate_prompt_tokens(tokens: mx.array, max_tokens: int) -> mx.array:
+    """Truncate prompt tokens to fit within max_tokens by removing the middle.
+
+    Keeps the first 25% (system prompt / BOS) and the last 75% (recent turns),
+    which preserves the most relevant context for subagent-style requests.
+    """
+    if len(tokens) <= max_tokens:
+        return tokens
+    keep_start = max_tokens // 4
+    keep_end = max_tokens - keep_start
+    return mx.concatenate([tokens[:keep_start], tokens[-keep_end:]])
+
+
 def _has_pipeline_communication_layer(model: Model):
     for layer in model.layers:
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
@@ -565,8 +578,11 @@ def mlx_generate(
     effective_max_context = task.max_context_tokens or EXO_MAX_CONTEXT_TOKENS
 
     if effective_max_context is not None and len(all_prompt_tokens) > effective_max_context:
-        raise ValueError(
-            f"prompt is too long: {len(all_prompt_tokens)} tokens > {effective_max_context} token context limit"
+        original_len = len(all_prompt_tokens)
+        all_prompt_tokens = _truncate_prompt_tokens(all_prompt_tokens, effective_max_context)
+        logger.warning(
+            f"Prompt truncated: {original_len} -> {len(all_prompt_tokens)} tokens "
+            f"(limit {effective_max_context})"
         )
 
     # Do not use the prefix cache if we are trying to do benchmarks.

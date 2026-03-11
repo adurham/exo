@@ -36,6 +36,7 @@ from exo.shared.types.worker.runners import (
     RunnerFailed,
     RunnerIdle,
     RunnerLoading,
+    RunnerReady,
     RunnerRunning,
     RunnerShuttingDown,
     RunnerStatus,
@@ -208,7 +209,7 @@ class RunnerSupervisor:
                 async for event in events:
                     if isinstance(event, RunnerStatusUpdated):
                         self.status = event.runner_status
-                        if isinstance(self.status, (RunnerRunning, RunnerWarmingUp)):
+                        if isinstance(self.status, (RunnerRunning, RunnerWarmingUp, RunnerReady)):
                             self._heartbeat.value = time.monotonic()  # pyright: ignore[reportAny]
                     if isinstance(event, TaskAcknowledged):
                         self.pending.pop(event.task_id).set()

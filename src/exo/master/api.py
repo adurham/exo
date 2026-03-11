@@ -196,6 +196,93 @@ def _ensure_seed(params: AdvancedImageParams | None) -> AdvancedImageParams:
     return params
 
 
+# Tools a subagent actually needs, with minimal descriptions.
+# Claude Code sends ~30K tokens of verbose schemas; these are ~500 tokens total.
+_SUBAGENT_TOOL_SCHEMAS: dict[str, dict[str, object]] = {
+    "Bash": {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a bash command and return its output.",
+            "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {"type": "string", "description": "The command to execute"},
+                    "description": {"type": "string", "description": "Short description of what this command does"},
+                },
+            },
+        },
+    },
+    "Read": {
+        "type": "function",
+        "function": {
+            "name": "Read",
+            "description": "Read a file from the filesystem. Returns contents with line numbers.",
+            "parameters": {
+                "type": "object",
+                "required": ["file_path"],
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to read"},
+                    "offset": {"type": "number", "description": "Line number to start from"},
+                    "limit": {"type": "number", "description": "Number of lines to read"},
+                },
+            },
+        },
+    },
+    "Grep": {
+        "type": "function",
+        "function": {
+            "name": "Grep",
+            "description": "Search file contents using regex. Returns matching file paths or content.",
+            "parameters": {
+                "type": "object",
+                "required": ["pattern"],
+                "properties": {
+                    "pattern": {"type": "string", "description": "Regex pattern to search for"},
+                    "path": {"type": "string", "description": "Directory or file to search in"},
+                    "glob": {"type": "string", "description": "Glob to filter files (e.g. '*.py')"},
+                    "output_mode": {"type": "string", "enum": ["content", "files_with_matches", "count"]},
+                    "-n": {"type": "boolean", "description": "Show line numbers"},
+                    "head_limit": {"type": "number", "description": "Limit output to first N entries"},
+                },
+            },
+        },
+    },
+    "Glob": {
+        "type": "function",
+        "function": {
+            "name": "Glob",
+            "description": "Find files matching a glob pattern. Returns paths sorted by modification time.",
+            "parameters": {
+                "type": "object",
+                "required": ["pattern"],
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '**/*.py')"},
+                    "path": {"type": "string", "description": "Directory to search in"},
+                },
+            },
+        },
+    },
+}
+
+# Ordered list of tools to keep — first ones are most important.
+_SUBAGENT_ALLOWED_TOOLS = ["Bash", "Read", "Grep", "Glob"]
+
+
+def _slim_subagent_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Replace verbose Claude Code tool schemas with minimal versions.
+
+    Keeps only the tools a subagent needs for file exploration and research.
+    Drops Agent, Edit, Write, Skill, Task*, Cron*, LSP, etc.
+    """
+    result: list[dict[str, object]] = []
+    for name in _SUBAGENT_ALLOWED_TOOLS:
+        if name in _SUBAGENT_TOOL_SCHEMAS:
+            result.append(_SUBAGENT_TOOL_SCHEMAS[name])
+    return result
+
+
 class API:
     def __init__(
         self,
@@ -907,6 +994,19 @@ class API:
             # Disable thinking for subagents — wastes output tokens and
             # smaller models tend to leak chain-of-thought into responses.
             updates["enable_thinking"] = False
+
+            # Slim down tool definitions — Claude Code sends ~30K tokens of
+            # verbose tool schemas with every subagent request.  Replace with
+            # minimal schemas for the tools a subagent actually needs.
+            if task_params.tools:
+                original_tools_chars = sum(len(str(t)) for t in task_params.tools)
+                slim_tools = _slim_subagent_tools(task_params.tools)
+                slim_tools_chars = sum(len(str(t)) for t in slim_tools)
+                logger.info(
+                    f"Slimmed tools: {len(task_params.tools)} -> {len(slim_tools)} tools, "
+                    f"~{(original_tools_chars - slim_tools_chars) // 4:,} tokens saved"
+                )
+                updates["tools"] = slim_tools
 
             # Strip bloated prompts — Claude Code injects its full agent system
             # prompt (~4K chars), CLAUDE.md, MEMORY.md, skill definitions, etc.
