@@ -2,9 +2,8 @@ import base64
 import contextlib
 import json
 import random
-import re
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
@@ -127,8 +126,6 @@ from exo.shared.types.chunks import (
 from exo.shared.types.claude_api import (
     ClaudeMessagesRequest,
     ClaudeMessagesResponse,
-    ClaudeTextBlock,
-    ClaudeUsage,
 )
 from exo.shared.types.commands import (
     Command,
@@ -173,7 +170,7 @@ from exo.shared.types.openai_responses import (
     ResponsesResponse,
 )
 from exo.shared.types.state import State
-from exo.shared.types.text_generation import InputMessage, TextGenerationTaskParams
+from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.downloads import DownloadCompleted
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
 from exo.shared.types.worker.shards import Sharding
@@ -196,106 +193,6 @@ def _ensure_seed(params: AdvancedImageParams | None) -> AdvancedImageParams:
     if params.seed is None:
         return params.model_copy(update={"seed": random.randint(0, 2**32 - 1)})
     return params
-
-
-# Tools a subagent actually needs, with minimal descriptions.
-# Claude Code sends ~30K tokens of verbose schemas; these are ~500 tokens total.
-_SUBAGENT_TOOL_SCHEMAS: dict[str, dict[str, object]] = {
-    "Bash": {
-        "type": "function",
-        "function": {
-            "name": "Bash",
-            "description": "Execute a bash command and return its output.",
-            "parameters": {
-                "type": "object",
-                "required": ["command"],
-                "properties": {
-                    "command": {"type": "string", "description": "The command to execute"},
-                    "description": {"type": "string", "description": "Short description of what this command does"},
-                },
-            },
-        },
-    },
-    "Read": {
-        "type": "function",
-        "function": {
-            "name": "Read",
-            "description": "Read a file from the filesystem. Returns contents with line numbers.",
-            "parameters": {
-                "type": "object",
-                "required": ["file_path"],
-                "properties": {
-                    "file_path": {"type": "string", "description": "Absolute path to read"},
-                    "offset": {"type": "number", "description": "Line number to start from"},
-                    "limit": {"type": "number", "description": "Number of lines to read"},
-                },
-            },
-        },
-    },
-    "Grep": {
-        "type": "function",
-        "function": {
-            "name": "Grep",
-            "description": "Search file contents using regex. Returns matching file paths or content.",
-            "parameters": {
-                "type": "object",
-                "required": ["pattern"],
-                "properties": {
-                    "pattern": {"type": "string", "description": "Regex pattern to search for"},
-                    "path": {"type": "string", "description": "Directory or file to search in"},
-                    "glob": {"type": "string", "description": "Glob to filter files (e.g. '*.py')"},
-                    "output_mode": {"type": "string", "enum": ["content", "files_with_matches", "count"]},
-                    "-n": {"type": "boolean", "description": "Show line numbers"},
-                    "head_limit": {"type": "number", "description": "Limit output to first N entries"},
-                },
-            },
-        },
-    },
-    "Glob": {
-        "type": "function",
-        "function": {
-            "name": "Glob",
-            "description": "Find files matching a glob pattern. Returns paths sorted by modification time.",
-            "parameters": {
-                "type": "object",
-                "required": ["pattern"],
-                "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '**/*.py')"},
-                    "path": {"type": "string", "description": "Directory to search in"},
-                },
-            },
-        },
-    },
-}
-
-# Ordered list of tools to keep — first ones are most important.
-_SUBAGENT_ALLOWED_TOOLS = ["Bash", "Read", "Grep", "Glob"]
-
-
-async def _synthetic_claude_stream(model: str, text: str) -> AsyncIterator[str]:
-    """Emit a minimal Claude SSE stream with a single text block and end_turn."""
-    import json
-
-    msg_id = "msg_cap"
-    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0}}})}\n\n"
-    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
-    yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}})}\n\n"
-    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
-    yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': 1}})}\n\n"
-    yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
-
-
-def _slim_subagent_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Replace verbose Claude Code tool schemas with minimal versions.
-
-    Keeps only the tools a subagent needs for file exploration and research.
-    Drops Agent, Edit, Write, Skill, Task*, Cron*, LSP, etc.
-    """
-    result: list[dict[str, object]] = []
-    for name in _SUBAGENT_ALLOWED_TOOLS:
-        if name in _SUBAGENT_TOOL_SCHEMAS:
-            result.append(_SUBAGENT_TOOL_SCHEMAS[name])
-    return result
 
 
 class API:
@@ -842,7 +739,7 @@ class API:
     ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI Chat Completions API - adapter."""
         task_params = chat_request_to_text_generation(payload)
-        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -873,7 +770,7 @@ class API:
         self, payload: BenchChatCompletionRequest
     ) -> BenchChatCompletionResponse:
         task_params = chat_request_to_text_generation(payload)
-        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         task_params = task_params.model_copy(update={"stream": False, "bench": True})
 
@@ -938,57 +835,16 @@ class API:
             detail=f"No instance found for model {model_id}",
         )
 
-    @staticmethod
-    def _trim_subagent_system_prompt(content: str) -> str:
-        """Strip bloat injected by Claude Code into subagent system prompts.
-
-        Claude Code injects CLAUDE.md, MEMORY.md, skill definitions, deferred
-        tools lists, and other metadata into every API request — including
-        subagents.  This can push subagent prompts to ~40K tokens, which is
-        far too large for a smaller model on constrained hardware.
-
-        We surgically remove known tag-delimited blocks and skill lists while
-        preserving the core agent instructions the model needs.
-        """
-        # 1. Strip <system-reminder>…</system-reminder> blocks (CLAUDE.md, MEMORY.md, etc.)
-        content = re.sub(
-            r"<system-reminder>.*?</system-reminder>",
-            "",
-            content,
-            flags=re.DOTALL,
-        )
-        # 2. Strip <available-deferred-tools>…</available-deferred-tools>
-        content = re.sub(
-            r"<available-deferred-tools>.*?</available-deferred-tools>",
-            "",
-            content,
-            flags=re.DOTALL,
-        )
-        # 3. Strip skill listing blocks injected into system-reminder tags
-        #    (pattern: "The following skills are available…" through end of list)
-        content = re.sub(
-            r"The following skills are available for use with the Skill tool:.*?(?=\n\n[A-Z]|\Z)",
-            "",
-            content,
-            flags=re.DOTALL,
-        )
-        # Collapse runs of whitespace left behind
-        content = re.sub(r"\n{3,}", "\n\n", content).strip()
-        return content
-
     async def _resolve_model_and_apply_limits(
         self, task_params: TextGenerationTaskParams
-    ) -> tuple[TextGenerationTaskParams, bool]:
-        """Resolve the model and apply subagent context limits when applicable.
-
-        Returns (task_params, was_fallback) where was_fallback indicates a subagent request.
-        """
-        resolved_model, was_fallback = await self._resolve_and_validate_text_model(
+    ) -> TextGenerationTaskParams:
+        """Resolve the model and apply per-model context limits."""
+        resolved_model, _was_fallback = await self._resolve_and_validate_text_model(
             ModelId(task_params.model)
         )
         updates: dict[str, object] = {"model": resolved_model}
 
-        # Per-model context limit — always applied regardless of fallback status.
+        # Per-model context limit — prevents OOM on smaller models.
         from exo.shared.constants import EXO_MODEL_MAX_CONTEXT_TOKENS
 
         model_limit = EXO_MODEL_MAX_CONTEXT_TOKENS.get(resolved_model)
@@ -997,102 +853,7 @@ class API:
             if existing is None or existing > model_limit:
                 updates["max_context_tokens"] = model_limit
 
-        if was_fallback:
-            from exo.shared.constants import (
-                EXO_MAX_CONTEXT_TOKENS,
-                EXO_SUBAGENT_MAX_CONTEXT_TOKENS,
-                EXO_SUBAGENT_MAX_OUTPUT_TOKENS,
-                EXO_SUBAGENT_RULES,
-            )
-
-            subagent_limit = EXO_SUBAGENT_MAX_CONTEXT_TOKENS
-            if subagent_limit is None and EXO_MAX_CONTEXT_TOKENS is not None:
-                subagent_limit = EXO_MAX_CONTEXT_TOKENS // 3
-
-            if subagent_limit is not None:
-                updates["max_context_tokens"] = subagent_limit
-
-            if EXO_SUBAGENT_MAX_OUTPUT_TOKENS is not None:
-                existing = task_params.max_output_tokens
-                cap = EXO_SUBAGENT_MAX_OUTPUT_TOKENS
-                if existing is None or existing > cap:
-                    updates["max_output_tokens"] = cap
-
-            # Disable thinking for subagents — wastes output tokens and
-            # smaller models tend to leak chain-of-thought into responses.
-            updates["enable_thinking"] = False
-
-            from exo.shared.constants import EXO_SUBAGENT_TRIM_MESSAGES
-
-            # Slim down tool definitions only when trimming is enabled.
-            # When trimming is off, pass through the full tools from Claude Code.
-            if EXO_SUBAGENT_TRIM_MESSAGES and task_params.tools:
-                original_tools_chars = sum(len(str(t)) for t in task_params.tools)
-                slim_tools = _slim_subagent_tools(task_params.tools)
-                slim_tools_chars = sum(len(str(t)) for t in slim_tools)
-                logger.info(
-                    f"Slimmed tools: {len(task_params.tools)} -> {len(slim_tools)} tools, "
-                    f"~{(original_tools_chars - slim_tools_chars) // 4:,} tokens saved"
-                )
-                updates["tools"] = slim_tools
-
-            if EXO_SUBAGENT_TRIM_MESSAGES:
-                # Replace instructions and trim messages for constrained models.
-                trim = self._trim_subagent_system_prompt
-                original_instructions_len = len(task_params.instructions or "")
-                updates["instructions"] = EXO_SUBAGENT_RULES or ""
-
-                total_input_saved = 0
-                trimmed_input: list[InputMessage] = []
-                for msg in task_params.input:
-                    trimmed_content = trim(msg.content)
-                    total_input_saved += len(msg.content) - len(trimmed_content)
-                    trimmed_input.append(InputMessage(role=msg.role, content=trimmed_content))
-                updates["input"] = trimmed_input
-
-                chat_msgs: list[dict[str, object]] = []
-                if task_params.chat_template_messages is not None:
-                    found_system = False
-                    for m in task_params.chat_template_messages:
-                        new_m = dict(m)
-                        if m.get("role") == "system":
-                            new_m["content"] = EXO_SUBAGENT_RULES or ""
-                            found_system = True
-                        else:
-                            content: str = m.get("content", "") or ""
-                            new_m["content"] = trim(content)
-                        chat_msgs.append(new_m)
-                    if not found_system:
-                        chat_msgs.insert(0, {"role": "system", "content": EXO_SUBAGENT_RULES or ""})
-                else:
-                    chat_msgs = [{"role": "system", "content": EXO_SUBAGENT_RULES or ""}]
-                updates["chat_template_messages"] = chat_msgs
-
-                total_saved = original_instructions_len + total_input_saved
-                if total_saved > 0:
-                    logger.info(
-                        f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
-                    )
-
-            logger.info(
-                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages', 'tools'))}"
-            )
-        else:
-            # Main agent — append performance rules to system prompt.
-            from exo.shared.constants import EXO_MAIN_RULES
-
-            if EXO_MAIN_RULES:
-                chat_msgs = list(task_params.chat_template_messages or [])
-                if chat_msgs and chat_msgs[0].get("role") == "system":
-                    chat_msgs[0] = {
-                        **chat_msgs[0],
-                        "content": f"{chat_msgs[0].get('content', '')}\n\n{EXO_MAIN_RULES}",
-                    }
-                else:
-                    chat_msgs.insert(0, {"role": "system", "content": EXO_MAIN_RULES})
-                updates["chat_template_messages"] = chat_msgs
-
-        return task_params.model_copy(update=updates), was_fallback
+        return task_params.model_copy(update=updates)
 
     async def _validate_image_model(self, model: ModelId) -> ModelId:
         """Validate model exists and return resolved model ID.
@@ -1618,66 +1379,12 @@ class API:
             response_format=response_format,
         )
 
-    def _check_subagent_tool_cap(
-        self, task_params: TextGenerationTaskParams, was_fallback: bool
-    ) -> str | None:
-        """Check if a subagent has exceeded the tool round cap.
-
-        Returns None if under the cap, or a string with the collected tool
-        results to use as the synthetic response.
-        """
-        if not was_fallback:
-            return None
-        from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
-
-        if EXO_SUBAGENT_MAX_TOOL_ROUNDS <= 0:
-            return None
-
-        tool_results: list[str] = []
-        for m in task_params.chat_template_messages or []:
-            if m.get("role") == "tool":
-                content = str(m.get("content") or "")
-                if content:
-                    tool_results.append(content)
-
-        if len(tool_results) < EXO_SUBAGENT_MAX_TOOL_ROUNDS:
-            return None
-
-        logger.info(
-            f"Subagent tool cap: {len(tool_results)}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, "
-            f"returning {len(tool_results)} tool results as synthetic response"
-        )
-        return "\n\n---\n\n".join(tool_results)
-
     async def claude_messages(
         self, payload: ClaudeMessagesRequest
     ) -> ClaudeMessagesResponse | StreamingResponse:
         """Claude Messages API - adapter."""
         task_params = claude_request_to_text_generation(payload)
-        task_params, was_fallback = await self._resolve_model_and_apply_limits(task_params)
-
-        # If the subagent has exceeded the tool round cap, return a synthetic
-        # response containing the raw tool results instead of calling the model.
-        cap_response = self._check_subagent_tool_cap(task_params, was_fallback)
-        if cap_response is not None:
-            cap_msg = cap_response
-            if payload.stream:
-                return StreamingResponse(
-                    _synthetic_claude_stream(payload.model, cap_msg),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "close",
-                        "X-Accel-Buffering": "no",
-                    },
-                )
-            return ClaudeMessagesResponse(
-                id="msg_cap",
-                model=payload.model,
-                content=[ClaudeTextBlock(text=cap_msg)],
-                stop_reason="end_turn",
-                usage=ClaudeUsage(input_tokens=0, output_tokens=1),
-            )
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1711,7 +1418,7 @@ class API:
     ) -> ResponsesResponse | StreamingResponse:
         """OpenAI Responses API."""
         task_params = responses_request_to_text_generation(payload)
-        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1752,7 +1459,7 @@ class API:
         body = await request.body()
         payload = OllamaChatRequest.model_validate_json(body)
         task_params = ollama_request_to_text_generation(payload)
-        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1786,7 +1493,7 @@ class API:
         body = await request.body()
         payload = OllamaGenerateRequest.model_validate_json(body)
         task_params = ollama_generate_request_to_text_generation(payload)
-        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
+        task_params = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)

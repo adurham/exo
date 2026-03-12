@@ -118,46 +118,6 @@ EXO_MODEL_MAX_CONTEXT_TOKENS: dict[str, int] = _parse_model_context_limits(
     "EXO_MODEL_MAX_CONTEXT_TOKENS"
 )
 
-# Context token limit applied to requests that required model fallback (subagents).
-# Defaults to EXO_MAX_CONTEXT_TOKENS / 3 when unset.
-EXO_SUBAGENT_MAX_CONTEXT_TOKENS: int | None = _int_or_none(
-    "EXO_SUBAGENT_MAX_CONTEXT_TOKENS", None
-)
-
-# Output token limit applied to subagent requests to prevent massive responses
-# from bloating the main conversation context. Defaults to 4096 when unset.
-EXO_SUBAGENT_MAX_OUTPUT_TOKENS: int | None = _int_or_none(
-    "EXO_SUBAGENT_MAX_OUTPUT_TOKENS", 10000
-)
-
-# When true, strip <system-reminder> and other tagged blocks from subagent
-# input messages.  Disable when the subagent model has enough context to
-# handle the full prompt from Claude Code.
-EXO_SUBAGENT_TRIM_MESSAGES: bool = os.environ.get(
-    "EXO_SUBAGENT_TRIM_MESSAGES", "1"
-) == "1"
-
-# Maximum number of tool-use rounds a subagent can perform before tools are
-# stripped from the request, forcing the model to return a text response.
-# Set to 0 to disable the cap entirely.
-EXO_SUBAGENT_MAX_TOOL_ROUNDS: int = int(os.environ.get(
-    "EXO_SUBAGENT_MAX_TOOL_ROUNDS", "5"
-))
-
-# Rules injected into system prompts.
-# Loaded from markdown files at the repo root for easy editing.
-_RULES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..")
-
-def _load_rules(filename: str) -> str:
-    path = os.path.join(_RULES_DIR, filename)
-    if os.path.isfile(path):
-        with open(path) as f:
-            return f.read().strip()
-    return ""
-
-EXO_SUBAGENT_RULES: str = _load_rules("exo-subagent-rules.md")
-EXO_MAIN_RULES: str = _load_rules("exo-rules.md")
-
 # When set, any request for an unknown model silently resolves to this model.
 # When unset (default), falls back to the sole active model if exactly one is loaded.
 EXO_DEFAULT_MODEL: str | None = os.environ.get("EXO_DEFAULT_MODEL", None) or None
