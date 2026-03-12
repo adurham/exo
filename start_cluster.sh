@@ -576,7 +576,8 @@ if place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-9B-8bit" "{
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 1,
-    \"node_ids\": [\"$MBP_NODE_ID\"]
+    \"node_ids\": [\"$MBP_NODE_ID\"],
+    \"max_context_tokens\": 20000
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi
