@@ -582,7 +582,7 @@ echo "Creating Qwen3.5-9B-8bit instance on MacBook (single node)..."
 if place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-9B-8bit" "{
     \"model_id\": \"mlx-community/Qwen3.5-9B-8bit\",
     \"sharding\": \"Pipeline\",
-    \"instance_meta\": \"MlxRing\",
+    \"instance_meta\": \"MlxRdma\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"]
 }"; then
