@@ -4,7 +4,7 @@ import json
 import random
 import re
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
@@ -127,6 +127,8 @@ from exo.shared.types.chunks import (
 from exo.shared.types.claude_api import (
     ClaudeMessagesRequest,
     ClaudeMessagesResponse,
+    ClaudeTextBlock,
+    ClaudeUsage,
 )
 from exo.shared.types.commands import (
     Command,
@@ -268,6 +270,19 @@ _SUBAGENT_TOOL_SCHEMAS: dict[str, dict[str, object]] = {
 
 # Ordered list of tools to keep — first ones are most important.
 _SUBAGENT_ALLOWED_TOOLS = ["Bash", "Read", "Grep", "Glob"]
+
+
+async def _synthetic_claude_stream(model: str, text: str) -> AsyncIterator[str]:
+    """Emit a minimal Claude SSE stream with a single text block and end_turn."""
+    import json
+
+    msg_id = "msg_cap"
+    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0}}})}\n\n"
+    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+    yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}})}\n\n"
+    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+    yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': 1}})}\n\n"
+    yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
 
 
 def _slim_subagent_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1047,22 +1062,6 @@ class API:
                         f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
                     )
 
-            # Hard cap on tool-use rounds: count existing tool_result entries
-            # in chat_template_messages. Once the cap is reached, strip tools
-            # so the model is forced to return a text response.
-            from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
-
-            if EXO_SUBAGENT_MAX_TOOL_ROUNDS > 0 and task_params.tools:
-                tool_rounds = 0
-                for m in task_params.chat_template_messages or []:
-                    if m.get("role") == "tool":
-                        tool_rounds += 1
-                if tool_rounds >= EXO_SUBAGENT_MAX_TOOL_ROUNDS:
-                    logger.info(
-                        f"Subagent hit tool round cap: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, stripping tools"
-                    )
-                    updates["tools"] = []
-
             logger.info(
                 f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages', 'tools'))}"
             )
@@ -1607,12 +1606,51 @@ class API:
             response_format=response_format,
         )
 
+    def _subagent_tool_cap_hit(self, task_params: TextGenerationTaskParams) -> bool:
+        """Check if a subagent request has exceeded the tool round cap."""
+        from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
+
+        if EXO_SUBAGENT_MAX_TOOL_ROUNDS <= 0:
+            return False
+        tool_rounds = 0
+        for m in task_params.chat_template_messages or []:
+            if m.get("role") == "tool":
+                tool_rounds += 1
+        if tool_rounds >= EXO_SUBAGENT_MAX_TOOL_ROUNDS:
+            logger.info(
+                f"Subagent hit tool round cap: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, returning synthetic end_turn"
+            )
+            return True
+        return False
+
     async def claude_messages(
         self, payload: ClaudeMessagesRequest
     ) -> ClaudeMessagesResponse | StreamingResponse:
         """Claude Messages API - adapter."""
         task_params = claude_request_to_text_generation(payload)
         task_params = await self._resolve_model_and_apply_limits(task_params)
+
+        # If the subagent has exceeded the tool round cap, return a synthetic
+        # end_turn response immediately instead of forwarding to the model.
+        if self._subagent_tool_cap_hit(task_params):
+            cap_msg = "Tool call limit reached. Summarize your findings and return them now."
+            if payload.stream:
+                return StreamingResponse(
+                    _synthetic_claude_stream(payload.model, cap_msg),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "close",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+            return ClaudeMessagesResponse(
+                id="msg_cap",
+                model=payload.model,
+                content=[ClaudeTextBlock(text=cap_msg)],
+                stop_reason="end_turn",
+                usage=ClaudeUsage(input_tokens=0, output_tokens=1),
+            )
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
