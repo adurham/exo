@@ -132,8 +132,8 @@ def _find_peer_repo_url(
 ) -> str | None:
     """Find a peer that already has the model downloaded and return its file server URL.
 
-    Prefers Thunderbolt IPs (192.168.x.x private range typically used for TB links)
-    over other interfaces to maximize transfer speed.
+    Prefers Thunderbolt IPv4 IPs over other interfaces to maximize transfer speed.
+    Skips IPv6 link-local addresses (fe80::) which aiohttp cannot connect to.
     """
     for peer_id, peer_downloads in global_download_status.items():
         if peer_id == node_id:
@@ -143,20 +143,24 @@ def _find_peer_repo_url(
                 isinstance(dp, DownloadCompleted)
                 and dp.shard_metadata.model_card.model_id == model_id
             ):
-                # Peer has the model — find best IP
+                # Peer has the model — find best IPv4 IP
                 net_info = node_network.get(peer_id)
                 if net_info is None or not net_info.interfaces:
                     continue
                 # Prefer thunderbolt interfaces, then ethernet, then anything
+                # Only consider IPv4 addresses (skip fe80:: link-local, ::1, etc.)
                 best_ip: str | None = None
                 for iface in net_info.interfaces:
+                    ip = iface.ip_address
+                    if ":" in ip or ip.startswith("fe80"):
+                        continue  # Skip IPv6 addresses
                     if iface.interface_type == "thunderbolt":
-                        best_ip = iface.ip_address
+                        best_ip = ip
                         break
                     if iface.interface_type in ("ethernet", "maybe_ethernet") and best_ip is None:
-                        best_ip = iface.ip_address
-                    if best_ip is None:
-                        best_ip = iface.ip_address
+                        best_ip = ip
+                    elif best_ip is None:
+                        best_ip = ip
                 if best_ip:
                     return f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"
     return None
