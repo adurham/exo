@@ -410,8 +410,15 @@ def _normalize_tool_calls(msg_dict: dict[str, Any]) -> None:
 
     OpenAI format has tool_calls[].function.arguments as a JSON string,
     but some chat templates (e.g., GLM) expect it as a dict.
+    Also removes tool_calls if None to prevent Jinja2 '{% for x in None %}'
+    errors (Jinja2 raises TypeError: 'NoneType' object is not iterable).
     """
     tool_calls = msg_dict.get("tool_calls")
+    if tool_calls is None:
+        # Remove None tool_calls entirely — Jinja2 treats None as non-iterable
+        # but treats missing keys as Undefined which IS iterable (empty).
+        msg_dict.pop("tool_calls", None)
+        return
     if not tool_calls or not isinstance(tool_calls, list):
         return
 
@@ -526,11 +533,16 @@ def apply_chat_template(
                 continue
             formatted_messages.append({"role": msg.role, "content": msg.content})
 
-    # Defensive: ensure content is always a string (never None/missing) —
-    # Qwen3.5 and other templates concatenate content directly.
+    # Defensive: sanitize message fields to prevent Jinja2 TypeError crashes.
+    # Jinja2 raises "TypeError: 'NoneType' object is not iterable" when
+    # {% for x in None %} is evaluated.  Removing None-valued keys is safe
+    # because Jinja's Undefined is iterable (empty), but None is not.
     for msg in formatted_messages:
         if msg.get("content") is None:
             msg["content"] = ""
+        for key in ("tool_calls", "images", "videos"):
+            if key in msg and msg[key] is None:
+                del msg[key]
 
     # Strip reasoning_content from previous assistant messages for stable KV-cache
     # matching.  Clients may inconsistently include/strip assistant reasoning across

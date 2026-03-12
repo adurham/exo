@@ -1,4 +1,5 @@
 import itertools
+import traceback
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -252,7 +253,9 @@ class SequentialGenerator(InferenceGenerator):
             if self._queue:
                 self._start_next()
         except (ValueError, TypeError) as e:
-            logger.warning(f"Task {task.task_id} rejected: {e}")
+            logger.warning(
+                f"Task {task.task_id} rejected: {e}\n{traceback.format_exc()}"
+            )
             self._send_error(task, e)
             self._active = None
             self._reset_heartbeat_timeout()
@@ -288,9 +291,17 @@ class SequentialGenerator(InferenceGenerator):
         if task.task_params.bench:
             output_generator = queue.gen()
         else:
+            try:
+                prompt_for_parsers = apply_chat_template(self.tokenizer, task.task_params)
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Task {task.task_id} template error: {e}\n{traceback.format_exc()}"
+                )
+                self._send_error(task, e)
+                return
             output_generator = apply_all_parsers(
                 queue.gen(),
-                apply_chat_template(self.tokenizer, task.task_params),
+                prompt_for_parsers,
                 self.tool_parser,
                 self.tokenizer,
                 type(self.model),
@@ -518,9 +529,19 @@ class BatchGenerator(InferenceGenerator):
             if task.task_params.bench:
                 output_generator = queue.gen()
             else:
+                try:
+                    prompt_for_parsers = apply_chat_template(self.tokenizer, task.task_params)
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Task {task.task_id} template error: {e}\n{traceback.format_exc()}"
+                    )
+                    self._send_error(task, e)
+                    self._mlx_gen.cancel([uid])
+                    rejected.append((task.task_id, Finished()))
+                    continue
                 output_generator = apply_all_parsers(
                     queue.gen(),
-                    apply_chat_template(self.tokenizer, task.task_params),
+                    prompt_for_parsers,
                     self.tool_parser,
                     self.tokenizer,
                     type(self.model),
@@ -545,7 +566,16 @@ class BatchGenerator(InferenceGenerator):
 
             task, queue, output_generator = self._active_tasks[uid]
             queue.push(response)
-            parsed = next(output_generator)
+            try:
+                parsed = next(output_generator)
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Task {task.task_id} parse error: {e}\n{traceback.format_exc()}"
+                )
+                self._send_error(task, e)
+                del self._active_tasks[uid]
+                output.append((task.task_id, Finished()))
+                continue
 
             if parsed is not None:
                 output.append((task.task_id, parsed))
