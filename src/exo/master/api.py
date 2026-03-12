@@ -1609,27 +1609,56 @@ class API:
             response_format=response_format,
         )
 
-    def _subagent_tool_cap_hit(self, task_params: TextGenerationTaskParams, was_fallback: bool) -> bool:
-        """Check if a subagent request has exceeded the tool round cap.
+    def _apply_subagent_tool_cap(
+        self, task_params: TextGenerationTaskParams, was_fallback: bool
+    ) -> tuple[TextGenerationTaskParams, bool]:
+        """Apply tool round cap to subagent requests.
 
-        Only applies to subagent requests (was_fallback=True).
+        Returns (task_params, hard_cap_hit) where:
+        - At round N: injects a "wrap up" message and strips tools (warn phase)
+        - At round N+1: hard_cap_hit=True, caller should return synthetic end_turn
         """
         if not was_fallback:
-            return False
+            return task_params, False
         from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
 
         if EXO_SUBAGENT_MAX_TOOL_ROUNDS <= 0:
-            return False
+            return task_params, False
+
         tool_rounds = 0
         for m in task_params.chat_template_messages or []:
             if m.get("role") == "tool":
                 tool_rounds += 1
-        if tool_rounds >= EXO_SUBAGENT_MAX_TOOL_ROUNDS:
+
+        if tool_rounds > EXO_SUBAGENT_MAX_TOOL_ROUNDS:
+            # Hard cap: model already had its warning round and still came back.
             logger.info(
-                f"Subagent hit tool round cap: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, returning synthetic end_turn"
+                f"Subagent hard cap: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, returning synthetic end_turn"
             )
-            return True
-        return False
+            return task_params, True
+
+        if tool_rounds == EXO_SUBAGENT_MAX_TOOL_ROUNDS:
+            # Warn phase: inject wrap-up message, strip tools so model summarizes.
+            logger.info(
+                f"Subagent warn phase: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, injecting wrap-up message"
+            )
+            wrap_msg = (
+                "You have reached your tool call limit. Do NOT make any more tool calls. "
+                "Summarize all findings from your research above and return your response now."
+            )
+            chat_msgs = list(task_params.chat_template_messages or [])
+            chat_msgs.append({"role": "user", "content": wrap_msg})
+            updates: dict[str, object] = {
+                "chat_template_messages": chat_msgs,
+                "tools": [],
+            }
+            # Also inject into input messages for models that use those.
+            inp = list(task_params.input)
+            inp.append(InputMessage(role="user", content=wrap_msg))
+            updates["input"] = inp
+            return task_params.model_copy(update=updates), False
+
+        return task_params, False
 
     async def claude_messages(
         self, payload: ClaudeMessagesRequest
@@ -1638,10 +1667,11 @@ class API:
         task_params = claude_request_to_text_generation(payload)
         task_params, was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
-        # If the subagent has exceeded the tool round cap, return a synthetic
-        # end_turn response immediately instead of forwarding to the model.
-        if self._subagent_tool_cap_hit(task_params, was_fallback):
-            cap_msg = "Tool call limit reached. Summarize your findings and return them now."
+        # Apply tool round cap: warn phase injects wrap-up message,
+        # hard cap returns synthetic end_turn.
+        task_params, hard_cap = self._apply_subagent_tool_cap(task_params, was_fallback)
+        if hard_cap:
+            cap_msg = "Tool call limit reached. Returning results gathered so far."
             if payload.stream:
                 return StreamingResponse(
                     _synthetic_claude_stream(payload.model, cap_msg),
