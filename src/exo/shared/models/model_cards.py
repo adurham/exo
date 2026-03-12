@@ -120,6 +120,14 @@ class ModelCard(CamelCaseModel):
         if model_id not in _card_cache:
             await _refresh_card_cache()
         if (mc := _card_cache.get(model_id)) is not None:
+            if mc.max_context_length is None:
+                try:
+                    config_data = await fetch_config_data(model_id)
+                    if config_data.max_position_embeddings is not None:
+                        mc = mc.model_copy(update={"max_context_length": config_data.max_position_embeddings})
+                        _card_cache[model_id] = mc
+                except Exception:
+                    logger.debug(f"Could not fetch max_position_embeddings for {model_id}")
             return mc
 
         return await ModelCard.fetch_from_hf(model_id)
