@@ -240,6 +240,9 @@ class KVPrefixCache:
 
         # Find best cache match (using normalized tokens)
         for i, cached_prompt in enumerate(self.prompts):
+            # Skip entries whose cache was moved out and never restored (e.g. crash)
+            if self.caches[i] is None:
+                continue
             length = get_prefix_length(compare_tokens, cached_prompt)
             if length >= max_length - 1:
                 best_index, best_length = i, length
