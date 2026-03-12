@@ -517,7 +517,7 @@ class BatchGenerator(InferenceGenerator):
             except PrefillCancelled:
                 continue
             except (ValueError, TypeError) as e:
-                logger.warning(f"Task {task.task_id} rejected: {e}")
+                logger.warning(f"Task {task.task_id} rejected: {e}\n{traceback.format_exc()}")
                 self._send_error(task, e)
                 rejected.append((task.task_id, Finished()))
                 continue
