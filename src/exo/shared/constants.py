@@ -97,6 +97,27 @@ def _int_or_none(env: str, default: int | None) -> int | None:
 
 EXO_MAX_CONTEXT_TOKENS: int | None = _int_or_none("EXO_MAX_CONTEXT_TOKENS", None)
 
+# Per-model context token limits.  Format:
+#   EXO_MODEL_MAX_CONTEXT_TOKENS="model-id-a:20000,model-id-b:150000"
+# When a request targets a model listed here, the limit is applied regardless
+# of whether the request was a fallback/subagent or a direct hit.
+def _parse_model_context_limits(env: str) -> dict[str, int]:
+    raw = os.environ.get(env, "")
+    if not raw:
+        return {}
+    result: dict[str, int] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if ":" not in entry:
+            continue
+        model, limit = entry.rsplit(":", 1)
+        result[model.strip()] = int(limit.strip())
+    return result
+
+EXO_MODEL_MAX_CONTEXT_TOKENS: dict[str, int] = _parse_model_context_limits(
+    "EXO_MODEL_MAX_CONTEXT_TOKENS"
+)
+
 # Context token limit applied to requests that required model fallback (subagents).
 # Defaults to EXO_MAX_CONTEXT_TOKENS / 3 when unset.
 EXO_SUBAGENT_MAX_CONTEXT_TOKENS: int | None = _int_or_none(

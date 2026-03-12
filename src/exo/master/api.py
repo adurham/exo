@@ -988,6 +988,15 @@ class API:
         )
         updates: dict[str, object] = {"model": resolved_model}
 
+        # Per-model context limit — always applied regardless of fallback status.
+        from exo.shared.constants import EXO_MODEL_MAX_CONTEXT_TOKENS
+
+        model_limit = EXO_MODEL_MAX_CONTEXT_TOKENS.get(resolved_model)
+        if model_limit is not None:
+            existing = task_params.max_context_tokens
+            if existing is None or existing > model_limit:
+                updates["max_context_tokens"] = model_limit
+
         if was_fallback:
             from exo.shared.constants import (
                 EXO_MAX_CONTEXT_TOKENS,
