@@ -251,7 +251,7 @@ class SequentialGenerator(InferenceGenerator):
             self._reset_heartbeat_timeout()
             if self._queue:
                 self._start_next()
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             logger.warning(f"Task {task.task_id} rejected: {e}")
             self._send_error(task, e)
             self._active = None
@@ -276,7 +276,7 @@ class SequentialGenerator(InferenceGenerator):
         task = self._queue.popleft()
         try:
             mlx_gen = self._build_generator(task)
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             logger.warning(f"Task {task.task_id} rejected during build: {e}")
             self._send_error(task, e)
             return
@@ -505,7 +505,7 @@ class BatchGenerator(InferenceGenerator):
                 uid = self._start_task(task)
             except PrefillCancelled:
                 continue
-            except ValueError as e:
+            except (ValueError, TypeError) as e:
                 logger.warning(f"Task {task.task_id} rejected: {e}")
                 self._send_error(task, e)
                 rejected.append((task.task_id, Finished()))

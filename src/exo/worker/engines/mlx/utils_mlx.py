@@ -425,6 +425,10 @@ def _normalize_tool_calls(msg_dict: dict[str, Any]) -> None:
         if isinstance(args, str):
             with contextlib.suppress(json.JSONDecodeError):
                 func["arguments"] = json.loads(args)
+        # Ensure arguments is always a dict — Qwen3.5 and other templates
+        # use `tool_call.arguments|items` which crashes on str/None/other types.
+        if not isinstance(func.get("arguments"), dict):
+            func["arguments"] = {}
 
 
 def _collect_nested_property_names(schema: dict[str, Any]) -> set[str]:
@@ -521,6 +525,12 @@ def apply_chat_template(
                 logger.warning("Received message with empty content, skipping")
                 continue
             formatted_messages.append({"role": msg.role, "content": msg.content})
+
+    # Defensive: ensure content is always a string (never None/missing) —
+    # Qwen3.5 and other templates concatenate content directly.
+    for msg in formatted_messages:
+        if msg.get("content") is None:
+            msg["content"] = ""
 
     # Strip reasoning_content from previous assistant messages for stable KV-cache
     # matching.  Clients may inconsistently include/strip assistant reasoning across
