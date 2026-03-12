@@ -842,7 +842,7 @@ class API:
     ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI Chat Completions API - adapter."""
         task_params = chat_request_to_text_generation(payload)
-        task_params = await self._resolve_model_and_apply_limits(task_params)
+        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -873,7 +873,7 @@ class API:
         self, payload: BenchChatCompletionRequest
     ) -> BenchChatCompletionResponse:
         task_params = chat_request_to_text_generation(payload)
-        task_params = await self._resolve_model_and_apply_limits(task_params)
+        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
         task_params = task_params.model_copy(update={"stream": False, "bench": True})
 
@@ -978,8 +978,11 @@ class API:
 
     async def _resolve_model_and_apply_limits(
         self, task_params: TextGenerationTaskParams
-    ) -> TextGenerationTaskParams:
-        """Resolve the model and apply subagent context limits when applicable."""
+    ) -> tuple[TextGenerationTaskParams, bool]:
+        """Resolve the model and apply subagent context limits when applicable.
+
+        Returns (task_params, was_fallback) where was_fallback indicates a subagent request.
+        """
         resolved_model, was_fallback = await self._resolve_and_validate_text_model(
             ModelId(task_params.model)
         )
@@ -1080,7 +1083,7 @@ class API:
                     chat_msgs.insert(0, {"role": "system", "content": EXO_MAIN_RULES})
                 updates["chat_template_messages"] = chat_msgs
 
-        return task_params.model_copy(update=updates)
+        return task_params.model_copy(update=updates), was_fallback
 
     async def _validate_image_model(self, model: ModelId) -> ModelId:
         """Validate model exists and return resolved model ID.
@@ -1606,8 +1609,13 @@ class API:
             response_format=response_format,
         )
 
-    def _subagent_tool_cap_hit(self, task_params: TextGenerationTaskParams) -> bool:
-        """Check if a subagent request has exceeded the tool round cap."""
+    def _subagent_tool_cap_hit(self, task_params: TextGenerationTaskParams, was_fallback: bool) -> bool:
+        """Check if a subagent request has exceeded the tool round cap.
+
+        Only applies to subagent requests (was_fallback=True).
+        """
+        if not was_fallback:
+            return False
         from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
 
         if EXO_SUBAGENT_MAX_TOOL_ROUNDS <= 0:
@@ -1628,11 +1636,11 @@ class API:
     ) -> ClaudeMessagesResponse | StreamingResponse:
         """Claude Messages API - adapter."""
         task_params = claude_request_to_text_generation(payload)
-        task_params = await self._resolve_model_and_apply_limits(task_params)
+        task_params, was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
         # If the subagent has exceeded the tool round cap, return a synthetic
         # end_turn response immediately instead of forwarding to the model.
-        if self._subagent_tool_cap_hit(task_params):
+        if self._subagent_tool_cap_hit(task_params, was_fallback):
             cap_msg = "Tool call limit reached. Summarize your findings and return them now."
             if payload.stream:
                 return StreamingResponse(
@@ -1684,7 +1692,7 @@ class API:
     ) -> ResponsesResponse | StreamingResponse:
         """OpenAI Responses API."""
         task_params = responses_request_to_text_generation(payload)
-        task_params = await self._resolve_model_and_apply_limits(task_params)
+        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1725,7 +1733,7 @@ class API:
         body = await request.body()
         payload = OllamaChatRequest.model_validate_json(body)
         task_params = ollama_request_to_text_generation(payload)
-        task_params = await self._resolve_model_and_apply_limits(task_params)
+        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
@@ -1759,7 +1767,7 @@ class API:
         body = await request.body()
         payload = OllamaGenerateRequest.model_validate_json(body)
         task_params = ollama_generate_request_to_text_generation(payload)
-        task_params = await self._resolve_model_and_apply_limits(task_params)
+        task_params, _was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
