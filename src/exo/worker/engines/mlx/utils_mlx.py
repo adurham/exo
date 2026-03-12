@@ -580,14 +580,34 @@ def apply_chat_template(
                     "Patched lossy chat template (removed inner_type length guard)"
                 )
 
-    prompt: str = tokenizer.apply_chat_template(
-        formatted_messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        tools=task_params.tools,
-        **({"chat_template": patched_template} if patched_template is not None else {}),
-        **extra_kwargs,
-    )
+    try:
+        prompt: str = tokenizer.apply_chat_template(
+            formatted_messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            tools=task_params.tools,
+            **({"chat_template": patched_template} if patched_template is not None else {}),
+            **extra_kwargs,
+        )
+    except TypeError as e:
+        # Log the exact messages that caused the template to crash
+        import json as _json
+
+        logger.error(
+            f"Chat template TypeError: {e}\n"
+            f"Messages ({len(formatted_messages)}):\n"
+            + "\n".join(
+                f"  [{i}] role={m.get('role')} content_type={type(m.get('content')).__name__} "
+                f"has_tool_calls={'tool_calls' in m} "
+                f"keys={list(m.keys())}"
+                for i, m in enumerate(formatted_messages)
+            )
+        )
+        # Also log any messages with tool_calls for detailed debugging
+        for i, m in enumerate(formatted_messages):
+            if "tool_calls" in m:
+                logger.error(f"  msg[{i}] tool_calls={_json.dumps(m['tool_calls'], default=str)[:500]}")
+        raise
 
     if task_params.tools and _schemas_lost_in_prompt(prompt, task_params.tools):
         logger.warning("Chat template lost nested tool schemas even after patching")
