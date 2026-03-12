@@ -16,14 +16,20 @@ from exo.shared.constants import EXO_FILE_SERVER_PORT, EXO_MODELS_DIR
 
 
 async def _handle_model_file(request: web.Request) -> web.StreamResponse:
-    """Serve a model file: GET /{model_id}/{file_path}
+    """Serve a model file: GET /{org}/{model}/{file_path}
 
+    The model_id is always two segments (e.g. mlx-community/MiniMax-M2.5-6bit).
+    On disk it's normalized with "--" (e.g. mlx-community--MiniMax-M2.5-6bit).
     Supports Range headers for resumable downloads.
     """
-    # model_id can contain slashes (e.g. "mlx-community/MiniMax-M2.5-6bit")
-    # but on disk it's normalized with "--" (e.g. "mlx-community--MiniMax-M2.5-6bit")
-    model_id = request.match_info["model_id"]
-    file_path = request.match_info["file_path"]
+    # Parse the full path: /{org}/{model}/{file_path...}
+    full_match = request.match_info["path"]
+    parts = full_match.split("/", 2)  # Split into at most 3 parts
+    if len(parts) < 3:
+        raise web.HTTPNotFound(text=f"Invalid path: {full_match}")
+
+    model_id = f"{parts[0]}/{parts[1]}"  # e.g. "mlx-community/MiniMax-M2.5-6bit"
+    file_path = parts[2]  # e.g. "model-00014-of-00038.safetensors"
 
     # Normalize model_id the same way download_utils does
     normalized = model_id.replace("/", "--")
@@ -90,7 +96,7 @@ async def _handle_model_file(request: web.Request) -> web.StreamResponse:
 async def run_file_server() -> None:
     """Start the model file server on EXO_FILE_SERVER_PORT."""
     app = web.Application()
-    app.router.add_get("/{model_id}/{file_path:.*}", _handle_model_file)
+    app.router.add_get("/{path:.*}", _handle_model_file)
 
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()

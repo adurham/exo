@@ -1,9 +1,9 @@
-import urllib.request
+import json
+import sys
+import time
 import urllib.error
 import urllib.parse
-import json
-import time
-import sys
+import urllib.request
 
 # Configuration
 MASTER_URL = "http://192.168.86.202:52415"

@@ -294,6 +294,7 @@ class Master:
                                 self.state.instances,
                                 self.state.node_memory,
                                 self.state.node_network,
+                                max_context_tokens=command.max_context_tokens,
                             )
                             transition_events = get_transition_events(
                                 self.state.instances, placement, self.state.tasks

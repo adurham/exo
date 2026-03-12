@@ -12,7 +12,7 @@ from mlx_lm.models.cache import ArraysCache, RotatingKVCache
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
-from exo.shared.constants import EXO_MAX_CONTEXT_TOKENS, EXO_TRACING_ENABLED
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.types.api import (
     CompletionTokensDetails,
     FinishReason,
@@ -549,7 +549,10 @@ def mlx_generate(
     distributed_prompt_progress_callback: Callable[[], None] | None = None,
     on_generation_token: Callable[[], None] | None = None,
 ) -> Generator[GenerationResponse]:
-    from exo.worker.engines.mlx.cache import get_memory_used_percentage, MEMORY_THRESHOLD
+    from exo.worker.engines.mlx.cache import (
+        MEMORY_THRESHOLD,
+        get_memory_used_percentage,
+    )
 
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
@@ -568,8 +571,7 @@ def mlx_generate(
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
 
-    # Per-request limit overrides the global default when set (e.g. subagents).
-    effective_max_context = task.max_context_tokens or EXO_MAX_CONTEXT_TOKENS
+    effective_max_context = task.max_context_tokens
 
     if effective_max_context is not None and len(all_prompt_tokens) > effective_max_context:
         original_len = len(all_prompt_tokens)

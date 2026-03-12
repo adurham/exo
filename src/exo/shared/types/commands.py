@@ -38,6 +38,7 @@ class PlaceInstance(BaseCommand):
     sharding: Sharding
     instance_meta: InstanceMeta
     min_nodes: int
+    max_context_tokens: int | None = None
 
 
 class CreateInstance(BaseCommand):

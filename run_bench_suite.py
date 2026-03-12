@@ -13,7 +13,13 @@ Usage:
   python3 run_bench_suite.py [--label "description"] [--output results.json]
 """
 
-import json, sys, time, urllib.request, os, argparse, textwrap
+import argparse
+import json
+import os
+import sys
+import textwrap
+import time
+import urllib.request
 
 API_BASE = os.environ.get("EXO_API", "http://192.168.86.201:52415")
 MODEL_ID = "mlx-community/MiniMax-M2.5-5bit"

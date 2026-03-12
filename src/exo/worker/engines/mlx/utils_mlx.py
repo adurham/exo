@@ -20,7 +20,6 @@ except ImportError:
     pass  # transformers < 5.0 or bytes_to_unicode not available
 
 from mlx_lm.models.cache import KVCache
-from mlx_lm.models.deepseek_v3 import DeepseekV3Model
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.models.model_cards import ModelId
@@ -38,6 +37,7 @@ from mlx_lm.utils import load_model
 from pydantic import RootModel
 
 from exo.download.download_utils import build_model_path
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.types.common import Host
 from exo.shared.types.memory import Memory
 from exo.shared.types.mlx import Model
@@ -65,7 +65,6 @@ from exo.worker.engines.mlx.auto_parallel import (
     pipeline_auto_parallel,
     tensor_auto_parallel,
 )
-from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.worker.runner.bootstrap import logger
 
 Group = mx.distributed.Group

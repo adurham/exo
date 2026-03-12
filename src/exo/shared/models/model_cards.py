@@ -89,6 +89,7 @@ class ModelCard(CamelCaseModel):
     quantization: str = ""
     base_model: str = ""
     capabilities: list[str] = []
+    max_context_length: PositiveInt | None = None
     uses_cfg: bool = False
     trust_remote_code: bool = True
 
@@ -137,6 +138,7 @@ class ModelCard(CamelCaseModel):
             n_layers=num_layers,
             hidden_size=config_data.hidden_size or 0,
             supports_tensor=config_data.supports_tensor,
+            max_context_length=config_data.max_position_embeddings,
             tasks=[ModelTask.TextGeneration],
             trust_remote_code=False,
         )
@@ -170,6 +172,7 @@ class ConfigData(BaseModel):
 
     architectures: list[str] | None = None
     hidden_size: Annotated[int, Field(ge=0)] | None = None
+    max_position_embeddings: PositiveInt | None = None
     layer_count: int = Field(
         validation_alias=AliasChoices(
             "num_hidden_layers",
@@ -208,6 +211,7 @@ class ConfigData(BaseModel):
         for field in [
             "architectures",
             "hidden_size",
+            "max_position_embeddings",
             "num_hidden_layers",
             "num_layers",
             "n_layer",

@@ -22,7 +22,7 @@ from exo.shared.constants import EXO_LOG
 from exo.shared.election import Election, ElectionResult
 from exo.shared.logging import logger_cleanup, logger_setup
 from exo.shared.types.common import NodeId, SessionId
-from exo.utils.channels import Receiver, Sender, channel
+from exo.utils.channels import Receiver, channel
 from exo.utils.pydantic_ext import CamelCaseModel
 from exo.utils.task_group import TaskGroup
 from exo.worker.main import Worker

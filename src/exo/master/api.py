@@ -54,7 +54,6 @@ from exo.shared.constants import (
     EXO_EVENT_LOG_DIR,
     EXO_IMAGE_CACHE_DIR,
     EXO_MAX_CHUNK_SIZE,
-    EXO_MAX_CONTEXT_TOKENS,
     EXO_TRACING_CACHE_DIR,
 )
 from exo.shared.election import ElectionMessage
@@ -354,11 +353,13 @@ class API:
         self.app.post("/onboarding")(self.complete_onboarding)
 
     async def place_instance(self, payload: PlaceInstanceParams):
+        model_card = await ModelCard.load(payload.model_id)
+        effective_limit = payload.max_context_tokens or model_card.max_context_length
+
         if payload.node_ids:
             # When specific nodes are requested, do placement locally and send
             # a CreateInstance command (PlaceInstance doesn't support node pinning
             # over the wire due to strict Pydantic serialization).
-            model_card = await ModelCard.load(payload.model_id)
             required_nodes = set(payload.node_ids)
             try:
                 placements = get_instance_placements(
@@ -373,6 +374,7 @@ class API:
                     topology=self.state.topology,
                     current_instances=self.state.instances,
                     required_nodes=required_nodes,
+                    max_context_tokens=effective_limit,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -394,10 +396,11 @@ class API:
             )
 
         command = PlaceInstance(
-            model_card=await ModelCard.load(payload.model_id),
+            model_card=model_card,
             sharding=payload.sharding,
             instance_meta=payload.instance_meta,
             min_nodes=payload.min_nodes,
+            max_context_tokens=effective_limit,
         )
         await self._send(command)
 
@@ -833,7 +836,21 @@ class API:
         resolved_model = await self._resolve_and_validate_text_model(
             ModelId(task_params.model)
         )
-        return task_params.model_copy(update={"model": resolved_model})
+        updates: dict[str, object] = {"model": resolved_model}
+
+        # If no per-request context limit, use the instance's limit
+        if task_params.max_context_tokens is None:
+            instance_limit = self._get_instance_context_limit(resolved_model)
+            if instance_limit is not None:
+                updates["max_context_tokens"] = instance_limit
+
+        return task_params.model_copy(update=updates)
+
+    def _get_instance_context_limit(self, model_id: ModelId) -> int | None:
+        for instance in self.state.instances.values():
+            if instance.shard_assignments.model_id == model_id:
+                return instance.max_context_tokens
+        return None
 
     async def _validate_image_model(self, model: ModelId) -> ModelId:
         """Validate model exists and return resolved model ID.
@@ -1607,7 +1624,7 @@ class API:
                     hugging_face_id=card.model_id,
                     name=card.model_id.short(),
                     description="",
-                    context_length=EXO_MAX_CONTEXT_TOKENS or 0,
+                    context_length=self._get_instance_context_limit(ModelId(card.model_id)) or card.max_context_length or 0,
                     tags=[],
                     storage_size_megabytes=card.storage_size.in_mb,
                     supports_tensor=card.supports_tensor,

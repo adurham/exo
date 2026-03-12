@@ -67,6 +67,7 @@ def place_instance(
     node_memory: Mapping[NodeId, MemoryUsage],
     node_network: Mapping[NodeId, NodeNetworkInfo],
     required_nodes: set[NodeId] | None = None,
+    max_context_tokens: int | None = None,
 ) -> dict[InstanceId, Instance]:
     cycles = topology.get_cycles()
     candidate_cycles = list(filter(lambda it: len(it) >= command.min_nodes, cycles))
@@ -194,6 +195,7 @@ def place_instance(
                 shard_assignments=shard_assignments,
                 jaccl_devices=mlx_jaccl_devices,
                 jaccl_coordinators=mlx_jaccl_coordinators,
+                max_context_tokens=max_context_tokens,
             )
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
@@ -208,6 +210,7 @@ def place_instance(
                 shard_assignments=shard_assignments,
                 hosts_by_node=hosts_by_node,
                 ephemeral_port=ephemeral_port,
+                max_context_tokens=max_context_tokens,
             )
 
     return target_instances

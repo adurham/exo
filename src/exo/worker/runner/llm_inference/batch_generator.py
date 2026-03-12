@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import mlx.core as mx
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
-from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS
+from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS, EXO_TRACING_ENABLED
 from exo.shared.types.chunks import ErrorChunk, PrefillProgressChunk
 from exo.shared.types.common import ModelId
 from exo.shared.types.events import ChunkGenerated, Event
@@ -24,7 +24,6 @@ from exo.worker.engines.mlx.generator.generate import (
     mlx_generate,
     warmup_inference,
 )
-from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     mx_all_gather_tasks,

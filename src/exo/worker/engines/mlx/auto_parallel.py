@@ -4,7 +4,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Iterator, Protocol, cast

@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import time as _time
@@ -18,8 +19,6 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.mlx import KVCacheType, Model
 from exo.worker.engines.mlx.constants import CACHE_GROUP_SIZE, KV_BITS
 from exo.worker.runner.bootstrap import logger
-
-import math
 
 
 # Fraction of Metal GPU memory (active / max_recommended_working_set_size)

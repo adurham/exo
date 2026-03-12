@@ -18,7 +18,6 @@
 : "${MLX_JACCL_FRAME_SIZE:=4096}"
 : "${EXO_KV_BITS:=16}"
 : "${EXO_PP_LAYER_OFFSET:=0}"
-: "${EXO_MAX_CONTEXT_TOKENS:=120000}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${LOG_LEVEL:=INFO}"
 export IBV_FORK_SAFE=1
@@ -382,7 +381,6 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=$EXO_TRACING_ENABLED"
     EXO_ENV="$EXO_ENV EXO_KV_BITS=$EXO_KV_BITS"
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
-    EXO_ENV="$EXO_ENV EXO_MAX_CONTEXT_TOKENS=$EXO_MAX_CONTEXT_TOKENS"
     EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
     EXO_ENV="$EXO_ENV EXO_KV_CACHE_MOVE=1"
     EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=1"
@@ -560,7 +558,8 @@ if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-6bit" "{
     \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
-    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"]
+    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
+    \"max_context_tokens\": 120000
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi

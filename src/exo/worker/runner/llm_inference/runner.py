@@ -7,6 +7,7 @@ import mlx.core as mx
 from anyio import WouldBlock
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
+from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.models.model_cards import ModelTask
 from exo.shared.types.chunks import (
     ErrorChunk,
@@ -51,7 +52,6 @@ from exo.shared.types.worker.runners import (
     RunnerStatus,
     RunnerWarmingUp,
 )
-from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.utils.channels import MpReceiver, MpSender
 from exo.worker.engines.mlx.cache import KVPrefixCache
 from exo.worker.engines.mlx.utils_mlx import (

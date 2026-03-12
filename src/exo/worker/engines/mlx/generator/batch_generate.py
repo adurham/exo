@@ -28,14 +28,17 @@ from exo.worker.engines.mlx.cache import (
     encode_prompt,
     make_kv_cache,
 )
-from exo.worker.engines.mlx.constants import DEFAULT_TOP_LOGPROBS, MAX_TOKENS, PREFILL_STEP_SIZE
+from exo.worker.engines.mlx.constants import (
+    DEFAULT_TOP_LOGPROBS,
+    MAX_TOKENS,
+    PREFILL_STEP_SIZE,
+)
 from exo.worker.engines.mlx.generator.generate import (
     ban_token_ids,
     eos_ids_from_tokenizer,
     extract_top_logprobs,
     prefill,
 )
-from exo.shared.constants import EXO_MAX_CONTEXT_TOKENS
 from exo.worker.engines.mlx.utils_mlx import fix_unmatched_think_end_tokens
 from exo.worker.runner.bootstrap import logger
 
@@ -115,14 +118,17 @@ class ExoBatchGenerator:
         distributed_prompt_progress_callback: Callable[[], None] | None = None,
         on_generation_token: Callable[[], None] | None = None,
     ) -> int:
-        from exo.worker.engines.mlx.cache import get_memory_used_percentage, MEMORY_THRESHOLD
+        from exo.worker.engines.mlx.cache import (
+            MEMORY_THRESHOLD,
+            get_memory_used_percentage,
+        )
 
         all_prompt_tokens = encode_prompt(self.tokenizer, prompt)
         all_prompt_tokens = fix_unmatched_think_end_tokens(
             all_prompt_tokens, self.tokenizer
         )
 
-        effective_max_context = task_params.max_context_tokens or EXO_MAX_CONTEXT_TOKENS
+        effective_max_context = task_params.max_context_tokens
 
         if effective_max_context is not None and len(all_prompt_tokens) > effective_max_context:
             original_len = len(all_prompt_tokens)

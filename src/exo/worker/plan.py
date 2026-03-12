@@ -157,9 +157,7 @@ def _find_peer_repo_url(
                     if iface.interface_type == "thunderbolt":
                         best_ip = ip
                         break
-                    if iface.interface_type in ("ethernet", "maybe_ethernet") and best_ip is None:
-                        best_ip = ip
-                    elif best_ip is None:
+                    if iface.interface_type in ("ethernet", "maybe_ethernet") and best_ip is None or best_ip is None:
                         best_ip = ip
                 if best_ip:
                     return f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"

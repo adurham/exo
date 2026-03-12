@@ -232,6 +232,7 @@ class PlaceInstanceParams(BaseModel):
     instance_meta: InstanceMeta = InstanceMeta.MlxRing
     min_nodes: int = 1
     node_ids: list[NodeId] | None = None
+    max_context_tokens: int | None = None
 
 
 
