@@ -1047,8 +1047,24 @@ class API:
                         f"Subagent prompt trimmed: {total_saved:,} chars removed (~{total_saved // 4:,} tokens saved)"
                     )
 
+            # Hard cap on tool-use rounds: count existing tool_result entries
+            # in chat_template_messages. Once the cap is reached, strip tools
+            # so the model is forced to return a text response.
+            from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
+
+            if EXO_SUBAGENT_MAX_TOOL_ROUNDS > 0 and task_params.tools:
+                tool_rounds = 0
+                for m in task_params.chat_template_messages or []:
+                    if m.get("role") == "tool":
+                        tool_rounds += 1
+                if tool_rounds >= EXO_SUBAGENT_MAX_TOOL_ROUNDS:
+                    logger.info(
+                        f"Subagent hit tool round cap: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, stripping tools"
+                    )
+                    updates["tools"] = []
+
             logger.info(
-                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages'))}"
+                f"Subagent detected: limits {', '.join(f'{k}={v}' for k, v in updates.items() if k not in ('model', 'instructions', 'input', 'chat_template_messages', 'tools'))}"
             )
         else:
             # Main agent — append performance rules to system prompt.

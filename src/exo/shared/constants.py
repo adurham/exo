@@ -116,6 +116,13 @@ EXO_SUBAGENT_TRIM_MESSAGES: bool = os.environ.get(
     "EXO_SUBAGENT_TRIM_MESSAGES", "1"
 ) == "1"
 
+# Maximum number of tool-use rounds a subagent can perform before tools are
+# stripped from the request, forcing the model to return a text response.
+# Set to 0 to disable the cap entirely.
+EXO_SUBAGENT_MAX_TOOL_ROUNDS: int = int(os.environ.get(
+    "EXO_SUBAGENT_MAX_TOOL_ROUNDS", "5"
+))
+
 # Rules injected into system prompts.
 # Loaded from markdown files at the repo root for easy editing.
 _RULES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..")
