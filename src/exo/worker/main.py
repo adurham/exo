@@ -153,7 +153,6 @@ class Worker:
                     self.input_chunk_buffer[cmd_id][event.chunk.chunk_index] = (
                         event.chunk.data
                     )
-
     async def plan_step(self):
         while True:
             await anyio.sleep(0.1)
@@ -166,6 +165,7 @@ class Worker:
                 self.state.tasks,
                 self.input_chunk_buffer,
                 self.input_chunk_counts,
+                node_network=self.state.node_network,
             )
             if task is None:
                 continue
@@ -222,12 +222,17 @@ class Worker:
                             )
                         )
                     else:
+                        if task.repo_url:
+                            logger.info(
+                                f"Model {model_id} available on peer, will download from {task.repo_url}"
+                            )
                         await self.download_command_sender.send(
                             ForwarderDownloadCommand(
                                 origin=self._system_id,
                                 command=StartDownload(
                                     target_node_id=self.node_id,
                                     shard_metadata=shard,
+                                    repo_url=task.repo_url,
                                 ),
                             )
                         )

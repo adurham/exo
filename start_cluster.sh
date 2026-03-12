@@ -554,9 +554,9 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating MiniMax-M2.5-5bit instance on Mac Studios (Tensor / RDMA)..."
-if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-5bit" "{
-    \"model_id\": \"mlx-community/MiniMax-M2.5-5bit\",
+echo "Creating MiniMax-M2.5-6bit instance on Mac Studios (Tensor / RDMA)..."
+if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-6bit" "{
+    \"model_id\": \"mlx-community/MiniMax-M2.5-6bit\",
     \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,

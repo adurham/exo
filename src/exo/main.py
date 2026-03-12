@@ -12,6 +12,7 @@ from pydantic import PositiveInt
 
 import exo.routing.topics as topics
 from exo.download.coordinator import DownloadCoordinator
+from exo.download.file_server import run_file_server
 from exo.download.impl_shard_downloader import exo_shard_downloader
 from exo.master.api import API  # TODO: should API be in master?
 from exo.master.main import Master
@@ -145,6 +146,7 @@ class Node:
             tg.start_soon(self.election.run)
             if self.download_coordinator:
                 tg.start_soon(self.download_coordinator.run)
+                tg.start_soon(run_file_server)
             if self.worker:
                 tg.start_soon(self.worker.run)
             if self.master:

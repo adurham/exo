@@ -50,7 +50,7 @@ async def build_full_shard(model_id: ModelId) -> PipelineShardMetadata:
 class SingletonShardDownloader(ShardDownloader):
     def __init__(self, shard_downloader: ShardDownloader):
         self.shard_downloader = shard_downloader
-        self.active_downloads: dict[ShardMetadata, asyncio.Task[Path]] = {}
+        self.active_downloads: dict[tuple[ShardMetadata, str | None], asyncio.Task[Path]] = {}
 
     def on_progress(
         self,
@@ -59,17 +59,20 @@ class SingletonShardDownloader(ShardDownloader):
         self.shard_downloader.on_progress(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self, shard: ShardMetadata, config_only: bool = False,
+        repo_url: str | None = None,
     ) -> Path:
-        if shard not in self.active_downloads:
-            self.active_downloads[shard] = asyncio.create_task(
-                self.shard_downloader.ensure_shard(shard, config_only)
+        # Include repo_url in the cache key so peer vs HF downloads are distinct
+        cache_key = (shard, repo_url)
+        if cache_key not in self.active_downloads:
+            self.active_downloads[cache_key] = asyncio.create_task(
+                self.shard_downloader.ensure_shard(shard, config_only, repo_url=repo_url)
             )
         try:
-            return await self.active_downloads[shard]
+            return await self.active_downloads[cache_key]
         finally:
-            if shard in self.active_downloads and self.active_downloads[shard].done():
-                del self.active_downloads[shard]
+            if cache_key in self.active_downloads and self.active_downloads[cache_key].done():
+                del self.active_downloads[cache_key]
 
     async def get_shard_download_status(
         self,
@@ -104,9 +107,13 @@ class ResumableShardDownloader(ShardDownloader):
         self.on_progress_callbacks.append(callback)
 
     async def ensure_shard(
-        self, shard: ShardMetadata, config_only: bool = False
+        self, shard: ShardMetadata, config_only: bool = False,
+        repo_url: str | None = None,
     ) -> Path:
         allow_patterns = ["config.json"] if config_only else None
+
+        if repo_url:
+            logger.info(f"Downloading {shard.model_card.model_id} from peer: {repo_url}")
 
         target_dir, _ = await download_shard(
             shard,
@@ -114,6 +121,7 @@ class ResumableShardDownloader(ShardDownloader):
             max_parallel_downloads=self.max_parallel_downloads,
             allow_patterns=allow_patterns,
             skip_internet=self.offline,
+            repo_url=repo_url,
         )
         return target_dir
 
