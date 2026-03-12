@@ -11,7 +11,7 @@
 : "${EXO_CHUNKED_PREFILL:=0}"
 : "${EXO_ADAPTIVE_THROTTLE:=100}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
-: "${EXO_TRACING_ENABLED:=false}"
+: "${EXO_TRACING_ENABLED:=true}"
 : "${EXO_SAFE_SYNC_LIMIT:=50000}"
 : "${EXO_PREFILL_STEP_SIZE:=524288}"
 : "${MLX_JACCL_NUM_BUFFERS:=2}"
@@ -19,7 +19,7 @@
 : "${EXO_KV_BITS:=16}"
 : "${EXO_PP_LAYER_OFFSET:=0}"
 : "${EXO_COMPILE_DECODE:=0}"
-: "${LOG_LEVEL:=INFO}"
+: "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
@@ -381,7 +381,10 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=$EXO_TRACING_ENABLED"
     EXO_ENV="$EXO_ENV EXO_KV_BITS=$EXO_KV_BITS"
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
-    EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
+    # MacBook gets 2 entries (see per-node overrides below), Studios get 1
+    if [ "$NODE" != "macbook-m4" ]; then
+        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
+    fi
     EXO_ENV="$EXO_ENV EXO_KV_CACHE_MOVE=1"
     EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=1"
     EXO_ENV="$EXO_ENV EXO_COMPILE_DECODE=$EXO_COMPILE_DECODE"
@@ -404,6 +407,9 @@ for NODE in "${NODES[@]}"; do
         # Smaller prefill steps = finer KV cache snapshot granularity for
         # the memory-constrained MacBook (subagent workloads are 1-10K tokens).
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
+        # 2 cache entries: title generator (610 tokens) and subagent (5K+ tokens)
+        # can coexist without evicting each other. Qwen 9B cache ~200MB/entry.
+        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=2"
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
