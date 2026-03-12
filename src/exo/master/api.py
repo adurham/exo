@@ -738,8 +738,11 @@ class API:
         self, payload: ChatCompletionRequest
     ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI Chat Completions API - adapter."""
+        logger.debug(f"chat_completions: request model={payload.model!r}")
         task_params = chat_request_to_text_generation(payload)
+        logger.debug(f"chat_completions: task_params model={task_params.model!r}")
         task_params = await self._resolve_model_and_apply_limits(task_params)
+        logger.debug(f"chat_completions: resolved model={task_params.model!r}")
 
         command = TextGeneration(task_params=task_params)
         await self._send(command)
