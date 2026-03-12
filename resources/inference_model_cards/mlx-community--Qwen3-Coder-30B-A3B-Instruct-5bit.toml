@@ -1,0 +1,12 @@
+model_id = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit"
+n_layers = 48
+hidden_size = 2048
+supports_tensor = true
+tasks = ["TextGeneration"]
+family = "qwen"
+quantization = "5bit"
+base_model = "Qwen3-Coder 30B"
+capabilities = ["text", "code"]
+
+[storage_size]
+in_bytes = 21002692318
