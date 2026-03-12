@@ -407,8 +407,8 @@ for NODE in "${NODES[@]}"; do
         # Smaller prefill steps = finer KV cache snapshot granularity for
         # the memory-constrained MacBook (subagent workloads are 1-10K tokens).
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
-        # 2 cache entries: title generator (610 tokens) and subagent (5K+ tokens)
-        # can coexist without evicting each other. Qwen 9B cache ~200MB/entry.
+        # 2 cache entries: with MOVE=1 (no deepcopy), a system-prompt entry (~5K tok, ~0.5GB)
+        # can coexist with a conversation entry (~31K tok, ~3GB).  21GB model + 3.5GB KV ≈ 63% of 38.6GB.
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=2"
     fi
 
@@ -570,14 +570,14 @@ if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-6bit" "{
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
-echo "Creating Qwen3.5-9B-8bit instance on MacBook (single node)..."
-if place_instance_with_retry "Qwen" "mlx-community/Qwen3.5-9B-8bit" "{
-    \"model_id\": \"mlx-community/Qwen3.5-9B-8bit\",
+echo "Creating Qwen3-Coder-30B-A3B instance on MacBook (single node)..."
+if place_instance_with_retry "Qwen" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit" "{
+    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 20000
+    \"max_context_tokens\": 50000
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi

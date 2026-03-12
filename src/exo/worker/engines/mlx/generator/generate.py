@@ -609,11 +609,10 @@ def mlx_generate(
             )
             cache_from_prefix = True
 
-    # Memory check.  If memory is above threshold, always evict the KV cache
-    # (even on a cache hit) and fall back to a fresh prefill.  A stale cache
-    # that blocks all new requests has negative value — following vLLM's
-    # preempt-and-recompute pattern, we sacrifice the cache to serve the
-    # incoming request.
+    # Memory check.  If memory is above threshold, evict stored KV cache
+    # entries to free memory.  We keep our already-copied prefix match if
+    # eviction frees enough — only fall back to a full reprefill when
+    # memory is still too high after eviction.
     mem_used = get_memory_used_percentage()
     if mem_used > MEMORY_THRESHOLD:
         if kv_prefix_cache is not None:
@@ -624,12 +623,20 @@ def mlx_generate(
                 f"Evicted KV cache under memory pressure, now at {mem_used:.0%}"
             )
         if cache_from_prefix:
-            # Cache was evicted — fall back to fresh prefill.
-            caches = make_kv_cache(model=model)
-            prompt_tokens = all_prompt_tokens
-            prefix_hit_length = 0
+            # The matched entry was evicted from the store, so the
+            # matched_index is stale.  Clear it so the save path uses
+            # add_kv_cache instead of update_kv_cache.
             matched_index = None
-            cache_from_prefix = False
+            if mem_used > MEMORY_THRESHOLD:
+                # Still too tight — discard the prefix match entirely.
+                caches = make_kv_cache(model=model)
+                prompt_tokens = all_prompt_tokens
+                prefix_hit_length = 0
+                cache_from_prefix = False
+            else:
+                logger.info(
+                    f"Retained prefix hit ({prefix_hit_length} tokens) after eviction"
+                )
         if mem_used > MEMORY_THRESHOLD:
             raise ValueError(
                 f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "

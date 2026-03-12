@@ -5,7 +5,7 @@ supports_tensor = true
 tasks = ["TextGeneration"]
 family = "qwen"
 quantization = "5bit"
-base_model = "Qwen3-Coder 30B"
+base_model = "Qwen3 Coder 30B"
 capabilities = ["text", "code"]
 
 [storage_size]
