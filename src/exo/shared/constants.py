@@ -97,32 +97,3 @@ def _int_or_none(env: str, default: int | None) -> int | None:
 
 EXO_MAX_CONTEXT_TOKENS: int | None = _int_or_none("EXO_MAX_CONTEXT_TOKENS", None)
 
-# Per-model context token limits.  Format:
-#   EXO_MODEL_MAX_CONTEXT_TOKENS="model-id-a:20000,model-id-b:150000"
-# When a request targets a model listed here, the limit is applied regardless
-# of whether the request was a fallback/subagent or a direct hit.
-def _parse_model_context_limits(env: str) -> dict[str, int]:
-    raw = os.environ.get(env, "")
-    if not raw:
-        return {}
-    result: dict[str, int] = {}
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if ":" not in entry:
-            continue
-        model, limit = entry.rsplit(":", 1)
-        result[model.strip()] = int(limit.strip())
-    return result
-
-EXO_MODEL_MAX_CONTEXT_TOKENS: dict[str, int] = _parse_model_context_limits(
-    "EXO_MODEL_MAX_CONTEXT_TOKENS"
-)
-
-# When set, any request for an unknown model silently resolves to this model.
-# When unset (default), falls back to the sole active model if exactly one is loaded.
-EXO_DEFAULT_MODEL: str | None = os.environ.get("EXO_DEFAULT_MODEL", None) or None
-
-# When set, subagent requests (was_fallback=True) resolve to this model
-# instead of EXO_DEFAULT_MODEL. Enables routing subagents to a smaller,
-# faster model on a dedicated node.
-EXO_SUBAGENT_MODEL: str | None = os.environ.get("EXO_SUBAGENT_MODEL", None) or None

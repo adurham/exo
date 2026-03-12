@@ -781,45 +781,24 @@ class API:
 
     async def _resolve_and_validate_text_model(
         self, model_id: ModelId
-    ) -> tuple[ModelId, bool]:
-        """Validate a text model exists and return (resolved_model_id, was_fallback).
+    ) -> ModelId:
+        """Validate a text model exists and return the resolved model ID.
 
         Resolution order:
         1. Exact match against active instances.
-        2. EXO_DEFAULT_MODEL env var (explicit override).
-        3. Sole active model when only one is loaded.
+        2. Sole active model when only one is loaded.
         Raises HTTPException 404 if none of the above succeed.
         """
         if any(
             instance.shard_assignments.model_id == model_id
             for instance in self.state.instances.values()
         ):
-            return model_id, False
-
-        from exo.shared.constants import EXO_DEFAULT_MODEL, EXO_SUBAGENT_MODEL
+            return model_id
 
         active_models = {
             instance.shard_assignments.model_id
             for instance in self.state.instances.values()
         }
-
-        # Subagent model: route to a dedicated smaller model if configured.
-        if EXO_SUBAGENT_MODEL is not None:
-            subagent = ModelId(EXO_SUBAGENT_MODEL)
-            if subagent in active_models:
-                logger.info(
-                    f"Model {model_id} not found, routing to EXO_SUBAGENT_MODEL={subagent}"
-                )
-                return subagent, True
-
-        # Explicit default model configured via env var.
-        if EXO_DEFAULT_MODEL is not None:
-            default = ModelId(EXO_DEFAULT_MODEL)
-            if default in active_models:
-                logger.info(
-                    f"Model {model_id} not found, using EXO_DEFAULT_MODEL={default}"
-                )
-                return default, True
 
         # Implicit fallback: sole active model.
         if len(active_models) == 1:
@@ -827,7 +806,7 @@ class API:
             logger.info(
                 f"Model {model_id} not found, falling back to {resolved}"
             )
-            return resolved, True
+            return resolved
 
         await self._trigger_notify_user_to_download_model(model_id)
         raise HTTPException(
@@ -838,22 +817,11 @@ class API:
     async def _resolve_model_and_apply_limits(
         self, task_params: TextGenerationTaskParams
     ) -> TextGenerationTaskParams:
-        """Resolve the model and apply per-model context limits."""
-        resolved_model, _was_fallback = await self._resolve_and_validate_text_model(
+        """Resolve the requested model to an active instance."""
+        resolved_model = await self._resolve_and_validate_text_model(
             ModelId(task_params.model)
         )
-        updates: dict[str, object] = {"model": resolved_model}
-
-        # Per-model context limit — prevents OOM on smaller models.
-        from exo.shared.constants import EXO_MODEL_MAX_CONTEXT_TOKENS
-
-        model_limit = EXO_MODEL_MAX_CONTEXT_TOKENS.get(resolved_model)
-        if model_limit is not None:
-            existing = task_params.max_context_tokens
-            if existing is None or existing > model_limit:
-                updates["max_context_tokens"] = model_limit
-
-        return task_params.model_copy(update=updates)
+        return task_params.model_copy(update={"model": resolved_model})
 
     async def _validate_image_model(self, model: ModelId) -> ModelId:
         """Validate model exists and return resolved model ID.
