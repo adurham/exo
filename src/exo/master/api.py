@@ -650,6 +650,15 @@ class API:
                     if isinstance(chunk, PrefillProgressChunk):
                         continue
                     if chunk.finish_reason is not None:
+                        if chunk.stats:
+                            s = chunk.stats
+                            logger.debug(
+                                f"chunk_stream: cmd={command_id} "
+                                f"prefill={s.prompt_tps:.1f} tok/s "
+                                f"decode={s.generation_tps:.1f} tok/s "
+                                f"prompt={s.prompt_tokens} gen={s.generation_tokens} "
+                                f"mem={s.peak_memory_usage.in_gb:.1f}GB"
+                            )
                         break
 
         except anyio.get_cancelled_exc_class():
