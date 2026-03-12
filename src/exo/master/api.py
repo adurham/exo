@@ -1609,56 +1609,36 @@ class API:
             response_format=response_format,
         )
 
-    def _apply_subagent_tool_cap(
+    def _check_subagent_tool_cap(
         self, task_params: TextGenerationTaskParams, was_fallback: bool
-    ) -> tuple[TextGenerationTaskParams, bool]:
-        """Apply tool round cap to subagent requests.
+    ) -> str | None:
+        """Check if a subagent has exceeded the tool round cap.
 
-        Returns (task_params, hard_cap_hit) where:
-        - At round N: injects a "wrap up" message and strips tools (warn phase)
-        - At round N+1: hard_cap_hit=True, caller should return synthetic end_turn
+        Returns None if under the cap, or a string with the collected tool
+        results to use as the synthetic response.
         """
         if not was_fallback:
-            return task_params, False
+            return None
         from exo.shared.constants import EXO_SUBAGENT_MAX_TOOL_ROUNDS
 
         if EXO_SUBAGENT_MAX_TOOL_ROUNDS <= 0:
-            return task_params, False
+            return None
 
-        tool_rounds = 0
+        tool_results: list[str] = []
         for m in task_params.chat_template_messages or []:
             if m.get("role") == "tool":
-                tool_rounds += 1
+                content = str(m.get("content") or "")
+                if content:
+                    tool_results.append(content)
 
-        if tool_rounds > EXO_SUBAGENT_MAX_TOOL_ROUNDS:
-            # Hard cap: model already had its warning round and still came back.
-            logger.info(
-                f"Subagent hard cap: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, returning synthetic end_turn"
-            )
-            return task_params, True
+        if len(tool_results) < EXO_SUBAGENT_MAX_TOOL_ROUNDS:
+            return None
 
-        if tool_rounds == EXO_SUBAGENT_MAX_TOOL_ROUNDS:
-            # Warn phase: inject wrap-up message, strip tools so model summarizes.
-            logger.info(
-                f"Subagent warn phase: {tool_rounds}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, injecting wrap-up message"
-            )
-            wrap_msg = (
-                "You have reached your tool call limit. Do NOT make any more tool calls. "
-                "Summarize all findings from your research above and return your response now."
-            )
-            chat_msgs = list(task_params.chat_template_messages or [])
-            chat_msgs.append({"role": "user", "content": wrap_msg})
-            updates: dict[str, object] = {
-                "chat_template_messages": chat_msgs,
-                "tools": [],
-            }
-            # Also inject into input messages for models that use those.
-            inp = list(task_params.input)
-            inp.append(InputMessage(role="user", content=wrap_msg))
-            updates["input"] = inp
-            return task_params.model_copy(update=updates), False
-
-        return task_params, False
+        logger.info(
+            f"Subagent tool cap: {len(tool_results)}/{EXO_SUBAGENT_MAX_TOOL_ROUNDS} rounds, "
+            f"returning {len(tool_results)} tool results as synthetic response"
+        )
+        return "\n\n---\n\n".join(tool_results)
 
     async def claude_messages(
         self, payload: ClaudeMessagesRequest
@@ -1667,11 +1647,11 @@ class API:
         task_params = claude_request_to_text_generation(payload)
         task_params, was_fallback = await self._resolve_model_and_apply_limits(task_params)
 
-        # Apply tool round cap: warn phase injects wrap-up message,
-        # hard cap returns synthetic end_turn.
-        task_params, hard_cap = self._apply_subagent_tool_cap(task_params, was_fallback)
-        if hard_cap:
-            cap_msg = "Tool call limit reached. Returning results gathered so far."
+        # If the subagent has exceeded the tool round cap, return a synthetic
+        # response containing the raw tool results instead of calling the model.
+        cap_response = self._check_subagent_tool_cap(task_params, was_fallback)
+        if cap_response is not None:
+            cap_msg = cap_response
             if payload.stream:
                 return StreamingResponse(
                     _synthetic_claude_stream(payload.model, cap_msg),
