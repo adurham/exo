@@ -647,22 +647,24 @@ class API:
             ]()
             logger.info(f"chunk_stream: queue created for cmd={command_id}")
 
+            last_stats: GenerationStats | None = None
             with recv as token_chunks:
                 async for chunk in token_chunks:
                     yield chunk
                     if isinstance(chunk, PrefillProgressChunk):
                         continue
+                    if hasattr(chunk, "stats") and chunk.stats is not None:
+                        last_stats = chunk.stats
                     if chunk.finish_reason is not None:
-                        if chunk.stats:
-                            s = chunk.stats
-                            logger.info(
-                                f"chunk_stream: cmd={command_id} "
-                                f"prefill={s.prompt_tps:.1f} tok/s "
-                                f"decode={s.generation_tps:.1f} tok/s "
-                                f"prompt={s.prompt_tokens} gen={s.generation_tokens} "
-                                f"mem={s.peak_memory_usage.in_gb:.1f}GB"
-                            )
                         break
+            if last_stats is not None:
+                logger.info(
+                    f"chunk_stream: cmd={command_id} "
+                    f"prefill={last_stats.prompt_tps:.1f} tok/s "
+                    f"decode={last_stats.generation_tps:.1f} tok/s "
+                    f"prompt={last_stats.prompt_tokens} gen={last_stats.generation_tokens} "
+                    f"mem={last_stats.peak_memory_usage.in_gb:.1f}GB"
+                )
 
         except anyio.get_cancelled_exc_class():
             logger.info(f"chunk_stream: cancelled cmd={command_id}")

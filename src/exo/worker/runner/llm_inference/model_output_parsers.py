@@ -108,6 +108,7 @@ def parse_gpt_oss(
                         )
                     ],
                     usage=response.usage,
+                    stats=response.stats,
                 )
                 tool_arg_parts = []
             current_tool_name = recipient
