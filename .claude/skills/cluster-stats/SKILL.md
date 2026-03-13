@@ -10,8 +10,8 @@ Gather and analyze logs from all three sources — local opencode logs and remot
 
 ## Cluster Nodes
 
-- **macstudio-m4-1** (128GB) — MiniMax-M2.5-6bit (229B MoE) TP worker, rank 1
-- **macstudio-m4-2** (128GB) — MiniMax-M2.5-6bit (229B MoE) TP worker, rank 0 (master node, API at 192.168.86.201:52415)
+- **macstudio-m4-1** (128GB) — MiniMax-M2.5-6bit (229B MoE) TP worker, rank 1 (API gateway at 192.168.86.201:52415)
+- **macstudio-m4-2** (128GB) — MiniMax-M2.5-6bit (229B MoE) TP worker, rank 0
 - **macbook-m4** (36GB) — Qwen3-Coder-30B-A3B-Instruct-5bit (single node)
 
 ## Current Known State
@@ -106,7 +106,7 @@ Same as above, plus:
 - `Prefill complete: N tokens in Xs (Z tok/s)` — final prefill summary with TPS
 - `[R{rank}] Prefill post-loop: Xms (cache eval: Xms)` — post-prefill overhead
 
-#### exo API chunk_stream (logger, master node):
+#### exo API chunk_stream (logger, API gateway node — macstudio-m4-1):
 - `chunk_stream: cmd=UUID prefill=X tok/s decode=Y tok/s prompt=N gen=M mem=XGB` — end-to-end summary per request
 
 Use these to compute:
