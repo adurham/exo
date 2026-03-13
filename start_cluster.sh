@@ -571,8 +571,8 @@ if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-6bit" "{
 fi
 
 echo "Creating Qwen3-Coder-30B-A3B instance on MacBook (single node)..."
-if place_instance_with_retry "Qwen" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit" "{
-    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit\",
+if place_instance_with_retry "Qwen" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
+    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 1,
