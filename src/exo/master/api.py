@@ -655,7 +655,7 @@ class API:
                     if chunk.finish_reason is not None:
                         if chunk.stats:
                             s = chunk.stats
-                            logger.debug(
+                            logger.info(
                                 f"chunk_stream: cmd={command_id} "
                                 f"prefill={s.prompt_tps:.1f} tok/s "
                                 f"decode={s.generation_tps:.1f} tok/s "
