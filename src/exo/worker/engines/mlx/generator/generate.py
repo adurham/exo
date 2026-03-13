@@ -615,10 +615,26 @@ def mlx_generate(
         )
         prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)
         if prefix_hit_length > 0:
-            logger.info(
-                f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
-            )
-            cache_from_prefix = True
+            hit_pct = 100 * prefix_hit_length / len(all_prompt_tokens)
+            if hit_pct < 1.0:
+                # Near-total cache miss (e.g. compaction changed the system
+                # prompt).  The matched prefix is too short to be useful and
+                # the stale entry wastes memory.  Evict it and start fresh.
+                logger.info(
+                    f"KV cache near-miss: {prefix_hit_length}/{len(all_prompt_tokens)} tokens "
+                    f"({hit_pct:.1f}%) — evicting stale entry and using fresh cache"
+                )
+                kv_prefix_cache.clear()
+                mx.clear_cache()
+                caches = make_kv_cache(model=model)
+                prompt_tokens = all_prompt_tokens
+                prefix_hit_length = 0
+                matched_index = None
+            else:
+                logger.info(
+                    f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({hit_pct:.1f}%)"
+                )
+                cache_from_prefix = True
 
     # Memory check.  If memory is above threshold, evict stored KV cache
     # entries to free memory.  We keep our already-copied prefix match if
