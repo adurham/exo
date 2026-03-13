@@ -52,6 +52,7 @@ from exo.worker.engines.mlx.constants import (
     DEFAULT_TOP_LOGPROBS,
     KV_BITS,
     KV_GROUP_SIZE,
+    MAX_PREFILL_CHUNK,
     MAX_TOKENS,
     PREFILL_STEP_SIZE,
 )
@@ -304,6 +305,11 @@ def prefill(
 
     prefill_step_size = PREFILL_STEP_SIZE
 
+    # Cap non-pipeline prefill chunks so heartbeat callbacks fire between
+    # chunks.  Pipeline parallel manages its own heartbeat touches per
+    # iteration, so only cap the stream_generate path.
+    capped_step_size = min(prefill_step_size, MAX_PREFILL_CHUNK)
+
     try:
         if is_pipeline and num_tokens >= prefill_step_size:
             set_pipeline_queue_sends(model, queue_sends=True)
@@ -329,7 +335,7 @@ def prefill(
                 max_tokens=1,
                 sampler=sampler,
                 prompt_cache=cache,
-                prefill_step_size=prefill_step_size,
+                prefill_step_size=capped_step_size,
                 kv_group_size=KV_GROUP_SIZE,
                 kv_bits=KV_BITS,
                 prompt_progress_callback=combined_progress_callback,
@@ -548,6 +554,7 @@ def mlx_generate(
     on_prefill_progress: Callable[[int, int], None] | None = None,
     distributed_prompt_progress_callback: Callable[[], None] | None = None,
     on_generation_token: Callable[[], None] | None = None,
+    on_token_count_known: Callable[[int], None] | None = None,
 ) -> Generator[GenerationResponse]:
     from exo.worker.engines.mlx.cache import (
         MEMORY_THRESHOLD,
@@ -570,6 +577,10 @@ def mlx_generate(
         distributed_prompt_progress_callback()
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
+
+    # Update heartbeat timeout with actual token count now that we know it.
+    if on_token_count_known is not None:
+        on_token_count_known(len(all_prompt_tokens))
 
     effective_max_context = task.max_context_tokens
 

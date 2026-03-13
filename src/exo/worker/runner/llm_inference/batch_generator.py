@@ -360,11 +360,6 @@ class SequentialGenerator(InferenceGenerator):
         # and deepcopy can take tens of seconds on large prompts.
         self._touch_heartbeat()
 
-        # Scale heartbeat timeout for large prompts — prefill can block in
-        # a single mx.eval for well over the default 90s at high context.
-        estimated_tokens = len(prompt) // 4
-        self._set_heartbeat_timeout(estimated_tokens)
-
         return mlx_generate(
             model=self.model,
             tokenizer=self.tokenizer,
@@ -374,6 +369,7 @@ class SequentialGenerator(InferenceGenerator):
             on_prefill_progress=on_prefill_progress,
             distributed_prompt_progress_callback=distributed_prompt_progress_callback,
             on_generation_token=on_generation_token,
+            on_token_count_known=self._set_heartbeat_timeout,
             group=self.group,
         )
 

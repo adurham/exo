@@ -23,5 +23,12 @@ DEFAULT_TOP_LOGPROBS: int = 5
 
 PREFILL_STEP_SIZE: int = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
 
+# Maximum prefill chunk size for heartbeat liveness.  Even when
+# EXO_PREFILL_STEP_SIZE is set very large (e.g. 524288 for pipeline
+# parallel throughput), generate_step must break the prefill into
+# chunks no larger than this so that prompt_progress_callback fires
+# between chunks and the runner heartbeat stays alive.
+MAX_PREFILL_CHUNK: int = int(os.environ.get("EXO_MAX_PREFILL_CHUNK", "32768"))
+
 # TODO: We should really make this opt-in, but Kimi requires trust_remote_code=True
 TRUST_REMOTE_CODE: bool = True
