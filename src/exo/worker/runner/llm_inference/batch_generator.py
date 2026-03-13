@@ -360,6 +360,14 @@ class SequentialGenerator(InferenceGenerator):
         # and deepcopy can take tens of seconds on large prompts.
         self._touch_heartbeat()
 
+        # Set a conservative heartbeat timeout from prompt string length.
+        # This is a rough estimate (len//4 underestimates for multi-byte
+        # tokenizers like MiniMax); on_token_count_known refines it after
+        # tokenization, but we need headroom NOW because encode_prompt +
+        # KV cache deepcopy can block for 90s+ before that callback fires.
+        estimated_tokens = len(prompt) // 2  # conservative: assume ~2 chars/token
+        self._set_heartbeat_timeout(estimated_tokens)
+
         return mlx_generate(
             model=self.model,
             tokenizer=self.tokenizer,
