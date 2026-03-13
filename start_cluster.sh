@@ -565,7 +565,7 @@ if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-6bit" "{
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
-    \"max_context_tokens\": 120000
+    \"max_context_tokens\": 180000
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
