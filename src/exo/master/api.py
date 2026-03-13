@@ -48,6 +48,7 @@ from exo.master.event_log import DiskEventLog
 from exo.master.image_store import ImageStore
 from exo.master.placement import place_instance as get_instance_placements
 from exo.shared.apply import apply
+from exo.worker.plan import find_peer_repo_url
 from exo.shared.constants import (
     DASHBOARD_DIR,
     EXO_CACHE_HOME,
@@ -102,6 +103,8 @@ from exo.shared.types.api import (
     PlaceInstanceParams,
     PlacementPreview,
     PlacementPreviewResponse,
+    CancelDownloadParams,
+    CancelDownloadResponse,
     StartDownloadParams,
     StartDownloadResponse,
     ToolCall,
@@ -127,6 +130,7 @@ from exo.shared.types.claude_api import (
     ClaudeMessagesResponse,
 )
 from exo.shared.types.commands import (
+    CancelDownload,
     Command,
     CreateInstance,
     DeleteDownload,
@@ -343,6 +347,7 @@ class API:
         self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(self.stream_events)
         self.app.post("/download/start")(self.start_download)
+        self.app.post("/download/cancel")(self.cancel_download)
         self.app.delete("/download/{node_id}/{model_id:path}")(self.delete_download)
         self.app.get("/v1/traces")(self.list_traces)
         self.app.post("/v1/traces/delete")(self.delete_traces)
@@ -1818,12 +1823,31 @@ class API:
     async def start_download(
         self, payload: StartDownloadParams
     ) -> StartDownloadResponse:
+        repo_url = payload.repo_url
+        if repo_url is None:
+            repo_url = find_peer_repo_url(
+                node_id=payload.target_node_id,
+                model_id=payload.shard_metadata.model_card.model_id,
+                global_download_status=self.state.downloads,
+                node_network=self.state.node_network,
+            )
         command = StartDownload(
             target_node_id=payload.target_node_id,
             shard_metadata=payload.shard_metadata,
+            repo_url=repo_url,
         )
         await self._send_download(command)
-        return StartDownloadResponse(command_id=command.command_id)
+        return StartDownloadResponse(command_id=command.command_id, repo_url=repo_url)
+
+    async def cancel_download(
+        self, payload: CancelDownloadParams
+    ) -> CancelDownloadResponse:
+        command = CancelDownload(
+            target_node_id=payload.target_node_id,
+            model_id=ModelId(payload.model_id),
+        )
+        await self._send_download(command)
+        return CancelDownloadResponse(command_id=command.command_id)
 
     async def delete_download(
         self, node_id: NodeId, model_id: ModelId

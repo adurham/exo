@@ -400,13 +400,24 @@ class ImageListResponse(BaseModel, frozen=True):
 class StartDownloadParams(CamelCaseModel):
     target_node_id: NodeId
     shard_metadata: ShardMetadata
+    repo_url: str | None = None
 
 
 class StartDownloadResponse(CamelCaseModel):
     command_id: CommandId
+    repo_url: str | None = None
 
 
 class DeleteDownloadResponse(CamelCaseModel):
+    command_id: CommandId
+
+
+class CancelDownloadParams(CamelCaseModel):
+    target_node_id: NodeId
+    model_id: ModelId
+
+
+class CancelDownloadResponse(CamelCaseModel):
     command_id: CommandId
 
 

@@ -12,7 +12,7 @@ Gather and analyze logs from all three sources — local opencode logs and remot
 
 - **macstudio-m4-1** (128GB) — MiniMax-M2.5-6bit (229B MoE) TP worker, rank 1 (API gateway at 192.168.86.201:52415)
 - **macstudio-m4-2** (128GB) — MiniMax-M2.5-6bit (229B MoE) TP worker, rank 0
-- **macbook-m4** (36GB) — Qwen3-Coder-30B-A3B-Instruct-5bit (single node)
+- **macbook-m4** (36GB) — Qwen3-Coder-30B-A3B-Instruct-6bit (single node)
 
 ## Current Known State
 

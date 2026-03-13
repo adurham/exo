@@ -124,7 +124,7 @@ def _create_runner(
         )
 
 
-def _find_peer_repo_url(
+def find_peer_repo_url(
     node_id: NodeId,
     model_id: str,
     global_download_status: Mapping[NodeId, Sequence[DownloadProgress]],
@@ -185,7 +185,7 @@ def _model_needs_download(
             )
         ):
             # Check if any peer already has this model downloaded
-            repo_url = _find_peer_repo_url(
+            repo_url = find_peer_repo_url(
                 node_id, model_id, global_download_status, node_network
             )
             # We don't invalidate download_status randomly in case a file gets deleted on disk
