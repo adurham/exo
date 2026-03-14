@@ -597,8 +597,16 @@ def mlx_generate(
         # Template typically appends <think>\n — strip both if present
         if len(toks) >= 2 and toks[-2] == think_start_id and toks[-1] == 10:
             cache_key_tokens = all_prompt_tokens[:-2]
+            logger.info(
+                f"Stripped generation prefix <think>\\n from cache key: "
+                f"{len(all_prompt_tokens)} -> {len(cache_key_tokens)} tokens"
+            )
         elif len(toks) >= 1 and toks[-1] == think_start_id:
             cache_key_tokens = all_prompt_tokens[:-1]
+            logger.info(
+                f"Stripped generation prefix <think> from cache key: "
+                f"{len(all_prompt_tokens)} -> {len(cache_key_tokens)} tokens"
+            )
 
     # Update heartbeat timeout with actual token count now that we know it.
     if on_token_count_known is not None:
