@@ -585,6 +585,21 @@ def mlx_generate(
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
 
+    # Strip the generation prefix (e.g. <think>\n) from the cache comparison
+    # key.  The chat template appends this to prime the model, but it won't
+    # appear at the same position in the next request's prompt (the actual
+    # response replaces it).  Keeping it causes a 2-3 token trailing mismatch
+    # on every cache lookup.
+    think_start_id: int | None = tokenizer.think_start_id
+    cache_key_tokens = all_prompt_tokens
+    if think_start_id is not None:
+        toks = all_prompt_tokens.tolist()
+        # Template typically appends <think>\n — strip both if present
+        if len(toks) >= 2 and toks[-2] == think_start_id and toks[-1] == 10:
+            cache_key_tokens = all_prompt_tokens[:-2]
+        elif len(toks) >= 1 and toks[-1] == think_start_id:
+            cache_key_tokens = all_prompt_tokens[:-1]
+
     # Update heartbeat timeout with actual token count now that we know it.
     if on_token_count_known is not None:
         on_token_count_known(len(all_prompt_tokens))
@@ -753,12 +768,12 @@ def mlx_generate(
                 caches,
                 cache_snapshots,
                 restore_pos=prefix_hit_length,
-                normalized_tokens=all_prompt_tokens,
+                normalized_tokens=cache_key_tokens,
             )
         else:
             kv_prefix_cache.add_kv_cache(
                 all_prompt_tokens, caches, cache_snapshots,
-                normalized_tokens=all_prompt_tokens,
+                normalized_tokens=cache_key_tokens,
             )
 
     # stream_generate starts from the last token
@@ -967,12 +982,12 @@ def mlx_generate(
                         caches,
                         cache_snapshots,
                         restore_pos=prefix_hit_length,
-                        normalized_tokens=all_prompt_tokens,
+                        normalized_tokens=cache_key_tokens,
                     )
                 else:
                     kv_prefix_cache.add_kv_cache(
                         full_prompt_tokens, caches, cache_snapshots,
-                        normalized_tokens=all_prompt_tokens,
+                        normalized_tokens=cache_key_tokens,
                     )
                 if EXO_TRACING_ENABLED:
                     logger.info(
