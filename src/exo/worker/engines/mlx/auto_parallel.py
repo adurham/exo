@@ -377,6 +377,31 @@ class TracingLayerWrapper(CustomMlxLayer):
         return result
 
 
+_TP_EVAL_INTERVAL: int = int(os.environ.get("EXO_TP_EVAL_INTERVAL", "8"))
+"""Force a guarded eval every N transformer layers in pure TP mode.
+
+Without this, the entire model forward pass (62 layers for MiniMax) builds a
+single lazy graph with ~186 collective operations.  Evaluating all of them in
+one ``mx.eval`` can deadlock the JACCL RDMA layer when both ranks block
+waiting for buffers that neither can release.  Inserting periodic evals limits
+the outstanding collectives and lets each rank make progress.
+"""
+
+
+class DistributedEvalBarrier(CustomMlxLayer):
+    """Forces ``_guarded_eval`` after a transformer block in pure TP mode.
+
+    Inserted every ``_TP_EVAL_INTERVAL`` layers by the sharding strategies to
+    break the lazy graph into smaller chunks, preventing RDMA deadlocks from
+    accumulated collective operations.
+    """
+
+    def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        result = self.original_layer(x, *args, **kwargs)
+        _guarded_eval(result)
+        return result
+
+
 class PipelineFirstLayer(CustomMlxLayer):
     def __init__(
         self,
@@ -1048,6 +1073,14 @@ def tensor_auto_parallel(
     model = tensor_parallel_sharding_strategy.shard_model(
         model, timeout_seconds, on_timeout, on_layer_loaded
     )
+
+    # Insert eval barriers every N layers to prevent RDMA deadlocks in pure TP.
+    if _TP_EVAL_INTERVAL > 0:
+        inner = get_inner_model(model)
+        if hasattr(inner, "layers"):
+            for i in range(len(inner.layers)):
+                if (i + 1) % _TP_EVAL_INTERVAL == 0:
+                    inner.layers[i] = DistributedEvalBarrier(inner.layers[i])  # type: ignore
 
     return patch_tensor_model(model)
 

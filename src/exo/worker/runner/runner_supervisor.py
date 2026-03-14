@@ -279,6 +279,10 @@ class RunnerSupervisor:
         if self.runner_process.is_alive():
             logger.info("Runner was found to be alive, attempting to join process")
             await to_thread.run_sync(self.runner_process.join, 5)
+        if self.runner_process.is_alive():
+            logger.warning("Runner still alive after join timeout, sending SIGKILL")
+            self.runner_process.kill()
+            await to_thread.run_sync(self.runner_process.join, 5)
         rc = self.runner_process.exitcode
         logger.info(f"Runner exited with exit code {rc}")
         if rc == 0:
