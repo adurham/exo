@@ -1075,11 +1075,14 @@ def tensor_auto_parallel(
     )
 
     # Insert eval barriers every N layers to prevent RDMA deadlocks in pure TP.
+    # Also wrap the LAST layer unconditionally so no tail chunk falls through
+    # to the unguarded mx.eval in generate_step.
     if _TP_EVAL_INTERVAL > 0:
         inner = get_inner_model(model)
         if hasattr(inner, "layers"):
-            for i in range(len(inner.layers)):
-                if (i + 1) % _TP_EVAL_INTERVAL == 0:
+            n = len(inner.layers)
+            for i in range(n):
+                if (i + 1) % _TP_EVAL_INTERVAL == 0 or i == n - 1:
                     inner.layers[i] = DistributedEvalBarrier(inner.layers[i])  # type: ignore
 
     return patch_tensor_model(model)

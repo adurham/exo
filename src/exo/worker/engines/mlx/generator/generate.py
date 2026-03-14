@@ -33,6 +33,7 @@ from exo.worker.engines.mlx.auto_parallel import (
     HybridPipelinePassthroughLayer,
     PipelineFirstLayer,
     PipelineLastLayer,
+    _guarded_eval,
     clear_prefill_sends,
     flush_prefill_sends,
     get_pipeline_timings,
@@ -461,14 +462,12 @@ def warmup_inference(
         math.ceil(tokens_generated / min(time.monotonic() - t, 0.001)), 100
     )
     if group is not None:
-        check_for_cancel_every = int(
-            mx.max(
-                mx.distributed.all_gather(
-                    mx.array([check_for_cancel_every]),
-                    group=group,
-                )
-            ).item()
+        gathered = mx.distributed.all_gather(
+            mx.array([check_for_cancel_every]),
+            group=group,
         )
+        _guarded_eval(gathered)
+        check_for_cancel_every = int(mx.max(gathered).item())
 
     logger.info(
         f"runner checking for cancellation every {check_for_cancel_every} tokens"
