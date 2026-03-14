@@ -288,6 +288,14 @@ def prefill(
 
     set_pipeline_prefill(model, is_prefill=True)
 
+    # Flush ALL Metal streams before the prefill to ensure no residual RDMA
+    # state from the previous request's generation_stream interferes with the
+    # new collective operations.  mx_barrier alone syncs the default stream,
+    # but the model forward pass runs on generation_stream — stale async work
+    # on that stream can cause JACCL RDMA deadlocks.
+    if group is not None:
+        mx.synchronize()
+
     if EXO_TRACING_ENABLED:
         t_barrier = time.perf_counter()
     mx_barrier(group)
@@ -777,6 +785,10 @@ def mlx_generate(
     # Touch heartbeat: prefill may have taken many seconds.
     if on_generation_token is not None:
         on_generation_token()
+
+    # Flush all streams before decode — same rationale as pre-prefill sync.
+    if group is not None:
+        mx.synchronize()
 
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
