@@ -646,13 +646,12 @@ class API:
 
         This is the internal low-level stream used by all API adapters.
         """
+        last_stats: GenerationStats | None = None
         try:
             self._text_generation_queues[command_id], recv = channel[
                 TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk
             ]()
             logger.info(f"chunk_stream: queue created for cmd={command_id}")
-
-            last_stats: GenerationStats | None = None
             with recv as token_chunks:
                 async for chunk in token_chunks:
                     yield chunk
@@ -672,7 +671,16 @@ class API:
                 )
 
         except anyio.get_cancelled_exc_class():
-            logger.info(f"chunk_stream: cancelled cmd={command_id}")
+            if last_stats is not None:
+                logger.info(
+                    f"chunk_stream: cancelled cmd={command_id} "
+                    f"prefill={last_stats.prompt_tps:.1f} tok/s "
+                    f"decode={last_stats.generation_tps:.1f} tok/s "
+                    f"prompt={last_stats.prompt_tokens} gen={last_stats.generation_tokens} "
+                    f"mem={last_stats.peak_memory_usage.in_gb:.1f}GB"
+                )
+            else:
+                logger.info(f"chunk_stream: cancelled cmd={command_id}")
             command = TaskCancelled(cancelled_command_id=command_id)
             with anyio.CancelScope(shield=True):
                 await self.command_sender.send(

@@ -226,6 +226,7 @@ class SequentialGenerator(InferenceGenerator):
         if mx_any(self.should_cancel(task.task_id), self.group):
             self._cancelled_tasks.discard(task.task_id)
             self._cancelled_tasks.discard(CANCEL_ALL_TASKS)
+            mlx_gen.close()  # Trigger finally block → stats + KV cache save
             self._active = None
             if self._queue:
                 self._start_next()
@@ -240,6 +241,7 @@ class SequentialGenerator(InferenceGenerator):
             response = next(output_generator)
         except PrefillCancelled:
             response = Cancelled()
+            mlx_gen.close()
             self._active = None
             self._reset_heartbeat_timeout()
             self._cancelled_tasks.discard(task.task_id)
@@ -257,11 +259,13 @@ class SequentialGenerator(InferenceGenerator):
                 f"Task {task.task_id} rejected: {e}\n{traceback.format_exc()}"
             )
             self._send_error(task, e)
+            mlx_gen.close()
             self._active = None
             self._reset_heartbeat_timeout()
             response = Finished()
         except Exception as e:
             self._send_error(task, e)
+            mlx_gen.close()
             self._active = None
             self._reset_heartbeat_timeout()
             raise

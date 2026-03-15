@@ -857,43 +857,46 @@ def mlx_generate(
         """Save KV cache with generated tokens. Called on both normal completion and abort."""
         if kv_prefix_cache is None or not generated_text_parts:
             return
-        if EXO_TRACING_ENABLED:
-            t_cache_update = time.perf_counter()
-        generated_tokens_array = mx.array(
-            tokenizer.encode(
-                "".join(generated_text_parts), add_special_tokens=False
+        try:
+            if EXO_TRACING_ENABLED:
+                t_cache_update = time.perf_counter()
+            generated_tokens_array = mx.array(
+                tokenizer.encode(
+                    "".join(generated_text_parts), add_special_tokens=False
+                )
             )
-        )
-        full_prompt_tokens = mx.concatenate(
-            [all_prompt_tokens, generated_tokens_array]
-        )
-        hit_ratio = (
-            prefix_hit_length / len(all_prompt_tokens)
-            if len(all_prompt_tokens) > 0
-            else 0.0
-        )
-        if (
-            matched_index is not None
-            and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
-        ):
-            kv_prefix_cache.update_kv_cache(
-                matched_index,
-                full_prompt_tokens,
-                caches,
-                cache_snapshots,
-                restore_pos=prefix_hit_length,
-                normalized_tokens=cache_key_tokens,
+            full_prompt_tokens = mx.concatenate(
+                [all_prompt_tokens, generated_tokens_array]
             )
-        else:
-            kv_prefix_cache.add_kv_cache(
-                full_prompt_tokens, caches, cache_snapshots,
-                normalized_tokens=cache_key_tokens,
+            hit_ratio = (
+                prefix_hit_length / len(all_prompt_tokens)
+                if len(all_prompt_tokens) > 0
+                else 0.0
             )
-        if EXO_TRACING_ENABLED:
-            logger.info(
-                f"KV prefix cache update took "
-                f"{(time.perf_counter() - t_cache_update) * 1000:.1f}ms"
-            )
+            if (
+                matched_index is not None
+                and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
+            ):
+                kv_prefix_cache.update_kv_cache(
+                    matched_index,
+                    full_prompt_tokens,
+                    caches,
+                    cache_snapshots,
+                    restore_pos=prefix_hit_length,
+                    normalized_tokens=cache_key_tokens,
+                )
+            else:
+                kv_prefix_cache.add_kv_cache(
+                    full_prompt_tokens, caches, cache_snapshots,
+                    normalized_tokens=cache_key_tokens,
+                )
+            if EXO_TRACING_ENABLED:
+                logger.info(
+                    f"KV prefix cache update took "
+                    f"{(time.perf_counter() - t_cache_update) * 1000:.1f}ms"
+                )
+        except Exception:
+            logger.warning("Failed to save KV cache after generation", exc_info=True)
 
     _generation_logged = False
     try:

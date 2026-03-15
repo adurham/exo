@@ -446,7 +446,17 @@ class ExoBatchGenerator:
     def cancel(self, uids: list[int]) -> None:
         self._exo_gen.remove(uids)
         for uid in uids:
-            self._active_tasks.pop(uid, None)
+            task = self._active_tasks.pop(uid, None)
+            if task is not None:
+                # Save KV cache before discarding — preserves prefill work
+                cache = self._exo_gen._cache  # type: ignore
+                self._save_prefix_cache(
+                    task.all_prompt_tokens,
+                    cache,
+                    task.cache_snapshots,
+                    task.prefix_hit_length,
+                    task.matched_index,
+                )
 
     def close(self) -> None:
         self._exo_gen.close()
