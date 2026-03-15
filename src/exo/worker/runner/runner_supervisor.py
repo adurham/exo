@@ -53,10 +53,11 @@ HEARTBEAT_TIMEOUT_SECONDS = 90
 def heartbeat_timeout_for_prompt(prompt_tokens: int) -> float:
     """Scale heartbeat timeout based on prompt size.
 
-    Large prefills can block in a single mx.eval for well over 90s.
-    Allow ~1s per 500 tokens with a floor of HEARTBEAT_TIMEOUT_SECONDS.
+    Large prefills can block in a single mx.eval for well over 90s,
+    especially in PP mode where prefill is serialized across nodes.
+    Allow ~1s per 100 tokens with a floor of HEARTBEAT_TIMEOUT_SECONDS.
     """
-    return max(HEARTBEAT_TIMEOUT_SECONDS, prompt_tokens / 500)
+    return max(HEARTBEAT_TIMEOUT_SECONDS, prompt_tokens / 100)
 
 
 @dataclass(eq=False)
