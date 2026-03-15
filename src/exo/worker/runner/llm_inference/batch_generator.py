@@ -223,7 +223,12 @@ class SequentialGenerator(InferenceGenerator):
         # boundary.  Without this, one peer may cancel and move to
         # agree_on_tasks (all_gather) while the other is still in a decode
         # all_reduce → mismatched collective ops → deadlock.
-        if mx_any(self.should_cancel(task.task_id), self.group):
+        # Only check every N steps to avoid RDMA overhead per token (~0.7ms each).
+        self._cancel_check_counter = getattr(self, "_cancel_check_counter", 0) + 1
+        _should_check_cancel = self._cancel_check_counter >= self.check_for_cancel_every
+        if _should_check_cancel:
+            self._cancel_check_counter = 0
+        if _should_check_cancel and mx_any(self.should_cancel(task.task_id), self.group):
             self._cancelled_tasks.discard(task.task_id)
             self._cancelled_tasks.discard(CANCEL_ALL_TASKS)
             mlx_gen.close()  # Trigger finally block → stats + KV cache save
