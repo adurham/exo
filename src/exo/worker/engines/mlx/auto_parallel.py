@@ -931,20 +931,16 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
     return model
 
 
-_COMPILE_DECODE = os.environ.get("EXO_COMPILE_DECODE", "0") == "1"
-
-
 def patch_tensor_model[T](model: T) -> T:
-    """Patch model's __call__ to ensure distributed ops sync during inference."""
+    """Patch model's __call__ to ensure distributed ops sync during inference.
+
+    When EXO_COMPILE_DECODE=1, the patched_call is still installed but the
+    mx.depends cache ordering is skipped during compiled decode steps.
+    The compile flag is checked per-call via a model attribute so that
+    uncompiled paths (prefill, warmup) still get the dependency.
+    """
     cls = model.__class__
     original_call = cls.__call__
-
-    if _COMPILE_DECODE:
-        # mx.compile traces through __call__ and cannot handle
-        # call_signature.bind_partial or mx.depends.  Skip the patch
-        # entirely — compiled decode manages evaluation order itself.
-        return model
-
     call_signature = signature(original_call)
 
     def patched_call(
@@ -953,6 +949,13 @@ def patch_tensor_model[T](model: T) -> T:
         **kwargs: object,
     ) -> mx.array:
         logits: mx.array = original_call(self, *args, **kwargs)  # pyright: ignore[reportAny]
+
+        # Skip cache dependency during compiled decode — mx.compile can't
+        # trace call_signature.bind_partial or mx.depends.  Compiled decode
+        # manages evaluation order itself.
+        if getattr(self, "_compiled_decode_active", False):
+            return logits
+
         cache = call_signature.bind_partial(self, *args, **kwargs).arguments.get(
             "cache", None
         )
