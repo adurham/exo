@@ -558,10 +558,10 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance on Mac Studios (Pipeline / RDMA)..."
+echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance on Mac Studios (Tensor / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
-    \"sharding\": \"Pipeline\",
+    \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
