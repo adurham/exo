@@ -931,10 +931,20 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
     return model
 
 
+_COMPILE_DECODE = os.environ.get("EXO_COMPILE_DECODE", "0") == "1"
+
+
 def patch_tensor_model[T](model: T) -> T:
     """Patch model's __call__ to ensure distributed ops sync during inference."""
     cls = model.__class__
     original_call = cls.__call__
+
+    if _COMPILE_DECODE:
+        # mx.compile traces through __call__ and cannot handle
+        # call_signature.bind_partial or mx.depends.  Skip the patch
+        # entirely — compiled decode manages evaluation order itself.
+        return model
+
     call_signature = signature(original_call)
 
     def patched_call(
