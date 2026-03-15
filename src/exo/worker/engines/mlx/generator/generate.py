@@ -827,7 +827,76 @@ def mlx_generate(
     if EXO_TRACING_ENABLED:
         logger.info("Starting decode")
 
-    for completion_tokens, out in enumerate(
+    def _log_generation_stats(generated_text_parts: list[str], reason: str) -> None:
+        """Log generation stats and save KV cache. Called on both normal completion and abort."""
+        generation_elapsed = time.perf_counter() - generation_start_time
+        generated_tokens = len(generated_text_parts)
+        generation_tps = (
+            generated_tokens / generation_elapsed if generation_elapsed > 0 else 0.0
+        )
+        if EXO_TRACING_ENABLED:
+            logger.info(
+                f"Generation {reason}: prefill {prefill_tokens} tokens @ "
+                f"{prefill_tps:.1f} tok/s, decoded {generated_tokens} tokens @ "
+                f"{generation_tps:.1f} tok/s in {generation_elapsed * 1000:.1f}ms "
+                f"({generation_elapsed * 1000 / generated_tokens:.2f}ms/tok)"
+                if generated_tokens > 0
+                else f"Generation {reason}: prefill {prefill_tokens} tokens @ "
+                f"{prefill_tps:.1f} tok/s, 0 tokens decoded"
+            )
+            rank = group.rank() if group is not None else 0
+            get_pipeline_timings().log_and_reset("decode", rank)
+        else:
+            logger.debug(
+                f"Generation {reason}: prefill {prefill_tokens} tokens @ "
+                f"{prefill_tps:.1f} tok/s, generated {generated_tokens} tokens @ "
+                f"{generation_tps:.1f} tok/s"
+            )
+
+    def _save_kv_cache(generated_text_parts: list[str]) -> None:
+        """Save KV cache with generated tokens. Called on both normal completion and abort."""
+        if kv_prefix_cache is None or not generated_text_parts:
+            return
+        if EXO_TRACING_ENABLED:
+            t_cache_update = time.perf_counter()
+        generated_tokens_array = mx.array(
+            tokenizer.encode(
+                "".join(generated_text_parts), add_special_tokens=False
+            )
+        )
+        full_prompt_tokens = mx.concatenate(
+            [all_prompt_tokens, generated_tokens_array]
+        )
+        hit_ratio = (
+            prefix_hit_length / len(all_prompt_tokens)
+            if len(all_prompt_tokens) > 0
+            else 0.0
+        )
+        if (
+            matched_index is not None
+            and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
+        ):
+            kv_prefix_cache.update_kv_cache(
+                matched_index,
+                full_prompt_tokens,
+                caches,
+                cache_snapshots,
+                restore_pos=prefix_hit_length,
+                normalized_tokens=cache_key_tokens,
+            )
+        else:
+            kv_prefix_cache.add_kv_cache(
+                full_prompt_tokens, caches, cache_snapshots,
+                normalized_tokens=cache_key_tokens,
+            )
+        if EXO_TRACING_ENABLED:
+            logger.info(
+                f"KV prefix cache update took "
+                f"{(time.perf_counter() - t_cache_update) * 1000:.1f}ms"
+            )
+
+    try:
+      for completion_tokens, out in enumerate(
         stream_generate(
             model=model,
             tokenizer=tokenizer,
@@ -841,7 +910,7 @@ def mlx_generate(
             kv_bits=KV_BITS,
         ),
         start=1,
-    ):
+      ):
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
@@ -935,73 +1004,8 @@ def mlx_generate(
             )
 
         if is_done:
-            # Log generation stats
-            generation_elapsed = time.perf_counter() - generation_start_time
-            generated_tokens = len(generated_text_parts)
-            generation_tps = (
-                generated_tokens / generation_elapsed if generation_elapsed > 0 else 0.0
-            )
-            if EXO_TRACING_ENABLED:
-                logger.info(
-                    f"Generation complete: prefill {prefill_tokens} tokens @ "
-                    f"{prefill_tps:.1f} tok/s, decoded {generated_tokens} tokens @ "
-                    f"{generation_tps:.1f} tok/s in {generation_elapsed * 1000:.1f}ms "
-                    f"({generation_elapsed * 1000 / generated_tokens:.2f}ms/tok)"
-                    if generated_tokens > 0
-                    else f"Generation complete: prefill {prefill_tokens} tokens @ "
-                    f"{prefill_tps:.1f} tok/s, 0 tokens decoded"
-                )
-                rank = group.rank() if group is not None else 0
-                get_pipeline_timings().log_and_reset("decode", rank)
-            else:
-                logger.debug(
-                    f"Generation complete: prefill {prefill_tokens} tokens @ "
-                    f"{prefill_tps:.1f} tok/s, generated {generated_tokens} tokens @ "
-                    f"{generation_tps:.1f} tok/s"
-                )
-            if kv_prefix_cache is not None:
-                if EXO_TRACING_ENABLED:
-                    t_cache_update = time.perf_counter()
-                generated_tokens_array = mx.array(
-                    tokenizer.encode(
-                        "".join(generated_text_parts), add_special_tokens=False
-                    )
-                )
-                full_prompt_tokens = mx.concatenate(
-                    [all_prompt_tokens, generated_tokens_array]
-                )
-                hit_ratio = (
-                    prefix_hit_length / len(all_prompt_tokens)
-                    if len(all_prompt_tokens) > 0
-                    else 0.0
-                )
-                # Use prompt-only tokens for cache comparison (normalized_tokens).
-                # The full KV cache (prompt + response) is stored, but comparisons
-                # use only the prompt portion. Response tokens get re-tokenized
-                # differently in the next turn's chat template, causing mismatches
-                # if included in the comparison key.
-                if (
-                    matched_index is not None
-                    and hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE
-                ):
-                    kv_prefix_cache.update_kv_cache(
-                        matched_index,
-                        full_prompt_tokens,
-                        caches,
-                        cache_snapshots,
-                        restore_pos=prefix_hit_length,
-                        normalized_tokens=cache_key_tokens,
-                    )
-                else:
-                    kv_prefix_cache.add_kv_cache(
-                        full_prompt_tokens, caches, cache_snapshots,
-                        normalized_tokens=cache_key_tokens,
-                    )
-                if EXO_TRACING_ENABLED:
-                    logger.info(
-                        f"KV prefix cache update took "
-                        f"{(time.perf_counter() - t_cache_update) * 1000:.1f}ms"
-                    )
+            _log_generation_stats(generated_text_parts, "complete")
+            _save_kv_cache(generated_text_parts)
 
         if on_generation_token is not None:
             on_generation_token()
@@ -1041,3 +1045,8 @@ def mlx_generate(
         # Limit accumulated_text to what's needed for stop sequence detection
         if max_stop_len > 0 and len(accumulated_text) > max_stop_len:
             accumulated_text = accumulated_text[-max_stop_len:]
+    except GeneratorExit:
+        # Client closed the SSE connection (e.g., opencode got enough tokens).
+        # Log stats and save KV cache so the work isn't lost.
+        _log_generation_stats(generated_text_parts, "aborted")
+        _save_kv_cache(generated_text_parts)
