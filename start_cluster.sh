@@ -558,14 +558,14 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating MiniMax-M2.5-6bit instance on Mac Studios (Tensor / RDMA)..."
-if place_instance_with_retry "MiniMax" "mlx-community/MiniMax-M2.5-6bit" "{
-    \"model_id\": \"mlx-community/MiniMax-M2.5-6bit\",
-    \"sharding\": \"Tensor\",
+echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance on Mac Studios (Pipeline / RDMA)..."
+if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
+    \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
+    \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
-    \"max_context_tokens\": 180000
+    \"max_context_tokens\": 120000
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
