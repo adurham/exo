@@ -1,0 +1,13 @@
+model_id = "lmstudio-community/Qwen3-235B-A22B-Thinking-2507-MLX-6bit"
+n_layers = 94
+hidden_size = 4096
+supports_tensor = true
+tasks = ["TextGeneration"]
+family = "qwen"
+quantization = "6bit"
+base_model = "Qwen3 235B"
+capabilities = ["text", "thinking"]
+max_context_length = 262144
+
+[storage_size]
+in_bytes = 205058662400
