@@ -570,9 +570,9 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
-echo "Creating Qwen3-Coder-30B-A3B instance on MacBook (single node)..."
-if place_instance_with_retry "Qwen" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit" "{
-    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit\",
+echo "Creating Qwen3-Coder-30B-A3B-6bit instance on MacBook (single node)..."
+if place_instance_with_retry "Qwen-Coder" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
+    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 1,
