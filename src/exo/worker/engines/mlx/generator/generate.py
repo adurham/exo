@@ -895,6 +895,7 @@ def mlx_generate(
                 f"{(time.perf_counter() - t_cache_update) * 1000:.1f}ms"
             )
 
+    _generation_logged = False
     try:
       for completion_tokens, out in enumerate(
         stream_generate(
@@ -1006,6 +1007,7 @@ def mlx_generate(
         if is_done:
             _log_generation_stats(generated_text_parts, "complete")
             _save_kv_cache(generated_text_parts)
+            _generation_logged = True
 
         if on_generation_token is not None:
             on_generation_token()
@@ -1046,7 +1048,11 @@ def mlx_generate(
         if max_stop_len > 0 and len(accumulated_text) > max_stop_len:
             accumulated_text = accumulated_text[-max_stop_len:]
     except GeneratorExit:
-        # Client closed the SSE connection (e.g., opencode got enough tokens).
-        # Log stats and save KV cache so the work isn't lost.
-        _log_generation_stats(generated_text_parts, "aborted")
-        _save_kv_cache(generated_text_parts)
+        if not _generation_logged and generated_text_parts:
+            _log_generation_stats(generated_text_parts, "aborted (GeneratorExit)")
+            _save_kv_cache(generated_text_parts)
+            _generation_logged = True
+    finally:
+        if not _generation_logged and generated_text_parts:
+            _log_generation_stats(generated_text_parts, "aborted")
+            _save_kv_cache(generated_text_parts)
