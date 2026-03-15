@@ -565,7 +565,7 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
-    \"max_context_tokens\": 120000
+    \"max_context_tokens\": 262144
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
@@ -577,7 +577,7 @@ if place_instance_with_retry "Qwen-Coder" "mlx-community/Qwen3-Coder-30B-A3B-Ins
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 50000
+    \"max_context_tokens\": 196608
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi
