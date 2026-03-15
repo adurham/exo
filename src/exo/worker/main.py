@@ -60,14 +60,12 @@ class Worker:
         # but I think it's the correct way to be thinking about commands
         command_sender: Sender[ForwarderCommand],
         download_command_sender: Sender[ForwarderDownloadCommand],
-        max_node_memory_gb: int | None = None,
     ):
         self.node_id: NodeId = node_id
         self.event_receiver = event_receiver
         self.event_sender = event_sender
         self.command_sender = command_sender
         self.download_command_sender = download_command_sender
-        self.max_node_memory_gb: int | None = max_node_memory_gb
 
         self.state: State = State()
         self.runners: dict[RunnerId, RunnerSupervisor] = {}
@@ -89,9 +87,7 @@ class Worker:
 
             if _mx.metal.is_available():
                 active = _mx.get_active_memory() + _mx.get_cache_memory()
-                limit = int(
-                    _mx.device_info().get("max_recommended_working_set_size", 0)
-                )
+                limit = int(_mx.device_info().get("max_recommended_working_set_size", 0))
                 if limit > 0:
                     usage = active / limit
                     # Model weights alone typically consume 50-60% of the budget.
@@ -111,9 +107,7 @@ class Worker:
         logger.info("Starting Worker")
 
         info_send, info_recv = channel[GatheredInfo]()
-        info_gatherer: InfoGatherer = InfoGatherer(
-            info_send, max_node_memory_gb=self.max_node_memory_gb
-        )
+        info_gatherer: InfoGatherer = InfoGatherer(info_send)
 
         try:
             async with self._tg as tg:
@@ -159,7 +153,6 @@ class Worker:
                     self.input_chunk_buffer[cmd_id][event.chunk.chunk_index] = (
                         event.chunk.data
                     )
-
     async def plan_step(self):
         while True:
             await anyio.sleep(0.1)

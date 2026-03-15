@@ -41,7 +41,6 @@ class Node:
 
     node_id: NodeId
     offline: bool
-    max_node_memory_gb: int | None = None  # Store for use in _elect_loop
     _tg: TaskGroup = field(init=False, default_factory=TaskGroup)
 
     @classmethod
@@ -96,7 +95,6 @@ class Node:
                 event_sender=event_router.sender(),
                 command_sender=router.sender(topics.COMMANDS),
                 download_command_sender=router.sender(topics.DOWNLOAD_COMMANDS),
-                max_node_memory_gb=args.max_node_memory_gb,
             )
         else:
             worker = None
@@ -137,7 +135,6 @@ class Node:
             api,
             node_id,
             args.offline,
-            args.max_node_memory_gb,
         )
 
     async def run(self):
@@ -251,7 +248,6 @@ class Node:
                             download_command_sender=self.router.sender(
                                 topics.DOWNLOAD_COMMANDS
                             ),
-                            max_node_memory_gb=self.max_node_memory_gb,
                         )
                         self._tg.start_soon(self.worker.run)
                     if self.api:
@@ -312,7 +308,6 @@ class Args(CamelCaseModel):
     offline: bool = os.getenv("EXO_OFFLINE", "false").lower() == "true"
     no_batch: bool = False
     fast_synch: bool | None = None  # None = auto, True = force on, False = force off
-    max_node_memory_gb: int | None = None  # Cap memory advertised to coordinator (GB)
 
     @classmethod
     def parse(cls) -> Self:
@@ -383,13 +378,6 @@ class Args(CamelCaseModel):
             action="store_false",
             dest="fast_synch",
             help="Force MLX FAST_SYNCH off",
-        )
-        parser.add_argument(
-            "--max-node-memory",
-            type=int,
-            dest="max_node_memory_gb",
-            default=None,
-            help="Cap the maximum memory (in GB) this node advertises to the coordinator. Prevents the coordinator from assigning model shards larger than this threshold.",
         )
 
         args = parser.parse_args()

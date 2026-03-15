@@ -372,7 +372,6 @@ GatheredInfo = (
 @dataclass
 class InfoGatherer:
     info_sender: Sender[GatheredInfo]
-    max_node_memory_gb: int | None = None  # Cap memory advertised to coordinator (GB)
     interface_watcher_interval: float | None = 10
     misc_poll_interval: float | None = 60
     system_profiler_interval: float | None = 5 if IS_DARWIN else None
@@ -471,20 +470,9 @@ class InfoGatherer:
             return
         while True:
             try:
-                memory_usage = MemoryUsage.from_psutil(override_memory=override_memory)
-
-                # Cap the advertised memory to max_node_memory_gb if set
-                if self.max_node_memory_gb is not None:
-                    max_memory_bytes = Memory.from_gb(self.max_node_memory_gb).in_bytes
-                    if memory_usage.ram_available.in_bytes > max_memory_bytes:
-                        memory_usage = MemoryUsage(
-                            ram_total=memory_usage.ram_total,
-                            ram_available=Memory.from_bytes(max_memory_bytes),
-                            swap_total=memory_usage.swap_total,
-                            swap_available=memory_usage.swap_available,
-                        )
-
-                await self.info_sender.send(memory_usage)
+                await self.info_sender.send(
+                    MemoryUsage.from_psutil(override_memory=override_memory)
+                )
             except Exception as e:
                 logger.warning(f"Error gathering memory usage: {e}")
             await anyio.sleep(self.memory_poll_rate)
