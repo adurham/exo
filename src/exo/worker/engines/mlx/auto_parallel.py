@@ -394,11 +394,18 @@ class DistributedEvalBarrier(CustomMlxLayer):
     Inserted every ``_TP_EVAL_INTERVAL`` layers by the sharding strategies to
     break the lazy graph into smaller chunks, preventing RDMA deadlocks from
     accumulated collective operations.
+
+    Only active during prefill.  During decode (1 token) the graph is small
+    and the barriers add unnecessary synchronization that prevents GPU
+    pipelining of compute and RDMA communication.
     """
+
+    is_prefill: bool = True
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         result = self.original_layer(x, *args, **kwargs)
-        _guarded_eval(result)
+        if self.is_prefill:
+            _guarded_eval(result)
         return result
 
 
@@ -627,7 +634,7 @@ def _unwrap_tracing(layer: Any) -> Any:  # pyright: ignore[reportAny]
 def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
         inner = _unwrap_tracing(layer)
-        if isinstance(inner, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
+        if isinstance(inner, (PipelineFirstLayer, PipelineLastLayer, HybridPipelineLastLayer, HybridPipelinePassthroughLayer, DistributedEvalBarrier)):
             inner.is_prefill = is_prefill
 
 
