@@ -1347,6 +1347,8 @@ class ExpertParallelMoE(nn.Module):
         # ranks have different lazy graphs and FAST_SYNCH times out.
         mx.eval(mlp.parameters())
 
+    _ep_logged: bool = False
+
     def __call__(self, x: mx.array) -> mx.array:
         moe = self.moe_block
 
@@ -1359,6 +1361,14 @@ class ExpertParallelMoE(nn.Module):
         scores = mx.take_along_axis(gates, inds, axis=-1)
         if moe.norm_topk_prob:  # type: ignore
             scores = scores / mx.sum(scores, axis=-1, keepdims=True)
+
+        if not ExpertParallelMoE._ep_logged:
+            ExpertParallelMoE._ep_logged = True
+            logger.info(
+                f"EP forward: rank={self.rank} local=[{self.local_start},{self.local_end}) "
+                f"inds={inds.tolist()} scores={scores.tolist()} "
+                f"gate_proj.weight.shape={moe.switch_mlp.gate_proj.weight.shape}"  # type: ignore
+            )
 
         # 2. Remap global expert indices to local (0-based).
         # Remote experts get index 0 (valid but irrelevant — score is zeroed).
