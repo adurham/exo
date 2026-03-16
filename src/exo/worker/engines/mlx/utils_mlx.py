@@ -215,10 +215,12 @@ def load_mlx_items(
     mx.clear_cache()
 
     # Load draft model for speculative decoding (if configured)
-    draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
+    draft_model_id_str = os.environ.get("EXO_DRAFT_MODEL", "")
     draft_model: Model | None = None
-    if draft_model_id:
+    if draft_model_id_str:
         try:
+            from exo.shared.types.common import ModelId
+            draft_model_id = ModelId(draft_model_id_str)
             draft_path = build_model_path(draft_model_id)
             logger.info(f"Loading draft model for speculative decoding: {draft_model_id}")
             start_draft = time.perf_counter()
@@ -231,7 +233,7 @@ def load_mlx_items(
             )
         except Exception as e:
             logger.warning(
-                f"Failed to load draft model {draft_model_id}: {e}. "
+                f"Failed to load draft model {draft_model_id_str}: {e}. "
                 "Speculative decoding disabled."
             )
             draft_model = None
