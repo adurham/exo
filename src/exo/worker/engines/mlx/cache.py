@@ -293,6 +293,16 @@ class KVPrefixCache:
                 if hasattr(c, "offset"):
                     c.offset = restore_pos
 
+        # Force KV arrays to be contiguous in memory.  Caches built via
+        # mx.concatenate() (step-based growth) create fragmented views that
+        # cause TLB misses and halve effective memory bandwidth during
+        # attention reads at high context (291 GB/s→174 GB/s at 45K tokens).
+        for c in prompt_cache:
+            if hasattr(c, "keys") and c.keys is not None:
+                c.keys = mx.contiguous(c.keys)
+            if hasattr(c, "values") and c.values is not None:
+                c.values = mx.contiguous(c.values)
+
         self._access_counter += 1
         # Return remaining from ORIGINAL prompt tokens (for actual computation)
         remaining = prompt_tokens[restore_pos:]
