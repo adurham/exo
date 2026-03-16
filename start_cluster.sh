@@ -411,9 +411,10 @@ for NODE in "${NODES[@]}"; do
         # Smaller prefill steps = finer KV cache snapshot granularity for
         # the memory-constrained MacBook (subagent workloads are 1-10K tokens).
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
-        # 2 cache entries: with MOVE=1 (no deepcopy), a system-prompt entry (~5K tok, ~0.5GB)
-        # can coexist with a conversation entry (~31K tok, ~3GB).  21GB model + 3.5GB KV ≈ 63% of 38.6GB.
-        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=2"
+        # 4 cache entries: explore subagent calls are 5-15K tokens each.
+        # 4 entries × ~10K avg × 48KB/tok = ~1.9GB.  25GB model + 2GB KV ≈ 75% of 36GB.
+        # Memory pressure eviction handles edge cases.
+        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
@@ -581,7 +582,7 @@ if place_instance_with_retry "Qwen-Coder" "mlx-community/Qwen3-Coder-30B-A3B-Ins
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 196608
+    \"max_context_tokens\": 50000
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi
