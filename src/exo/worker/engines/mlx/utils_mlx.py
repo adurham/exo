@@ -172,7 +172,7 @@ def load_mlx_items(
     group: Group | None,
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
-) -> tuple[Model, TokenizerWrapper]:
+) -> tuple[Model, TokenizerWrapper, "Model | None"]:
     if group is None:
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
@@ -214,7 +214,29 @@ def load_mlx_items(
 
     mx.clear_cache()
 
-    return cast(Model, model), tokenizer
+    # Load draft model for speculative decoding (if configured)
+    draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
+    draft_model: Model | None = None
+    if draft_model_id:
+        try:
+            draft_path = build_model_path(draft_model_id)
+            logger.info(f"Loading draft model for speculative decoding: {draft_model_id}")
+            start_draft = time.perf_counter()
+            raw_draft, _ = load_model(draft_path, lazy=True, strict=False)
+            mx.eval(raw_draft)
+            draft_model = cast(Model, raw_draft)
+            logger.info(
+                f"Draft model loaded in {time.perf_counter() - start_draft:.2f}s "
+                f"({draft_model_id})"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to load draft model {draft_model_id}: {e}. "
+                "Speculative decoding disabled."
+            )
+            draft_model = None
+
+    return cast(Model, model), tokenizer, draft_model
 
 
 def shard_and_load(

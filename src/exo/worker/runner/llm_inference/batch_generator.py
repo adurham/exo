@@ -142,6 +142,7 @@ class SequentialGenerator(InferenceGenerator):
     event_sender: MpSender[Event]
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
+    draft_model: Model | None = None
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
@@ -388,6 +389,7 @@ class SequentialGenerator(InferenceGenerator):
             on_generation_token=on_generation_token,
             on_token_count_known=self._set_heartbeat_timeout,
             group=self.group,
+            draft_model=self.draft_model,
         )
 
     def close(self) -> None:
@@ -407,6 +409,7 @@ class BatchGenerator(InferenceGenerator):
     event_sender: MpSender[Event]
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
+    draft_model: Model | None = None
     check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)

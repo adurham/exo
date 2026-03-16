@@ -569,6 +569,7 @@ def mlx_generate(
     distributed_prompt_progress_callback: Callable[[], None] | None = None,
     on_generation_token: Callable[[], None] | None = None,
     on_token_count_known: Callable[[int], None] | None = None,
+    draft_model: Model | None = None,
 ) -> Generator[GenerationResponse]:
     from exo.worker.engines.mlx.cache import (
         MEMORY_THRESHOLD,
@@ -905,15 +906,13 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
-    # Self-speculative decoding: create layer-skip draft model if enabled
-    _draft_model = None
-    if _SPECULATIVE_SKIP > 0:
-        from mlx_lm.self_speculative import LayerSkipDraftModel
-        _draft_model = LayerSkipDraftModel(model, skip_factor=_SPECULATIVE_SKIP)
+    # Speculative decoding: use draft model if available
+    _draft_model = draft_model
+    if _draft_model is not None:
+        draft_layers = len(_draft_model.layers) if hasattr(_draft_model, 'layers') else '?'
         logger.info(
-            f"Self-speculative decode: skip_factor={_SPECULATIVE_SKIP}, "
-            f"draft_layers={len(_draft_model.layers)}/{len(model.model.layers)}, "
-            f"draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
+            f"Speculative decoding enabled: draft_model={type(_draft_model).__name__}, "
+            f"draft_layers={draft_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
         )
 
     _generation_logged = False

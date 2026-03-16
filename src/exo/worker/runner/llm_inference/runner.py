@@ -211,7 +211,7 @@ class Runner:
                 assert (
                     ModelTask.TextGeneration in self.shard_metadata.model_card.tasks
                 ), f"Incorrect model task(s): {self.shard_metadata.model_card.tasks}"
-                self.generator.inference_model, self.generator.tokenizer = (
+                self.generator.inference_model, self.generator.tokenizer, self.generator.draft_model = (
                     load_mlx_items(
                         self.bound_instance,
                         self.generator.group,
@@ -422,6 +422,7 @@ class Builder:
     inference_model: Model | None = None
     tokenizer: TokenizerWrapper | None = None
     group: mx.distributed.Group | None = None
+    draft_model: Model | None = None
 
     def build(
         self,
@@ -462,6 +463,7 @@ class Builder:
                 event_sender=self.event_sender,
                 heartbeat=self.heartbeat,
                 heartbeat_timeout=self.heartbeat_timeout,
+                draft_model=self.draft_model,
             )
         logger.info("using BatchGenerator")
         return BatchGenerator(
@@ -476,4 +478,5 @@ class Builder:
             event_sender=self.event_sender,
             heartbeat=self.heartbeat,
             heartbeat_timeout=self.heartbeat_timeout,
+            draft_model=self.draft_model,
         )
