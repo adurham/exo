@@ -562,9 +562,9 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating Qwen3-235B-A22B-Thinking-2507-MLX-6bit instance on Mac Studios (Tensor / RDMA)..."
-if place_instance_with_retry "Qwen3-235B" "lmstudio-community/Qwen3-235B-A22B-Thinking-2507-MLX-6bit" "{
-    \"model_id\": \"lmstudio-community/Qwen3-235B-A22B-Thinking-2507-MLX-6bit\",
+echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance on Mac Studios (Tensor / RDMA)..."
+if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
+    \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
     \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
