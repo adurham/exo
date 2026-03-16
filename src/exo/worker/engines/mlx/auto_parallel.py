@@ -1343,49 +1343,37 @@ class ExpertParallelMoE(nn.Module):
     def __call__(self, x: mx.array) -> mx.array:
         moe = self.moe_block
 
-        # 1. Gate computation — identical on all nodes (full gate weights)
+        # 1. Gate computation — identical on all nodes (full gate weights).
         gates = moe.gate(x)  # type: ignore
+        gates = mx.softmax(gates, axis=-1, precise=True)
 
-        # Handle different gating styles
-        if hasattr(moe, "norm_topk_prob"):
-            # Qwen3 MoE style
-            gates = mx.softmax(gates, axis=-1, precise=True)
-            k = moe.top_k  # type: ignore
-            inds = mx.argpartition(gates, kth=-k, axis=-1)[..., -k:]
-            scores = mx.take_along_axis(gates, inds, axis=-1)
-            if moe.norm_topk_prob:  # type: ignore
-                scores = scores / mx.sum(scores, axis=-1, keepdims=True)
-        elif hasattr(moe, "scoring_func"):
-            # MiniMax style (sigmoid scoring)
-            scores = mx.sigmoid(gates)
-            orig_scores = scores
-            if hasattr(moe, "e_score_correction_bias"):
-                scores = scores + moe.e_score_correction_bias  # type: ignore
-            k = moe.num_experts_per_tok  # type: ignore
-            inds = mx.argpartition(-scores, kth=k - 1, axis=-1)[..., :k]
-            scores = mx.take_along_axis(orig_scores, inds, axis=-1)
-            scores = scores / (mx.sum(scores, axis=-1, keepdims=True) + 1e-20)
-            scores = scores.astype(x.dtype)
-        else:
-            raise ValueError("Unsupported MoE gating style")
+        k = moe.top_k  # type: ignore
+        inds = mx.argpartition(gates, kth=-k, axis=-1)[..., -k:]
+        scores = mx.take_along_axis(gates, inds, axis=-1)
+        if moe.norm_topk_prob:  # type: ignore
+            scores = scores / mx.sum(scores, axis=-1, keepdims=True)
 
-        # 2. Remap global expert indices to local indices
-        # Local experts: indices in [local_start, local_end)
+        # 2. Remap global expert indices to local (0-based).
+        # Remote experts get index 0 (valid but irrelevant — score is zeroed).
         is_local = (inds >= self.local_start) & (inds < self.local_end)
         local_inds = mx.where(is_local, inds - self.local_start, 0)
 
-        # 3. Compute local experts using the trimmed switch_mlp
-        local_y = moe.switch_mlp(x, local_inds)  # type: ignore
+        # Zero scores for remote experts so they contribute nothing
+        # to the weighted sum, even though switch_mlp computes them.
+        local_scores = mx.where(is_local, scores, 0.0)
 
-        # Zero out contributions from remote experts
-        local_mask = is_local.astype(x.dtype)[..., None]
-        local_y = local_y * local_mask
+        # 3. Compute experts using the trimmed switch_mlp.
+        # Remote expert slots compute expert 0 redundantly, but their
+        # score is 0 so they don't affect the output.
+        # NOTE: _gather_sort groups by index and may mix real expert-0
+        # tokens with fake remote tokens, but the weighted sum with
+        # zeroed scores eliminates the remote contributions.
+        y = moe.switch_mlp(x, local_inds)  # type: ignore
 
-        # 4. Weighted sum of local expert outputs
-        local_result = (local_y * scores[..., None]).sum(axis=-2)
+        # 4. Weighted sum — only local experts contribute.
+        local_result = (y * local_scores[..., None]).sum(axis=-2)
 
-        # 5. All-reduce to combine local results from all nodes
-        # Each node computed its local experts; sum gives the full result
+        # 5. All-reduce to combine local results from all nodes.
         result = mx.distributed.all_sum(local_result, group=self.group)
 
         return result
