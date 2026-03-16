@@ -378,6 +378,7 @@ class TracingLayerWrapper(CustomMlxLayer):
 
 
 _TP_EVAL_INTERVAL: int = int(os.environ.get("EXO_TP_EVAL_INTERVAL", "8"))
+_USE_EXPERT_PARALLEL: bool = os.environ.get("EXO_EXPERT_PARALLEL", "0") == "1"
 """Force a guarded eval every N transformer layers in pure TP mode.
 
 Without this, the entire model forward pass (62 layers for MiniMax) builds a
@@ -1275,6 +1276,114 @@ class ShardedMoE(CustomMlxLayer):
         return y
 
 
+class ExpertParallelMoE(nn.Module):
+    """Expert Parallelism: each node owns a subset of full experts.
+
+    Instead of sharding each expert's weights across nodes (TP), this pins
+    whole experts to specific nodes.  Local experts compute with contiguous
+    memory reads.  Remote experts are handled by exchanging activations via
+    point-to-point RDMA (all_gather + scatter) instead of all_sum.
+
+    Benefits over ShardedMoE:
+    - Contiguous expert weight reads (no scatter across hidden dim)
+    - Eliminates the per-layer MoE all_sum barrier
+    """
+
+    def __init__(
+        self,
+        moe_block: nn.Module,
+        group: mx.distributed.Group,
+    ):
+        super().__init__()
+        # Store the full MoE block (gate + switch_mlp)
+        dict.__setitem__(self, "_moe_block", moe_block)
+        self.group = group
+        self.rank = group.rank()
+        self.world_size = group.size()
+
+        # Total experts and per-node split
+        self.num_experts: int = moe_block.num_experts  # type: ignore
+        self.experts_per_node = self.num_experts // self.world_size
+        self.local_start = self.rank * self.experts_per_node
+        self.local_end = self.local_start + self.experts_per_node
+
+    @property
+    def moe_block(self) -> nn.Module:
+        return self["_moe_block"]  # type: ignore
+
+    def _split_expert_weights(self) -> None:
+        """Trim switch_mlp weights to only this node's experts.
+
+        Called once after construction to free memory for remote experts.
+        """
+        s = self.local_start
+        e = self.local_end
+        mlp = self.moe_block.switch_mlp  # type: ignore
+
+        for proj_name in ("gate_proj", "up_proj", "down_proj"):
+            proj = getattr(mlp, proj_name)
+            # QuantizedSwitchLinear stores weight, scales, biases
+            if hasattr(proj, "scales"):
+                proj.weight = proj.weight[s:e]
+                proj.scales = proj.scales[s:e]
+                if proj.biases is not None:
+                    proj.biases = proj.biases[s:e]
+            else:
+                proj.weight = proj.weight[s:e]
+            if "bias" in proj:
+                proj.bias = proj.bias[s:e]
+
+    def __call__(self, x: mx.array) -> mx.array:
+        moe = self.moe_block
+
+        # 1. Gate computation — identical on all nodes (full gate weights)
+        gates = moe.gate(x)  # type: ignore
+
+        # Handle different gating styles
+        if hasattr(moe, "norm_topk_prob"):
+            # Qwen3 MoE style
+            gates = mx.softmax(gates, axis=-1, precise=True)
+            k = moe.top_k  # type: ignore
+            inds = mx.argpartition(gates, kth=-k, axis=-1)[..., -k:]
+            scores = mx.take_along_axis(gates, inds, axis=-1)
+            if moe.norm_topk_prob:  # type: ignore
+                scores = scores / mx.sum(scores, axis=-1, keepdims=True)
+        elif hasattr(moe, "scoring_func"):
+            # MiniMax style (sigmoid scoring)
+            scores = mx.sigmoid(gates)
+            orig_scores = scores
+            if hasattr(moe, "e_score_correction_bias"):
+                scores = scores + moe.e_score_correction_bias  # type: ignore
+            k = moe.num_experts_per_tok  # type: ignore
+            inds = mx.argpartition(-scores, kth=k - 1, axis=-1)[..., :k]
+            scores = mx.take_along_axis(orig_scores, inds, axis=-1)
+            scores = scores / (mx.sum(scores, axis=-1, keepdims=True) + 1e-20)
+            scores = scores.astype(x.dtype)
+        else:
+            raise ValueError("Unsupported MoE gating style")
+
+        # 2. Remap global expert indices to local indices
+        # Local experts: indices in [local_start, local_end)
+        is_local = (inds >= self.local_start) & (inds < self.local_end)
+        local_inds = mx.where(is_local, inds - self.local_start, 0)
+
+        # 3. Compute local experts using the trimmed switch_mlp
+        local_y = moe.switch_mlp(x, local_inds)  # type: ignore
+
+        # Zero out contributions from remote experts
+        local_mask = is_local.astype(x.dtype)[..., None]
+        local_y = local_y * local_mask
+
+        # 4. Weighted sum of local expert outputs
+        local_result = (local_y * scores[..., None]).sum(axis=-2)
+
+        # 5. All-reduce to combine local results from all nodes
+        # Each node computed its local experts; sum gives the full result
+        result = mx.distributed.all_sum(local_result, group=self.group)
+
+        return result
+
+
 class GLM4MoeLiteShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
@@ -1595,21 +1704,29 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
                     Qwen3_5SparseMoeBlock,
                 ),
             ):
-                self.all_to_sharded_linear_in_place(layer.mlp.switch_mlp.gate_proj)
-                self.sharded_to_all_linear_in_place(layer.mlp.switch_mlp.down_proj)
-                self.all_to_sharded_linear_in_place(layer.mlp.switch_mlp.up_proj)
-                if isinstance(
-                    layer.mlp, (Qwen3NextSparseMoeBlock, Qwen3_5SparseMoeBlock)
-                ):
-                    self.all_to_sharded_linear_in_place(
-                        layer.mlp.shared_expert.gate_proj
-                    )
-                    self.sharded_to_all_linear_in_place(
-                        layer.mlp.shared_expert.down_proj
-                    )
-                    self.all_to_sharded_linear_in_place(layer.mlp.shared_expert.up_proj)
-                layer.mlp = ShardedMoE(layer.mlp)  # pyright: ignore[reportAttributeAccessIssue, reportArgumentType]
-                layer.mlp.sharding_group = self.group
+                if _USE_EXPERT_PARALLEL and isinstance(layer.mlp, Qwen3MoeSparseMoeBlock):
+                    # Expert Parallelism: each node owns a subset of FULL experts.
+                    # Contiguous weight reads, no per-expert sharding.
+                    ep = ExpertParallelMoE(layer.mlp, self.group)
+                    ep._split_expert_weights()
+                    layer.mlp = ep  # type: ignore
+                else:
+                    # Standard TP: shard each expert's weights across nodes.
+                    self.all_to_sharded_linear_in_place(layer.mlp.switch_mlp.gate_proj)
+                    self.sharded_to_all_linear_in_place(layer.mlp.switch_mlp.down_proj)
+                    self.all_to_sharded_linear_in_place(layer.mlp.switch_mlp.up_proj)
+                    if isinstance(
+                        layer.mlp, (Qwen3NextSparseMoeBlock, Qwen3_5SparseMoeBlock)
+                    ):
+                        self.all_to_sharded_linear_in_place(
+                            layer.mlp.shared_expert.gate_proj
+                        )
+                        self.sharded_to_all_linear_in_place(
+                            layer.mlp.shared_expert.down_proj
+                        )
+                        self.all_to_sharded_linear_in_place(layer.mlp.shared_expert.up_proj)
+                    layer.mlp = ShardedMoE(layer.mlp)  # pyright: ignore[reportAttributeAccessIssue, reportArgumentType]
+                    layer.mlp.sharding_group = self.group
 
             # Shard the MLP
             else:

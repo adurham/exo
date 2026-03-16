@@ -20,6 +20,7 @@
 : "${EXO_PP_LAYER_OFFSET:=0}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
+: "${EXO_EXPERT_PARALLEL:=1}"
 : "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -383,6 +384,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_KV_BITS=$EXO_KV_BITS"
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
     EXO_ENV="$EXO_ENV EXO_TP_EVAL_INTERVAL=$EXO_TP_EVAL_INTERVAL"
+    EXO_ENV="$EXO_ENV EXO_EXPERT_PARALLEL=$EXO_EXPERT_PARALLEL"
     # MacBook gets 2 entries (see per-node overrides below), Studios get 1
     if [ "$NODE" != "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
@@ -561,7 +563,7 @@ place_instance_with_retry() {
 EXPECTED_RUNNERS=0
 
 echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance on Mac Studios (Tensor / RDMA)..."
-if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
+if place_instance_with_retry "Qwen3-235B" "lmstudio-community/Qwen3-235B-A22B-Thinking-2507-MLX-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
     \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
