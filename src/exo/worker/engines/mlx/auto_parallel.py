@@ -1315,6 +1315,8 @@ class ExpertParallelMoE(nn.Module):
         """Trim switch_mlp weights to only this node's experts.
 
         Called once after construction to free memory for remote experts.
+        Immediately evaluates and makes contiguous to avoid lazy view
+        mismatches between TP ranks during eval_with_timeout.
         """
         s = self.local_start
         e = self.local_end
@@ -1324,14 +1326,19 @@ class ExpertParallelMoE(nn.Module):
             proj = getattr(mlp, proj_name)
             # QuantizedSwitchLinear stores weight, scales, biases
             if hasattr(proj, "scales"):
-                proj.weight = proj.weight[s:e]
-                proj.scales = proj.scales[s:e]
+                proj.weight = mx.contiguous(proj.weight[s:e])
+                proj.scales = mx.contiguous(proj.scales[s:e])
                 if proj.biases is not None:
-                    proj.biases = proj.biases[s:e]
+                    proj.biases = mx.contiguous(proj.biases[s:e])
             else:
-                proj.weight = proj.weight[s:e]
+                proj.weight = mx.contiguous(proj.weight[s:e])
             if "bias" in proj:
-                proj.bias = proj.bias[s:e]
+                proj.bias = mx.contiguous(proj.bias[s:e])
+
+        # Force evaluation so the trimmed weights are materialized before
+        # eval_with_timeout runs on the layer.  Without this, different
+        # ranks have different lazy graphs and FAST_SYNCH times out.
+        mx.eval(mlp.parameters())
 
     def __call__(self, x: mx.array) -> mx.array:
         moe = self.moe_block
