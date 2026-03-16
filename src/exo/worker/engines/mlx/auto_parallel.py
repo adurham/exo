@@ -1366,25 +1366,20 @@ class ExpertParallelMoE(nn.Module):
             ExpertParallelMoE._ep_logged = True
             logger.info(
                 f"EP forward: rank={self.rank} local=[{self.local_start},{self.local_end}) "
-                f"inds={inds.tolist()} scores={scores.tolist()} "
+                f"inds shape={inds.shape} "
                 f"gate_proj.weight.shape={moe.switch_mlp.gate_proj.weight.shape}"  # type: ignore
             )
 
-        # 2. Remap global expert indices to local (0-based).
-        # Remote experts get index 0 (valid but irrelevant — score is zeroed).
+        # 2. Remap and mask
         is_local = (inds >= self.local_start) & (inds < self.local_end)
         local_inds = mx.where(is_local, inds - self.local_start, 0)
-
-        # Zero scores for remote experts so they contribute nothing
-        # to the weighted sum, even though switch_mlp computes them.
         local_scores = mx.where(is_local, scores, 0.0)
 
-        # 3. Compute experts using the trimmed switch_mlp.
-        # Remote expert slots compute expert 0 redundantly, but their
-        # score is 0 so they don't affect the output.
-        # NOTE: _gather_sort groups by index and may mix real expert-0
-        # tokens with fake remote tokens, but the weighted sum with
-        # zeroed scores eliminates the remote contributions.
+        # 3. Compute via switch_mlp with remapped indices.
+        # Remote slots use index 0 with score 0. gather_qmm still loads
+        # expert-0 weights for those slots, but the zeroed score eliminates
+        # their contribution. This wastes ~50% of expert compute but is
+        # correct and avoids Metal kernel changes.
         y = moe.switch_mlp(x, local_inds)  # type: ignore
 
         # 4. Weighted sum — only local experts contribute.
