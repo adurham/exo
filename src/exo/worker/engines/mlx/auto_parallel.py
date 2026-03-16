@@ -951,11 +951,18 @@ def patch_tensor_model[T](model: T) -> T:
     ) -> mx.array:
         logits: mx.array = original_call(self, *args, **kwargs)  # pyright: ignore[reportAny]
 
-        # Skip cache dependency during compiled decode — mx.compile can't
-        # trace call_signature.bind_partial or mx.depends.  Compiled decode
-        # manages evaluation order itself.
+        # Skip cache dependency during decode (1 token) — the lazy graph is
+        # tiny and MLX's natural ordering handles it.  Only needed during
+        # prefill where large graphs can reorder distributed ops.
+        # Also skip for compiled decode (mx.compile can't trace mx.depends).
         if getattr(self, "_compiled_decode_active", False):
             return logits
+
+        # Check if this is a decode step (single token input)
+        if len(args) > 0 and hasattr(args[0], "shape"):
+            seq_len = args[0].shape[1] if len(args[0].shape) > 1 else args[0].shape[0]  # type: ignore
+            if seq_len <= 1:
+                return logits
 
         cache = call_signature.bind_partial(self, *args, **kwargs).arguments.get(
             "cache", None
