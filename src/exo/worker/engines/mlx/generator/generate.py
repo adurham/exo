@@ -1,5 +1,6 @@
 import functools
 import math
+import os
 import time
 from typing import Callable, Generator, cast, get_args
 
@@ -57,6 +58,12 @@ from exo.worker.engines.mlx.constants import (
     MAX_TOKENS,
     PREFILL_STEP_SIZE,
 )
+
+# Self-speculative decoding: use the same model with layer skipping as draft.
+# EXO_SPECULATIVE_DECODE=N means skip factor N (e.g., 10 = use every 10th layer).
+# 0 or unset = disabled.
+_SPECULATIVE_SKIP = int(os.environ.get("EXO_SPECULATIVE_DECODE", "0"))
+_SPECULATIVE_DRAFT_TOKENS = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "3"))
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
@@ -898,21 +905,37 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
+    # Self-speculative decoding: create layer-skip draft model if enabled
+    _draft_model = None
+    if _SPECULATIVE_SKIP > 0:
+        from mlx_lm.self_speculative import LayerSkipDraftModel
+        _draft_model = LayerSkipDraftModel(model, skip_factor=_SPECULATIVE_SKIP)
+        logger.info(
+            f"Self-speculative decode: skip_factor={_SPECULATIVE_SKIP}, "
+            f"draft_layers={len(_draft_model.layers)}/{len(model.model.layers)}, "
+            f"draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
+        )
+
     _generation_logged = False
     try:
+      _gen_kwargs = dict(
+          model=model,
+          tokenizer=tokenizer,
+          prompt=last_token,
+          max_tokens=max_tokens,
+          sampler=sampler,
+          logits_processors=logits_processors,
+          prompt_cache=caches,
+          prefill_step_size=1,
+          kv_group_size=KV_GROUP_SIZE,
+          kv_bits=KV_BITS,
+      )
+      if _draft_model is not None:
+          _gen_kwargs["draft_model"] = _draft_model
+          _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
+
       for completion_tokens, out in enumerate(
-        stream_generate(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=last_token,
-            max_tokens=max_tokens,
-            sampler=sampler,
-            logits_processors=logits_processors,
-            prompt_cache=caches,
-            prefill_step_size=1,
-            kv_group_size=KV_GROUP_SIZE,
-            kv_bits=KV_BITS,
-        ),
+        stream_generate(**_gen_kwargs),
         start=1,
       ):
         generated_text_parts.append(out.text)
