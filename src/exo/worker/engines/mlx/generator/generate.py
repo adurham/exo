@@ -906,40 +906,38 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
-    # Speculative decoding: use draft model if available
-    _draft_model = draft_model
-    if _draft_model is not None:
-        draft_layers = len(_draft_model.layers) if hasattr(_draft_model, 'layers') else '?'
-        logger.info(
-            f"Speculative decoding enabled: draft_model={type(_draft_model).__name__}, "
-            f"draft_layers={draft_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
-        )
+    # CPU-pipelined speculative decoding: draft on CPU, verify on GPU
+    _cpu_draft = None
+    _draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
+    if _draft_model_id and os.path.exists(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cpu_draft.dylib")
+    ):
+        try:
+            from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
+            _cpu_draft = CPUDraftEngine(_draft_model_id)
+            logger.info(
+                f"CPU-pipelined speculative decode: draft={_draft_model_id}, "
+                f"layers={_cpu_draft._n_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to init CPU draft engine: {e}")
+            _cpu_draft = None
 
     _generation_logged = False
     try:
-      _gen_kwargs = dict(
-          model=model,
-          tokenizer=tokenizer,
-          prompt=last_token,
-          max_tokens=max_tokens,
-          sampler=sampler,
-          logits_processors=logits_processors,
-          prompt_cache=caches,
-          prefill_step_size=1,
-          kv_group_size=KV_GROUP_SIZE,
-          kv_bits=KV_BITS,
-      )
-      if _draft_model is not None:
-          # speculative_generate_step splits prompt_cache into model + draft portions.
-          # Append draft cache entries so it can find them.
-          from mlx_lm.models.cache import make_prompt_cache
-          draft_cache = make_prompt_cache(_draft_model)
-          _gen_kwargs["prompt_cache"] = caches + draft_cache
-          _gen_kwargs["draft_model"] = _draft_model
-          _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
-
       for completion_tokens, out in enumerate(
-        stream_generate(**_gen_kwargs),
+        stream_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=last_token,
+            max_tokens=max_tokens,
+            sampler=sampler,
+            logits_processors=logits_processors,
+            prompt_cache=caches,
+            prefill_step_size=1,
+            kv_group_size=KV_GROUP_SIZE,
+            kv_bits=KV_BITS,
+        ),
         start=1,
       ):
         generated_text_parts.append(out.text)
