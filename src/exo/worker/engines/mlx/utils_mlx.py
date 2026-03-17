@@ -223,20 +223,27 @@ def load_mlx_items(
             os.path.dirname(os.path.abspath(__file__)), "cpu_draft.dylib")
         if os.path.exists(dylib_path):
             try:
-                from exo.worker.engines.mlx.cpu_draft_process import CPUDraftProcess
-                logger.info(f"Starting CPU draft process: {draft_model_id_str}")
+                # Extract weights in the parent process (where MLX works),
+                # then fork the child which only uses C/Accelerate.
+                from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
+                from exo.worker.engines.mlx.cpu_draft_process import CPUDraftWrapper
+                logger.info(f"Loading CPU draft weights: {draft_model_id_str}")
                 start_draft = time.perf_counter()
-                draft_engine = CPUDraftProcess(draft_model_id_str)
-                if draft_engine.start(timeout=30.0):
-                    logger.info(
-                        f"CPU draft process ready in {time.perf_counter() - start_draft:.2f}s "
-                        f"({draft_model_id_str})"
-                    )
-                else:
-                    logger.warning("CPU draft process failed to start")
-                    draft_engine = None
+                # Load and dequantize weights in parent (MLX is safe here)
+                engine = CPUDraftEngine(draft_model_id_str)
+                # Warmup to pull weights into CPU cache
+                engine.draft_sync(start_token=1, num_tokens=1)
+                engine.reset_cache()
+                logger.info(f"CPU draft weights ready in {time.perf_counter() - start_draft:.2f}s")
+                # Use the engine directly (no separate process for now —
+                # the fork+MLX conflict makes process isolation impractical.
+                # The engine runs on CPU via C/Accelerate, called from the
+                # main process between decode steps. Non-blocking via
+                # request_draft/get_result API on CPUDraftProcess wrapper.)
+                draft_engine = CPUDraftWrapper.from_engine(engine)
+                logger.info(f"CPU draft engine ready ({draft_model_id_str})")
             except Exception as e:
-                logger.warning(f"Failed to start CPU draft process: {e}")
+                logger.warning(f"Failed to init CPU draft: {e}")
                 draft_engine = None
         else:
             logger.info(f"CPU draft dylib not found at {dylib_path}, skipping")
