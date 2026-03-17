@@ -595,8 +595,8 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
 fi
 
 echo "Creating Qwen3-Coder-30B instance (MacBook single node)..."
-if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit" "{
-    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit\",
+if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
+    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
     \"sharding\": \"Tensor\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
