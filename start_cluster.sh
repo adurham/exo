@@ -571,7 +571,7 @@ EXPECTED_RUNNERS=0
 # draft_model + draft_tokens are part of the instance config — the runner reads them.
 DRAFT_FIELDS=""
 if [ -n "$EXO_DRAFT_MODEL" ]; then
-    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": 10"
+    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": ${EXO_DRAFT_TOKENS:-3}"
 fi
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
@@ -587,16 +587,16 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
 fi
 
 # ── Instance 2: Subagent model (MacBook, single node) ──
-echo "Creating Qwen3-Coder-30B instance (MacBook)..."
-if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
-    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
-    \"sharding\": \"Pipeline\",
-    \"min_nodes\": 1,
-    \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 50000
-}"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
-fi
+# echo "Creating Qwen3-Coder-30B instance (MacBook)..."
+# if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
+#     \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
+#     \"sharding\": \"Pipeline\",
+#     \"min_nodes\": 1,
+#     \"node_ids\": [\"$MBP_NODE_ID\"],
+#     \"max_context_tokens\": 50000
+# }"; then
+#     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+# fi
 
 # ── Instance 3: Draft model for speculative decoding (MacBook) ──
 if [ -n "$EXO_DRAFT_MODEL" ]; then
