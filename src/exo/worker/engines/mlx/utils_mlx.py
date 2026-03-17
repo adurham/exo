@@ -227,6 +227,11 @@ def load_mlx_items(
                 logger.info(f"Loading CPU draft engine: {draft_model_id_str}")
                 start_draft = time.perf_counter()
                 draft_engine = CPUDraftEngine(draft_model_id_str)
+                # Warm up: run a dummy forward pass to pull weights into CPU cache.
+                # Without this, the first real draft call reads 3GB cold from DRAM,
+                # blocking the generation thread long enough to stale the heartbeat.
+                draft_engine.draft_sync(start_token=1, num_tokens=1)
+                draft_engine.reset_cache()
                 logger.info(
                     f"CPU draft engine ready in {time.perf_counter() - start_draft:.2f}s "
                     f"({draft_model_id_str}, {draft_engine._n_layers} layers, "
