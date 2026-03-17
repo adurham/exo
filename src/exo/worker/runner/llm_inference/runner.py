@@ -246,6 +246,11 @@ class Runner:
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
 
+                # Register loaded model in process-global registry so the API can
+                # serve /v1/draft requests without loading a second model copy.
+                from exo.worker.engines.mlx.draft_registry import register as _draft_register
+                _draft_register(self.model_id, self.generator.model)
+
                 self.send_task_status(task.task_id, TaskStatus.Complete)
                 self.update_status(RunnerLoaded())
                 if EXO_TRACING_ENABLED:
@@ -288,49 +293,26 @@ class Runner:
                 )
 
     def handle_draft_task(self, task: DraftGeneration):
-        """Handle a draft generation request with persistent KV cache."""
+        """Handle a gossip-routed draft request via the registry's DraftHandler."""
         assert isinstance(self.generator, InferenceGenerator)
         self.acknowledge_task(task)
         self.send_task_status(task.task_id, TaskStatus.Running)
 
         t0 = time.perf_counter()
-
-        # Lazy-init the draft cache
-        if not hasattr(self, '_draft_cache'):
-            from mlx_lm.models.cache import make_prompt_cache
-            self._draft_cache = make_prompt_cache(self.generator.model)
-            self._draft_cache_len = 0
+        from exo.worker.engines.mlx.draft_registry import get_handler
+        handler = get_handler(self.model_id)
+        result_tokens: list[int] = []
 
         try:
+            if handler is None:
+                raise RuntimeError(f"No draft handler registered for {self.model_id}")
+
             if task.action == "reset":
-                from mlx_lm.models.cache import make_prompt_cache
-                self._draft_cache = make_prompt_cache(self.generator.model)
-                self._draft_cache_len = 0
-                result_tokens: list[int] = []
-
+                handler.reset()
             elif task.action == "prefill":
-                if task.prefill_token_ids:
-                    tokens = mx.array([task.prefill_token_ids])
-                    logits = self.generator.model(tokens, cache=self._draft_cache)
-                    mx.eval(logits)
-                    self._draft_cache_len += len(task.prefill_token_ids)
-                result_tokens = []
-
-            else:  # "draft"
-                from mlx_lm.models.cache import trim_prompt_cache
-                if task.trim > 0:
-                    trim_prompt_cache(self._draft_cache, task.trim)
-                    self._draft_cache_len = max(0, self._draft_cache_len - task.trim)
-
-                result_tokens = []
-                tok = task.token_id
-                for _ in range(task.num_tokens):
-                    current = mx.array([[tok]])
-                    logits = self.generator.model(current, cache=self._draft_cache)
-                    mx.eval(logits)
-                    self._draft_cache_len += 1
-                    tok = logits[0, -1].argmax().item()
-                    result_tokens.append(tok)
+                handler.prefill(task.prefill_token_ids or [])
+            else:
+                result_tokens = handler.draft(task.token_id, task.num_tokens, trim=task.trim)
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
             self.event_sender.send(
@@ -339,7 +321,7 @@ class Runner:
                     chunk=DraftChunk(
                         model=self.model_id,
                         tokens=result_tokens,
-                        cache_len=self._draft_cache_len,
+                        cache_len=handler.cache_len,
                         elapsed_ms=elapsed_ms,
                     ),
                 )
@@ -404,6 +386,8 @@ class Runner:
         logger.info("runner shutting down")
         self.update_status(RunnerShuttingDown())
         self.acknowledge_task(task)
+        from exo.worker.engines.mlx.draft_registry import unregister as _draft_unregister
+        _draft_unregister(self.model_id)
         if isinstance(self.generator, InferenceGenerator):
             self.generator.close()
         mx.clear_cache()

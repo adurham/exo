@@ -257,7 +257,8 @@ class API:
         ] = {}
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
-        self._draft_model: object | None = None  # DraftModel for fast local draft serving
+        self._draft_handler: object | None = None  # cached DraftHandler (wraps runner's model)
+        self._draft_handler_model_id: str = ""
 
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
@@ -2000,34 +2001,29 @@ class API:
     # API → Master (routes to draft instance) → Worker → Runner
     # The runner maintains a persistent KV cache for stateful draft generation.
 
-    def _ensure_local_draft_model(self, model_id: str) -> object | None:
-        """Load draft model in API process for fast local handling.
+    def _get_draft_handler(self, model_id: str) -> object | None:
+        """Get a DraftHandler wrapping the runner's already-loaded model.
 
-        Only loads if a draft instance for this model exists on this node.
-        The instance provides visibility in the UI; the API-local model
-        provides the speed needed for per-token draft requests.
+        Uses a process-global registry — no second model copy is loaded.
         """
-        if self._draft_model is not None:
-            if self._draft_model.model_id == model_id:  # type: ignore
-                return self._draft_model
-        # Check if this model has an instance on any node
-        for inst in self.state.instances.values():
-            if inst.shard_assignments.model_id == model_id:
-                from exo.worker.engines.mlx.draft_server import DraftModel
-                logger.info(f"Loading draft model for fast local serving: {model_id}")
-                self._draft_model = DraftModel(model_id)
-                return self._draft_model
-        return None
+        if self._draft_handler_model_id == model_id and self._draft_handler is not None:
+            return self._draft_handler
+        from exo.worker.engines.mlx.draft_registry import get_handler
+        handler = get_handler(model_id)
+        if handler is not None:
+            self._draft_handler = handler
+            self._draft_handler_model_id = model_id
+        return handler
 
     async def _draft_command(self, body: dict) -> JSONResponse:
-        """Handle draft request locally for speed (no gossip round-trip)."""
+        """Handle draft request using the runner's loaded model (no gossip round-trip)."""
         model = body.get("model", "")
         if not model:
             raise HTTPException(400, "model field required")
 
-        draft = self._ensure_local_draft_model(model)
+        draft = self._get_draft_handler(model)
         if draft is None:
-            raise HTTPException(404, f"No draft instance found for {model}")
+            raise HTTPException(404, f"No loaded model found for {model}")
 
         action = body.get("action", "draft")
         t0 = time.time()
@@ -2064,13 +2060,8 @@ class API:
         return await self._draft_command(body)
 
     async def draft_health(self) -> JSONResponse:
-        # Check if any draft model instance exists
-        draft_models = [
-            inst.shard_assignments.model_id
-            for inst in self.state.instances.values()
-            if any(r.key == "RunnerReady" for r in self.state.runners.get(inst.instance_id, {}).values())  # type: ignore
-        ]
-        return JSONResponse({"status": "ok", "models": draft_models})
+        from exo.worker.engines.mlx.draft_registry import _registry
+        return JSONResponse({"status": "ok", "models": list(_registry.keys())})
 
     async def get_onboarding(self) -> JSONResponse:
         return JSONResponse({"completed": ONBOARDING_COMPLETE_FILE.exists()})
