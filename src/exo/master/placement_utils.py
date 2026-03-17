@@ -245,13 +245,18 @@ def _get_shard_assignments_for_pure_pipeline(
 def get_shard_assignments_for_tensor_parallel(
     model_card: ModelCard,
     cycle: Cycle,
+    draft_node_id: NodeId | None = None,
+    draft_model_id: str | None = None,
 ):
     total_layers = model_card.n_layers
-    world_size = len(cycle)
+    # Draft node doesn't count toward TP world_size
+    tp_nodes = [n for n in cycle if n != draft_node_id]
+    world_size = len(tp_nodes)
     runner_to_shard: dict[RunnerId, ShardMetadata] = {}
     node_to_runner: dict[NodeId, RunnerId] = {}
 
-    for i, node_id in enumerate(cycle):
+    # Assign TP shards to non-draft nodes
+    for i, node_id in enumerate(tp_nodes):
         shard = TensorShardMetadata(
             model_card=model_card,
             device_rank=i,
@@ -260,11 +265,25 @@ def get_shard_assignments_for_tensor_parallel(
             end_layer=total_layers,
             n_layers=total_layers,
         )
-
         runner_id = RunnerId()
-
         runner_to_shard[runner_id] = shard
         node_to_runner[node_id] = runner_id
+
+    # Assign draft shard to draft node
+    if draft_node_id is not None and draft_model_id is not None:
+        from exo.shared.types.worker.shards import DraftShardMetadata
+        draft_shard = DraftShardMetadata(
+            model_card=model_card,
+            device_rank=world_size,  # rank after TP nodes
+            world_size=world_size + 1,  # total group size including draft
+            start_layer=0,
+            end_layer=0,
+            n_layers=total_layers,
+            draft_model_id=draft_model_id,
+        )
+        runner_id = RunnerId()
+        runner_to_shard[runner_id] = draft_shard
+        node_to_runner[draft_node_id] = runner_id
 
     shard_assignments = ShardAssignments(
         model_id=model_card.model_id,

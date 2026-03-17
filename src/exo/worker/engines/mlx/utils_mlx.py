@@ -172,7 +172,24 @@ def load_mlx_items(
     group: Group | None,
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
-) -> tuple[Model, TokenizerWrapper, "Model | None"]:
+) -> tuple[Model, TokenizerWrapper, object | None]:
+    from exo.shared.types.worker.shards import DraftShardMetadata
+
+    # Draft node: load draft model instead of primary, no TP sharding
+    if isinstance(bound_instance.bound_shard, DraftShardMetadata):
+        draft_id = bound_instance.bound_shard.draft_model_id
+        logger.info(f"Draft node: loading draft model {draft_id}")
+        draft_path = build_model_path(ModelId(draft_id))
+        start_time = time.perf_counter()
+        model, _ = load_model(str(draft_path), lazy=True)
+        mx.eval(model)
+        end_time = time.perf_counter()
+        logger.info(f"Draft model loaded in {end_time - start_time:.2f}s")
+        tokenizer = get_tokenizer(draft_path, bound_instance.bound_shard)
+        set_wired_limit_for_model(get_weights_size(bound_instance.bound_shard))
+        mx.clear_cache()
+        return cast(Model, model), tokenizer, None
+
     if group is None:
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
