@@ -514,7 +514,7 @@ place_instance_with_retry() {
     local label="$1"
     local model_id="$2"
     local payload="$3"
-    local max_attempts=10
+    local max_attempts=20
     for attempt in $(seq 1 $max_attempts); do
         # Before each attempt, check if an instance for this model already exists
         local existing
@@ -542,11 +542,11 @@ place_instance_with_retry() {
             return 0
         fi
 
-        # These 400s happen when node_memory/node_network aren't populated yet — retryable
-        if echo "$msg" | grep -q "sufficient memory\|devices to be able to communicate"; then
+        # These 400s happen when node_memory/node_network/RDMA aren't populated yet — retryable
+        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend"; then
             if [ "$attempt" -lt "$max_attempts" ]; then
-                echo "  Attempt $attempt/$max_attempts: cluster state still propagating, retrying in 3s..."
-                sleep 3
+                echo "  Attempt $attempt/$max_attempts: cluster state still propagating, retrying in 5s..."
+                sleep 5
                 continue
             fi
         fi
