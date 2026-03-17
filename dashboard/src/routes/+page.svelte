@@ -828,6 +828,8 @@
   }
   let selectedSharding = $state<"Pipeline" | "Tensor" | "Hybrid">("Pipeline");
   type InstanceMeta = "MlxRing" | "MlxJaccl";
+  let isDraftProvider = $state(false);
+  let useDraftModel = $state("");
 
   // Launch defaults persistence
   const LAUNCH_DEFAULTS_KEY = "exo-launch-defaults-v2";
@@ -5091,7 +5093,7 @@
                           class="flex items-center gap-2 text-white/60 text-xs font-mono"
                         >
                           <span
-                            >{instanceInfo.sharding} &middot; {instanceInfo.instanceType}</span
+                            >{instanceInfo.sharding} &middot; {instanceInfo.instanceType}{#if (instanceModelId ?? "").includes("1.7B") || (instanceModelId ?? "").includes("0.6B")} &middot; <span class="text-teal-400">Draft</span>{/if}</span
                           >
                           <span
                             class="px-1.5 py-0.5 text-[10px] tracking-wider uppercase rounded transition-all duration-300 {isDownloading
@@ -5758,6 +5760,48 @@
                           >
                         </div>
                       {/each}
+                    </div>
+                  </div>
+
+                  <!-- Speculative Decoding -->
+                  <div>
+                    <div class="text-xs text-white/50 font-mono mb-2">
+                      Speculative Decoding:
+                    </div>
+                    <div class="space-y-2">
+                      <label
+                        class="flex items-center gap-2 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          bind:checked={isDraftProvider}
+                          class="w-3.5 h-3.5 accent-exo-yellow cursor-pointer"
+                        />
+                        <span class="text-xs font-mono text-white/70"
+                          >Draft Provider</span
+                        >
+                      </label>
+                      {#if !isDraftProvider}
+                        {@const draftInstances = Object.entries(state?.instances ?? {}).filter(([_, inst]) => {
+                          const modelId = inst?.shardAssignments?.modelId ?? "";
+                          return modelId.includes("1.7B") || modelId.includes("0.6B") || modelId.includes("draft");
+                        })}
+                        {#if draftInstances.length > 0}
+                          <div>
+                            <select
+                              bind:value={useDraftModel}
+                              class="w-full bg-exo-dark-gray border border-exo-medium-gray/50 text-xs font-mono text-white/70 py-1.5 px-2 rounded cursor-pointer focus:border-exo-yellow/50 focus:outline-none"
+                            >
+                              <option value="">No drafter</option>
+                              {#each draftInstances as [_, inst]}
+                                <option value={inst.shardAssignments.modelId}
+                                  >{inst.shardAssignments.modelId?.split("/").pop() ?? "Unknown"}</option
+                                >
+                              {/each}
+                            </select>
+                          </div>
+                        {/if}
+                      {/if}
                     </div>
                   </div>
                 </div>
