@@ -830,6 +830,7 @@
   type InstanceMeta = "MlxRing" | "MlxJaccl";
   let isDraftProvider = $state(false);
   let useDraftModel = $state("");
+  let draftTokens = $state(10);
 
   // Launch defaults persistence
   const LAUNCH_DEFAULTS_KEY = "exo-launch-defaults-v2";
@@ -1363,6 +1364,7 @@
             sharding: selectedSharding,
             instance_meta: selectedInstanceType,
             min_nodes: 1,
+            ...(useDraftModel ? { draft_model: useDraftModel, draft_tokens: draftTokens } : {}),
           }),
         });
       }
@@ -5796,6 +5798,18 @@
                             {/each}
                           </select>
                         </div>
+                        {#if useDraftModel}
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs font-mono text-white/50 whitespace-nowrap">Draft tokens:</span>
+                            <input
+                              type="number"
+                              bind:value={draftTokens}
+                              min="1"
+                              max="50"
+                              class="w-16 bg-exo-dark-gray border border-exo-medium-gray/50 text-xs font-mono text-white/70 py-1 px-2 rounded focus:border-exo-yellow/50 focus:outline-none"
+                            />
+                          </div>
+                        {/if}
                       {/if}
                     </div>
                   </div>
