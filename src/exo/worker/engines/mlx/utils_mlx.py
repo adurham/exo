@@ -203,6 +203,13 @@ def load_mlx_items(
         tokenizer = get_tokenizer(draft_path, bound_instance.bound_shard)
         set_wired_limit_for_model(get_weights_size(bound_instance.bound_shard))
         mx.clear_cache()
+
+        # Participate in the post-load barrier that shard_and_load does.
+        # Studios block on mx_barrier(group) after loading — draft node must match.
+        logger.info("Draft node: participating in post-load barrier")
+        mx_barrier(group)
+        logger.info("Draft node: post-load barrier complete")
+
         return cast(Model, model), tokenizer, None
 
     if group is None:
