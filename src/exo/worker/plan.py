@@ -1,6 +1,7 @@
 # pyright: reportUnusedImport = false
 
 from collections.abc import Mapping, Sequence
+from loguru import logger
 
 from exo.shared.constants import EXO_FILE_SERVER_PORT
 from exo.shared.types.common import CommandId, NodeId
