@@ -129,12 +129,12 @@ def main():
     final_norm = np.ascontiguousarray(to_np32(inner.norm.weight))
     total_bytes += final_norm.nbytes
 
-    # LM head (keep quantized)
+    # LM head — use float32 embedding for tied weights (skip dequant of 155M elements)
     if args.tie_word_embeddings:
-        lm_w = np.ascontiguousarray(to_np_raw(emb.weight))
-        lm_s = np.ascontiguousarray(to_np32(emb.scales))
-        lm_b = np.ascontiguousarray(to_np32(emb.biases)) if emb.biases is not None else None
-        lm_gs = emb.group_size
+        lm_w = embed_np  # already float32
+        lm_s = None  # signal to C code: use float32 path
+        lm_b = None
+        lm_gs = 0
     else:
         lm = model.lm_head
         lm_w = np.ascontiguousarray(to_np_raw(lm.weight))

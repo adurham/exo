@@ -246,9 +246,17 @@ void cpu_draft_q8_forward(
 
     rms_norm(norm, h, final_norm, hidden, 1e-6f);
 
-    /* LM head (quantized) */
-    qvm_8bit(logits_out, norm, lm_head_w, lm_head_s, lm_head_b,
-             vocab_size, hidden, lm_head_gs);
+    /* LM head — use float32 path if available (tied embeddings),
+     * otherwise use quantized path */
+    if (lm_head_s == NULL) {
+        /* Float32 LM head (e.g., tied to dequantized embedding) */
+        const float* lm_f32 = (const float*)lm_head_w;
+        cblas_sgemv(CblasRowMajor, CblasNoTrans,
+                    vocab_size, hidden, 1.0f, lm_f32, hidden, norm, 1, 0.0f, logits_out, 1);
+    } else {
+        qvm_8bit(logits_out, norm, lm_head_w, lm_head_s, lm_head_b,
+                 vocab_size, hidden, lm_head_gs);
+    }
 
     free(h); free(norm); free(buf1); free(buf2); free(buf3); free(proj);
 }
