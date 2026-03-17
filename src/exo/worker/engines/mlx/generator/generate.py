@@ -1135,6 +1135,12 @@ def mlx_generate(
                     f"Model generated unexpected finish_reason: {out.finish_reason}"
                 )
 
+            if _accepted_draft_tokens > 0:
+                logger.info(
+                    f"Speculative decode: {_accepted_draft_tokens}/{completion_tokens} tokens "
+                    f"from draft ({_accepted_draft_tokens / completion_tokens * 100:.1f}%)"
+                )
+
             usage = Usage(
                 prompt_tokens=total_prompt_tokens,
                 completion_tokens=completion_tokens,
