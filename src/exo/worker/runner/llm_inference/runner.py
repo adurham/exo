@@ -390,14 +390,15 @@ class Runner:
                         continue
                     def _routable(ip: str) -> bool:
                         return bool(ip) and ":" not in ip and not ip.startswith("127.") and not ip.startswith("fe80") and not ip.startswith("169.254")
-                    # Priority: wifi/ethernet > thunderbolt > unknown (tailscale etc)
-                    _priority = {"wifi": 0, "ethernet": 0, "thunderbolt": 1}
+                    # Priority: thunderbolt > ethernet > wifi > unknown
+                    # Matches codebase-wide convention (Ring topology, P2P downloads)
+                    _priority = {"thunderbolt": 0, "maybe_ethernet": 1, "ethernet": 2, "wifi": 3}
                     candidates: list[tuple[int, str]] = []
                     for iface in net_info.get("interfaces", []):
                         ip = iface.get("ipAddress", "")
                         iface_type = iface.get("interfaceType", "")
                         if _routable(ip):
-                            pri = _priority.get(iface_type, 2)
+                            pri = _priority.get(iface_type, 4)
                             candidates.append((pri, ip))
                     if candidates:
                         candidates.sort()

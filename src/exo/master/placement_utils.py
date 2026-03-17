@@ -499,7 +499,7 @@ def _find_ip_prioritised(
 ) -> str | None:
     """Find an IP address between nodes with prioritization.
 
-    Priority: ethernet > wifi > unknown > thunderbolt
+    Priority: thunderbolt > maybe_ethernet > ethernet > wifi > unknown
     """
     ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
     if not ips:
@@ -520,14 +520,14 @@ def _find_ip_prioritised(
             "unknown": 4,
         }
 
-    # RDMA prefers ethernet coordinator
+    # RDMA also prioritises fastest connection (thunderbolt)
     else:
         priority = {
-            "ethernet": 0,
-            "wifi": 1,
-            "unknown": 2,
-            "maybe_ethernet": 3,
-            "thunderbolt": 4,
+            "thunderbolt": 0,
+            "maybe_ethernet": 1,
+            "ethernet": 2,
+            "wifi": 3,
+            "unknown": 4,
         }
     return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 2))
 
