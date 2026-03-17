@@ -253,6 +253,8 @@ class Node:
                             ),
                         )
                         self._tg.start_soon(self.worker.run)
+                        if self.api:
+                            self.api.set_worker(self.worker)
                     if self.api:
                         self.api.reset(result.won_clock, self.event_router.receiver())
                 else:
