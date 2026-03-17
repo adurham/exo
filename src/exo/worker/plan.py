@@ -76,12 +76,14 @@ def _kill_runner(
     for runner in runners.values():
         runner_id = runner.bound_instance.bound_runner_id
         if (instance_id := runner.bound_instance.instance.instance_id) not in instances:
+            logger.debug(f"_kill_runner: instance {instance_id} not in instances → Shutdown")
             return Shutdown(instance_id=instance_id, runner_id=runner_id)
 
         # Shut down our own runner if it crashed (e.g. signal 6 OOM) so that
         # _create_runner can restart it on the next plan cycle.  The worker
         # gates CreateRunner on a memory check to avoid crash loops.
         if isinstance(runner.status, RunnerFailed):
+            logger.info(f"_kill_runner: own runner {runner_id} is RunnerFailed → Shutdown")
             return Shutdown(
                 instance_id=runner.bound_instance.instance.instance_id,
                 runner_id=runner_id,
@@ -93,7 +95,12 @@ def _kill_runner(
             if runner_id == global_runner_id:
                 continue
 
-            if isinstance(all_runners.get(global_runner_id, None), RunnerFailed):
+            peer_status = all_runners.get(global_runner_id, None)
+            if isinstance(peer_status, RunnerFailed):
+                logger.info(
+                    f"_kill_runner: peer runner {global_runner_id} is RunnerFailed "
+                    f"(our runner={runner_id}) → Shutdown"
+                )
                 return Shutdown(
                     instance_id=instance_id,
                     runner_id=runner_id,
