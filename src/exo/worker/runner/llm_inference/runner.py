@@ -439,8 +439,8 @@ class Runner:
     def _try_connect_draft(self) -> None:
         """Lazy DraftClient init — retries if the draft instance wasn't ready at load time."""
         assert isinstance(self.generator, InferenceGenerator)
-        if self.generator.draft_model is not None:
-            return  # Already connected
+        if self.generator.draft_model is not None and hasattr(self.generator.draft_model, 'prefill'):
+            return  # Already connected with TCP draft
         _draft_model_id = self.bound_instance.instance.draft_model
         _draft_tokens = self.bound_instance.instance.draft_tokens
         if not _draft_model_id or self.device_rank != 0:
@@ -455,6 +455,11 @@ class Runner:
                     draft_model=_draft_model_id,
                 )
                 logger.info(f"Draft client connected (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
+                if isinstance(self.generator, BatchGenerator):
+                    logger.warning(
+                        "Draft client connected but BatchGenerator is active — "
+                        "speculative decoding requires SequentialGenerator (restart needed)"
+                    )
         except Exception as e:
             logger.debug(f"Draft client not yet available: {e}")
 
@@ -624,8 +629,12 @@ class Builder:
         kv_prefix_cache = KVPrefixCache(self.group)
 
         device_rank = 0 if self.group is None else self.group.rank()
-        if os.environ.get("EXO_NO_BATCH"):
-            logger.info("using SequentialGenerator (batching disabled)")
+        _use_sequential = bool(os.environ.get("EXO_NO_BATCH"))
+        if not _use_sequential and self.draft_model is not None and hasattr(self.draft_model, 'prefill'):
+            _use_sequential = True
+            logger.info("using SequentialGenerator (TCP draft model requires speculative path)")
+        if _use_sequential:
+            logger.info("using SequentialGenerator")
             return SequentialGenerator(
                 model=self.inference_model,
                 tokenizer=self.tokenizer,
