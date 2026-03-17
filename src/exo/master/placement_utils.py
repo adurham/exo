@@ -422,8 +422,13 @@ def get_shard_assignments_for_hybrid_parallel(
         device_rank = pp_tail_rank + i
 
         if draft_model_id:
-            # Draft mode: PP tail loads draft model, sends predictions to TP master
-            # Give it 0 layers of the primary model — it only runs the draft
+            # Draft mode: PP tail loads draft model for speculative decoding.
+            # IMPORTANT: TP nodes must NOT have pipeline_send_to/recv_from set,
+            # because that would wrap their layers with HybridPipelineLastLayer
+            # which calls all_gather on the full group — the draft node won't
+            # participate in those collectives → deadlock.
+            # Draft token exchange is handled separately by RDMADraftClient/
+            # draft_provider_loop using point-to-point send/recv.
             shard = HybridShardMetadata(
                 model_card=model_card,
                 device_rank=device_rank,
@@ -435,12 +440,11 @@ def get_shard_assignments_for_hybrid_parallel(
                 tp_rank=-1,
                 pp_rank=1,
                 pp_size=pp_size,
-                pipeline_send_to=tp_master_rank,  # sends draft tokens TO TP master
-                pipeline_recv_from=tp_master_rank,  # receives current token FROM TP master
+                pipeline_send_to=tp_master_rank,
+                pipeline_recv_from=tp_master_rank,
                 draft_model_id=draft_model_id,
             )
-            # TP master layers get the full model (no PP split)
-            # Override TP shards to use all layers
+            # TP nodes get all layers, NO pipeline send/recv (pure TP)
             for rid, existing_shard in runner_to_shard.items():
                 if isinstance(existing_shard, HybridShardMetadata) and existing_shard.tp_rank >= 0:
                     runner_to_shard[rid] = HybridShardMetadata(
@@ -454,8 +458,8 @@ def get_shard_assignments_for_hybrid_parallel(
                         tp_rank=existing_shard.tp_rank,
                         pp_rank=0,
                         pp_size=pp_size,
-                        pipeline_send_to=device_rank if existing_shard.tp_rank == 0 else None,
-                        pipeline_recv_from=device_rank if existing_shard.tp_rank == 0 else None,
+                        pipeline_send_to=None,  # NO pipeline wrapping
+                        pipeline_recv_from=None,  # draft exchange is separate
                     )
         else:
             shard = HybridShardMetadata(

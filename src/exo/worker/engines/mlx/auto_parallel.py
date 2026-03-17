@@ -876,8 +876,14 @@ def hybrid_auto_parallel(
             recv_from=model_shard_meta.pipeline_recv_from,
         )
 
+    # Skip ALL pipeline wrapping when draft mode is active.
+    # Draft node doesn't participate in all_gather/send/recv during model forward.
+    # Draft token exchange is handled separately by RDMADraftClient.
+    _has_real_pp_tail = (model_shard_meta.pipeline_send_to is not None
+                         or model_shard_meta.pipeline_recv_from is not None)
+
     # TP-master's last layer sends to PP tail + participates in decode all_gather
-    if model_shard_meta.pipeline_send_to is not None:
+    if model_shard_meta.pipeline_send_to is not None and _has_real_pp_tail:
         layers[-1] = HybridPipelineLastLayer(
             layers[-1],
             model_shard_meta.device_rank,
@@ -886,14 +892,14 @@ def hybrid_auto_parallel(
             send_to=model_shard_meta.pipeline_send_to,
         )
     # TP non-master: no send, but must participate in decode all_gather
-    elif is_tp_node and model_shard_meta.pipeline_send_to is None:
+    elif is_tp_node and _has_real_pp_tail:
         layers[-1] = HybridPipelinePassthroughLayer(
             layers[-1],
             group=group,
         )
 
     # PP tail's last layer is the final pipeline stage — needs all_gather for decode
-    if model_shard_meta.pp_rank == model_shard_meta.pp_size - 1:
+    if model_shard_meta.pp_rank == model_shard_meta.pp_size - 1 and _has_real_pp_tail:
         # Only wrap if not already wrapped by one of the above
         if not isinstance(layers[-1], (HybridPipelineLastLayer, HybridPipelinePassthroughLayer)):
             layers[-1] = PipelineLastLayer(
