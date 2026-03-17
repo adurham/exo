@@ -641,6 +641,10 @@ class _TpDraftWrapper:
         actual_len = rank0_data[0]
         self._result = rank0_data[1:1 + actual_len] if actual_len > 0 else []
 
+    def reset_cache(self) -> None:
+        if self._client is not None and hasattr(self._client, 'reset_cache'):
+            self._client.reset_cache()
+
     def shutdown(self) -> None:
         if self._client is not None and hasattr(self._client, 'shutdown'):
             self._client.shutdown()
