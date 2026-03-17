@@ -930,6 +930,11 @@ def mlx_generate(
           kv_bits=KV_BITS,
       )
       if _draft_model is not None:
+          # speculative_generate_step splits prompt_cache into model + draft portions.
+          # Append draft cache entries so it can find them.
+          from mlx_lm.models.cache import make_prompt_cache
+          draft_cache = make_prompt_cache(_draft_model)
+          _gen_kwargs["prompt_cache"] = caches + draft_cache
           _gen_kwargs["draft_model"] = _draft_model
           _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
 
