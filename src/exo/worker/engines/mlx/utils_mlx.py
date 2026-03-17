@@ -275,7 +275,17 @@ def load_mlx_items(
             logger.warning(f"Failed to init RDMA draft client: {e}")
             draft_client = None
 
-    return cast(Model, model), tokenizer, draft_client
+    # If the model has a TP sub-group (from hybrid_auto_parallel), use it for
+    # collective ops in the generator. The full group includes the draft node
+    # which doesn't participate in agree_on_tasks/mx_any → deadlock.
+    tp_group = getattr(model, '_tp_group', None)
+    if tp_group is not None:
+        logger.info(
+            f"Using TP sub-group for collective ops "
+            f"(size={tp_group.size()}, rank={tp_group.rank()})"
+        )
+
+    return cast(Model, model), tokenizer, draft_client, tp_group
 
 
 def shard_and_load(

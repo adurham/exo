@@ -833,6 +833,11 @@ def hybrid_auto_parallel(
         f"tp_group.size()={tp_group.size()} tp_group.rank()={tp_group.rank()}"
     )
 
+    # Stash TP sub-group on the model so load_mlx_items can retrieve it.
+    # Generators must use tp_group (not the full group) for collective ops
+    # like agree_on_tasks/mx_any — the draft node won't participate in those.
+    model._tp_group = tp_group  # type: ignore[reportAttributeAccessIssue]
+
     # Apply tensor parallelism to TP nodes
     if is_tp_node and tp_group.size() > 1:
         logger.info(f"[hybrid] rank={model_shard_meta.device_rank} applying tensor_auto_parallel")

@@ -213,7 +213,7 @@ class Runner:
                 assert (
                     ModelTask.TextGeneration in self.shard_metadata.model_card.tasks
                 ), f"Incorrect model task(s): {self.shard_metadata.model_card.tasks}"
-                self.generator.inference_model, self.generator.tokenizer, self.generator.draft_model = (
+                self.generator.inference_model, self.generator.tokenizer, self.generator.draft_model, tp_group = (
                     load_mlx_items(
                         self.bound_instance,
                         self.generator.group,
@@ -221,6 +221,13 @@ class Runner:
                         on_layer_loaded=on_layer_loaded,
                     )
                 )
+                # Save full group for warmup barriers (all 3 nodes participate),
+                # then switch to TP sub-group for runtime collective ops
+                # (agree_on_tasks/mx_any). The draft node doesn't participate
+                # in those → using the full group would deadlock.
+                self._full_group = self.generator.group
+                if tp_group is not None:
+                    self.generator.group = tp_group
                 # Check if this node is a draft provider
                 from exo.shared.types.worker.shards import HybridShardMetadata
                 if (isinstance(self.shard_metadata, HybridShardMetadata)
@@ -244,7 +251,7 @@ class Runner:
                 self.update_status(RunnerWarmingUp())
                 self.acknowledge_task(task)
 
-                self.generator.warmup()
+                self.generator.warmup(warmup_group=getattr(self, '_full_group', None))
 
                 logger.info(
                     f"runner initialized in {time.time() - self.setup_start_time} seconds"

@@ -88,7 +88,7 @@ class InferenceGenerator(ABC):
             ht.value = HEARTBEAT_TIMEOUT_SECONDS  # pyright: ignore[reportAttributeAccessIssue]
 
     @abstractmethod
-    def warmup(self) -> None: ...
+    def warmup(self, warmup_group: object | None = None) -> None: ...
 
     @abstractmethod
     def submit(
@@ -161,11 +161,15 @@ class SequentialGenerator(InferenceGenerator):
         | None
     ) = field(default=None, init=False)
 
-    def warmup(self):
+    def warmup(self, warmup_group: object | None = None):
+        # Use warmup_group (full JACCL group) for barriers during warmup
+        # so all nodes (including draft) participate. Fall back to self.group.
+        import mlx.core as _mx
+        wg = warmup_group if isinstance(warmup_group, _mx.distributed.Group) else self.group
         self.check_for_cancel_every = warmup_inference(
             model=self.model,
             tokenizer=self.tokenizer,
-            group=self.group,
+            group=wg,
             model_id=self.model_id,
             is_draft_node=self.is_draft_node,
         )
@@ -439,11 +443,13 @@ class BatchGenerator(InferenceGenerator):
             draft_model=self.draft_model,
         )
 
-    def warmup(self):
+    def warmup(self, warmup_group: object | None = None):
+        import mlx.core as _mx
+        wg = warmup_group if isinstance(warmup_group, _mx.distributed.Group) else self.group
         self.check_for_cancel_every = warmup_inference(
             model=self.model,
             tokenizer=self.tokenizer,
-            group=self.group,
+            group=wg,
             model_id=self.model_id,
             is_draft_node=self.is_draft_node,
         )
