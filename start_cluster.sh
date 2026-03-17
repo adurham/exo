@@ -604,7 +604,7 @@ fi
 echo "Creating Qwen3-1.7B draft model instance (MacBook, speculative decoding)..."
 if place_instance_with_retry "Qwen3-1.7B-draft" "mlx-community/Qwen3-1.7B-8bit" "{
     \"model_id\": \"mlx-community/Qwen3-1.7B-8bit\",
-    \"sharding\": \"Tensor\",
+    \"sharding\": \"Pipeline\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
     \"max_context_tokens\": 4096
