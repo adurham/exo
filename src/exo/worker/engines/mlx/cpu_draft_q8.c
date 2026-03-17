@@ -42,25 +42,55 @@ static void dequant_to_scratch(
     const float* biases,
     int out_dim, int in_dim, int group_size
 ) {
-    int pack = 4;
-    int in_packed = in_dim / pack;
     int n_groups = in_dim / group_size;
 
     for (int j = 0; j < out_dim; j++) {
-        const uint32_t* wrow = src + j * in_packed;
+        /* Treat packed uint32 as raw uint8 bytes */
+        const uint8_t* raw = (const uint8_t*)(src + j * (in_dim / 4));
         float* drow = dst + j * in_dim;
-        int idx = 0;
 
         for (int g = 0; g < n_groups; g++) {
             float s = scales[j * n_groups + g];
             float b = biases ? biases[j * n_groups + g] : 0.0f;
+            float32x4_t vs = vdupq_n_f32(s);
+            float32x4_t vb = vdupq_n_f32(b);
 
-            for (int p = 0; p < group_size / pack; p++) {
-                uint32_t packed = wrow[idx++];
-                for (int k = 0; k < pack; k++) {
-                    uint8_t q = (packed >> (8 * k)) & 0xFF;
-                    *drow++ = s * (float)q + b;
-                }
+            int gstart = g * group_size;
+            const uint8_t* graw = raw + gstart;
+            float* gdst = drow + gstart;
+
+            /* Process 16 uint8 values at a time with NEON */
+            int k = 0;
+            for (; k + 15 < group_size; k += 16) {
+                uint8x16_t q8 = vld1q_u8(graw + k);
+
+                /* Split into two halves, extend to float32 */
+                uint8x8_t lo8 = vget_low_u8(q8);
+                uint8x8_t hi8 = vget_high_u8(q8);
+
+                uint16x8_t lo16 = vmovl_u8(lo8);
+                uint16x8_t hi16 = vmovl_u8(hi8);
+
+                /* 4 float32x4 vectors */
+                float32x4_t f0 = vcvtq_f32_u32(vmovl_u16(vget_low_u16(lo16)));
+                float32x4_t f1 = vcvtq_f32_u32(vmovl_u16(vget_high_u16(lo16)));
+                float32x4_t f2 = vcvtq_f32_u32(vmovl_u16(vget_low_u16(hi16)));
+                float32x4_t f3 = vcvtq_f32_u32(vmovl_u16(vget_high_u16(hi16)));
+
+                /* scale * q + bias */
+                f0 = vmlaq_f32(vb, vs, f0);
+                f1 = vmlaq_f32(vb, vs, f1);
+                f2 = vmlaq_f32(vb, vs, f2);
+                f3 = vmlaq_f32(vb, vs, f3);
+
+                vst1q_f32(gdst + k,      f0);
+                vst1q_f32(gdst + k + 4,  f1);
+                vst1q_f32(gdst + k + 8,  f2);
+                vst1q_f32(gdst + k + 12, f3);
+            }
+            /* Remainder */
+            for (; k < group_size; k++) {
+                gdst[k] = s * (float)graw[k] + b;
             }
         }
     }
