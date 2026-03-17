@@ -22,7 +22,7 @@
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
-: "${EXO_DRAFT_SERVER:=http://192.168.86.203:8199}"
+: "${EXO_DRAFT_SERVER:=http://192.168.86.203:52415}"
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
 : "${EXO_SPECULATIVE_DRAFT_TOKENS:=10}"
 : "${LOG_LEVEL:=DEBUG}"
@@ -426,6 +426,9 @@ for NODE in "${NODES[@]}"; do
         # 4 entries × ~10K avg × 48KB/tok = ~1.9GB.  25GB model + 2GB KV ≈ 75% of 36GB.
         # Memory pressure eviction handles edge cases.
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
+        # Draft model: loaded lazily by the API process on first draft request.
+        # The draft model instance (1.7B) also shows as a regular exo instance.
+        EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
@@ -436,13 +439,6 @@ for NODE in "${NODES[@]}"; do
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo > ~/exo.log 2>&1'"
     fi
 done
-
-# 3b. Start draft server on MacBook (if configured)
-if [ -n "$EXO_DRAFT_MODEL" ] && [ -n "$EXO_DRAFT_SERVER" ]; then
-    echo "Starting draft server on macbook-m4 (model=$EXO_DRAFT_MODEL)..."
-    ssh macbook-m4 "pkill -f 'draft_server' || true"
-    ssh macbook-m4 "screen -dmS draft zsh -l -c 'cd ~/repos/exo && .venv/bin/python -m exo.worker.engines.mlx.draft_server --model $EXO_DRAFT_MODEL --port 8199 > ~/draft.log 2>&1'"
-fi
 
 # 4. Health Check / Topology Verification
 # Wait for all 3 nodes AND their identities (friendlyName) to be populated.
@@ -601,6 +597,17 @@ if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
     \"max_context_tokens\": 50000
+}"; then
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+fi
+
+echo "Creating Qwen3-1.7B draft model instance (MacBook, speculative decoding)..."
+if place_instance_with_retry "Qwen3-1.7B-draft" "mlx-community/Qwen3-1.7B-8bit" "{
+    \"model_id\": \"mlx-community/Qwen3-1.7B-8bit\",
+    \"sharding\": \"Tensor\",
+    \"min_nodes\": 1,
+    \"node_ids\": [\"$MBP_NODE_ID\"],
+    \"max_context_tokens\": 4096
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi

@@ -35,7 +35,7 @@ class DraftClient:
             t0 = time.perf_counter()
             data = json.dumps({"token_ids": token_ids}).encode()
             req = urllib.request.Request(
-                f"{self.server_url}/prefill",
+                f"{self.server_url}/v1/draft/prefill",
                 data=data,
                 headers={"Content-Type": "application/json"},
             )
@@ -74,7 +74,7 @@ class DraftClient:
                     "trim": trim,
                 }).encode()
                 req = urllib.request.Request(
-                    f"{self.server_url}/draft",
+                    f"{self.server_url}/v1/draft",
                     data=data,
                     headers={"Content-Type": "application/json"},
                 )
@@ -114,7 +114,7 @@ class DraftClient:
         """Reset the remote draft model's KV cache."""
         try:
             req = urllib.request.Request(
-                f"{self.server_url}/reset",
+                f"{self.server_url}/v1/draft/reset",
                 data=b'{}',
                 headers={"Content-Type": "application/json"},
             )
@@ -134,7 +134,7 @@ class DraftClient:
     @property
     def is_alive(self) -> bool:
         try:
-            urllib.request.urlopen(f"{self.server_url}/health", timeout=2.0)
+            urllib.request.urlopen(f"{self.server_url}/v1/draft/health", timeout=2.0)
             return True
         except Exception:
             return False

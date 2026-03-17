@@ -256,6 +256,7 @@ class API:
         ] = {}
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
+        self._draft_model: object | None = None  # DraftModel instance, loaded lazily
 
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
@@ -343,6 +344,12 @@ class API:
         self.app.post("/ollama/api/show")(self.ollama_show)
         self.app.get("/ollama/api/ps")(self.ollama_ps)
         self.app.get("/ollama/api/version")(self.ollama_version)
+
+        # Draft endpoints for speculative decoding
+        self.app.post("/v1/draft")(self.draft_generate)
+        self.app.post("/v1/draft/prefill")(self.draft_prefill)
+        self.app.post("/v1/draft/reset")(self.draft_reset)
+        self.app.get("/v1/draft/health")(self.draft_health)
 
         self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(self.stream_events)
@@ -1982,6 +1989,61 @@ class API:
             else:
                 not_found.append(task_id)
         return DeleteTracesResponse(deleted=deleted, not_found=not_found)
+
+    # ── Draft endpoints for speculative decoding ──────────────────────
+    # The draft model is loaded lazily in the API process when the first
+    # draft request arrives. It stays loaded for the lifetime of the process.
+    # This is separate from the runner — the draft model is small (~2GB)
+    # and serves stateful token-level requests that need KV cache persistence.
+
+    def _ensure_draft_model(self) -> object:
+        if self._draft_model is not None:
+            return self._draft_model
+        import os
+        draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
+        if not draft_model_id:
+            raise HTTPException(400, "EXO_DRAFT_MODEL not configured")
+        from exo.worker.engines.mlx.draft_server import DraftModel
+        logger.info(f"Loading draft model in API process: {draft_model_id}")
+        self._draft_model = DraftModel(draft_model_id)
+        logger.info(f"Draft model ready: {draft_model_id}")
+        return self._draft_model
+
+    async def draft_generate(self, request: Request) -> JSONResponse:
+        body = await request.json()
+        token_id = body.get("token_id", 1)
+        num_tokens = body.get("num_tokens", 10)
+        trim = body.get("trim", 0)
+
+        draft = self._ensure_draft_model()
+        t0 = time.time()
+        tokens = draft.draft(token_id, num_tokens, trim=trim)  # type: ignore
+        elapsed_ms = (time.time() - t0) * 1000
+        return JSONResponse({"tokens": tokens, "elapsed_ms": elapsed_ms})
+
+    async def draft_prefill(self, request: Request) -> JSONResponse:
+        body = await request.json()
+        token_ids = body.get("token_ids", [])
+
+        draft = self._ensure_draft_model()
+        t0 = time.time()
+        cache_len = draft.prefill(token_ids)  # type: ignore
+        elapsed_ms = (time.time() - t0) * 1000
+        return JSONResponse({"cache_len": cache_len, "elapsed_ms": elapsed_ms})
+
+    async def draft_reset(self, request: Request) -> JSONResponse:
+        draft = self._ensure_draft_model()
+        draft.reset()  # type: ignore
+        return JSONResponse({"status": "ok"})
+
+    async def draft_health(self) -> JSONResponse:
+        if self._draft_model is None:
+            return JSONResponse({"status": "not_loaded", "model": None})
+        return JSONResponse({
+            "status": "ok",
+            "cache_len": self._draft_model.cache_len,  # type: ignore
+            "model": self._draft_model.model_id,  # type: ignore
+        })
 
     async def get_onboarding(self) -> JSONResponse:
         return JSONResponse({"completed": ONBOARDING_COMPLETE_FILE.exists()})
