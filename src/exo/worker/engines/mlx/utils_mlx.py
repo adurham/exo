@@ -210,7 +210,7 @@ def load_mlx_items(
         mx_barrier(group)
         logger.info("Draft node: post-load barrier complete")
 
-        return cast(Model, model), tokenizer, None
+        return cast(Model, model), tokenizer, None, None
 
     if group is None:
         logger.info(f"Single device used for {bound_instance.instance}")
