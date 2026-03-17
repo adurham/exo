@@ -49,6 +49,8 @@ class PlaceInstance(BaseCommand):
     instance_meta: InstanceMeta
     min_nodes: int
     max_context_tokens: int | None = None
+    draft_model: str | None = None
+    draft_tokens: int = 10
 
 
 class CreateInstance(BaseCommand):

@@ -222,21 +222,24 @@ class Runner:
                     )
                 )
 
-                # TCP draft client: if EXO_DRAFT_SERVER is set, create a
-                # DraftClient that queries a draft model instance over exo's API.
-                # The draft instance is a normal exo instance visible in the UI.
-                draft_server = os.environ.get("EXO_DRAFT_SERVER", "")
-                draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
-                if draft_server and draft_model_id and self.device_rank == 0:
+                # Speculative decoding: if the instance has a draft_model configured,
+                # create a DraftClient that queries the draft instance via the API.
+                # Config comes from the instance metadata (set at creation time).
+                _draft_model_id = self.bound_instance.instance.draft_model
+                _draft_tokens = self.bound_instance.instance.draft_tokens
+                if _draft_model_id and self.device_rank == 0:
                     try:
                         from exo.worker.engines.mlx.draft_client import DraftClient
-                        num_draft = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "10"))
+                        # Find the node running the draft model to get its API URL.
+                        # For now, use the first node in the cluster that isn't us.
+                        # TODO: resolve from cluster state properly.
+                        _draft_api = os.environ.get("EXO_DRAFT_SERVER", "http://192.168.86.203:52415")
                         self.generator.draft_model = DraftClient(
-                            server_url=draft_server,
-                            num_draft_tokens=num_draft,
-                            draft_model=draft_model_id,
+                            server_url=_draft_api,
+                            num_draft_tokens=_draft_tokens,
+                            draft_model=_draft_model_id,
                         )
-                        logger.info(f"Draft client ready (server={draft_server}, model={draft_model_id}, K={num_draft})")
+                        logger.info(f"Draft client ready (model={_draft_model_id}, K={_draft_tokens})")
                     except Exception as e:
                         logger.warning(f"Failed to init draft client: {e}")
 

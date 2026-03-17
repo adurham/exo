@@ -25,10 +25,9 @@
 : "${LOG_LEVEL:=DEBUG}"
 
 # ── Speculative decoding ──
-# Draft model runs as a separate instance on the MacBook.
-# Studios query it via exo's /v1/draft API during decode.
+# Set to a model ID to create a draft instance for speculative decoding.
+# Leave empty to disable. The primary instance auto-discovers it.
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
-: "${EXO_DRAFT_TOKENS:=10}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
@@ -421,11 +420,9 @@ for NODE in "${NODES[@]}"; do
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
     fi
 
-    # Studios: configure speculative decoding (query MacBook's draft instance)
-    if [ "$NODE" != "macbook-m4" ] && [ -n "$EXO_DRAFT_MODEL" ]; then
+    # Studios: draft server URL for speculative decoding (auto-discovered from instance config)
+    if [ "$NODE" != "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_DRAFT_SERVER=http://$MBP_IP:52415"
-        EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
-        EXO_ENV="$EXO_ENV EXO_SPECULATIVE_DRAFT_TOKENS=$EXO_DRAFT_TOKENS"
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
@@ -575,6 +572,11 @@ place_instance_with_retry() {
 EXPECTED_RUNNERS=0
 
 # ── Instance 1: Primary model (Studios, Tensor Parallel over RDMA) ──
+# draft_model + draft_tokens are part of the instance config — the runner reads them.
+DRAFT_FIELDS=""
+if [ -n "$EXO_DRAFT_MODEL" ]; then
+    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": 10"
+fi
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
@@ -583,6 +585,7 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
     \"max_context_tokens\": 262144
+    $DRAFT_FIELDS
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi

@@ -380,6 +380,8 @@ class API:
                         sharding=payload.sharding,
                         instance_meta=payload.instance_meta,
                         min_nodes=payload.min_nodes,
+                        draft_model=payload.draft_model,
+                        draft_tokens=payload.draft_tokens,
                     ),
                     node_memory=self.state.node_memory,
                     node_network=self.state.node_network,
@@ -413,6 +415,8 @@ class API:
             instance_meta=payload.instance_meta,
             min_nodes=payload.min_nodes,
             max_context_tokens=effective_limit,
+            draft_model=payload.draft_model,
+            draft_tokens=payload.draft_tokens,
         )
         await self._send(command)
 

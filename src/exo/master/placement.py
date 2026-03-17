@@ -196,6 +196,8 @@ def place_instance(
                 jaccl_devices=mlx_jaccl_devices,
                 jaccl_coordinators=mlx_jaccl_coordinators,
                 max_context_tokens=max_context_tokens,
+                draft_model=command.draft_model,
+                draft_tokens=command.draft_tokens,
             )
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
@@ -211,6 +213,8 @@ def place_instance(
                 hosts_by_node=hosts_by_node,
                 ephemeral_port=ephemeral_port,
                 max_context_tokens=max_context_tokens,
+                draft_model=command.draft_model,
+                draft_tokens=command.draft_tokens,
             )
 
     return target_instances
