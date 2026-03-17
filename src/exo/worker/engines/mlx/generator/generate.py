@@ -925,19 +925,29 @@ def mlx_generate(
 
     _generation_logged = False
     try:
+      _gen_kwargs = dict(
+          model=model,
+          tokenizer=tokenizer,
+          prompt=last_token,
+          max_tokens=max_tokens,
+          sampler=sampler,
+          logits_processors=logits_processors,
+          prompt_cache=caches,
+          prefill_step_size=1,
+          kv_group_size=KV_GROUP_SIZE,
+          kv_bits=KV_BITS,
+      )
+      if _cpu_draft is not None:
+          _cpu_draft.reset_cache()
+          # Feed prompt tokens to CPU draft model's cache
+          if isinstance(last_token, mx.array):
+              for t in last_token.tolist():
+                  _cpu_draft._forward_one(t)
+          _gen_kwargs["cpu_draft_fn"] = _cpu_draft.draft_sync
+          _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
+
       for completion_tokens, out in enumerate(
-        stream_generate(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=last_token,
-            max_tokens=max_tokens,
-            sampler=sampler,
-            logits_processors=logits_processors,
-            prompt_cache=caches,
-            prefill_step_size=1,
-            kv_group_size=KV_GROUP_SIZE,
-            kv_bits=KV_BITS,
-        ),
+        stream_generate(**_gen_kwargs),
         start=1,
       ):
         generated_text_parts.append(out.text)
