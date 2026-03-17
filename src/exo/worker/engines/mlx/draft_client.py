@@ -3,37 +3,75 @@
 Non-blocking API — request_draft starts the HTTP call in a background
 thread, get_result checks if the response arrived.
 
-The HTTP request goes over the Thunderbolt network to the MacBook,
-which runs the draft server with the 0.6B model on its own GPU.
-Zero GPU contention on the Studios.
+The HTTP request goes over TCP to whichever node runs the draft server.
+Zero GPU contention on the primary model's nodes.
+
+Set EXO_DRAFT_SERVER=http://<host>:8199 to enable.
 """
 import json
 import threading
+import time
 import urllib.request
+
+from exo.worker.runner.bootstrap import logger
 
 
 class DraftClient:
     """Non-blocking client for the draft token server."""
 
-    def __init__(self, server_url: str):
+    def __init__(self, server_url: str, num_draft_tokens: int = 10):
         self.server_url = server_url.rstrip('/')
-        self._thread = None
-        self._result = None
+        self.num_draft_tokens = num_draft_tokens
+        self._thread: threading.Thread | None = None
+        self._result: list[int] | None = None
         self._pending = False
+        self._num_to_trim = 0
+        self._step = 0
+        self._total_exchange_ms = 0.0
 
-    def request_draft(self, token_id: int, num_tokens: int):
+    def prefill(self, token_ids: list[int]) -> int | None:
+        """Prefill the draft model's KV cache with prompt tokens. Blocking."""
+        try:
+            t0 = time.perf_counter()
+            data = json.dumps({"token_ids": token_ids}).encode()
+            req = urllib.request.Request(
+                f"{self.server_url}/prefill",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30.0) as resp:
+                result = json.loads(resp.read())
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                cache_len = result.get("cache_len", 0)
+                logger.info(
+                    f"Draft prefill: {len(token_ids)} tokens → cache_len={cache_len} "
+                    f"in {elapsed_ms:.1f}ms"
+                )
+                return cache_len
+        except Exception as e:
+            logger.warning(f"Draft prefill failed: {e}")
+            return None
+
+    def request_draft(self, token_id: int, num_tokens: int = 0):
         """Start a draft request in a background thread. Non-blocking."""
         if self._thread is not None and self._thread.is_alive():
             return  # previous request still running
 
+        num = num_tokens or self.num_draft_tokens
+        trim = self._num_to_trim
+        self._num_to_trim = 0
         self._result = None
         self._pending = True
+        self._step += 1
+        step = self._step
 
         def _fetch():
+            t0 = time.perf_counter()
             try:
                 data = json.dumps({
                     "token_id": token_id,
-                    "num_tokens": num_tokens,
+                    "num_tokens": num,
+                    "trim": trim,
                 }).encode()
                 req = urllib.request.Request(
                     f"{self.server_url}/draft",
@@ -43,13 +81,26 @@ class DraftClient:
                 with urllib.request.urlopen(req, timeout=5.0) as resp:
                     result = json.loads(resp.read())
                     self._result = result.get("tokens")
-            except Exception:
+                    elapsed_ms = (time.perf_counter() - t0) * 1000
+                    self._total_exchange_ms += elapsed_ms
+                    if step <= 5 or step % 50 == 0:
+                        logger.info(
+                            f"Draft exchange step {step}: {elapsed_ms:.1f}ms "
+                            f"(token={token_id}, trim={trim}, got {len(self._result)} drafts)"
+                        )
+            except Exception as e:
+                if step <= 5:
+                    logger.warning(f"Draft exchange failed at step {step}: {e}")
                 self._result = None
 
         self._thread = threading.Thread(target=_fetch, daemon=True)
         self._thread.start()
 
-    def get_result(self) -> list | None:
+    def set_trim(self, num_rejected: int):
+        """Set how many tokens the draft server should trim on next request."""
+        self._num_to_trim = num_rejected
+
+    def get_result(self) -> list[int] | None:
         """Get draft result. Non-blocking — returns None if not ready."""
         if not self._pending:
             return None
@@ -71,12 +122,19 @@ class DraftClient:
         except Exception:
             pass
 
+    def shutdown(self):
+        """Log stats. Draft server stays running independently."""
+        if self._step > 0:
+            avg_ms = self._total_exchange_ms / self._step
+            logger.info(
+                f"Draft client stats: {self._step} exchanges, "
+                f"avg {avg_ms:.1f}ms per exchange"
+            )
+
     @property
     def is_alive(self) -> bool:
         try:
-            urllib.request.urlopen(f"{self.server_url}/draft",
-                data=json.dumps({"token_id": 1, "num_tokens": 0}).encode(),
-                timeout=2.0)
+            urllib.request.urlopen(f"{self.server_url}/health", timeout=2.0)
             return True
         except Exception:
             return False

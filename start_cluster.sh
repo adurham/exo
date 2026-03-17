@@ -22,7 +22,8 @@
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
-: "${EXO_DRAFT_MODEL:=}"
+: "${EXO_DRAFT_SERVER:=http://192.168.86.203:8199}"
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
 : "${EXO_SPECULATIVE_DRAFT_TOKENS:=10}"
 : "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
@@ -388,8 +389,11 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
     EXO_ENV="$EXO_ENV EXO_TP_EVAL_INTERVAL=$EXO_TP_EVAL_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_EXPERT_PARALLEL=$EXO_EXPERT_PARALLEL"
-    EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
     EXO_ENV="$EXO_ENV EXO_SPECULATIVE_DRAFT_TOKENS=$EXO_SPECULATIVE_DRAFT_TOKENS"
+    # Only Studios get the draft server URL (MacBook IS the draft server)
+    if [ "$NODE" != "macbook-m4" ] && [ -n "$EXO_DRAFT_SERVER" ]; then
+        EXO_ENV="$EXO_ENV EXO_DRAFT_SERVER=$EXO_DRAFT_SERVER"
+    fi
     EXO_ENV="$EXO_ENV MLX_SDPA_CPU_FRACTION=$MLX_SDPA_CPU_FRACTION"
     EXO_ENV="$EXO_ENV EXO_NO_BATCH=$EXO_NO_BATCH"
     # MacBook gets 2 entries (see per-node overrides below), Studios get 1
@@ -432,6 +436,13 @@ for NODE in "${NODES[@]}"; do
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo > ~/exo.log 2>&1'"
     fi
 done
+
+# 3b. Start draft server on MacBook (if configured)
+if [ -n "$EXO_DRAFT_MODEL" ] && [ -n "$EXO_DRAFT_SERVER" ]; then
+    echo "Starting draft server on macbook-m4 (model=$EXO_DRAFT_MODEL)..."
+    ssh macbook-m4 "pkill -f 'draft_server' || true"
+    ssh macbook-m4 "screen -dmS draft zsh -l -c 'cd ~/repos/exo && .venv/bin/python -m exo.worker.engines.mlx.draft_server --model $EXO_DRAFT_MODEL --port 8199 > ~/draft.log 2>&1'"
+fi
 
 # 4. Health Check / Topology Verification
 # Wait for all 3 nodes AND their identities (friendlyName) to be populated.

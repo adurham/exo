@@ -220,6 +220,22 @@ class Runner:
                     )
                 )
 
+                # TCP draft client: if EXO_DRAFT_SERVER is set, create a
+                # DraftClient that queries a remote draft model over HTTP.
+                # The draft server is a separate process (draft_server.py).
+                draft_server = os.environ.get("EXO_DRAFT_SERVER", "")
+                if draft_server and self.device_rank == 0:
+                    try:
+                        from exo.worker.engines.mlx.draft_client import DraftClient
+                        num_draft = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "10"))
+                        self.generator.draft_model = DraftClient(
+                            server_url=draft_server,
+                            num_draft_tokens=num_draft,
+                        )
+                        logger.info(f"TCP draft client ready (server={draft_server}, K={num_draft})")
+                    except Exception as e:
+                        logger.warning(f"Failed to init TCP draft client: {e}")
+
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
 
