@@ -570,28 +570,17 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance on Mac Studios (Tensor / RDMA)..."
+echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance (Hybrid TP+Draft / RDMA)..."
+echo "  Studios: TP (all 94 layers), MacBook: Draft provider (Qwen3-1.7B)"
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
-    \"sharding\": \"Tensor\",
+    \"sharding\": \"Hybrid\",
     \"instance_meta\": \"MlxJaccl\",
-    \"min_nodes\": 2,
-    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
+    \"min_nodes\": 3,
+    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\", \"$MBP_NODE_ID\"],
     \"max_context_tokens\": 262144
 }"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
-fi
-
-echo "Creating Qwen3-Coder-30B-A3B-6bit instance on MacBook (single node)..."
-if place_instance_with_retry "Qwen-Coder" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
-    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
-    \"sharding\": \"Pipeline\",
-    \"instance_meta\": \"MlxJaccl\",
-    \"min_nodes\": 1,
-    \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 50000
-}"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 3))
 fi
 
 if [ "$EXPECTED_RUNNERS" -eq 0 ]; then
