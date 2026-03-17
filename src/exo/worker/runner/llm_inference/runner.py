@@ -223,19 +223,23 @@ class Runner:
                 )
 
                 # Speculative decoding: if the instance has a draft_model configured,
-                # create a DraftClient that queries the draft instance via the API.
-                # Config comes from the instance metadata (set at creation time).
+                # create a DraftClient that queries the draft instance's node directly.
+                # We resolve the draft node's IP from cluster state at setup time.
                 _draft_model_id = self.bound_instance.instance.draft_model
                 _draft_tokens = self.bound_instance.instance.draft_tokens
                 if _draft_model_id and self.device_rank == 0:
                     try:
                         from exo.worker.engines.mlx.draft_client import DraftClient
-                        self.generator.draft_model = DraftClient(
-                            server_url="http://localhost:52415",
-                            num_draft_tokens=_draft_tokens,
-                            draft_model=_draft_model_id,
-                        )
-                        logger.info(f"Draft client ready (model={_draft_model_id}, K={_draft_tokens})")
+                        _draft_url = self._resolve_draft_url(_draft_model_id)
+                        if _draft_url:
+                            self.generator.draft_model = DraftClient(
+                                server_url=_draft_url,
+                                num_draft_tokens=_draft_tokens,
+                                draft_model=_draft_model_id,
+                            )
+                            logger.info(f"Draft client ready (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
+                        else:
+                            logger.warning(f"Could not resolve draft node for {_draft_model_id}")
                     except Exception as e:
                         logger.warning(f"Failed to init draft client: {e}")
 
@@ -353,6 +357,48 @@ class Runner:
             )
 
         self.send_task_status(task.task_id, TaskStatus.Complete)
+
+    def _resolve_draft_url(self, draft_model_id: str) -> str | None:
+        """Find the API URL of the node running the draft model instance."""
+        import json
+        import urllib.request
+        try:
+            with urllib.request.urlopen("http://localhost:52415/state", timeout=5) as resp:
+                state = json.loads(resp.read())
+            # Find the instance running the draft model
+            for inst in state.get("instances", {}).values():
+                # Handle tagged union format: {"MlxRingInstance": {...}} or {"MlxJacclInstance": {...}}
+                inst_data = inst
+                for key in ("MlxRingInstance", "MlxJacclInstance"):
+                    if key in inst:
+                        inst_data = inst[key]
+                        break
+                model_id = inst_data.get("shardAssignments", {}).get("modelId", "")
+                if model_id != draft_model_id:
+                    continue
+                # Get the node ID running this instance
+                node_to_runner = inst_data.get("shardAssignments", {}).get("nodeToRunner", {})
+                draft_node_id = next(iter(node_to_runner.keys()), None)
+                if not draft_node_id:
+                    continue
+                # Get the node's IP from network info
+                for node_id, net_info in state.get("nodeNetwork", {}).items():
+                    if node_id != draft_node_id:
+                        continue
+                    for iface in net_info.get("interfaces", []):
+                        ip = iface.get("ipAddress", "")
+                        iface_type = iface.get("interfaceType", "")
+                        # Prefer non-thunderbolt IPs (regular network)
+                        if ip and ":" not in ip and not ip.startswith("fe80") and iface_type != "thunderbolt":
+                            return f"http://{ip}:52415"
+                    # Fallback: any IPv4
+                    for iface in net_info.get("interfaces", []):
+                        ip = iface.get("ipAddress", "")
+                        if ip and ":" not in ip and not ip.startswith("fe80"):
+                            return f"http://{ip}:52415"
+        except Exception as e:
+            logger.warning(f"Failed to resolve draft node URL: {e}")
+        return None
 
     def shutdown(self, task: Task):
         logger.info("runner shutting down")

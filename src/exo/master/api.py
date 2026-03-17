@@ -257,6 +257,7 @@ class API:
         ] = {}
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
+        self._draft_model: object | None = None  # DraftModel for fast local draft serving
 
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
@@ -1999,42 +2000,53 @@ class API:
     # API → Master (routes to draft instance) → Worker → Runner
     # The runner maintains a persistent KV cache for stateful draft generation.
 
+    def _ensure_local_draft_model(self, model_id: str) -> object | None:
+        """Load draft model in API process for fast local handling.
+
+        Only loads if a draft instance for this model exists on this node.
+        The instance provides visibility in the UI; the API-local model
+        provides the speed needed for per-token draft requests.
+        """
+        if self._draft_model is not None:
+            if self._draft_model.model_id == model_id:  # type: ignore
+                return self._draft_model
+        # Check if this model has an instance on any node
+        for inst in self.state.instances.values():
+            if inst.shard_assignments.model_id == model_id:
+                from exo.worker.engines.mlx.draft_server import DraftModel
+                logger.info(f"Loading draft model for fast local serving: {model_id}")
+                self._draft_model = DraftModel(model_id)
+                return self._draft_model
+        return None
+
     async def _draft_command(self, body: dict) -> JSONResponse:
-        """Send a draft command and await the response."""
-        from exo.shared.types.commands import DraftGeneration as DraftCmd
+        """Handle draft request locally for speed (no gossip round-trip)."""
         model = body.get("model", "")
         if not model:
             raise HTTPException(400, "model field required")
 
-        command = DraftCmd(
-            model=model,
-            token_id=body.get("token_id", 0),
-            num_tokens=body.get("num_tokens", 10),
-            trim=body.get("trim", 0),
-            action=body.get("action", "draft"),
-            prefill_token_ids=body.get("prefill_token_ids", body.get("token_ids", [])),
-        )
+        draft = self._ensure_local_draft_model(model)
+        if draft is None:
+            raise HTTPException(404, f"No draft instance found for {model}")
 
-        queue_send, queue_recv = anyio.create_memory_object_stream[
-            TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk | DraftChunk
-        ](16)
-        self._text_generation_queues[command.command_id] = queue_send
+        action = body.get("action", "draft")
+        t0 = time.time()
 
-        try:
-            self.command_sender.send(command)
-            async with queue_recv:
-                async for chunk in queue_recv:
-                    if isinstance(chunk, DraftChunk):
-                        return JSONResponse({
-                            "tokens": chunk.tokens,
-                            "cache_len": chunk.cache_len,
-                            "elapsed_ms": chunk.elapsed_ms,
-                        })
-                    elif isinstance(chunk, ErrorChunk):
-                        raise HTTPException(500, chunk.error_message)
-            raise HTTPException(504, "Draft request timed out")
-        finally:
-            self._text_generation_queues.pop(command.command_id, None)
+        if action == "reset":
+            draft.reset()  # type: ignore
+            return JSONResponse({"tokens": [], "cache_len": 0, "elapsed_ms": 0})
+        elif action == "prefill":
+            token_ids = body.get("prefill_token_ids", body.get("token_ids", []))
+            cache_len = draft.prefill(token_ids)  # type: ignore
+            elapsed_ms = (time.time() - t0) * 1000
+            return JSONResponse({"tokens": [], "cache_len": cache_len, "elapsed_ms": elapsed_ms})
+        else:
+            token_id = body.get("token_id", 0)
+            num_tokens = body.get("num_tokens", 10)
+            trim = body.get("trim", 0)
+            tokens = draft.draft(token_id, num_tokens, trim=trim)  # type: ignore
+            elapsed_ms = (time.time() - t0) * 1000
+            return JSONResponse({"tokens": tokens, "cache_len": draft.cache_len, "elapsed_ms": elapsed_ms})  # type: ignore
 
     async def draft_generate(self, request: Request) -> JSONResponse:
         body = await request.json()
