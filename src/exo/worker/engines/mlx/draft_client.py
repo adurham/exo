@@ -80,7 +80,7 @@ class DraftClient:
                     data=data,
                     headers={"Content-Type": "application/json"},
                 )
-                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                with urllib.request.urlopen(req, timeout=30.0) as resp:
                     result = json.loads(resp.read())
                     self._result = result.get("tokens")
                     elapsed_ms = (time.perf_counter() - t0) * 1000
