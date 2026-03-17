@@ -184,6 +184,16 @@ def load_mlx_items(
 
     if draft_model_id is not None:
         logger.info(f"Draft node: loading draft model {draft_model_id}")
+
+        # CRITICAL: participate in group.split() — it's a collective operation
+        # that ALL nodes in the JACCL group must call. The Studios call it in
+        # hybrid_auto_parallel, so the draft node must call it here before
+        # the early return. Color=1 means "not in TP group".
+        if group is not None:
+            logger.info("Draft node: participating in group.split()")
+            _draft_subgroup = group.split(1)
+            logger.info(f"Draft node: split complete (subgroup size={_draft_subgroup.size()})")
+
         draft_path = build_model_path(ModelId(draft_model_id))
         start_time = time.perf_counter()
         model, _ = load_model(str(draft_path), lazy=True)
