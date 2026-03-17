@@ -843,11 +843,17 @@ def hybrid_auto_parallel(
 
     # Draft node: no primary model layers to process. The draft model is
     # loaded separately in load_mlx_items. Just return the model as-is.
+    # BUT: must still call group.split() because it's a collective operation
+    # that ALL nodes in the group must participate in.
     if model_shard_meta.draft_model_id is not None:
         logger.info(
             f"[hybrid] rank={model_shard_meta.device_rank} is draft node "
             f"(model={model_shard_meta.draft_model_id}), skipping layer sharding"
         )
+        # Participate in group.split() (collective — all nodes must call it)
+        tp_color = 1  # not in TP group
+        _draft_subgroup = group.split(tp_color)
+        logger.info(f"[hybrid] draft node split complete (subgroup size={_draft_subgroup.size()})")
         mx.eval(model)
         return model
 

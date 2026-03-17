@@ -73,4 +73,13 @@ class RDMADraftClient:
 
     def reset_cache(self):
         """Send reset signal to draft node."""
-        pass  # TODO: send negative token as reset signal
+        pass
+
+    def shutdown(self):
+        """Send shutdown signal to draft node (negative token)."""
+        try:
+            ctrl = mx.array([-1, 0], dtype=mx.int32)
+            mx.distributed.send(ctrl, self.draft_rank, group=self.group)
+            mx.eval(ctrl)
+        except Exception:
+            pass

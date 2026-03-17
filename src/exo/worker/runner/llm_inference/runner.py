@@ -378,6 +378,15 @@ class Runner:
             except WouldBlock:
                 pass
 
+        # Send shutdown signal to draft node if we're the TP master
+        if (hasattr(self.generator, 'draft_model') and self.generator.draft_model is not None
+                and hasattr(self.generator.draft_model, 'shutdown')):
+            try:
+                self.generator.draft_model.shutdown()
+                logger.info("Sent shutdown signal to draft node")
+            except Exception:
+                pass
+
         self.update_status(RunnerReady())
         logger.info("runner ready")
 
