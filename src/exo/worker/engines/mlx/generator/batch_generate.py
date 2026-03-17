@@ -97,10 +97,14 @@ class ExoBatchGenerator:
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
+        draft_fn = None
+        if self.draft_model is not None and hasattr(self.draft_model, 'draft_sync'):
+            draft_fn = self.draft_model.draft_sync
         self._exo_gen = MlxBatchGenerator(
             model=self.model,
             stop_tokens=set(eos_ids_from_tokenizer(self.tokenizer)),
             prefill_step_size=PREFILL_STEP_SIZE,
+            cpu_draft_fn=draft_fn,
         )
 
     @property

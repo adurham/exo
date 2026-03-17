@@ -449,9 +449,8 @@ class Builder:
         kv_prefix_cache = KVPrefixCache(self.group)
 
         device_rank = 0 if self.group is None else self.group.rank()
-        if os.environ.get("EXO_NO_BATCH") or self.draft_model is not None:
-            reason = "batching disabled" if os.environ.get("EXO_NO_BATCH") else "speculative decode active"
-            logger.info(f"using SequentialGenerator ({reason})")
+        if os.environ.get("EXO_NO_BATCH"):
+            logger.info("using SequentialGenerator (batching disabled)")
             return SequentialGenerator(
                 model=self.inference_model,
                 tokenizer=self.tokenizer,
