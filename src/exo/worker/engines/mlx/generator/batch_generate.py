@@ -103,16 +103,11 @@ class ExoBatchGenerator:
             prefill_step_size=PREFILL_STEP_SIZE,
         )
         self._draft_prev_token = None
-        # CPU draft: can safely run during async eval (no RDMA involved)
-        # RDMA draft: MUST NOT run during async eval — RDMA send/recv on the full
-        # JACCL group collides with TP all_reduce on the sub-group → deadlock.
-        # RDMA draft exchange happens in step() after decode completes instead.
-        self._is_rdma_draft = (self.draft_model is not None
-                               and hasattr(self.draft_model, 'request_draft')
-                               and not hasattr(self.draft_model, 'draft_sync'))
-        if self.draft_model is not None and hasattr(self.draft_model, 'draft_sync'):
+        # Wire draft: run draft using the PREVIOUS step's token
+        # (we can't access current y without forcing GPU sync)
+        if self.draft_model is not None and hasattr(self.draft_model, 'request_draft'):
             def _on_async_eval(y):
-                """Called during GPU async eval. Use PREVIOUS token for CPU draft."""
+                """Called during GPU async eval. Use PREVIOUS token for draft."""
                 if self._draft_prev_token is not None:
                     try:
                         self.draft_model.request_draft(self._draft_prev_token)
@@ -319,17 +314,6 @@ class ExoBatchGenerator:
         # Save current token for next step's draft callback
         if self.draft_model is not None and len(responses) == 1:
             self._draft_prev_token = responses[0].token
-
-        # RDMA draft exchange: DISABLED — group.split() for TP breaks
-        # point-to-point send/recv on the parent JACCL group.
-        # TODO: implement draft exchange over TCP sockets instead.
-        # if self._is_rdma_draft and self._draft_prev_token is not None:
-        #     drafts = self.draft_model.get_result()
-        #     if drafts is not None:
-        #         logger.info(f"RDMA draft received {len(drafts)} predictions: {drafts[:5]}...")
-        #     self.draft_model.request_draft(self._draft_prev_token)
-        #     if self.draft_model._thread is not None:
-        #         self.draft_model._thread.join()
 
         for response in responses:
             if response.uid not in self._active_tasks:

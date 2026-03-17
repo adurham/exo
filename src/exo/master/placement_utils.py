@@ -245,18 +245,13 @@ def _get_shard_assignments_for_pure_pipeline(
 def get_shard_assignments_for_tensor_parallel(
     model_card: ModelCard,
     cycle: Cycle,
-    draft_node_id: NodeId | None = None,
-    draft_model_id: str | None = None,
 ):
     total_layers = model_card.n_layers
-    # Draft node doesn't count toward TP world_size
-    tp_nodes = [n for n in cycle if n != draft_node_id]
-    world_size = len(tp_nodes)
+    world_size = len(cycle)
     runner_to_shard: dict[RunnerId, ShardMetadata] = {}
     node_to_runner: dict[NodeId, RunnerId] = {}
 
-    # Assign TP shards to non-draft nodes
-    for i, node_id in enumerate(tp_nodes):
+    for i, node_id in enumerate(cycle.node_ids):
         shard = TensorShardMetadata(
             model_card=model_card,
             device_rank=i,
@@ -268,22 +263,6 @@ def get_shard_assignments_for_tensor_parallel(
         runner_id = RunnerId()
         runner_to_shard[runner_id] = shard
         node_to_runner[node_id] = runner_id
-
-    # Assign draft shard to draft node
-    if draft_node_id is not None and draft_model_id is not None:
-        from exo.shared.types.worker.shards import DraftShardMetadata
-        draft_shard = DraftShardMetadata(
-            model_card=model_card,
-            device_rank=world_size,  # rank after TP nodes
-            world_size=world_size + 1,  # total group size including draft
-            start_layer=0,
-            end_layer=0,
-            n_layers=total_layers,
-            draft_model_id=draft_model_id,
-        )
-        runner_id = RunnerId()
-        runner_to_shard[runner_id] = draft_shard
-        node_to_runner[draft_node_id] = runner_id
 
     shard_assignments = ShardAssignments(
         model_id=model_card.model_id,
@@ -415,68 +394,22 @@ def get_shard_assignments_for_hybrid_parallel(
         runner_to_shard[runner_id] = shard
         node_to_runner[node_id] = runner_id
 
-    # Check if the PP tail should be a draft provider
-    draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "") or None
-
     for i, node_id in enumerate(pp_node_ids):
         device_rank = pp_tail_rank + i
-
-        if draft_model_id:
-            # Draft mode: PP tail loads draft model for speculative decoding.
-            # IMPORTANT: TP nodes must NOT have pipeline_send_to/recv_from set,
-            # because that would wrap their layers with HybridPipelineLastLayer
-            # which calls all_gather on the full group — the draft node won't
-            # participate in those collectives → deadlock.
-            # Draft token exchange is handled separately by RDMADraftClient/
-            # draft_provider_loop using point-to-point send/recv.
-            shard = HybridShardMetadata(
-                model_card=model_card,
-                device_rank=device_rank,
-                world_size=world_size,
-                start_layer=0,
-                end_layer=0,
-                n_layers=model_card.n_layers,
-                tp_size=tp_size,
-                tp_rank=-1,
-                pp_rank=1,
-                pp_size=pp_size,
-                pipeline_send_to=tp_master_rank,
-                pipeline_recv_from=tp_master_rank,
-                draft_model_id=draft_model_id,
-            )
-            # TP nodes get all layers, NO pipeline send/recv (pure TP)
-            for rid, existing_shard in runner_to_shard.items():
-                if isinstance(existing_shard, HybridShardMetadata) and existing_shard.tp_rank >= 0:
-                    runner_to_shard[rid] = HybridShardMetadata(
-                        model_card=model_card,
-                        device_rank=existing_shard.device_rank,
-                        world_size=world_size,
-                        start_layer=0,
-                        end_layer=model_card.n_layers,
-                        n_layers=model_card.n_layers,
-                        tp_size=tp_size,
-                        tp_rank=existing_shard.tp_rank,
-                        pp_rank=0,
-                        pp_size=pp_size,
-                        pipeline_send_to=None,  # NO pipeline wrapping
-                        pipeline_recv_from=None,  # draft exchange is separate
-                        draft_rank=pp_tail_rank,  # tells TP master where draft node is
-                    )
-        else:
-            shard = HybridShardMetadata(
-                model_card=model_card,
-                device_rank=device_rank,
-                world_size=world_size,
-                start_layer=pp_start,
-                end_layer=pp_end,
-                n_layers=model_card.n_layers,
-                tp_size=tp_size,
-                tp_rank=-1,
-                pp_rank=1,
-                pp_size=pp_size,
-                pipeline_send_to=None,
-                pipeline_recv_from=tp_master_rank,
-            )
+        shard = HybridShardMetadata(
+            model_card=model_card,
+            device_rank=device_rank,
+            world_size=world_size,
+            start_layer=pp_start,
+            end_layer=pp_end,
+            n_layers=model_card.n_layers,
+            tp_size=tp_size,
+            tp_rank=-1,
+            pp_rank=1,
+            pp_size=pp_size,
+            pipeline_send_to=None,
+            pipeline_recv_from=tp_master_rank,
+        )
         runner_id = RunnerId()
         runner_to_shard[runner_id] = shard
         node_to_runner[node_id] = runner_id

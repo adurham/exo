@@ -3,8 +3,6 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-_SPECULATIVE_DRAFT_TOKENS = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "3"))
-
 import mlx.core as mx
 from anyio import WouldBlock
 from mlx_lm.tokenizer_utils import TokenizerWrapper
@@ -213,7 +211,7 @@ class Runner:
                 assert (
                     ModelTask.TextGeneration in self.shard_metadata.model_card.tasks
                 ), f"Incorrect model task(s): {self.shard_metadata.model_card.tasks}"
-                self.generator.inference_model, self.generator.tokenizer, self.generator.draft_model, tp_group = (
+                self.generator.inference_model, self.generator.tokenizer, self.generator.draft_model = (
                     load_mlx_items(
                         self.bound_instance,
                         self.generator.group,
@@ -221,18 +219,6 @@ class Runner:
                         on_layer_loaded=on_layer_loaded,
                     )
                 )
-                # Save full group for warmup barriers (all 3 nodes participate),
-                # then switch to TP sub-group for runtime collective ops
-                # (agree_on_tasks/mx_any). The draft node doesn't participate
-                # in those → using the full group would deadlock.
-                self._full_group = self.generator.group
-                if tp_group is not None:
-                    self.generator.group = tp_group
-                # Check if this node is a draft provider
-                from exo.shared.types.worker.shards import HybridShardMetadata
-                if (isinstance(self.shard_metadata, HybridShardMetadata)
-                        and self.shard_metadata.draft_model_id is not None):
-                    self.generator.is_draft_node = True
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
@@ -251,7 +237,7 @@ class Runner:
                 self.update_status(RunnerWarmingUp())
                 self.acknowledge_task(task)
 
-                self.generator.warmup(warmup_group=getattr(self, '_full_group', None))
+                self.generator.warmup()
 
                 logger.info(
                     f"runner initialized in {time.time() - self.setup_start_time} seconds"
@@ -312,20 +298,6 @@ class Runner:
     def handle_generation_tasks(self, starting_task: TextGeneration):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
-
-        # Draft node: acknowledge task and sit idle.
-        # RDMA draft_provider_loop is DISABLED because group.split() for TP
-        # breaks point-to-point send/recv on the parent JACCL group.
-        # TODO: implement draft exchange over TCP sockets instead.
-        from exo.shared.types.worker.shards import HybridShardMetadata
-        if (isinstance(self.shard_metadata, HybridShardMetadata)
-                and self.shard_metadata.draft_model_id is not None):
-            logger.info("Draft node: acknowledging task (RDMA exchange disabled, awaiting TCP implementation)")
-            self.update_status(RunnerRunning())
-            self.acknowledge_task(starting_task)
-            self.send_task_status(starting_task.task_id, TaskStatus.Complete)
-            self.update_status(RunnerReady())
-            return ExitCode.Continue
 
         logger.info(f"received chat request: {starting_task}")
         self.update_status(RunnerRunning())

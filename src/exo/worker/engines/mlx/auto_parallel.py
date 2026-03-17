@@ -833,11 +833,6 @@ def hybrid_auto_parallel(
         f"tp_group.size()={tp_group.size()} tp_group.rank()={tp_group.rank()}"
     )
 
-    # Stash TP sub-group on the model so load_mlx_items can retrieve it.
-    # Generators must use tp_group (not the full group) for collective ops
-    # like agree_on_tasks/mx_any — the draft node won't participate in those.
-    model._tp_group = tp_group  # type: ignore[reportAttributeAccessIssue]
-
     # Apply tensor parallelism to TP nodes
     if is_tp_node and tp_group.size() > 1:
         logger.info(f"[hybrid] rank={model_shard_meta.device_rank} applying tensor_auto_parallel")
@@ -845,22 +840,6 @@ def hybrid_auto_parallel(
             model, tp_group, timeout_seconds, on_timeout, on_layer_loaded
         )
         logger.info(f"[hybrid] rank={model_shard_meta.device_rank} tensor_auto_parallel complete")
-
-    # Draft node: no primary model layers to process. The draft model is
-    # loaded separately in load_mlx_items. Just return the model as-is.
-    # BUT: must still call group.split() because it's a collective operation
-    # that ALL nodes in the group must participate in.
-    if model_shard_meta.draft_model_id is not None:
-        logger.info(
-            f"[hybrid] rank={model_shard_meta.device_rank} is draft node "
-            f"(model={model_shard_meta.draft_model_id}), skipping layer sharding"
-        )
-        # Participate in group.split() (collective — all nodes must call it)
-        tp_color = 1  # not in TP group
-        _draft_subgroup = group.split(tp_color)
-        logger.info(f"[hybrid] draft node split complete (subgroup size={_draft_subgroup.size()})")
-        mx.eval(model)
-        return model
 
     inner_model_instance = get_inner_model(model)
     all_layers = get_layers(inner_model_instance)

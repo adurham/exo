@@ -173,45 +173,6 @@ def load_mlx_items(
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
 ) -> tuple[Model, TokenizerWrapper, object | None]:
-    from exo.shared.types.worker.shards import DraftShardMetadata, HybridShardMetadata
-
-    # Check if this is a draft provider node (DraftShardMetadata or HybridShard with draft_model_id)
-    draft_model_id = None
-    if isinstance(bound_instance.bound_shard, DraftShardMetadata):
-        draft_model_id = bound_instance.bound_shard.draft_model_id
-    elif isinstance(bound_instance.bound_shard, HybridShardMetadata) and bound_instance.bound_shard.draft_model_id:
-        draft_model_id = bound_instance.bound_shard.draft_model_id
-
-    if draft_model_id is not None:
-        logger.info(f"Draft node: loading draft model {draft_model_id}")
-
-        # CRITICAL: participate in group.split() — it's a collective operation
-        # that ALL nodes in the JACCL group must call. The Studios call it in
-        # hybrid_auto_parallel, so the draft node must call it here before
-        # the early return. Color=1 means "not in TP group".
-        if group is not None:
-            logger.info("Draft node: participating in group.split()")
-            _draft_subgroup = group.split(1)
-            logger.info(f"Draft node: split complete (subgroup size={_draft_subgroup.size()})")
-
-        draft_path = build_model_path(ModelId(draft_model_id))
-        start_time = time.perf_counter()
-        model, _ = load_model(draft_path, lazy=True)
-        mx.eval(model)
-        end_time = time.perf_counter()
-        logger.info(f"Draft model loaded in {end_time - start_time:.2f}s")
-        tokenizer = get_tokenizer(draft_path, bound_instance.bound_shard)
-        set_wired_limit_for_model(get_weights_size(bound_instance.bound_shard))
-        mx.clear_cache()
-
-        # Participate in the post-load barrier that shard_and_load does.
-        # Studios block on mx_barrier(group) after loading — draft node must match.
-        logger.info("Draft node: participating in post-load barrier")
-        mx_barrier(group)
-        logger.info("Draft node: post-load barrier complete")
-
-        return cast(Model, model), tokenizer, None, None
-
     if group is None:
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
@@ -253,39 +214,7 @@ def load_mlx_items(
 
     mx.clear_cache()
 
-    # RDMA draft client: if this is a hybrid TP node with a draft node in the group,
-    # create an RDMADraftClient that sends/receives draft tokens via JACCL RDMA.
-    draft_client = None
-    shard = bound_instance.bound_shard
-    if (isinstance(shard, HybridShardMetadata)
-            and shard.tp_rank == 0  # only TP master communicates with draft
-            and shard.draft_rank is not None
-            and group is not None):
-        # draft_rank points to the draft node in the JACCL group
-        draft_rank = shard.draft_rank
-        try:
-            from exo.worker.engines.mlx.rdma_draft_client import RDMADraftClient
-            draft_client = RDMADraftClient(
-                group=group,
-                draft_rank=draft_rank,
-                num_draft_tokens=int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "2")),
-            )
-            logger.info(f"RDMA draft client ready (draft_rank={draft_rank})")
-        except Exception as e:
-            logger.warning(f"Failed to init RDMA draft client: {e}")
-            draft_client = None
-
-    # If the model has a TP sub-group (from hybrid_auto_parallel), use it for
-    # collective ops in the generator. The full group includes the draft node
-    # which doesn't participate in agree_on_tasks/mx_any → deadlock.
-    tp_group = getattr(model, '_tp_group', None)
-    if tp_group is not None:
-        logger.info(
-            f"Using TP sub-group for collective ops "
-            f"(size={tp_group.size()}, rank={tp_group.rank()})"
-        )
-
-    return cast(Model, model), tokenizer, draft_client, tp_group
+    return cast(Model, model), tokenizer, None
 
 
 def shard_and_load(

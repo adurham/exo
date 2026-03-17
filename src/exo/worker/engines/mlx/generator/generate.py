@@ -1004,8 +1004,7 @@ def mlx_generate(
 
     # CPU-pipelined speculative decoding: use pre-loaded draft engine
     # (initialized at model load time in utils_mlx.py, not per-request)
-    # RDMADraftClient is handled by ExoBatchGenerator, not here.
-    _cpu_draft = draft_model if draft_model is not None and hasattr(draft_model, 'draft_sync') else None
+    _cpu_draft = draft_model  # draft_model is actually a CPUDraftEngine or None
     if _cpu_draft is not None:
         logger.info(
             f"CPU-pipelined speculative decode active: "

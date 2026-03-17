@@ -22,7 +22,7 @@
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
+: "${EXO_DRAFT_MODEL:=}"
 : "${EXO_SPECULATIVE_DRAFT_TOKENS:=10}"
 : "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
@@ -570,17 +570,28 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance (Hybrid TP+Draft / RDMA)..."
-echo "  Studios: TP (all 94 layers), MacBook: Draft provider (Qwen3-1.7B)"
+echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance (Tensor Parallel / RDMA)..."
+echo "  Studios: TP (all 94 layers)"
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
-    \"sharding\": \"Hybrid\",
+    \"sharding\": \"Tensor\",
     \"instance_meta\": \"MlxJaccl\",
-    \"min_nodes\": 3,
-    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\", \"$MBP_NODE_ID\"],
+    \"min_nodes\": 2,
+    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
     \"max_context_tokens\": 262144
 }"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 3))
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
+fi
+
+echo "Creating Qwen3-Coder-30B instance (MacBook single node)..."
+if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit" "{
+    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-5bit\",
+    \"sharding\": \"Tensor\",
+    \"min_nodes\": 1,
+    \"node_ids\": [\"$MBP_NODE_ID\"],
+    \"max_context_tokens\": 50000
+}"; then
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi
 
 if [ "$EXPECTED_RUNNERS" -eq 0 ]; then
