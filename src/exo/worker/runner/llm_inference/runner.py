@@ -385,16 +385,18 @@ class Runner:
                 for node_id, net_info in state.get("nodeNetwork", {}).items():
                     if node_id != draft_node_id:
                         continue
+                    def _routable(ip: str) -> bool:
+                        return bool(ip) and ":" not in ip and not ip.startswith("127.") and not ip.startswith("fe80")
                     for iface in net_info.get("interfaces", []):
                         ip = iface.get("ipAddress", "")
                         iface_type = iface.get("interfaceType", "")
-                        # Prefer non-thunderbolt IPs (regular network)
-                        if ip and ":" not in ip and not ip.startswith("fe80") and iface_type != "thunderbolt":
+                        # Prefer non-thunderbolt routable IPs (regular WiFi/Ethernet)
+                        if _routable(ip) and iface_type != "thunderbolt":
                             return f"http://{ip}:52415"
-                    # Fallback: any IPv4
+                    # Fallback: any routable IPv4 (including Thunderbolt)
                     for iface in net_info.get("interfaces", []):
                         ip = iface.get("ipAddress", "")
-                        if ip and ":" not in ip and not ip.startswith("fe80"):
+                        if _routable(ip):
                             return f"http://{ip}:52415"
         except Exception as e:
             logger.warning(f"Failed to resolve draft node URL: {e}")
