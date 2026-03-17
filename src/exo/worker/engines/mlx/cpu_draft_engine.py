@@ -21,6 +21,11 @@ class CPUDraftEngine:
     """Manages CPU-only draft model inference in a background thread."""
 
     def __init__(self, model_id: str, max_seq: int = 256):
+        import os
+        # Force single-threaded BLAS to avoid fork() + Accelerate thread pool conflicts
+        os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+        os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "4")
+
         from mlx_lm.utils import load
         from exo.download.download_utils import build_model_path
         from exo.shared.types.common import ModelId
