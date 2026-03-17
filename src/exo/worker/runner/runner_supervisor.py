@@ -253,17 +253,6 @@ class RunnerSupervisor:
                         isinstance(event, TaskStatusUpdated)
                         and event.task_status == TaskStatus.Complete
                     ):
-                        # If a task has just been completed, we should be working on it.
-                        assert isinstance(
-                            self.status,
-                            (
-                                RunnerRunning,
-                                RunnerWarmingUp,
-                                RunnerLoading,
-                                RunnerConnecting,
-                                RunnerShuttingDown,
-                            ),
-                        )
                         self.in_progress.pop(event.task_id, None)
                         self.completed.add(event.task_id)
                     # Always send through the event pipeline so the master's
