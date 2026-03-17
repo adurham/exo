@@ -223,23 +223,20 @@ def load_mlx_items(
             os.path.dirname(os.path.abspath(__file__)), "cpu_draft.dylib")
         if os.path.exists(dylib_path):
             try:
-                from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
-                logger.info(f"Loading CPU draft engine: {draft_model_id_str}")
+                from exo.worker.engines.mlx.cpu_draft_process import CPUDraftProcess
+                logger.info(f"Starting CPU draft process: {draft_model_id_str}")
                 start_draft = time.perf_counter()
-                draft_engine = CPUDraftEngine(draft_model_id_str)
-                # Warm up: run a dummy forward pass to pull weights into CPU cache
-                # AND verify the C code doesn't segfault.
-                logger.info("Warming up CPU draft engine (dummy forward pass)...")
-                test_result = draft_engine.draft_sync(start_token=1, num_tokens=1)
-                draft_engine.reset_cache()
-                logger.info(f"CPU draft warmup OK (predicted token: {test_result})")
-                logger.info(
-                    f"CPU draft engine ready in {time.perf_counter() - start_draft:.2f}s "
-                    f"({draft_model_id_str}, {draft_engine._n_layers} layers, "
-                    f"{draft_engine._hidden}d)"
-                )
+                draft_engine = CPUDraftProcess(draft_model_id_str)
+                if draft_engine.start(timeout=30.0):
+                    logger.info(
+                        f"CPU draft process ready in {time.perf_counter() - start_draft:.2f}s "
+                        f"({draft_model_id_str})"
+                    )
+                else:
+                    logger.warning("CPU draft process failed to start")
+                    draft_engine = None
             except Exception as e:
-                logger.warning(f"Failed to init CPU draft engine: {e}")
+                logger.warning(f"Failed to start CPU draft process: {e}")
                 draft_engine = None
         else:
             logger.info(f"CPU draft dylib not found at {dylib_path}, skipping")

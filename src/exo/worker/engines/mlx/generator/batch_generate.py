@@ -97,14 +97,10 @@ class ExoBatchGenerator:
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        draft_fn = None
-        if self.draft_model is not None and hasattr(self.draft_model, 'draft_sync'):
-            draft_fn = self.draft_model.draft_sync
         self._exo_gen = MlxBatchGenerator(
             model=self.model,
             stop_tokens=set(eos_ids_from_tokenizer(self.tokenizer)),
             prefill_step_size=PREFILL_STEP_SIZE,
-            cpu_draft_fn=draft_fn,
         )
 
     @property
@@ -302,6 +298,13 @@ class ExoBatchGenerator:
         responses = self._exo_gen.next()
 
         results: list[tuple[int, GenerationResponse]] = []
+
+        # After GPU decode, start CPU draft for next step (non-blocking)
+        if (self.draft_model is not None and hasattr(self.draft_model, 'request_draft')
+                and self.draft_model.is_alive and len(responses) == 1):
+            token_id = responses[0].token
+            if token_id not in self._exo_gen.stop_tokens:
+                self.draft_model.request_draft(token_id, 2)
 
         for response in responses:
             if response.uid not in self._active_tasks:
