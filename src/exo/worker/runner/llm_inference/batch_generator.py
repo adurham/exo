@@ -143,6 +143,7 @@ class SequentialGenerator(InferenceGenerator):
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
     draft_model: Model | None = None
+    is_draft_node: bool = False
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
@@ -166,6 +167,7 @@ class SequentialGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             model_id=self.model_id,
+            is_draft_node=self.is_draft_node,
         )
 
     def submit(
@@ -410,6 +412,7 @@ class BatchGenerator(InferenceGenerator):
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
     draft_model: Model | None = None
+    is_draft_node: bool = False
     check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
@@ -442,6 +445,7 @@ class BatchGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             model_id=self.model_id,
+            is_draft_node=self.is_draft_node,
         )
 
     def submit(

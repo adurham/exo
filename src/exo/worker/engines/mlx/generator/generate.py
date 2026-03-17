@@ -400,6 +400,7 @@ def warmup_inference(
     tokenizer: TokenizerWrapper,
     group: mx.distributed.Group | None,
     model_id: ModelId,
+    is_draft_node: bool = False,
 ) -> int:
     logger.info(f"warming up inference for instance: {model_id}")
     t = time.monotonic()
@@ -431,30 +432,39 @@ def warmup_inference(
             f"Warmup pre-barrier: {(time.perf_counter() - t_barrier) * 1000:.1f}ms"
         )
 
-    if EXO_TRACING_ENABLED:
-        t_warmup_gen = time.perf_counter()
-    prompt_len = len(warmup_prompt) if isinstance(warmup_prompt, list) else len(warmup_prompt)  # type: ignore
-    logger.info(f"Generating warmup tokens (prompt_len={prompt_len}, max_tokens=50)")
-    for _r in stream_generate(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=warmup_prompt,
-        max_tokens=50,
-        sampler=sampler,
-        prompt_cache=cache,
-        prefill_step_size=2048,
-        kv_group_size=KV_GROUP_SIZE,
-        kv_bits=KV_BITS,
-    ):
-        tokens_generated += 1
-
-    if EXO_TRACING_ENABLED:
-        warmup_gen_ms = (time.perf_counter() - t_warmup_gen) * 1000
-        logger.info(
-            f"Generated ALL warmup tokens: {tokens_generated} in {warmup_gen_ms:.1f}ms"
-        )
+    if is_draft_node:
+        # Draft node: warm up the draft model standalone (no TP/PP communication)
+        logger.info("Draft node: warming up draft model standalone")
+        tokens = mx.array([[1, 2, 3]])
+        logits = model(tokens)
+        mx.eval(logits)
+        tokens_generated = 1
+        logger.info("Draft node warmup complete")
     else:
-        logger.info("Generated ALL warmup tokens")
+        if EXO_TRACING_ENABLED:
+            t_warmup_gen = time.perf_counter()
+        prompt_len = len(warmup_prompt) if isinstance(warmup_prompt, list) else len(warmup_prompt)  # type: ignore
+        logger.info(f"Generating warmup tokens (prompt_len={prompt_len}, max_tokens=50)")
+        for _r in stream_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=warmup_prompt,
+            max_tokens=50,
+            sampler=sampler,
+            prompt_cache=cache,
+            prefill_step_size=2048,
+            kv_group_size=KV_GROUP_SIZE,
+            kv_bits=KV_BITS,
+        ):
+            tokens_generated += 1
+
+        if EXO_TRACING_ENABLED:
+            warmup_gen_ms = (time.perf_counter() - t_warmup_gen) * 1000
+            logger.info(
+                f"Generated ALL warmup tokens: {tokens_generated} in {warmup_gen_ms:.1f}ms"
+            )
+        else:
+            logger.info("Generated ALL warmup tokens")
 
     if EXO_TRACING_ENABLED:
         t_barrier = time.perf_counter()

@@ -841,6 +841,16 @@ def hybrid_auto_parallel(
         )
         logger.info(f"[hybrid] rank={model_shard_meta.device_rank} tensor_auto_parallel complete")
 
+    # Draft node: no primary model layers to process. The draft model is
+    # loaded separately in load_mlx_items. Just return the model as-is.
+    if model_shard_meta.draft_model_id is not None:
+        logger.info(
+            f"[hybrid] rank={model_shard_meta.device_rank} is draft node "
+            f"(model={model_shard_meta.draft_model_id}), skipping layer sharding"
+        )
+        mx.eval(model)
+        return model
+
     inner_model_instance = get_inner_model(model)
     all_layers = get_layers(inner_model_instance)
 

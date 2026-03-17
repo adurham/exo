@@ -219,6 +219,11 @@ class Runner:
                         on_layer_loaded=on_layer_loaded,
                     )
                 )
+                # Check if this node is a draft provider
+                from exo.shared.types.worker.shards import HybridShardMetadata
+                if (isinstance(self.shard_metadata, HybridShardMetadata)
+                        and self.shard_metadata.draft_model_id is not None):
+                    self.generator.is_draft_node = True
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
@@ -442,6 +447,7 @@ class Builder:
     tokenizer: TokenizerWrapper | None = None
     group: mx.distributed.Group | None = None
     draft_model: Model | None = None
+    is_draft_node: bool = False
 
     def build(
         self,
@@ -483,6 +489,7 @@ class Builder:
                 heartbeat=self.heartbeat,
                 heartbeat_timeout=self.heartbeat_timeout,
                 draft_model=self.draft_model,
+                is_draft_node=self.is_draft_node,
             )
         logger.info("using BatchGenerator")
         return BatchGenerator(
@@ -498,4 +505,5 @@ class Builder:
             heartbeat=self.heartbeat,
             heartbeat_timeout=self.heartbeat_timeout,
             draft_model=self.draft_model,
+            is_draft_node=self.is_draft_node,
         )
