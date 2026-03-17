@@ -10,6 +10,7 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.models.model_cards import ModelTask
 from exo.shared.types.chunks import (
+    DraftChunk,
     ErrorChunk,
     TokenChunk,
     ToolCallChunk,
@@ -25,6 +26,7 @@ from exo.shared.types.events import (
 from exo.shared.types.mlx import Model
 from exo.shared.types.tasks import (
     ConnectToGroup,
+    DraftGeneration,
     LoadModel,
     Shutdown,
     StartWarmup,
@@ -221,20 +223,22 @@ class Runner:
                 )
 
                 # TCP draft client: if EXO_DRAFT_SERVER is set, create a
-                # DraftClient that queries a remote draft model over HTTP.
-                # The draft server is a separate process (draft_server.py).
+                # DraftClient that queries a draft model instance over exo's API.
+                # The draft instance is a normal exo instance visible in the UI.
                 draft_server = os.environ.get("EXO_DRAFT_SERVER", "")
-                if draft_server and self.device_rank == 0:
+                draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
+                if draft_server and draft_model_id and self.device_rank == 0:
                     try:
                         from exo.worker.engines.mlx.draft_client import DraftClient
                         num_draft = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "10"))
                         self.generator.draft_model = DraftClient(
                             server_url=draft_server,
                             num_draft_tokens=num_draft,
+                            draft_model=draft_model_id,
                         )
-                        logger.info(f"TCP draft client ready (server={draft_server}, K={num_draft})")
+                        logger.info(f"Draft client ready (server={draft_server}, model={draft_model_id}, K={num_draft})")
                     except Exception as e:
-                        logger.warning(f"Failed to init TCP draft client: {e}")
+                        logger.warning(f"Failed to init draft client: {e}")
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
@@ -268,6 +272,9 @@ class Runner:
                 if return_code == ExitCode.Shutdown:
                     return
 
+            case DraftGeneration() if isinstance(self.current_status, (RunnerReady, RunnerRunning)):
+                self.handle_draft_task(task)
+
             case Shutdown():
                 self.shutdown(task)
                 return
@@ -276,6 +283,77 @@ class Runner:
                 raise ValueError(
                     f"Received {task.__class__.__name__} outside of state machine in {self.current_status=}"
                 )
+
+    def handle_draft_task(self, task: DraftGeneration):
+        """Handle a draft generation request with persistent KV cache."""
+        assert isinstance(self.generator, InferenceGenerator)
+        self.acknowledge_task(task)
+        self.send_task_status(task.task_id, TaskStatus.Running)
+
+        t0 = time.perf_counter()
+
+        # Lazy-init the draft cache
+        if not hasattr(self, '_draft_cache'):
+            from mlx_lm.models.cache import make_prompt_cache
+            self._draft_cache = make_prompt_cache(self.generator.model)
+            self._draft_cache_len = 0
+
+        try:
+            if task.action == "reset":
+                from mlx_lm.models.cache import make_prompt_cache
+                self._draft_cache = make_prompt_cache(self.generator.model)
+                self._draft_cache_len = 0
+                result_tokens: list[int] = []
+
+            elif task.action == "prefill":
+                if task.prefill_token_ids:
+                    tokens = mx.array([task.prefill_token_ids])
+                    logits = self.generator.model(tokens, cache=self._draft_cache)
+                    mx.eval(logits)
+                    self._draft_cache_len += len(task.prefill_token_ids)
+                result_tokens = []
+
+            else:  # "draft"
+                from mlx_lm.models.cache import trim_prompt_cache
+                if task.trim > 0:
+                    trim_prompt_cache(self._draft_cache, task.trim)
+                    self._draft_cache_len = max(0, self._draft_cache_len - task.trim)
+
+                result_tokens = []
+                tok = task.token_id
+                for _ in range(task.num_tokens):
+                    current = mx.array([[tok]])
+                    logits = self.generator.model(current, cache=self._draft_cache)
+                    mx.eval(logits)
+                    self._draft_cache_len += 1
+                    tok = logits[0, -1].argmax().item()
+                    result_tokens.append(tok)
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            self.event_sender.send(
+                ChunkGenerated(
+                    command_id=task.command_id,
+                    chunk=DraftChunk(
+                        model=self.model_id,
+                        tokens=result_tokens,
+                        cache_len=self._draft_cache_len,
+                        elapsed_ms=elapsed_ms,
+                    ),
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Draft generation failed: {e}")
+            self.event_sender.send(
+                ChunkGenerated(
+                    command_id=task.command_id,
+                    chunk=ErrorChunk(
+                        model=self.model_id,
+                        error_message=str(e),
+                    ),
+                )
+            )
+
+        self.send_task_status(task.task_id, TaskStatus.Complete)
 
     def shutdown(self, task: Task):
         logger.info("runner shutting down")

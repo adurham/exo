@@ -84,6 +84,14 @@ class PrefillProgressChunk(BaseChunk):
     total_tokens: int
 
 
+class DraftChunk(BaseChunk):
+    """Response from a draft generation request."""
+
+    tokens: list[int]
+    cache_len: int
+    elapsed_ms: float
+
+
 GenerationChunk = (
-    TokenChunk | ImageChunk | ToolCallChunk | ErrorChunk | PrefillProgressChunk
+    TokenChunk | ImageChunk | ToolCallChunk | ErrorChunk | PrefillProgressChunk | DraftChunk
 )

@@ -390,9 +390,10 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_TP_EVAL_INTERVAL=$EXO_TP_EVAL_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_EXPERT_PARALLEL=$EXO_EXPERT_PARALLEL"
     EXO_ENV="$EXO_ENV EXO_SPECULATIVE_DRAFT_TOKENS=$EXO_SPECULATIVE_DRAFT_TOKENS"
-    # Only Studios get the draft server URL (MacBook IS the draft server)
+    # Studios get draft server URL + model ID for speculative decoding
     if [ "$NODE" != "macbook-m4" ] && [ -n "$EXO_DRAFT_SERVER" ]; then
         EXO_ENV="$EXO_ENV EXO_DRAFT_SERVER=$EXO_DRAFT_SERVER"
+        EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
     fi
     EXO_ENV="$EXO_ENV MLX_SDPA_CPU_FRACTION=$MLX_SDPA_CPU_FRACTION"
     EXO_ENV="$EXO_ENV EXO_NO_BATCH=$EXO_NO_BATCH"

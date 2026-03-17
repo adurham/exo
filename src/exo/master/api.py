@@ -118,6 +118,7 @@ from exo.shared.types.api import (
     normalize_image_size,
 )
 from exo.shared.types.chunks import (
+    DraftChunk,
     ErrorChunk,
     ImageChunk,
     InputImageChunk,
@@ -249,14 +250,13 @@ class API:
 
         self._text_generation_queues: dict[
             CommandId,
-            Sender[TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk],
+            Sender[TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk | DraftChunk],
         ] = {}
         self._image_generation_queues: dict[
             CommandId, Sender[ImageChunk | ErrorChunk]
         ] = {}
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
-        self._draft_model: object | None = None  # DraftModel instance, loaded lazily
 
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
@@ -1991,59 +1991,70 @@ class API:
         return DeleteTracesResponse(deleted=deleted, not_found=not_found)
 
     # ── Draft endpoints for speculative decoding ──────────────────────
-    # The draft model is loaded lazily in the API process when the first
-    # draft request arrives. It stays loaded for the lifetime of the process.
-    # This is separate from the runner — the draft model is small (~2GB)
-    # and serves stateful token-level requests that need KV cache persistence.
+    # Draft requests flow through the normal pipeline:
+    # API → Master (routes to draft instance) → Worker → Runner
+    # The runner maintains a persistent KV cache for stateful draft generation.
 
-    def _ensure_draft_model(self) -> object:
-        if self._draft_model is not None:
-            return self._draft_model
-        import os
-        draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
-        if not draft_model_id:
-            raise HTTPException(400, "EXO_DRAFT_MODEL not configured")
-        from exo.worker.engines.mlx.draft_server import DraftModel
-        logger.info(f"Loading draft model in API process: {draft_model_id}")
-        self._draft_model = DraftModel(draft_model_id)
-        logger.info(f"Draft model ready: {draft_model_id}")
-        return self._draft_model
+    async def _draft_command(self, body: dict) -> JSONResponse:
+        """Send a draft command and await the response."""
+        from exo.shared.types.commands import DraftGeneration as DraftCmd
+        model = body.get("model", "")
+        if not model:
+            raise HTTPException(400, "model field required")
+
+        command = DraftCmd(
+            model=model,
+            token_id=body.get("token_id", 0),
+            num_tokens=body.get("num_tokens", 10),
+            trim=body.get("trim", 0),
+            action=body.get("action", "draft"),
+            prefill_token_ids=body.get("prefill_token_ids", body.get("token_ids", [])),
+        )
+
+        queue_send, queue_recv = anyio.create_memory_object_stream[
+            TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk | DraftChunk
+        ](16)
+        self._text_generation_queues[command.command_id] = queue_send
+
+        try:
+            self.command_sender.send(command)
+            async with queue_recv:
+                async for chunk in queue_recv:
+                    if isinstance(chunk, DraftChunk):
+                        return JSONResponse({
+                            "tokens": chunk.tokens,
+                            "cache_len": chunk.cache_len,
+                            "elapsed_ms": chunk.elapsed_ms,
+                        })
+                    elif isinstance(chunk, ErrorChunk):
+                        raise HTTPException(500, chunk.error_message)
+            raise HTTPException(504, "Draft request timed out")
+        finally:
+            self._text_generation_queues.pop(command.command_id, None)
 
     async def draft_generate(self, request: Request) -> JSONResponse:
         body = await request.json()
-        token_id = body.get("token_id", 1)
-        num_tokens = body.get("num_tokens", 10)
-        trim = body.get("trim", 0)
-
-        draft = self._ensure_draft_model()
-        t0 = time.time()
-        tokens = draft.draft(token_id, num_tokens, trim=trim)  # type: ignore
-        elapsed_ms = (time.time() - t0) * 1000
-        return JSONResponse({"tokens": tokens, "elapsed_ms": elapsed_ms})
+        body.setdefault("action", "draft")
+        return await self._draft_command(body)
 
     async def draft_prefill(self, request: Request) -> JSONResponse:
         body = await request.json()
-        token_ids = body.get("token_ids", [])
-
-        draft = self._ensure_draft_model()
-        t0 = time.time()
-        cache_len = draft.prefill(token_ids)  # type: ignore
-        elapsed_ms = (time.time() - t0) * 1000
-        return JSONResponse({"cache_len": cache_len, "elapsed_ms": elapsed_ms})
+        body["action"] = "prefill"
+        return await self._draft_command(body)
 
     async def draft_reset(self, request: Request) -> JSONResponse:
-        draft = self._ensure_draft_model()
-        draft.reset()  # type: ignore
-        return JSONResponse({"status": "ok"})
+        body = await request.json()
+        body["action"] = "reset"
+        return await self._draft_command(body)
 
     async def draft_health(self) -> JSONResponse:
-        if self._draft_model is None:
-            return JSONResponse({"status": "not_loaded", "model": None})
-        return JSONResponse({
-            "status": "ok",
-            "cache_len": self._draft_model.cache_len,  # type: ignore
-            "model": self._draft_model.model_id,  # type: ignore
-        })
+        # Check if any draft model instance exists
+        draft_models = [
+            inst.shard_assignments.model_id
+            for inst in self.state.instances.values()
+            if any(r.key == "RunnerReady" for r in self.state.runners.get(inst.instance_id, {}).values())  # type: ignore
+        ]
+        return JSONResponse({"status": "ok", "models": draft_models})
 
     async def get_onboarding(self) -> JSONResponse:
         return JSONResponse({"completed": ONBOARDING_COMPLETE_FILE.exists()})

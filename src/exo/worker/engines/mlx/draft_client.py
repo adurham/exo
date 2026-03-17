@@ -19,9 +19,10 @@ from exo.worker.runner.bootstrap import logger
 class DraftClient:
     """Non-blocking client for the draft token server."""
 
-    def __init__(self, server_url: str, num_draft_tokens: int = 10):
+    def __init__(self, server_url: str, num_draft_tokens: int = 10, draft_model: str = ""):
         self.server_url = server_url.rstrip('/')
         self.num_draft_tokens = num_draft_tokens
+        self.draft_model = draft_model
         self._thread: threading.Thread | None = None
         self._result: list[int] | None = None
         self._pending = False
@@ -33,7 +34,7 @@ class DraftClient:
         """Prefill the draft model's KV cache with prompt tokens. Blocking."""
         try:
             t0 = time.perf_counter()
-            data = json.dumps({"token_ids": token_ids}).encode()
+            data = json.dumps({"model": self.draft_model, "token_ids": token_ids}).encode()
             req = urllib.request.Request(
                 f"{self.server_url}/v1/draft/prefill",
                 data=data,
@@ -69,6 +70,7 @@ class DraftClient:
             t0 = time.perf_counter()
             try:
                 data = json.dumps({
+                    "model": self.draft_model,
                     "token_id": token_id,
                     "num_tokens": num,
                     "trim": trim,
@@ -115,7 +117,7 @@ class DraftClient:
         try:
             req = urllib.request.Request(
                 f"{self.server_url}/v1/draft/reset",
-                data=b'{}',
+                data=json.dumps({"model": self.draft_model}).encode(),
                 headers={"Content-Type": "application/json"},
             )
             urllib.request.urlopen(req, timeout=5.0)

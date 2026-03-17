@@ -16,6 +16,7 @@ from exo.shared.constants import EXO_EVENT_LOG_DIR, EXO_TRACING_ENABLED
 from exo.shared.types.commands import (
     CreateInstance,
     DeleteInstance,
+    DraftGeneration,
     ForwarderCommand,
     ForwarderDownloadCommand,
     ImageEdits,
@@ -55,6 +56,9 @@ from exo.shared.types.tasks import (
 from exo.shared.types.tasks import (
     TaskId,
     TaskStatus,
+)
+from exo.shared.types.tasks import (
+    DraftGeneration as DraftGenerationTask,
 )
 from exo.shared.types.tasks import (
     TextGeneration as TextGenerationTask,
@@ -164,6 +168,36 @@ class Master:
                                 )
                             )
 
+                            self.command_task_mapping[command.command_id] = task_id
+                        case DraftGeneration():
+                            # Route to the instance running the draft model
+                            for instance in self.state.instances.values():
+                                if (
+                                    instance.shard_assignments.model_id
+                                    == command.model
+                                ):
+                                    instance_task_counts[instance.instance_id] = 0
+                            if not instance_task_counts:
+                                raise ValueError(
+                                    f"No instance found for draft model {command.model}"
+                                )
+                            task_id = TaskId()
+                            generated_events.append(
+                                TaskCreated(
+                                    task_id=task_id,
+                                    task=DraftGenerationTask(
+                                        task_id=task_id,
+                                        command_id=command.command_id,
+                                        instance_id=list(instance_task_counts.keys())[0],
+                                        task_status=TaskStatus.Pending,
+                                        token_id=command.token_id,
+                                        num_tokens=command.num_tokens,
+                                        trim=command.trim,
+                                        action=command.action,
+                                        prefill_token_ids=command.prefill_token_ids,
+                                    ),
+                                )
+                            )
                             self.command_task_mapping[command.command_id] = task_id
                         case ImageGeneration():
                             for instance in self.state.instances.values():
