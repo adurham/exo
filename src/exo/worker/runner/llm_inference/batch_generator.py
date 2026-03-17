@@ -433,6 +433,7 @@ class BatchGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             kv_prefix_cache=self.kv_prefix_cache,
+            draft_model=self.draft_model,
         )
 
     def warmup(self):
