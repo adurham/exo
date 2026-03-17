@@ -415,22 +415,63 @@ def get_shard_assignments_for_hybrid_parallel(
         runner_to_shard[runner_id] = shard
         node_to_runner[node_id] = runner_id
 
+    # Check if the PP tail should be a draft provider
+    draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "") or None
+
     for i, node_id in enumerate(pp_node_ids):
         device_rank = pp_tail_rank + i
-        shard = HybridShardMetadata(
-            model_card=model_card,
-            device_rank=device_rank,
-            world_size=world_size,
-            start_layer=pp_start,
-            end_layer=pp_end,
-            n_layers=model_card.n_layers,
-            tp_size=tp_size,
-            tp_rank=-1,  # not in TP group
-            pp_rank=1,
-            pp_size=pp_size,
-            pipeline_send_to=None,
-            pipeline_recv_from=tp_master_rank,
-        )
+
+        if draft_model_id:
+            # Draft mode: PP tail loads draft model, sends predictions to TP master
+            # Give it 0 layers of the primary model — it only runs the draft
+            shard = HybridShardMetadata(
+                model_card=model_card,
+                device_rank=device_rank,
+                world_size=world_size,
+                start_layer=0,
+                end_layer=0,
+                n_layers=model_card.n_layers,
+                tp_size=tp_size,
+                tp_rank=-1,
+                pp_rank=1,
+                pp_size=pp_size,
+                pipeline_send_to=tp_master_rank,  # sends draft tokens TO TP master
+                pipeline_recv_from=tp_master_rank,  # receives current token FROM TP master
+                draft_model_id=draft_model_id,
+            )
+            # TP master layers get the full model (no PP split)
+            # Override TP shards to use all layers
+            for rid, existing_shard in runner_to_shard.items():
+                if isinstance(existing_shard, HybridShardMetadata) and existing_shard.tp_rank >= 0:
+                    runner_to_shard[rid] = HybridShardMetadata(
+                        model_card=model_card,
+                        device_rank=existing_shard.device_rank,
+                        world_size=world_size,
+                        start_layer=0,
+                        end_layer=model_card.n_layers,
+                        n_layers=model_card.n_layers,
+                        tp_size=tp_size,
+                        tp_rank=existing_shard.tp_rank,
+                        pp_rank=0,
+                        pp_size=pp_size,
+                        pipeline_send_to=device_rank if existing_shard.tp_rank == 0 else None,
+                        pipeline_recv_from=device_rank if existing_shard.tp_rank == 0 else None,
+                    )
+        else:
+            shard = HybridShardMetadata(
+                model_card=model_card,
+                device_rank=device_rank,
+                world_size=world_size,
+                start_layer=pp_start,
+                end_layer=pp_end,
+                n_layers=model_card.n_layers,
+                tp_size=tp_size,
+                tp_rank=-1,
+                pp_rank=1,
+                pp_size=pp_size,
+                pipeline_send_to=None,
+                pipeline_recv_from=tp_master_rank,
+            )
         runner_id = RunnerId()
         runner_to_shard[runner_id] = shard
         node_to_runner[node_id] = runner_id

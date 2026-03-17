@@ -173,13 +173,18 @@ def load_mlx_items(
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
 ) -> tuple[Model, TokenizerWrapper, object | None]:
-    from exo.shared.types.worker.shards import DraftShardMetadata
+    from exo.shared.types.worker.shards import DraftShardMetadata, HybridShardMetadata
 
-    # Draft node: load draft model instead of primary, no TP sharding
+    # Check if this is a draft provider node (DraftShardMetadata or HybridShard with draft_model_id)
+    draft_model_id = None
     if isinstance(bound_instance.bound_shard, DraftShardMetadata):
-        draft_id = bound_instance.bound_shard.draft_model_id
-        logger.info(f"Draft node: loading draft model {draft_id}")
-        draft_path = build_model_path(ModelId(draft_id))
+        draft_model_id = bound_instance.bound_shard.draft_model_id
+    elif isinstance(bound_instance.bound_shard, HybridShardMetadata) and bound_instance.bound_shard.draft_model_id:
+        draft_model_id = bound_instance.bound_shard.draft_model_id
+
+    if draft_model_id is not None:
+        logger.info(f"Draft node: loading draft model {draft_model_id}")
+        draft_path = build_model_path(ModelId(draft_model_id))
         start_time = time.perf_counter()
         model, _ = load_model(str(draft_path), lazy=True)
         mx.eval(model)

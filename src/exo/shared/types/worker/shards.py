@@ -87,6 +87,11 @@ class HybridShardMetadata(BaseShardMetadata):
     TP nodes share the same [start_layer, end_layer) range and split each
     layer's compute via all-reduce.  PP nodes own a disjoint layer range and
     communicate via send/recv.
+
+    When draft_model_id is set, the PP tail node loads a draft model instead
+    of a slice of the primary model. It uses the send/recv RDMA channel to
+    exchange draft tokens with the TP master, enabling speculative decoding
+    over RDMA.
     """
 
     tp_size: int  # number of nodes in the TP sub-group (e.g. 2)
@@ -95,6 +100,7 @@ class HybridShardMetadata(BaseShardMetadata):
     pp_size: int  # total pipeline stages (e.g. 2)
     pipeline_send_to: int | None = None  # global rank to send output to
     pipeline_recv_from: int | None = None  # global rank to receive input from
+    draft_model_id: str | None = None  # if set, this is a draft provider node
 
 
 @final
