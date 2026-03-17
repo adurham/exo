@@ -436,9 +436,33 @@ class Runner:
             self.send_task_status(task.task_id, TaskStatus.Complete)
             return False
 
+    def _try_connect_draft(self) -> None:
+        """Lazy DraftClient init — retries if the draft instance wasn't ready at load time."""
+        assert isinstance(self.generator, InferenceGenerator)
+        if self.generator.draft_model is not None:
+            return  # Already connected
+        _draft_model_id = self.bound_instance.instance.draft_model
+        _draft_tokens = self.bound_instance.instance.draft_tokens
+        if not _draft_model_id or self.device_rank != 0:
+            return
+        try:
+            from exo.worker.engines.mlx.draft_client import DraftClient
+            _draft_url = self._resolve_draft_url(_draft_model_id)
+            if _draft_url:
+                self.generator.draft_model = DraftClient(
+                    server_url=_draft_url,
+                    num_draft_tokens=_draft_tokens,
+                    draft_model=_draft_model_id,
+                )
+                logger.info(f"Draft client connected (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
+        except Exception as e:
+            logger.debug(f"Draft client not yet available: {e}")
+
     def handle_generation_tasks(self, starting_task: TextGeneration):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
+
+        self._try_connect_draft()
 
         logger.info(f"received chat request: {starting_task}")
         self.update_status(RunnerRunning())
