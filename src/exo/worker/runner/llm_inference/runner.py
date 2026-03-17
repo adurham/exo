@@ -594,6 +594,58 @@ class Runner:
                     )
 
 
+class _TpDraftWrapper:
+    """Wraps a DraftClient (rank 0 only) with TP broadcast for speculative decoding.
+
+    All TP ranks must call the model with identical draft tokens. Rank 0 fetches
+    from the TCP DraftClient, then broadcasts the result to all other ranks via
+    mx.distributed.all_gather before returning.
+    """
+
+    def __init__(self, draft_client: object | None, group: mx.distributed.Group):
+        self._client = draft_client  # DraftClient on rank 0, None on other ranks
+        self._group = group
+        self.num_draft_tokens: int = getattr(draft_client, 'num_draft_tokens', 10) if draft_client else 10
+        self.server_url: str = getattr(draft_client, 'server_url', '') if draft_client else ''
+        self._num_to_trim: int = 0
+        self._result: list[int] | None = None
+        self._thread = None  # Always None — we block inside request_draft
+
+    def prefill(self, token_ids: list[int]) -> int | None:
+        """Prefill draft cache (rank 0 only)."""
+        if self._client is not None and hasattr(self._client, 'prefill'):
+            return self._client.prefill(token_ids)
+        return None
+
+    def request_draft(self, token_id: int, num_tokens: int = 0) -> None:
+        """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
+        num = num_tokens or self.num_draft_tokens
+        if self._group.rank() == 0 and self._client is not None:
+            self._client._num_to_trim = self._num_to_trim
+            self._num_to_trim = 0
+            self._client.request_draft(token_id, num)
+            if self._client._thread is not None:
+                self._client._thread.join()
+            result = self._client._result or []
+            # Pack: [actual_length, tok0, tok1, ..., tokN-1] padded to num+1
+            padded = result[:num] + [0] * max(0, num - len(result))
+            draft_array = mx.array([len(result)] + padded, dtype=mx.int32)
+        else:
+            self._num_to_trim = 0
+            draft_array = mx.zeros(num + 1, dtype=mx.int32)
+
+        # Broadcast from rank 0 to all ranks
+        gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=self._group)
+        mx.eval(gathered)
+        rank0_data = gathered[0].tolist()
+        actual_len = rank0_data[0]
+        self._result = rank0_data[1:1 + actual_len] if actual_len > 0 else []
+
+    def shutdown(self) -> None:
+        if self._client is not None and hasattr(self._client, 'shutdown'):
+            self._client.shutdown()
+
+
 @dataclass
 class Builder:
     model_id: ModelId
@@ -634,10 +686,14 @@ class Builder:
 
         device_rank = 0 if self.group is None else self.group.rank()
         _use_sequential = bool(os.environ.get("EXO_NO_BATCH"))
-        # If a draft model is configured (even if only rank 0 has the DraftClient),
-        # ALL TP ranks must use SequentialGenerator for consistent collective ops.
+        # If a draft model is configured, ALL TP ranks must use SequentialGenerator
+        # with a TP-aware draft_fn that broadcasts draft tokens from rank 0.
         if not _use_sequential and self.use_speculative:
             _use_sequential = True
+            if self.group is not None and self.group.size() > 1:
+                # TP mode: wrap the DraftClient in a broadcast-based draft_fn
+                # so all ranks call the model with the same draft tokens.
+                self.draft_model = _TpDraftWrapper(self.draft_model, self.group)
             logger.info("using SequentialGenerator (TCP draft model requires speculative path)")
         if _use_sequential:
             logger.info("using SequentialGenerator")
