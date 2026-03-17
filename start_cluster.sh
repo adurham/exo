@@ -23,6 +23,7 @@
 : "${EXO_EXPERT_PARALLEL:=0}"
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-0.6B-8bit}"
+: "${EXO_NO_BATCH:=1}"
 : "${EXO_SPECULATIVE_DRAFT_TOKENS:=3}"
 : "${LOG_LEVEL:=DEBUG}"
 export IBV_FORK_SAFE=1
@@ -391,6 +392,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
     EXO_ENV="$EXO_ENV EXO_SPECULATIVE_DRAFT_TOKENS=$EXO_SPECULATIVE_DRAFT_TOKENS"
     EXO_ENV="$EXO_ENV MLX_SDPA_CPU_FRACTION=$MLX_SDPA_CPU_FRACTION"
+    EXO_ENV="$EXO_ENV EXO_NO_BATCH=$EXO_NO_BATCH"
     # MacBook gets 2 entries (see per-node overrides below), Studios get 1
     if [ "$NODE" != "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
