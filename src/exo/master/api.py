@@ -2024,6 +2024,7 @@ class API:
         t0 = time.time()
 
         task = DraftGenerationTask(
+            instance_id=runner.bound_instance.instance.instance_id,  # type: ignore[union-attr]
             command_id=command_id,
             action=action,
             token_id=body.get("token_id", 0),
