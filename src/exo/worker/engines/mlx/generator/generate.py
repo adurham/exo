@@ -563,42 +563,63 @@ def draft_provider_loop(
     group: mx.distributed.Group,
     recv_from: int,
     send_to: int,
-    num_draft_tokens: int = 2,
+    num_draft_tokens: int = 10,
 ) -> None:
     """Draft provider loop: receives tokens via RDMA, generates predictions, sends back.
 
     Runs on the MacBook as part of a hybrid JACCL group.
-    The TP master (Studio) sends a token ID, the draft node generates predictions
-    and sends them back — all over RDMA.
+    The TP master (Studio) sends a control message, the draft node generates
+    predictions and sends them back — all over RDMA.
+
+    Protocol per step:
+      1. Recv (2,) int32 from TP master: [accepted_token_id, num_to_trim]
+         - accepted_token_id: the verified token to continue from
+         - num_to_trim: how many draft tokens were rejected (trim KV cache)
+         - accepted_token_id < 0 means shutdown
+      2. Trim draft KV cache by num_to_trim (KV cache desync fix)
+      3. Feed accepted token through draft model
+      4. Generate num_draft_tokens predictions
+      5. Send (num_draft_tokens,) int32 back to TP master
     """
-    from mlx_lm.models.cache import make_prompt_cache
+    from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
 
     cache = make_prompt_cache(model)
-    logger.info(f"Draft provider loop started (recv_from={recv_from}, send_to={send_to}, draft_tokens={num_draft_tokens})")
+    logger.info(
+        f"Draft provider loop started (recv_from={recv_from}, "
+        f"send_to={send_to}, K={num_draft_tokens})"
+    )
 
     while True:
-        # Receive token ID from TP master via RDMA
-        token_arr = mx.distributed.recv(shape=(1,), dtype=mx.int32, src=recv_from, group=group)
-        mx.eval(token_arr)
-        token_id = token_arr.item()
+        # Receive control message: [token_id, num_to_trim]
+        ctrl = mx.distributed.recv(shape=(2,), dtype=mx.int32, src=recv_from, group=group)
+        mx.eval(ctrl)
+        token_id = ctrl[0].item()
+        num_to_trim = ctrl[1].item()
 
         if token_id < 0:
-            # Negative token = shutdown signal
             logger.info("Draft provider: received shutdown signal")
             break
 
-        # Generate draft tokens
-        draft_tokens = []
+        # Trim KV cache for rejected tokens (KV cache desync fix)
+        if num_to_trim > 0:
+            trim_prompt_cache(cache, num_to_trim)
+
+        # Feed the accepted token through draft model
         current = mx.array([[token_id]])
+        logits = model(current, cache=cache)
+        mx.eval(logits)
+
+        # Generate K draft tokens
+        draft_tokens = []
         for _ in range(num_draft_tokens):
-            logits = model(current, cache=cache)
-            mx.eval(logits)
             next_token = logits[0, -1].argmax()
             mx.eval(next_token)
             draft_tokens.append(next_token.item())
             current = next_token.reshape(1, 1)
+            logits = model(current, cache=cache)
+            mx.eval(logits)
 
-        # Send draft tokens back via RDMA
+        # Send draft predictions via RDMA
         result = mx.array(draft_tokens, dtype=mx.int32)
         mx.distributed.send(result, send_to, group=group)
         mx.eval(result)
