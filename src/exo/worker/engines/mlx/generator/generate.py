@@ -920,8 +920,14 @@ def mlx_generate(
                 f"layers={_cpu_draft._n_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
             )
         except Exception as e:
-            logger.warning(f"Failed to init CPU draft engine: {e}")
+            logger.warning(f"Failed to init CPU draft engine: {e}", exc_info=True)
             _cpu_draft = None
+    else:
+        if _draft_model_id:
+            dylib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cpu_draft.dylib")
+            logger.info(f"CPU draft: model={_draft_model_id}, dylib={dylib_path}, exists={os.path.exists(dylib_path)}")
+        else:
+            logger.debug("CPU draft disabled: EXO_DRAFT_MODEL not set")
 
     _generation_logged = False
     try:
