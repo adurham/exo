@@ -22,10 +22,13 @@
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
-: "${EXO_DRAFT_SERVER:=http://192.168.86.203:52415}"
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
-: "${EXO_SPECULATIVE_DRAFT_TOKENS:=10}"
 : "${LOG_LEVEL:=DEBUG}"
+
+# ── Speculative decoding ──
+# Draft model runs as a separate instance on the MacBook.
+# Studios query it via exo's /v1/draft API during decode.
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
+: "${EXO_DRAFT_TOKENS:=10}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
@@ -389,12 +392,6 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
     EXO_ENV="$EXO_ENV EXO_TP_EVAL_INTERVAL=$EXO_TP_EVAL_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_EXPERT_PARALLEL=$EXO_EXPERT_PARALLEL"
-    EXO_ENV="$EXO_ENV EXO_SPECULATIVE_DRAFT_TOKENS=$EXO_SPECULATIVE_DRAFT_TOKENS"
-    # Studios get draft server URL + model ID for speculative decoding
-    if [ "$NODE" != "macbook-m4" ] && [ -n "$EXO_DRAFT_SERVER" ]; then
-        EXO_ENV="$EXO_ENV EXO_DRAFT_SERVER=$EXO_DRAFT_SERVER"
-        EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
-    fi
     EXO_ENV="$EXO_ENV MLX_SDPA_CPU_FRACTION=$MLX_SDPA_CPU_FRACTION"
     EXO_ENV="$EXO_ENV EXO_NO_BATCH=$EXO_NO_BATCH"
     # MacBook gets 2 entries (see per-node overrides below), Studios get 1
@@ -420,16 +417,15 @@ for NODE in "${NODES[@]}"; do
 
     # Per-node overrides
     if [ "$NODE" == "macbook-m4" ]; then
-        # Smaller prefill steps = finer KV cache snapshot granularity for
-        # the memory-constrained MacBook (subagent workloads are 1-10K tokens).
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
-        # 4 cache entries: explore subagent calls are 5-15K tokens each.
-        # 4 entries × ~10K avg × 48KB/tok = ~1.9GB.  25GB model + 2GB KV ≈ 75% of 36GB.
-        # Memory pressure eviction handles edge cases.
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
-        # Draft model: loaded lazily by the API process on first draft request.
-        # The draft model instance (1.7B) also shows as a regular exo instance.
+    fi
+
+    # Studios: configure speculative decoding (query MacBook's draft instance)
+    if [ "$NODE" != "macbook-m4" ] && [ -n "$EXO_DRAFT_MODEL" ]; then
+        EXO_ENV="$EXO_ENV EXO_DRAFT_SERVER=http://$MBP_IP:52415"
         EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
+        EXO_ENV="$EXO_ENV EXO_SPECULATIVE_DRAFT_TOKENS=$EXO_DRAFT_TOKENS"
     fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
@@ -578,8 +574,8 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-echo "Creating Qwen3-235B-A22B-Instruct-2507-6bit instance (Tensor Parallel / RDMA)..."
-echo "  Studios: TP (all 94 layers)"
+# ── Instance 1: Primary model (Studios, Tensor Parallel over RDMA) ──
+echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
     \"sharding\": \"Tensor\",
@@ -591,10 +587,11 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
-echo "Creating Qwen3-Coder-30B instance (MacBook single node)..."
+# ── Instance 2: Subagent model (MacBook, single node) ──
+echo "Creating Qwen3-Coder-30B instance (MacBook)..."
 if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
-    \"sharding\": \"Tensor\",
+    \"sharding\": \"Pipeline\",
     \"min_nodes\": 1,
     \"node_ids\": [\"$MBP_NODE_ID\"],
     \"max_context_tokens\": 50000
@@ -602,15 +599,18 @@ if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 fi
 
-echo "Creating Qwen3-1.7B draft model instance (MacBook, speculative decoding)..."
-if place_instance_with_retry "Qwen3-1.7B-draft" "mlx-community/Qwen3-1.7B-8bit" "{
-    \"model_id\": \"mlx-community/Qwen3-1.7B-8bit\",
-    \"sharding\": \"Pipeline\",
-    \"min_nodes\": 1,
-    \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 4096
-}"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+# ── Instance 3: Draft model for speculative decoding (MacBook) ──
+if [ -n "$EXO_DRAFT_MODEL" ]; then
+    echo "Creating draft model instance ($EXO_DRAFT_MODEL on MacBook)..."
+    if place_instance_with_retry "Draft" "$EXO_DRAFT_MODEL" "{
+        \"model_id\": \"$EXO_DRAFT_MODEL\",
+        \"sharding\": \"Pipeline\",
+        \"min_nodes\": 1,
+        \"node_ids\": [\"$MBP_NODE_ID\"],
+        \"max_context_tokens\": 4096
+    }"; then
+        EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+    fi
 fi
 
 if [ "$EXPECTED_RUNNERS" -eq 0 ]; then
