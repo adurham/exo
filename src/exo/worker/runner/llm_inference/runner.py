@@ -3,6 +3,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
+_SPECULATIVE_DRAFT_TOKENS = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "3"))
+
 import mlx.core as mx
 from anyio import WouldBlock
 from mlx_lm.tokenizer_utils import TokenizerWrapper
@@ -311,13 +313,24 @@ class Runner:
             logger.info("Draft node: entering draft provider loop")
             self.update_status(RunnerRunning())
             self.acknowledge_task(starting_task)
+            # Set large heartbeat timeout — recv() blocks during Studios' prefill
+            # which can take 10s+ for long prompts. Default 90s would kill us.
+            hb_timeout = getattr(self.generator, 'heartbeat_timeout', None)
+            if hb_timeout is not None:
+                hb_timeout.value = 3600.0  # 1 hour — draft node lifecycle is managed by shutdown signal
+            hb = getattr(self.generator, 'heartbeat', None)
+            if hb is not None:
+                hb.value = time.monotonic()
             from exo.worker.engines.mlx.generator.generate import draft_provider_loop
+            assert self.shard_metadata.pipeline_recv_from is not None, "Draft node must have pipeline_recv_from"
+            assert self.shard_metadata.pipeline_send_to is not None, "Draft node must have pipeline_send_to"
             draft_provider_loop(
-                model=self.generator.model,
-                group=self.generator.group,
+                model=self.generator.model,  # type: ignore[reportAttributeAccessIssue]
+                group=self.generator.group,  # type: ignore[reportAttributeAccessIssue]
                 recv_from=self.shard_metadata.pipeline_recv_from,
                 send_to=self.shard_metadata.pipeline_send_to,
                 num_draft_tokens=_SPECULATIVE_DRAFT_TOKENS,
+                heartbeat=hb,
             )
             self.send_task_status(starting_task.task_id, TaskStatus.Complete)
             self.update_status(RunnerReady())

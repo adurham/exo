@@ -101,6 +101,7 @@ class HybridShardMetadata(BaseShardMetadata):
     pipeline_send_to: int | None = None  # global rank to send output to
     pipeline_recv_from: int | None = None  # global rank to receive input from
     draft_model_id: str | None = None  # if set, this is a draft provider node
+    draft_rank: int | None = None  # rank of draft node in JACCL group (set on TP nodes)
 
 
 @final

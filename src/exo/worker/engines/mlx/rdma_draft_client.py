@@ -7,7 +7,11 @@ Has the same request_draft/get_result API as DraftClient/CPUDraftWrapper
 so it plugs into the ExoBatchGenerator callback.
 """
 import threading
+import time
+
 import mlx.core as mx
+
+from exo.worker.runner.bootstrap import logger
 
 
 class RDMADraftClient:
@@ -17,10 +21,12 @@ class RDMADraftClient:
         self.group = group
         self.draft_rank = draft_rank
         self.num_draft_tokens = num_draft_tokens
-        self._thread = None
-        self._result = None
+        self._thread: threading.Thread | None = None
+        self._result: list[int] | None = None
         self._pending = False
         self._num_to_trim = 0  # rejected tokens from last step
+        self._step = 0
+        self._total_exchange_ms = 0.0
 
     def request_draft(self, token_id: int, num_tokens: int = 0):
         """Send accepted token + trim count to draft node, receive predictions.
@@ -33,8 +39,11 @@ class RDMADraftClient:
         self._num_to_trim = 0
         self._result = None
         self._pending = True
+        self._step += 1
+        step = self._step
 
         def _exchange():
+            t0 = time.perf_counter()
             try:
                 # Send control: [accepted_token_id, num_to_trim]
                 ctrl = mx.array([token_id, trim], dtype=mx.int32)
@@ -47,7 +56,15 @@ class RDMADraftClient:
                     src=self.draft_rank, group=self.group)
                 mx.eval(preds)
                 self._result = preds.tolist()
-            except Exception:
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                self._total_exchange_ms += elapsed_ms
+                if step <= 5 or step % 50 == 0:
+                    logger.info(
+                        f"RDMA draft exchange step {step}: {elapsed_ms:.1f}ms "
+                        f"(token={token_id}, trim={trim}, got {len(self._result)} drafts)"
+                    )
+            except Exception as e:
+                logger.warning(f"RDMA draft exchange failed at step {step}: {e}")
                 self._result = None
 
         self._thread = threading.Thread(target=_exchange, daemon=True)
@@ -57,7 +74,7 @@ class RDMADraftClient:
         """Set how many tokens the draft node should trim on next request."""
         self._num_to_trim = num_rejected
 
-    def get_result(self) -> list | None:
+    def get_result(self) -> list[int] | None:
         """Get draft result. Non-blocking."""
         if not self._pending:
             return None
@@ -78,8 +95,15 @@ class RDMADraftClient:
     def shutdown(self):
         """Send shutdown signal to draft node (negative token)."""
         try:
+            logger.info(f"Sending shutdown to draft node (rank={self.draft_rank})")
             ctrl = mx.array([-1, 0], dtype=mx.int32)
             mx.distributed.send(ctrl, self.draft_rank, group=self.group)
             mx.eval(ctrl)
-        except Exception:
-            pass
+            if self._step > 0:
+                avg_ms = self._total_exchange_ms / self._step
+                logger.info(
+                    f"RDMA draft stats: {self._step} exchanges, "
+                    f"avg {avg_ms:.1f}ms per exchange"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send shutdown to draft node: {e}")

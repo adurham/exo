@@ -259,12 +259,10 @@ def load_mlx_items(
     shard = bound_instance.bound_shard
     if (isinstance(shard, HybridShardMetadata)
             and shard.tp_rank == 0  # only TP master communicates with draft
-            and shard.pipeline_send_to is not None
-            and shard.pipeline_recv_from is not None
+            and shard.draft_rank is not None
             and group is not None):
-        # Check if there's a draft node in the group
-        # (pipeline_send_to/recv_from point to the draft node rank)
-        draft_rank = shard.pipeline_send_to
+        # draft_rank points to the draft node in the JACCL group
+        draft_rank = shard.draft_rank
         try:
             from exo.worker.engines.mlx.rdma_draft_client import RDMADraftClient
             draft_client = RDMADraftClient(

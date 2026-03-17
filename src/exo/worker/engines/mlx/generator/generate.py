@@ -574,6 +574,7 @@ def draft_provider_loop(
     recv_from: int,
     send_to: int,
     num_draft_tokens: int = 10,
+    heartbeat: object | None = None,
 ) -> None:
     """Draft provider loop: receives tokens via RDMA, generates predictions, sends back.
 
@@ -599,7 +600,12 @@ def draft_provider_loop(
         f"send_to={send_to}, K={num_draft_tokens})"
     )
 
+    step = 0
     while True:
+        # Touch heartbeat before blocking recv — prefill on Studios can take 10s+
+        if heartbeat is not None:
+            heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+
         # Receive control message: [token_id, num_to_trim]
         ctrl = mx.distributed.recv(shape=(2,), dtype=mx.int32, src=recv_from, group=group)
         mx.eval(ctrl)
@@ -610,11 +616,16 @@ def draft_provider_loop(
             logger.info("Draft provider: received shutdown signal")
             break
 
+        # Touch heartbeat after recv completes
+        if heartbeat is not None:
+            heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+
         # Trim KV cache for rejected tokens (KV cache desync fix)
         if num_to_trim > 0:
             trim_prompt_cache(cache, num_to_trim)
 
         # Feed the accepted token through draft model
+        t0 = time.perf_counter()
         current = mx.array([[token_id]])
         logits = model(current, cache=cache)
         mx.eval(logits)
@@ -633,6 +644,14 @@ def draft_provider_loop(
         result = mx.array(draft_tokens, dtype=mx.int32)
         mx.distributed.send(result, send_to, group=group)
         mx.eval(result)
+
+        step += 1
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        if step <= 5 or step % 50 == 0:
+            logger.info(
+                f"Draft step {step}: generated {num_draft_tokens} tokens in {elapsed_ms:.1f}ms "
+                f"(token_id={token_id}, trim={num_to_trim})"
+            )
 
 
 def mlx_generate(
@@ -985,7 +1004,8 @@ def mlx_generate(
 
     # CPU-pipelined speculative decoding: use pre-loaded draft engine
     # (initialized at model load time in utils_mlx.py, not per-request)
-    _cpu_draft = draft_model  # draft_model is actually a CPUDraftEngine or None
+    # RDMADraftClient is handled by ExoBatchGenerator, not here.
+    _cpu_draft = draft_model if draft_model is not None and hasattr(draft_model, 'draft_sync') else None
     if _cpu_draft is not None:
         logger.info(
             f"CPU-pipelined speculative decode active: "

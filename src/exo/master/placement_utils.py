@@ -460,6 +460,7 @@ def get_shard_assignments_for_hybrid_parallel(
                         pp_size=pp_size,
                         pipeline_send_to=None,  # NO pipeline wrapping
                         pipeline_recv_from=None,  # draft exchange is separate
+                        draft_rank=pp_tail_rank,  # tells TP master where draft node is
                     )
         else:
             shard = HybridShardMetadata(

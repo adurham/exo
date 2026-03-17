@@ -102,7 +102,7 @@ class ExoBatchGenerator:
             stop_tokens=set(eos_ids_from_tokenizer(self.tokenizer)),
             prefill_step_size=PREFILL_STEP_SIZE,
         )
-        # Wire CPU draft: run draft using the PREVIOUS step's token
+        # Wire draft: run draft using the PREVIOUS step's token
         # (we can't access current y without forcing GPU sync)
         self._draft_prev_token = None
         if self.draft_model is not None and hasattr(self.draft_model, 'request_draft'):
@@ -110,7 +110,8 @@ class ExoBatchGenerator:
                 """Called during GPU async eval. Use PREVIOUS token for draft."""
                 if self._draft_prev_token is not None:
                     try:
-                        self.draft_model.request_draft(self._draft_prev_token, 2)
+                        # Pass 0 to use draft client's configured K (e.g. K=10 for RDMA)
+                        self.draft_model.request_draft(self._draft_prev_token)
                     except Exception:
                         pass
             self._exo_gen.draft_callback = _on_async_eval
@@ -314,6 +315,11 @@ class ExoBatchGenerator:
         # Save current token for next step's draft callback
         if self.draft_model is not None and len(responses) == 1:
             self._draft_prev_token = responses[0].token
+            # Check for completed draft predictions from previous step
+            if hasattr(self.draft_model, 'get_result'):
+                drafts = self.draft_model.get_result()
+                if drafts is not None:
+                    logger.info(f"RDMA draft received {len(drafts)} predictions: {drafts[:5]}...")
 
         for response in responses:
             if response.uid not in self._active_tasks:
