@@ -20,46 +20,69 @@
 /* weight is packed: 4 uint8 values per uint32                   */
 /* scales/biases are per-group (group_size elements share one)   */
 
-static void qvm_8bit(
-    float* out,           /* (out_dim,) */
-    const float* input,   /* (in_dim,) */
-    const uint32_t* weight, /* (out_dim, in_dim/4) packed uint8 */
-    const float* scales,  /* (out_dim, n_groups) */
-    const float* biases,  /* (out_dim, n_groups) or NULL */
-    int out_dim,
-    int in_dim,
-    int group_size
+/* Dequantize a quantized weight matrix into a float32 scratch buffer,
+ * then use cblas_sgemv for the actual matmul. This reads 4× less from
+ * DRAM (uint8 vs float32) and the scratch buffer stays in L2 cache. */
+static float* _scratch = NULL;
+static int _scratch_size = 0;
+
+static float* get_scratch(int n) {
+    if (n > _scratch_size) {
+        free(_scratch);
+        _scratch = (float*)malloc(n * sizeof(float));
+        _scratch_size = n;
+    }
+    return _scratch;
+}
+
+static void dequant_to_scratch(
+    float* dst,
+    const uint32_t* src,   /* packed uint8 */
+    const float* scales,
+    const float* biases,
+    int out_dim, int in_dim, int group_size
 ) {
-    int pack = 4;  /* 8-bit: 4 values per uint32 */
+    int pack = 4;
     int in_packed = in_dim / pack;
     int n_groups = in_dim / group_size;
 
     for (int j = 0; j < out_dim; j++) {
-        const uint32_t* wrow = weight + j * in_packed;
-        const float* srow = scales + j * n_groups;
-        const float* brow = biases ? biases + j * n_groups : NULL;
-
-        float sum = 0.0f;
+        const uint32_t* wrow = src + j * in_packed;
+        float* drow = dst + j * in_dim;
         int idx = 0;
 
         for (int g = 0; g < n_groups; g++) {
-            float s = srow[g];
-            float b = brow ? brow[g] : 0.0f;
-            int gstart = g * group_size;
+            float s = scales[j * n_groups + g];
+            float b = biases ? biases[j * n_groups + g] : 0.0f;
 
-            /* Process group_size elements (packed in group_size/4 uint32s) */
-            int packs_per_group = group_size / pack;
-            for (int p = 0; p < packs_per_group; p++) {
+            for (int p = 0; p < group_size / pack; p++) {
                 uint32_t packed = wrow[idx++];
                 for (int k = 0; k < pack; k++) {
                     uint8_t q = (packed >> (8 * k)) & 0xFF;
-                    int i = gstart + p * pack + k;
-                    sum += input[i] * (s * (float)q + b);
+                    *drow++ = s * (float)q + b;
                 }
             }
         }
-        out[j] = sum;
     }
+}
+
+static void qvm_8bit(
+    float* out,
+    const float* input,
+    const uint32_t* weight,
+    const float* scales,
+    const float* biases,
+    int out_dim,
+    int in_dim,
+    int group_size
+) {
+    /* Dequantize to scratch buffer, then use optimized BLAS */
+    float* scratch = get_scratch(out_dim * in_dim);
+    dequant_to_scratch(scratch, weight, scales, biases, out_dim, in_dim, group_size);
+
+    /* y = A * x : A is (out_dim × in_dim), x is (in_dim,), y is (out_dim,) */
+    cblas_sgemv(CblasRowMajor, CblasNoTrans,
+                out_dim, in_dim, 1.0f, scratch, in_dim, input, 1, 0.0f, out, 1);
 }
 
 /* ── Same helpers as cpu_draft.c ─────────────────────────────── */
