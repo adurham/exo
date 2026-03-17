@@ -846,6 +846,22 @@ def mlx_generate(
     )
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
+    # Start draft prefill in background thread (overlaps with primary prefill)
+    _draft_prefill_thread = None
+    if draft_model is not None and hasattr(draft_model, 'prefill'):
+        import threading
+        _draft_client_ref = draft_model
+        _draft_client_ref.reset_cache()
+        _prompt_token_ids = prompt_tokens.tolist() if isinstance(prompt_tokens, mx.array) else list(prompt_tokens)
+        def _bg_draft_prefill():
+            try:
+                _draft_client_ref.prefill(_prompt_token_ids)
+            except Exception as e:
+                logger.warning(f"Draft prefill failed: {e}")
+        _draft_prefill_thread = threading.Thread(target=_bg_draft_prefill, daemon=True)
+        _draft_prefill_thread.start()
+        logger.info(f"Draft prefill started in background ({len(_prompt_token_ids)} tokens)")
+
     # Prefill cache with all tokens except the last one
     prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
         model,
@@ -1008,12 +1024,10 @@ def mlx_generate(
     if draft_model is not None and hasattr(draft_model, 'prefill'):
         # TCP DraftClient — use speculative_generate_step via draft_fn
         _draft_client = draft_model
-        _draft_client.reset_cache()
-        # Prefill the draft server with prompt tokens
-        if isinstance(last_token, mx.array):
-            prompt_token_ids = last_token.tolist()
-            if isinstance(prompt_token_ids, list) and len(prompt_token_ids) > 0:
-                _draft_client.prefill(prompt_token_ids)
+        # Wait for background draft prefill to finish before decode starts
+        if _draft_prefill_thread is not None:
+            _draft_prefill_thread.join()
+            logger.info("Draft prefill complete (was overlapped with primary prefill)")
         def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
             """Blocking call to remote draft server."""
             _draft_client._num_to_trim = trim
