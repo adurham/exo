@@ -1002,10 +1002,32 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
-    # CPU-pipelined speculative decoding: use pre-loaded draft engine
-    # (initialized at model load time in utils_mlx.py, not per-request)
-    _cpu_draft = draft_model  # draft_model is actually a CPUDraftEngine or None
-    if _cpu_draft is not None:
+    # Speculative decoding: TCP draft server or CPU draft engine
+    _draft_fn = None
+    _cpu_draft = None
+    if draft_model is not None and hasattr(draft_model, 'prefill'):
+        # TCP DraftClient — use speculative_generate_step via draft_fn
+        _draft_client = draft_model
+        _draft_client.reset_cache()
+        # Prefill the draft server with prompt tokens
+        if isinstance(last_token, mx.array):
+            prompt_token_ids = last_token.tolist()
+            if isinstance(prompt_token_ids, list) and len(prompt_token_ids) > 0:
+                _draft_client.prefill(prompt_token_ids)
+        def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
+            """Blocking call to remote draft server."""
+            _draft_client._num_to_trim = trim
+            _draft_client.request_draft(token_id, num_tokens)
+            if _draft_client._thread is not None:
+                _draft_client._thread.join()
+            return _draft_client._result or []
+        _draft_fn = _tcp_draft_fn
+        logger.info(
+            f"TCP speculative decode active: server={_draft_client.server_url}, "
+            f"K={_SPECULATIVE_DRAFT_TOKENS}"
+        )
+    elif draft_model is not None and hasattr(draft_model, 'draft_sync'):
+        _cpu_draft = draft_model
         logger.info(
             f"CPU-pipelined speculative decode active: "
             f"layers={_cpu_draft._n_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
@@ -1025,7 +1047,10 @@ def mlx_generate(
           kv_group_size=KV_GROUP_SIZE,
           kv_bits=KV_BITS,
       )
-      if _cpu_draft is not None:
+      if _draft_fn is not None:
+          _gen_kwargs["draft_fn"] = _draft_fn
+          _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
+      elif _cpu_draft is not None:
           _cpu_draft.reset_cache()
           # Feed prompt tokens to CPU draft model's cache
           if isinstance(last_token, mx.array):
