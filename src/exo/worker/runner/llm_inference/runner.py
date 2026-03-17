@@ -225,9 +225,8 @@ class Runner:
                 # Speculative decoding: if the instance has a draft_model configured,
                 # create a DraftClient that queries the draft instance via the API.
                 # Config comes from the instance metadata (set at creation time).
-                _draft_model_id = getattr(self.bound_instance.instance, 'draft_model', None)
-                _draft_tokens = getattr(self.bound_instance.instance, 'draft_tokens', 10)
-                logger.info(f"Draft config: model={_draft_model_id}, tokens={_draft_tokens}, rank={self.device_rank}")
+                _draft_model_id = self.bound_instance.instance.draft_model
+                _draft_tokens = self.bound_instance.instance.draft_tokens
                 if _draft_model_id and self.device_rank == 0:
                     try:
                         from exo.worker.engines.mlx.draft_client import DraftClient
