@@ -1075,10 +1075,13 @@ def mlx_generate(
           _gen_kwargs["cpu_draft_fn"] = _cpu_draft.draft_sync
           _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
 
+      _accepted_draft_tokens = 0
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
         start=1,
       ):
+        if out.from_draft:
+            _accepted_draft_tokens += 1
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
@@ -1140,7 +1143,8 @@ def mlx_generate(
                     cached_tokens=prefix_hit_length
                 ),
                 completion_tokens_details=CompletionTokensDetails(
-                    reasoning_tokens=reasoning_tokens
+                    reasoning_tokens=reasoning_tokens,
+                    accepted_prediction_tokens=_accepted_draft_tokens,
                 ),
             )
 
