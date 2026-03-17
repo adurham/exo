@@ -16,143 +16,194 @@ Usage:
     tokens = draft.get_result()  # non-blocking check
     draft.stop()
 """
-import multiprocessing as mp
 import os
+import select
+import signal
+import struct
 import time
 
 
-def _draft_worker(model_id: str, request_pipe, result_pipe, ready_event):
-    """Worker function that runs in a separate process."""
-    # Set BLAS thread limits BEFORE importing anything
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
-    os.environ["OPENBLAS_NUM_THREADS"] = "4"
-
-    try:
-        from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
-
-        engine = CPUDraftEngine(model_id)
-        # Warmup
-        engine.draft_sync(start_token=1, num_tokens=1)
-        engine.reset_cache()
-
-        ready_event.set()  # signal main process we're ready
-
-        while True:
-            if not request_pipe.poll(timeout=1.0):
-                continue
-
-            msg = request_pipe.recv()
-            if msg is None:  # shutdown signal
-                break
-
-            cmd, token_id, num_tokens = msg
-            if cmd == "draft":
-                tokens = engine.draft_sync(token_id, num_tokens)
-                result_pipe.send(tokens)
-            elif cmd == "reset":
-                engine.reset_cache()
-                result_pipe.send("ok")
-            elif cmd == "feed":
-                # Feed a token to the cache without drafting
-                engine._forward_one(token_id)
-                result_pipe.send("ok")
-
-    except Exception as e:
-        ready_event.set()  # unblock main even on error
-        result_pipe.send(f"ERROR: {e}")
-
-
 class CPUDraftProcess:
-    """Manages a separate process for CPU draft model inference."""
+    """Manages a separate process for CPU draft model inference.
+
+    Uses os.fork() directly instead of multiprocessing.Process to avoid
+    the 'daemonic processes cannot have children' restriction.
+    Communication via raw pipes (os.pipe) with simple binary protocol.
+    """
 
     def __init__(self, model_id: str):
         self.model_id = model_id
-        self._process = None
-        self._request_pipe = None
-        self._result_pipe = None
-        self._ready = None
+        self._pid = None
+        self._to_child_w = None   # write end: parent → child
+        self._from_child_r = None  # read end: child → parent
         self._pending = False
 
     def start(self, timeout: float = 30.0) -> bool:
-        """Start the draft process. Returns True if ready."""
-        if self._process is not None:
+        """Start the draft process via os.fork(). Returns True if ready."""
+        if self._pid is not None:
             return True
 
-        req_recv, self._request_pipe = mp.Pipe(duplex=False)
-        self._result_pipe, res_send = mp.Pipe(duplex=False)
-        self._ready = mp.Event()
+        # Create pipes: parent writes to child, child writes to parent
+        to_child_r, to_child_w = os.pipe()
+        from_child_r, from_child_w = os.pipe()
 
-        self._process = mp.Process(
-            target=_draft_worker,
-            args=(self.model_id, req_recv, res_send, self._ready),
-            daemon=True,
-        )
-        self._process.start()
+        pid = os.fork()
+        if pid == 0:
+            # === CHILD PROCESS ===
+            os.close(to_child_w)
+            os.close(from_child_r)
+            # Ignore SIGINT in child (parent handles cleanup)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            self._child_loop(self.model_id, to_child_r, from_child_w)
+            os._exit(0)
+        else:
+            # === PARENT PROCESS ===
+            os.close(to_child_r)
+            os.close(from_child_w)
+            self._pid = pid
+            self._to_child_w = to_child_w
+            self._from_child_r = from_child_r
 
-        # Wait for worker to load and warm up
-        if not self._ready.wait(timeout=timeout):
+            # Wait for "ready" signal from child
+            start = time.time()
+            while time.time() - start < timeout:
+                r, _, _ = select.select([self._from_child_r], [], [], 1.0)
+                if r:
+                    data = os.read(self._from_child_r, 1)
+                    if data == b'R':
+                        return True
+                    elif data == b'E':
+                        self.stop()
+                        return False
             self.stop()
             return False
 
-        return self._process.is_alive()
+    @staticmethod
+    def _child_loop(model_id, read_fd, write_fd):
+        """Child process main loop."""
+        os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
+        os.environ["OPENBLAS_NUM_THREADS"] = "4"
+
+        try:
+            from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
+            engine = CPUDraftEngine(model_id)
+            engine.draft_sync(start_token=1, num_tokens=1)
+            engine.reset_cache()
+            os.write(write_fd, b'R')  # ready signal
+        except Exception:
+            os.write(write_fd, b'E')  # error signal
+            return
+
+        while True:
+            try:
+                r, _, _ = select.select([read_fd], [], [], 1.0)
+                if not r:
+                    continue
+                header = os.read(read_fd, 9)  # 1 byte cmd + 4 byte token + 4 byte num
+                if len(header) < 9:
+                    break  # pipe closed
+                cmd = header[0:1]
+                token_id = struct.unpack('i', header[1:5])[0]
+                num_tokens = struct.unpack('i', header[5:9])[0]
+
+                if cmd == b'Q':  # quit
+                    break
+                elif cmd == b'D':  # draft
+                    tokens = engine.draft_sync(token_id, num_tokens)
+                    # Send: 4 byte count + 4 bytes per token
+                    os.write(write_fd, struct.pack('i', len(tokens)))
+                    for t in tokens:
+                        os.write(write_fd, struct.pack('i', t))
+                elif cmd == b'R':  # reset cache
+                    engine.reset_cache()
+                    os.write(write_fd, b'K')
+                elif cmd == b'F':  # feed token
+                    engine._forward_one(token_id)
+                    os.write(write_fd, b'K')
+            except (OSError, BrokenPipeError):
+                break
 
     def stop(self):
         """Stop the draft process."""
-        if self._request_pipe is not None:
+        if self._to_child_w is not None:
             try:
-                self._request_pipe.send(None)  # shutdown signal
-            except (BrokenPipeError, OSError):
+                os.write(self._to_child_w, b'Q' + struct.pack('ii', 0, 0))
+            except (OSError, BrokenPipeError):
                 pass
-        if self._process is not None:
-            self._process.join(timeout=5.0)
-            if self._process.is_alive():
-                self._process.kill()
-            self._process = None
-        self._request_pipe = None
-        self._result_pipe = None
+            try:
+                os.close(self._to_child_w)
+            except OSError:
+                pass
+            self._to_child_w = None
+        if self._from_child_r is not None:
+            try:
+                os.close(self._from_child_r)
+            except OSError:
+                pass
+            self._from_child_r = None
+        if self._pid is not None:
+            try:
+                os.waitpid(self._pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            self._pid = None
         self._pending = False
 
     def request_draft(self, token_id: int, num_tokens: int):
         """Request draft tokens. Non-blocking — starts the draft."""
-        if self._process is None or not self._process.is_alive():
+        if self._to_child_w is None:
             return
         # Drain any old results
-        while self._result_pipe.poll():
-            self._result_pipe.recv()
-        self._request_pipe.send(("draft", token_id, num_tokens))
-        self._pending = True
+        while self._from_child_r is not None:
+            r, _, _ = select.select([self._from_child_r], [], [], 0)
+            if not r:
+                break
+            os.read(self._from_child_r, 4096)
+        try:
+            os.write(self._to_child_w, b'D' + struct.pack('ii', token_id, num_tokens))
+            self._pending = True
+        except (OSError, BrokenPipeError):
+            self._pending = False
 
     def get_result(self) -> list | None:
         """Get draft result. Non-blocking — returns None if not ready."""
-        if not self._pending or self._result_pipe is None:
+        if not self._pending or self._from_child_r is None:
             return None
-        if not self._result_pipe.poll():
-            return None  # not ready yet
-        result = self._result_pipe.recv()
-        self._pending = False
-        if isinstance(result, str) and result.startswith("ERROR"):
+        r, _, _ = select.select([self._from_child_r], [], [], 0)
+        if not r:
             return None
-        return result
+        try:
+            count_data = os.read(self._from_child_r, 4)
+            if len(count_data) < 4:
+                self._pending = False
+                return None
+            count = struct.unpack('i', count_data)[0]
+            tokens = []
+            for _ in range(count):
+                t_data = os.read(self._from_child_r, 4)
+                tokens.append(struct.unpack('i', t_data)[0])
+            self._pending = False
+            return tokens
+        except (OSError, BrokenPipeError):
+            self._pending = False
+            return None
 
     def reset_cache(self):
         """Reset the draft model's KV cache."""
-        if self._process is None or not self._process.is_alive():
+        if self._to_child_w is None:
             return
-        while self._result_pipe.poll():
-            self._result_pipe.recv()
-        self._request_pipe.send(("reset", 0, 0))
-        # Wait for ack
-        self._result_pipe.recv()
-
-    def feed_token(self, token_id: int):
-        """Feed a token to the draft cache without drafting."""
-        if self._process is None or not self._process.is_alive():
-            return
-        while self._result_pipe.poll():
-            self._result_pipe.recv()
-        self._request_pipe.send(("feed", token_id, 0))
-        self._result_pipe.recv()  # wait for ack
+        try:
+            os.write(self._to_child_w, b'R' + struct.pack('ii', 0, 0))
+            os.read(self._from_child_r, 1)  # wait for ack
+        except (OSError, BrokenPipeError):
+            pass
 
     @property
     def is_alive(self) -> bool:
-        return self._process is not None and self._process.is_alive()
+        if self._pid is None:
+            return False
+        try:
+            os.kill(self._pid, 0)  # check if process exists
+            return True
+        except ProcessLookupError:
+            return False
