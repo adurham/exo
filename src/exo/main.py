@@ -99,6 +99,9 @@ class Node:
         else:
             worker = None
 
+        if api is not None and worker is not None:
+            api.set_worker(worker)
+
         # We start every node with a master
         master = Master(
             node_id,

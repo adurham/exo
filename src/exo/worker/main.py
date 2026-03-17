@@ -314,6 +314,13 @@ class Worker:
                 instance.shard_assignments.node_to_runner[self.node_id]
             ].start_task(task)
 
+    def get_draft_runner(self, model_id: str) -> RunnerSupervisor | None:
+        """Return the local runner supervisor for a given model_id, or None."""
+        for runner in self.runners.values():
+            if runner.shard_metadata.model_card.model_id == model_id:
+                return runner
+        return None
+
     def _create_supervisor(self, task: CreateRunner) -> RunnerSupervisor:
         """Creates and stores a new AssignedRunner with initial downloading status."""
         runner = RunnerSupervisor.create(

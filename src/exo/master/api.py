@@ -257,8 +257,10 @@ class API:
         ] = {}
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
-        self._draft_handler: object | None = None  # cached DraftHandler (wraps runner's model)
-        self._draft_handler_model_id: str = ""
+        self._worker: object | None = None  # Worker — set after construction via set_worker()
+
+    def set_worker(self, worker: object) -> None:
+        self._worker = worker
 
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
@@ -2001,48 +2003,45 @@ class API:
     # API → Master (routes to draft instance) → Worker → Runner
     # The runner maintains a persistent KV cache for stateful draft generation.
 
-    def _get_draft_handler(self, model_id: str) -> object | None:
-        """Get a DraftHandler wrapping the runner's already-loaded model.
-
-        Uses a process-global registry — no second model copy is loaded.
-        """
-        if self._draft_handler_model_id == model_id and self._draft_handler is not None:
-            return self._draft_handler
-        from exo.worker.engines.mlx.draft_registry import get_handler
-        handler = get_handler(model_id)
-        if handler is not None:
-            self._draft_handler = handler
-            self._draft_handler_model_id = model_id
-        return handler
-
     async def _draft_command(self, body: dict) -> JSONResponse:
-        """Handle draft request using the runner's loaded model (no gossip round-trip)."""
+        """Route a draft request to the local runner via its supervisor — no gossip, no duplicate model load."""
+        import uuid
+        from exo.shared.types.tasks import DraftGeneration as DraftGenerationTask
+
         model = body.get("model", "")
         if not model:
             raise HTTPException(400, "model field required")
 
-        draft = self._get_draft_handler(model)
-        if draft is None:
-            raise HTTPException(404, f"No loaded model found for {model}")
+        if self._worker is None:
+            raise HTTPException(503, "Worker not available for draft requests")
+
+        runner = self._worker.get_draft_runner(model)  # type: ignore[union-attr]
+        if runner is None:
+            raise HTTPException(404, f"No local runner found for {model}")
 
         action = body.get("action", "draft")
+        command_id = CommandId(str(uuid.uuid4()))
         t0 = time.time()
 
-        if action == "reset":
-            draft.reset()  # type: ignore
-            return JSONResponse({"tokens": [], "cache_len": 0, "elapsed_ms": 0})
-        elif action == "prefill":
-            token_ids = body.get("prefill_token_ids", body.get("token_ids", []))
-            cache_len = draft.prefill(token_ids)  # type: ignore
-            elapsed_ms = (time.time() - t0) * 1000
-            return JSONResponse({"tokens": [], "cache_len": cache_len, "elapsed_ms": elapsed_ms})
-        else:
-            token_id = body.get("token_id", 0)
-            num_tokens = body.get("num_tokens", 10)
-            trim = body.get("trim", 0)
-            tokens = draft.draft(token_id, num_tokens, trim=trim)  # type: ignore
-            elapsed_ms = (time.time() - t0) * 1000
-            return JSONResponse({"tokens": tokens, "cache_len": draft.cache_len, "elapsed_ms": elapsed_ms})  # type: ignore
+        task = DraftGenerationTask(
+            command_id=command_id,
+            action=action,
+            token_id=body.get("token_id", 0),
+            num_tokens=body.get("num_tokens", 10),
+            trim=body.get("trim", 0),
+            prefill_token_ids=body.get("prefill_token_ids", body.get("token_ids", [])),
+        )
+        result = await runner.draft_request(task)
+        elapsed_ms = (time.time() - t0) * 1000
+
+        if result is None:
+            raise HTTPException(504, "Draft request timed out")
+
+        return JSONResponse({
+            "tokens": result.tokens,
+            "cache_len": result.cache_len,
+            "elapsed_ms": elapsed_ms,
+        })
 
     async def draft_generate(self, request: Request) -> JSONResponse:
         body = await request.json()
@@ -2060,8 +2059,13 @@ class API:
         return await self._draft_command(body)
 
     async def draft_health(self) -> JSONResponse:
-        from exo.worker.engines.mlx.draft_registry import _registry
-        return JSONResponse({"status": "ok", "models": list(_registry.keys())})
+        if self._worker is None:
+            return JSONResponse({"status": "ok", "models": []})
+        models = [
+            r.shard_metadata.model_card.model_id  # type: ignore[union-attr]
+            for r in self._worker.runners.values()  # type: ignore[union-attr]
+        ]
+        return JSONResponse({"status": "ok", "models": models})
 
     async def get_onboarding(self) -> JSONResponse:
         return JSONResponse({"completed": ONBOARDING_COMPLETE_FILE.exists()})

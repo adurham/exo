@@ -13,7 +13,8 @@ from anyio import (
 )
 from loguru import logger
 
-from exo.shared.types.chunks import ErrorChunk
+from exo.shared.types.chunks import DraftChunk, ErrorChunk
+from exo.shared.types.common import CommandId
 from exo.shared.types.events import (
     ChunkGenerated,
     Event,
@@ -80,6 +81,10 @@ class RunnerSupervisor:
     cancelled: set[TaskId] = field(default_factory=set, init=False)
     _cancel_watch_runner: anyio.CancelScope = field(
         default_factory=anyio.CancelScope, init=False
+    )
+    # Pending draft requests: command_id -> (event, result_slot)
+    _draft_pending: dict[CommandId, tuple[anyio.Event, list]] = field(
+        default_factory=dict, init=False
     )
 
     @classmethod
@@ -204,6 +209,25 @@ class RunnerSupervisor:
             logger.error("RunnerSupervisor cancel pipe blocked")
             await self._check_runner(TimeoutError("cancel pipe blocked"))
 
+    async def draft_request(self, task: "Task", timeout: float = 10.0) -> DraftChunk | None:
+        """Send a DraftGeneration task to the runner and return the result.
+
+        Bypasses gossip — the DraftChunk response is intercepted in _forward_events
+        before it reaches the network. ~5ms round-trip for local runner process.
+        """
+        ev = anyio.Event()
+        slot: list[DraftChunk] = []
+        self._draft_pending[task.command_id] = (ev, slot)  # type: ignore[attr-defined]
+        try:
+            await self.start_task(task)
+            with anyio.move_on_after(timeout):
+                await ev.wait()
+            if slot:
+                return slot[0]
+            return None
+        finally:
+            self._draft_pending.pop(task.command_id, None)  # type: ignore[attr-defined]
+
     async def _forward_events(self):
         try:
             with self._ev_recv as events:
@@ -214,6 +238,16 @@ class RunnerSupervisor:
                             self._heartbeat.value = time.monotonic()  # pyright: ignore[reportAny]
                     if isinstance(event, TaskAcknowledged):
                         self.pending.pop(event.task_id).set()
+                        continue
+                    # Intercept DraftChunk events for local draft_request callers
+                    if (
+                        isinstance(event, ChunkGenerated)
+                        and isinstance(event.chunk, DraftChunk)
+                        and event.command_id in self._draft_pending
+                    ):
+                        ev, slot = self._draft_pending.pop(event.command_id)
+                        slot.append(event.chunk)
+                        ev.set()
                         continue
                     if (
                         isinstance(event, TaskStatusUpdated)
