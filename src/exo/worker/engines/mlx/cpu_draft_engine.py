@@ -39,7 +39,7 @@ class CPUDraftEngine:
 
         # Load model and extract float32 weights
         model_path = build_model_path(ModelId(model_id))
-        model, self.tokenizer = load(str(model_path), lazy=True, strict=False)
+        model, self.tokenizer = load(str(model_path), lazy=True)
         mx.eval(model.parameters())
         self.args = model.args
 
