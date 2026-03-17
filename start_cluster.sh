@@ -420,10 +420,6 @@ for NODE in "${NODES[@]}"; do
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
     fi
 
-    # Studios: draft server URL for speculative decoding (auto-discovered from instance config)
-    if [ "$NODE" != "macbook-m4" ]; then
-        EXO_ENV="$EXO_ENV EXO_DRAFT_SERVER=http://$MBP_IP:52415"
-    fi
 
     if [ "$NODE" == "macstudio-m4-1" ]; then
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo > ~/exo.log 2>&1'"

@@ -230,12 +230,8 @@ class Runner:
                 if _draft_model_id and self.device_rank == 0:
                     try:
                         from exo.worker.engines.mlx.draft_client import DraftClient
-                        # Find the node running the draft model to get its API URL.
-                        # For now, use the first node in the cluster that isn't us.
-                        # TODO: resolve from cluster state properly.
-                        _draft_api = os.environ.get("EXO_DRAFT_SERVER", "http://192.168.86.203:52415")
                         self.generator.draft_model = DraftClient(
-                            server_url=_draft_api,
+                            server_url="http://localhost:52415",
                             num_draft_tokens=_draft_tokens,
                             draft_model=_draft_model_id,
                         )
