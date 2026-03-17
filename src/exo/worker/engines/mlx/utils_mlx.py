@@ -196,7 +196,7 @@ def load_mlx_items(
 
         draft_path = build_model_path(ModelId(draft_model_id))
         start_time = time.perf_counter()
-        model, _ = load_model(str(draft_path), lazy=True)
+        model, _ = load_model(draft_path, lazy=True)
         mx.eval(model)
         end_time = time.perf_counter()
         logger.info(f"Draft model loaded in {end_time - start_time:.2f}s")
