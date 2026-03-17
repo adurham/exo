@@ -1076,12 +1076,15 @@ def mlx_generate(
           _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
 
       _accepted_draft_tokens = 0
+      _draft_fn_active = _draft_fn is not None
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
         start=1,
       ):
         if out.from_draft:
             _accepted_draft_tokens += 1
+        if _draft_fn_active and completion_tokens <= 3:
+            logger.info(f"Token {completion_tokens}: from_draft={out.from_draft} token={out.token}")
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
