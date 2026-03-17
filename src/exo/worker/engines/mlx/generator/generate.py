@@ -1024,6 +1024,8 @@ def mlx_generate(
     if draft_model is not None and hasattr(draft_model, 'prefill'):
         # TCP DraftClient — use speculative_generate_step via draft_fn
         _draft_client = draft_model
+        # Use instance-configured draft tokens (from UI) rather than env var default
+        _tcp_draft_tokens = getattr(_draft_client, 'num_draft_tokens', _SPECULATIVE_DRAFT_TOKENS)
         # Wait for background draft prefill to finish before decode starts
         if _draft_prefill_thread is not None:
             _draft_prefill_thread.join()
@@ -1038,7 +1040,7 @@ def mlx_generate(
         _draft_fn = _tcp_draft_fn
         logger.info(
             f"TCP speculative decode active: server={_draft_client.server_url}, "
-            f"K={_SPECULATIVE_DRAFT_TOKENS}"
+            f"K={_tcp_draft_tokens}"
         )
     elif draft_model is not None and hasattr(draft_model, 'draft_sync'):
         _cpu_draft = draft_model
@@ -1063,7 +1065,7 @@ def mlx_generate(
       )
       if _draft_fn is not None:
           _gen_kwargs["draft_fn"] = _draft_fn
-          _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
+          _gen_kwargs["num_draft_tokens"] = _tcp_draft_tokens
       elif _cpu_draft is not None:
           _cpu_draft.reset_cache()
           # Feed prompt tokens to CPU draft model's cache

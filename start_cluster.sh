@@ -516,7 +516,7 @@ place_instance_with_retry() {
         # Before each attempt, check if an instance for this model already exists
         local existing
         existing=$(curl -s "$API/state" | jq -r --arg m "$model_id" \
-            '[.instances | to_entries[] | select(.value.shardAssignments.modelId == $m)] | length' 2>/dev/null)
+            '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
         if [ "$existing" != "0" ] && [ -n "$existing" ] && [ "$existing" != "null" ]; then
             echo "  Instance for $label already exists, skipping."
             return 0
