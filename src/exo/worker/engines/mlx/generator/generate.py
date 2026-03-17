@@ -906,28 +906,14 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
-    # CPU-pipelined speculative decoding: draft on CPU, verify on GPU
-    _cpu_draft = None
-    _draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
-    if _draft_model_id and os.path.exists(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cpu_draft.dylib")
-    ):
-        try:
-            from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
-            _cpu_draft = CPUDraftEngine(_draft_model_id)
-            logger.info(
-                f"CPU-pipelined speculative decode: draft={_draft_model_id}, "
-                f"layers={_cpu_draft._n_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to init CPU draft engine: {e}", exc_info=True)
-            _cpu_draft = None
-    else:
-        if _draft_model_id:
-            dylib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cpu_draft.dylib")
-            logger.info(f"CPU draft: model={_draft_model_id}, dylib={dylib_path}, exists={os.path.exists(dylib_path)}")
-        else:
-            logger.debug("CPU draft disabled: EXO_DRAFT_MODEL not set")
+    # CPU-pipelined speculative decoding: use pre-loaded draft engine
+    # (initialized at model load time in utils_mlx.py, not per-request)
+    _cpu_draft = draft_model  # draft_model is actually a CPUDraftEngine or None
+    if _cpu_draft is not None:
+        logger.info(
+            f"CPU-pipelined speculative decode active: "
+            f"layers={_cpu_draft._n_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
+        )
 
     _generation_logged = False
     try:

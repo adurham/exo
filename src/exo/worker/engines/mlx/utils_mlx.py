@@ -214,31 +214,31 @@ def load_mlx_items(
 
     mx.clear_cache()
 
-    # Load draft model for speculative decoding (if configured)
+    # Init CPU draft engine at load time (not per-request) to avoid
+    # blocking the generation thread during TP warmup/decode.
+    draft_engine = None
     draft_model_id_str = os.environ.get("EXO_DRAFT_MODEL", "")
-    draft_model: Model | None = None
     if draft_model_id_str:
-        try:
-            from exo.shared.types.common import ModelId
-            draft_model_id = ModelId(draft_model_id_str)
-            draft_path = build_model_path(draft_model_id)
-            logger.info(f"Loading draft model for speculative decoding: {draft_model_id}")
-            start_draft = time.perf_counter()
-            raw_draft, _ = load_model(draft_path, lazy=True, strict=False)
-            mx.eval(raw_draft)
-            draft_model = cast(Model, raw_draft)
-            logger.info(
-                f"Draft model loaded in {time.perf_counter() - start_draft:.2f}s "
-                f"({draft_model_id})"
-            )
-        except Exception as e:
-            logger.warning(
-                f"Failed to load draft model {draft_model_id_str}: {e}. "
-                "Speculative decoding disabled."
-            )
-            draft_model = None
+        dylib_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "cpu_draft.dylib")
+        if os.path.exists(dylib_path):
+            try:
+                from exo.worker.engines.mlx.cpu_draft_engine import CPUDraftEngine
+                logger.info(f"Loading CPU draft engine: {draft_model_id_str}")
+                start_draft = time.perf_counter()
+                draft_engine = CPUDraftEngine(draft_model_id_str)
+                logger.info(
+                    f"CPU draft engine ready in {time.perf_counter() - start_draft:.2f}s "
+                    f"({draft_model_id_str}, {draft_engine._n_layers} layers, "
+                    f"{draft_engine._hidden}d)"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to init CPU draft engine: {e}")
+                draft_engine = None
+        else:
+            logger.info(f"CPU draft dylib not found at {dylib_path}, skipping")
 
-    return cast(Model, model), tokenizer, draft_model
+    return cast(Model, model), tokenizer, draft_engine
 
 
 def shard_and_load(
