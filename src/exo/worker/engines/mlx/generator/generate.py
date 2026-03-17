@@ -558,6 +558,52 @@ def extract_top_logprobs(
     return selected_logprob, top_logprob_items
 
 
+def draft_provider_loop(
+    model: Model,
+    group: mx.distributed.Group,
+    recv_from: int,
+    send_to: int,
+    num_draft_tokens: int = 2,
+) -> None:
+    """Draft provider loop: receives tokens via RDMA, generates predictions, sends back.
+
+    Runs on the MacBook as part of a hybrid JACCL group.
+    The TP master (Studio) sends a token ID, the draft node generates predictions
+    and sends them back — all over RDMA.
+    """
+    from mlx_lm.models.cache import make_prompt_cache
+
+    cache = make_prompt_cache(model)
+    logger.info(f"Draft provider loop started (recv_from={recv_from}, send_to={send_to}, draft_tokens={num_draft_tokens})")
+
+    while True:
+        # Receive token ID from TP master via RDMA
+        token_arr = mx.distributed.recv(shape=(1,), dtype=mx.int32, src=recv_from, group=group)
+        mx.eval(token_arr)
+        token_id = token_arr.item()
+
+        if token_id < 0:
+            # Negative token = shutdown signal
+            logger.info("Draft provider: received shutdown signal")
+            break
+
+        # Generate draft tokens
+        draft_tokens = []
+        current = mx.array([[token_id]])
+        for _ in range(num_draft_tokens):
+            logits = model(current, cache=cache)
+            mx.eval(logits)
+            next_token = logits[0, -1].argmax()
+            mx.eval(next_token)
+            draft_tokens.append(next_token.item())
+            current = next_token.reshape(1, 1)
+
+        # Send draft tokens back via RDMA
+        result = mx.array(draft_tokens, dtype=mx.int32)
+        mx.distributed.send(result, send_to, group=group)
+        mx.eval(result)
+
+
 def mlx_generate(
     model: Model,
     tokenizer: TokenizerWrapper,

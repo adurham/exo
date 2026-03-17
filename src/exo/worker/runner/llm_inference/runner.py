@@ -299,6 +299,25 @@ class Runner:
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
 
+        # Draft node: run draft provider loop instead of normal generation
+        from exo.shared.types.worker.shards import HybridShardMetadata
+        if (isinstance(self.shard_metadata, HybridShardMetadata)
+                and self.shard_metadata.draft_model_id is not None):
+            logger.info("Draft node: entering draft provider loop")
+            self.update_status(RunnerRunning())
+            self.acknowledge_task(starting_task)
+            from exo.worker.engines.mlx.generator.generate import draft_provider_loop
+            draft_provider_loop(
+                model=self.generator.model,
+                group=self.generator.group,
+                recv_from=self.shard_metadata.pipeline_recv_from,
+                send_to=self.shard_metadata.pipeline_send_to,
+                num_draft_tokens=_SPECULATIVE_DRAFT_TOKENS,
+            )
+            self.send_task_status(starting_task.task_id, TaskStatus.Complete)
+            self.update_status(RunnerReady())
+            return ExitCode.Continue
+
         logger.info(f"received chat request: {starting_task}")
         self.update_status(RunnerRunning())
         logger.info("runner running")
