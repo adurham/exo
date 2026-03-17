@@ -313,32 +313,16 @@ class Runner:
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
 
-        # Draft node: run draft provider loop instead of normal generation
+        # Draft node: acknowledge task and sit idle.
+        # RDMA draft_provider_loop is DISABLED because group.split() for TP
+        # breaks point-to-point send/recv on the parent JACCL group.
+        # TODO: implement draft exchange over TCP sockets instead.
         from exo.shared.types.worker.shards import HybridShardMetadata
         if (isinstance(self.shard_metadata, HybridShardMetadata)
                 and self.shard_metadata.draft_model_id is not None):
-            logger.info("Draft node: entering draft provider loop")
+            logger.info("Draft node: acknowledging task (RDMA exchange disabled, awaiting TCP implementation)")
             self.update_status(RunnerRunning())
             self.acknowledge_task(starting_task)
-            # Set large heartbeat timeout — recv() blocks during Studios' prefill
-            # which can take 10s+ for long prompts. Default 90s would kill us.
-            hb_timeout = getattr(self.generator, 'heartbeat_timeout', None)
-            if hb_timeout is not None:
-                hb_timeout.value = 3600.0  # 1 hour — draft node lifecycle is managed by shutdown signal
-            hb = getattr(self.generator, 'heartbeat', None)
-            if hb is not None:
-                hb.value = time.monotonic()
-            from exo.worker.engines.mlx.generator.generate import draft_provider_loop
-            assert self.shard_metadata.pipeline_recv_from is not None, "Draft node must have pipeline_recv_from"
-            assert self.shard_metadata.pipeline_send_to is not None, "Draft node must have pipeline_send_to"
-            draft_provider_loop(
-                model=self.generator.model,  # type: ignore[reportAttributeAccessIssue]
-                group=self.generator.group,  # type: ignore[reportAttributeAccessIssue]
-                recv_from=self.shard_metadata.pipeline_recv_from,
-                send_to=self.shard_metadata.pipeline_send_to,
-                num_draft_tokens=_SPECULATIVE_DRAFT_TOKENS,
-                heartbeat=hb,
-            )
             self.send_task_status(starting_task.task_id, TaskStatus.Complete)
             self.update_status(RunnerReady())
             return ExitCode.Continue

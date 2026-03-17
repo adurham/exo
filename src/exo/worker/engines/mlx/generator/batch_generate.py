@@ -320,21 +320,16 @@ class ExoBatchGenerator:
         if self.draft_model is not None and len(responses) == 1:
             self._draft_prev_token = responses[0].token
 
-        # RDMA draft exchange: runs SYNCHRONOUSLY between decode steps.
-        # Cannot overlap with decode because RDMA send/recv on full group collides
-        # with TP all_reduce on sub-group → deadlock.
-        if self._is_rdma_draft and self._draft_prev_token is not None:
-            # Check for completed draft predictions from previous step
-            drafts = self.draft_model.get_result()
-            if drafts is not None:
-                logger.info(f"RDMA draft received {len(drafts)} predictions: {drafts[:5]}...")
-            # Request drafts for current token — blocks until exchange completes
-            # so RDMA is idle before next decode step's TP all_reduce.
-            self.draft_model.request_draft(self._draft_prev_token)
-            # Wait for thread to finish before returning (next call to step()
-            # will invoke _exo_gen.next() which does TP all_reduce).
-            if self.draft_model._thread is not None:
-                self.draft_model._thread.join()
+        # RDMA draft exchange: DISABLED — group.split() for TP breaks
+        # point-to-point send/recv on the parent JACCL group.
+        # TODO: implement draft exchange over TCP sockets instead.
+        # if self._is_rdma_draft and self._draft_prev_token is not None:
+        #     drafts = self.draft_model.get_result()
+        #     if drafts is not None:
+        #         logger.info(f"RDMA draft received {len(drafts)} predictions: {drafts[:5]}...")
+        #     self.draft_model.request_draft(self._draft_prev_token)
+        #     if self.draft_model._thread is not None:
+        #         self.draft_model._thread.join()
 
         for response in responses:
             if response.uid not in self._active_tasks:
