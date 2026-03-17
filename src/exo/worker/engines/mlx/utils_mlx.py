@@ -236,18 +236,28 @@ def load_mlx_items(
 
     mx.clear_cache()
 
-    # Remote draft client for speculative decoding.
-    # Connects to a draft server on another node (e.g., MacBook).
-    # Set EXO_DRAFT_SERVER=http://macbook-m4:8199 to enable.
+    # RDMA draft client: if this is a hybrid TP node with a draft node in the group,
+    # create an RDMADraftClient that sends/receives draft tokens via JACCL RDMA.
     draft_client = None
-    draft_server = os.environ.get("EXO_DRAFT_SERVER", "")
-    if draft_server:
+    shard = bound_instance.bound_shard
+    if (isinstance(shard, HybridShardMetadata)
+            and shard.tp_rank == 0  # only TP master communicates with draft
+            and shard.pipeline_send_to is not None
+            and shard.pipeline_recv_from is not None
+            and group is not None):
+        # Check if there's a draft node in the group
+        # (pipeline_send_to/recv_from point to the draft node rank)
+        draft_rank = shard.pipeline_send_to
         try:
-            from exo.worker.engines.mlx.draft_client import DraftClient
-            draft_client = DraftClient(draft_server)
-            logger.info(f"Draft client configured: {draft_server}")
+            from exo.worker.engines.mlx.rdma_draft_client import RDMADraftClient
+            draft_client = RDMADraftClient(
+                group=group,
+                draft_rank=draft_rank,
+                num_draft_tokens=int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "2")),
+            )
+            logger.info(f"RDMA draft client ready (draft_rank={draft_rank})")
         except Exception as e:
-            logger.warning(f"Failed to init draft client: {e}")
+            logger.warning(f"Failed to init RDMA draft client: {e}")
             draft_client = None
 
     return cast(Model, model), tokenizer, draft_client
