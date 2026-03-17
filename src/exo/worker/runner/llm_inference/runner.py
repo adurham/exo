@@ -227,6 +227,9 @@ class Runner:
                 # We resolve the draft node's IP from cluster state at setup time.
                 _draft_model_id = self.bound_instance.instance.draft_model
                 _draft_tokens = self.bound_instance.instance.draft_tokens
+                # All TP ranks must know about speculative decode for generator selection
+                if _draft_model_id:
+                    self.generator.use_speculative = True
                 if _draft_model_id and self.device_rank == 0:
                     try:
                         from exo.worker.engines.mlx.draft_client import DraftClient
@@ -603,6 +606,7 @@ class Builder:
     group: mx.distributed.Group | None = None
     draft_model: Model | None = None
     is_draft_node: bool = False
+    use_speculative: bool = False
 
     def build(
         self,
@@ -630,7 +634,9 @@ class Builder:
 
         device_rank = 0 if self.group is None else self.group.rank()
         _use_sequential = bool(os.environ.get("EXO_NO_BATCH"))
-        if not _use_sequential and self.draft_model is not None and hasattr(self.draft_model, 'prefill'):
+        # If a draft model is configured (even if only rank 0 has the DraftClient),
+        # ALL TP ranks must use SequentialGenerator for consistent collective ops.
+        if not _use_sequential and self.use_speculative:
             _use_sequential = True
             logger.info("using SequentialGenerator (TCP draft model requires speculative path)")
         if _use_sequential:
