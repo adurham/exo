@@ -5578,7 +5578,7 @@
                     <div class="text-xs text-white/50 font-mono mb-2">
                       Sharding Strategy:
                     </div>
-                    <div class="flex gap-2">
+                    <div class="flex flex-wrap gap-2">
                       <button
                         onclick={() => {
                           selectedSharding = "Pipeline";
