@@ -982,7 +982,7 @@ def mlx_generate(
         # Don't save cache when speculative decode was active — the sequential
         # verify path may leave the cache in a state that doesn't exactly match
         # the token sequence (off-by-one from draft/verify transitions).
-        if _draft_fn is not None:
+        if draft_model is not None:
             return
         try:
             if EXO_TRACING_ENABLED:
