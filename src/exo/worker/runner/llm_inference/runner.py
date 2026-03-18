@@ -223,28 +223,23 @@ class Runner:
                 )
 
                 # Speculative decoding: if the instance has a draft_model configured,
-                # create a DraftClient that queries the draft instance's node directly.
-                # We resolve the draft node's IP from cluster state at setup time.
+                # create a DraftClient using the draft_url from instance config
+                # (computed deterministically by the master at placement time).
                 _draft_model_id = self.bound_instance.instance.draft_model
                 _draft_tokens = self.bound_instance.instance.draft_tokens
-                # All TP ranks must know about speculative decode for generator selection
+                _draft_url = self.bound_instance.instance.draft_url
                 if _draft_model_id:
                     self.generator.use_speculative = True
-                if _draft_model_id and self.device_rank == 0:
-                    try:
-                        from exo.worker.engines.mlx.draft_client import DraftClient
-                        _draft_url = self._resolve_draft_url(_draft_model_id)
-                        if _draft_url:
-                            self.generator.draft_model = DraftClient(
-                                server_url=_draft_url,
-                                num_draft_tokens=_draft_tokens,
-                                draft_model=_draft_model_id,
-                            )
-                            logger.info(f"Draft client ready (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
-                        else:
-                            logger.warning(f"Could not resolve draft node for {_draft_model_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to init draft client: {e}")
+                if _draft_model_id and _draft_url and self.device_rank == 0:
+                    from exo.worker.engines.mlx.draft_client import DraftClient
+                    self.generator.draft_model = DraftClient(
+                        server_url=_draft_url,
+                        num_draft_tokens=_draft_tokens,
+                        draft_model=_draft_model_id,
+                    )
+                    logger.info(f"Draft client ready (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
+                elif _draft_model_id and not _draft_url:
+                    logger.warning(f"Draft model {_draft_model_id} configured but no draft_url — master could not resolve it")
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
@@ -365,70 +360,6 @@ class Runner:
 
         self.send_task_status(task.task_id, TaskStatus.Complete)
 
-    def _resolve_draft_url(self, draft_model_id: str) -> str | None:
-        """Find the API URL of the node running the draft model instance.
-
-        Retries up to 30s since the draft node's network info may not have
-        propagated via gossip when the primary model finishes loading.
-        """
-        import json
-        import urllib.request
-        for attempt in range(10):
-            try:
-                url = self._resolve_draft_url_once(draft_model_id)
-                if url:
-                    return url
-                if attempt < 9:
-                    logger.info(f"Draft URL not yet resolvable (attempt {attempt + 1}/10), retrying in 3s...")
-                    time.sleep(3)
-            except Exception as e:
-                if attempt < 9:
-                    logger.info(f"Draft URL resolution failed (attempt {attempt + 1}/10): {e}, retrying in 3s...")
-                    time.sleep(3)
-                else:
-                    logger.warning(f"Failed to resolve draft node URL after 10 attempts: {e}")
-        return None
-
-    def _resolve_draft_url_once(self, draft_model_id: str) -> str | None:
-        """Single attempt to find the draft node URL from cluster state."""
-        import json
-        import urllib.request
-        with urllib.request.urlopen("http://localhost:52415/state", timeout=5) as resp:
-            state = json.loads(resp.read())
-        for inst in state.get("instances", {}).values():
-            # Handle tagged union format: {"MlxRingInstance": {...}} or {"MlxJacclInstance": {...}}
-            inst_data = inst
-            for key in ("MlxRingInstance", "MlxJacclInstance"):
-                if key in inst:
-                    inst_data = inst[key]
-                    break
-            model_id = inst_data.get("shardAssignments", {}).get("modelId", "")
-            if model_id != draft_model_id:
-                continue
-            node_to_runner = inst_data.get("shardAssignments", {}).get("nodeToRunner", {})
-            draft_node_id = next(iter(node_to_runner.keys()), None)
-            if not draft_node_id:
-                continue
-            for node_id, net_info in state.get("nodeNetwork", {}).items():
-                if node_id != draft_node_id:
-                    continue
-                tb_ip: str | None = None
-                fallback_ip: str | None = None
-                for iface in net_info.get("interfaces", []):
-                    ip = iface.get("ipAddress", "")
-                    if not ip or ":" in ip or ip.startswith("127.") or ip.startswith("fe80") or ip.startswith("169.254"):
-                        continue
-                    if iface.get("interfaceType", "") == "thunderbolt":
-                        tb_ip = ip
-                        break
-                    if fallback_ip is None:
-                        fallback_ip = ip
-                best = tb_ip or fallback_ip
-                if best:
-                    draft_port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52416"))
-                    return f"http://{best}:{draft_port}"
-        return None
-
     def _start_draft_server(self) -> None:
         """Start a lightweight HTTP server for direct draft requests, bypassing the task pipeline."""
         import json
@@ -547,38 +478,9 @@ class Runner:
             self.send_task_status(task.task_id, TaskStatus.Complete)
             return False
 
-    def _try_connect_draft(self) -> None:
-        """Lazy DraftClient init — retries if the draft instance wasn't ready at load time."""
-        assert isinstance(self.generator, InferenceGenerator)
-        if self.generator.draft_model is not None and hasattr(self.generator.draft_model, 'prefill'):
-            return  # Already connected with TCP draft
-        _draft_model_id = self.bound_instance.instance.draft_model
-        _draft_tokens = self.bound_instance.instance.draft_tokens
-        if not _draft_model_id or self.device_rank != 0:
-            return
-        try:
-            from exo.worker.engines.mlx.draft_client import DraftClient
-            _draft_url = self._resolve_draft_url(_draft_model_id)
-            if _draft_url:
-                self.generator.draft_model = DraftClient(
-                    server_url=_draft_url,
-                    num_draft_tokens=_draft_tokens,
-                    draft_model=_draft_model_id,
-                )
-                logger.info(f"Draft client connected (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
-                if isinstance(self.generator, BatchGenerator):
-                    logger.warning(
-                        "Draft client connected but BatchGenerator is active — "
-                        "speculative decoding requires SequentialGenerator (restart needed)"
-                    )
-        except Exception as e:
-            logger.debug(f"Draft client not yet available: {e}")
-
     def handle_generation_tasks(self, starting_task: TextGeneration):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
-
-        self._try_connect_draft()
 
         logger.info(f"received chat request: {starting_task}")
         self.update_status(RunnerRunning())
