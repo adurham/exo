@@ -618,25 +618,32 @@ class _TpDraftWrapper:
             return self._client.prefill(token_ids)
         return None
 
-    def request_draft(self, token_id: int, num_tokens: int = 0) -> None:
-        """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
-        num = num_tokens or self.num_draft_tokens
+    def _broadcast_draft(self, token_id: int, num: int, trim: int) -> list[int]:
+        """Fetch draft tokens on rank 0, broadcast to all TP ranks, return result."""
         if self._group.rank() == 0 and self._client is not None:
-            trim = self._num_to_trim
-            self._num_to_trim = 0
             result = self._client.fetch_draft_sync(token_id, num, trim=trim)
             padded = result[:num] + [0] * max(0, num - len(result))
             draft_array = mx.array([len(result)] + padded, dtype=mx.int32)
         else:
-            self._num_to_trim = 0
             draft_array = mx.zeros(num + 1, dtype=mx.int32)
 
-        # Broadcast from rank 0 to all ranks
         gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=self._group)
         mx.eval(gathered)
         rank0_data = gathered[0].tolist()
         actual_len = rank0_data[0]
-        self._result = rank0_data[1:1 + actual_len] if actual_len > 0 else []
+        return rank0_data[1:1 + actual_len] if actual_len > 0 else []
+
+    def fetch_draft_sync(self, token_id: int, num_tokens: int = 0, trim: int = 0) -> list[int]:
+        """Blocking draft with TP broadcast. Used by generate.py's _tcp_draft_fn."""
+        num = num_tokens or self.num_draft_tokens
+        return self._broadcast_draft(token_id, num, trim)
+
+    def request_draft(self, token_id: int, num_tokens: int = 0) -> None:
+        """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
+        num = num_tokens or self.num_draft_tokens
+        trim = self._num_to_trim
+        self._num_to_trim = 0
+        self._result = self._broadcast_draft(token_id, num, trim)
 
     def reset_cache(self) -> None:
         if self._client is not None and hasattr(self._client, 'reset_cache'):
