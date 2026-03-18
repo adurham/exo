@@ -758,7 +758,9 @@ def mlx_generate(
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
     # One-time multi-token forward pass test (gated behind env var)
-    if os.environ.get("EXO_TEST_MULTI_TOKEN") == "1":
+    _test_multi = os.environ.get("EXO_TEST_MULTI_TOKEN", "")
+    logger.info(f"[multi-token-test] env={_test_multi!r}, prompt_len={len(prompt_tokens)}")
+    if _test_multi == "1":
         os.environ["EXO_TEST_MULTI_TOKEN"] = "done"  # run once only
         from mlx_lm.models.cache import make_prompt_cache as _make_test_cache, trim_prompt_cache as _trim_test_cache
         _test_k = 6
