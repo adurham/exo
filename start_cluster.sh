@@ -26,6 +26,7 @@
 
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
+export EXO_TEST_MULTI_TOKEN=1  # temporary: test multi-token forward on first request
 
 # Define Node Constants
 M4_1_IP="192.168.86.201"

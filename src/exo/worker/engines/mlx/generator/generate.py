@@ -757,6 +757,40 @@ def mlx_generate(
     )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
+    # One-time multi-token forward pass test (gated behind env var)
+    if os.environ.get("EXO_TEST_MULTI_TOKEN") == "1":
+        os.environ["EXO_TEST_MULTI_TOKEN"] = "done"  # run once only
+        from mlx_lm.models.cache import make_prompt_cache as _make_test_cache, trim_prompt_cache as _trim_test_cache
+        _test_k = 6
+        logger.info(f"[multi-token-test] Starting: {len(prompt_tokens)} prompt tokens, K={_test_k}")
+        try:
+            # Single-token ground truth: generate K tokens one at a time
+            _single_tokens = []
+            _y = prompt_tokens[-1:]
+            for _i in range(_test_k):
+                _logits = model(_y[None] if _y.ndim == 1 else mx.array([[_y.item()]]), cache=caches)
+                mx.eval(_logits)
+                _tok = _logits[0, -1].argmax().item()
+                _single_tokens.append(_tok)
+                _y = mx.array([_tok], mx.uint32)
+            # Rewind the cache back to post-prefill state
+            _trim_test_cache(caches, _test_k)
+            # Multi-token: feed last prompt token + first K-1 single tokens as batch
+            _multi_input = mx.array([[prompt_tokens[-1].item()] + _single_tokens[:_test_k - 1]])
+            _multi_logits = model(_multi_input, cache=caches)
+            mx.eval(_multi_logits)
+            _multi_tokens = [_multi_logits[0, _i].argmax().item() for _i in range(_test_k)]
+            # Rewind again
+            _trim_test_cache(caches, _test_k)
+            # Compare
+            _matches = sum(1 for a, b in zip(_single_tokens, _multi_tokens) if a == b)
+            logger.info(
+                f"[multi-token-test] single={_single_tokens} multi={_multi_tokens} "
+                f"match={_matches}/{_test_k} {'PASS' if _matches == _test_k else 'FAIL'}"
+            )
+        except Exception as _e:
+            logger.warning(f"[multi-token-test] Error: {_e}", exc_info=True)
+
     # Save the KV cache immediately after prefill so the work is preserved
     # even if generation is cancelled before completion. This is critical for
     # large-context requests (/compact) that may take 5+ minutes to prefill
