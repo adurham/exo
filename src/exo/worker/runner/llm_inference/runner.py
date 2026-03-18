@@ -435,7 +435,7 @@ class Runner:
             def log_message(self, format, *args):
                 pass  # suppress per-request logging
 
-        port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52416"))
+        port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52417"))
         try:
             class ReuseHTTPServer(HTTPServer):
                 allow_reuse_address = True

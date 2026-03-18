@@ -180,7 +180,7 @@ def place_instance(
     draft_url: str | None = None
     if command.draft_model:
         import os
-        draft_port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52416"))
+        draft_port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52417"))
         for inst in current_instances.values():
             if inst.shard_assignments.model_id != command.draft_model:
                 continue
