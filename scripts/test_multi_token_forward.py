@@ -117,26 +117,28 @@ def test_multi_token_direct(model_id: str):
         print(f"\n--- Context size: {test_context} tokens ---")
         test_prompt = prompt[:test_context]
 
-        # Prefill
-        cache = make_prompt_cache(model)
-        logits = model(test_prompt[:-1][None], cache=cache)
-        mx.eval(logits)
+        # Prefill + single-token decode
+        cache_single = make_prompt_cache(model)
+        model(test_prompt[:-1][None], cache=cache_single)
+        mx.eval([c.state for c in cache_single])
 
-        # Single-token decode: generate 10 tokens one at a time
-        single_cache = [c.copy() for c in cache]  # snapshot
         single_tokens = []
         single_logits = []
         y = test_prompt[-1].item()
         for i in range(10):
-            out = model(mx.array([[y]]), cache=single_cache)
+            out = model(mx.array([[y]]), cache=cache_single)
             mx.eval(out)
             single_logits.append(out[0, -1])
             y = out[0, -1].argmax().item()
             single_tokens.append(y)
 
-        # Multi-token decode: feed all 10 tokens at once
+        # Prefill again + multi-token decode
+        cache_multi = make_prompt_cache(model)
+        model(test_prompt[:-1][None], cache=cache_multi)
+        mx.eval([c.state for c in cache_multi])
+
         multi_input = mx.array([[test_prompt[-1].item()] + single_tokens[:9]])
-        multi_out = model(multi_input, cache=cache)
+        multi_out = model(multi_input, cache=cache_multi)
         mx.eval(multi_out)
 
         # Compare logits at each position
