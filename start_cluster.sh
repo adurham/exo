@@ -27,7 +27,7 @@
 # ── Speculative decoding ──
 # Set to a model ID to create a draft instance for speculative decoding.
 # Leave empty to disable. The primary instance auto-discovers it.
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-30B-A3B-4bit}"
+: "${EXO_DRAFT_MODEL:=}"  # set to a model ID to enable speculative decoding
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
