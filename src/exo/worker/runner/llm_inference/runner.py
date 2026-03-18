@@ -366,50 +366,67 @@ class Runner:
         self.send_task_status(task.task_id, TaskStatus.Complete)
 
     def _resolve_draft_url(self, draft_model_id: str) -> str | None:
-        """Find the API URL of the node running the draft model instance."""
+        """Find the API URL of the node running the draft model instance.
+
+        Retries up to 30s since the draft node's network info may not have
+        propagated via gossip when the primary model finishes loading.
+        """
         import json
         import urllib.request
-        try:
-            with urllib.request.urlopen("http://localhost:52415/state", timeout=5) as resp:
-                state = json.loads(resp.read())
-            # Find the instance running the draft model
-            for inst in state.get("instances", {}).values():
-                # Handle tagged union format: {"MlxRingInstance": {...}} or {"MlxJacclInstance": {...}}
-                inst_data = inst
-                for key in ("MlxRingInstance", "MlxJacclInstance"):
-                    if key in inst:
-                        inst_data = inst[key]
-                        break
-                model_id = inst_data.get("shardAssignments", {}).get("modelId", "")
-                if model_id != draft_model_id:
+        for attempt in range(10):
+            try:
+                url = self._resolve_draft_url_once(draft_model_id)
+                if url:
+                    return url
+                if attempt < 9:
+                    logger.info(f"Draft URL not yet resolvable (attempt {attempt + 1}/10), retrying in 3s...")
+                    time.sleep(3)
+            except Exception as e:
+                if attempt < 9:
+                    logger.info(f"Draft URL resolution failed (attempt {attempt + 1}/10): {e}, retrying in 3s...")
+                    time.sleep(3)
+                else:
+                    logger.warning(f"Failed to resolve draft node URL after 10 attempts: {e}")
+        return None
+
+    def _resolve_draft_url_once(self, draft_model_id: str) -> str | None:
+        """Single attempt to find the draft node URL from cluster state."""
+        import json
+        import urllib.request
+        with urllib.request.urlopen("http://localhost:52415/state", timeout=5) as resp:
+            state = json.loads(resp.read())
+        for inst in state.get("instances", {}).values():
+            # Handle tagged union format: {"MlxRingInstance": {...}} or {"MlxJacclInstance": {...}}
+            inst_data = inst
+            for key in ("MlxRingInstance", "MlxJacclInstance"):
+                if key in inst:
+                    inst_data = inst[key]
+                    break
+            model_id = inst_data.get("shardAssignments", {}).get("modelId", "")
+            if model_id != draft_model_id:
+                continue
+            node_to_runner = inst_data.get("shardAssignments", {}).get("nodeToRunner", {})
+            draft_node_id = next(iter(node_to_runner.keys()), None)
+            if not draft_node_id:
+                continue
+            for node_id, net_info in state.get("nodeNetwork", {}).items():
+                if node_id != draft_node_id:
                     continue
-                # Get the node ID running this instance
-                node_to_runner = inst_data.get("shardAssignments", {}).get("nodeToRunner", {})
-                draft_node_id = next(iter(node_to_runner.keys()), None)
-                if not draft_node_id:
-                    continue
-                # Get the node's IP from network info
-                for node_id, net_info in state.get("nodeNetwork", {}).items():
-                    if node_id != draft_node_id:
+                tb_ip: str | None = None
+                fallback_ip: str | None = None
+                for iface in net_info.get("interfaces", []):
+                    ip = iface.get("ipAddress", "")
+                    if not ip or ":" in ip or ip.startswith("127.") or ip.startswith("fe80") or ip.startswith("169.254"):
                         continue
-                    # Prefer thunderbolt, then any routable IPv4
-                    tb_ip: str | None = None
-                    fallback_ip: str | None = None
-                    for iface in net_info.get("interfaces", []):
-                        ip = iface.get("ipAddress", "")
-                        if not ip or ":" in ip or ip.startswith("127.") or ip.startswith("fe80") or ip.startswith("169.254"):
-                            continue
-                        if iface.get("interfaceType", "") == "thunderbolt":
-                            tb_ip = ip
-                            break
-                        if fallback_ip is None:
-                            fallback_ip = ip
-                    best = tb_ip or fallback_ip
-                    if best:
-                        draft_port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52416"))
-                        return f"http://{best}:{draft_port}"
-        except Exception as e:
-            logger.warning(f"Failed to resolve draft node URL: {e}")
+                    if iface.get("interfaceType", "") == "thunderbolt":
+                        tb_ip = ip
+                        break
+                    if fallback_ip is None:
+                        fallback_ip = ip
+                best = tb_ip or fallback_ip
+                if best:
+                    draft_port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52416"))
+                    return f"http://{best}:{draft_port}"
         return None
 
     def _start_draft_server(self) -> None:
