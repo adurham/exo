@@ -63,7 +63,7 @@ from exo.worker.engines.mlx.constants import (
 # EXO_SPECULATIVE_DECODE=N means skip factor N (e.g., 10 = use every 10th layer).
 # 0 or unset = disabled.
 _SPECULATIVE_SKIP = int(os.environ.get("EXO_SPECULATIVE_DECODE", "0"))
-_SPECULATIVE_DRAFT_TOKENS = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "3"))
+_SPECULATIVE_DRAFT_TOKENS = 10  # fallback only; instance config draft_tokens is authoritative
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
@@ -1032,11 +1032,7 @@ def mlx_generate(
             logger.info("Draft prefill complete (was overlapped with primary prefill)")
         def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
             """Blocking call to remote draft server."""
-            _draft_client._num_to_trim = trim
-            _draft_client.request_draft(token_id, num_tokens)
-            if _draft_client._thread is not None:
-                _draft_client._thread.join()
-            return _draft_client._result or []
+            return _draft_client.fetch_draft_sync(token_id, num_tokens, trim=trim)
         _draft_fn = _tcp_draft_fn
         logger.info(
             f"TCP speculative decode active: server={_draft_client.server_url}, "

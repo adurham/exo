@@ -5790,9 +5790,10 @@
                             class="w-full bg-exo-dark-gray border border-exo-medium-gray/50 text-xs font-mono text-white/70 py-1.5 px-2 rounded cursor-pointer focus:border-exo-yellow/50 focus:outline-none"
                           >
                             <option value="">No drafter</option>
-                            {#each Object.values(instanceData ?? {}) as inst}
+                            {#each Object.entries(instanceData ?? {}) as [, inst]}
                               {@const mid = getInstanceModelId(inst)}
-                              {#if mid.includes("1.7B") || mid.includes("0.6B") || mid.includes("draft")}
+                              {@const status = deriveInstanceStatus(inst)}
+                              {#if status.statusText === "READY" || status.statusText === "LOADED" || status.statusText === "RUNNING"}
                                 <option value={mid}>{mid.split("/").pop()}</option>
                               {/if}
                             {/each}

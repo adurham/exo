@@ -156,17 +156,16 @@ def find_peer_repo_url(
                 net_info = node_network.get(peer_id)
                 if net_info is None or not net_info.interfaces:
                     continue
-                # Prefer thunderbolt interfaces, then ethernet, then anything
-                # Only consider IPv4 addresses (skip fe80:: link-local, ::1, etc.)
+                # Prefer thunderbolt, then any routable IPv4
                 best_ip: str | None = None
                 for iface in net_info.interfaces:
                     ip = iface.ip_address
-                    if ":" in ip or ip.startswith("fe80"):
-                        continue  # Skip IPv6 addresses
+                    if ":" in ip or ip.startswith("fe80") or ip.startswith("127.") or ip.startswith("169.254"):
+                        continue
                     if iface.interface_type == "thunderbolt":
                         best_ip = ip
                         break
-                    if iface.interface_type in ("ethernet", "maybe_ethernet") and best_ip is None or best_ip is None:
+                    if best_ip is None:
                         best_ip = ip
                 if best_ip:
                     return f"http://{best_ip}:{EXO_FILE_SERVER_PORT}"

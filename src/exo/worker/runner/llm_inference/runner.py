@@ -388,21 +388,21 @@ class Runner:
                 for node_id, net_info in state.get("nodeNetwork", {}).items():
                     if node_id != draft_node_id:
                         continue
-                    def _routable(ip: str) -> bool:
-                        return bool(ip) and ":" not in ip and not ip.startswith("127.") and not ip.startswith("fe80") and not ip.startswith("169.254")
-                    # Priority: thunderbolt > ethernet > wifi > unknown
-                    # Matches codebase-wide convention (Ring topology, P2P downloads)
-                    _priority = {"thunderbolt": 0, "maybe_ethernet": 1, "ethernet": 2, "wifi": 3}
-                    candidates: list[tuple[int, str]] = []
+                    # Prefer thunderbolt, then any routable IPv4
+                    tb_ip: str | None = None
+                    fallback_ip: str | None = None
                     for iface in net_info.get("interfaces", []):
                         ip = iface.get("ipAddress", "")
-                        iface_type = iface.get("interfaceType", "")
-                        if _routable(ip):
-                            pri = _priority.get(iface_type, 4)
-                            candidates.append((pri, ip))
-                    if candidates:
-                        candidates.sort()
-                        return f"http://{candidates[0][1]}:52415"
+                        if not ip or ":" in ip or ip.startswith("127.") or ip.startswith("fe80") or ip.startswith("169.254"):
+                            continue
+                        if iface.get("interfaceType", "") == "thunderbolt":
+                            tb_ip = ip
+                            break
+                        if fallback_ip is None:
+                            fallback_ip = ip
+                    best = tb_ip or fallback_ip
+                    if best:
+                        return f"http://{best}:52415"
         except Exception as e:
             logger.warning(f"Failed to resolve draft node URL: {e}")
         return None
@@ -611,7 +611,6 @@ class _TpDraftWrapper:
         self.server_url: str = getattr(draft_client, 'server_url', '') if draft_client else ''
         self._num_to_trim: int = 0
         self._result: list[int] | None = None
-        self._thread = None  # Always None — we block inside request_draft
 
     def prefill(self, token_ids: list[int]) -> int | None:
         """Prefill draft cache (rank 0 only)."""
@@ -623,13 +622,9 @@ class _TpDraftWrapper:
         """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
         num = num_tokens or self.num_draft_tokens
         if self._group.rank() == 0 and self._client is not None:
-            self._client._num_to_trim = self._num_to_trim
+            trim = self._num_to_trim
             self._num_to_trim = 0
-            self._client.request_draft(token_id, num)
-            if self._client._thread is not None:
-                self._client._thread.join()
-            result = self._client._result or []
-            # Pack: [actual_length, tok0, tok1, ..., tokN-1] padded to num+1
+            result = self._client.fetch_draft_sync(token_id, num, trim=trim)
             padded = result[:num] + [0] * max(0, num - len(result))
             draft_array = mx.array([len(result)] + padded, dtype=mx.int32)
         else:
@@ -731,6 +726,5 @@ class Builder:
             event_sender=self.event_sender,
             heartbeat=self.heartbeat,
             heartbeat_timeout=self.heartbeat_timeout,
-            draft_model=self.draft_model,
             is_draft_node=self.is_draft_node,
         )

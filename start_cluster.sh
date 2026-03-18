@@ -571,7 +571,7 @@ EXPECTED_RUNNERS=0
 # draft_model + draft_tokens are part of the instance config — the runner reads them.
 DRAFT_FIELDS=""
 if [ -n "$EXO_DRAFT_MODEL" ]; then
-    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": ${EXO_DRAFT_TOKENS:-3}"
+    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": 10"
 fi
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
