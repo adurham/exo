@@ -539,8 +539,8 @@ place_instance_with_retry() {
             return 0
         fi
 
-        # These 400s happen when node_memory/node_network/RDMA aren't populated yet — retryable
-        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend"; then
+        # These 400s happen when cluster state isn't ready yet — retryable
+        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend\|No running instance found for draft model"; then
             if [ "$attempt" -lt "$max_attempts" ]; then
                 echo "  Attempt $attempt/$max_attempts: cluster state still propagating, retrying in 5s..."
                 sleep 5
