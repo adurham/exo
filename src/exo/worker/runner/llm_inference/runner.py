@@ -437,7 +437,9 @@ class Runner:
 
         port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52416"))
         try:
-            server = HTTPServer(("0.0.0.0", port), Handler)
+            class ReuseHTTPServer(HTTPServer):
+                allow_reuse_address = True
+            server = ReuseHTTPServer(("0.0.0.0", port), Handler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             logger.info(f"Draft direct server started on port {port}")
