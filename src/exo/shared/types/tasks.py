@@ -86,21 +86,6 @@ class ImageEdits(BaseTask):  # emitted by Master
     error_message: str | None = Field(default=None)
 
 
-class DraftGeneration(BaseTask):  # emitted by Master
-    """Stateful draft token generation for speculative decoding.
-
-    The runner maintains a persistent KV cache across DraftGeneration tasks.
-    Each call feeds token_id through the model and generates num_tokens predictions.
-    trim > 0 trims rejected tokens from the cache before generating.
-    """
-    command_id: CommandId
-    token_id: int = 0
-    num_tokens: int = 10
-    trim: int = 0
-    action: str = "draft"  # "draft", "prefill", "reset"
-    prefill_token_ids: list[int] = Field(default_factory=list)
-
-
 class Shutdown(BaseTask):  # emitted by Worker
     runner_id: RunnerId
 
@@ -115,6 +100,5 @@ Task = (
     | CancelTask
     | ImageGeneration
     | ImageEdits
-    | DraftGeneration
     | Shutdown
 )

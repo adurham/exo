@@ -10,7 +10,6 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.models.model_cards import ModelTask
 from exo.shared.types.chunks import (
-    DraftChunk,
     ErrorChunk,
     TokenChunk,
     ToolCallChunk,
@@ -26,7 +25,6 @@ from exo.shared.types.events import (
 from exo.shared.types.mlx import Model
 from exo.shared.types.tasks import (
     ConnectToGroup,
-    DraftGeneration,
     LoadModel,
     Shutdown,
     StartWarmup,
@@ -213,7 +211,7 @@ class Runner:
                 assert (
                     ModelTask.TextGeneration in self.shard_metadata.model_card.tasks
                 ), f"Incorrect model task(s): {self.shard_metadata.model_card.tasks}"
-                self.generator.inference_model, self.generator.tokenizer, self.generator.draft_model = (
+                self.generator.inference_model, self.generator.tokenizer, _ = (
                     load_mlx_items(
                         self.bound_instance,
                         self.generator.group,
@@ -221,30 +219,6 @@ class Runner:
                         on_layer_loaded=on_layer_loaded,
                     )
                 )
-
-                # Speculative decoding: if the instance has a draft_model configured,
-                # create a DraftClient that queries the draft instance's node directly.
-                # We resolve the draft node's IP from cluster state at setup time.
-                _draft_model_id = self.bound_instance.instance.draft_model
-                _draft_tokens = self.bound_instance.instance.draft_tokens
-                # All TP ranks must know about speculative decode for generator selection
-                if _draft_model_id:
-                    self.generator.use_speculative = True
-                if _draft_model_id and self.device_rank == 0:
-                    try:
-                        from exo.worker.engines.mlx.draft_client import DraftClient
-                        _draft_url = self._resolve_draft_url(_draft_model_id)
-                        if _draft_url:
-                            self.generator.draft_model = DraftClient(
-                                server_url=_draft_url,
-                                num_draft_tokens=_draft_tokens,
-                                draft_model=_draft_model_id,
-                            )
-                            logger.info(f"Draft client ready (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
-                        else:
-                            logger.warning(f"Could not resolve draft node for {_draft_model_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to init draft client: {e}")
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
@@ -278,9 +252,6 @@ class Runner:
                 if return_code == ExitCode.Shutdown:
                     return
 
-            case DraftGeneration() if isinstance(self.current_status, (RunnerReady, RunnerRunning)):
-                self.handle_draft_task(task)
-
             case Shutdown():
                 self.shutdown(task)
                 return
@@ -289,123 +260,6 @@ class Runner:
                 raise ValueError(
                     f"Received {task.__class__.__name__} outside of state machine in {self.current_status=}"
                 )
-
-    def handle_draft_task(self, task: DraftGeneration):
-        """Handle a draft generation request with persistent KV cache."""
-        assert isinstance(self.generator, InferenceGenerator)
-        self.acknowledge_task(task)
-        self.send_task_status(task.task_id, TaskStatus.Running)
-
-        t0 = time.perf_counter()
-
-        # Lazy-init the draft cache
-        if not hasattr(self, '_draft_cache'):
-            from mlx_lm.models.cache import make_prompt_cache
-            self._draft_cache = make_prompt_cache(self.generator.model)
-            self._draft_cache_len = 0
-
-        try:
-            if task.action == "reset":
-                from mlx_lm.models.cache import make_prompt_cache
-                self._draft_cache = make_prompt_cache(self.generator.model)
-                self._draft_cache_len = 0
-                result_tokens: list[int] = []
-
-            elif task.action == "prefill":
-                if task.prefill_token_ids:
-                    tokens = mx.array([task.prefill_token_ids])
-                    logits = self.generator.model(tokens, cache=self._draft_cache)
-                    mx.eval(logits)
-                    self._draft_cache_len += len(task.prefill_token_ids)
-                result_tokens = []
-
-            else:  # "draft"
-                from mlx_lm.models.cache import trim_prompt_cache
-                if task.trim > 0:
-                    trim_prompt_cache(self._draft_cache, task.trim)
-                    self._draft_cache_len = max(0, self._draft_cache_len - task.trim)
-
-                result_tokens = []
-                tok = task.token_id
-                for _ in range(task.num_tokens):
-                    current = mx.array([[tok]])
-                    logits = self.generator.model(current, cache=self._draft_cache)
-                    mx.eval(logits)
-                    self._draft_cache_len += 1
-                    tok = logits[0, -1].argmax().item()
-                    result_tokens.append(tok)
-
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            self.event_sender.send(
-                ChunkGenerated(
-                    command_id=task.command_id,
-                    chunk=DraftChunk(
-                        model=self.model_id,
-                        tokens=result_tokens,
-                        cache_len=self._draft_cache_len,
-                        elapsed_ms=elapsed_ms,
-                    ),
-                )
-            )
-        except Exception as e:
-            logger.warning(f"Draft generation failed: {e}")
-            self.event_sender.send(
-                ChunkGenerated(
-                    command_id=task.command_id,
-                    chunk=ErrorChunk(
-                        model=self.model_id,
-                        error_message=str(e),
-                    ),
-                )
-            )
-
-        self.send_task_status(task.task_id, TaskStatus.Complete)
-
-    def _resolve_draft_url(self, draft_model_id: str) -> str | None:
-        """Find the API URL of the node running the draft model instance."""
-        import json
-        import urllib.request
-        try:
-            with urllib.request.urlopen("http://localhost:52415/state", timeout=5) as resp:
-                state = json.loads(resp.read())
-            # Find the instance running the draft model
-            for inst in state.get("instances", {}).values():
-                # Handle tagged union format: {"MlxRingInstance": {...}} or {"MlxJacclInstance": {...}}
-                inst_data = inst
-                for key in ("MlxRingInstance", "MlxJacclInstance"):
-                    if key in inst:
-                        inst_data = inst[key]
-                        break
-                model_id = inst_data.get("shardAssignments", {}).get("modelId", "")
-                if model_id != draft_model_id:
-                    continue
-                # Get the node ID running this instance
-                node_to_runner = inst_data.get("shardAssignments", {}).get("nodeToRunner", {})
-                draft_node_id = next(iter(node_to_runner.keys()), None)
-                if not draft_node_id:
-                    continue
-                # Get the node's IP from network info
-                for node_id, net_info in state.get("nodeNetwork", {}).items():
-                    if node_id != draft_node_id:
-                        continue
-                    def _routable(ip: str) -> bool:
-                        return bool(ip) and ":" not in ip and not ip.startswith("127.") and not ip.startswith("fe80") and not ip.startswith("169.254")
-                    # Priority: thunderbolt > ethernet > wifi > unknown
-                    # Matches codebase-wide convention (Ring topology, P2P downloads)
-                    _priority = {"thunderbolt": 0, "maybe_ethernet": 1, "ethernet": 2, "wifi": 3}
-                    candidates: list[tuple[int, str]] = []
-                    for iface in net_info.get("interfaces", []):
-                        ip = iface.get("ipAddress", "")
-                        iface_type = iface.get("interfaceType", "")
-                        if _routable(ip):
-                            pri = _priority.get(iface_type, 4)
-                            candidates.append((pri, ip))
-                    if candidates:
-                        candidates.sort()
-                        return f"http://{candidates[0][1]}:52415"
-        except Exception as e:
-            logger.warning(f"Failed to resolve draft node URL: {e}")
-        return None
 
     def shutdown(self, task: Task):
         logger.info("runner shutting down")
@@ -441,38 +295,9 @@ class Runner:
             self.send_task_status(task.task_id, TaskStatus.Complete)
             return False
 
-    def _try_connect_draft(self) -> None:
-        """Lazy DraftClient init — retries if the draft instance wasn't ready at load time."""
-        assert isinstance(self.generator, InferenceGenerator)
-        if self.generator.draft_model is not None and hasattr(self.generator.draft_model, 'prefill'):
-            return  # Already connected with TCP draft
-        _draft_model_id = self.bound_instance.instance.draft_model
-        _draft_tokens = self.bound_instance.instance.draft_tokens
-        if not _draft_model_id or self.device_rank != 0:
-            return
-        try:
-            from exo.worker.engines.mlx.draft_client import DraftClient
-            _draft_url = self._resolve_draft_url(_draft_model_id)
-            if _draft_url:
-                self.generator.draft_model = DraftClient(
-                    server_url=_draft_url,
-                    num_draft_tokens=_draft_tokens,
-                    draft_model=_draft_model_id,
-                )
-                logger.info(f"Draft client connected (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
-                if isinstance(self.generator, BatchGenerator):
-                    logger.warning(
-                        "Draft client connected but BatchGenerator is active — "
-                        "speculative decoding requires SequentialGenerator (restart needed)"
-                    )
-        except Exception as e:
-            logger.debug(f"Draft client not yet available: {e}")
-
     def handle_generation_tasks(self, starting_task: TextGeneration):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
-
-        self._try_connect_draft()
 
         logger.info(f"received chat request: {starting_task}")
         self.update_status(RunnerRunning())
@@ -527,15 +352,6 @@ class Runner:
                         )
 
             except WouldBlock:
-                pass
-
-        # Send shutdown signal to draft node if we're the TP master
-        if (hasattr(self.generator, 'draft_model') and self.generator.draft_model is not None
-                and hasattr(self.generator.draft_model, 'shutdown')):
-            try:
-                self.generator.draft_model.shutdown()
-                logger.info("Sent shutdown signal to draft node")
-            except Exception:
                 pass
 
         self.update_status(RunnerReady())
@@ -596,62 +412,6 @@ class Runner:
                     )
 
 
-class _TpDraftWrapper:
-    """Wraps a DraftClient (rank 0 only) with TP broadcast for speculative decoding.
-
-    All TP ranks must call the model with identical draft tokens. Rank 0 fetches
-    from the TCP DraftClient, then broadcasts the result to all other ranks via
-    mx.distributed.all_gather before returning.
-    """
-
-    def __init__(self, draft_client: object | None, group: mx.distributed.Group):
-        self._client = draft_client  # DraftClient on rank 0, None on other ranks
-        self._group = group
-        self.num_draft_tokens: int = getattr(draft_client, 'num_draft_tokens', 10) if draft_client else 10
-        self.server_url: str = getattr(draft_client, 'server_url', '') if draft_client else ''
-        self._num_to_trim: int = 0
-        self._result: list[int] | None = None
-        self._thread = None  # Always None — we block inside request_draft
-
-    def prefill(self, token_ids: list[int]) -> int | None:
-        """Prefill draft cache (rank 0 only)."""
-        if self._client is not None and hasattr(self._client, 'prefill'):
-            return self._client.prefill(token_ids)
-        return None
-
-    def request_draft(self, token_id: int, num_tokens: int = 0) -> None:
-        """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
-        num = num_tokens or self.num_draft_tokens
-        if self._group.rank() == 0 and self._client is not None:
-            self._client._num_to_trim = self._num_to_trim
-            self._num_to_trim = 0
-            self._client.request_draft(token_id, num)
-            if self._client._thread is not None:
-                self._client._thread.join()
-            result = self._client._result or []
-            # Pack: [actual_length, tok0, tok1, ..., tokN-1] padded to num+1
-            padded = result[:num] + [0] * max(0, num - len(result))
-            draft_array = mx.array([len(result)] + padded, dtype=mx.int32)
-        else:
-            self._num_to_trim = 0
-            draft_array = mx.zeros(num + 1, dtype=mx.int32)
-
-        # Broadcast from rank 0 to all ranks
-        gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=self._group)
-        mx.eval(gathered)
-        rank0_data = gathered[0].tolist()
-        actual_len = rank0_data[0]
-        self._result = rank0_data[1:1 + actual_len] if actual_len > 0 else []
-
-    def reset_cache(self) -> None:
-        if self._client is not None and hasattr(self._client, 'reset_cache'):
-            self._client.reset_cache()
-
-    def shutdown(self) -> None:
-        if self._client is not None and hasattr(self._client, 'shutdown'):
-            self._client.shutdown()
-
-
 @dataclass
 class Builder:
     model_id: ModelId
@@ -662,9 +422,6 @@ class Builder:
     inference_model: Model | None = None
     tokenizer: TokenizerWrapper | None = None
     group: mx.distributed.Group | None = None
-    draft_model: Model | None = None
-    is_draft_node: bool = False
-    use_speculative: bool = False
 
     def build(
         self,
@@ -692,15 +449,6 @@ class Builder:
 
         device_rank = 0 if self.group is None else self.group.rank()
         _use_sequential = bool(os.environ.get("EXO_NO_BATCH"))
-        # If a draft model is configured, ALL TP ranks must use SequentialGenerator
-        # with a TP-aware draft_fn that broadcasts draft tokens from rank 0.
-        if not _use_sequential and self.use_speculative:
-            _use_sequential = True
-            if self.group is not None and self.group.size() > 1:
-                # TP mode: wrap the DraftClient in a broadcast-based draft_fn
-                # so all ranks call the model with the same draft tokens.
-                self.draft_model = _TpDraftWrapper(self.draft_model, self.group)
-            logger.info("using SequentialGenerator (TCP draft model requires speculative path)")
         if _use_sequential:
             logger.info("using SequentialGenerator")
             return SequentialGenerator(
@@ -715,8 +463,6 @@ class Builder:
                 event_sender=self.event_sender,
                 heartbeat=self.heartbeat,
                 heartbeat_timeout=self.heartbeat_timeout,
-                draft_model=self.draft_model,
-                is_draft_node=self.is_draft_node,
             )
         logger.info("using BatchGenerator")
         return BatchGenerator(
@@ -731,6 +477,4 @@ class Builder:
             event_sender=self.event_sender,
             heartbeat=self.heartbeat,
             heartbeat_timeout=self.heartbeat_timeout,
-            draft_model=self.draft_model,
-            is_draft_node=self.is_draft_node,
         )

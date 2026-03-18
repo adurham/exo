@@ -29,16 +29,6 @@ class ImageGeneration(BaseCommand):
     task_params: ImageGenerationTaskParams
 
 
-class DraftGeneration(BaseCommand):
-    """Command for stateful draft token generation (speculative decoding)."""
-    model: ModelId
-    token_id: int = 0
-    num_tokens: int = 10
-    trim: int = 0
-    action: str = "draft"  # "draft", "prefill", "reset"
-    prefill_token_ids: list[int] = Field(default_factory=list)
-
-
 class ImageEdits(BaseCommand):
     task_params: ImageEditsTaskParams
 
@@ -49,8 +39,6 @@ class PlaceInstance(BaseCommand):
     instance_meta: InstanceMeta
     min_nodes: int
     max_context_tokens: int | None = None
-    draft_model: str | None = None
-    draft_tokens: int = 10
 
 
 class CreateInstance(BaseCommand):
@@ -102,7 +90,6 @@ Command = (
     TestCommand
     | RequestEventLog
     | TextGeneration
-    | DraftGeneration
     | ImageGeneration
     | ImageEdits
     | PlaceInstance

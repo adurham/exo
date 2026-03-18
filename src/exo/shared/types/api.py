@@ -233,8 +233,6 @@ class PlaceInstanceParams(BaseModel):
     min_nodes: int = 1
     node_ids: list[NodeId] | None = None
     max_context_tokens: int | None = None
-    draft_model: str | None = None
-    draft_tokens: int = 10
 
 
 

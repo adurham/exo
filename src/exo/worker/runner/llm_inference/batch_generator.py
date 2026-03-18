@@ -142,9 +142,6 @@ class SequentialGenerator(InferenceGenerator):
     event_sender: MpSender[Event]
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
-    draft_model: Model | None = None
-    is_draft_node: bool = False
-
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
     _queue: deque[TextGeneration] = field(default_factory=deque, init=False)
@@ -167,7 +164,6 @@ class SequentialGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             model_id=self.model_id,
-            is_draft_node=self.is_draft_node,
         )
 
     def submit(
@@ -391,7 +387,6 @@ class SequentialGenerator(InferenceGenerator):
             on_generation_token=on_generation_token,
             on_token_count_known=self._set_heartbeat_timeout,
             group=self.group,
-            draft_model=self.draft_model,
         )
 
     def close(self) -> None:
@@ -411,8 +406,6 @@ class BatchGenerator(InferenceGenerator):
     event_sender: MpSender[Event]
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
-    draft_model: Model | None = None
-    is_draft_node: bool = False
     check_for_cancel_every: int = 50
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
@@ -436,7 +429,6 @@ class BatchGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             kv_prefix_cache=self.kv_prefix_cache,
-            draft_model=self.draft_model,
         )
 
     def warmup(self):
@@ -445,7 +437,6 @@ class BatchGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             model_id=self.model_id,
-            is_draft_node=self.is_draft_node,
         )
 
     def submit(

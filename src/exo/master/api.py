@@ -118,7 +118,6 @@ from exo.shared.types.api import (
     normalize_image_size,
 )
 from exo.shared.types.chunks import (
-    DraftChunk,
     ErrorChunk,
     ImageChunk,
     InputImageChunk,
@@ -250,7 +249,7 @@ class API:
 
         self._text_generation_queues: dict[
             CommandId,
-            Sender[TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk | DraftChunk],
+            Sender[TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk],
         ] = {}
         self._image_generation_queues: dict[
             CommandId, Sender[ImageChunk | ErrorChunk]
@@ -349,12 +348,6 @@ class API:
         self.app.get("/ollama/api/ps")(self.ollama_ps)
         self.app.get("/ollama/api/version")(self.ollama_version)
 
-        # Draft endpoints for speculative decoding
-        self.app.post("/v1/draft")(self.draft_generate)
-        self.app.post("/v1/draft/prefill")(self.draft_prefill)
-        self.app.post("/v1/draft/reset")(self.draft_reset)
-        self.app.get("/v1/draft/health")(self.draft_health)
-
         self.app.get("/state")(lambda: self.state)
         self.app.get("/events")(self.stream_events)
         self.app.post("/download/start")(self.start_download)
@@ -384,8 +377,6 @@ class API:
                         sharding=payload.sharding,
                         instance_meta=payload.instance_meta,
                         min_nodes=payload.min_nodes,
-                        draft_model=payload.draft_model,
-                        draft_tokens=payload.draft_tokens,
                     ),
                     node_memory=self.state.node_memory,
                     node_network=self.state.node_network,
@@ -419,8 +410,6 @@ class API:
             instance_meta=payload.instance_meta,
             min_nodes=payload.min_nodes,
             max_context_tokens=effective_limit,
-            draft_model=payload.draft_model,
-            draft_tokens=payload.draft_tokens,
         )
         await self._send(command)
 
@@ -1997,76 +1986,6 @@ class API:
             else:
                 not_found.append(task_id)
         return DeleteTracesResponse(deleted=deleted, not_found=not_found)
-
-    # ── Draft endpoints for speculative decoding ──────────────────────
-    # Draft requests flow through the normal pipeline:
-    # API → Master (routes to draft instance) → Worker → Runner
-    # The runner maintains a persistent KV cache for stateful draft generation.
-
-    async def _draft_command(self, body: dict) -> JSONResponse:
-        """Route a draft request to the local runner via its supervisor — no gossip, no duplicate model load."""
-        import uuid
-        from exo.shared.types.tasks import DraftGeneration as DraftGenerationTask
-
-        model = body.get("model", "")
-        if not model:
-            raise HTTPException(400, "model field required")
-
-        if self._worker is None:
-            raise HTTPException(503, "Worker not available for draft requests")
-
-        runner = self._worker.get_draft_runner(model)  # type: ignore[union-attr]
-        if runner is None:
-            raise HTTPException(404, f"No local runner found for {model}")
-
-        action = body.get("action", "draft")
-        command_id = CommandId(str(uuid.uuid4()))
-        t0 = time.time()
-
-        task = DraftGenerationTask(
-            instance_id=runner.bound_instance.instance.instance_id,  # type: ignore[union-attr]
-            command_id=command_id,
-            action=action,
-            token_id=body.get("token_id", 0),
-            num_tokens=body.get("num_tokens", 10),
-            trim=body.get("trim", 0),
-            prefill_token_ids=body.get("prefill_token_ids", body.get("token_ids", [])),
-        )
-        result = await runner.draft_request(task)
-        elapsed_ms = (time.time() - t0) * 1000
-
-        if result is None:
-            raise HTTPException(504, "Draft request timed out")
-
-        return JSONResponse({
-            "tokens": result.tokens,
-            "cache_len": result.cache_len,
-            "elapsed_ms": elapsed_ms,
-        })
-
-    async def draft_generate(self, request: Request) -> JSONResponse:
-        body = await request.json()
-        body.setdefault("action", "draft")
-        return await self._draft_command(body)
-
-    async def draft_prefill(self, request: Request) -> JSONResponse:
-        body = await request.json()
-        body["action"] = "prefill"
-        return await self._draft_command(body)
-
-    async def draft_reset(self, request: Request) -> JSONResponse:
-        body = await request.json()
-        body["action"] = "reset"
-        return await self._draft_command(body)
-
-    async def draft_health(self) -> JSONResponse:
-        if self._worker is None:
-            return JSONResponse({"status": "ok", "models": []})
-        models = [
-            r.shard_metadata.model_card.model_id  # type: ignore[union-attr]
-            for r in self._worker.runners.values()  # type: ignore[union-attr]
-        ]
-        return JSONResponse({"status": "ok", "models": models})
 
     async def get_onboarding(self) -> JSONResponse:
         return JSONResponse({"completed": ONBOARDING_COMPLETE_FILE.exists()})

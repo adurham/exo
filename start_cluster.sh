@@ -24,10 +24,6 @@
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
-# ── Speculative decoding ──
-# Set to a model ID to create a draft instance for speculative decoding.
-# Leave empty to disable. The primary instance auto-discovers it.
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-1.7B-8bit}"
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
@@ -568,11 +564,6 @@ place_instance_with_retry() {
 EXPECTED_RUNNERS=0
 
 # ── Instance 1: Primary model (Studios, Tensor Parallel over RDMA) ──
-# draft_model + draft_tokens are part of the instance config — the runner reads them.
-DRAFT_FIELDS=""
-if [ -n "$EXO_DRAFT_MODEL" ]; then
-    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": ${EXO_DRAFT_TOKENS:-3}"
-fi
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
@@ -581,7 +572,6 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
     \"max_context_tokens\": 262144
-    $DRAFT_FIELDS
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
@@ -597,20 +587,6 @@ fi
 # }"; then
 #     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
 # fi
-
-# ── Instance 3: Draft model for speculative decoding (MacBook) ──
-if [ -n "$EXO_DRAFT_MODEL" ]; then
-    echo "Creating draft model instance ($EXO_DRAFT_MODEL on MacBook)..."
-    if place_instance_with_retry "Draft" "$EXO_DRAFT_MODEL" "{
-        \"model_id\": \"$EXO_DRAFT_MODEL\",
-        \"sharding\": \"Pipeline\",
-        \"min_nodes\": 1,
-        \"node_ids\": [\"$MBP_NODE_ID\"],
-        \"max_context_tokens\": 4096
-    }"; then
-        EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
-    fi
-fi
 
 if [ "$EXPECTED_RUNNERS" -eq 0 ]; then
     echo "ERROR: No instances were created. Check the dashboard."

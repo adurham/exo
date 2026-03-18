@@ -91,8 +91,6 @@ class ExoBatchGenerator:
     tokenizer: TokenizerWrapper
     group: mx.distributed.Group | None
     kv_prefix_cache: KVPrefixCache | None
-    draft_model: object | None = None  # CPUDraftEngine or None
-
     _exo_gen: MlxBatchGenerator = field(init=False)
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
 
@@ -102,18 +100,6 @@ class ExoBatchGenerator:
             stop_tokens=set(eos_ids_from_tokenizer(self.tokenizer)),
             prefill_step_size=PREFILL_STEP_SIZE,
         )
-        self._draft_prev_token = None
-        # Wire draft: run draft using the PREVIOUS step's token
-        # (we can't access current y without forcing GPU sync)
-        if self.draft_model is not None and hasattr(self.draft_model, 'request_draft'):
-            def _on_async_eval(y):
-                """Called during GPU async eval. Use PREVIOUS token for draft."""
-                if self._draft_prev_token is not None:
-                    try:
-                        self.draft_model.request_draft(self._draft_prev_token)
-                    except Exception:
-                        pass
-            self._exo_gen.draft_callback = _on_async_eval
 
     @property
     def has_work(self) -> bool:
@@ -310,10 +296,6 @@ class ExoBatchGenerator:
         responses = self._exo_gen.next()
 
         results: list[tuple[int, GenerationResponse]] = []
-
-        # Save current token for next step's draft callback
-        if self.draft_model is not None and len(responses) == 1:
-            self._draft_prev_token = responses[0].token
 
         for response in responses:
             if response.uid not in self._active_tasks:

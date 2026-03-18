@@ -866,9 +866,6 @@ def hybrid_auto_parallel(
             recv_from=model_shard_meta.pipeline_recv_from,
         )
 
-    # Skip ALL pipeline wrapping when draft mode is active.
-    # Draft node doesn't participate in all_gather/send/recv during model forward.
-    # Draft token exchange is handled separately by RDMADraftClient.
     _has_real_pp_tail = (model_shard_meta.pipeline_send_to is not None
                          or model_shard_meta.pipeline_recv_from is not None)
 

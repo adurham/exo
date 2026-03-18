@@ -97,20 +97,6 @@ class HybridShardMetadata(BaseShardMetadata):
     pipeline_recv_from: int | None = None  # global rank to receive input from
 
 
-@final
-class DraftShardMetadata(BaseShardMetadata):
-    """Draft node shard metadata for speculative decoding.
-
-    The node joins the JACCL/RDMA group but loads a DIFFERENT (smaller)
-    model for generating draft tokens. It processes 0 layers of the
-    primary model. start_layer == end_layer == 0.
-
-    The draft_model_id specifies which model to load (e.g., Qwen3-0.6B-8bit).
-    Must share the same tokenizer as the primary model.
-    """
-    draft_model_id: str  # e.g., "mlx-community/Qwen3-0.6B-8bit"
-
-
 ShardMetadata: TypeAlias = (
-    PipelineShardMetadata | CfgShardMetadata | TensorShardMetadata | HybridShardMetadata | DraftShardMetadata
+    PipelineShardMetadata | CfgShardMetadata | TensorShardMetadata | HybridShardMetadata
 )

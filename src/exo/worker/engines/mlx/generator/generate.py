@@ -59,11 +59,6 @@ from exo.worker.engines.mlx.constants import (
     PREFILL_STEP_SIZE,
 )
 
-# Self-speculative decoding: use the same model with layer skipping as draft.
-# EXO_SPECULATIVE_DECODE=N means skip factor N (e.g., 10 = use every 10th layer).
-# 0 or unset = disabled.
-_SPECULATIVE_SKIP = int(os.environ.get("EXO_SPECULATIVE_DECODE", "0"))
-_SPECULATIVE_DRAFT_TOKENS = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "3"))
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
@@ -400,7 +395,6 @@ def warmup_inference(
     tokenizer: TokenizerWrapper,
     group: mx.distributed.Group | None,
     model_id: ModelId,
-    is_draft_node: bool = False,
 ) -> int:
     logger.info(f"warming up inference for instance: {model_id}")
     t = time.monotonic()
@@ -432,39 +426,30 @@ def warmup_inference(
             f"Warmup pre-barrier: {(time.perf_counter() - t_barrier) * 1000:.1f}ms"
         )
 
-    if is_draft_node:
-        # Draft node: warm up the draft model standalone (no TP/PP communication)
-        logger.info("Draft node: warming up draft model standalone")
-        tokens = mx.array([[1, 2, 3]])
-        logits = model(tokens)
-        mx.eval(logits)
-        tokens_generated = 1
-        logger.info("Draft node warmup complete")
-    else:
-        if EXO_TRACING_ENABLED:
-            t_warmup_gen = time.perf_counter()
-        prompt_len = len(warmup_prompt) if isinstance(warmup_prompt, list) else len(warmup_prompt)  # type: ignore
-        logger.info(f"Generating warmup tokens (prompt_len={prompt_len}, max_tokens=50)")
-        for _r in stream_generate(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=warmup_prompt,
-            max_tokens=50,
-            sampler=sampler,
-            prompt_cache=cache,
-            prefill_step_size=2048,
-            kv_group_size=KV_GROUP_SIZE,
-            kv_bits=KV_BITS,
-        ):
-            tokens_generated += 1
+    if EXO_TRACING_ENABLED:
+        t_warmup_gen = time.perf_counter()
+    prompt_len = len(warmup_prompt) if isinstance(warmup_prompt, list) else len(warmup_prompt)  # type: ignore
+    logger.info(f"Generating warmup tokens (prompt_len={prompt_len}, max_tokens=50)")
+    for _r in stream_generate(
+        model=model,
+        tokenizer=tokenizer,
+        prompt=warmup_prompt,
+        max_tokens=50,
+        sampler=sampler,
+        prompt_cache=cache,
+        prefill_step_size=2048,
+        kv_group_size=KV_GROUP_SIZE,
+        kv_bits=KV_BITS,
+    ):
+        tokens_generated += 1
 
-        if EXO_TRACING_ENABLED:
-            warmup_gen_ms = (time.perf_counter() - t_warmup_gen) * 1000
-            logger.info(
-                f"Generated ALL warmup tokens: {tokens_generated} in {warmup_gen_ms:.1f}ms"
-            )
-        else:
-            logger.info("Generated ALL warmup tokens")
+    if EXO_TRACING_ENABLED:
+        warmup_gen_ms = (time.perf_counter() - t_warmup_gen) * 1000
+        logger.info(
+            f"Generated ALL warmup tokens: {tokens_generated} in {warmup_gen_ms:.1f}ms"
+        )
+    else:
+        logger.info("Generated ALL warmup tokens")
 
     if EXO_TRACING_ENABLED:
         t_barrier = time.perf_counter()
@@ -568,92 +553,6 @@ def extract_top_logprobs(
     return selected_logprob, top_logprob_items
 
 
-def draft_provider_loop(
-    model: Model,
-    group: mx.distributed.Group,
-    recv_from: int,
-    send_to: int,
-    num_draft_tokens: int = 10,
-    heartbeat: object | None = None,
-) -> None:
-    """Draft provider loop: receives tokens via RDMA, generates predictions, sends back.
-
-    Runs on the MacBook as part of a hybrid JACCL group.
-    The TP master (Studio) sends a control message, the draft node generates
-    predictions and sends them back — all over RDMA.
-
-    Protocol per step:
-      1. Recv (2,) int32 from TP master: [accepted_token_id, num_to_trim]
-         - accepted_token_id: the verified token to continue from
-         - num_to_trim: how many draft tokens were rejected (trim KV cache)
-         - accepted_token_id < 0 means shutdown
-      2. Trim draft KV cache by num_to_trim (KV cache desync fix)
-      3. Feed accepted token through draft model
-      4. Generate num_draft_tokens predictions
-      5. Send (num_draft_tokens,) int32 back to TP master
-    """
-    from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
-
-    cache = make_prompt_cache(model)
-    logger.info(
-        f"Draft provider loop started (recv_from={recv_from}, "
-        f"send_to={send_to}, K={num_draft_tokens})"
-    )
-
-    step = 0
-    while True:
-        # Touch heartbeat before blocking recv — prefill on Studios can take 10s+
-        if heartbeat is not None:
-            heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
-
-        # Receive control message: [token_id, num_to_trim]
-        ctrl = mx.distributed.recv(shape=(2,), dtype=mx.int32, src=recv_from, group=group)
-        mx.eval(ctrl)
-        token_id = ctrl[0].item()
-        num_to_trim = ctrl[1].item()
-
-        if token_id < 0:
-            logger.info("Draft provider: received shutdown signal")
-            break
-
-        # Touch heartbeat after recv completes
-        if heartbeat is not None:
-            heartbeat.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
-
-        # Trim KV cache for rejected tokens (KV cache desync fix)
-        if num_to_trim > 0:
-            trim_prompt_cache(cache, num_to_trim)
-
-        # Feed the accepted token through draft model
-        t0 = time.perf_counter()
-        current = mx.array([[token_id]])
-        logits = model(current, cache=cache)
-        mx.eval(logits)
-
-        # Generate K draft tokens
-        draft_tokens = []
-        for _ in range(num_draft_tokens):
-            next_token = logits[0, -1].argmax()
-            mx.eval(next_token)
-            draft_tokens.append(next_token.item())
-            current = next_token.reshape(1, 1)
-            logits = model(current, cache=cache)
-            mx.eval(logits)
-
-        # Send draft predictions via RDMA
-        result = mx.array(draft_tokens, dtype=mx.int32)
-        mx.distributed.send(result, send_to, group=group)
-        mx.eval(result)
-
-        step += 1
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        if step <= 5 or step % 50 == 0:
-            logger.info(
-                f"Draft step {step}: generated {num_draft_tokens} tokens in {elapsed_ms:.1f}ms "
-                f"(token_id={token_id}, trim={num_to_trim})"
-            )
-
-
 def mlx_generate(
     model: Model,
     tokenizer: TokenizerWrapper,
@@ -665,7 +564,6 @@ def mlx_generate(
     distributed_prompt_progress_callback: Callable[[], None] | None = None,
     on_generation_token: Callable[[], None] | None = None,
     on_token_count_known: Callable[[int], None] | None = None,
-    draft_model: Model | None = None,
 ) -> Generator[GenerationResponse]:
     from exo.worker.engines.mlx.cache import (
         MEMORY_THRESHOLD,
@@ -846,22 +744,6 @@ def mlx_generate(
     )
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
-    # Start draft prefill in background thread (overlaps with primary prefill)
-    _draft_prefill_thread = None
-    if draft_model is not None and hasattr(draft_model, 'prefill'):
-        import threading
-        _draft_client_ref = draft_model
-        _draft_client_ref.reset_cache()
-        _prompt_token_ids = prompt_tokens.tolist() if isinstance(prompt_tokens, mx.array) else list(prompt_tokens)
-        def _bg_draft_prefill():
-            try:
-                _draft_client_ref.prefill(_prompt_token_ids)
-            except Exception as e:
-                logger.warning(f"Draft prefill failed: {e}")
-        _draft_prefill_thread = threading.Thread(target=_bg_draft_prefill, daemon=True)
-        _draft_prefill_thread.start()
-        logger.info(f"Draft prefill started in background ({len(_prompt_token_ids)} tokens)")
-
     # Prefill cache with all tokens except the last one
     prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
         model,
@@ -1018,37 +900,6 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
-    # Speculative decoding: TCP draft server or CPU draft engine
-    _draft_fn = None
-    _cpu_draft = None
-    if draft_model is not None and hasattr(draft_model, 'prefill'):
-        # TCP DraftClient — use speculative_generate_step via draft_fn
-        _draft_client = draft_model
-        # Use instance-configured draft tokens (from UI) rather than env var default
-        _tcp_draft_tokens = getattr(_draft_client, 'num_draft_tokens', _SPECULATIVE_DRAFT_TOKENS)
-        # Wait for background draft prefill to finish before decode starts
-        if _draft_prefill_thread is not None:
-            _draft_prefill_thread.join()
-            logger.info("Draft prefill complete (was overlapped with primary prefill)")
-        def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
-            """Blocking call to remote draft server."""
-            _draft_client._num_to_trim = trim
-            _draft_client.request_draft(token_id, num_tokens)
-            if _draft_client._thread is not None:
-                _draft_client._thread.join()
-            return _draft_client._result or []
-        _draft_fn = _tcp_draft_fn
-        logger.info(
-            f"TCP speculative decode active: server={_draft_client.server_url}, "
-            f"K={_tcp_draft_tokens}"
-        )
-    elif draft_model is not None and hasattr(draft_model, 'draft_sync'):
-        _cpu_draft = draft_model
-        logger.info(
-            f"CPU-pipelined speculative decode active: "
-            f"layers={_cpu_draft._n_layers}, draft_tokens={_SPECULATIVE_DRAFT_TOKENS}"
-        )
-
     _generation_logged = False
     try:
       _gen_kwargs = dict(
@@ -1063,25 +914,10 @@ def mlx_generate(
           kv_group_size=KV_GROUP_SIZE,
           kv_bits=KV_BITS,
       )
-      if _draft_fn is not None:
-          _gen_kwargs["draft_fn"] = _draft_fn
-          _gen_kwargs["num_draft_tokens"] = _tcp_draft_tokens
-      elif _cpu_draft is not None:
-          _cpu_draft.reset_cache()
-          # Feed prompt tokens to CPU draft model's cache
-          if isinstance(last_token, mx.array):
-              for t in last_token.tolist():
-                  _cpu_draft._forward_one(t)
-          _gen_kwargs["cpu_draft_fn"] = _cpu_draft.draft_sync
-          _gen_kwargs["num_draft_tokens"] = _SPECULATIVE_DRAFT_TOKENS
-
-      _accepted_draft_tokens = 0
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
         start=1,
       ):
-        if out.from_draft:
-            _accepted_draft_tokens += 1
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
@@ -1135,12 +971,6 @@ def mlx_generate(
                     f"Model generated unexpected finish_reason: {out.finish_reason}"
                 )
 
-            if _accepted_draft_tokens > 0:
-                logger.info(
-                    f"Speculative decode: {_accepted_draft_tokens}/{completion_tokens} tokens "
-                    f"from draft ({_accepted_draft_tokens / completion_tokens * 100:.1f}%)"
-                )
-
             usage = Usage(
                 prompt_tokens=total_prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -1150,7 +980,6 @@ def mlx_generate(
                 ),
                 completion_tokens_details=CompletionTokensDetails(
                     reasoning_tokens=reasoning_tokens,
-                    accepted_prediction_tokens=_accepted_draft_tokens,
                 ),
             )
 
