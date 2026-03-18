@@ -787,32 +787,35 @@ def mlx_generate(
                 f"match={_m1}/{_test_k} {'PASS' if _m1 == _test_k else 'FAIL'}"
             )
 
-            # Test 2: multi-token with NO cache (fresh, just a few tokens)
-            _fresh_cache = _make_test_cache(model)
-            _short_prompt = prompt_tokens[:5]
-            _prefill_logits = model(_short_prompt[:-1][None], cache=_fresh_cache)
-            mx.eval(_prefill_logits)
-            # Single-token from position 4
-            _single2 = []
-            _y2 = _short_prompt[-1:]
-            for _i in range(_test_k):
-                _logits2 = model(_y2[None] if _y2.ndim == 1 else mx.array([[_y2.item()]]), cache=_fresh_cache)
-                mx.eval(_logits2)
-                _tok2 = _logits2[0, -1].argmax().item()
-                _single2.append(_tok2)
-                _y2 = mx.array([_tok2], mx.uint32)
-            _trim_test_cache(_fresh_cache, _test_k)
-            # Multi-token from position 4
-            _multi_input2 = mx.array([[_short_prompt[-1].item()] + _single2[:_test_k - 1]])
-            _multi_logits2 = model(_multi_input2, cache=_fresh_cache)
-            mx.eval(_multi_logits2)
-            _multi2 = [_multi_logits2[0, _i].argmax().item() for _i in range(_test_k)]
-            _m2 = sum(1 for a, b in zip(_single2, _multi2) if a == b)
-            logger.info(
-                f"[multi-token-test] ctx=4 (short): single={_single2} multi={_multi2} "
-                f"match={_m2}/{_test_k} {'PASS' if _m2 == _test_k else 'FAIL'}"
-            )
-            _trim_test_cache(_fresh_cache, _test_k)
+            # Test 2: sweep context sizes to find failure threshold
+            for _test_ctx in [4, 50, 100, 200, 500, 1000]:
+                if _test_ctx >= len(prompt_tokens):
+                    continue
+                _fresh_cache = _make_test_cache(model)
+                _test_prompt = prompt_tokens[:_test_ctx + 1]
+                model(_test_prompt[:-1][None], cache=_fresh_cache)
+                mx.eval([c.state for c in _fresh_cache])
+                # Single-token
+                _s = []
+                _y2 = _test_prompt[-1:]
+                for _i in range(_test_k):
+                    _l2 = model(_y2[None] if _y2.ndim == 1 else mx.array([[_y2.item()]]), cache=_fresh_cache)
+                    mx.eval(_l2)
+                    _t2 = _l2[0, -1].argmax().item()
+                    _s.append(_t2)
+                    _y2 = mx.array([_t2], mx.uint32)
+                _trim_test_cache(_fresh_cache, _test_k)
+                # Multi-token
+                _mi2 = mx.array([[_test_prompt[-1].item()] + _s[:_test_k - 1]])
+                _ml2 = model(_mi2, cache=_fresh_cache)
+                mx.eval(_ml2)
+                _m = [_ml2[0, _i].argmax().item() for _i in range(_test_k)]
+                _trim_test_cache(_fresh_cache, _test_k)
+                _matches = sum(1 for a, b in zip(_s, _m) if a == b)
+                logger.info(
+                    f"[multi-token-test] ctx={_test_ctx}: match={_matches}/{_test_k} "
+                    f"{'PASS' if _matches == _test_k else 'FAIL'}"
+                )
         except Exception as _e:
             logger.warning(f"[multi-token-test] Error: {_e}", exc_info=True)
 
