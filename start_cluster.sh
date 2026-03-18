@@ -540,7 +540,7 @@ place_instance_with_retry() {
         fi
 
         # These 400s happen when cluster state isn't ready yet — retryable
-        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend\|No running instance found for draft model"; then
+        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend\|No running instance found for draft model\|No tensor sharding found"; then
             if [ "$attempt" -lt "$max_attempts" ]; then
                 echo "  Attempt $attempt/$max_attempts: cluster state still propagating, retrying in 5s..."
                 sleep 5
