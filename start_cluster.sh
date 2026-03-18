@@ -391,6 +391,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_EXPERT_PARALLEL=$EXO_EXPERT_PARALLEL"
     EXO_ENV="$EXO_ENV MLX_SDPA_CPU_FRACTION=$MLX_SDPA_CPU_FRACTION"
     EXO_ENV="$EXO_ENV EXO_NO_BATCH=$EXO_NO_BATCH"
+    EXO_ENV="$EXO_ENV EXO_TEST_MULTI_TOKEN=${EXO_TEST_MULTI_TOKEN:-}"
     # MacBook gets 2 entries (see per-node overrides below), Studios get 1
     if [ "$NODE" != "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
