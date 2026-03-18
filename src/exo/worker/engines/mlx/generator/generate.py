@@ -759,14 +759,14 @@ def mlx_generate(
 
     # One-time multi-token forward pass test (gated behind env var)
     _test_multi = os.environ.get("EXO_TEST_MULTI_TOKEN", "")
-    logger.info(f"[multi-token-test] env={_test_multi!r}, prompt_len={len(prompt_tokens)}")
     if _test_multi == "1":
         os.environ["EXO_TEST_MULTI_TOKEN"] = "done"  # run once only
         from mlx_lm.models.cache import make_prompt_cache as _make_test_cache, trim_prompt_cache as _trim_test_cache
         _test_k = 6
-        logger.info(f"[multi-token-test] Starting: {len(prompt_tokens)} prompt tokens, K={_test_k}")
+        _ctx_len = len(prompt_tokens) - 1  # post-prefill cache length
+        logger.info(f"[multi-token-test] context={_ctx_len}, K={_test_k}")
         try:
-            # Single-token ground truth: generate K tokens one at a time
+            # Test 1: multi-token right after prefill (with KV cache)
             _single_tokens = []
             _y = prompt_tokens[-1:]
             for _i in range(_test_k):
@@ -775,21 +775,44 @@ def mlx_generate(
                 _tok = _logits[0, -1].argmax().item()
                 _single_tokens.append(_tok)
                 _y = mx.array([_tok], mx.uint32)
-            # Rewind the cache back to post-prefill state
             _trim_test_cache(caches, _test_k)
-            # Multi-token: feed last prompt token + first K-1 single tokens as batch
             _multi_input = mx.array([[prompt_tokens[-1].item()] + _single_tokens[:_test_k - 1]])
             _multi_logits = model(_multi_input, cache=caches)
             mx.eval(_multi_logits)
             _multi_tokens = [_multi_logits[0, _i].argmax().item() for _i in range(_test_k)]
-            # Rewind again
             _trim_test_cache(caches, _test_k)
-            # Compare
-            _matches = sum(1 for a, b in zip(_single_tokens, _multi_tokens) if a == b)
+            _m1 = sum(1 for a, b in zip(_single_tokens, _multi_tokens) if a == b)
             logger.info(
-                f"[multi-token-test] single={_single_tokens} multi={_multi_tokens} "
-                f"match={_matches}/{_test_k} {'PASS' if _matches == _test_k else 'FAIL'}"
+                f"[multi-token-test] ctx={_ctx_len}: single={_single_tokens} multi={_multi_tokens} "
+                f"match={_m1}/{_test_k} {'PASS' if _m1 == _test_k else 'FAIL'}"
             )
+
+            # Test 2: multi-token with NO cache (fresh, just a few tokens)
+            _fresh_cache = _make_test_cache(model)
+            _short_prompt = prompt_tokens[:5]
+            _prefill_logits = model(_short_prompt[:-1][None], cache=_fresh_cache)
+            mx.eval(_prefill_logits)
+            # Single-token from position 4
+            _single2 = []
+            _y2 = _short_prompt[-1:]
+            for _i in range(_test_k):
+                _logits2 = model(_y2[None] if _y2.ndim == 1 else mx.array([[_y2.item()]]), cache=_fresh_cache)
+                mx.eval(_logits2)
+                _tok2 = _logits2[0, -1].argmax().item()
+                _single2.append(_tok2)
+                _y2 = mx.array([_tok2], mx.uint32)
+            _trim_test_cache(_fresh_cache, _test_k)
+            # Multi-token from position 4
+            _multi_input2 = mx.array([[_short_prompt[-1].item()] + _single2[:_test_k - 1]])
+            _multi_logits2 = model(_multi_input2, cache=_fresh_cache)
+            mx.eval(_multi_logits2)
+            _multi2 = [_multi_logits2[0, _i].argmax().item() for _i in range(_test_k)]
+            _m2 = sum(1 for a, b in zip(_single2, _multi2) if a == b)
+            logger.info(
+                f"[multi-token-test] ctx=4 (short): single={_single2} multi={_multi2} "
+                f"match={_m2}/{_test_k} {'PASS' if _m2 == _test_k else 'FAIL'}"
+            )
+            _trim_test_cache(_fresh_cache, _test_k)
         except Exception as _e:
             logger.warning(f"[multi-token-test] Error: {_e}", exc_info=True)
 
