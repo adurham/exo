@@ -788,7 +788,7 @@ def mlx_generate(
             )
 
             # Test 2: sweep context sizes to find failure threshold
-            for _test_ctx in [4, 50, 100, 200, 500, 1000]:
+            for _test_ctx in [1000, 1024, 1050, 1100, 1200, 1262]:
                 if _test_ctx >= len(prompt_tokens):
                     continue
                 _fresh_cache = _make_test_cache(model)
