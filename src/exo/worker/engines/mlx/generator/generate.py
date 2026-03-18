@@ -847,12 +847,14 @@ def mlx_generate(
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
     # Start draft prefill in background thread (overlaps with primary prefill)
+    # IMPORTANT: use all_prompt_tokens, not prompt_tokens — the latter may be
+    # truncated by KV prefix cache hits, but the draft model needs the full prompt.
     _draft_prefill_thread = None
     if draft_model is not None and hasattr(draft_model, 'prefill'):
         import threading
         _draft_client_ref = draft_model
         _draft_client_ref.reset_cache()
-        _prompt_token_ids = prompt_tokens.tolist() if isinstance(prompt_tokens, mx.array) else list(prompt_tokens)
+        _prompt_token_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
         def _bg_draft_prefill():
             try:
                 _draft_client_ref.prefill(_prompt_token_ids)
