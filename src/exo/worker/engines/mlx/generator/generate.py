@@ -760,60 +760,51 @@ def mlx_generate(
     # One-time multi-token forward pass test (gated behind env var)
     _test_multi = os.environ.get("EXO_TEST_MULTI_TOKEN", "")
     if _test_multi == "1":
-        os.environ["EXO_TEST_MULTI_TOKEN"] = "done"  # run once only
-        from mlx_lm.models.cache import make_prompt_cache as _make_test_cache, trim_prompt_cache as _trim_test_cache
+        os.environ["EXO_TEST_MULTI_TOKEN"] = "done"
+        from mlx_lm.models.cache import make_prompt_cache as _make_test_cache
         _test_k = 6
-        _ctx_len = len(prompt_tokens) - 1  # post-prefill cache length
-        logger.info(f"[multi-token-test] context={_ctx_len}, K={_test_k}")
+        logger.info(f"[multi-token-test] starting, prompt_len={len(prompt_tokens)}")
         try:
-            # Test 1: multi-token right after prefill (with KV cache)
-            _single_tokens = []
-            _y = prompt_tokens[-1:]
-            for _i in range(_test_k):
-                _logits = model(_y[None] if _y.ndim == 1 else mx.array([[_y.item()]]), cache=caches)
-                mx.eval(_logits)
-                _tok = _logits[0, -1].argmax().item()
-                _single_tokens.append(_tok)
-                _y = mx.array([_tok], mx.uint32)
-            _trim_test_cache(caches, _test_k)
-            _multi_input = mx.array([[prompt_tokens[-1].item()] + _single_tokens[:_test_k - 1]])
-            _multi_logits = model(_multi_input, cache=caches)
-            mx.eval(_multi_logits)
-            _multi_tokens = [_multi_logits[0, _i].argmax().item() for _i in range(_test_k)]
-            _trim_test_cache(caches, _test_k)
-            _m1 = sum(1 for a, b in zip(_single_tokens, _multi_tokens) if a == b)
-            logger.info(
-                f"[multi-token-test] ctx={_ctx_len}: single={_single_tokens} multi={_multi_tokens} "
-                f"match={_m1}/{_test_k} {'PASS' if _m1 == _test_k else 'FAIL'}"
-            )
-
-            # Test 2: sweep context sizes to find failure threshold
-            for _test_ctx in [1000, 1024, 1050, 1100, 1200, 1262]:
+            for _test_ctx in [100, 500, 1000, 1024, 1100, 1262]:
                 if _test_ctx >= len(prompt_tokens):
                     continue
-                _fresh_cache = _make_test_cache(model)
-                _test_prompt = prompt_tokens[:_test_ctx + 1]
-                model(_test_prompt[:-1][None], cache=_fresh_cache)
-                mx.eval([c.state for c in _fresh_cache])
-                # Single-token
+                _tp = prompt_tokens[:_test_ctx + 1]
+                # Fresh cache A: prefill + single-token decode
+                _ca = _make_test_cache(model)
+                model(_tp[:-1][None], cache=_ca)
+                mx.eval([c.state for c in _ca])
                 _s = []
-                _y2 = _test_prompt[-1:]
-                for _i in range(_test_k):
-                    _l2 = model(_y2[None] if _y2.ndim == 1 else mx.array([[_y2.item()]]), cache=_fresh_cache)
-                    mx.eval(_l2)
-                    _t2 = _l2[0, -1].argmax().item()
-                    _s.append(_t2)
-                    _y2 = mx.array([_t2], mx.uint32)
-                _trim_test_cache(_fresh_cache, _test_k)
-                # Multi-token
-                _mi2 = mx.array([[_test_prompt[-1].item()] + _s[:_test_k - 1]])
-                _ml2 = model(_mi2, cache=_fresh_cache)
-                mx.eval(_ml2)
-                _m = [_ml2[0, _i].argmax().item() for _i in range(_test_k)]
-                _trim_test_cache(_fresh_cache, _test_k)
+                _y = _tp[-1:]
+                for _ in range(_test_k):
+                    _l = model(mx.array([[_y.item() if _y.ndim == 0 else _y[-1].item()]]), cache=_ca)
+                    mx.eval(_l)
+                    _t = _l[0, -1].argmax().item()
+                    _s.append(_t)
+                    _y = mx.array([_t], mx.uint32)
+                # Fresh cache B: prefill ALL tokens (prompt + single_tokens)
+                _cb = _make_test_cache(model)
+                _full = mx.array([_tp.tolist()[:-1] + [_tp[-1].item()] + _s[:_test_k - 1]])
+                model(_full, cache=_cb)
+                mx.eval([c.state for c in _cb])
+                # One more single-token to get the prediction at the last position
+                _l2 = model(mx.array([[_s[_test_k - 1]]]), cache=_cb)
+                mx.eval(_l2)
+                _last_pred = _l2[0, -1].argmax().item()
+                # Compare: single-token decode token[0] should match the model's
+                # prediction after seeing prompt (which is _s[0])
+                # But this tests prefill equivalence, not multi-token decode
+                # Let me just test: fresh_cache + multi-token input
+                _cc = _make_test_cache(model)
+                model(_tp[:-1][None], cache=_cc)
+                mx.eval([c.state for c in _cc])
+                _mi = mx.array([[_tp[-1].item()] + _s[:_test_k - 1]])
+                _ml = model(_mi, cache=_cc)
+                mx.eval(_ml)
+                _m = [_ml[0, _i].argmax().item() for _i in range(_test_k)]
                 _matches = sum(1 for a, b in zip(_s, _m) if a == b)
                 logger.info(
                     f"[multi-token-test] ctx={_test_ctx}: match={_matches}/{_test_k} "
+                    f"single={_s[:3]}... multi={_m[:3]}... "
                     f"{'PASS' if _matches == _test_k else 'FAIL'}"
                 )
         except Exception as _e:
