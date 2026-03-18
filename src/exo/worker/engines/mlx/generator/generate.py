@@ -979,11 +979,6 @@ def mlx_generate(
         """Save KV cache with generated tokens. Called on both normal completion and abort."""
         if kv_prefix_cache is None or not generated_text_parts:
             return
-        # Don't save cache when speculative decode was active — the sequential
-        # verify path may leave the cache in a state that doesn't exactly match
-        # the token sequence (off-by-one from draft/verify transitions).
-        if draft_model is not None:
-            return
         try:
             if EXO_TRACING_ENABLED:
                 t_cache_update = time.perf_counter()

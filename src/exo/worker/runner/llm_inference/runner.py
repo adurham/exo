@@ -244,10 +244,6 @@ class Runner:
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
 
-                # Start direct draft server for low-latency draft requests
-                if self.device_rank == 0:
-                    self._start_draft_server()
-
                 self.send_task_status(task.task_id, TaskStatus.Complete)
                 self.update_status(RunnerLoaded())
                 if EXO_TRACING_ENABLED:
@@ -359,92 +355,6 @@ class Runner:
             )
 
         self.send_task_status(task.task_id, TaskStatus.Complete)
-
-    def _start_draft_server(self) -> None:
-        """Start a lightweight HTTP server for direct draft requests, bypassing the task pipeline."""
-        import json
-        import threading
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-        from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
-
-        runner = self
-        model = self.generator.model  # pyright: ignore[reportAttributeAccessIssue]
-        lock = threading.Lock()
-
-        # Shared draft cache state
-        cache = make_prompt_cache(model)
-        cache_len = 0
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                if self.path == "/v1/draft/health":
-                    self._json({"status": "ok", "cache_len": cache_len, "model": runner.model_id})
-                else:
-                    self.send_error(404)
-
-            def do_POST(self):
-                nonlocal cache, cache_len
-                body = self._read()
-                if self.path == "/v1/draft":
-                    token_id = body.get("token_id", 1)
-                    num_tokens = body.get("num_tokens", 10)
-                    trim = body.get("trim", 0)
-                    t0 = time.perf_counter()
-                    with lock:
-                        if trim > 0:
-                            trim_prompt_cache(cache, trim)
-                            cache_len = max(0, cache_len - trim)
-                        tokens = []
-                        tok = token_id
-                        for _ in range(num_tokens):
-                            logits = model(mx.array([[tok]]), cache=cache)
-                            mx.eval(logits)
-                            cache_len += 1
-                            tok = logits[0, -1].argmax().item()
-                            tokens.append(tok)
-                    self._json({"tokens": tokens, "elapsed_ms": (time.perf_counter() - t0) * 1000})
-                elif self.path == "/v1/draft/prefill":
-                    token_ids = body.get("token_ids", body.get("token_ids", []))
-                    t0 = time.perf_counter()
-                    with lock:
-                        if token_ids:
-                            logits = model(mx.array([token_ids]), cache=cache)
-                            mx.eval(logits)
-                            cache_len += len(token_ids)
-                    self._json({"cache_len": cache_len, "elapsed_ms": (time.perf_counter() - t0) * 1000})
-                elif self.path == "/v1/draft/reset":
-                    with lock:
-                        cache = make_prompt_cache(model)
-                        cache_len = 0
-                    self._json({"status": "ok"})
-                else:
-                    self.send_error(404)
-
-            def _read(self) -> dict:
-                n = int(self.headers.get("Content-Length", 0))
-                return json.loads(self.rfile.read(n)) if n else {}
-
-            def _json(self, data: dict):
-                out = json.dumps(data).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(out)))
-                self.end_headers()
-                self.wfile.write(out)
-
-            def log_message(self, format, *args):
-                pass  # suppress per-request logging
-
-        port = int(os.environ.get("EXO_DRAFT_DIRECT_PORT", "52417"))
-        try:
-            class ReuseHTTPServer(HTTPServer):
-                allow_reuse_address = True
-            server = ReuseHTTPServer(("0.0.0.0", port), Handler)
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            logger.info(f"Draft direct server started on port {port}")
-        except OSError as e:
-            logger.warning(f"Could not start draft direct server on port {port}: {e}")
 
     def shutdown(self, task: Task):
         logger.info("runner shutting down")
