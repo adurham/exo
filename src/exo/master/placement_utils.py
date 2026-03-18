@@ -497,7 +497,10 @@ def _find_ip_prioritised(
     node_network: Mapping[NodeId, NodeNetworkInfo],
     ring: bool,
 ) -> str | None:
-    """Find an IP address between nodes, preferring thunderbolt."""
+    """Find an IP address between nodes with prioritization.
+
+    Priority: thunderbolt > maybe_ethernet > ethernet > wifi > unknown
+    """
     ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
     if not ips:
         return None
@@ -506,8 +509,27 @@ def _find_ip_prioritised(
         iface.ip_address: iface.interface_type for iface in other_network.interfaces
     }
 
-    # Thunderbolt first, then any routable IP
-    return min(ips, key=lambda ip: 0 if ip_to_type.get(ip, "unknown") == "thunderbolt" else 1)
+    # Ring should prioritise fastest connection. As a best-effort, we prioritise TB.
+    # TODO: Profile and get actual connection speeds.
+    if ring:
+        priority = {
+            "thunderbolt": 0,
+            "maybe_ethernet": 1,
+            "ethernet": 2,
+            "wifi": 3,
+            "unknown": 4,
+        }
+
+    # RDMA also prioritises fastest connection (thunderbolt)
+    else:
+        priority = {
+            "thunderbolt": 0,
+            "maybe_ethernet": 1,
+            "ethernet": 2,
+            "wifi": 3,
+            "unknown": 4,
+        }
+    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 2))
 
 
 def get_mlx_ring_hosts_by_node(

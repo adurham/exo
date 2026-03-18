@@ -223,23 +223,28 @@ class Runner:
                 )
 
                 # Speculative decoding: if the instance has a draft_model configured,
-                # create a DraftClient using the draft_url from instance config
-                # (computed deterministically by the master at placement time).
+                # create a DraftClient that queries the draft instance's node directly.
+                # We resolve the draft node's IP from cluster state at setup time.
                 _draft_model_id = self.bound_instance.instance.draft_model
                 _draft_tokens = self.bound_instance.instance.draft_tokens
-                _draft_url = self.bound_instance.instance.draft_url
+                # All TP ranks must know about speculative decode for generator selection
                 if _draft_model_id:
                     self.generator.use_speculative = True
-                if _draft_model_id and _draft_url and self.device_rank == 0:
-                    from exo.worker.engines.mlx.draft_client import DraftClient
-                    self.generator.draft_model = DraftClient(
-                        server_url=_draft_url,
-                        num_draft_tokens=_draft_tokens,
-                        draft_model=_draft_model_id,
-                    )
-                    logger.info(f"Draft client ready (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
-                elif _draft_model_id and not _draft_url:
-                    logger.warning(f"Draft model {_draft_model_id} configured but no draft_url — master could not resolve it")
+                if _draft_model_id and self.device_rank == 0:
+                    try:
+                        from exo.worker.engines.mlx.draft_client import DraftClient
+                        _draft_url = self._resolve_draft_url(_draft_model_id)
+                        if _draft_url:
+                            self.generator.draft_model = DraftClient(
+                                server_url=_draft_url,
+                                num_draft_tokens=_draft_tokens,
+                                draft_model=_draft_model_id,
+                            )
+                            logger.info(f"Draft client ready (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
+                        else:
+                            logger.warning(f"Could not resolve draft node for {_draft_model_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to init draft client: {e}")
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
                 self.generator = self.generator.build()
@@ -356,6 +361,52 @@ class Runner:
 
         self.send_task_status(task.task_id, TaskStatus.Complete)
 
+    def _resolve_draft_url(self, draft_model_id: str) -> str | None:
+        """Find the API URL of the node running the draft model instance."""
+        import json
+        import urllib.request
+        try:
+            with urllib.request.urlopen("http://localhost:52415/state", timeout=5) as resp:
+                state = json.loads(resp.read())
+            # Find the instance running the draft model
+            for inst in state.get("instances", {}).values():
+                # Handle tagged union format: {"MlxRingInstance": {...}} or {"MlxJacclInstance": {...}}
+                inst_data = inst
+                for key in ("MlxRingInstance", "MlxJacclInstance"):
+                    if key in inst:
+                        inst_data = inst[key]
+                        break
+                model_id = inst_data.get("shardAssignments", {}).get("modelId", "")
+                if model_id != draft_model_id:
+                    continue
+                # Get the node ID running this instance
+                node_to_runner = inst_data.get("shardAssignments", {}).get("nodeToRunner", {})
+                draft_node_id = next(iter(node_to_runner.keys()), None)
+                if not draft_node_id:
+                    continue
+                # Get the node's IP from network info
+                for node_id, net_info in state.get("nodeNetwork", {}).items():
+                    if node_id != draft_node_id:
+                        continue
+                    def _routable(ip: str) -> bool:
+                        return bool(ip) and ":" not in ip and not ip.startswith("127.") and not ip.startswith("fe80") and not ip.startswith("169.254")
+                    # Priority: thunderbolt > ethernet > wifi > unknown
+                    # Matches codebase-wide convention (Ring topology, P2P downloads)
+                    _priority = {"thunderbolt": 0, "maybe_ethernet": 1, "ethernet": 2, "wifi": 3}
+                    candidates: list[tuple[int, str]] = []
+                    for iface in net_info.get("interfaces", []):
+                        ip = iface.get("ipAddress", "")
+                        iface_type = iface.get("interfaceType", "")
+                        if _routable(ip):
+                            pri = _priority.get(iface_type, 4)
+                            candidates.append((pri, ip))
+                    if candidates:
+                        candidates.sort()
+                        return f"http://{candidates[0][1]}:52415"
+        except Exception as e:
+            logger.warning(f"Failed to resolve draft node URL: {e}")
+        return None
+
     def shutdown(self, task: Task):
         logger.info("runner shutting down")
         self.update_status(RunnerShuttingDown())
@@ -390,9 +441,38 @@ class Runner:
             self.send_task_status(task.task_id, TaskStatus.Complete)
             return False
 
+    def _try_connect_draft(self) -> None:
+        """Lazy DraftClient init — retries if the draft instance wasn't ready at load time."""
+        assert isinstance(self.generator, InferenceGenerator)
+        if self.generator.draft_model is not None and hasattr(self.generator.draft_model, 'prefill'):
+            return  # Already connected with TCP draft
+        _draft_model_id = self.bound_instance.instance.draft_model
+        _draft_tokens = self.bound_instance.instance.draft_tokens
+        if not _draft_model_id or self.device_rank != 0:
+            return
+        try:
+            from exo.worker.engines.mlx.draft_client import DraftClient
+            _draft_url = self._resolve_draft_url(_draft_model_id)
+            if _draft_url:
+                self.generator.draft_model = DraftClient(
+                    server_url=_draft_url,
+                    num_draft_tokens=_draft_tokens,
+                    draft_model=_draft_model_id,
+                )
+                logger.info(f"Draft client connected (url={_draft_url}, model={_draft_model_id}, K={_draft_tokens})")
+                if isinstance(self.generator, BatchGenerator):
+                    logger.warning(
+                        "Draft client connected but BatchGenerator is active — "
+                        "speculative decoding requires SequentialGenerator (restart needed)"
+                    )
+        except Exception as e:
+            logger.debug(f"Draft client not yet available: {e}")
+
     def handle_generation_tasks(self, starting_task: TextGeneration):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, InferenceGenerator)
+
+        self._try_connect_draft()
 
         logger.info(f"received chat request: {starting_task}")
         self.update_status(RunnerRunning())
@@ -531,6 +611,7 @@ class _TpDraftWrapper:
         self.server_url: str = getattr(draft_client, 'server_url', '') if draft_client else ''
         self._num_to_trim: int = 0
         self._result: list[int] | None = None
+        self._thread = None  # Always None — we block inside request_draft
 
     def prefill(self, token_ids: list[int]) -> int | None:
         """Prefill draft cache (rank 0 only)."""
@@ -538,32 +619,29 @@ class _TpDraftWrapper:
             return self._client.prefill(token_ids)
         return None
 
-    def _broadcast_draft(self, token_id: int, num: int, trim: int) -> list[int]:
-        """Fetch draft tokens on rank 0, broadcast to all TP ranks, return result."""
+    def request_draft(self, token_id: int, num_tokens: int = 0) -> None:
+        """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
+        num = num_tokens or self.num_draft_tokens
         if self._group.rank() == 0 and self._client is not None:
-            result = self._client.fetch_draft_sync(token_id, num, trim=trim)
+            self._client._num_to_trim = self._num_to_trim
+            self._num_to_trim = 0
+            self._client.request_draft(token_id, num)
+            if self._client._thread is not None:
+                self._client._thread.join()
+            result = self._client._result or []
+            # Pack: [actual_length, tok0, tok1, ..., tokN-1] padded to num+1
             padded = result[:num] + [0] * max(0, num - len(result))
             draft_array = mx.array([len(result)] + padded, dtype=mx.int32)
         else:
+            self._num_to_trim = 0
             draft_array = mx.zeros(num + 1, dtype=mx.int32)
 
+        # Broadcast from rank 0 to all ranks
         gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=self._group)
         mx.eval(gathered)
         rank0_data = gathered[0].tolist()
         actual_len = rank0_data[0]
-        return rank0_data[1:1 + actual_len] if actual_len > 0 else []
-
-    def fetch_draft_sync(self, token_id: int, num_tokens: int = 0, trim: int = 0) -> list[int]:
-        """Blocking draft with TP broadcast. Used by generate.py's _tcp_draft_fn."""
-        num = num_tokens or self.num_draft_tokens
-        return self._broadcast_draft(token_id, num, trim)
-
-    def request_draft(self, token_id: int, num_tokens: int = 0) -> None:
-        """Fetch draft tokens on rank 0, broadcast to all TP ranks."""
-        num = num_tokens or self.num_draft_tokens
-        trim = self._num_to_trim
-        self._num_to_trim = 0
-        self._result = self._broadcast_draft(token_id, num, trim)
+        self._result = rank0_data[1:1 + actual_len] if actual_len > 0 else []
 
     def reset_cache(self) -> None:
         if self._client is not None and hasattr(self._client, 'reset_cache'):
@@ -653,5 +731,6 @@ class Builder:
             event_sender=self.event_sender,
             heartbeat=self.heartbeat,
             heartbeat_timeout=self.heartbeat_timeout,
+            draft_model=self.draft_model,
             is_draft_node=self.is_draft_node,
         )

@@ -411,6 +411,7 @@ class BatchGenerator(InferenceGenerator):
     event_sender: MpSender[Event]
     heartbeat: object | None = None
     heartbeat_timeout: object | None = None
+    draft_model: Model | None = None
     is_draft_node: bool = False
     check_for_cancel_every: int = 50
 
@@ -435,6 +436,7 @@ class BatchGenerator(InferenceGenerator):
             tokenizer=self.tokenizer,
             group=self.group,
             kv_prefix_cache=self.kv_prefix_cache,
+            draft_model=self.draft_model,
         )
 
     def warmup(self):

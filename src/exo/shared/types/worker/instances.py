@@ -23,7 +23,6 @@ class BaseInstance(TaggedModel):
     max_context_tokens: int | None = None
     draft_model: str | None = None  # model ID of draft instance for speculative decoding
     draft_tokens: int = 10  # number of draft tokens per speculative step
-    draft_url: str | None = None  # direct URL to draft server, computed at placement time
 
     def shard(self, runner_id: RunnerId) -> ShardMetadata | None:
         return self.shard_assignments.runner_to_shard.get(runner_id, None)

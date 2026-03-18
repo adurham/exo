@@ -63,7 +63,7 @@ from exo.worker.engines.mlx.constants import (
 # EXO_SPECULATIVE_DECODE=N means skip factor N (e.g., 10 = use every 10th layer).
 # 0 or unset = disabled.
 _SPECULATIVE_SKIP = int(os.environ.get("EXO_SPECULATIVE_DECODE", "0"))
-_SPECULATIVE_DRAFT_TOKENS = 10  # fallback only; instance config draft_tokens is authoritative
+_SPECULATIVE_DRAFT_TOKENS = int(os.environ.get("EXO_SPECULATIVE_DRAFT_TOKENS", "3"))
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
@@ -847,14 +847,12 @@ def mlx_generate(
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
     # Start draft prefill in background thread (overlaps with primary prefill)
-    # IMPORTANT: use all_prompt_tokens, not prompt_tokens — the latter may be
-    # truncated by KV prefix cache hits, but the draft model needs the full prompt.
     _draft_prefill_thread = None
     if draft_model is not None and hasattr(draft_model, 'prefill'):
         import threading
         _draft_client_ref = draft_model
         _draft_client_ref.reset_cache()
-        _prompt_token_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
+        _prompt_token_ids = prompt_tokens.tolist() if isinstance(prompt_tokens, mx.array) else list(prompt_tokens)
         def _bg_draft_prefill():
             try:
                 _draft_client_ref.prefill(_prompt_token_ids)
@@ -1034,7 +1032,11 @@ def mlx_generate(
             logger.info("Draft prefill complete (was overlapped with primary prefill)")
         def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
             """Blocking call to remote draft server."""
-            return _draft_client.fetch_draft_sync(token_id, num_tokens, trim=trim)
+            _draft_client._num_to_trim = trim
+            _draft_client.request_draft(token_id, num_tokens)
+            if _draft_client._thread is not None:
+                _draft_client._thread.join()
+            return _draft_client._result or []
         _draft_fn = _tcp_draft_fn
         logger.info(
             f"TCP speculative decode active: server={_draft_client.server_url}, "

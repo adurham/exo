@@ -368,20 +368,7 @@ class API:
         self.app.get("/onboarding")(self.get_onboarding)
         self.app.post("/onboarding")(self.complete_onboarding)
 
-    def _validate_draft_model(self, draft_model: str | None) -> None:
-        """Raise 400 if draft_model is set but no running instance serves that model."""
-        if not draft_model:
-            return
-        for inst in self.state.instances.values():
-            if inst.shard_assignments.model_id == draft_model:
-                return
-        raise HTTPException(
-            status_code=400,
-            detail=f"No running instance found for draft model '{draft_model}'. Create the draft instance first.",
-        )
-
     async def place_instance(self, payload: PlaceInstanceParams):
-        self._validate_draft_model(payload.draft_model)
         model_card = await ModelCard.load(payload.model_id)
         effective_limit = payload.max_context_tokens or model_card.max_context_length
 
@@ -447,7 +434,6 @@ class API:
         self, payload: CreateInstanceParams
     ) -> CreateInstanceResponse:
         instance = payload.instance
-        self._validate_draft_model(instance.draft_model)
         model_card = await ModelCard.load(instance.shard_assignments.model_id)
         required_memory = model_card.storage_size
         available_memory = self._calculate_total_available_memory()

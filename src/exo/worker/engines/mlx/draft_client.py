@@ -126,34 +126,6 @@ class DraftClient:
         self._thread = threading.Thread(target=_fetch, daemon=True)
         self._thread.start()
 
-    def fetch_draft_sync(self, token_id: int, num_tokens: int = 0, trim: int = 0) -> list[int]:
-        """Blocking draft request — no background thread. Use when you need the result immediately."""
-        num = num_tokens or self.num_draft_tokens
-        self._step += 1
-        step = self._step
-        t0 = time.perf_counter()
-        try:
-            result = self._post("/v1/draft", {
-                "model": self.draft_model,
-                "token_id": token_id,
-                "num_tokens": num,
-                "trim": trim,
-            })
-            if result is not None:
-                tokens = result.get("tokens", [])
-                elapsed_ms = (time.perf_counter() - t0) * 1000
-                self._total_exchange_ms += elapsed_ms
-                if step <= 5 or step % 50 == 0:
-                    logger.info(
-                        f"Draft exchange step {step}: {elapsed_ms:.1f}ms "
-                        f"(token={token_id}, trim={trim}, got {len(tokens)} drafts)"
-                    )
-                return tokens
-        except Exception as e:
-            if step <= 5:
-                logger.warning(f"Draft exchange failed at step {step}: {e}")
-        return []
-
     def set_trim(self, num_rejected: int):
         """Set how many tokens the draft server should trim on next request."""
         self._num_to_trim = num_rejected
