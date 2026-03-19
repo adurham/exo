@@ -831,8 +831,14 @@ def mlx_generate(
     if EXO_TRACING_ENABLED:
         logger.info("Starting decode")
 
+    _draft_call_count = 0
+    _draft_trim_total = 0
+    _log_draft_stats: Callable[[], None] | None = None
+
     def _log_generation_stats(generated_text_parts: list[str], reason: str) -> None:
         """Log generation stats and save KV cache. Called on both normal completion and abort."""
+        if _log_draft_stats is not None and _draft_call_count > 0:
+            _log_draft_stats()
         generation_elapsed = time.perf_counter() - generation_start_time
         generated_tokens = len(generated_text_parts)
         generation_tps = (
@@ -937,8 +943,11 @@ def mlx_generate(
             on_generation_token()
 
         def _local_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list[int]:
+            nonlocal _draft_call_count, _draft_trim_total
+            _draft_call_count += 1
             if trim > 0:
                 trim_prompt_cache(draft_cache, trim)
+                _draft_trim_total += trim
             tokens: list[int] = []
             tok = token_id
             for _ in range(num_tokens):
@@ -953,6 +962,17 @@ def mlx_generate(
                 on_generation_token()
             return tokens
 
+        def _draft_stats_fn() -> None:
+            total_drafted = _draft_call_count * _draft_tokens
+            accepted = total_drafted - _draft_trim_total
+            rate = accepted / total_drafted * 100 if total_drafted > 0 else 0
+            logger.info(
+                f"[speculative] {_draft_call_count} steps, "
+                f"{total_drafted} drafted, {_draft_trim_total} trimmed, "
+                f"~{rate:.0f}% acceptance"
+            )
+
+        _log_draft_stats = _draft_stats_fn  # noqa: F841
         _tp_draft_fn = _local_draft_fn
 
     elif _is_remote_draft:
