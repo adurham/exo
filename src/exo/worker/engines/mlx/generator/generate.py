@@ -858,8 +858,6 @@ def mlx_generate(
 
     def _save_kv_cache(generated_text_parts: list[str]) -> None:
         """Save KV cache with generated tokens. Called on both normal completion and abort."""
-        if draft_model is not None:
-            return  # Skip KV cache save during speculative decode until proven safe
         if kv_prefix_cache is None or not generated_text_parts:
             return
         try:
