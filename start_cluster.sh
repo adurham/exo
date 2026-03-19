@@ -588,16 +588,17 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
 fi
 
 # ── Instance 2: Subagent model (MacBook, single node) ──
-echo "Creating Qwen3-Coder-30B instance (MacBook)..."
-if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
-    \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
-    \"sharding\": \"Pipeline\",
-    \"min_nodes\": 1,
-    \"node_ids\": [\"$MBP_NODE_ID\"],
-    \"max_context_tokens\": 50000
-}"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
-fi
+# Commented out for now — not needed for speculative decode testing
+# echo "Creating Qwen3-Coder-30B instance (MacBook)..."
+# if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
+#     \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",
+#     \"sharding\": \"Pipeline\",
+#     \"min_nodes\": 1,
+#     \"node_ids\": [\"$MBP_NODE_ID\"],
+#     \"max_context_tokens\": 50000
+# }"; then
+#     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+# fi
 
 if [ "$EXPECTED_RUNNERS" -eq 0 ]; then
     echo "ERROR: No instances were created. Check the dashboard."
