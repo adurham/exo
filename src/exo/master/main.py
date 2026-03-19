@@ -143,11 +143,15 @@ class Master:
                                     f"No instance found for model {command.task_params.model}"
                                 )
 
+                            # Sort by task count (ascending), then by node count
+                            # (descending) to prefer larger instances (e.g. TP primary
+                            # over a sparse draft Pipeline with the same model_id).
                             available_instance_ids = sorted(
                                 instance_task_counts.keys(),
-                                key=lambda instance_id: instance_task_counts[
-                                    instance_id
-                                ],
+                                key=lambda instance_id: (
+                                    instance_task_counts[instance_id],
+                                    -len(self.state.instances[instance_id].shard_assignments.node_to_runner),
+                                ),
                             )
 
                             task_id = TaskId()
