@@ -27,21 +27,11 @@ from exo.worker.runner.bootstrap import logger
 DRAFT_SERVER_PORT = int(os.environ.get("EXO_DRAFT_SERVER_PORT", "52417"))
 
 
-def start_draft_server(model, model_id: str, tokenizer=None) -> int | None:
+def start_draft_server(model, model_id: str) -> int | None:
     """Start a draft HTTP server in a daemon thread. Returns the port or None on failure."""
     lock = threading.Lock()
     cache = make_prompt_cache(model)
     cache_len = 0
-
-    # Ban thinking/structural tokens from draft predictions — the verifier
-    # (with enable_thinking=False) never produces these, so the draft shouldn't either.
-    banned_ids: set[int] = set()
-    if tokenizer is not None:
-        for attr in ("think_start_id", "think_end_id"):
-            tid = getattr(tokenizer, attr, None)
-            if tid is not None:
-                banned_ids.add(tid)
-        logger.info(f"Draft server banning {len(banned_ids)} thinking token IDs: {banned_ids}")
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -68,14 +58,7 @@ def start_draft_server(model, model_id: str, tokenizer=None) -> int | None:
                         logits = model(mx.array([[tok]]), cache=cache)
                         mx.eval(logits)
                         cache_len += 1
-                        if banned_ids:
-                            logit_vec = logits[0, -1]
-                            for bid in banned_ids:
-                                logit_vec[bid] = -float('inf')
-                            mx.eval(logit_vec)
-                            tok = logit_vec.argmax().item()
-                        else:
-                            tok = logits[0, -1].argmax().item()
+                        tok = logits[0, -1].argmax().item()
                         tokens.append(tok)
                 self._json({"tokens": tokens, "elapsed_ms": (time.perf_counter() - t0) * 1000})
             elif self.path == "/v1/draft/prefill":

@@ -240,7 +240,7 @@ class Runner:
                 # Start draft server only on instances that ARE draft models (not the primary)
                 if self.device_rank == 0 and not draft_url:
                     from exo.worker.engines.mlx.draft_server import start_draft_server
-                    start_draft_server(self.generator.inference_model, self.model_id, self.generator.tokenizer)
+                    start_draft_server(self.generator.inference_model, self.model_id)
 
                 self.generator = self.generator.build()
 
