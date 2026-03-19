@@ -24,9 +24,8 @@
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
-# Speculative decoding: disabled — draft overhead exceeds gains in 2-way TP
-# (both Studios are fully utilized during decode, no idle time to exploit)
-: "${EXO_DRAFT_MODEL:=}"
+# Speculative decoding: testing with Pipeline Parallel (idle time between stages)
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-0.6B-4bit}"
 : "${EXO_DRAFT_TOKENS:=3}"
 
 export IBV_FORK_SAFE=1
@@ -574,12 +573,12 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-# ── Instance 1: Primary model (Studios, Tensor Parallel over RDMA) ──
-# Local draft model loads automatically via EXO_DRAFT_MODEL env var
-echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
+# ── Instance 1: Primary model (Studios, Pipeline Parallel over RDMA) ──
+# PP gives each stage idle time while the other processes — draft runs during gaps
+echo "Creating Qwen3-235B instance (Studios PP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
-    \"sharding\": \"Tensor\",
+    \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
