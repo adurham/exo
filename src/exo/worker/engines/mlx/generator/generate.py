@@ -914,7 +914,10 @@ def mlx_generate(
     _tp_draft_fn = None
     _is_tp = group is not None and group.size() > 1
     _is_rank0 = group is None or group.rank() == 0
-    _is_local_draft = draft_model is not None and isinstance(draft_model, nn.Module)
+    from exo.worker.engines.mlx.utils_mlx import _DraftBroadcastSentinel
+    _is_local_draft = draft_model is not None and (
+        isinstance(draft_model, nn.Module) or isinstance(draft_model, _DraftBroadcastSentinel)
+    )
     _is_remote_draft = draft_model is not None and hasattr(draft_model, 'prefill')
 
     if _is_local_draft:

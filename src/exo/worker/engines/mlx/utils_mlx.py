@@ -37,6 +37,15 @@ from mlx_lm.utils import load_model
 from pydantic import RootModel
 
 from exo.download.download_utils import build_model_path
+
+
+class _DraftBroadcastSentinel:
+    """Sentinel for non-rank-0 nodes: draft is configured but model not loaded.
+
+    Not an nn.Module, so generate.py's isinstance check correctly identifies
+    this as a broadcast-only participant. Truthy so the runner enables
+    speculative mode.
+    """
 from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.types.common import Host, ModelId
 from exo.shared.types.memory import Memory
@@ -281,7 +290,7 @@ def shard_and_load(
     # Wrapped in try/except so a draft failure degrades gracefully.
     draft_model: nn.Module | None = None
     draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
-    if draft_model_id:
+    if draft_model_id and group.rank() == 0:
         try:
             draft_path = build_model_path(ModelId(draft_model_id))
             if not any(draft_path.glob("*.safetensors")):
@@ -297,6 +306,12 @@ def shard_and_load(
             )
             draft_model = None
             mx.clear_cache()
+    elif draft_model_id:
+        # Non-rank-0: signal that draft is configured but don't load model.
+        # generate.py uses a sentinel to enable speculative mode with
+        # broadcast-only participation (no local draft generation).
+        draft_model = _DraftBroadcastSentinel()
+        logger.info("Draft configured — will receive tokens from rank 0 via broadcast")
 
     return model, tokenizer, draft_model
 
