@@ -21,6 +21,9 @@ class BaseInstance(TaggedModel):
     instance_id: InstanceId
     shard_assignments: ShardAssignments
     max_context_tokens: int | None = None
+    draft_model: str | None = None
+    draft_tokens: int = 5
+    draft_url: str | None = None
 
     def shard(self, runner_id: RunnerId) -> ShardMetadata | None:
         return self.shard_assignments.runner_to_shard.get(runner_id, None)
