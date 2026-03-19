@@ -513,14 +513,15 @@ place_instance_with_retry() {
     local label="$1"
     local model_id="$2"
     local payload="$3"
+    local expected_count="${4:-1}"  # how many instances of this model_id are expected
     local max_attempts=20
     for attempt in $(seq 1 $max_attempts); do
-        # Before each attempt, check if an instance for this model already exists
+        # Before each attempt, check if enough instances for this model already exist
         local existing
         existing=$(curl -s "$API/state" | jq -r --arg m "$model_id" \
             '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-        if [ "$existing" != "0" ] && [ -n "$existing" ] && [ "$existing" != "null" ]; then
-            echo "  Instance for $label already exists, skipping."
+        if [ -n "$existing" ] && [ "$existing" != "null" ] && [ "$existing" -ge "$expected_count" ] 2>/dev/null; then
+            echo "  Instance for $label already exists ($existing/$expected_count), skipping."
             return 0
         fi
 
@@ -589,6 +590,11 @@ DRAFT_FIELDS=""
 if [ -n "$EXO_DRAFT_MODEL" ]; then
     DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": 5"
 fi
+# If draft uses the same model_id as primary, expect 2 instances with that id
+PRIMARY_EXPECTED=1
+if [ "$EXO_DRAFT_MODEL" = "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" ]; then
+    PRIMARY_EXPECTED=2
+fi
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
@@ -598,7 +604,7 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
     \"max_context_tokens\": 262144
     $DRAFT_FIELDS
-}"; then
+}" "$PRIMARY_EXPECTED"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
