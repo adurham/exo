@@ -105,6 +105,13 @@ class DraftClient:
         except Exception:
             pass
 
+    def trim_to(self, length: int):
+        """Trim the remote draft model's KV cache to a specific length."""
+        try:
+            self._post("/v1/draft/trim", {"length": length})
+        except Exception:
+            pass
+
     def shutdown(self):
         """Log stats and close persistent connection."""
         if self._step > 0:

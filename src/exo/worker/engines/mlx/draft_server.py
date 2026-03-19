@@ -70,6 +70,13 @@ def start_draft_server(model, model_id: str) -> int | None:
                         mx.eval(logits)
                         cache_len += len(token_ids)
                 self._json({"cache_len": cache_len, "elapsed_ms": (time.perf_counter() - t0) * 1000})
+            elif self.path == "/v1/draft/trim":
+                target = body.get("length", 0)
+                with lock:
+                    if cache_len > target:
+                        trim_prompt_cache(cache, cache_len - target)
+                        cache_len = target
+                self._json({"status": "ok", "cache_len": cache_len})
             elif self.path == "/v1/draft/reset":
                 with lock:
                     cache = make_prompt_cache(model)

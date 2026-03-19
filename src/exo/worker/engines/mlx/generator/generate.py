@@ -907,16 +907,26 @@ def mlx_generate(
     if draft_model is not None and hasattr(draft_model, 'prefill'):
         _draft_tokens = getattr(draft_model, 'num_draft_tokens', 5)
         import threading
-        draft_model.reset_cache()
-        _prompt_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
+        # Keep draft cache in sync with the 235B's KV prefix cache:
+        # - Cache hit: draft already has the prefix from last request. Trim any
+        #   generated tokens past the prefix, then prefill only the delta.
+        # - Cache miss: reset and prefill the full prompt.
+        if prefix_hit_length > 0:
+            # Trim draft cache to prefix_hit_length (remove generated tokens from last request)
+            draft_model.trim_to(prefix_hit_length)
+            _draft_prefill_ids = prompt_tokens.tolist() if isinstance(prompt_tokens, mx.array) else list(prompt_tokens)
+            logger.info(f"Draft cache synced: kept {prefix_hit_length}, prefilling {len(_draft_prefill_ids)} delta tokens")
+        else:
+            draft_model.reset_cache()
+            _draft_prefill_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
+            logger.info(f"Draft cache reset: prefilling {len(_draft_prefill_ids)} tokens")
         def _bg_prefill():
             try:
-                draft_model.prefill(_prompt_ids)
+                draft_model.prefill(_draft_prefill_ids)
             except Exception as e:
                 logger.warning(f"Draft prefill failed: {e}")
         _prefill_thread = threading.Thread(target=_bg_prefill, daemon=True)
         _prefill_thread.start()
-        logger.info(f"Draft prefill started in background ({len(_prompt_ids)} tokens)")
 
     # Build TP-aware draft function that works on ALL ranks.
     # Rank 0 fetches from draft server, broadcasts to other ranks.
@@ -1112,8 +1122,7 @@ def mlx_generate(
             accumulated_text = accumulated_text[-max_stop_len:]
 
       # Log speculative decode stats if active
-      if _tp_draft_fn is not None and draft_model is not None and hasattr(draft_model, 'shutdown'):
-          draft_model.shutdown()
+      # Don't shutdown draft client — keep connection and cache alive for next request
     except GeneratorExit:
         if not _generation_logged and generated_text_parts:
             _log_generation_stats(generated_text_parts, "aborted (GeneratorExit)")
