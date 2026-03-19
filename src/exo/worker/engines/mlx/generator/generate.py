@@ -918,27 +918,28 @@ def mlx_generate(
     _is_remote_draft = draft_model is not None and hasattr(draft_model, 'prefill')
 
     if _is_local_draft:
-        # Local draft: each rank runs an independent copy of the draft model.
-        # Same weights + same input + argmax = identical tokens on all ranks.
-        # No broadcast/all_gather needed.
+        # Local draft: only rank 0 runs the draft model and broadcasts tokens.
+        # Non-rank-0 nodes receive via all_gather — they don't run the draft
+        # model at all (avoids FP non-determinism causing TP deadlock).
         from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
 
-        draft_cache = make_prompt_cache(draft_model)
+        draft_cache = None
+        if _is_rank0 or not _is_tp:
+            draft_cache = make_prompt_cache(draft_model)
 
-        # Synchronous prefill on each rank independently
-        logger.info(f"Prefilling local draft ({len(all_prompt_tokens)} tokens)...")
-        t_draft_prefill = time.perf_counter()
-        _draft_chunk = 512
-        for i in range(0, len(all_prompt_tokens), _draft_chunk):
-            draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=draft_cache)
-            mx.eval([c.state for c in draft_cache])  # type: ignore
-            # Touch heartbeat every ~10 chunks to prevent timeout on large prompts
-            if on_generation_token is not None and (i // _draft_chunk) % 10 == 9:
-                on_generation_token()
-        draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
-        logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
+            # Prefill draft on rank 0 only
+            logger.info(f"Prefilling local draft ({len(all_prompt_tokens)} tokens)...")
+            t_draft_prefill = time.perf_counter()
+            _draft_chunk = 512
+            for i in range(0, len(all_prompt_tokens), _draft_chunk):
+                draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=draft_cache)
+                mx.eval([c.state for c in draft_cache])  # type: ignore
+                if on_generation_token is not None and (i // _draft_chunk) % 10 == 9:
+                    on_generation_token()
+            draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
+            logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
 
-        # Touch heartbeat: draft prefill can take seconds for large prompts.
+        # Touch heartbeat on all ranks
         if on_generation_token is not None:
             on_generation_token()
 
@@ -946,36 +947,32 @@ def mlx_generate(
             nonlocal _draft_call_count, _draft_trim_total
             _draft_call_count += 1
             if trim > 0:
-                trim_prompt_cache(draft_cache, trim)
                 _draft_trim_total += trim
-            tokens: list[int] = []
-            tok = token_id
-            for _ in range(num_tokens):
-                logits = draft_model(mx.array([[tok]]), cache=draft_cache)
-                mx.eval(logits)
-                tok = int(logits[0, -1].argmax().item())
-                tokens.append(tok)
+                if draft_cache is not None:
+                    trim_prompt_cache(draft_cache, trim)
 
-            # TP sync: broadcast rank 0's draft tokens to all ranks.
-            # Independent copies of the draft model can diverge due to
-            # floating point non-determinism in quantized inference.
-            # Divergent draft tokens cause TP deadlock in the verify pass.
+            # Rank 0: generate draft tokens
+            if draft_cache is not None:
+                tokens: list[int] = []
+                tok = token_id
+                for _ in range(num_tokens):
+                    logits = draft_model(mx.array([[tok]]), cache=draft_cache)
+                    mx.eval(logits)
+                    tok = int(logits[0, -1].argmax().item())
+                    tokens.append(tok)
+            else:
+                tokens = []
+
+            # TP: broadcast rank 0's tokens to all ranks
             if _is_tp:
-                draft_array = mx.array(tokens, dtype=mx.int32)
+                if _is_rank0:
+                    draft_array = mx.array(tokens, dtype=mx.int32)
+                else:
+                    draft_array = mx.zeros(num_tokens, dtype=mx.int32)
                 gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=group)
                 mx.eval(gathered)
                 tokens = list(gathered[0].tolist())
-                # Sync draft cache: non-rank-0 must use rank 0's tokens
-                if not _is_rank0 and len(tokens) > 0:
-                    # Trim the tokens we just generated and replay rank 0's
-                    trim_prompt_cache(draft_cache, num_tokens)
-                    for t in tokens:
-                        draft_model(mx.array([[t]]), cache=draft_cache)
-                    mx.eval([c.state for c in draft_cache])  # type: ignore
 
-            # Touch heartbeat: draft_fn is called by stream_generate's speculative
-            # loop which doesn't yield between steps. Without this, the supervisor
-            # kills the runner for heartbeat timeout on long generations.
             if on_generation_token is not None:
                 on_generation_token()
             return tokens
