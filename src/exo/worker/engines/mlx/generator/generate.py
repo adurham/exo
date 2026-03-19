@@ -564,6 +564,7 @@ def mlx_generate(
     distributed_prompt_progress_callback: Callable[[], None] | None = None,
     on_generation_token: Callable[[], None] | None = None,
     on_token_count_known: Callable[[int], None] | None = None,
+    draft_model: object | None = None,
 ) -> Generator[GenerationResponse]:
     from exo.worker.engines.mlx.cache import (
         MEMORY_THRESHOLD,
@@ -857,6 +858,8 @@ def mlx_generate(
 
     def _save_kv_cache(generated_text_parts: list[str]) -> None:
         """Save KV cache with generated tokens. Called on both normal completion and abort."""
+        if draft_model is not None:
+            return  # Skip KV cache save during speculative decode until proven safe
         if kv_prefix_cache is None or not generated_text_parts:
             return
         try:
@@ -900,6 +903,26 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
+    _draft_fn = None
+    _draft_tokens = 5
+    if draft_model is not None and hasattr(draft_model, 'prefill'):
+        _draft_client = draft_model
+        _draft_tokens = getattr(_draft_client, 'num_draft_tokens', 5)
+        # Prefill draft model with full prompt in background
+        import threading
+        _draft_client.reset_cache()
+        _prompt_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
+        def _bg_prefill():
+            try:
+                _draft_client.prefill(_prompt_ids)
+            except Exception as e:
+                logger.warning(f"Draft prefill failed: {e}")
+        _prefill_thread = threading.Thread(target=_bg_prefill, daemon=True)
+        _prefill_thread.start()
+        logger.info(f"Draft prefill started in background ({len(_prompt_ids)} tokens)")
+        # Wait for prefill before decode
+        # (will be joined later, before decode starts)
+
     _generation_logged = False
     try:
       _gen_kwargs = dict(
@@ -914,6 +937,16 @@ def mlx_generate(
           kv_group_size=KV_GROUP_SIZE,
           kv_bits=KV_BITS,
       )
+      if draft_model is not None and hasattr(draft_model, 'prefill'):
+          _draft_client = draft_model
+          _prefill_thread.join()
+          logger.info("Draft prefill complete")
+          def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
+              return _draft_client.fetch_draft_sync(token_id, num_tokens, trim=trim)
+          _gen_kwargs["draft_fn"] = _tcp_draft_fn
+          _gen_kwargs["num_draft_tokens"] = _draft_tokens
+          logger.info(f"Speculative decode active: server={_draft_client.server_url}, K={_draft_tokens}")
+
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
         start=1,
@@ -1053,6 +1086,10 @@ def mlx_generate(
         # Limit accumulated_text to what's needed for stop sequence detection
         if max_stop_len > 0 and len(accumulated_text) > max_stop_len:
             accumulated_text = accumulated_text[-max_stop_len:]
+
+      # Log speculative decode stats if active
+      if _draft_fn is not None and hasattr(draft_model, 'shutdown'):
+          draft_model.shutdown()
     except GeneratorExit:
         if not _generation_logged and generated_text_parts:
             _log_generation_stats(generated_text_parts, "aborted (GeneratorExit)")

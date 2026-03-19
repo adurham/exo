@@ -176,6 +176,30 @@ def place_instance(
     instance_id = InstanceId()
     target_instances = dict(deepcopy(current_instances))
 
+    draft_url: str | None = None
+    if command.draft_model:
+        import os
+        draft_port = int(os.environ.get("EXO_DRAFT_SERVER_PORT", "52417"))
+        for inst in current_instances.values():
+            if inst.shard_assignments.model_id != command.draft_model:
+                continue
+            draft_node_id = next(iter(inst.shard_assignments.node_to_runner.keys()), None)
+            if draft_node_id is None:
+                continue
+            net = node_network.get(draft_node_id)
+            if net is None:
+                continue
+            for iface in net.interfaces:
+                ip = iface.ip_address
+                if not ip or ":" in ip or ip.startswith("127.") or ip.startswith("fe80") or ip.startswith("169.254"):
+                    continue
+                if iface.interface_type == "thunderbolt":
+                    draft_url = f"http://{ip}:{draft_port}"
+                    break
+                if draft_url is None:
+                    draft_url = f"http://{ip}:{draft_port}"
+            break
+
     match command.instance_meta:
         case InstanceMeta.MlxJaccl:
             coordinator_node_id = nodes_by_rank[0]
@@ -196,6 +220,9 @@ def place_instance(
                 jaccl_devices=mlx_jaccl_devices,
                 jaccl_coordinators=mlx_jaccl_coordinators,
                 max_context_tokens=max_context_tokens,
+                draft_model=command.draft_model,
+                draft_tokens=command.draft_tokens,
+                draft_url=draft_url,
             )
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
@@ -211,6 +238,9 @@ def place_instance(
                 hosts_by_node=hosts_by_node,
                 ephemeral_port=ephemeral_port,
                 max_context_tokens=max_context_tokens,
+                draft_model=command.draft_model,
+                draft_tokens=command.draft_tokens,
+                draft_url=draft_url,
             )
 
     return target_instances

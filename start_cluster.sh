@@ -24,6 +24,9 @@
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
+# Speculative decoding: set to a model ID to enable, empty to disable
+: "${EXO_DRAFT_MODEL:=}"
+
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
@@ -537,7 +540,7 @@ place_instance_with_retry() {
         fi
 
         # These 400s happen when node_memory/node_network/RDMA aren't populated yet — retryable
-        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend"; then
+        if echo "$msg" | grep -qi "sufficient memory\|devices to be able to communicate\|RDMA connections\|jaccl backend\|No running instance found for draft model\|No tensor sharding found"; then
             if [ "$attempt" -lt "$max_attempts" ]; then
                 echo "  Attempt $attempt/$max_attempts: cluster state still propagating, retrying in 5s..."
                 sleep 5
@@ -564,7 +567,25 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-# ── Instance 1: Primary model (Studios, Tensor Parallel over RDMA) ──
+# ── Instance 1: Draft model (MacBook, if enabled) ──
+if [ -n "$EXO_DRAFT_MODEL" ]; then
+    echo "Creating draft instance ($EXO_DRAFT_MODEL on MacBook)..."
+    if place_instance_with_retry "Draft" "$EXO_DRAFT_MODEL" "{
+        \"model_id\": \"$EXO_DRAFT_MODEL\",
+        \"sharding\": \"Pipeline\",
+        \"min_nodes\": 1,
+        \"node_ids\": [\"$MBP_NODE_ID\"],
+        \"max_context_tokens\": 4096
+    }"; then
+        EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
+    fi
+fi
+
+# ── Instance 2: Primary model (Studios, Tensor Parallel over RDMA) ──
+DRAFT_FIELDS=""
+if [ -n "$EXO_DRAFT_MODEL" ]; then
+    DRAFT_FIELDS=",\"draft_model\": \"$EXO_DRAFT_MODEL\", \"draft_tokens\": 5"
+fi
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
@@ -573,11 +594,12 @@ if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruc
     \"min_nodes\": 2,
     \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
     \"max_context_tokens\": 262144
+    $DRAFT_FIELDS
 }"; then
     EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
-# ── Instance 2: Subagent model (MacBook, single node) ──
+# ── Instance 3: Subagent model (MacBook, single node) ──
 # echo "Creating Qwen3-Coder-30B instance (MacBook)..."
 # if place_instance_with_retry "Qwen3-Coder-30B" "mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit" "{
 #     \"model_id\": \"mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit\",

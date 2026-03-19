@@ -221,6 +221,27 @@ class Runner:
                 )
 
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
+
+                # Wire speculative decoding if configured
+                draft_url = self.bound_instance.instance.draft_url
+                draft_model_id = self.bound_instance.instance.draft_model or ""
+                draft_tokens = self.bound_instance.instance.draft_tokens
+                if draft_url is not None:
+                    if self.device_rank == 0:
+                        from exo.worker.engines.mlx.draft_client import DraftClient
+                        self.generator.draft_model = DraftClient(
+                            server_url=draft_url,
+                            num_draft_tokens=draft_tokens,
+                            draft_model=draft_model_id,
+                        )
+                        logger.info(f"Draft client ready (url={draft_url}, model={draft_model_id}, K={draft_tokens})")
+                    self.generator.use_speculative = True
+
+                # Start draft server on rank 0 so other instances can query this model
+                if self.device_rank == 0:
+                    from exo.worker.engines.mlx.draft_server import start_draft_server
+                    start_draft_server(self.generator.inference_model, self.model_id)
+
                 self.generator = self.generator.build()
 
                 self.send_task_status(task.task_id, TaskStatus.Complete)
@@ -422,6 +443,8 @@ class Builder:
     inference_model: Model | None = None
     tokenizer: TokenizerWrapper | None = None
     group: mx.distributed.Group | None = None
+    draft_model: object | None = None
+    use_speculative: bool = False
 
     def build(
         self,
@@ -449,6 +472,9 @@ class Builder:
 
         device_rank = 0 if self.group is None else self.group.rank()
         _use_sequential = bool(os.environ.get("EXO_NO_BATCH"))
+        if self.use_speculative and not _use_sequential:
+            logger.info("speculative decoding enabled — forcing SequentialGenerator")
+            _use_sequential = True
         if _use_sequential:
             logger.info("using SequentialGenerator")
             return SequentialGenerator(
@@ -463,6 +489,7 @@ class Builder:
                 event_sender=self.event_sender,
                 heartbeat=self.heartbeat,
                 heartbeat_timeout=self.heartbeat_timeout,
+                draft_model=self.draft_model,
             )
         logger.info("using BatchGenerator")
         return BatchGenerator(
