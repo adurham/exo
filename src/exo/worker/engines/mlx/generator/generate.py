@@ -762,14 +762,16 @@ def mlx_generate(
     if _test_multi == "1":
         os.environ["EXO_TEST_MULTI_TOKEN"] = "done"
         from mlx_lm.models.cache import make_prompt_cache as _make_test_cache
-        _test_k = 6
+        _test_k = 4
         logger.info(f"[multi-token-test] starting, prompt_len={len(prompt_tokens)}")
         try:
-            for _test_ctx in [100, 500, 1000, 1024, 1100, 1262]:
+            # Test at 1024 (fails) and 1000 (passes) to compare
+            for _test_ctx in [1000, 1024]:
                 if _test_ctx >= len(prompt_tokens):
                     continue
                 _tp = prompt_tokens[:_test_ctx + 1]
-                # Fresh cache A: prefill + single-token decode
+
+                # A: single-token decode
                 _ca = _make_test_cache(model)
                 model(_tp[:-1][None], cache=_ca)
                 mx.eval([c.state for c in _ca])
@@ -781,19 +783,8 @@ def mlx_generate(
                     _t = _l[0, -1].argmax().item()
                     _s.append(_t)
                     _y = mx.array([_t], mx.uint32)
-                # Fresh cache B: prefill ALL tokens (prompt + single_tokens)
-                _cb = _make_test_cache(model)
-                _full = mx.array([_tp.tolist()[:-1] + [_tp[-1].item()] + _s[:_test_k - 1]])
-                model(_full, cache=_cb)
-                mx.eval([c.state for c in _cb])
-                # One more single-token to get the prediction at the last position
-                _l2 = model(mx.array([[_s[_test_k - 1]]]), cache=_cb)
-                mx.eval(_l2)
-                _last_pred = _l2[0, -1].argmax().item()
-                # Compare: single-token decode token[0] should match the model's
-                # prediction after seeing prompt (which is _s[0])
-                # But this tests prefill equivalence, not multi-token decode
-                # Let me just test: fresh_cache + multi-token input
+
+                # B: multi-token decode (fresh cache)
                 _cc = _make_test_cache(model)
                 model(_tp[:-1][None], cache=_cc)
                 mx.eval([c.state for c in _cc])
@@ -801,11 +792,32 @@ def mlx_generate(
                 _ml = model(_mi, cache=_cc)
                 mx.eval(_ml)
                 _m = [_ml[0, _i].argmax().item() for _i in range(_test_k)]
-                _matches = sum(1 for a, b in zip(_s, _m) if a == b)
+
+                # C: full prefill (prompt + single tokens) — gold standard
+                _cd = _make_test_cache(model)
+                _full_seq = _tp.tolist()[:-1] + [_tp[-1].item()] + _s[:_test_k - 1]
+                model(mx.array([_full_seq]), cache=_cd)
+                mx.eval([c.state for c in _cd])
+                _lp = model(mx.array([[_s[_test_k - 1]]]), cache=_cd)
+                mx.eval(_lp)
+                _p = [_lp[0, -1].argmax().item()]
+                # Get predictions at each position from full prefill logits
+                _cd2 = _make_test_cache(model)
+                _full_logits = model(mx.array([_full_seq + [_s[_test_k - 1]]]), cache=_cd2)
+                mx.eval(_full_logits)
+                # Predictions at positions ctx through ctx+k-1
+                _prefill_preds = [_full_logits[0, _test_ctx + _i].argmax().item() for _i in range(_test_k)]
+
+                _m_single = sum(1 for a, b in zip(_s, _prefill_preds) if a == b)
+                _m_multi = sum(1 for a, b in zip(_m, _prefill_preds) if a == b)
+                _m_sm = sum(1 for a, b in zip(_s, _m) if a == b)
+
                 logger.info(
-                    f"[multi-token-test] ctx={_test_ctx}: match={_matches}/{_test_k} "
-                    f"single={_s[:3]}... multi={_m[:3]}... "
-                    f"{'PASS' if _matches == _test_k else 'FAIL'}"
+                    f"[multi-token-test] ctx={_test_ctx}: "
+                    f"single_vs_prefill={_m_single}/{_test_k} "
+                    f"multi_vs_prefill={_m_multi}/{_test_k} "
+                    f"single_vs_multi={_m_sm}/{_test_k} "
+                    f"single={_s} multi={_m} prefill={_prefill_preds}"
                 )
         except Exception as _e:
             logger.warning(f"[multi-token-test] Error: {_e}", exc_info=True)
