@@ -929,6 +929,10 @@ def mlx_generate(
         draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
         logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
 
+        # Touch heartbeat: draft prefill can take seconds for large prompts.
+        if on_generation_token is not None:
+            on_generation_token()
+
         def _local_tp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list[int]:
             if trim > 0:
                 trim_prompt_cache(draft_cache, trim)

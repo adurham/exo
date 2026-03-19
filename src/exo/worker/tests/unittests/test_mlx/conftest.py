@@ -96,7 +96,7 @@ def run_gpt_oss_pipeline_device(
             n_layers=24,
         )
 
-        model, tokenizer = shard_and_load(
+        model, tokenizer, _ = shard_and_load(
             shard_meta, group, on_timeout=None, on_layer_loaded=None
         )
         model = cast(Model, model)
@@ -174,7 +174,7 @@ def run_gpt_oss_tensor_parallel_device(
             n_layers=24,
         )
 
-        model, tokenizer = shard_and_load(
+        model, tokenizer, _ = shard_and_load(
             shard_meta, group, on_timeout=None, on_layer_loaded=None
         )
         model = cast(Model, model)
