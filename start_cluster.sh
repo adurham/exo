@@ -577,7 +577,8 @@ if [ -n "$EXO_DRAFT_MODEL" ]; then
         \"sharding\": \"Pipeline\",
         \"min_nodes\": 1,
         \"node_ids\": [\"$MBP_NODE_ID\"],
-        \"max_context_tokens\": 4096
+        \"max_context_tokens\": 4096,
+        \"storage_override_gb\": 30
     }"; then
         EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 1))
     fi

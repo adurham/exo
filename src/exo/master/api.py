@@ -363,6 +363,8 @@ class API:
 
     async def place_instance(self, payload: PlaceInstanceParams):
         model_card = await ModelCard.load(payload.model_id)
+        if payload.storage_override_gb is not None:
+            model_card.storage_size = Memory.from_gb(payload.storage_override_gb)
         effective_limit = payload.max_context_tokens or model_card.max_context_length
 
         if payload.node_ids:
