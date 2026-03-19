@@ -25,7 +25,7 @@
 : "${LOG_LEVEL:=DEBUG}"
 
 # Speculative decoding: small local draft model on Studios
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-0.6B-4bit}"
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-4B-Instruct-2507-6bit}"
 : "${EXO_DRAFT_TOKENS:=5}"
 
 export IBV_FORK_SAFE=1

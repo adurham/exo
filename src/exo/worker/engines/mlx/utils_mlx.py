@@ -290,6 +290,8 @@ def shard_and_load(
     if draft_model_id:
         try:
             draft_path = build_model_path(ModelId(draft_model_id))
+            if not any(draft_path.glob("*.safetensors")):
+                raise FileNotFoundError(f"No safetensors weights in {draft_path}")
             logger.info(f"Loading local draft model: {draft_model_id} from {draft_path}")
             draft_model, _ = load_model(draft_path, lazy=True, strict=False)
             mx.eval(draft_model)
