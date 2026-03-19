@@ -153,6 +153,10 @@ class Master:
                                     -len(self.state.instances[instance_id].shard_assignments.node_to_runner),
                                 ),
                             )
+                            for _dbg_iid in available_instance_ids:
+                                _dbg_inst = self.state.instances[_dbg_iid]
+                                logger.info(f"Instance routing: {_dbg_iid} nodes={len(_dbg_inst.shard_assignments.node_to_runner)} tasks={instance_task_counts[_dbg_iid]}")
+                            logger.info(f"Selected instance: {available_instance_ids[0]}")
 
                             task_id = TaskId()
                             generated_events.append(
