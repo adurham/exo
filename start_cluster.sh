@@ -24,8 +24,8 @@
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
-# Speculative decoding: local TP draft on Studios (sparse copy of primary model)
-: "${EXO_DRAFT_SKIP_FACTOR:=6}"
+# Speculative decoding: small local draft model on Studios
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-0.6B-4bit}"
 : "${EXO_DRAFT_TOKENS:=5}"
 
 export IBV_FORK_SAFE=1
@@ -420,8 +420,8 @@ for NODE in "${NODES[@]}"; do
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
     else
-        # Studios: local TP draft model (sparse copy sharded across both Studios)
-        EXO_ENV="$EXO_ENV EXO_DRAFT_SKIP_FACTOR=$EXO_DRAFT_SKIP_FACTOR"
+        # Studios: small local draft model (independent copy per node, no TP)
+        EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
         EXO_ENV="$EXO_ENV EXO_DRAFT_TOKENS=$EXO_DRAFT_TOKENS"
     fi
 

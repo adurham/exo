@@ -912,15 +912,15 @@ def mlx_generate(
     _is_remote_draft = draft_model is not None and hasattr(draft_model, 'prefill')
 
     if _is_local_draft:
-        # Local TP draft: all ranks run the same forward pass on the sparse model.
-        # TP all_sum inside the model ensures all ranks produce identical logits —
-        # no broadcast/all_gather needed.
+        # Local draft: each rank runs an independent copy of the draft model.
+        # Same weights + same input + argmax = identical tokens on all ranks.
+        # No broadcast/all_gather needed.
         from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
 
         draft_cache = make_prompt_cache(draft_model)
 
-        # Synchronous prefill — all ranks must participate (TP collectives inside fwd)
-        logger.info(f"Prefilling local TP draft ({len(all_prompt_tokens)} tokens)...")
+        # Synchronous prefill on each rank independently
+        logger.info(f"Prefilling local draft ({len(all_prompt_tokens)} tokens)...")
         t_draft_prefill = time.perf_counter()
         _draft_chunk = 512
         for i in range(0, len(all_prompt_tokens), _draft_chunk):
