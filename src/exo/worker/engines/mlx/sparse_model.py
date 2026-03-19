@@ -163,3 +163,32 @@ def load_sparse_model(
     )
 
     return model, config
+
+
+def load_sparse_tp_model(
+    model_path: Path,
+    skip_factor: int,
+    group: mx.distributed.Group,
+    on_layer_loaded: Callable[[int, int], None] | None = None,
+) -> tuple[nn.Module, dict[str, Any]]:
+    """Load a sparse model and TP-shard it using an existing distributed group.
+
+    Used for local TP draft models that share the JACCL group with the primary.
+    Skips patch_tensor_model() since the primary already patched cls.__call__
+    (both models share the same class).
+    """
+    from exo.worker.engines.mlx.auto_parallel import tensor_auto_parallel
+
+    model, config = load_sparse_model(model_path, skip_factor, on_layer_loaded)
+
+    logger.info(f"TP-sharding sparse draft model (group size={group.size()})...")
+    model = tensor_auto_parallel(
+        model, group, timeout_seconds=120.0,
+        on_timeout=None, on_layer_loaded=None,
+        patch_model=False,
+    )
+
+    mx.eval(model)
+    logger.info("Sparse TP draft model ready")
+
+    return model, config

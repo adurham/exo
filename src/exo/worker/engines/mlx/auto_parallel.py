@@ -989,6 +989,8 @@ def tensor_auto_parallel(
     timeout_seconds: float,
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
+    *,
+    patch_model: bool = True,
 ) -> nn.Module:
     init_distributed_watchdog()
 
@@ -1116,7 +1118,9 @@ def tensor_auto_parallel(
                 if (i + 1) % _TP_EVAL_INTERVAL == 0 or i == n - 1:
                     inner.layers[i] = DistributedEvalBarrier(inner.layers[i])  # type: ignore
 
-    return patch_tensor_model(model)
+    if patch_model:
+        return patch_tensor_model(model)
+    return model
 
 
 class TensorParallelShardingStrategy(ABC):

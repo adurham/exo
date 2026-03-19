@@ -173,6 +173,7 @@ def load_mlx_items(
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
 ) -> tuple[Model, TokenizerWrapper, object | None]:
+    draft_model: object | None = None
     if group is None:
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
@@ -205,7 +206,7 @@ def load_mlx_items(
     else:
         logger.info("Starting distributed init")
         start_time = time.perf_counter()
-        model, tokenizer = shard_and_load(
+        model, tokenizer, draft_model = shard_and_load(
             bound_instance.bound_shard,
             group=group,
             on_timeout=on_timeout,
@@ -220,7 +221,7 @@ def load_mlx_items(
 
     mx.clear_cache()
 
-    return cast(Model, model), tokenizer, None
+    return cast(Model, model), tokenizer, draft_model
 
 
 def shard_and_load(
@@ -228,7 +229,7 @@ def shard_and_load(
     group: Group,
     on_timeout: TimeoutCallback | None,
     on_layer_loaded: LayerLoadedCallback | None,
-) -> tuple[nn.Module, TokenizerWrapper]:
+) -> tuple[nn.Module, TokenizerWrapper, nn.Module | None]:
     model_path = build_model_path(shard_metadata.model_card.model_id)
 
     model, _ = load_model(model_path, lazy=True, strict=False)
@@ -280,7 +281,18 @@ def shard_and_load(
     # Synchronize processes before generation to avoid timeout
     mx_barrier(group)
 
-    return model, tokenizer
+    # Load local TP draft model if configured (same group, sparse layers)
+    draft_model: nn.Module | None = None
+    skip_factor = int(os.environ.get("EXO_DRAFT_SKIP_FACTOR", "0"))
+    if skip_factor > 0 and isinstance(shard_metadata, TensorShardMetadata):
+        from exo.worker.engines.mlx.sparse_model import load_sparse_tp_model
+
+        logger.info(f"Loading sparse TP draft model (skip_factor={skip_factor})...")
+        draft_model, _ = load_sparse_tp_model(model_path, skip_factor, group)
+        mx_barrier(group)
+        logger.info("Sparse TP draft model loaded and synchronized")
+
+    return model, tokenizer, draft_model
 
 
 def get_tokenizer(model_path: Path, shard_metadata: ShardMetadata) -> TokenizerWrapper:

@@ -5,6 +5,7 @@ import time
 from typing import Callable, Generator, cast, get_args
 
 import mlx.core as mx
+import mlx.nn as nn
 from mlx_lm.generate import (
     maybe_quantize_kv_cache,
     stream_generate,
@@ -902,10 +903,48 @@ def mlx_generate(
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
     # Speculative decoding setup
-    _draft_tokens = 5
+    _draft_tokens = int(os.environ.get("EXO_DRAFT_TOKENS", "5"))
     _prefill_thread = None
-    if draft_model is not None and hasattr(draft_model, 'prefill'):
-        _draft_tokens = getattr(draft_model, 'num_draft_tokens', 5)
+    _tp_draft_fn = None
+    _is_tp = group is not None and group.size() > 1
+    _is_rank0 = group is None or group.rank() == 0
+    _is_local_draft = draft_model is not None and isinstance(draft_model, nn.Module)
+    _is_remote_draft = draft_model is not None and hasattr(draft_model, 'prefill')
+
+    if _is_local_draft:
+        # Local TP draft: all ranks run the same forward pass on the sparse model.
+        # TP all_sum inside the model ensures all ranks produce identical logits —
+        # no broadcast/all_gather needed.
+        from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
+
+        draft_cache = make_prompt_cache(draft_model)
+
+        # Synchronous prefill — all ranks must participate (TP collectives inside fwd)
+        logger.info(f"Prefilling local TP draft ({len(all_prompt_tokens)} tokens)...")
+        t_draft_prefill = time.perf_counter()
+        _draft_chunk = 512
+        for i in range(0, len(all_prompt_tokens), _draft_chunk):
+            draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=draft_cache)
+            mx.eval([c.state for c in draft_cache])  # type: ignore
+        draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
+        logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
+
+        def _local_tp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list[int]:
+            if trim > 0:
+                trim_prompt_cache(draft_cache, trim)
+            tokens: list[int] = []
+            tok = token_id
+            for _ in range(num_tokens):
+                logits = draft_model(mx.array([[tok]]), cache=draft_cache)
+                mx.eval(logits)
+                tok = int(logits[0, -1].argmax().item())
+                tokens.append(tok)
+            return tokens
+
+        _tp_draft_fn = _local_tp_draft_fn
+
+    elif _is_remote_draft:
+        _draft_tokens = getattr(draft_model, 'num_draft_tokens', _draft_tokens)
         import threading
         # Keep draft cache in sync with the 235B's KV prefix cache:
         # - Cache hit: draft already has the prefix from last request. Trim any
@@ -928,16 +967,9 @@ def mlx_generate(
         _prefill_thread = threading.Thread(target=_bg_prefill, daemon=True)
         _prefill_thread.start()
 
-    # Build TP-aware draft function that works on ALL ranks.
-    # Rank 0 fetches from draft server, broadcasts to other ranks.
-    # ALL ranks must call draft_fn so they all enter speculative_generate_step
-    # and execute the same sequence of model forward passes.
-    _tp_draft_fn = None
-    _is_tp = group is not None and group.size() > 1
-    _is_rank0 = group is None or group.rank() == 0
-    if draft_model is not None or (_is_tp and not _is_rank0):
-        # Either we have the draft client (rank 0) or we're a non-rank-0 TP peer
-        # that needs to participate in speculative decode to stay in sync.
+    # Build TP-aware draft function for REMOTE draft (rank 0 fetches, broadcasts).
+    # Not needed for local draft (all ranks run the model directly).
+    if not _is_local_draft and (_is_remote_draft or (_is_tp and not _is_rank0)):
         def _tp_draft_fn_impl(token_id: int, num_tokens: int, trim: int = 0) -> list:
             num = num_tokens or _draft_tokens
             if _is_rank0 and draft_model is not None:
@@ -975,14 +1007,17 @@ def mlx_generate(
       if _tp_draft_fn is not None:
           if _prefill_thread is not None:
               _prefill_thread.join()
-              logger.info("Draft prefill complete")
+              logger.info("Remote draft prefill complete")
           _gen_kwargs["draft_fn"] = _tp_draft_fn
           _gen_kwargs["num_draft_tokens"] = _draft_tokens
-          # Draft server uses argmax — main model must match for exact-match verification.
+          # Draft uses argmax — main model must match for exact-match verification.
           # TODO: implement proper rejection sampling to support temperature > 0.
           _gen_kwargs["sampler"] = make_sampler(temp=0.0)
-          server_url = getattr(draft_model, 'server_url', '') if draft_model else ''
-          logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp} (forcing temp=0 for draft match)")
+          if _is_local_draft:
+              logger.info(f"Speculative decode active: local TP draft, K={_draft_tokens} (forcing temp=0)")
+          else:
+              server_url = getattr(draft_model, 'server_url', '') if draft_model else ''
+              logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp} (forcing temp=0)")
 
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),

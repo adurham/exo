@@ -211,7 +211,7 @@ class Runner:
                 assert (
                     ModelTask.TextGeneration in self.shard_metadata.model_card.tasks
                 ), f"Incorrect model task(s): {self.shard_metadata.model_card.tasks}"
-                self.generator.inference_model, self.generator.tokenizer, _ = (
+                self.generator.inference_model, self.generator.tokenizer, local_draft = (
                     load_mlx_items(
                         self.bound_instance,
                         self.generator.group,
@@ -223,22 +223,28 @@ class Runner:
                 self.generator.kv_prefix_cache = KVPrefixCache(self.generator.group)
 
                 # Wire speculative decoding if configured
-                draft_url = self.bound_instance.instance.draft_url
-                draft_model_id = self.bound_instance.instance.draft_model or ""
-                draft_tokens = self.bound_instance.instance.draft_tokens
-                if draft_url is not None:
-                    if self.device_rank == 0:
-                        from exo.worker.engines.mlx.draft_client import DraftClient
-                        self.generator.draft_model = DraftClient(
-                            server_url=draft_url,
-                            num_draft_tokens=draft_tokens,
-                            draft_model=draft_model_id,
-                        )
-                        logger.info(f"Draft client ready (url={draft_url}, model={draft_model_id}, K={draft_tokens})")
+                if local_draft is not None:
+                    # Local TP draft: sparse model on same devices, same JACCL group
+                    self.generator.draft_model = local_draft
                     self.generator.use_speculative = True
+                    logger.info("Local TP draft model wired for speculative decoding")
+                else:
+                    draft_url = self.bound_instance.instance.draft_url
+                    draft_model_id = self.bound_instance.instance.draft_model or ""
+                    draft_tokens = self.bound_instance.instance.draft_tokens
+                    if draft_url is not None:
+                        if self.device_rank == 0:
+                            from exo.worker.engines.mlx.draft_client import DraftClient
+                            self.generator.draft_model = DraftClient(
+                                server_url=draft_url,
+                                num_draft_tokens=draft_tokens,
+                                draft_model=draft_model_id,
+                            )
+                            logger.info(f"Draft client ready (url={draft_url}, model={draft_model_id}, K={draft_tokens})")
+                        self.generator.use_speculative = True
 
                 # Start draft server only on instances that ARE draft models (not the primary)
-                if self.device_rank == 0 and not draft_url:
+                if self.device_rank == 0 and local_draft is None and not self.bound_instance.instance.draft_url:
                     from exo.worker.engines.mlx.draft_server import start_draft_server
                     start_draft_server(self.generator.inference_model, self.model_id)
 
