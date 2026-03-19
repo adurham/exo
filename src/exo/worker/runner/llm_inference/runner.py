@@ -227,7 +227,7 @@ class Runner:
                     # Local draft: small model loaded independently on each rank
                     self.generator.draft_model = local_draft
                     self.generator.use_speculative = True
-                    logger.info("Local TP draft model wired for speculative decoding")
+                    logger.info("Local draft model wired for speculative decoding")
                 else:
                     draft_url = self.bound_instance.instance.draft_url
                     draft_model_id = self.bound_instance.instance.draft_model or ""

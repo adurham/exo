@@ -178,27 +178,21 @@ def load_mlx_items(
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
         start_time = time.perf_counter()
-        skip_factor = int(os.environ.get("EXO_DRAFT_SKIP_FACTOR", "0"))
-        if skip_factor > 0:
-            from exo.worker.engines.mlx.sparse_model import load_sparse_model
-
-            model, _ = load_sparse_model(model_path, skip_factor, on_layer_loaded)
-        else:
-            model, _ = load_model(model_path, lazy=True, strict=False)
-            # Eval layers one by one for progress reporting
-            try:
-                inner = get_inner_model(model)
-                layers = get_layers(inner)
-                total = len(layers)
-                for i, layer in enumerate(layers):
-                    mx.eval(layer)  # type: ignore
-                    if on_layer_loaded is not None:
-                        on_layer_loaded(i, total)
-            except ValueError as e:
-                logger.opt(exception=e).debug(
-                    "Model architecture doesn't support layer-by-layer progress tracking",
-                )
-            mx.eval(model)
+        model, _ = load_model(model_path, lazy=True, strict=False)
+        # Eval layers one by one for progress reporting
+        try:
+            inner = get_inner_model(model)
+            layers = get_layers(inner)
+            total = len(layers)
+            for i, layer in enumerate(layers):
+                mx.eval(layer)  # type: ignore
+                if on_layer_loaded is not None:
+                    on_layer_loaded(i, total)
+        except ValueError as e:
+            logger.opt(exception=e).debug(
+                "Model architecture doesn't support layer-by-layer progress tracking",
+            )
+        mx.eval(model)
         end_time = time.perf_counter()
         logger.info(f"Time taken to load model: {(end_time - start_time):.2f}s")
         tokenizer = get_tokenizer(model_path, bound_instance.bound_shard)

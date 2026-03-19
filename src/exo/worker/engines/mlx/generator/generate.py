@@ -936,7 +936,7 @@ def mlx_generate(
         if on_generation_token is not None:
             on_generation_token()
 
-        def _local_tp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list[int]:
+        def _local_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list[int]:
             if trim > 0:
                 trim_prompt_cache(draft_cache, trim)
             tokens: list[int] = []
@@ -953,7 +953,7 @@ def mlx_generate(
                 on_generation_token()
             return tokens
 
-        _tp_draft_fn = _local_tp_draft_fn
+        _tp_draft_fn = _local_draft_fn
 
     elif _is_remote_draft:
         _draft_tokens = getattr(draft_model, 'num_draft_tokens', _draft_tokens)
@@ -1031,7 +1031,7 @@ def mlx_generate(
           # TODO: implement proper rejection sampling to support temperature > 0.
           _gen_kwargs["sampler"] = make_sampler(temp=0.0)
           if _is_local_draft:
-              logger.info(f"Speculative decode active: local TP draft, K={_draft_tokens} (forcing temp=0)")
+              logger.info(f"Speculative decode active: local draft, K={_draft_tokens} (forcing temp=0)")
           else:
               server_url = getattr(draft_model, 'server_url', '') if draft_model else ''
               logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp} (forcing temp=0)")
