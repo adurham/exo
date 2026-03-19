@@ -1114,7 +1114,7 @@ def mlx_generate(
             accumulated_text = accumulated_text[-max_stop_len:]
 
       # Log speculative decode stats if active
-      if _draft_fn is not None and hasattr(draft_model, 'shutdown'):
+      if _tp_draft_fn is not None and draft_model is not None and hasattr(draft_model, 'shutdown'):
           draft_model.shutdown()
     except GeneratorExit:
         if not _generation_logged and generated_text_parts:
