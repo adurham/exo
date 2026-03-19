@@ -943,6 +943,11 @@ def mlx_generate(
                 mx.eval(logits)
                 tok = int(logits[0, -1].argmax().item())
                 tokens.append(tok)
+            # Touch heartbeat: draft_fn is called by stream_generate's speculative
+            # loop which doesn't yield between steps. Without this, the supervisor
+            # kills the runner for heartbeat timeout on long generations.
+            if on_generation_token is not None:
+                on_generation_token()
             return tokens
 
         _tp_draft_fn = _local_tp_draft_fn
