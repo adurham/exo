@@ -629,11 +629,6 @@ def mlx_generate(
     is_bench = task.bench
     if is_bench:
         kv_prefix_cache = None
-    # Disable prefix cache when speculative decode is active — the draft model
-    # gets a fresh prefill every time, and cached KV may diverge from fresh KV
-    # at the 1024-token step boundary, causing draft/verifier cache mismatch.
-    if draft_model is not None:
-        kv_prefix_cache = None
 
     # Try KV cache lookup BEFORE memory check — reusing the cache means we
     # only need to prefill the delta, which requires far less memory than a
