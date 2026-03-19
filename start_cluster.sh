@@ -574,7 +574,7 @@ place_instance_with_retry() {
 EXPECTED_RUNNERS=0
 
 # ── Instance 1: Primary model (Studios, Tensor Parallel over RDMA) ──
-# Local TP draft model loads automatically via EXO_DRAFT_SKIP_FACTOR env var
+# Local draft model loads automatically via EXO_DRAFT_MODEL env var
 echo "Creating Qwen3-235B instance (Studios TP / RDMA)..."
 if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
     \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",

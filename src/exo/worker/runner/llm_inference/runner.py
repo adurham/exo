@@ -224,7 +224,7 @@ class Runner:
 
                 # Wire speculative decoding if configured
                 if local_draft is not None:
-                    # Local TP draft: sparse model on same devices, same JACCL group
+                    # Local draft: small model loaded independently on each rank
                     self.generator.draft_model = local_draft
                     self.generator.use_speculative = True
                     logger.info("Local TP draft model wired for speculative decoding")

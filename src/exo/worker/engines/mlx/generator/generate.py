@@ -926,6 +926,9 @@ def mlx_generate(
         for i in range(0, len(all_prompt_tokens), _draft_chunk):
             draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=draft_cache)
             mx.eval([c.state for c in draft_cache])  # type: ignore
+            # Touch heartbeat every ~10 chunks to prevent timeout on large prompts
+            if on_generation_token is not None and (i // _draft_chunk) % 10 == 9:
+                on_generation_token()
         draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
         logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
 
@@ -992,10 +995,15 @@ def mlx_generate(
                 gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=group)
                 mx.eval(gathered)
                 rank0_data = gathered[0].tolist()
-                actual_len = rank0_data[0]
-                return rank0_data[1:1 + actual_len] if actual_len > 0 else []
+                tokens = rank0_data[1:1 + actual_len] if (actual_len := rank0_data[0]) > 0 else []
             else:
-                return result if (_is_rank0 and draft_model is not None) else []
+                tokens = result if (_is_rank0 and draft_model is not None) else []
+
+            # Touch heartbeat: stream_generate's speculative loop doesn't yield
+            # between steps, so the supervisor can kill for stale heartbeat.
+            if on_generation_token is not None:
+                on_generation_token()
+            return tokens
 
         _tp_draft_fn = _tp_draft_fn_impl
 
