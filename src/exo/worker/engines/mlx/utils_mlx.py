@@ -281,16 +281,26 @@ def shard_and_load(
     # Synchronize processes before generation to avoid timeout
     mx_barrier(group)
 
-    # Load local TP draft model if configured (same group, sparse layers)
+    # Load local TP draft model if configured (same group, sparse layers).
+    # Wrapped in try/except so a draft failure degrades gracefully to
+    # non-speculative mode instead of crashing the successfully-loaded primary.
     draft_model: nn.Module | None = None
     skip_factor = int(os.environ.get("EXO_DRAFT_SKIP_FACTOR", "0"))
     if skip_factor > 0 and isinstance(shard_metadata, TensorShardMetadata):
         from exo.worker.engines.mlx.sparse_model import load_sparse_tp_model
 
-        logger.info(f"Loading sparse TP draft model (skip_factor={skip_factor})...")
-        draft_model, _ = load_sparse_tp_model(model_path, skip_factor, group)
-        mx_barrier(group)
-        logger.info("Sparse TP draft model loaded and synchronized")
+        try:
+            logger.info(f"Loading sparse TP draft model (skip_factor={skip_factor})...")
+            draft_model, _ = load_sparse_tp_model(model_path, skip_factor, group)
+            mx_barrier(group)
+            logger.info("Sparse TP draft model loaded and synchronized")
+        except Exception:
+            logger.warning(
+                "Failed to load sparse TP draft model — continuing without speculative decoding",
+                exc_info=True,
+            )
+            draft_model = None
+            mx.clear_cache()
 
     return model, tokenizer, draft_model
 
