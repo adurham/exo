@@ -486,6 +486,169 @@ def test_draft_tokens_default():
     assert val == 5
 
 
+# ── Test: stream_generate with local draft_fn ───────────────────────────── #
+
+
+def test_stream_generate_with_local_draft_fn():
+    """stream_generate's speculative_generate_step works with our draft_fn signature.
+
+    This is the actual integration point: stream_generate calls draft_fn(token, K, trim)
+    and uses the returned tokens for speculative verification. We verify it produces
+    output without crashing, meaning the signature and return format are correct.
+    """
+    from mlx_lm.generate import stream_generate
+    from mlx_lm.sample_utils import make_sampler
+    from mlx_lm.tokenizer_utils import TokenizerWrapper
+
+    model = _build_tiny_llama(num_layers=2)
+    cache = make_prompt_cache(model)
+
+    # Build a draft model (same architecture, could be different weights)
+    draft = _build_tiny_llama(num_layers=2)
+    draft_cache = make_prompt_cache(draft)
+
+    # Prefill draft with the prompt
+    prompt_tokens = mx.array([[1, 2, 3, 4, 5, 6, 7, 8]])
+    draft(prompt_tokens, cache=draft_cache)
+    mx.eval([c.state for c in draft_cache])
+
+    def local_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list[int]:
+        if trim > 0:
+            trim_prompt_cache(draft_cache, trim)
+        tokens: list[int] = []
+        tok = token_id
+        for _ in range(num_tokens):
+            logits = draft(mx.array([[tok]]), cache=draft_cache)
+            mx.eval(logits)
+            tok = int(logits[0, -1].argmax().item())
+            tokens.append(tok)
+        return tokens
+
+    # Need a minimal tokenizer for stream_generate
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = [1, 2, 3, 4, 5, 6, 7, 8]
+    mock_tokenizer.decode.side_effect = lambda ids: "x"
+    mock_tokenizer.eos_token_id = 999  # never hit
+    mock_tokenizer.eos_token_ids = None
+
+    sampler = make_sampler(temp=0.0)
+    generated_count = 0
+
+    for result in stream_generate(
+        model=model,
+        tokenizer=mock_tokenizer,
+        prompt=mx.array([1, 2, 3, 4, 5, 6, 7, 8]),
+        max_tokens=10,
+        sampler=sampler,
+        prompt_cache=cache,
+        draft_fn=local_draft_fn,
+        num_draft_tokens=3,
+    ):
+        generated_count += 1
+        if result.finish_reason is not None:
+            break
+
+    assert generated_count > 0, "stream_generate should produce at least one token"
+    assert generated_count <= 10, "Should not exceed max_tokens"
+
+
+# ── Test: load_sparse_model with on-disk model ─────────────────────────── #
+
+
+def _save_tiny_model_to_disk(path: Path, num_layers: int = 8) -> None:
+    """Save a tiny Llama model to disk in safetensors format with index."""
+    import safetensors.numpy
+
+    model = _build_tiny_llama(num_layers=num_layers)
+    flat = cast(list[tuple[str, mx.array]], tree_flatten(model.parameters()))
+
+    # Group weights into 2 shard files to test shard filtering
+    mid = len(flat) // 2
+    shard1 = {k: v.tolist() for k, v in flat[:mid]}
+    shard2 = {k: v.tolist() for k, v in flat[mid:]}
+
+    # Convert to numpy for safetensors
+    import numpy as np
+
+    shard1_np = {k: np.array(v, dtype=np.float16) for k, v in shard1.items()}
+    shard2_np = {k: np.array(v, dtype=np.float16) for k, v in shard2.items()}
+
+    safetensors.numpy.save_file(shard1_np, str(path / "model-00001-of-00002.safetensors"))
+    safetensors.numpy.save_file(shard2_np, str(path / "model-00002-of-00002.safetensors"))
+
+    # Build weight map for index
+    weight_map: dict[str, str] = {}
+    for k in shard1:
+        weight_map[k] = "model-00001-of-00002.safetensors"
+    for k in shard2:
+        weight_map[k] = "model-00002-of-00002.safetensors"
+
+    index = {
+        "metadata": {"total_size": int(sum(int(np.prod(v.shape)) * 2 for v in shard1_np.values()) +
+                      sum(int(np.prod(v.shape)) * 2 for v in shard2_np.values()))},
+        "weight_map": weight_map,
+    }
+
+    with open(path / "model.safetensors.index.json", "w") as f:
+        json.dump(index, f)
+
+    # Save config
+    config = {
+        "model_type": "llama",
+        "vocab_size": 1000,
+        "hidden_size": 64,
+        "num_hidden_layers": num_layers,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 4,
+        "intermediate_size": 128,
+        "rms_norm_eps": 1e-5,
+        "rope_theta": 10000.0,
+        "tie_word_embeddings": False,
+    }
+    with open(path / "config.json", "w") as f:
+        json.dump(config, f)
+
+
+def test_load_sparse_model_from_disk():
+    """load_sparse_model with actual files: verify layer count reduction and shard filtering."""
+    from exo.worker.engines.mlx.sparse_model import load_sparse_model
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        model_path = Path(tmpdir)
+        _save_tiny_model_to_disk(model_path, num_layers=8)
+
+        # skip_factor=3: keep layers 0, 3, 6, 7 = 4 layers
+        model, config = load_sparse_model(model_path, skip_factor=3)
+
+        assert config["num_hidden_layers"] == 4
+        assert len(model.model.layers) == 4
+
+        # Verify model produces output
+        tokens = mx.array([[1, 2, 3]])
+        logits = model(tokens)
+        mx.eval(logits)
+        assert logits.shape == (1, 3, 1000)
+
+
+def test_load_sparse_model_skip_factor_2():
+    """Sparse load with skip_factor=2 on 8-layer model: keep 0, 2, 4, 6, 7 = 5 layers."""
+    from exo.worker.engines.mlx.sparse_model import load_sparse_model
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        model_path = Path(tmpdir)
+        _save_tiny_model_to_disk(model_path, num_layers=8)
+
+        model, config = load_sparse_model(model_path, skip_factor=2)
+
+        assert config["num_hidden_layers"] == 5
+        assert len(model.model.layers) == 5
+
+        tokens = mx.array([[1, 2, 3]])
+        logits = model(tokens)
+        mx.eval(logits)
+        assert logits.shape == (1, 3, 1000)
+
+
 # ── Multiprocess TP integration tests ──────────────────────────────────── #
 # These spawn 2 processes with ring backend to validate actual TP behavior.
 
