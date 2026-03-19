@@ -1,0 +1,12 @@
+model_id = "mlx-community/Qwen3-4B-Instruct-2507-6bit"
+n_layers = 36
+hidden_size = 2560
+supports_tensor = false
+tasks = ["TextGeneration"]
+family = "qwen"
+quantization = "6bit"
+base_model = "Qwen3 4B"
+capabilities = ["text"]
+
+[storage_size]
+in_bytes = 3270000000
