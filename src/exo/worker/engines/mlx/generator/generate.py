@@ -903,25 +903,52 @@ def mlx_generate(
         except Exception:
             logger.warning("Failed to save KV cache after generation", exc_info=True)
 
-    _draft_fn = None
+    # Speculative decoding setup
     _draft_tokens = 5
+    _prefill_thread = None
     if draft_model is not None and hasattr(draft_model, 'prefill'):
-        _draft_client = draft_model
-        _draft_tokens = getattr(_draft_client, 'num_draft_tokens', 5)
-        # Prefill draft model with full prompt in background
+        _draft_tokens = getattr(draft_model, 'num_draft_tokens', 5)
         import threading
-        _draft_client.reset_cache()
+        draft_model.reset_cache()
         _prompt_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
         def _bg_prefill():
             try:
-                _draft_client.prefill(_prompt_ids)
+                draft_model.prefill(_prompt_ids)
             except Exception as e:
                 logger.warning(f"Draft prefill failed: {e}")
         _prefill_thread = threading.Thread(target=_bg_prefill, daemon=True)
         _prefill_thread.start()
         logger.info(f"Draft prefill started in background ({len(_prompt_ids)} tokens)")
-        # Wait for prefill before decode
-        # (will be joined later, before decode starts)
+
+    # Build TP-aware draft function that works on ALL ranks.
+    # Rank 0 fetches from draft server, broadcasts to other ranks.
+    # ALL ranks must call draft_fn so they all enter speculative_generate_step
+    # and execute the same sequence of model forward passes.
+    _tp_draft_fn = None
+    _is_tp = group is not None and group.size() > 1
+    _is_rank0 = group is None or group.rank() == 0
+    if draft_model is not None or (_is_tp and not _is_rank0):
+        # Either we have the draft client (rank 0) or we're a non-rank-0 TP peer
+        # that needs to participate in speculative decode to stay in sync.
+        def _tp_draft_fn_impl(token_id: int, num_tokens: int, trim: int = 0) -> list:
+            num = num_tokens or _draft_tokens
+            if _is_rank0 and draft_model is not None:
+                result = draft_model.fetch_draft_sync(token_id, num, trim=trim)
+                padded = result[:num] + [0] * max(0, num - len(result))
+                draft_array = mx.array([len(result)] + padded, dtype=mx.int32)
+            else:
+                draft_array = mx.zeros(num + 1, dtype=mx.int32)
+
+            if _is_tp:
+                gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=group)
+                mx.eval(gathered)
+                rank0_data = gathered[0].tolist()
+                actual_len = rank0_data[0]
+                return rank0_data[1:1 + actual_len] if actual_len > 0 else []
+            else:
+                return result if (_is_rank0 and draft_model is not None) else []
+
+        _tp_draft_fn = _tp_draft_fn_impl
 
     _generation_logged = False
     try:
@@ -937,15 +964,14 @@ def mlx_generate(
           kv_group_size=KV_GROUP_SIZE,
           kv_bits=KV_BITS,
       )
-      if draft_model is not None and hasattr(draft_model, 'prefill'):
-          _draft_client = draft_model
-          _prefill_thread.join()
-          logger.info("Draft prefill complete")
-          def _tcp_draft_fn(token_id: int, num_tokens: int, trim: int = 0) -> list:
-              return _draft_client.fetch_draft_sync(token_id, num_tokens, trim=trim)
-          _gen_kwargs["draft_fn"] = _tcp_draft_fn
+      if _tp_draft_fn is not None:
+          if _prefill_thread is not None:
+              _prefill_thread.join()
+              logger.info("Draft prefill complete")
+          _gen_kwargs["draft_fn"] = _tp_draft_fn
           _gen_kwargs["num_draft_tokens"] = _draft_tokens
-          logger.info(f"Speculative decode active: server={_draft_client.server_url}, K={_draft_tokens}")
+          server_url = getattr(draft_model, 'server_url', '') if draft_model else ''
+          logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp}")
 
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
