@@ -26,7 +26,7 @@
 
 # Speculative decoding: set to a model ID to enable, empty to disable
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit}"
-: "${EXO_DRAFT_SKIP_FACTOR:=8}"
+: "${EXO_DRAFT_SKIP_FACTOR:=16}"
 
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
