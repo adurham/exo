@@ -955,6 +955,24 @@ def mlx_generate(
                 mx.eval(logits)
                 tok = int(logits[0, -1].argmax().item())
                 tokens.append(tok)
+
+            # TP sync: broadcast rank 0's draft tokens to all ranks.
+            # Independent copies of the draft model can diverge due to
+            # floating point non-determinism in quantized inference.
+            # Divergent draft tokens cause TP deadlock in the verify pass.
+            if _is_tp:
+                draft_array = mx.array(tokens, dtype=mx.int32)
+                gathered = mx.distributed.all_gather(draft_array.reshape(1, -1), group=group)
+                mx.eval(gathered)
+                tokens = list(gathered[0].tolist())
+                # Sync draft cache: non-rank-0 must use rank 0's tokens
+                if not _is_rank0 and len(tokens) > 0:
+                    # Trim the tokens we just generated and replay rank 0's
+                    trim_prompt_cache(draft_cache, num_tokens)
+                    for t in tokens:
+                        draft_model(mx.array([[t]]), cache=draft_cache)
+                    mx.eval([c.state for c in draft_cache])  # type: ignore
+
             # Touch heartbeat: draft_fn is called by stream_generate's speculative
             # loop which doesn't yield between steps. Without this, the supervisor
             # kills the runner for heartbeat timeout on long generations.
