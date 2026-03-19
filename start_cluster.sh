@@ -26,7 +26,7 @@
 
 # Speculative decoding: small local draft model on Studios
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-4B-Instruct-2507-6bit}"
-: "${EXO_DRAFT_TOKENS:=5}"
+: "${EXO_DRAFT_TOKENS:=3}"
 
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
