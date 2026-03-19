@@ -38,7 +38,7 @@ from pydantic import RootModel
 
 from exo.download.download_utils import build_model_path
 from exo.shared.constants import EXO_TRACING_ENABLED
-from exo.shared.types.common import Host
+from exo.shared.types.common import Host, ModelId
 from exo.shared.types.memory import Memory
 from exo.shared.types.mlx import Model
 from exo.shared.types.tasks import TaskId, TextGeneration
@@ -289,7 +289,7 @@ def shard_and_load(
     draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
     if draft_model_id:
         try:
-            draft_path = build_model_path(draft_model_id)
+            draft_path = build_model_path(ModelId(draft_model_id))
             logger.info(f"Loading local draft model: {draft_model_id} from {draft_path}")
             draft_model, _ = load_model(draft_path, lazy=True, strict=False)
             mx.eval(draft_model)
