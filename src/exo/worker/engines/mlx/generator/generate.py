@@ -911,15 +911,6 @@ def mlx_generate(
         import threading
         draft_model.reset_cache()
         _prompt_ids = all_prompt_tokens.tolist() if isinstance(all_prompt_tokens, mx.array) else list(all_prompt_tokens)
-        # Append empty thinking block so the draft model enters non-thinking mode.
-        # The 235B-2507 (non-thinking model) doesn't need this, but thinking-capable
-        # draft models (e.g., Qwen3-1.7B) default to thinking without it.
-        think_start_id = getattr(tokenizer, 'think_start_id', None)
-        think_end_id = getattr(tokenizer, 'think_end_id', None)
-        if think_start_id is not None and think_end_id is not None:
-            # <think>\n\n</think>\n\n
-            _prompt_ids = _prompt_ids + [think_start_id, 198, 198, think_end_id, 198, 198]
-            logger.info(f"Draft prefill: appended empty think block to suppress thinking mode")
         def _bg_prefill():
             try:
                 draft_model.prefill(_prompt_ids)
