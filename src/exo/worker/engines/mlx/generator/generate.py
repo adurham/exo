@@ -978,8 +978,11 @@ def mlx_generate(
               logger.info("Draft prefill complete")
           _gen_kwargs["draft_fn"] = _tp_draft_fn
           _gen_kwargs["num_draft_tokens"] = _draft_tokens
+          # Draft server uses argmax — main model must match for exact-match verification.
+          # TODO: implement proper rejection sampling to support temperature > 0.
+          _gen_kwargs["sampler"] = make_sampler(temp=0.0)
           server_url = getattr(draft_model, 'server_url', '') if draft_model else ''
-          logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp}")
+          logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp} (forcing temp=0 for draft match)")
 
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
