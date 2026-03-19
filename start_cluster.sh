@@ -24,8 +24,9 @@
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
-# Speculative decoding: small local draft model on Studios
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-0.6B-4bit}"
+# Speculative decoding: disabled — draft overhead exceeds gains in 2-way TP
+# (both Studios are fully utilized during decode, no idle time to exploit)
+: "${EXO_DRAFT_MODEL:=}"
 : "${EXO_DRAFT_TOKENS:=3}"
 
 export IBV_FORK_SAFE=1
