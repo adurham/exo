@@ -237,8 +237,8 @@ class Runner:
                         logger.info(f"Draft client ready (url={draft_url}, model={draft_model_id}, K={draft_tokens})")
                     self.generator.use_speculative = True
 
-                # Start draft server on rank 0 so other instances can query this model
-                if self.device_rank == 0:
+                # Start draft server only on instances that ARE draft models (not the primary)
+                if self.device_rank == 0 and not draft_url:
                     from exo.worker.engines.mlx.draft_server import start_draft_server
                     start_draft_server(self.generator.inference_model, self.model_id)
 
