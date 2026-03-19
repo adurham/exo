@@ -25,7 +25,8 @@
 : "${LOG_LEVEL:=DEBUG}"
 
 # Speculative decoding: set to a model ID to enable, empty to disable
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-4B-Instruct-2507-6bit}"
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit}"
+: "${EXO_DRAFT_SKIP_FACTOR:=6}"
 
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -418,6 +419,7 @@ for NODE in "${NODES[@]}"; do
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
+        EXO_ENV="$EXO_ENV EXO_DRAFT_SKIP_FACTOR=$EXO_DRAFT_SKIP_FACTOR"
     fi
 
 
