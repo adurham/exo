@@ -484,3 +484,157 @@ def test_draft_tokens_default():
     # Don't set env var, check default
     val = int(os.environ.get("EXO_DRAFT_TOKENS", "5"))
     assert val == 5
+
+
+# ── Multiprocess TP integration tests ──────────────────────────────────── #
+# These spawn 2 processes with ring backend to validate actual TP behavior.
+
+
+def _tp_draft_worker(
+    rank: int,
+    world_size: int,
+    hostfile_path: str,
+    weights_bytes: bytes,
+    result_queue: Any,
+) -> None:
+    """Worker process: TP-shard a tiny model, run draft fn, return tokens."""
+    import os
+    import pickle
+    import traceback
+
+    os.environ["MLX_HOSTFILE"] = hostfile_path
+    os.environ["MLX_RANK"] = str(rank)
+
+    try:
+        group = mx.distributed.init(backend="ring", strict=True)
+
+        # Build model from shared weights (same random init on all ranks)
+        cfg: dict[str, Any] = {
+            "model_type": "llama",
+            "vocab_size": 1000,
+            "hidden_size": 64,
+            "num_hidden_layers": 4,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 4,
+            "intermediate_size": 128,
+            "rms_norm_eps": 1e-5,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": False,
+        }
+        mod = importlib.import_module("mlx_lm.models.llama")
+        args = mod.ModelArgs.from_dict(cfg)
+        model: nn.Module = mod.Model(args)
+
+        # Load identical weights on all ranks
+        weights = pickle.loads(weights_bytes)
+        model.update(cast(dict[str, Any], tree_unflatten(weights)))
+        mx.eval(model.parameters())
+
+        # Primary patches __call__ (rank 0 does it, but it patches the CLASS
+        # so both ranks see it)
+        if rank == 0:
+            from exo.worker.engines.mlx.auto_parallel import patch_tensor_model
+            patch_tensor_model(model)
+
+        # TP-shard with patch_model=False (draft path)
+        from exo.worker.engines.mlx.auto_parallel import tensor_auto_parallel
+        model = tensor_auto_parallel(
+            model, group, timeout_seconds=30.0,
+            on_timeout=None, on_layer_loaded=None,
+            patch_model=False,
+        )
+
+        # Verify forward pass works
+        tokens = mx.array([[1, 2, 3]])
+        logits = model(tokens)
+        mx.eval(logits)
+
+        assert logits.shape[0] == 1
+        assert logits.shape[1] == 3
+        assert logits.shape[2] == 1000  # vocab_size
+
+        # Build draft cache and prefill
+        draft_cache = make_prompt_cache(model)
+        prompt = mx.array([[1, 2, 3, 4, 5]])
+        model(prompt, cache=draft_cache)
+        mx.eval([c.state for c in draft_cache])
+
+        # Run draft fn — generate 5 tokens
+        draft_tokens: list[int] = []
+        tok = 10
+        for _ in range(5):
+            logits = model(mx.array([[tok]]), cache=draft_cache)
+            mx.eval(logits)
+            tok = int(logits[0, -1].argmax().item())
+            draft_tokens.append(tok)
+
+        result_queue.put((rank, True, draft_tokens))
+
+    except Exception as e:
+        result_queue.put((rank, False, f"{e}\n{traceback.format_exc()}"))
+
+
+def test_tp_draft_produces_identical_tokens_across_ranks():
+    """2-rank TP draft: both ranks must produce identical argmax tokens.
+
+    This validates the core correctness guarantee: TP all_sum inside the
+    model ensures all ranks see the same logits, so argmax is identical
+    without any broadcast.
+    """
+    import multiprocessing as mp
+    import os
+    import pickle
+
+    ctx = mp.get_context("spawn")
+    world_size = 2
+    base_port = 29700
+
+    hosts = [f"127.0.0.1:{base_port + i}" for i in range(world_size)]
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(hosts, f)
+        hostfile_path = f.name
+
+    # Build shared random weights (identical across ranks)
+    model = _build_tiny_llama(num_layers=4)
+    flat = cast(list[tuple[str, mx.array]], tree_flatten(model.parameters()))
+    weights_bytes = pickle.dumps(flat)
+    del model
+
+    try:
+        result_queue: Any = ctx.Queue()
+        processes: list[Any] = []
+        for rank in range(world_size):
+            p = ctx.Process(
+                target=_tp_draft_worker,
+                args=(rank, world_size, hostfile_path, weights_bytes, result_queue),
+            )
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join(timeout=30)
+
+        results: dict[int, list[int]] = {}
+        errors: dict[int, str] = {}
+        while not result_queue.empty():
+            rank, success, value = result_queue.get()
+            if success:
+                results[rank] = value
+            else:
+                errors[rank] = value
+
+        assert len(results) == world_size, (
+            f"Expected {world_size} results, got {len(results)}. Errors: {errors}"
+        )
+
+        # THE KEY ASSERTION: both ranks produced identical tokens
+        assert results[0] == results[1], (
+            f"Rank 0 tokens {results[0]} != Rank 1 tokens {results[1]}"
+        )
+
+        # Sanity: tokens are valid
+        assert len(results[0]) == 5
+        assert all(0 <= t < 1000 for t in results[0])
+
+    finally:
+        os.unlink(hostfile_path)
