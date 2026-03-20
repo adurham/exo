@@ -764,17 +764,15 @@ def mlx_generate(
     )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
-    # Touch heartbeat: prefill may have taken many seconds, and the KV cache
-    # save below can take 90s+ for large-context 397B models (deep copy of
-    # several GB of KV state).  Without this, the supervisor kills the runner.
     if on_generation_token is not None:
         on_generation_token()
 
+    if EXO_TRACING_ENABLED:
+        t_post = time.perf_counter()
+        logger.info("Post-prefill: saving KV cache")
+
     # Save the KV cache immediately after prefill so the work is preserved
-    # even if generation is cancelled before completion. This is critical for
-    # large-context requests (/compact) that may take 5+ minutes to prefill
-    # and then get cancelled during decode — without this, the retry has to
-    # re-prefill from scratch.
+    # even if generation is cancelled before completion.
     if kv_prefix_cache is not None:
         hit_ratio = (
             prefix_hit_length / len(all_prompt_tokens)
@@ -799,6 +797,12 @@ def mlx_generate(
                 normalized_tokens=cache_key_tokens,
             )
 
+    if EXO_TRACING_ENABLED:
+        logger.info(f"Post-prefill: KV cache saved in {(time.perf_counter() - t_post) * 1000:.1f}ms")
+
+    if on_generation_token is not None:
+        on_generation_token()
+
     # stream_generate starts from the last token
     last_token = prompt_tokens[-2:]
 
@@ -819,30 +823,34 @@ def mlx_generate(
     think_start = tokenizer.think_start
     think_end = tokenizer.think_end
 
-    # Touch heartbeat: prefill may have taken many seconds.
     if on_generation_token is not None:
         on_generation_token()
 
     # Flush all streams before decode — same rationale as pre-prefill sync.
     if group is not None:
+        if EXO_TRACING_ENABLED:
+            t_sync = time.perf_counter()
+            logger.info("Post-prefill: mx.synchronize()")
         mx.synchronize()
+        if EXO_TRACING_ENABLED:
+            logger.info(f"Post-prefill: mx.synchronize() took {(time.perf_counter() - t_sync) * 1000:.1f}ms")
 
-    # Touch heartbeat: mx.synchronize + KV cache save above can block for
-    # 90s+ on large-context requests with big models.
     if on_generation_token is not None:
         on_generation_token()
 
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
         t_barrier = time.perf_counter()
+        logger.info("Post-prefill: mx_barrier()")
     mx_barrier(group)
     if EXO_TRACING_ENABLED:
-        decode_barrier_ms = (time.perf_counter() - t_barrier) * 1000
-        logger.info(f"Pre-decode barrier: {decode_barrier_ms:.1f}ms")
+        logger.info(f"Post-prefill: mx_barrier() took {(time.perf_counter() - t_barrier) * 1000:.1f}ms")
 
-    # Touch heartbeat: pre-decode barrier can block waiting for other ranks.
     if on_generation_token is not None:
         on_generation_token()
+
+    if EXO_TRACING_ENABLED:
+        logger.info("Post-prefill: starting decode")
 
     if EXO_TRACING_ENABLED:
         logger.info("Starting decode")
