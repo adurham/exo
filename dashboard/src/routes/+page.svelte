@@ -1828,9 +1828,14 @@
     if (has("Shutdown"))
       return { statusText: "SHUTDOWN", statusClass: "inactive" };
     if (has("Loading")) {
-      // Tensor parallel: each runner loads all layers — use max/min (bottleneck)
+      // Tensor parallel: each runner loads all layers — use min/max (bottleneck)
       // Pipeline parallel: each runner loads a disjoint slice — use sum
-      const isTensor = instanceTag === "MlxJacclInstance";
+      // Detect by checking shard metadata tags, not instance type (MlxJacclInstance
+      // is used for both TP and PP).
+      const rts = inst.shardAssignments?.runnerToShard || {};
+      const firstShard = Object.values(rts)[0];
+      const [shardTag] = firstShard ? getTagged(firstShard) : [null];
+      const isTensor = shardTag === "TensorShardMetadata";
       let layersLoaded = isTensor ? Infinity : 0;
       let totalLayers = 0;
       for (const rid of runnerIds) {
