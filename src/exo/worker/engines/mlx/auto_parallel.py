@@ -487,9 +487,12 @@ class PipelineLastLayer(CustomMlxLayer):
                 _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
                 if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
                     _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
-            _guarded_eval(output)
+            # Single eval for send output + cache keys (cache depends on output
+            # via mx.depends, so one eval materializes both).
             if cache is not None and hasattr(_cache, "keys"):  # type: ignore
-                _guarded_eval(_cache.keys)  # type: ignore
+                _guarded_eval(output, _cache.keys)  # type: ignore
+            else:
+                _guarded_eval(output)
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.send_us += int(
                     (time.perf_counter() - t_send) * 1_000_000
