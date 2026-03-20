@@ -409,7 +409,6 @@ for NODE in "${NODES[@]}"; do
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=0 MTL_COMMAND_BUFFER_TIMEOUT=1 EXO_DISABLE_METAL_TIMEOUT=0"
     fi
 
-    # Manual layer split override (e.g., EXO_LAYER_SPLIT="7,28,27")
     # Per-node overrides
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
