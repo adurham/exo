@@ -1,4 +1,5 @@
 import itertools
+import threading
 import traceback
 import time
 from abc import ABC, abstractmethod
@@ -57,6 +58,35 @@ class GeneratorQueue[T]:
                 yield None
             else:
                 yield self._q.popleft()
+
+
+def _warmup_with_heartbeat(gen: "InferenceGenerator") -> int:
+    """Run warmup while touching the heartbeat every 10s.
+
+    First-time Metal shader compilation for large models (397B+) can
+    exceed the 90s supervisor heartbeat timeout.  A background thread
+    keeps the heartbeat alive so the supervisor doesn't kill us.
+    """
+    stop = threading.Event()
+
+    def _keep_alive() -> None:
+        while not stop.wait(10):
+            hb = getattr(gen, "heartbeat", None)
+            if hb is not None:
+                hb.value = time.monotonic()  # pyright: ignore[reportAttributeAccessIssue]
+
+    t = threading.Thread(target=_keep_alive, daemon=True)
+    t.start()
+    try:
+        return warmup_inference(
+            model=gen.model,
+            tokenizer=gen.tokenizer,
+            group=gen.group,
+            model_id=gen.model_id,
+        )
+    finally:
+        stop.set()
+        t.join(timeout=1)
 
 
 class InferenceGenerator(ABC):
@@ -160,12 +190,7 @@ class SequentialGenerator(InferenceGenerator):
     ) = field(default=None, init=False)
 
     def warmup(self):
-        self.check_for_cancel_every = warmup_inference(
-            model=self.model,
-            tokenizer=self.tokenizer,
-            group=self.group,
-            model_id=self.model_id,
-        )
+        self.check_for_cancel_every = _warmup_with_heartbeat(self)
 
     def submit(
         self,
@@ -434,12 +459,7 @@ class BatchGenerator(InferenceGenerator):
         )
 
     def warmup(self):
-        self.check_for_cancel_every = warmup_inference(
-            model=self.model,
-            tokenizer=self.tokenizer,
-            group=self.group,
-            model_id=self.model_id,
-        )
+        self.check_for_cancel_every = _warmup_with_heartbeat(self)
 
     def submit(
         self,
