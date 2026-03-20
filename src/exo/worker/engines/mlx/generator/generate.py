@@ -323,7 +323,7 @@ def prefill(
     capped_step_size = min(prefill_step_size, MAX_PREFILL_CHUNK)
 
     try:
-        if is_pipeline and num_tokens >= prefill_step_size:
+        if is_pipeline:
             set_pipeline_queue_sends(model, queue_sends=True)
             assert group is not None, "Pipeline prefill requires a distributed group"
             pipeline_parallel_prefill(

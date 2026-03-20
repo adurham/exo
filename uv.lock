@@ -1360,7 +1360,7 @@ wheels = [
 
 [[package]]
 name = "mlx"
-version = "0.30.99.dev20260316+1d29e7fc"
+version = "0.30.99.dev20260319+b954c7ca"
 source = { editable = "mlx" }
 
 [package.metadata]
@@ -1375,7 +1375,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "mlx-lm"
-version = "0.30.8"
+version = "0.31.1"
 source = { editable = "mlx-lm" }
 dependencies = [
     { name = "jinja2", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
