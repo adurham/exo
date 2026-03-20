@@ -18,10 +18,6 @@
 : "${MLX_JACCL_FRAME_SIZE:=8192}"
 : "${EXO_KV_BITS:=16}"
 : "${EXO_PP_LAYER_OFFSET:=0}"
-# Explicit layer split for 3-node PP (Studio1, Studio2, MacBook).
-# MacBook gets fewer layers to stay within 36GB memory budget.
-# Must sum to model's n_layers (60 for Qwen3.5-397B, 94 for Qwen3-235B).
-: "${EXO_LAYER_SPLIT:=29,27,4}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
@@ -415,14 +411,13 @@ for NODE in "${NODES[@]}"; do
     fi
 
     # Manual layer split override (e.g., EXO_LAYER_SPLIT="7,28,27")
-    if [ -n "${EXO_LAYER_SPLIT:-}" ]; then
-        EXO_ENV="$EXO_ENV EXO_LAYER_SPLIT=$EXO_LAYER_SPLIT"
-    fi
-
     # Per-node overrides
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
+        # Cap reported RAM so proportional layer allocation gives MacBook fewer
+        # layers, leaving headroom for KV cache at high context.
+        EXO_ENV="$EXO_ENV EXO_RAM_CAP_GB=20"
         # MacBook has tight memory with large models.
         # Raise threshold to avoid rejecting requests that deadlock the pipeline.
         EXO_ENV="$EXO_ENV EXOMEMORY_THRESHOLD=0.95"

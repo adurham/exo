@@ -1,3 +1,4 @@
+import os
 from typing import Self
 
 from pydantic import BaseModel
@@ -59,7 +60,11 @@ class MacmonMetrics(TaggedModel):
             ),
             memory=MemoryUsage.from_bytes(
                 ram_total=raw.memory.ram_total,
-                ram_available=(raw.memory.ram_total - raw.memory.ram_usage),
+                ram_available=min(
+                    raw.memory.ram_total - raw.memory.ram_usage,
+                    int(os.environ.get("EXO_RAM_CAP_GB", "0")) * 1_073_741_824
+                    or (raw.memory.ram_total - raw.memory.ram_usage),
+                ),
                 swap_total=raw.memory.swap_total,
                 swap_available=(raw.memory.swap_total - raw.memory.swap_usage),
             ),
