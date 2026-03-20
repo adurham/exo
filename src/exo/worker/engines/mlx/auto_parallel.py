@@ -426,24 +426,16 @@ class PipelineFirstLayer(CustomMlxLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
-            if self.is_prefill:
-                # Prefill: synchronous evals for correct pipeline staging.
-                if EXO_TRACING_ENABLED:
-                    t0 = time.perf_counter()
-                mx.eval(x)
-                if EXO_TRACING_ENABLED:
-                    t1 = time.perf_counter()
-                x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
-                _guarded_eval(x)
-                if EXO_TRACING_ENABLED:
-                    _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
-                    _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
-            else:
-                # Decode: lazy recv — no synchronous evals.  The recv_like
-                # becomes part of the lazy graph so that async_eval in the
-                # generate loop can overlap graph building with GPU execution
-                # (double-buffered decode).
-                x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
+            if EXO_TRACING_ENABLED:
+                t0 = time.perf_counter()
+            mx.eval(x)
+            if EXO_TRACING_ENABLED:
+                t1 = time.perf_counter()
+            x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
+            _guarded_eval(x)
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
+                _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -468,62 +460,55 @@ class PipelineLastLayer(CustomMlxLayer):
             x, *args, **kwargs
         ).arguments.get("cache", None)
 
+        if EXO_TRACING_ENABLED:
+            t0 = time.perf_counter()
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
-        if self.is_prefill:
-            # ── Prefill path: synchronous evals for pipeline staging ──
+        # Eval layer output to materialize it before send — this splits the graph
+        # so the send is isolated and the receiving rank's recv can complete.
+        _guarded_eval(output)
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.compute_us += int(
+                (time.perf_counter() - t0) * 1_000_000
+            )
+
+        if self.r != self.s - 1:
             if EXO_TRACING_ENABLED:
-                t0 = time.perf_counter()
-            _guarded_eval(output)
-            if EXO_TRACING_ENABLED:
-                _pipeline_timings.compute_us += int(
-                    (time.perf_counter() - t0) * 1_000_000
+                t_send = time.perf_counter()
+            if self.queue_sends:
+                _pending_prefill_sends.append(
+                    (output, (self.r + 1) % self.s, self.group)
                 )
-
-            if self.r != self.s - 1:
-                if EXO_TRACING_ENABLED:
-                    t_send = time.perf_counter()
-                if self.queue_sends:
-                    _pending_prefill_sends.append(
-                        (output, (self.r + 1) % self.s, self.group)
-                    )
-                else:
-                    output = mx.distributed.send(
-                        output, (self.r + 1) % self.s, group=self.group
-                    )
-                if cache is not None:
-                    _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
-                        _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
-                _guarded_eval(output)
-                if cache is not None and hasattr(_cache, "keys"):  # type: ignore
-                    _guarded_eval(_cache.keys)  # type: ignore
-                if EXO_TRACING_ENABLED:
-                    _pipeline_timings.send_us += int(
-                        (time.perf_counter() - t_send) * 1_000_000
-                    )
-
-            if EXO_TRACING_ENABLED:
-                _pipeline_timings.step_count += 1
-        else:
-            # ── Decode path: fully lazy graph for double-buffered decode ──
-            # No synchronous evals — send, recv_like, all_gather are lazy
-            # graph nodes evaluated by the async_eval in the generate loop.
-            # This enables graph-build for step N+1 to overlap with GPU
-            # execution of step N, saving ~9-11ms/tok of Python overhead.
-            if self.r != self.s - 1:
+            else:
                 output = mx.distributed.send(
                     output, (self.r + 1) % self.s, group=self.group
                 )
-                if cache is not None:
-                    _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
-                    if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
-                        _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+            if cache is not None:
+                _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
+                if hasattr(_cache, "keys"):  # pyright: ignore[reportAny]
+                    _cache.keys = mx.depends(_cache.keys, output)  # type: ignore
+            _guarded_eval(output)
+            if cache is not None and hasattr(_cache, "keys"):  # type: ignore
+                _guarded_eval(_cache.keys)  # type: ignore
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.send_us += int(
+                    (time.perf_counter() - t_send) * 1_000_000
+                )
 
+        if not self.is_prefill:
+            if EXO_TRACING_ENABLED:
+                t_ag = time.perf_counter()
             output = mx.distributed.all_gather(output, group=self.group)[
                 -output.shape[0] :
             ]
+            _guarded_eval(output)
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.all_gather_us += int(
+                    (time.perf_counter() - t_ag) * 1_000_000
+                )
 
+        if EXO_TRACING_ENABLED:
+            _pipeline_timings.step_count += 1
         return output
 
 
