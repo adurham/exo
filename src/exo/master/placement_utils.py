@@ -101,12 +101,29 @@ def _allocate_and_validate_layers(
     total_memory: Memory,
     model_card: ModelCard,
 ) -> list[int]:
-    layer_allocations = allocate_layers_proportionally(
-        total_layers=model_card.n_layers,
-        memory_fractions=[
-            node_memory[node_id].ram_available / total_memory for node_id in node_ids
-        ],
-    )
+    # EXO_LAYER_SPLIT: explicit per-rank layer counts (e.g. "28,26,6").
+    # Bypasses proportional allocation entirely.
+    layer_split_env = os.environ.get("EXO_LAYER_SPLIT", "")
+    if layer_split_env:
+        layer_allocations = [int(x) for x in layer_split_env.split(",")]
+        if len(layer_allocations) != len(node_ids):
+            raise ValueError(
+                f"EXO_LAYER_SPLIT has {len(layer_allocations)} values "
+                f"but there are {len(node_ids)} nodes"
+            )
+        if sum(layer_allocations) != model_card.n_layers:
+            raise ValueError(
+                f"EXO_LAYER_SPLIT sums to {sum(layer_allocations)} "
+                f"but model has {model_card.n_layers} layers"
+            )
+        logger.info(f"EXO_LAYER_SPLIT override: {layer_allocations}")
+    else:
+        layer_allocations = allocate_layers_proportionally(
+            total_layers=model_card.n_layers,
+            memory_fractions=[
+                node_memory[node_id].ram_available / total_memory for node_id in node_ids
+            ],
+        )
 
     total_storage = model_card.storage_size
     total_layers = model_card.n_layers

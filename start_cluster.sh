@@ -18,6 +18,10 @@
 : "${MLX_JACCL_FRAME_SIZE:=8192}"
 : "${EXO_KV_BITS:=16}"
 : "${EXO_PP_LAYER_OFFSET:=0}"
+# Explicit layer split for 3-node PP (Studio1, Studio2, MacBook).
+# MacBook gets fewer layers to stay within 36GB memory budget.
+# Must sum to model's n_layers (60 for Qwen3.5-397B, 94 for Qwen3-235B).
+: "${EXO_LAYER_SPLIT:=29,27,4}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
@@ -418,10 +422,10 @@ for NODE in "${NODES[@]}"; do
     # Per-node overrides
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
-        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
-        # MacBook has tight memory (~81% after loading 397B shard + warmup).
+        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
+        # MacBook has tight memory with large models.
         # Raise threshold to avoid rejecting requests that deadlock the pipeline.
-        EXO_ENV="$EXO_ENV EXOMEMORY_THRESHOLD=0.90"
+        EXO_ENV="$EXO_ENV EXOMEMORY_THRESHOLD=0.95"
     else
         # Studios: small local draft model (independent copy per node, no TP)
         EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
@@ -576,17 +580,17 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-# ── Instance 1: Primary model (Studios, Pipeline Parallel over RDMA) ──
-echo "Creating Qwen3-235B instance (Studios PP / RDMA)..."
-if place_instance_with_retry "Qwen3-235B" "mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit" "{
-    \"model_id\": \"mlx-community/Qwen3-235B-A22B-Instruct-2507-6bit\",
+# ── Instance 1: Primary model (3-node Pipeline Parallel over RDMA) ──
+echo "Creating Qwen3.5-397B instance (3-node PP / RDMA)..."
+if place_instance_with_retry "Qwen3.5-397B" "mlx-community/Qwen3.5-397B-A17B-4bit" "{
+    \"model_id\": \"mlx-community/Qwen3.5-397B-A17B-4bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
-    \"min_nodes\": 2,
-    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
+    \"min_nodes\": 3,
+    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\", \"$MBP_NODE_ID\"],
     \"max_context_tokens\": 262144
 }"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 3))
 fi
 
 # ── Instance 2: Subagent model (MacBook, single node) ──
