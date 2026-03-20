@@ -423,9 +423,14 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.recv_from: int = recv_from if recv_from is not None else (r - 1)
         self.group = group
         self.is_prefill: bool = False
+        self._compiled_decode_active: bool = False
+        self._hidden_buf: list[mx.array] | None = None
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        if self.r != 0:
+        if self._compiled_decode_active and self.r != 0:
+            # Compiled decode: read hidden state from buffer (recv handled outside compile)
+            x = self._hidden_buf[0]  # type: ignore
+        elif self.r != 0:
             if EXO_TRACING_ENABLED:
                 t0 = time.perf_counter()
             mx.eval(x)
@@ -454,15 +459,23 @@ class PipelineLastLayer(CustomMlxLayer):
         self.original_layer_signature = signature(self.original_layer.__call__)
         self.is_prefill: bool = False
         self.queue_sends: bool = False
+        self._compiled_decode_active: bool = False
+        self._hidden_buf: list[mx.array] | None = None
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        output: mx.array = self.original_layer(x, *args, **kwargs)
+
+        if self._compiled_decode_active:
+            # Compiled decode: write output to buffer (send/all_gather handled outside compile)
+            self._hidden_buf[0] = output  # type: ignore
+            return output
+
         cache = self.original_layer_signature.bind_partial(
             x, *args, **kwargs
         ).arguments.get("cache", None)
 
         if EXO_TRACING_ENABLED:
             t0 = time.perf_counter()
-        output: mx.array = self.original_layer(x, *args, **kwargs)
 
         # Eval layer output to materialize it before send — this splits the graph
         # so the send is isolated and the receiving rank's recv can complete.
@@ -513,6 +526,41 @@ class PipelineLastLayer(CustomMlxLayer):
         if EXO_TRACING_ENABLED:
             _pipeline_timings.step_count += 1
         return output
+
+
+@dataclass
+class PipelineInfo:
+    """Info extracted from pipeline layer wrappers for compiled decode."""
+    rank: int
+    world_size: int
+    group: mx.distributed.Group
+    recv_from: int
+
+
+def get_pipeline_info(model: nn.Module) -> PipelineInfo | None:
+    """Extract pipeline info by inspecting the model's layer wrappers."""
+    inner = get_inner_model(model)
+    layers = get_layers(inner)
+    first_layer = layers[0] if layers else None
+    last_layer = layers[-1] if layers else None
+    if not isinstance(first_layer, PipelineFirstLayer) or not isinstance(last_layer, PipelineLastLayer):
+        return None
+    return PipelineInfo(
+        rank=first_layer.r,
+        world_size=last_layer.s,
+        group=first_layer.group,
+        recv_from=first_layer.recv_from,
+    )
+
+
+def set_pipeline_compiled_decode(model: nn.Module, active: bool, hidden_buf: list[mx.array] | None = None) -> None:
+    """Enable/disable compiled decode bypass on pipeline first/last layers."""
+    inner = get_inner_model(model)
+    layers = get_layers(inner)
+    for layer in layers:
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+            layer._compiled_decode_active = active
+            layer._hidden_buf = hidden_buf if active else None
 
 
 class HybridPipelineLastLayer(CustomMlxLayer):
@@ -921,6 +969,11 @@ def patch_pipeline_model[T](model: T, group: mx.distributed.Group) -> T:
         **kwargs: object,
     ) -> mx.array:
         logits: mx.array = original_call(self, *args, **kwargs)  # type: ignore
+
+        # Skip cache dependency during compiled decode (mx.compile can't trace mx.depends)
+        if getattr(self, "_compiled_decode_active", False):
+            return logits
+
         cache = call_signature.bind_partial(self, *args, **kwargs).arguments.get(
             "cache", None
         )
