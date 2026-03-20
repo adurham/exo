@@ -25,7 +25,7 @@
 : "${LOG_LEVEL:=DEBUG}"
 
 # Speculative decoding: PP mode with local draft
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3-0.6B-4bit}"
+: "${EXO_DRAFT_MODEL:=}"
 : "${EXO_DRAFT_TOKENS:=3}"
 
 export IBV_FORK_SAFE=1
