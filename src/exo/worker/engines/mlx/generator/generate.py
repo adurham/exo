@@ -63,6 +63,7 @@ from exo.worker.engines.mlx.constants import (
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
+    mx_any,
     mx_barrier,
 )
 from exo.worker.runner.bootstrap import logger
@@ -698,10 +699,14 @@ def mlx_generate(
                 logger.info(
                     f"Retained prefix hit ({prefix_hit_length} tokens) after eviction"
                 )
-        if mem_used > MEMORY_THRESHOLD:
+        # Coordinate across all PP ranks: if ANY rank is over threshold,
+        # ALL ranks must reject.  Otherwise the rejecting rank raises while
+        # other ranks enter prefill → pipeline deadlock.
+        any_over = mx_any(mem_used > MEMORY_THRESHOLD, group)
+        if any_over:
             raise ValueError(
                 f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
-                f"cannot accept new request"
+                f"cannot accept new request (coordinated rejection across pipeline)"
             )
 
     # Touch heartbeat: cache lookup deepcopy of large KV state can take 10s+ seconds.

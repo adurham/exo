@@ -39,7 +39,7 @@ from exo.worker.engines.mlx.generator.generate import (
     extract_top_logprobs,
     prefill,
 )
-from exo.worker.engines.mlx.utils_mlx import fix_unmatched_think_end_tokens
+from exo.worker.engines.mlx.utils_mlx import fix_unmatched_think_end_tokens, mx_any
 from exo.worker.runner.bootstrap import logger
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
@@ -192,10 +192,14 @@ class ExoBatchGenerator:
                     logger.info(
                         f"Retained prefix hit ({prefix_hit_length} tokens) after eviction"
                     )
-            if mem_used > MEMORY_THRESHOLD:
+            # Coordinate across all PP ranks: if ANY rank is over threshold,
+            # ALL ranks must reject.  Otherwise the rejecting rank raises while
+            # other ranks enter prefill → pipeline deadlock.
+            any_over = mx_any(mem_used > MEMORY_THRESHOLD, self.group)
+            if any_over:
                 raise ValueError(
                     f"memory pressure too high ({mem_used:.0%} used, threshold {MEMORY_THRESHOLD:.0%}): "
-                    f"cannot accept new request"
+                    f"cannot accept new request (coordinated rejection across pipeline)"
                 )
 
         seed = task_params.seed if task_params.seed is not None else 42
