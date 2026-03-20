@@ -412,10 +412,7 @@ for NODE in "${NODES[@]}"; do
     # Per-node overrides
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
-        # Inflate reported RAM so proportional allocation gives MacBook MORE
-        # layers.  This shifts weight memory from Studios (which OOM in Metal
-        # at 91%) to MacBook (which has headroom at 62%).
-        EXO_ENV="$EXO_ENV EXO_RAM_CAP_GB=50"
+        EXO_ENV="$EXO_ENV EXO_RAM_CAP_GB=20"
         # MacBook has tight memory with large models.
         # Raise threshold to avoid rejecting requests that deadlock the pipeline.
         EXO_ENV="$EXO_ENV EXOMEMORY_THRESHOLD=0.95"
