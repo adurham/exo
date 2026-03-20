@@ -424,12 +424,13 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.group = group
         self.is_prefill: bool = False
         self._compiled_decode_active: bool = False
-        self._hidden_buf: list[mx.array] | None = None
+        self._compile_state: list[mx.array] | None = None
+        self._hidden_idx: int = -1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self._compiled_decode_active and self.r != 0:
-            # Compiled decode: read hidden state from buffer (recv handled outside compile)
-            x = self._hidden_buf[0]  # type: ignore
+            # Compiled decode: read hidden state from compile state list (recv handled outside compile)
+            x = self._compile_state[self._hidden_idx]  # type: ignore
         elif self.r != 0:
             if EXO_TRACING_ENABLED:
                 t0 = time.perf_counter()
@@ -460,14 +461,15 @@ class PipelineLastLayer(CustomMlxLayer):
         self.is_prefill: bool = False
         self.queue_sends: bool = False
         self._compiled_decode_active: bool = False
-        self._hidden_buf: list[mx.array] | None = None
+        self._compile_state: list[mx.array] | None = None
+        self._hidden_idx: int = -1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
         if self._compiled_decode_active:
-            # Compiled decode: write output to buffer (send/all_gather handled outside compile)
-            self._hidden_buf[0] = output  # type: ignore
+            # Compiled decode: write output to compile state list (send/all_gather handled outside compile)
+            self._compile_state[self._hidden_idx] = output  # type: ignore
             return output
 
         cache = self.original_layer_signature.bind_partial(
@@ -553,14 +555,19 @@ def get_pipeline_info(model: nn.Module) -> PipelineInfo | None:
     )
 
 
-def set_pipeline_compiled_decode(model: nn.Module, active: bool, hidden_buf: list[mx.array] | None = None) -> None:
-    """Enable/disable compiled decode bypass on pipeline first/last layers."""
+def set_pipeline_compiled_decode(model: nn.Module, active: bool, compile_state: list[mx.array] | None = None, hidden_idx: int = -1) -> None:
+    """Enable/disable compiled decode bypass on pipeline first/last layers.
+
+    compile_state must be the SAME list passed to mx.compile as inputs/outputs.
+    hidden_idx is the index within that list where the hidden state lives.
+    """
     inner = get_inner_model(model)
     layers = get_layers(inner)
     for layer in layers:
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
             layer._compiled_decode_active = active
-            layer._hidden_buf = hidden_buf if active else None
+            layer._compile_state = compile_state if active else None
+            layer._hidden_idx = hidden_idx if active else -1
 
 
 class HybridPipelineLastLayer(CustomMlxLayer):
