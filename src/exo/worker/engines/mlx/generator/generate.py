@@ -764,6 +764,12 @@ def mlx_generate(
     )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
+    # Touch heartbeat: prefill may have taken many seconds, and the KV cache
+    # save below can take 90s+ for large-context 397B models (deep copy of
+    # several GB of KV state).  Without this, the supervisor kills the runner.
+    if on_generation_token is not None:
+        on_generation_token()
+
     # Save the KV cache immediately after prefill so the work is preserved
     # even if generation is cancelled before completion. This is critical for
     # large-context requests (/compact) that may take 5+ minutes to prefill
@@ -820,6 +826,11 @@ def mlx_generate(
     # Flush all streams before decode — same rationale as pre-prefill sync.
     if group is not None:
         mx.synchronize()
+
+    # Touch heartbeat: mx.synchronize + KV cache save above can block for
+    # 90s+ on large-context requests with big models.
+    if on_generation_token is not None:
+        on_generation_token()
 
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
