@@ -394,10 +394,9 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV MLX_SDPA_CPU_FRACTION=$MLX_SDPA_CPU_FRACTION"
     EXO_ENV="$EXO_ENV EXO_NO_BATCH=$EXO_NO_BATCH"
     EXO_ENV="$EXO_ENV EXO_TEST_MULTI_TOKEN=${EXO_TEST_MULTI_TOKEN:-}"
-    # MacBook gets 2 entries (see per-node overrides below), Studios get 1
-    if [ "$NODE" != "macbook-m4" ]; then
-        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
-    fi
+    # KV cache entries must be the same on all PP ranks — mismatched entries
+    # cause prefix cache hits on some ranks but not others, breaking lockstep.
+    EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
     EXO_ENV="$EXO_ENV EXO_KV_CACHE_MOVE=1"
     EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=1"
     EXO_ENV="$EXO_ENV EXO_COMPILE_DECODE=$EXO_COMPILE_DECODE"
@@ -414,7 +413,6 @@ for NODE in "${NODES[@]}"; do
     # Per-node overrides
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
-        EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=1"
         # Cap reported RAM so proportional layer allocation gives MacBook fewer
         # layers, leaving headroom for KV cache at high context.
         EXO_ENV="$EXO_ENV EXO_RAM_CAP_GB=20"
