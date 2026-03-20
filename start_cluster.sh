@@ -570,17 +570,20 @@ place_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-# ── Instance 1: Primary model (3-node Pipeline Parallel over RDMA) ──
-echo "Creating Qwen3.5-397B instance (3-node PP / RDMA)..."
+# ── Instance 1: Primary model (2-node Pipeline Parallel over RDMA) ──
+# MacBook excluded — OOMs at ~5K context with this model.
+# TODO: implement remote KV cache so MacBook serves as RDMA-backed
+# KV prefix cache server without running any transformer layers.
+echo "Creating Qwen3.5-397B instance (Studios PP / RDMA)..."
 if place_instance_with_retry "Qwen3.5-397B" "mlx-community/Qwen3.5-397B-A17B-4bit" "{
     \"model_id\": \"mlx-community/Qwen3.5-397B-A17B-4bit\",
     \"sharding\": \"Pipeline\",
     \"instance_meta\": \"MlxJaccl\",
-    \"min_nodes\": 3,
-    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\", \"$MBP_NODE_ID\"],
+    \"min_nodes\": 2,
+    \"node_ids\": [\"$M4_1_NODE_ID\", \"$M4_2_NODE_ID\"],
     \"max_context_tokens\": 262144
 }"; then
-    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 3))
+    EXPECTED_RUNNERS=$((EXPECTED_RUNNERS + 2))
 fi
 
 # ── Instance 2: Subagent model (MacBook, single node) ──
