@@ -419,6 +419,9 @@ for NODE in "${NODES[@]}"; do
     if [ "$NODE" == "macbook-m4" ]; then
         EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=512"
         EXO_ENV="$EXO_ENV EXO_KV_CACHE_MAX_ENTRIES=4"
+        # MacBook has tight memory (~81% after loading 397B shard + warmup).
+        # Raise threshold to avoid rejecting requests that deadlock the pipeline.
+        EXO_ENV="$EXO_ENV EXOMEMORY_THRESHOLD=0.90"
     else
         # Studios: small local draft model (independent copy per node, no TP)
         EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
