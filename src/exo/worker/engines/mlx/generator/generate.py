@@ -600,7 +600,8 @@ def mlx_generate(
     if think_start_id is not None:
         toks = all_prompt_tokens.tolist()
         # Template typically appends <think>\n — strip both if present
-        if len(toks) >= 2 and toks[-2] == think_start_id and toks[-1] == 10:
+        newline_id = tokenizer.encode("\n", add_special_tokens=False)[-1]
+        if len(toks) >= 2 and toks[-2] == think_start_id and toks[-1] == newline_id:
             cache_key_tokens = all_prompt_tokens[:-2]
             logger.info(
                 f"Stripped generation prefix <think>\\n from cache key: "
