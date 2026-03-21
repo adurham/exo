@@ -1207,11 +1207,14 @@ def mlx_generate(
         # Extract logprobs from the full vocabulary logprobs array
         logprob: float | None = None
         top_logprobs: list[TopLogprobItem] | None = None
-        if task.logprobs:
+        # Skip logprobs extraction if the logprobs array is too small (non-last
+        # PP ranks skip lm_head, producing garbage logprobs with wrong shape).
+        _n_logprobs = task.top_logprobs or DEFAULT_TOP_LOGPROBS
+        if task.logprobs and out.logprobs.size > _n_logprobs:
             logprob, top_logprobs = extract_top_logprobs(
                 logprobs=out.logprobs,
                 tokenizer=tokenizer,
-                top_logprobs=task.top_logprobs or DEFAULT_TOP_LOGPROBS,
+                top_logprobs=_n_logprobs,
                 selected_token=out.token,
             )
 
