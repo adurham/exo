@@ -1069,6 +1069,21 @@ def mlx_generate(
 
         _tp_draft_fn = _tp_draft_fn_impl
 
+    # PP idle-time speculation: use rank 0's idle time for draft + speculative forward.
+    _pp_draft_model = None
+    _pp_draft_cache = None
+    if _is_local_draft:
+        from exo.worker.engines.mlx.auto_parallel import get_pipeline_info
+        _pp_info = get_pipeline_info(model)
+        if _pp_info is not None:
+            _tp_draft_fn = None  # disable traditional spec decode (all_gather pattern mismatch)
+            if _pp_info.rank != _pp_info.world_size - 1 and draft_cache is not None:
+                _pp_draft_model = draft_model
+                _pp_draft_cache = draft_cache
+                logger.info(f"PP idle-time speculation: rank {_pp_info.rank}/{_pp_info.world_size}")
+            else:
+                logger.info(f"PP rank {_pp_info.rank}/{_pp_info.world_size}: no idle-time spec")
+
     _generation_logged = False
     try:
       _gen_kwargs = dict(
@@ -1083,6 +1098,10 @@ def mlx_generate(
           kv_group_size=KV_GROUP_SIZE,
           kv_bits=KV_BITS,
       )
+      if _pp_draft_model is not None:
+          _gen_kwargs["pp_draft_model"] = _pp_draft_model
+          _gen_kwargs["pp_draft_cache"] = _pp_draft_cache
+          _gen_kwargs["sampler"] = make_sampler(temp=0.0)
       if _tp_draft_fn is not None:
           if _prefill_thread is not None:
               _prefill_thread.join()
