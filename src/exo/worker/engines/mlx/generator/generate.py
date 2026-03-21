@@ -196,12 +196,21 @@ def pipeline_parallel_prefill(
                 mx.clear_cache()
 
                 # Log memory at each chunk boundary for debugging OOM during large prefill
-                _peak_gb = mx.get_peak_memory() / 1e9
                 _active_gb = mx.get_active_memory() / 1e9
+                _peak_gb = mx.get_peak_memory() / 1e9
                 _cache_gb = mx.get_cache_memory() / 1e9
+                # Measure actual cache object sizes
+                _obj_bytes = 0
+                for _c in _prompt_cache:
+                    if hasattr(_c, "keys") and _c.keys is not None:
+                        _obj_bytes += _c.keys.nbytes + _c.values.nbytes
+                    elif hasattr(_c, "cache"):
+                        _obj_bytes += sum(_x.nbytes for _x in _c.cache if _x is not None)
+                _obj_mb = _obj_bytes / 1e6
                 logger.info(
                     f"[R{rank}] Prefill chunk {processed}/{total}: "
-                    f"active={_active_gb:.1f}GB, peak={_peak_gb:.1f}GB, cache={_cache_gb:.1f}GB"
+                    f"active={_active_gb:.1f}GB, cache_obj={_obj_mb:.0f}MB, "
+                    f"overhead={_active_gb - _obj_mb/1000:.1f}GB, mlx_cache={_cache_gb:.1f}GB"
                 )
 
                 prompt_progress_callback(processed, total)
