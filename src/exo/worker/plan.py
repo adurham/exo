@@ -80,15 +80,16 @@ def _kill_runner(
             logger.debug(f"_kill_runner: instance {instance_id} not in instances → Shutdown")
             return Shutdown(instance_id=instance_id, runner_id=runner_id)
 
-        # Shut down our own runner if it crashed (e.g. signal 6 OOM) so that
-        # _create_runner can restart it on the next plan cycle.  The worker
-        # gates CreateRunner on a memory check to avoid crash loops.
+        # Runner crashed (e.g. signal 6 OOM, RDMA failure). In-process restart
+        # never works: GPU memory isn't released, RDMA state is dirty, and the
+        # distributed group can't rejoin. Exit the process so the screen session
+        # or supervisor restarts it clean.
         if isinstance(runner.status, RunnerFailed):
-            logger.info(f"_kill_runner: own runner {runner_id} is RunnerFailed → Shutdown")
-            return Shutdown(
-                instance_id=runner.bound_instance.instance.instance_id,
-                runner_id=runner_id,
+            logger.critical(
+                f"Runner {runner_id} failed: {runner.status.error_message}. "
+                "Exiting process for clean restart."
             )
+            raise SystemExit(1)
 
         for (
             global_runner_id
@@ -98,14 +99,11 @@ def _kill_runner(
 
             peer_status = all_runners.get(global_runner_id, None)
             if isinstance(peer_status, RunnerFailed):
-                logger.info(
-                    f"_kill_runner: peer runner {global_runner_id} is RunnerFailed "
-                    f"(our runner={runner_id}) → Shutdown"
+                logger.critical(
+                    f"Peer runner {global_runner_id} failed. "
+                    "Exiting process for clean restart."
                 )
-                return Shutdown(
-                    instance_id=instance_id,
-                    runner_id=runner_id,
-                )
+                raise SystemExit(1)
 
 
 def _create_runner(

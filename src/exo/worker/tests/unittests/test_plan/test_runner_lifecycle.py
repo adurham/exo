@@ -1,5 +1,6 @@
 from typing import Any
 
+import pytest
 import exo.worker.plan as plan_mod
 from exo.shared.types.tasks import Shutdown
 from exo.shared.types.worker.instances import BoundInstance, Instance, InstanceId
@@ -84,18 +85,15 @@ def test_plan_kills_runner_when_sibling_failed():
         RUNNER_2_ID: RunnerFailed(error_message="boom"),
     }
 
-    result = plan_mod.plan(
-        node_id=NODE_A,
-        runners=runners,  # type: ignore[arg-type]
-        global_download_status={NODE_A: []},
-        instances=instances,
-        all_runners=all_runners,
-        tasks={},
-    )
-
-    assert isinstance(result, Shutdown)
-    assert result.instance_id == INSTANCE_1_ID
-    assert result.runner_id == RUNNER_1_ID
+    with pytest.raises(SystemExit):
+        plan_mod.plan(
+            node_id=NODE_A,
+            runners=runners,  # type: ignore[arg-type]
+            global_download_status={NODE_A: []},
+            instances=instances,
+            all_runners=all_runners,
+            tasks={},
+        )
 
 
 def test_plan_creates_runner_when_missing_for_node():
