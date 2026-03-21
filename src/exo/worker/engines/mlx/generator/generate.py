@@ -194,6 +194,15 @@ def pipeline_parallel_prefill(
                 # mx.eval, causing 90s+ blocks and heartbeat timeouts.
                 mx.async_eval(*[c.state for c in _prompt_cache])  # type: ignore
 
+                # Log memory at each chunk boundary for debugging OOM during large prefill
+                _peak_gb = mx.get_peak_memory() / 1e9
+                _active_gb = mx.get_active_memory() / 1e9
+                _cache_gb = mx.get_cache_memory() / 1e9
+                logger.info(
+                    f"[R{rank}] Prefill chunk {processed}/{total}: "
+                    f"active={_active_gb:.1f}GB, peak={_peak_gb:.1f}GB, cache={_cache_gb:.1f}GB"
+                )
+
                 prompt_progress_callback(processed, total)
 
             for _ in range(n_trailing):
