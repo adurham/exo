@@ -1074,17 +1074,15 @@ def mlx_generate(
     # The draft model runs during rank 0's idle time (waiting for rank 1 via all_gather).
     _pp_draft_model = None
     _pp_draft_cache = None
-    if _is_local_draft and not _is_tp:
-        # PP idle-time spec requires no TP within the PP rank — TP collectives
-        # inside the model forward would deadlock if only the TP master speculates.
+    if _is_local_draft:
         from exo.worker.engines.mlx.auto_parallel import get_pipeline_info
         _pp_info = get_pipeline_info(model)
         if _pp_info is not None:
             # PP detected: disable traditional speculative decode (different all_gather
             # patterns between generate_step and speculative_generate_step would deadlock).
             _tp_draft_fn = None
-            if _pp_info.rank != _pp_info.world_size - 1 and _is_rank0:
-                # Non-last PP rank: enable idle-time speculation
+            if _pp_info.rank != _pp_info.world_size - 1 and draft_cache is not None:
+                # Non-last PP rank with draft cache: enable idle-time speculation
                 _pp_draft_model = draft_model
                 _pp_draft_cache = draft_cache
                 logger.info(
