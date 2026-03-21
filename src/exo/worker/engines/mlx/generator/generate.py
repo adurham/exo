@@ -1159,6 +1159,8 @@ def mlx_generate(
             finish_reason = "context_window_exceeded"
 
         is_done = finish_reason is not None
+        if is_done:
+            logger.info(f"Generation stopping: finish_reason={finish_reason}, token={out.token}, n={completion_tokens}, text={repr(out.text[:50])}")
 
         stats: GenerationStats | None = None
         if is_done:
