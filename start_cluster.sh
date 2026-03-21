@@ -18,14 +18,14 @@
 : "${MLX_JACCL_FRAME_SIZE:=8192}"
 : "${EXO_KV_BITS:=16}"
 : "${EXO_PP_LAYER_OFFSET:=0}"
-: "${EXO_COMPILE_DECODE:=0}"
+: "${EXO_COMPILE_DECODE:=1}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
 # Speculative decoding: PP mode with local draft
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3.5-0.8B-MLX-4bit}"
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_DRAFT_TOKENS:=3}"
 
 export IBV_FORK_SAFE=1
