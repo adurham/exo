@@ -892,6 +892,10 @@ def mlx_generate(
         if kv_prefix_cache is None or not generated_text_parts:
             return
         try:
+            # Materialize any lazy compile-output arrays before saving.
+            # mx.compile produces trace nodes that can't be evaluated in a
+            # different compile context (next request). One-time cost.
+            mx.eval([c.state for c in caches])
             if EXO_TRACING_ENABLED:
                 t_cache_update = time.perf_counter()
             generated_tokens_array = mx.array(
