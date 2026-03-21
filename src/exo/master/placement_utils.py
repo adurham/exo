@@ -215,6 +215,24 @@ def _get_shard_assignments_for_pure_pipeline(
         cycle.node_ids, node_memory, total_memory, model_card
     )
 
+    # EXO_PP_LAYER_OFFSET: shift layers from rank 0 toward the last rank.
+    # Positive values give rank 0 fewer layers (more idle time for speculation).
+    pp_offset = int(os.environ.get("EXO_PP_LAYER_OFFSET", "0"))
+    if pp_offset != 0 and len(layer_allocations) == 2:
+        old_r0, old_r1 = layer_allocations
+        new_r0 = old_r0 - pp_offset
+        new_r1 = old_r1 + pp_offset
+        if new_r0 < 1 or new_r1 < 1:
+            raise ValueError(
+                f"EXO_PP_LAYER_OFFSET={pp_offset} produces invalid split "
+                f"{new_r0}/{new_r1} (need at least 1 layer per rank)"
+            )
+        logger.info(
+            f"EXO_PP_LAYER_OFFSET={pp_offset}: adjusting PP split from "
+            f"{old_r0}/{old_r1} to {new_r0}/{new_r1}"
+        )
+        layer_allocations = [new_r0, new_r1]
+
     runner_to_shard: dict[RunnerId, ShardMetadata] = {}
     node_to_runner: dict[NodeId, RunnerId] = {}
 
