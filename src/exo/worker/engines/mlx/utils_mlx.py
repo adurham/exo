@@ -293,12 +293,14 @@ def shard_and_load(
     # Load draft on the non-last PP rank (device_rank 0). Use device_rank from
     # shard metadata, NOT group.rank() — JACCL group rank is non-deterministic
     # and can flip between restarts.
-    _is_draft_rank = (
+    _has_pp_rank = (
         hasattr(shard_metadata, "device_rank")
-        and shard_metadata.device_rank == 0
         and hasattr(shard_metadata, "world_size")
         and shard_metadata.world_size > 1
-    ) or group.rank() == 0  # fallback for non-PP (TP) mode
+    )
+    _is_draft_rank = (
+        shard_metadata.device_rank == 0 if _has_pp_rank else group.rank() == 0
+    )
     if draft_model_id and _is_draft_rank:
         try:
             draft_path = build_model_path(ModelId(draft_model_id))
