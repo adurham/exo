@@ -24,8 +24,8 @@
 : "${MLX_SDPA_CPU_FRACTION:=0.10}"
 : "${LOG_LEVEL:=DEBUG}"
 
-# Speculative decoding: PP mode with local draft
-: "${EXO_DRAFT_MODEL:=}"
+# Speculative decoding: PP idle-time speculation with local draft
+: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_DRAFT_TOKENS:=3}"
 
 export IBV_FORK_SAFE=1
