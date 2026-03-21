@@ -463,18 +463,9 @@ class PipelineLastLayer(CustomMlxLayer):
         self._compiled_decode_active: bool = False
         self._compile_state: list[mx.array] | None = None
         self._hidden_idx: int = -1
-        self._speculative_mode: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         output: mx.array = self.original_layer(x, *args, **kwargs)
-
-        if self._speculative_mode:
-            # Speculative forward: eval output for cache update but skip send/all_gather.
-            # Write raw hidden to compile_state so the speculation caller can retrieve it.
-            _guarded_eval(output)
-            if self._compile_state is not None:
-                self._compile_state[self._hidden_idx] = output
-            return output
 
         if self._compiled_decode_active:
             # Compiled decode: write output to compile state list (send/all_gather handled outside compile)
@@ -562,19 +553,6 @@ def get_pipeline_info(model: nn.Module) -> PipelineInfo | None:
         group=first_layer.group,
         recv_from=first_layer.recv_from,
     )
-
-
-def set_pipeline_speculative_mode(model: nn.Module, active: bool) -> None:
-    """Enable/disable speculative mode on PipelineLastLayer.
-
-    In speculative mode, PipelineLastLayer evals its output (updating cache)
-    but skips send/all_gather — the speculative forward is local to rank 0.
-    """
-    inner = get_inner_model(model)
-    layers = get_layers(inner)
-    for layer in layers:
-        if isinstance(layer, PipelineLastLayer):
-            layer._speculative_mode = active
 
 
 def set_pipeline_compiled_decode(model: nn.Module, active: bool, compile_state: list[mx.array] | None = None, hidden_idx: int = -1) -> None:
