@@ -305,7 +305,9 @@ def shard_and_load(
         try:
             draft_path = build_model_path(ModelId(draft_model_id))
             if not any(draft_path.glob("*.safetensors")):
-                raise FileNotFoundError(f"No safetensors weights in {draft_path}")
+                from huggingface_hub import snapshot_download
+                logger.info(f"Downloading draft model: {draft_model_id}")
+                snapshot_download(repo_id=draft_model_id, local_dir=str(draft_path))
             logger.info(f"Loading local draft model: {draft_model_id} from {draft_path}")
             draft_model, _ = load_model(draft_path, lazy=True, strict=False)
             mx.eval(draft_model)
