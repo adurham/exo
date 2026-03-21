@@ -892,16 +892,6 @@ def mlx_generate(
         if kv_prefix_cache is None or not generated_text_parts:
             return
         try:
-            # Materialize any lazy compile-output arrays before saving.
-            # mx.compile produces trace nodes that can't be evaluated in a
-            # different compile context (next request). One-time cost.
-            # Use tree_flatten to reach ALL leaf arrays in the cache, not just
-            # the sliced .state views (which create new arrays without
-            # evaluating the underlying buffers).
-            from mlx.utils import tree_flatten
-            all_cache_arrays = [v for _, v in tree_flatten(caches)]
-            if all_cache_arrays:
-                mx.eval(*all_cache_arrays)
             if EXO_TRACING_ENABLED:
                 t_cache_update = time.perf_counter()
             generated_tokens_array = mx.array(
