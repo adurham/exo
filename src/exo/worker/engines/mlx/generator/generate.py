@@ -1069,6 +1069,34 @@ def mlx_generate(
 
         _tp_draft_fn = _tp_draft_fn_impl
 
+    # PP idle-time speculation: if PP is detected and we have a local draft model
+    # on non-last rank, use idle-time speculation instead of traditional speculative decode.
+    # The draft model runs during rank 0's idle time (waiting for rank 1 via all_gather).
+    _pp_draft_model = None
+    _pp_draft_cache = None
+    if _is_local_draft and not _is_tp:
+        # PP idle-time spec requires no TP within the PP rank — TP collectives
+        # inside the model forward would deadlock if only the TP master speculates.
+        from exo.worker.engines.mlx.auto_parallel import get_pipeline_info
+        _pp_info = get_pipeline_info(model)
+        if _pp_info is not None:
+            # PP detected: disable traditional speculative decode (different all_gather
+            # patterns between generate_step and speculative_generate_step would deadlock).
+            _tp_draft_fn = None
+            if _pp_info.rank != _pp_info.world_size - 1 and _is_rank0:
+                # Non-last PP rank: enable idle-time speculation
+                _pp_draft_model = draft_model
+                _pp_draft_cache = draft_cache
+                logger.info(
+                    f"PP idle-time speculation: rank {_pp_info.rank}/{_pp_info.world_size}, "
+                    f"draft model loaded (forcing temp=0)"
+                )
+            else:
+                logger.info(
+                    f"PP rank {_pp_info.rank}/{_pp_info.world_size}: "
+                    "traditional spec decode disabled (PP mode), no idle-time spec"
+                )
+
     _generation_logged = False
     try:
       _gen_kwargs = dict(
@@ -1083,6 +1111,11 @@ def mlx_generate(
           kv_group_size=KV_GROUP_SIZE,
           kv_bits=KV_BITS,
       )
+      if _pp_draft_model is not None:
+          # PP idle-time speculation: pass draft model to generate_step
+          _gen_kwargs["pp_draft_model"] = _pp_draft_model
+          _gen_kwargs["pp_draft_cache"] = _pp_draft_cache
+          _gen_kwargs["sampler"] = make_sampler(temp=0.0)
       if _tp_draft_fn is not None:
           if _prefill_thread is not None:
               _prefill_thread.join()
