@@ -887,28 +887,11 @@ def mlx_generate(
                 f"{generation_tps:.1f} tok/s"
             )
 
-    def _materialize_cache():
-        """Force-eval all raw cache arrays so no lazy compile artifacts persist.
-
-        c.state returns sliced views (new arrays) that don't eval the underlying
-        buffers. We must eval the raw attributes: KVCache.keys/values,
-        ArraysCache.cache entries.
-        """
-        arrays_to_eval = []
-        for c in caches:
-            if hasattr(c, "keys") and c.keys is not None:
-                arrays_to_eval.extend([c.keys, c.values])
-            elif hasattr(c, "cache"):
-                arrays_to_eval.extend(x for x in c.cache if x is not None)
-        if arrays_to_eval:
-            mx.eval(*arrays_to_eval)
-
     def _save_kv_cache(generated_text_parts: list[str]) -> None:
         """Save KV cache with generated tokens. Called on both normal completion and abort."""
         if kv_prefix_cache is None or not generated_text_parts:
             return
         try:
-            _materialize_cache()
             if EXO_TRACING_ENABLED:
                 t_cache_update = time.perf_counter()
             generated_tokens_array = mx.array(
