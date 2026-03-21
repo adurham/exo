@@ -356,6 +356,12 @@ for NODE in "${NODES[@]}"; do
 
     echo "Building dashboard on $NODE..."
     ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
+
+    # Pre-download draft model on studios (device_rank assignment is non-deterministic)
+    if [[ "$NODE" != *"macbook"* ]] && [ -n "$EXO_DRAFT_MODEL" ]; then
+        echo "Ensuring draft model on $NODE..."
+        ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv run huggingface-cli download $EXO_DRAFT_MODEL --local-dir ~/.exo/models/\$(echo $EXO_DRAFT_MODEL | tr / --) --quiet'" || echo "WARNING: Draft model download failed on $NODE"
+    fi
 done
 
 # 2. Inter-Node Git Sync Check (M4-1 vs M4-2 vs MBP)
