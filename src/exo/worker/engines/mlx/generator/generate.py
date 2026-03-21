@@ -1102,12 +1102,6 @@ def mlx_generate(
           _gen_kwargs["pp_draft_model"] = _pp_draft_model
           _gen_kwargs["pp_draft_cache"] = _pp_draft_cache
           _gen_kwargs["pp_no_compile"] = True  # rank 0: skip compile for speculation
-          # Don't override sampler — forced temp=0 deadlocks when the user requests
-          # temp>0 (rank samplers diverge). Accept lower acceptance rate instead.
-      elif _pp_draft_model is None and _is_local_draft and _pp_info is not None:
-          # Rank 1 (last rank): also skip compile so KV prefix cache arrays
-          # are regular tensors, not stale compile artifacts.
-          _gen_kwargs["pp_no_compile"] = True
       if _tp_draft_fn is not None:
           if _prefill_thread is not None:
               _prefill_thread.join()
