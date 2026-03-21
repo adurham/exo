@@ -1082,7 +1082,7 @@ def mlx_generate(
                 _pp_draft_cache = draft_cache
                 logger.info(f"PP idle-time speculation: rank {_pp_info.rank}/{_pp_info.world_size}")
             else:
-                logger.info(f"PP rank {_pp_info.rank}/{_pp_info.world_size}: no idle-time spec")
+                logger.info(f"PP rank {_pp_info.rank}/{_pp_info.world_size}: no idle-time spec (last rank)")
 
     _generation_logged = False
     try:
@@ -1101,7 +1101,12 @@ def mlx_generate(
       if _pp_draft_model is not None:
           _gen_kwargs["pp_draft_model"] = _pp_draft_model
           _gen_kwargs["pp_draft_cache"] = _pp_draft_cache
+          _gen_kwargs["pp_no_compile"] = True  # rank 0: skip compile for speculation
           _gen_kwargs["sampler"] = make_sampler(temp=0.0)
+      elif _pp_draft_model is None and _is_local_draft and _pp_info is not None:
+          # Rank 1 (last rank): also skip compile so KV prefix cache arrays
+          # are regular tensors, not stale compile artifacts.
+          _gen_kwargs["pp_no_compile"] = True
       if _tp_draft_fn is not None:
           if _prefill_thread is not None:
               _prefill_thread.join()
