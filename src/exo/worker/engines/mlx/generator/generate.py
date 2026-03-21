@@ -192,7 +192,8 @@ def pipeline_parallel_prefill(
                 # Pipeline tail ranks have no pending sends, so flush_prefill_sends
                 # is a no-op — without this, all computation defers to the final
                 # mx.eval, causing 90s+ blocks and heartbeat timeouts.
-                mx.async_eval(*[c.state for c in _prompt_cache])  # type: ignore
+                mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+                mx.clear_cache()
 
                 # Log memory at each chunk boundary for debugging OOM during large prefill
                 _peak_gb = mx.get_peak_memory() / 1e9
