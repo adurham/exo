@@ -193,6 +193,15 @@ def pipeline_parallel_prefill(
                 # is a no-op — without this, all computation defers to the final
                 # mx.eval, causing 90s+ blocks and heartbeat timeouts.
                 mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+                # Break shared-buffer references from cache slices back to the
+                # full computation graph of this chunk. Without this, DeltaNet
+                # conv1d state (a 2-position slice of the full conv_input) keeps
+                # the entire chunk's arrays alive (~540KB/tok on 397B).
+                from mlx_lm.models.cache import ArraysCache as _AC
+                for _c in _prompt_cache:
+                    if isinstance(_c, _AC):
+                        _c.cache = [mx.contiguous(x) if x is not None else x for x in _c.cache]
+                        mx.eval(*[x for x in _c.cache if x is not None])
                 mx.clear_cache()
 
                 # Log memory at each chunk boundary for debugging OOM during large prefill
