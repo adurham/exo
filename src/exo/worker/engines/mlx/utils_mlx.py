@@ -290,7 +290,16 @@ def shard_and_load(
     # Wrapped in try/except so a draft failure degrades gracefully.
     draft_model: nn.Module | None = None
     draft_model_id = os.environ.get("EXO_DRAFT_MODEL", "")
-    if draft_model_id and group.rank() == 0:
+    # Load draft on the non-last PP rank (device_rank 0). Use device_rank from
+    # shard metadata, NOT group.rank() — JACCL group rank is non-deterministic
+    # and can flip between restarts.
+    _is_draft_rank = (
+        hasattr(shard_metadata, "device_rank")
+        and shard_metadata.device_rank == 0
+        and hasattr(shard_metadata, "world_size")
+        and shard_metadata.world_size > 1
+    ) or group.rank() == 0  # fallback for non-PP (TP) mode
+    if draft_model_id and _is_draft_rank:
         try:
             draft_path = build_model_path(ModelId(draft_model_id))
             if not any(draft_path.glob("*.safetensors")):
