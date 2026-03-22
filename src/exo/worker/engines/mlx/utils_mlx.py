@@ -351,8 +351,10 @@ def shard_and_load(
                 logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
             else:
                 logger.warning(f"No MTP safetensors found at {mtp_path}")
-        except Exception:
-            logger.warning("Failed to load MTP weights — continuing without MTP", exc_info=True)
+        except Exception as e:
+            import traceback
+            logger.warning(f"Failed to load MTP weights — continuing without MTP: {e}")
+            logger.warning(traceback.format_exc())
             model.mtp = None  # type: ignore
 
     return model, tokenizer, draft_model
