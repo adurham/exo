@@ -301,7 +301,8 @@ def shard_and_load(
     _is_draft_rank = (
         shard_metadata.device_rank == 0 if _has_pp_rank else group.rank() == 0
     )
-    if draft_model_id and _is_draft_rank:
+    _use_mtp = os.environ.get("EXO_MTP_SPECULATION", "0") == "1"
+    if draft_model_id and _is_draft_rank and not _use_mtp:
         try:
             draft_path = build_model_path(ModelId(draft_model_id))
             if not any(draft_path.glob("*.safetensors")):
