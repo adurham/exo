@@ -320,7 +320,7 @@ def shard_and_load(
             )
             draft_model = None
             mx.clear_cache()
-    elif draft_model_id:
+    elif draft_model_id and not _use_mtp:
         # Non-rank-0: signal that draft is configured but don't load model.
         # generate.py uses a sentinel to enable speculative mode with
         # broadcast-only participation (no local draft generation).
