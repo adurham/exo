@@ -21,6 +21,31 @@ step — skipping rank 0's full compute cycle.
 | Max verified context | 104K tokens (12-turn conversation) |
 | Decode at 50K context | ~31 ms/tok (SDPA scaling) |
 
+### 104K Context Test (March 21, 2026)
+
+12-turn multi-turn coding conversation, each turn building on previous context:
+
+| Turn | Prompt tokens | Generated | Total ctx | Elapsed | Finish |
+|------|--------------|-----------|-----------|---------|--------|
+| T1 | 45 | 3,331 | 3,376 | 74s | stop |
+| T2 | 3,395 | 613 | 7,339 | 99s | stop |
+| T3 | 4,029 | 2,624 | 10,597 | 160s | stop |
+| T4 | 6,678 | 151 | 13,397 | 173s | stop |
+| T5 | 6,848 | 16,000 | 29,567 | 505s | length |
+| T6 | 22,871 | 16,000 | 61,590 | 930s | length |
+| T7 | 38,900 | 1,773 | 79,392 | 1,033s | stop |
+| T8 | 40,689 | 145 | 81,326 | 1,053s | stop |
+| T9 | 40,854 | 614 | 82,105 | 1,082s | stop |
+| T10 | 41,487 | 779 | 83,517 | 1,117s | stop |
+| T11 | 42,282 | 1,893 | 86,205 | 1,183s | stop |
+| T12 | 44,189 | 16,000 | **104,112** | 1,718s | length |
+
+- Zero crashes, zero OOM, zero deadlocks
+- Memory stable at 118GB throughout (128GB machines)
+- Decode: 21ms/tok (low ctx) → 31ms/tok (50K ctx) — expected SDPA scaling
+- Prefill: 288-403 tok/s with KV prefix cache reuse
+- All fixes from this session (contiguous, barrier removal, chunk sizing) required
+
 ## Configuration
 
 ```bash
