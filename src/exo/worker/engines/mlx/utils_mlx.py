@@ -326,6 +326,27 @@ def shard_and_load(
         draft_model = _DraftBroadcastSentinel()
         logger.info("Draft configured — will receive tokens from rank 0 via broadcast")
 
+    # Load MTP weights if configured (EXO_MTP_MODEL points to a model ID or path
+    # containing quantized MTP safetensors + config). Downloaded same as draft model.
+    mtp_model_id = os.environ.get("EXO_MTP_MODEL", "")
+    if mtp_model_id and os.environ.get("EXO_MTP_SPECULATION", "0") == "1":
+        try:
+            mtp_path = build_model_path(ModelId(mtp_model_id))
+            if not any(mtp_path.glob("*.safetensors")):
+                from huggingface_hub import snapshot_download
+                logger.info(f"Downloading MTP weights: {mtp_model_id}")
+                snapshot_download(repo_id=mtp_model_id, local_dir=str(mtp_path))
+            logger.info(f"Loading MTP weights from {mtp_path}")
+            mtp_weights = {}
+            for wf in sorted(mtp_path.glob("*.safetensors")):
+                mtp_weights.update(mx.load(str(wf)))
+            # Merge MTP weights into the main model
+            model.load_weights(list(mtp_weights.items()), strict=False)
+            mx.eval(model.mtp)  # type: ignore
+            logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
+        except Exception:
+            logger.warning("Failed to load MTP weights — continuing without MTP", exc_info=True)
+
     return model, tokenizer, draft_model
 
 
