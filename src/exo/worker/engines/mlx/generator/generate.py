@@ -1114,6 +1114,10 @@ def mlx_generate(
           _gen_kwargs["pp_draft_model"] = _pp_draft_model
           _gen_kwargs["pp_draft_cache"] = _pp_draft_cache
           _gen_kwargs["pp_no_compile"] = True  # rank 0: skip compile for speculation
+          # Pass </think> token ID so speculation stays K=1 during thinking
+          _think_end_id = getattr(tokenizer, "_think_end_id", None)
+          if _think_end_id is not None:
+              _gen_kwargs["pp_think_end_token"] = _think_end_id
       if _tp_draft_fn is not None:
           if _prefill_thread is not None:
               _prefill_thread.join()
