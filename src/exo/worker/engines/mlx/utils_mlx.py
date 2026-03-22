@@ -341,13 +341,15 @@ def shard_and_load(
                 mtp_weights = {}
                 for wf in sorted(mtp_path.glob("*.safetensors")):
                     mtp_weights.update(mx.load(str(wf)))
-                # Create MTP module dynamically and load weights
+                # Create MTP module dynamically and load weights.
+                # MTP attaches to the TextModel (language_model), not the outer VLM Model,
+                # because weight keys are "mtp.*" which maps to language_model.mtp.*.
                 from mlx_lm.models.qwen3_5 import MTPModule
-                inner = model.model if hasattr(model, "model") else model  # type: ignore
-                args = inner.args if hasattr(inner, "args") else model.args  # type: ignore
-                model.mtp = MTPModule(args)  # type: ignore
-                model.load_weights(list(mtp_weights.items()), strict=False)
-                mx.eval(model.mtp)  # type: ignore
+                target = model.language_model if hasattr(model, "language_model") else model  # type: ignore
+                args = target.args  # type: ignore
+                target.mtp = MTPModule(args)  # type: ignore
+                target.load_weights(list(mtp_weights.items()), strict=False)
+                mx.eval(target.mtp)  # type: ignore
                 logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
             else:
                 logger.warning(f"No MTP safetensors found at {mtp_path}")
