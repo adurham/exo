@@ -860,11 +860,6 @@ def mlx_generate(
     # send/recv/all_gather.
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
-    if EXO_TRACING_ENABLED:
-        logger.info(f"Post-prefill: mx_barrier() took {(time.perf_counter() - t_barrier) * 1000:.1f}ms")
-
-    if on_generation_token is not None:
-        on_generation_token()
 
     if EXO_TRACING_ENABLED:
         logger.info("Post-prefill: starting decode")
