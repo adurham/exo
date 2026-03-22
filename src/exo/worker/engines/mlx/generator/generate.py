@@ -487,7 +487,7 @@ def warmup_inference(
 
     logger.info(f"warmed up by generating {tokens_generated} tokens")
     check_for_cancel_every = min(
-        math.ceil(tokens_generated / min(time.monotonic() - t, 0.001)), 100
+        math.ceil(tokens_generated / min(time.monotonic() - t, 0.001)), 10
     )
     if group is not None:
         gathered = mx.distributed.all_gather(
@@ -1146,6 +1146,17 @@ def mlx_generate(
             in_thinking = False
         if in_thinking:
             reasoning_tokens += 1
+
+        # Thinking budget: stop generation if thinking exceeds limit.
+        # Prevents infinite thinking loops that waste cluster time.
+        _max_thinking = int(os.environ.get("EXO_MAX_THINKING_TOKENS", "16384"))
+        if _max_thinking > 0 and in_thinking and reasoning_tokens >= _max_thinking:
+            logger.warning(
+                f"Thinking budget exhausted ({reasoning_tokens} tokens). "
+                f"Stopping generation to prevent infinite loop."
+            )
+            finish_reason = "length"
+            break
 
         # Check for stop sequences
         text = out.text
