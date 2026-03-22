@@ -357,6 +357,12 @@ def shard_and_load(
                 def _replace_linear_with_quantized(mod: nn.Module, prefix: str) -> None:
                     for name, child in mod.children().items():
                         full = f"{prefix}.{name}" if prefix else name
+                        # Recurse into lists (e.g., self.layers = [DecoderLayer(...)])
+                        if isinstance(child, list):
+                            for i, item in enumerate(child):
+                                if isinstance(item, nn.Module):
+                                    _replace_linear_with_quantized(item, f"{full}.{i}")
+                            continue
                         if isinstance(child, nn.Linear) and f"mtp.{full}.scales" in mtp_weights:
                             q = nn.QuantizedLinear(
                                 child.weight.shape[1], child.weight.shape[0],
