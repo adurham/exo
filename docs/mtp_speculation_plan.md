@@ -75,6 +75,19 @@ Feature flag: `EXO_MTP_SPECULATION=1` (default: 0, uses existing draft model)
 
 The MTP layer has 512 experts but only activates 10+1 per token. The actual weight reads are ~80MB (not the full 8.5GB), making it much faster than the 0.8B draft model despite being architecturally larger.
 
+## PP Mode: NOT VIABLE (Tested March 22, 2026)
+
+MTP on rank 0 (partial hidden state): **0% acceptance** — garbage predictions.
+MTP on rank 1 (full hidden state): ~7ms wait penalty makes it **slower than draft model**.
+
+| Approach | Step time | Acceptance | Effective tok/s |
+|----------|-----------|-----------|----------------|
+| Draft model (0.8B, rank 0) | 24ms | 80% | ~10.2ms/tok |
+| MTP on rank 0 | 24ms | 0% | N/A (broken) |
+| MTP on rank 1 | 31ms | ~95% est. | ~11.6ms/tok |
+
+MTP only viable for: TP mode (all ranks have full hidden), single device, or PP with 3+ ranks.
+
 ## Risk: MTP layer is SDPA (not DeltaNet)
 
 The MTP layer uses standard attention (`self_attn`), not DeltaNet. This means:
