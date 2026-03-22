@@ -344,24 +344,29 @@ def shard_and_load(
                     mtp_weights.update(mx.load(str(wf)))
                 # Create MTP module and load quantized weights.
                 # MTP attaches to TextModel (language_model.mtp.*).
-                # load_weights auto-converts Linear → QuantizedLinear when it sees
-                # .scales/.biases keys alongside .weight. No nn.quantize() needed.
-                # The Linear init allocates lazy mx.zeros (no GPU memory until eval),
-                # and load_weights replaces them before eval triggers.
                 from mlx_lm.models.qwen3_5 import MTPModule
                 target = model.language_model if hasattr(model, "language_model") else model  # type: ignore
                 args = target.args  # type: ignore
                 target.mtp = MTPModule(args)  # type: ignore
-                # MTP weights need the same sanitization as main model weights
-                # (expert fusion, projection fusion, norm shifting, conv1d transpose)
+                # Sanitize MTP weights (expert fusion, projection fusion, etc.)
                 mtp_weights = target.sanitize(mtp_weights)
-                # Quantize MTP module: convert Linear → QuantizedLinear for layers
-                # that have .scales in the weight dict (same as main model loading)
-                def _mtp_class_predicate(p: str, m: object) -> bool:
-                    if not hasattr(m, "to_quantized"):
-                        return False
-                    return f"mtp.{p}.scales" in mtp_weights
-                nn.quantize(target.mtp, group_size=64, bits=4, class_predicate=_mtp_class_predicate)  # type: ignore
+                # Replace Linear → QuantizedLinear WITHOUT evaluating bf16 weights.
+                # nn.quantize() would materialise 12.3GB of bf16 expert weights during
+                # conversion. Instead, directly construct QuantizedLinear with the right
+                # dimensions and let load_weights fill them with quantized data.
+                def _replace_linear_with_quantized(mod: nn.Module, prefix: str) -> None:
+                    for name, child in mod.children().items():
+                        full = f"{prefix}.{name}" if prefix else name
+                        if isinstance(child, nn.Linear) and f"mtp.{full}.scales" in mtp_weights:
+                            q = nn.QuantizedLinear(
+                                child.weight.shape[1], child.weight.shape[0],
+                                bias=hasattr(child, "bias") and child.bias is not None,
+                                group_size=64, bits=4,
+                            )
+                            setattr(mod, name, q)
+                        elif isinstance(child, nn.Module):
+                            _replace_linear_with_quantized(child, full)
+                _replace_linear_with_quantized(target.mtp, "")
                 target.load_weights(list(mtp_weights.items()), strict=False)
                 mx.eval(target.mtp)  # type: ignore
                 logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")

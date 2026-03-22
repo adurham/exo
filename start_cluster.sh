@@ -17,7 +17,7 @@
 : "${MLX_JACCL_NUM_BUFFERS:=4}"
 : "${MLX_JACCL_FRAME_SIZE:=8192}"
 : "${EXO_KV_BITS:=16}"
-: "${EXO_PP_LAYER_OFFSET:=1}"  # rank 0 gets 14 layers (room for MTP 3.5GB), rank 1 gets 16
+: "${EXO_PP_LAYER_OFFSET:=0}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
