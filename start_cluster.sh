@@ -28,6 +28,9 @@
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_DRAFT_TOKENS:=3}"
 : "${EXO_PP_DRAFT_K:=3}"
+# MTP speculation (alternative to draft model): set both to enable
+: "${EXO_MTP_SPECULATION:=0}"
+: "${EXO_MTP_MODEL:=mtp-qwen35-397b-4bit}"
 
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -422,6 +425,8 @@ for NODE in "${NODES[@]}"; do
         EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
         EXO_ENV="$EXO_ENV EXO_DRAFT_TOKENS=$EXO_DRAFT_TOKENS"
         EXO_ENV="$EXO_ENV EXO_PP_DRAFT_K=$EXO_PP_DRAFT_K"
+        EXO_ENV="$EXO_ENV EXO_MTP_SPECULATION=$EXO_MTP_SPECULATION"
+        EXO_ENV="$EXO_ENV EXO_MTP_MODEL=$EXO_MTP_MODEL"
         # Raise memory threshold: default 0.90 triggers eviction at 115GB on
         # 128GB, but the KV cache we evict is the same one the next request
         # needs. Re-prefilling after eviction causes mx.synchronize deadlock.
