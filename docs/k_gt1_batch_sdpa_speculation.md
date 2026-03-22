@@ -85,6 +85,18 @@ MacBook M4 Max 36GB (same bandwidth as Studios): PP=3 doesn't improve throughput
 2. **`_orig_snap` cleared before use**: TypeError crash on rank 0, rank 1 hung at recv
 3. **Hidden state shape mismatch**: `(1,K,H)` left in `_cache_state` after batch verify → `recv_like` shape error
 
+## Draft Model Optimization Ceiling
+
+The 0.8B-8bit draft model takes **3ms/token**:
+- **1.13ms** weight reads (619MB at 546 GB/s) — irreducible
+- **1.87ms** dispatch overhead (24 layers × 78μs) — cannot compile away
+
+**mx.compile does NOT work** for DeltaNet draft models. ArraysCache mutations (`cache[i] = mx.contiguous(state)`) are not tracked correctly between compiled calls. Tested: acceptance cratered from 91%→66% (factual), 74%→34% (code).
+
+**Qwen3 (non-3.5) as draft**: not viable — different architecture/training distribution, predictions diverge from Qwen3.5 target model.
+
+**3ms/token is the architecture ceiling** for DeltaNet models on MLX.
+
 ## Config
 
 ```bash
