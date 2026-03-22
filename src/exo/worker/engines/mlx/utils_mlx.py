@@ -352,6 +352,16 @@ def shard_and_load(
                 target = model.language_model if hasattr(model, "language_model") else model  # type: ignore
                 args = target.args  # type: ignore
                 target.mtp = MTPModule(args)  # type: ignore
+                # MTP weights need the same sanitization as main model weights
+                # (expert fusion, projection fusion, norm shifting, conv1d transpose)
+                mtp_weights = target.sanitize(mtp_weights)
+                # Quantize MTP module: convert Linear → QuantizedLinear for layers
+                # that have .scales in the weight dict (same as main model loading)
+                def _mtp_class_predicate(p: str, m: object) -> bool:
+                    if not hasattr(m, "to_quantized"):
+                        return False
+                    return f"mtp.{p}.scales" in mtp_weights
+                nn.quantize(target.mtp, group_size=64, bits=4, class_predicate=_mtp_class_predicate)  # type: ignore
                 target.load_weights(list(mtp_weights.items()), strict=False)
                 mx.eval(target.mtp)  # type: ignore
                 logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
