@@ -187,7 +187,8 @@ def load_mlx_items(
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
         start_time = time.perf_counter()
-        model, _ = load_model(model_path, lazy=True, strict=False)
+        _mc: dict[str, Any] | None = {"mtp_num_hidden_layers": 1} if os.environ.get("EXO_MTP_SPECULATION", "0") == "1" else None
+        model, _ = load_model(model_path, lazy=True, strict=False, model_config=_mc)
         # Eval layers one by one for progress reporting
         try:
             inner = get_inner_model(model)
@@ -235,7 +236,10 @@ def shard_and_load(
 ) -> tuple[nn.Module, TokenizerWrapper, nn.Module | None]:
     model_path = build_model_path(shard_metadata.model_card.model_id)
 
-    model, _ = load_model(model_path, lazy=True, strict=False)
+    _model_config: dict[str, Any] | None = None
+    if os.environ.get("EXO_MTP_SPECULATION", "0") == "1":
+        _model_config = {"mtp_num_hidden_layers": 1}
+    model, _ = load_model(model_path, lazy=True, strict=False, model_config=_model_config)
     logger.debug(model)
     assert isinstance(model, nn.Module)
 
