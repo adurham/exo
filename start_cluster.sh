@@ -420,6 +420,10 @@ for NODE in "${NODES[@]}"; do
         # Studios: small local draft model (independent copy per node, no TP)
         EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
         EXO_ENV="$EXO_ENV EXO_DRAFT_TOKENS=$EXO_DRAFT_TOKENS"
+        # Raise memory threshold: default 0.90 triggers eviction at 115GB on
+        # 128GB, but the KV cache we evict is the same one the next request
+        # needs. Re-prefilling after eviction causes mx.synchronize deadlock.
+        EXO_ENV="$EXO_ENV EXOMEMORY_THRESHOLD=0.98"
     fi
 
 
