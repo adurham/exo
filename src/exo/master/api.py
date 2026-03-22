@@ -699,6 +699,16 @@ class API:
             raise
         finally:
             logger.info(f"chunk_stream: cleanup cmd={command_id}")
+            # If the stream ended without a finish_reason (client disconnect
+            # during non-streaming response, or any abnormal exit), cancel
+            # the generation so the runner stops producing tokens into the void.
+            if last_stats is None:
+                cancel_cmd = TaskCancelled(cancelled_command_id=command_id)
+                with anyio.CancelScope(shield=True):
+                    await self.command_sender.send(
+                        ForwarderCommand(origin=self._system_id, command=cancel_cmd)
+                    )
+                logger.info(f"chunk_stream: sent TaskCancelled for incomplete cmd={command_id}")
             await self._send(TaskFinished(finished_command_id=command_id))
             if command_id in self._text_generation_queues:
                 del self._text_generation_queues[command_id]
