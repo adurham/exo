@@ -851,23 +851,15 @@ def mlx_generate(
     if on_generation_token is not None:
         on_generation_token()
 
-    # Flush all streams before decode — same rationale as pre-prefill sync.
-    if group is not None:
-        if EXO_TRACING_ENABLED:
-            t_sync = time.perf_counter()
-            logger.info("Post-prefill: mx.synchronize()")
-        mx.synchronize()
-        if EXO_TRACING_ENABLED:
-            logger.info(f"Post-prefill: mx.synchronize() took {(time.perf_counter() - t_sync) * 1000:.1f}ms")
-
     if on_generation_token is not None:
         on_generation_token()
 
+    # NOTE: post-prefill mx_barrier removed — it deadlocked for 160s+ after
+    # large prefills. The prefill's own pipeline sends + evals already
+    # synchronize the ranks. Decode's _pp_step handles per-step sync via
+    # send/recv/all_gather.
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
-        t_barrier = time.perf_counter()
-        logger.info("Post-prefill: mx_barrier()")
-    mx_barrier(group)
     if EXO_TRACING_ENABLED:
         logger.info(f"Post-prefill: mx_barrier() took {(time.perf_counter() - t_barrier) * 1000:.1f}ms")
 
