@@ -17,7 +17,7 @@
 : "${MLX_JACCL_NUM_BUFFERS:=4}"
 : "${MLX_JACCL_FRAME_SIZE:=8192}"
 : "${EXO_KV_BITS:=16}"
-: "${EXO_PP_LAYER_OFFSET:=0}"
+: "${EXO_PP_LAYER_OFFSET:=1}"  # rank 0 gets 1 fewer layer to fit MTP init peak
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"

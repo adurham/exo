@@ -370,7 +370,7 @@ def shard_and_load(
                                 group_size=64, bits=4,
                             )
                             setattr(mod, name, q)
-                        elif hasattr(child, 'weight') and child.weight.ndim == 3 and f"mtp.{full}.scales" in mtp_weights:
+                        elif hasattr(child, 'weight') and child.weight.ndim == 3:
                             # SwitchLinear: 3D weight (num_experts, out, in) = 12.9GB bf16.
                             # Can't use QuantizedSwitchLinear() — its __init__ also creates
                             # random bf16 then quantizes. Instead, create an empty shell and
