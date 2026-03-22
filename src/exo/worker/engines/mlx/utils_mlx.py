@@ -364,15 +364,22 @@ def shard_and_load(
                                 group_size=64, bits=4,
                             )
                             setattr(mod, name, q)
-                        elif isinstance(child, nn.SwitchLinear) and f"mtp.{full}.scales" in mtp_weights:
-                            # SwitchLinear holds batched expert weights (12.9GB bf16).
-                            # Replace with QuantizedSwitchLinear to avoid materialising bf16.
+                        elif hasattr(child, 'weight') and child.weight.ndim == 3 and f"mtp.{full}.scales" in mtp_weights:
+                            # SwitchLinear: 3D weight (num_experts, out, in) = 12.9GB bf16.
+                            # Can't use QuantizedSwitchLinear() — its __init__ also creates
+                            # random bf16 then quantizes. Instead, create an empty shell and
+                            # set the quantized weight arrays directly from our weight dict.
+                            from mlx_lm.models.switch_layers import QuantizedSwitchLinear as _QSL
                             num_experts, output_dims, input_dims = child.weight.shape
-                            q = nn.QuantizedSwitchLinear(
-                                input_dims, output_dims, num_experts,
-                                bias=hasattr(child, "bias") and child.bias is not None,
-                                group_size=64, bits=4,
-                            )
+                            q = object.__new__(_QSL)
+                            nn.Module.__init__(q)
+                            q.group_size = 64
+                            q.bits = 4
+                            q.mode = "affine"
+                            # Placeholder tiny arrays — load_weights will replace them
+                            q.weight = mx.zeros((1, 1, 1), dtype=mx.uint32)
+                            q.scales = mx.zeros((1, 1, 1), dtype=mx.bfloat16)
+                            q.biases = mx.zeros((1, 1, 1), dtype=mx.bfloat16)
                             setattr(mod, name, q)
                         elif isinstance(child, nn.Module):
                             _replace_linear_with_quantized(child, full)
