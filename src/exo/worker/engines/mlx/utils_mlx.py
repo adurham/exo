@@ -330,7 +330,7 @@ def shard_and_load(
     # Load MTP weights if configured. MTP module is created dynamically ONLY
     # after confirming weights exist — avoids allocating 3.5GB of empty weights.
     mtp_model_id = os.environ.get("EXO_MTP_MODEL", "")
-    if mtp_model_id and os.environ.get("EXO_MTP_SPECULATION", "0") == "1":
+    if mtp_model_id and _use_mtp and _is_draft_rank:
         try:
             mtp_path = build_model_path(ModelId(mtp_model_id))
             if not any(mtp_path.glob("*.safetensors")):
