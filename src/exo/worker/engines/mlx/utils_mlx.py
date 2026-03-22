@@ -187,8 +187,7 @@ def load_mlx_items(
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
         start_time = time.perf_counter()
-        _mc: dict[str, Any] | None = {"mtp_num_hidden_layers": 1} if os.environ.get("EXO_MTP_SPECULATION", "0") == "1" else None
-        model, _ = load_model(model_path, lazy=True, strict=False, model_config=_mc)
+        model, _ = load_model(model_path, lazy=True, strict=False)
         # Eval layers one by one for progress reporting
         try:
             inner = get_inner_model(model)
@@ -236,10 +235,7 @@ def shard_and_load(
 ) -> tuple[nn.Module, TokenizerWrapper, nn.Module | None]:
     model_path = build_model_path(shard_metadata.model_card.model_id)
 
-    _model_config: dict[str, Any] | None = None
-    if os.environ.get("EXO_MTP_SPECULATION", "0") == "1":
-        _model_config = {"mtp_num_hidden_layers": 1}
-    model, _ = load_model(model_path, lazy=True, strict=False, model_config=_model_config)
+    model, _ = load_model(model_path, lazy=True, strict=False)
     logger.debug(model)
     assert isinstance(model, nn.Module)
 
@@ -330,8 +326,8 @@ def shard_and_load(
         draft_model = _DraftBroadcastSentinel()
         logger.info("Draft configured — will receive tokens from rank 0 via broadcast")
 
-    # Load MTP weights if configured (EXO_MTP_MODEL points to a model ID or path
-    # containing quantized MTP safetensors + config). Downloaded same as draft model.
+    # Load MTP weights if configured. MTP module is created dynamically ONLY
+    # after confirming weights exist — avoids allocating 3.5GB of empty weights.
     mtp_model_id = os.environ.get("EXO_MTP_MODEL", "")
     if mtp_model_id and os.environ.get("EXO_MTP_SPECULATION", "0") == "1":
         try:
@@ -340,16 +336,24 @@ def shard_and_load(
                 from huggingface_hub import snapshot_download
                 logger.info(f"Downloading MTP weights: {mtp_model_id}")
                 snapshot_download(repo_id=mtp_model_id, local_dir=str(mtp_path))
-            logger.info(f"Loading MTP weights from {mtp_path}")
-            mtp_weights = {}
-            for wf in sorted(mtp_path.glob("*.safetensors")):
-                mtp_weights.update(mx.load(str(wf)))
-            # Merge MTP weights into the main model
-            model.load_weights(list(mtp_weights.items()), strict=False)
-            mx.eval(model.mtp)  # type: ignore
-            logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
+            if any(mtp_path.glob("*.safetensors")):
+                logger.info(f"Loading MTP weights from {mtp_path}")
+                mtp_weights = {}
+                for wf in sorted(mtp_path.glob("*.safetensors")):
+                    mtp_weights.update(mx.load(str(wf)))
+                # Create MTP module dynamically and load weights
+                from mlx_lm.models.qwen3_5 import MTPModule
+                inner = model.model if hasattr(model, "model") else model  # type: ignore
+                args = inner.args if hasattr(inner, "args") else model.args  # type: ignore
+                model.mtp = MTPModule(args)  # type: ignore
+                model.load_weights(list(mtp_weights.items()), strict=False)
+                mx.eval(model.mtp)  # type: ignore
+                logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
+            else:
+                logger.warning(f"No MTP safetensors found at {mtp_path}")
         except Exception:
             logger.warning("Failed to load MTP weights — continuing without MTP", exc_info=True)
+            model.mtp = None  # type: ignore
 
     return model, tokenizer, draft_model
 
