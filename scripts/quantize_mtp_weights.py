@@ -21,9 +21,6 @@ from pathlib import Path
 import mlx.core as mx
 import mlx.nn as nn
 from huggingface_hub import hf_hub_download
-from safetensors import safe_open
-from safetensors.numpy import save_file
-import numpy as np
 
 
 MODEL_ID = "Qwen/Qwen3.5-397B-A17B"
@@ -69,16 +66,19 @@ def main():
     mtp_files = sorted(set(mtp_key_to_file.values()))
     print(f"Found {len(mtp_key_to_file)} MTP weight tensors across {len(mtp_files)} files")
 
-    # 2. Download and extract MTP weights
-    all_mtp_weights: dict[str, np.ndarray] = {}
+    # 2. Download and extract MTP weights using MLX (handles bf16 natively)
+    all_mtp_weights: dict[str, mx.array] = {}
     for filename in mtp_files:
         print(f"Downloading {filename}...")
         filepath = hf_hub_download(MODEL_ID, filename)
-        print(f"  Extracting MTP weights...")
+        print(f"  Loading and extracting MTP weights...")
+        file_weights = mx.load(filepath)
         keys_in_file = [k for k, f in mtp_key_to_file.items() if f == filename]
-        with safe_open(filepath, framework="numpy") as f:
-            for key in keys_in_file:
-                all_mtp_weights[key] = f.get_tensor(key)
+        for key in keys_in_file:
+            if key in file_weights:
+                all_mtp_weights[key] = file_weights[key]
+        del file_weights  # free non-MTP weights
+        mx.clear_cache()
         print(f"  Extracted {len(keys_in_file)} tensors")
 
     print(f"\nTotal MTP weights: {len(all_mtp_weights)}")
@@ -87,23 +87,22 @@ def main():
 
     # 3. Quantize weights that are large enough (skip norms, biases)
     print(f"\nQuantizing to {args.bits}-bit (group_size={GROUP_SIZE})...")
-    quantized: dict[str, np.ndarray] = {}
+    quantized: dict[str, mx.array] = {}
     for key, weight in sorted(all_mtp_weights.items()):
         if weight.ndim < 2 or weight.shape[0] < GROUP_SIZE:
-            # Small weights (norms, biases) — keep as-is in bf16
+            # Small weights (norms, biases) — keep as-is
             quantized[key] = weight
         else:
-            # Quantize using MLX
-            w_mx = mx.array(weight)
-            q_weight, q_scales, q_biases = mx.quantize(w_mx, group_size=GROUP_SIZE, bits=args.bits)
+            # Quantize
+            q_weight, q_scales, q_biases = mx.quantize(weight, group_size=GROUP_SIZE, bits=args.bits)
             mx.eval(q_weight, q_scales, q_biases)
-            quantized[key.replace(".weight", ".weight")] = np.array(q_weight)
-            quantized[key.replace(".weight", ".scales")] = np.array(q_scales)
-            quantized[key.replace(".weight", ".biases")] = np.array(q_biases)
+            quantized[key] = q_weight
+            quantized[key.replace(".weight", ".scales")] = q_scales
+            quantized[key.replace(".weight", ".biases")] = q_biases
 
-    # 4. Save
+    # 4. Save using MLX's native save (handles all dtypes)
     print(f"Saving to {output_path}...")
-    save_file(quantized, str(output_path))
+    mx.save_safetensors(str(output_path), quantized)
     out_size = output_path.stat().st_size
     print(f"Done! Output: {out_size / 1e9:.1f} GB ({out_size / total_bytes * 100:.0f}% of original)")
 
