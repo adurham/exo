@@ -342,16 +342,16 @@ def shard_and_load(
                 mtp_weights = {}
                 for wf in sorted(mtp_path.glob("*.safetensors")):
                     mtp_weights.update(mx.load(str(wf)))
-                # Create MTP module, quantize it BEFORE loading weights to avoid
-                # peak memory (512 experts at bf16 = 12.3GB vs 3.5GB quantized).
+                # Create MTP module and load quantized weights.
                 # MTP attaches to TextModel (language_model.mtp.*).
+                # load_weights auto-converts Linear → QuantizedLinear when it sees
+                # .scales/.biases keys alongside .weight. No nn.quantize() needed.
+                # The Linear init allocates lazy mx.zeros (no GPU memory until eval),
+                # and load_weights replaces them before eval triggers.
                 from mlx_lm.models.qwen3_5 import MTPModule
                 target = model.language_model if hasattr(model, "language_model") else model  # type: ignore
                 args = target.args  # type: ignore
                 target.mtp = MTPModule(args)  # type: ignore
-                # Quantize module to QuantizedLinear BEFORE loading weights —
-                # this way load_weights fills quantized placeholders, not bf16.
-                nn.quantize(target.mtp, group_size=64, bits=4)  # type: ignore
                 target.load_weights(list(mtp_weights.items()), strict=False)
                 mx.eval(target.mtp)  # type: ignore
                 logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
