@@ -364,6 +364,16 @@ def shard_and_load(
                                 group_size=64, bits=4,
                             )
                             setattr(mod, name, q)
+                        elif isinstance(child, nn.SwitchLinear) and f"mtp.{full}.scales" in mtp_weights:
+                            # SwitchLinear holds batched expert weights (12.9GB bf16).
+                            # Replace with QuantizedSwitchLinear to avoid materialising bf16.
+                            num_experts, output_dims, input_dims = child.weight.shape
+                            q = nn.QuantizedSwitchLinear(
+                                input_dims, output_dims, num_experts,
+                                bias=hasattr(child, "bias") and child.bias is not None,
+                                group_size=64, bits=4,
+                            )
+                            setattr(mod, name, q)
                         elif isinstance(child, nn.Module):
                             _replace_linear_with_quantized(child, full)
                 _replace_linear_with_quantized(target.mtp, "")
