@@ -219,6 +219,7 @@ class SequentialGenerator(InferenceGenerator):
         still in a decode all_reduce.
         """
         for task_id in self.cancel_receiver.collect():
+            logger.info(f"Cancel received from pipe for task {task_id}")
             if task_id == CANCEL_ALL_TASKS:
                 self._cancelled_tasks.add(CANCEL_ALL_TASKS)
             else:

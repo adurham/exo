@@ -192,9 +192,11 @@ class RunnerSupervisor:
             self.cancelled.add(task_id)
             return
         self.cancelled.add(task_id)
+        logger.info(f"Cancelling task {task_id} — sending to runner process")
         with anyio.move_on_after(0.5) as scope:
             try:
                 await self._cancel_sender.send_async(task_id)
+                logger.info(f"Cancel sent for {task_id}")
             except ClosedResourceError:
                 # typically occurs when trying to shut down a failed instance
                 logger.warning(
