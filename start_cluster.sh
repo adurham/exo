@@ -27,6 +27,7 @@
 # Speculative decoding: PP mode with local draft
 : "${EXO_DRAFT_MODEL:=mlx-community/Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_DRAFT_TOKENS:=3}"
+: "${EXO_PP_DRAFT_K:=3}"
 
 export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
@@ -420,6 +421,7 @@ for NODE in "${NODES[@]}"; do
         # Studios: small local draft model (independent copy per node, no TP)
         EXO_ENV="$EXO_ENV EXO_DRAFT_MODEL=$EXO_DRAFT_MODEL"
         EXO_ENV="$EXO_ENV EXO_DRAFT_TOKENS=$EXO_DRAFT_TOKENS"
+        EXO_ENV="$EXO_ENV EXO_PP_DRAFT_K=$EXO_PP_DRAFT_K"
         # Raise memory threshold: default 0.90 triggers eviction at 115GB on
         # 128GB, but the KV cache we evict is the same one the next request
         # needs. Re-prefilling after eviction causes mx.synchronize deadlock.
