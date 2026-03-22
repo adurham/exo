@@ -29,7 +29,7 @@
 : "${EXO_DRAFT_TOKENS:=3}"
 : "${EXO_PP_DRAFT_K:=3}"
 # MTP speculation (alternative to draft model): set both to enable
-: "${EXO_MTP_SPECULATION:=0}"
+: "${EXO_MTP_SPECULATION:=1}"
 : "${EXO_MTP_MODEL:=mtp-qwen35-397b-4bit}"
 
 export IBV_FORK_SAFE=1
