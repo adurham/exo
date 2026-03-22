@@ -17,7 +17,7 @@
 : "${MLX_JACCL_NUM_BUFFERS:=4}"
 : "${MLX_JACCL_FRAME_SIZE:=8192}"
 : "${EXO_KV_BITS:=16}"
-: "${EXO_PP_LAYER_OFFSET:=1}"  # rank 0 gets 1 fewer layer to fit MTP init peak
+: "${EXO_PP_LAYER_OFFSET:=0}"
 : "${EXO_COMPILE_DECODE:=0}"
 : "${EXO_TP_EVAL_INTERVAL:=0}"
 : "${EXO_EXPERT_PARALLEL:=0}"
@@ -29,7 +29,7 @@
 : "${EXO_DRAFT_TOKENS:=3}"
 : "${EXO_PP_DRAFT_K:=3}"
 # MTP speculation (alternative to draft model): set both to enable
-: "${EXO_MTP_SPECULATION:=1}"
+: "${EXO_MTP_SPECULATION:=0}"
 : "${EXO_MTP_MODEL:=mtp-qwen35-397b-4bit}"
 
 export IBV_FORK_SAFE=1
