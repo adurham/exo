@@ -350,46 +350,25 @@ def shard_and_load(
                 target.mtp = MTPModule(args)  # type: ignore
                 # Sanitize MTP weights (expert fusion, projection fusion, etc.)
                 mtp_weights = target.sanitize(mtp_weights)
-                # Replace Linear → QuantizedLinear WITHOUT evaluating bf16 weights.
-                # nn.quantize() would materialise 12.3GB of bf16 expert weights during
-                # conversion. Instead, directly construct QuantizedLinear with the right
-                # dimensions and let load_weights fill them with quantized data.
-                def _replace_linear_with_quantized(mod: nn.Module, prefix: str) -> None:
-                    for name, child in mod.children().items():
-                        full = f"{prefix}.{name}" if prefix else name
-                        # Recurse into lists (e.g., self.layers = [DecoderLayer(...)])
-                        if isinstance(child, list):
-                            for i, item in enumerate(child):
-                                if isinstance(item, nn.Module):
-                                    _replace_linear_with_quantized(item, f"{full}.{i}")
-                            continue
-                        if isinstance(child, nn.Linear) and f"mtp.{full}.scales" in mtp_weights:
-                            q = nn.QuantizedLinear(
-                                child.weight.shape[1], child.weight.shape[0],
-                                bias=hasattr(child, "bias") and child.bias is not None,
-                                group_size=64, bits=4,
-                            )
-                            setattr(mod, name, q)
-                        elif hasattr(child, 'weight') and child.weight.ndim == 3:
-                            # SwitchLinear: 3D weight (num_experts, out, in) = 12.9GB bf16.
-                            # Can't use QuantizedSwitchLinear() — its __init__ also creates
-                            # random bf16 then quantizes. Instead, create an empty shell and
-                            # set the quantized weight arrays directly from our weight dict.
-                            from mlx_lm.models.switch_layers import QuantizedSwitchLinear as _QSL
-                            num_experts, output_dims, input_dims = child.weight.shape
-                            q = object.__new__(_QSL)
-                            nn.Module.__init__(q)
-                            q.group_size = 64
-                            q.bits = 4
-                            q.mode = "affine"
-                            # Placeholder tiny arrays — load_weights will replace them
-                            q.weight = mx.zeros((1, 1, 1), dtype=mx.uint32)
-                            q.scales = mx.zeros((1, 1, 1), dtype=mx.bfloat16)
-                            q.biases = mx.zeros((1, 1, 1), dtype=mx.bfloat16)
-                            setattr(mod, name, q)
-                        elif isinstance(child, nn.Module):
-                            _replace_linear_with_quantized(child, full)
-                _replace_linear_with_quantized(target.mtp, "")
+                # Quantize the MTP module the SAME way the main model does:
+                # nn.quantize with class_predicate converts Linear/SwitchLinear →
+                # QuantizedLinear/QuantizedSwitchLinear using LAZY quantization
+                # (no GPU memory allocated). Then load_weights fills the actual
+                # quantized data. Finally mx.eval materializes only the real weights.
+                # All MTP weights are quantized, so predicate returns True for all.
+                nn.quantize(
+                    target.mtp,  # type: ignore
+                    group_size=64, bits=4,
+                    class_predicate=lambda p, m: (
+                        hasattr(m, "to_quantized")
+                        and (
+                            f"mtp.{p}.scales" in mtp_weights
+                            # SwitchLinear: weight keys use experts.0 not switch_mlp
+                            or f"mtp.{p.replace('switch_mlp.gate_up_proj', 'experts.0.gate_up_proj')}.scales" in mtp_weights
+                            or f"mtp.{p.replace('switch_mlp.down_proj', 'experts.0.down_proj')}.scales" in mtp_weights
+                        )
+                    ),
+                )
                 target.load_weights(list(mtp_weights.items()), strict=False)
                 mx.eval(target.mtp)  # type: ignore
                 logger.info(f"MTP module loaded ({len(mtp_weights)} tensors)")
