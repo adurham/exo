@@ -663,6 +663,7 @@ def mlx_generate(
     # Touch heartbeat: cache lookup deepcopies KV state which can be slow.
     if distributed_prompt_progress_callback is not None:
         distributed_prompt_progress_callback()
+    logger.info(f"[mlx_generate] KV cache lookup starting ({len(all_prompt_tokens)} prompt tokens)")
     prefix_hit_length = 0
     matched_index: int | None = None
     cache_from_prefix = False
@@ -727,6 +728,7 @@ def mlx_generate(
         # Coordinate across all PP ranks: if ANY rank is over threshold,
         # ALL ranks must reject.  Otherwise the rejecting rank raises while
         # other ranks enter prefill → pipeline deadlock.
+        logger.info(f"[mlx_generate] memory check: {mem_used:.1%} used, threshold {MEMORY_THRESHOLD:.0%}")
         any_over = mx_any(mem_used > MEMORY_THRESHOLD, group)
         if any_over:
             raise ValueError(
@@ -777,6 +779,7 @@ def mlx_generate(
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
     # Prefill cache with all tokens except the last one
+    logger.info(f"[mlx_generate] starting main prefill ({len(prompt_tokens)} tokens, prefix_hit={prefix_hit_length})")
     prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
         model,
         tokenizer,
@@ -1144,6 +1147,8 @@ def mlx_generate(
               server_url = getattr(draft_model, 'server_url', '') if draft_model else ''
               logger.info(f"Speculative decode active: server={server_url}, K={_draft_tokens}, tp={_is_tp} (forcing temp=0)")
 
+      _pp_rank_str = f"R{_pp_info_for_draft.rank}" if _pp_info_for_draft is not None else "R?"
+      logger.info(f"[{_pp_rank_str}] entering stream_generate (draft_cache={'yes' if _pp_draft_model else 'no'})")
       for completion_tokens, out in enumerate(
         stream_generate(**_gen_kwargs),
         start=1,
