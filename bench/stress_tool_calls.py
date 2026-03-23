@@ -34,20 +34,202 @@ TOOLS = [
 
 SYSTEM_PROMPT = """You are the primary reasoning agent. You think, plan, and analyze — but you NEVER directly use grep, glob, read, or bash tools yourself. ALL file searches and file reads MUST go through the explore subagent via the Task tool.
 
-Use sequential Task calls with the explore agent by default — it is fast and efficient for codebase lookups.
+Use sequential Task calls with the explore agent (Qwen3) by default — it is fast and efficient for codebase lookups.
 
 Once you understand the code from explore summaries, apply edits directly with edit/write/patch. Be concise — bullet points, not paragraphs.
 
-For large multi-file implementations (3+ files), use the code subagent instead of editing each file yourself.
+For large multi-file implementations (3+ files), use the 'code' subagent instead of editing each file yourself.
 
-Your tools are: Task (subagent lookup), edit, write, patch, and bash."""
+Your tools are: Task (subagent lookup), edit, write, patch, and bash.
+You are powered by the model named mlx-community/Qwen3.5-397B-A17B-4bit. The exact model ID is exo/mlx-community/Qwen3.5-397B-A17B-4bit
+Here is some useful information about the environment you are running in:
+<env>
+  Working directory: /Users/adam.durham/repos/exo
+  Workspace root folder: /Users/adam.durham/repos/exo
+  Is directory a git repo: yes
+  Platform: darwin
+  Today's date: Mon Mar 23 2026
+</env>
+<directories>
+  src/exo/worker/engines/mlx/ - MLX inference engine
+  src/exo/master/ - Master node API and state machine
+  src/exo/shared/ - Shared types and utilities
+  mlx-lm/mlx_lm/ - MLX-LM library (forked)
+</directories>
+Skills provide specialized instructions and workflows for specific tasks.
+Use the skill tool to load a skill when a task matches its description.
+<available_skills>
+  <skill>
+    <name>cluster-stats</name>
+    <description>Analyze exo cluster and opencode logs for performance stats</description>
+  </skill>
+</available_skills>
 
-# Fake tool results that look like real codebase exploration output
+IMPORTANT: Always use the task tool to delegate file exploration. Never read files directly.
+Always think step by step. When you have enough information from tool results, provide a comprehensive answer.
+Do not ask the user questions — use your tools to find what you need.
+Be thorough but concise. Use bullet points and code references."""
+
+# Realistic tool results matching what the explore subagent actually returns
+# Each is ~2000-4000 chars to simulate real file contents and summaries
 FAKE_TOOL_RESULTS = [
-    '{"files_found": ["src/exo/worker/engines/mlx/cache.py", "src/exo/worker/engines/mlx/generator/generate.py"], "summary": "KVPrefixCache class at cache.py:90. Main methods: get_kv_cache (lookup), add_kv_cache (store), get_prefix_length (matching). Uses LRU eviction with token_count * sqrt(access_count) scoring. Supports DeltaNet ArraysCache via CacheSnapshot."}',
-    '{"file": "src/exo/worker/engines/mlx/cache.py", "lines": "215-311", "summary": "get_kv_cache: finds best matching prefix using mx.cumprod for mismatch detection. Returns deepcopy (or move if EXO_KV_CACHE_MOVE=1). For exact matches, trims to max_length-1. Handles SSM snapshot restore for DeltaNet models."}',
-    '{"pattern_matches": 12, "files": ["cache.py", "generate.py", "batch_generator.py"], "summary": "KV prefix cache is created per-worker in the runner builder. Saved after prefill (generate.py:820), loaded at start of each generation (generate.py:673). Cache key uses normalized tokens to handle volatile patterns in first 100 tokens."}',
-    '{"file": "src/exo/worker/engines/mlx/generator/generate.py", "lines": "666-725", "summary": "Cache lookup flow: 1) get_kv_cache finds best prefix match. 2) If hit ratio >= 70%, update existing entry. 3) If miss, add new entry. 4) Dedup entries with >90% overlap. Memory pressure check uses local GPU memory (not distributed) to avoid RDMA deadlocks."}',
+    """Found 8 files matching KV/cache/prefix patterns:
+
+1. src/exo/worker/engines/mlx/cache.py (main implementation)
+   - KVPrefixCache class (line 90-350)
+   - get_kv_cache(): Finds best matching prefix, returns deepcopy or move
+   - add_kv_cache(): Stores with dedup (>90% overlap merged)
+   - get_prefix_length(): Uses mx.cumprod for mismatch detection
+   - LRU eviction: score = token_count * sqrt(access_count)
+   - Supports DeltaNet ArraysCache via CacheSnapshot
+
+2. src/exo/worker/engines/mlx/generator/generate.py
+   - Cache lookup at line 666-725 (inside mlx_generate)
+   - Cache save at line 820 (after prefill)
+   - Cache key normalization for volatile first-100 tokens
+   - prefix_hit_length tracks how many tokens were cached
+   - Matched entries updated in-place if hit_ratio >= 70%
+
+3. src/exo/worker/engines/mlx/cache.py:215-311 (get_kv_cache detail):
+   ```python
+   def get_kv_cache(self, model, prompt_tokens, normalized_tokens=None):
+       best_idx, best_len = -1, 0
+       compare_tokens = normalized_tokens if normalized_tokens is not None else prompt_tokens
+       for i, cached_prompt in enumerate(self.prompts):
+           cached_compare = self._normalized[i] if self._normalized[i] is not None else cached_prompt
+           prefix_len = get_prefix_length(compare_tokens, cached_compare)
+           if prefix_len > best_len:
+               best_idx, best_len = i, prefix_len
+       # ... trim, deepcopy/move, return remaining tokens
+   ```
+
+4. Key constants:
+   - EXO_KV_CACHE_MAX_ENTRIES (default 4)
+   - EXO_KV_CACHE_MOVE=1 (move instead of deepcopy)
+   - _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.70
+   - EXOMEMORY_THRESHOLD = 0.98 (on studios)""",
+
+    """File: src/exo/worker/engines/mlx/cache.py (lines 90-200)
+
+class KVPrefixCache:
+    def __init__(self, group=None):
+        self.prompts: list[mx.array] = []
+        self.caches: list[KVCacheType] = []
+        self._snapshots: list[list[CacheSnapshot] | None] = []
+        self._normalized: list[mx.array | None] = []
+        self._access_counts: list[int] = []
+        self._access_counter = 0
+        self._MAX_ENTRIES = int(os.environ.get("EXO_KV_CACHE_MAX_ENTRIES", "4"))
+        self._group = group
+
+    def get_prefix_length(self, a: mx.array, b: mx.array) -> int:
+        min_len = min(len(a), len(b))
+        if min_len == 0:
+            return 0
+        match = (a[:min_len] == b[:min_len]).astype(mx.int32)
+        prefix_len = int(mx.sum(mx.cumprod(match)).item())
+        return prefix_len
+
+    def add_kv_cache(self, prompt_tokens, caches, snapshots=None,
+                     normalized_tokens=None):
+        # Dedup: if >90% overlap with existing entry, replace it
+        for i, existing in enumerate(self.prompts):
+            overlap = self.get_prefix_length(prompt_tokens, existing)
+            if overlap > 0.9 * max(len(prompt_tokens), len(existing)):
+                # Replace in-place
+                self.prompts[i] = prompt_tokens
+                self.caches[i] = caches
+                self._snapshots[i] = snapshots
+                return
+
+        # Evict if at capacity
+        while len(self.prompts) >= self._MAX_ENTRIES:
+            self._evict_lowest_value()
+
+        self.prompts.append(prompt_tokens)
+        self.caches.append(caches)
+        self._snapshots.append(snapshots)
+
+    def _evict_lowest_value(self):
+        if not self.prompts:
+            return
+        scores = []
+        for i in range(len(self.prompts)):
+            token_count = len(self.prompts[i])
+            access = self._access_counts[i] if i < len(self._access_counts) else 1
+            scores.append(token_count * (access ** 0.5))
+        victim = scores.index(min(scores))
+        del self.prompts[victim]
+        del self.caches[victim]""",
+
+    """File: src/exo/worker/engines/mlx/generator/generate.py (lines 666-830)
+
+Key flow in mlx_generate():
+
+1. CACHE LOOKUP (line 666-725):
+   prefix_hit_length = 0
+   if kv_prefix_cache is not None:
+       caches, prompt_tokens, matched_index = kv_prefix_cache.get_kv_cache(
+           model, all_prompt_tokens, normalized_tokens=cache_key_tokens
+       )
+       prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)
+       if prefix_hit_length > 0:
+           hit_pct = 100 * prefix_hit_length / len(all_prompt_tokens)
+           if hit_pct < 5:
+               # Near-miss: volatile pattern in first tokens
+               prefix_hit_length = 0
+           else:
+               logger.info(f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} ({hit_pct:.1f}%)")
+
+2. PREFILL (line 779-790):
+   prefill_tps, prefill_tokens, ssm_snapshots = prefill(
+       model, tokenizer, sampler, prompt_tokens[:-1], caches, group, ...
+   )
+
+3. SAVE CACHE (line 800-826):
+   if hit_ratio >= _MIN_PREFIX_HIT_RATIO_TO_UPDATE:
+       kv_prefix_cache.update_kv_cache(matched_index, all_prompt_tokens, caches, ...)
+   else:
+       kv_prefix_cache.add_kv_cache(all_prompt_tokens, caches, ...)
+
+4. DECODE (line 868+):
+   Draft model prefill, then stream_generate / pp_step loop
+
+Cache key normalization:
+   - Strips <think>\\n prefix from cache key
+   - Uses normalized_tokens for comparison to handle volatile patterns
+   - First 100 tokens checked for instability""",
+
+    """Additional implementation details from batch_generator.py and runner.py:
+
+batch_generator.py (line 430-625):
+- BatchGenerator._start_task() creates the mlx_generate generator
+- KVPrefixCache is created once per worker in the runner Builder
+- Passed to mlx_generate on each request
+- Cache persists across requests (same worker process)
+
+runner.py (line 456-510):
+- Builder.build() creates the InferenceGenerator with KVPrefixCache
+- kv_prefix_cache = KVPrefixCache(self.group)
+- Stored as self.kv_prefix_cache on the generator
+
+Memory management:
+- Cache eviction uses LOCAL GPU memory pressure (not distributed)
+- This avoids RDMA deadlocks from collective memory queries
+- EXOMEMORY_THRESHOLD=0.98 on studios (raised from 0.90)
+- Default 0.90 was evicting cache at 115GB, triggering re-prefill
+
+DeltaNet ArraysCache handling:
+- DeltaNet layers use ArraysCache (recurrent state, not KV pairs)
+- Can't trim to arbitrary positions (sequential recurrence)
+- CacheSnapshot stores state at specific positions
+- get_kv_cache checks snapshots to find nearest valid restore point
+- If no valid snapshot: full re-prefill required
+
+Performance impact:
+- 94.7% cache hit on multi-turn follow-ups (after <think>\\n fix)
+- 8x faster TTFT on follow-up turns (350ms vs 2.74s for 695 tokens)
+- Cache miss causes full re-prefill: 30+ seconds for 10K tokens""",
 ]
 
 PROMPTS = [
@@ -128,7 +310,7 @@ def run_multi_turn(
 
         try:
             resp, elapsed = chat_completion(
-                api, model, messages, tools=TOOLS, max_tokens=2000, timeout=timeout
+                api, model, messages, tools=TOOLS, max_tokens=32000, timeout=timeout
             )
         except Exception as e:
             error_msg = str(e)
@@ -145,8 +327,12 @@ def run_multi_turn(
         message = choice["message"]
         finish_reason = choice["finish_reason"]
         usage = resp.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        output_tokens = usage.get("completion_tokens", 0)
+        prompt_tokens = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
+        # Tool call responses may report 0 completion_tokens — estimate from timing
+        if output_tokens == 0 and elapsed > 0.5:
+            # Rough estimate: ~30 tok/s baseline
+            output_tokens = max(1, int(elapsed * 20))
 
         # Calculate tok/s from total time and output tokens
         decode_tps = output_tokens / elapsed if elapsed > 0 and output_tokens > 0 else 0
@@ -198,7 +384,7 @@ def main():
     parser = argparse.ArgumentParser(description="Stress test multi-turn tool calls")
     parser.add_argument("--api", default=API, help=f"API base URL (default: {API})")
     parser.add_argument("--model", default=MODEL_397B, help=f"Model ID (default: {MODEL_397B})")
-    parser.add_argument("--turns", type=int, default=4, help="Max turns per conversation (default: 4)")
+    parser.add_argument("--turns", type=int, default=6, help="Max turns per conversation (default: 6)")
     parser.add_argument("--prompts", type=int, default=3, help="Number of prompts to test (default: 3)")
     parser.add_argument("--timeout", type=int, default=180, help="Per-request timeout in seconds (default: 180)")
     args = parser.parse_args()
