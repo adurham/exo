@@ -665,13 +665,18 @@ class API:
             logger.info(f"chunk_stream: queue created for cmd={command_id}")
             with recv as token_chunks:
                 async for chunk in token_chunks:
-                    yield chunk
                     if isinstance(chunk, PrefillProgressChunk):
+                        yield chunk
                         continue
                     if hasattr(chunk, "stats") and chunk.stats is not None:
                         last_stats = chunk.stats
+                    # Set finish_reason_seen BEFORE yield — if the client
+                    # disconnects during yield, the generator is cancelled at
+                    # the yield point and code after it never runs.
                     if chunk.finish_reason is not None:
                         finish_reason_seen = True
+                    yield chunk
+                    if finish_reason_seen:
                         break
             if last_stats is not None:
                 logger.info(
