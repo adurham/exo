@@ -974,30 +974,20 @@ def mlx_generate(
         )
 
         draft_cache = None
-        _draft_ready = [False]  # mutable flag for background thread
         if (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
             draft_cache = make_prompt_cache(draft_model)
 
-            # Prefill draft in background thread so decode starts immediately
-            # on both PP ranks (no desync).  Speculation is skipped until the
-            # draft is ready.  Previous blocking approach caused PP deadlocks
-            # because rank 1 entered the decode loop while rank 0 was still
-            # doing draft prefill.
-            import threading
-            _draft_prefill_tokens = all_prompt_tokens  # capture for thread
-            def _bg_draft_prefill():
-                logger.info(f"Prefilling local draft ({len(_draft_prefill_tokens)} tokens) [background]...")
-                t0 = time.perf_counter()
-                _chunk = 512
-                for i in range(0, len(_draft_prefill_tokens), _chunk):
-                    draft_model(_draft_prefill_tokens[i:i + _chunk][None], cache=draft_cache)
-                    mx.eval([c.state for c in draft_cache])  # type: ignore
-                elapsed = (time.perf_counter() - t0) * 1000
-                _draft_ready[0] = True
-                logger.info(f"Draft prefill complete: {elapsed:.1f}ms [background]")
-
-            _draft_thread = threading.Thread(target=_bg_draft_prefill, daemon=True)
-            _draft_thread.start()
+            # Prefill draft on rank 0 only
+            logger.info(f"Prefilling local draft ({len(all_prompt_tokens)} tokens)...")
+            t_draft_prefill = time.perf_counter()
+            _draft_chunk = 512
+            for i in range(0, len(all_prompt_tokens), _draft_chunk):
+                draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=draft_cache)
+                mx.eval([c.state for c in draft_cache])  # type: ignore
+                if on_generation_token is not None and (i // _draft_chunk) % 10 == 9:
+                    on_generation_token()
+            draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
+            logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
 
         # Touch heartbeat on all ranks
         if on_generation_token is not None:
@@ -1010,10 +1000,6 @@ def mlx_generate(
                 _draft_trim_total += trim
                 if draft_cache is not None:
                     trim_prompt_cache(draft_cache, trim)
-
-            # Skip speculation until background prefill completes
-            if draft_cache is not None and not _draft_ready[0]:
-                return []
 
             # Rank 0: generate draft tokens
             if draft_cache is not None:
