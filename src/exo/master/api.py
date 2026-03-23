@@ -785,9 +785,9 @@ class API:
         self, payload: ChatCompletionRequest
     ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI Chat Completions API - adapter."""
-        logger.debug(f"chat_completions: request model={payload.model!r}")
+        logger.debug(f"chat_completions: request model={payload.model!r} tools={len(payload.tools) if payload.tools else 0} max_tokens={payload.max_tokens}")
         task_params = chat_request_to_text_generation(payload)
-        logger.debug(f"chat_completions: task_params model={task_params.model!r}")
+        logger.debug(f"chat_completions: task_params model={task_params.model!r} tools={len(task_params.tools) if task_params.tools else 0}")
         task_params = await self._resolve_model_and_apply_limits(task_params)
         logger.debug(f"chat_completions: resolved model={task_params.model!r}")
 
