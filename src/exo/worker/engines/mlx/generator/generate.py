@@ -232,13 +232,18 @@ def pipeline_parallel_prefill(
         clear_prefill_sends()
 
     # Post-loop: process remaining 1 token + add +1 entry to match stream_generate.
+    # Each iteration must sync (mx.eval) before the next — without this, rank 0's
+    # async RDMA sends pile up on rank 1's Metal command queue before rank 1 has
+    # issued matching recvs.  The unprocessed RDMA writes block rank 1's local
+    # compute, causing a permanent deadlock.
     if EXO_TRACING_ENABLED:
         t_post = time.perf_counter()
-    for _ in range(2):
+    for _post_i in range(2):
         with mx.stream(generation_stream):
             model(prompt[-1:][None], cache=_prompt_cache)
             quantize_cache_fn(_prompt_cache)
         flush_prefill_sends()
+        mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:
