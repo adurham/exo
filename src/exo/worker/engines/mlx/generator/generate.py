@@ -856,18 +856,29 @@ def mlx_generate(
     if on_generation_token is not None:
         on_generation_token()
 
-    # NOTE: post-prefill mx_barrier removed — it deadlocked for 160s+ after
-    # large prefills. The prefill's own pipeline sends + evals already
-    # synchronize the ranks. Decode's _pp_step handles per-step sync via
-    # send/recv/all_gather.
+    # Post-prefill barrier: ensure both PP ranks finish prefill before either
+    # enters decode.  Without this, rank 0 can enter decode and issue RDMA
+    # sends while rank 1 is still evaluating its last prefill layer — the
+    # unsolicited RDMA write interferes with rank 1's Metal GPU computation,
+    # causing an intermittent deadlock on back-to-back requests.
+    #
+    # Previously removed because it "deadlocked for 160s+" — that was caused
+    # by issuing the barrier on the generation_stream while prefill pipeline
+    # sends were still in-flight on that stream.  Fixed by placing the barrier
+    # AFTER set_pipeline_queue_sends(False) and the cache save (which eval
+    # all pending ops).
+    t_barrier = time.perf_counter()
+    logger.info("[post-prefill] entering barrier")
+    mx_barrier(group)
+    logger.info(f"[post-prefill] barrier done: {(time.perf_counter() - t_barrier) * 1000:.1f}ms")
+
+    if on_generation_token is not None:
+        on_generation_token()
+
     if EXO_TRACING_ENABLED:
         get_pipeline_timings().reset()
 
-    if EXO_TRACING_ENABLED:
-        logger.info("Post-prefill: starting decode")
-
-    if EXO_TRACING_ENABLED:
-        logger.info("Starting decode")
+    logger.info("Starting decode")
 
     _draft_call_count = 0
     _draft_trim_total = 0
@@ -976,12 +987,7 @@ def mlx_generate(
         )
 
         draft_cache = None
-        # TEMPORARILY DISABLED: draft prefill causes PP desync deadlock.
-        # Both the blocking and background-thread approaches fail.
-        # Rank 0's draft prefill delays its pipeline entry relative to rank 1,
-        # and the RDMA sequence gets corrupted on subsequent requests.
-        _draft_disabled_for_debug = True
-        if not _draft_disabled_for_debug and (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
+        if (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
             draft_cache = make_prompt_cache(draft_model)
 
             # Prefill draft on rank 0 only
