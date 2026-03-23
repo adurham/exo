@@ -434,11 +434,15 @@ class PipelineFirstLayer(CustomMlxLayer):
         elif self.r != 0:
             if EXO_TRACING_ENABLED:
                 t0 = time.perf_counter()
+            logger.debug(f"[PipelineFirst R{self.r}] eval(x) start, prefill={self.is_prefill}")
             mx.eval(x)
             if EXO_TRACING_ENABLED:
                 t1 = time.perf_counter()
+            logger.debug(f"[PipelineFirst R{self.r}] recv_like start")
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
+            logger.debug(f"[PipelineFirst R{self.r}] _guarded_eval start")
             _guarded_eval(x)
+            logger.debug(f"[PipelineFirst R{self.r}] recv complete")
             if EXO_TRACING_ENABLED:
                 _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
                 _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
@@ -488,6 +492,7 @@ class PipelineLastLayer(CustomMlxLayer):
 
         # Eval layer output to materialize it before send — this splits the graph
         # so the send is isolated and the receiving rank's recv can complete.
+        logger.debug(f"[PipelineLast R{self.r}] eval output start, prefill={self.is_prefill}, queue={self.queue_sends}")
         _guarded_eval(output)
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
@@ -498,14 +503,17 @@ class PipelineLastLayer(CustomMlxLayer):
             if EXO_TRACING_ENABLED:
                 t_send = time.perf_counter()
             if self.queue_sends:
+                logger.debug(f"[PipelineLast R{self.r}] queuing send")
                 _pending_prefill_sends.append(
                     (output, (self.r + 1) % self.s, self.group)
                 )
             else:
+                logger.debug(f"[PipelineLast R{self.r}] direct send start")
                 output = mx.distributed.send(
                     output, (self.r + 1) % self.s, group=self.group
                 )
             _guarded_eval(output)
+            logger.debug(f"[PipelineLast R{self.r}] send/queue done")
             if cache is not None:
                 _cache = cache[0] if hasattr(cache, "caches") else cache  # type: ignore
                 if hasattr(_cache, "keys") and _cache.keys is not None:  # pyright: ignore[reportAny]
