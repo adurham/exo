@@ -776,40 +776,6 @@ def mlx_generate(
     )
     max_stop_len = max((len(s) for s in stop_sequences), default=0)
 
-    # Early draft model prefill — runs BEFORE the main model prefill so the
-    # draft is ready when decode starts.  Main model prefill takes 30+ seconds
-    # for 10K tokens; draft takes ~1.3s.  Without this, draft prefill runs
-    # during decode, competing for GPU bandwidth and delaying speculation.
-    _early_draft_cache = None
-    if draft_model is not None:
-        from exo.worker.engines.mlx.utils_mlx import _DraftBroadcastSentinel
-        _is_local_for_early = (
-            isinstance(draft_model, nn.Module)
-            or isinstance(draft_model, _DraftBroadcastSentinel)
-        )
-        if _is_local_for_early:
-            _is_tp_early = group is not None and group.size() > 1
-            _is_rank0_early = group is None or group.rank() == 0
-            from exo.worker.engines.mlx.auto_parallel import get_pipeline_info as _gpi
-            _pp_early = _gpi(model)
-            _is_last_pp = (
-                _pp_early is not None
-                and _pp_early.rank == _pp_early.world_size - 1
-            )
-            if (_is_rank0_early or not _is_tp_early) and not _is_last_pp:
-                from mlx_lm.models.cache import make_prompt_cache
-                _early_draft_cache = make_prompt_cache(draft_model)
-                logger.info(f"Prefilling local draft ({len(all_prompt_tokens)} tokens)...")
-                t_draft_prefill = time.perf_counter()
-                _draft_chunk = 512
-                for i in range(0, len(all_prompt_tokens), _draft_chunk):
-                    draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=_early_draft_cache)
-                    mx.eval([c.state for c in _early_draft_cache])  # type: ignore
-                    if on_generation_token is not None and (i // _draft_chunk) % 10 == 9:
-                        on_generation_token()
-                draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
-                logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
-
     # Prefill cache with all tokens except the last one
     prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
         model,
@@ -1007,8 +973,21 @@ def mlx_generate(
             and _pp_info_for_draft.rank == _pp_info_for_draft.world_size - 1
         )
 
-        # Use the early-prefilled draft cache (created before main model prefill)
-        draft_cache = _early_draft_cache
+        draft_cache = None
+        if (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
+            draft_cache = make_prompt_cache(draft_model)
+
+            # Prefill draft on rank 0 only
+            logger.info(f"Prefilling local draft ({len(all_prompt_tokens)} tokens)...")
+            t_draft_prefill = time.perf_counter()
+            _draft_chunk = 512
+            for i in range(0, len(all_prompt_tokens), _draft_chunk):
+                draft_model(all_prompt_tokens[i:i + _draft_chunk][None], cache=draft_cache)
+                mx.eval([c.state for c in draft_cache])  # type: ignore
+                if on_generation_token is not None and (i // _draft_chunk) % 10 == 9:
+                    on_generation_token()
+            draft_prefill_ms = (time.perf_counter() - t_draft_prefill) * 1000
+            logger.info(f"Draft prefill complete: {draft_prefill_ms:.1f}ms")
 
         # Touch heartbeat on all ranks
         if on_generation_token is not None:
