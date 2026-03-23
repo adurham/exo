@@ -962,8 +962,19 @@ def mlx_generate(
         # model at all (avoids FP non-determinism causing TP deadlock).
         from mlx_lm.models.cache import make_prompt_cache, trim_prompt_cache
 
+        # In PP mode, only non-last ranks use the draft model (for idle-time
+        # speculation).  Prefilling the draft on the last PP rank blocks its
+        # GPU while the primary rank is already in the decode loop, causing a
+        # PP communication deadlock.
+        from exo.worker.engines.mlx.auto_parallel import get_pipeline_info
+        _pp_info_for_draft = get_pipeline_info(model)
+        _is_last_pp_rank = (
+            _pp_info_for_draft is not None
+            and _pp_info_for_draft.rank == _pp_info_for_draft.world_size - 1
+        )
+
         draft_cache = None
-        if _is_rank0 or not _is_tp:
+        if (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
             draft_cache = make_prompt_cache(draft_model)
 
             # Prefill draft on rank 0 only
