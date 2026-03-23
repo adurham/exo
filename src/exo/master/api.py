@@ -657,6 +657,7 @@ class API:
         This is the internal low-level stream used by all API adapters.
         """
         last_stats: GenerationStats | None = None
+        finish_reason_seen = False
         try:
             self._text_generation_queues[command_id], recv = channel[
                 TokenChunk | ErrorChunk | ToolCallChunk | PrefillProgressChunk
@@ -670,6 +671,7 @@ class API:
                     if hasattr(chunk, "stats") and chunk.stats is not None:
                         last_stats = chunk.stats
                     if chunk.finish_reason is not None:
+                        finish_reason_seen = True
                         break
             if last_stats is not None:
                 logger.info(
@@ -691,18 +693,19 @@ class API:
                 )
             else:
                 logger.info(f"chunk_stream: cancelled cmd={command_id}")
-            command = TaskCancelled(cancelled_command_id=command_id)
-            with anyio.CancelScope(shield=True):
-                await self.command_sender.send(
-                    ForwarderCommand(origin=self._system_id, command=command)
-                )
+            if not finish_reason_seen:
+                command = TaskCancelled(cancelled_command_id=command_id)
+                with anyio.CancelScope(shield=True):
+                    await self.command_sender.send(
+                        ForwarderCommand(origin=self._system_id, command=command)
+                    )
             raise
         finally:
             logger.info(f"chunk_stream: cleanup cmd={command_id}")
             # If the stream ended without a finish_reason (client disconnect
             # during non-streaming response, or any abnormal exit), cancel
             # the generation so the runner stops producing tokens into the void.
-            if last_stats is None:
+            if not finish_reason_seen:
                 cancel_cmd = TaskCancelled(cancelled_command_id=command_id)
                 with anyio.CancelScope(shield=True):
                     await self.command_sender.send(
