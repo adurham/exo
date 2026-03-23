@@ -1315,3 +1315,11 @@ def mlx_generate(
         if not _generation_logged and generated_text_parts:
             _log_generation_stats(generated_text_parts, "aborted")
             _save_kv_cache(generated_text_parts)
+        # Always barrier on exit — if one rank exits (cancel/abort) while the
+        # other is mid-collective (all_gather/send/recv), the stale op poisons
+        # subsequent requests.  Both ranks must sync before returning.
+        try:
+            mx_barrier(group)
+            logger.info("Post-generation cleanup barrier done")
+        except Exception as e:
+            logger.warning(f"Post-generation cleanup barrier failed: {e}")
