@@ -976,7 +976,12 @@ def mlx_generate(
         )
 
         draft_cache = None
-        if (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
+        # TEMPORARILY DISABLED: draft prefill causes PP desync deadlock.
+        # Both the blocking and background-thread approaches fail.
+        # Rank 0's draft prefill delays its pipeline entry relative to rank 1,
+        # and the RDMA sequence gets corrupted on subsequent requests.
+        _draft_disabled_for_debug = True
+        if not _draft_disabled_for_debug and (_is_rank0 or not _is_tp) and not _is_last_pp_rank:
             draft_cache = make_prompt_cache(draft_model)
 
             # Prefill draft on rank 0 only
