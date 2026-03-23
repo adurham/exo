@@ -320,19 +320,18 @@ def prefill(
         progress_callback(processed, total)
 
     set_pipeline_prefill(model, is_prefill=True)
+    logger.info(f"[prefill] entered ({num_tokens} tokens, pipeline={_has_pipeline_communication_layer(model)})")
 
     # Note: generation_stream IS the default stream (line 229 in generate.py).
     # mx_barrier (below) synchronizes via all_reduce on the default stream,
     # which is sufficient. No separate mx.synchronize() needed.
 
-    if EXO_TRACING_ENABLED:
-        t_barrier = time.perf_counter()
+    t_barrier = time.perf_counter()
+    logger.info("[prefill] entering mx_barrier")
     mx_barrier(group)
-    if EXO_TRACING_ENABLED:
-        barrier_ms = (time.perf_counter() - t_barrier) * 1000
-        logger.info(f"Pre-prefill barrier: {barrier_ms:.1f}ms")
-    if EXO_TRACING_ENABLED:
-        logger.info("Starting prefill")
+    barrier_ms = (time.perf_counter() - t_barrier) * 1000
+    logger.info(f"[prefill] barrier done: {barrier_ms:.1f}ms")
+    logger.info("[prefill] starting pipeline")
 
     # Touch heartbeat: mx_barrier can block for seconds waiting for other ranks.
     if distributed_prompt_progress_callback is not None:
