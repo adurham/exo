@@ -212,7 +212,12 @@ def flush_prefill_sends() -> None:
     for output, dst, group in _pending_prefill_sends:
         sent = mx.distributed.send(output, dst, group=group)
         _last_flush_sent.append(sent)
-        mx.async_eval(sent)
+        # Synchronous eval: In UC mode, send completes on TRANSMIT (not
+        # delivery), so this returns as soon as the NIC transmits.  The
+        # async_eval alternative caused the event signal task to queue
+        # behind the send on the stream thread — if the send blocked
+        # (due to stale CQ entries), the signal never ran.
+        mx.eval(sent)
     _pending_prefill_sends.clear()
     if EXO_TRACING_ENABLED:
         _pipeline_timings.flush_sends_us += int((time.perf_counter() - t0) * 1_000_000)
