@@ -234,28 +234,12 @@ def pipeline_parallel_prefill(
     # Post-loop: process remaining 1 token + add +1 entry to match stream_generate.
     if EXO_TRACING_ENABLED:
         t_post = time.perf_counter()
-    if is_pipeline:
-        # PP mode: switch to synchronous direct sends for the post-loop.
-        # With queue_sends=True (async RDMA), rank 0's writes land in rank 1's
-        # memory before rank 1 issues matching recvs. This intermittently hangs
-        # rank 1's _guarded_eval.  Direct sends (queue_sends=False) block rank 0
-        # until rank 1 receives — both ranks stay synchronized.
-        set_pipeline_queue_sends(model, queue_sends=False)
-        mx_barrier(group)  # sync both ranks before post-loop
-        for _post_i in range(2):
-            with mx.stream(generation_stream):
-                model(prompt[-1:][None], cache=_prompt_cache)
-                quantize_cache_fn(_prompt_cache)
-            # No flush needed — direct sends happen inside model()
-            mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
-        set_pipeline_queue_sends(model, queue_sends=True)  # restore for caller
-    else:
-        for _post_i in range(2):
-            with mx.stream(generation_stream):
-                model(prompt[-1:][None], cache=_prompt_cache)
-                quantize_cache_fn(_prompt_cache)
-            flush_prefill_sends()
-            mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+    for _post_i in range(2):
+        with mx.stream(generation_stream):
+            model(prompt[-1:][None], cache=_prompt_cache)
+            quantize_cache_fn(_prompt_cache)
+        flush_prefill_sends()
+        mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:

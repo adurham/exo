@@ -199,7 +199,7 @@ def flush_prefill_sends() -> None:
         t0 = time.perf_counter()
     for output, dst, group in _pending_prefill_sends:
         sent = mx.distributed.send(output, dst, group=group)
-        mx.async_eval(sent)
+        mx.eval(sent)  # synchronous — async_eval caused RDMA stalls on rank 1
     _pending_prefill_sends.clear()
     if EXO_TRACING_ENABLED:
         _pipeline_timings.flush_sends_us += int((time.perf_counter() - t0) * 1_000_000)
