@@ -244,6 +244,11 @@ def pipeline_parallel_prefill(
             quantize_cache_fn(_prompt_cache)
         flush_prefill_sends()
         mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+        # Barrier between iterations: rank 0's RDMA writes are one-sided and
+        # land in rank 1's memory before rank 1 issues a matching recv.  Without
+        # this barrier, rank 0's next iteration's write can corrupt buffers that
+        # rank 1 is still using for computation.
+        mx_barrier(group)
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:
