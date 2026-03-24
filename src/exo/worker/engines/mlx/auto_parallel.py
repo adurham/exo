@@ -199,7 +199,7 @@ def flush_prefill_sends() -> None:
         t0 = time.perf_counter()
     for output, dst, group in _pending_prefill_sends:
         sent = mx.distributed.send(output, dst, group=group)
-        mx.eval(sent)  # synchronous — async_eval caused RDMA stalls on rank 1
+        mx.async_eval(sent)
     _pending_prefill_sends.clear()
     if EXO_TRACING_ENABLED:
         _pipeline_timings.flush_sends_us += int((time.perf_counter() - t0) * 1_000_000)
@@ -492,8 +492,11 @@ class PipelineLastLayer(CustomMlxLayer):
 
         # Eval layer output to materialize it before send — this splits the graph
         # so the send is isolated and the receiving rank's recv can complete.
-        logger.debug(f"[PipelineLast R{self.r}] eval output start, prefill={self.is_prefill}, queue={self.queue_sends}")
+        _mem_active = mx.get_active_memory() / 1e9
+        _mem_peak = mx.get_peak_memory() / 1e9
+        logger.debug(f"[PipelineLast R{self.r}] eval output start, prefill={self.is_prefill}, queue={self.queue_sends}, mem={_mem_active:.1f}/{_mem_peak:.1f}GB")
         _guarded_eval(output)
+        logger.debug(f"[PipelineLast R{self.r}] eval output done")
         if EXO_TRACING_ENABLED:
             _pipeline_timings.compute_us += int(
                 (time.perf_counter() - t0) * 1_000_000
