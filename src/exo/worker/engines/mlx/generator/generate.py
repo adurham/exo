@@ -232,23 +232,23 @@ def pipeline_parallel_prefill(
         clear_prefill_sends()
 
     # Post-loop: process remaining 1 token + add +1 entry to match stream_generate.
-    # Each iteration must sync (mx.eval) before the next — without this, rank 0's
-    # async RDMA sends pile up on rank 1's Metal command queue before rank 1 has
-    # issued matching recvs.  The unprocessed RDMA writes block rank 1's local
-    # compute, causing a permanent deadlock.
+    #
+    # CRITICAL: barrier before AND between iterations.  Rank 0 finishes the
+    # real chunk pipeline ~50ms before rank 1 (rank 0 only sends, rank 1 must
+    # recv + compute 30 layers).  Without a barrier here, rank 0's post-loop
+    # RDMA writes arrive at rank 1 while rank 1 is still evaluating the real
+    # chunk's PipelineLast output — the one-sided RDMA writes corrupt rank 1's
+    # Metal GPU state and cause _guarded_eval to hang permanently.
     if EXO_TRACING_ENABLED:
         t_post = time.perf_counter()
+    mx_barrier(group)  # sync after real chunks before post-loop
     for _post_i in range(2):
         with mx.stream(generation_stream):
             model(prompt[-1:][None], cache=_prompt_cache)
             quantize_cache_fn(_prompt_cache)
         flush_prefill_sends()
         mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
-        # Barrier between iterations: rank 0's RDMA writes are one-sided and
-        # land in rank 1's memory before rank 1 issues a matching recv.  Without
-        # this barrier, rank 0's next iteration's write can corrupt buffers that
-        # rank 1 is still using for computation.
-        mx_barrier(group)
+        mx_barrier(group)  # sync between iterations
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:
