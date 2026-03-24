@@ -194,15 +194,36 @@ def enable_distributed_tracing(rank: int) -> None:
     logger.info(f"[dist R{rank}] distributed op tracing enabled")
 
 
+_last_flush_sent: list[mx.array] = []
+
 def flush_prefill_sends() -> None:
+    """Flush queued pipeline sends.
+
+    Send arrays are collected in _last_flush_sent so the caller can include
+    them in a subsequent mx.eval() to guarantee completion.  Without this,
+    mx.async_eval(sent) fires-and-forgets the RDMA writes — nothing waits
+    for them, and they can arrive at the receiver while the receiver's GPU
+    is still computing on the previous message's buffer.
+    """
+    global _last_flush_sent
     if EXO_TRACING_ENABLED:
         t0 = time.perf_counter()
+    _last_flush_sent.clear()
     for output, dst, group in _pending_prefill_sends:
         sent = mx.distributed.send(output, dst, group=group)
+        _last_flush_sent.append(sent)
         mx.async_eval(sent)
     _pending_prefill_sends.clear()
     if EXO_TRACING_ENABLED:
         _pipeline_timings.flush_sends_us += int((time.perf_counter() - t0) * 1_000_000)
+
+
+def drain_flush_sends() -> None:
+    """Block until all sends from the last flush_prefill_sends() complete."""
+    global _last_flush_sent
+    if _last_flush_sent:
+        mx.eval(*_last_flush_sent)
+        _last_flush_sent.clear()
 
 
 def clear_prefill_sends() -> None:
