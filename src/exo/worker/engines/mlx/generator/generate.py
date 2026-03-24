@@ -37,7 +37,6 @@ from exo.worker.engines.mlx.auto_parallel import (
     PipelineLastLayer,
     _guarded_eval,
     clear_prefill_sends,
-    drain_flush_sends,
     flush_prefill_sends,
     get_pipeline_timings,
     set_pipeline_prefill,
@@ -194,7 +193,6 @@ def pipeline_parallel_prefill(
                 # is a no-op — without this, all computation defers to the final
                 # mx.eval, causing 90s+ blocks and heartbeat timeouts.
                 mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
-                drain_flush_sends()  # wait for async RDMA sends to complete
                 # Break shared-buffer references from cache slices back to the
                 # full computation graph of this chunk. Without this, DeltaNet
                 # conv1d state (a 2-position slice of the full conv_input) keeps
