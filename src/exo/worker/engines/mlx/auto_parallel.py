@@ -194,15 +194,36 @@ def enable_distributed_tracing(rank: int) -> None:
     logger.info(f"[dist R{rank}] distributed op tracing enabled")
 
 
+_last_flush_sent: list[mx.array] = []
+
 def flush_prefill_sends() -> None:
+    """Flush queued pipeline sends.
+
+    Send arrays are collected in _last_flush_sent so the caller can include
+    them in a subsequent mx.eval() to guarantee completion.  Without this,
+    mx.async_eval(sent) fires-and-forgets the RDMA writes — nothing waits
+    for them, and they can arrive at the receiver while the receiver's GPU
+    is still computing on the previous message's buffer.
+    """
+    global _last_flush_sent
     if EXO_TRACING_ENABLED:
         t0 = time.perf_counter()
+    _last_flush_sent.clear()
     for output, dst, group in _pending_prefill_sends:
         sent = mx.distributed.send(output, dst, group=group)
+        _last_flush_sent.append(sent)
         mx.async_eval(sent)
     _pending_prefill_sends.clear()
     if EXO_TRACING_ENABLED:
         _pipeline_timings.flush_sends_us += int((time.perf_counter() - t0) * 1_000_000)
+
+
+def drain_flush_sends() -> None:
+    """Block until all sends from the last flush_prefill_sends() complete."""
+    global _last_flush_sent
+    if _last_flush_sent:
+        mx.eval(*_last_flush_sent)
+        _last_flush_sent.clear()
 
 
 def clear_prefill_sends() -> None:
@@ -432,19 +453,20 @@ class PipelineFirstLayer(CustomMlxLayer):
             # Compiled decode: read hidden state from compile state list (recv handled outside compile)
             x = self._compile_state[self._hidden_idx]  # type: ignore
         elif self.r != 0:
-            # CRITICAL: recv_like is LAZY — do NOT eval it here.
-            #
-            # Each _guarded_eval() creates a separate eval → Event → event signal
-            # task on the CPU stream thread.  If the RDMA recv blocks the stream
-            # thread (waiting for the other rank's send), the event signal task is
-            # queued BEHIND the blocked recv.  Event::wait() on the main thread
-            # hangs forever — the stream thread can't reach the signal.
-            #
-            # By keeping the recv lazy, it gets evaluated together with the model
-            # layers in PipelineLastLayer's _guarded_eval(output).  One eval call
-            # = one event signal = no deadlock.  The stream thread processes:
-            # [recv (blocks until data arrives), compute 30 layers, signal].
+            if EXO_TRACING_ENABLED:
+                t0 = time.perf_counter()
+            logger.debug(f"[PipelineFirst R{self.r}] eval(x) start, prefill={self.is_prefill}")
+            mx.eval(x)
+            if EXO_TRACING_ENABLED:
+                t1 = time.perf_counter()
+            logger.debug(f"[PipelineFirst R{self.r}] recv_like start")
             x = mx.distributed.recv_like(x, self.recv_from, group=self.group)
+            logger.debug(f"[PipelineFirst R{self.r}] _guarded_eval start")
+            _guarded_eval(x)
+            logger.debug(f"[PipelineFirst R{self.r}] recv complete")
+            if EXO_TRACING_ENABLED:
+                _pipeline_timings.recv_eval_us += int((t1 - t0) * 1_000_000)
+                _pipeline_timings.recv_us += int((time.perf_counter() - t1) * 1_000_000)
         return self.original_layer(x, *args, **kwargs)
 
 
