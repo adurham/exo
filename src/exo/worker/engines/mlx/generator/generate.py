@@ -193,8 +193,7 @@ def pipeline_parallel_prefill(
                 # Pipeline tail ranks have no pending sends, so flush_prefill_sends
                 # is a no-op — without this, all computation defers to the final
                 # mx.eval, causing 90s+ blocks and heartbeat timeouts.
-                from exo.worker.engines.mlx.auto_parallel import _guarded_eval as _ge
-                _ge(*[c.state for c in _prompt_cache])  # type: ignore
+                mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
                 drain_flush_sends()  # wait for async RDMA sends to complete
                 # Break shared-buffer references from cache slices back to the
                 # full computation graph of this chunk. Without this, DeltaNet
@@ -237,19 +236,13 @@ def pipeline_parallel_prefill(
     # Post-loop: process remaining 1 token + add +1 entry to match stream_generate.
     if EXO_TRACING_ENABLED:
         t_post = time.perf_counter()
-    from exo.worker.engines.mlx.auto_parallel import _guarded_eval as _ge
     for _post_i in range(2):
-        logger.info(f"[R{rank}] post-loop iter {_post_i}: model start")
         with mx.stream(generation_stream):
             model(prompt[-1:][None], cache=_prompt_cache)
             quantize_cache_fn(_prompt_cache)
-        logger.info(f"[R{rank}] post-loop iter {_post_i}: flush")
         flush_prefill_sends()
-        logger.info(f"[R{rank}] post-loop iter {_post_i}: eval cache")
-        _ge(*[c.state for c in _prompt_cache])  # type: ignore
-        logger.info(f"[R{rank}] post-loop iter {_post_i}: drain")
-        drain_flush_sends()  # wait for async RDMA sends to complete
-        logger.info(f"[R{rank}] post-loop iter {_post_i}: done")
+        mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+        drain_flush_sends()
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:
