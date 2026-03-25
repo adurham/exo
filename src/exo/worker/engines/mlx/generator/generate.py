@@ -237,12 +237,17 @@ def pipeline_parallel_prefill(
     if EXO_TRACING_ENABLED:
         t_post = time.perf_counter()
     for _post_i in range(2):
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: model start")
         with mx.stream(generation_stream):
             model(prompt[-1:][None], cache=_prompt_cache)
             quantize_cache_fn(_prompt_cache)
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: flush")
         flush_prefill_sends()
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: eval cache")
         mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: drain")
         drain_flush_sends()  # wait for async RDMA sends to complete
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: done")
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:
@@ -253,7 +258,9 @@ def pipeline_parallel_prefill(
         t_cache_eval = time.perf_counter()
     from exo.worker.engines.mlx.auto_parallel import _guarded_eval
 
+    logger.info(f"[R{rank}] post-loop: final cache eval")
     _guarded_eval([c.state for c in _prompt_cache])  # type: ignore
+    logger.info(f"[R{rank}] post-loop: final cache eval done")
     if EXO_TRACING_ENABLED:
         cache_eval_ms = (time.perf_counter() - t_cache_eval) * 1000
         post_ms = (time.perf_counter() - t_post) * 1000
