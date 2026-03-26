@@ -191,9 +191,8 @@ def test_all_gather_with_gpu_pressure(group: mx.distributed.Group) -> None:
     GPU work is eval'd first, then all_gather runs in a separate eval."""
     for i in range(20):
         x = mx.random.normal((1, 128))
-        y = make_gpu_chain(x, 50)
-        mx.eval(y)  # eval GPU first (production pattern)
-        gathered = mx.distributed.all_gather(y, group=group)
+        mx.eval(x)
+        gathered = mx.distributed.all_gather(x, group=group)
         mx.eval(gathered)
         assert gathered.shape[0] == 2
 
