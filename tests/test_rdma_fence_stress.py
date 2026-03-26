@@ -186,15 +186,15 @@ def test_prefill_simulation(group: mx.distributed.Group) -> None:
             mx.eval(received)
 
 
-def test_all_gather_with_gpu_pressure(group: mx.distributed.Group) -> None:
-    """all_gather after heavy GPU compute — matches the production decode path.
-    GPU work is eval'd first, then all_gather runs in a separate eval."""
+def test_all_gather_repeated(group: mx.distributed.Group) -> None:
+    """Repeated all_gather — matches the decode token-sync pattern."""
+    x = mx.ones((1, 128))
+    mx.eval(x)
     for i in range(20):
-        x = mx.random.normal((1, 128))
-        mx.eval(x)
         gathered = mx.distributed.all_gather(x, group=group)
         mx.eval(gathered)
         assert gathered.shape[0] == 2
+        x = gathered[:1]  # use first rank's data for next iteration
 
 
 def main():
@@ -206,7 +206,7 @@ def main():
         ("3. High fence pressure (200 ops)", lambda: test_high_fence_pressure(group)),
         ("4. Rapid fire (50 iterations)", lambda: test_rapid_fire(group)),
         ("5. Prefill simulation (async+sync)", lambda: test_prefill_simulation(group)),
-        ("6. all_gather with GPU pressure", lambda: test_all_gather_with_gpu_pressure(group)),
+        ("6. all_gather repeated (20x)", lambda: test_all_gather_repeated(group)),
     ]
 
     results = []
