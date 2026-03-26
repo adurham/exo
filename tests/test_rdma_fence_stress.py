@@ -15,8 +15,10 @@ Tests:
   5. Prefill simulation: large tensor send with concurrent GPU work (async)
 """
 
+import json
 import os
 import sys
+import tempfile
 import time
 import traceback
 
@@ -29,12 +31,21 @@ TIMEOUT = 30  # seconds per test
 
 
 def init_group() -> mx.distributed.Group:
+    # JACCL requires: MLX_IBV_DEVICES (JSON connectivity), MLX_RANK, MLX_JACCL_COORDINATOR
+    devices = [[None, "rdma_en5"], ["rdma_en5", None]]
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(devices, f)
+        devfile = f.name
+    os.environ["MLX_IBV_DEVICES"] = devfile
     os.environ["MLX_RANK"] = str(RANK)
-    os.environ["MLX_COORDINATOR"] = COORDINATOR
-    group = mx.distributed.init(strict=True)
+    os.environ["MLX_JACCL_COORDINATOR"] = COORDINATOR
+    os.environ["MLX_JACCL_NUM_BUFFERS"] = "4"
+    os.environ["MLX_JACCL_FRAME_SIZE"] = "8192"
+    os.environ["MLX_METAL_FAST_SYNCH"] = "1"
+    group = mx.distributed.init(backend="jaccl", strict=True)
     assert group.rank() == RANK
     assert group.size() == 2
-    print(f"[R{RANK}] Initialized: rank={group.rank()}, size={group.size()}", flush=True)
+    print(f"[R{RANK}] JACCL initialized: rank={group.rank()}, size={group.size()}", flush=True)
     return group
 
 
@@ -90,7 +101,7 @@ def test_separated_eval(group: mx.distributed.Group) -> None:
         sent = mx.distributed.send(y, OTHER_RANK, group=group)
         mx.eval(sent)
     else:
-        received = mx.distributed.recv_like(y, OTHER_RANK, group=group)
+        received = mx.distributed.recv(y.shape, y.dtype, OTHER_RANK, group=group)
         mx.eval(received)
         y = received
     # Phase 3: all_gather
@@ -109,7 +120,7 @@ def test_combined_eval(group: mx.distributed.Group) -> None:
         sent = mx.distributed.send(y, OTHER_RANK, group=group)
         mx.eval(sent)
     else:
-        received = mx.distributed.recv_like(mx.zeros_like(y), OTHER_RANK, group=group)
+        received = mx.distributed.recv((1, 128), mx.float32, OTHER_RANK, group=group)
         mx.eval(received)
 
 
@@ -122,7 +133,7 @@ def test_high_fence_pressure(group: mx.distributed.Group) -> None:
         sent = mx.distributed.send(y, OTHER_RANK, group=group)
         mx.eval(sent)
     else:
-        received = mx.distributed.recv_like(mx.zeros((1, 256)), OTHER_RANK, group=group)
+        received = mx.distributed.recv((1, 256), mx.float32, OTHER_RANK, group=group)
         mx.eval(received)
     # Verify data
     gathered = mx.distributed.all_gather(
@@ -141,7 +152,7 @@ def test_rapid_fire(group: mx.distributed.Group) -> None:
             sent = mx.distributed.send(y, OTHER_RANK, group=group)
             mx.eval(sent)
         else:
-            received = mx.distributed.recv_like(mx.zeros((1, 64)), OTHER_RANK, group=group)
+            received = mx.distributed.recv((1, 64), mx.float32, OTHER_RANK, group=group)
             mx.eval(received)
 
 
@@ -159,7 +170,7 @@ def test_prefill_simulation(group: mx.distributed.Group) -> None:
             sent = mx.distributed.send(y, OTHER_RANK, group=group)
             mx.async_eval(sent)
         else:
-            received = mx.distributed.recv_like(mx.zeros_like(y), OTHER_RANK, group=group)
+            received = mx.distributed.recv(y.shape, y.dtype, OTHER_RANK, group=group)
             mx.async_eval(received)
 
         # Simulate concurrent cache quantization (generates fence tasks
