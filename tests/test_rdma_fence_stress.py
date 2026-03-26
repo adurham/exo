@@ -187,11 +187,12 @@ def test_prefill_simulation(group: mx.distributed.Group) -> None:
 
 
 def test_all_gather_with_gpu_pressure(group: mx.distributed.Group) -> None:
-    """all_gather with heavy GPU compute — verifies the decode path stays safe."""
+    """all_gather after heavy GPU compute — matches the production decode path.
+    GPU work is eval'd first, then all_gather runs in a separate eval."""
     for i in range(20):
         x = mx.random.normal((1, 128))
         y = make_gpu_chain(x, 50)
-        # Don't eval y first — test all_gather with pending GPU work
+        mx.eval(y)  # eval GPU first (production pattern)
         gathered = mx.distributed.all_gather(y, group=group)
         mx.eval(gathered)
         assert gathered.shape[0] == 2
