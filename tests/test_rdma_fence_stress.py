@@ -251,6 +251,31 @@ def test_tiny_buffer_all_gather(group: mx.distributed.Group) -> None:
             mx.eval(gathered)
 
 
+def test_prefill_pipeline_send_recv(group: mx.distributed.Group) -> None:
+    """Simulates the actual prefill pipeline: multiple chunks of send/recv
+    with GPU compute between them, matching PipelineFirstLayer/PipelineLastLayer.
+    5 chunks of 256 tokens × 5120 hidden dim bf16 = ~2.5MB per chunk."""
+    for chunk in range(5):
+        # GPU compute (30 layers worth of matmuls)
+        x = mx.random.normal((256, 5120)).astype(mx.bfloat16)
+        y = make_gpu_chain(x, 10)
+        mx.eval(y)  # eval GPU first (production pattern)
+
+        # Send/recv (production pattern: eval output, then eval send separately)
+        if RANK == 0:
+            sent = mx.distributed.send(y, OTHER_RANK, group=group)
+            mx.eval(sent)
+        else:
+            received = mx.distributed.recv((256, 5120), mx.bfloat16, OTHER_RANK, group=group)
+            mx.eval(received)
+
+        # Then all_gather for token sync
+        token = mx.array([chunk], dtype=mx.int32)
+        mx.eval(token)
+        gathered = mx.distributed.all_gather(token.reshape(1), group=group)
+        mx.eval(gathered)
+
+
 def main():
     group = init_group()
 
@@ -262,6 +287,7 @@ def main():
         ("5. Prefill simulation (async+sync)", lambda: test_prefill_simulation(group)),
         ("6. Production decode pattern (50 steps)", lambda: test_production_decode_pattern(group)),
         ("7. Tiny buffer all_gather (500x)", lambda: test_tiny_buffer_all_gather(group)),
+        ("8. Prefill pipeline send/recv (5 chunks)", lambda: test_prefill_pipeline_send_recv(group)),
     ]
 
     results = []
