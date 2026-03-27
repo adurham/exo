@@ -277,9 +277,11 @@ def test_prefill_pipeline_send_recv(group: mx.distributed.Group) -> None:
     with GPU compute between them, matching PipelineFirstLayer/PipelineLastLayer.
     5 chunks of 256 tokens × 5120 hidden dim bf16 = ~2.5MB per chunk."""
     for chunk in range(5):
-        # GPU compute (30 layers worth of matmuls)
+        # GPU compute — use bf16 matmuls (production dtype) with small weight
+        # to avoid Metal memory pressure that invalidates RDMA DMA mappings
         x = mx.random.normal((256, 5120)).astype(mx.bfloat16)
-        y = make_gpu_chain(x, 10)
+        w = mx.random.normal((5120, 5120)).astype(mx.bfloat16)
+        y = x @ w
         mx.eval(y)  # eval GPU first (production pattern)
 
         # Send/recv (production pattern: eval output, then eval send separately)
