@@ -128,6 +128,21 @@ def main():
     print(f"\n[R{RANK}] === REQUEST 1 ===", flush=True)
     simulate_pipeline_prefill(group, n_chunks=4)
 
+    # Simulate decode: 100 all_gather token syncs (like the 2000-token decode)
+    print(f"\n[R{RANK}] === DECODE (100 all_gathers) ===", flush=True)
+    for i in range(100):
+        # GPU compute (simulating model forward)
+        x = mx.random.normal((1, HIDDEN)).astype(DTYPE)
+        w = mx.random.normal((HIDDEN, HIDDEN)).astype(DTYPE)
+        y = x @ w
+        mx.eval(y)
+        # Token sync via all_gather
+        token = mx.array([i], dtype=mx.int32)
+        mx.eval(token)
+        g = mx.distributed.all_gather(token.reshape(1), group=group)
+        mx.eval(g)
+    print(f"[R{RANK}] decode done", flush=True)
+
     # Second "request" — this is where the cluster deadlocks
     print(f"\n[R{RANK}] === REQUEST 2 ===", flush=True)
     simulate_pipeline_prefill(group, n_chunks=2)
