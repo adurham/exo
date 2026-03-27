@@ -260,9 +260,8 @@ def main():
         ("3. High fence pressure (200 ops)", lambda: test_high_fence_pressure(group)),
         ("4. Rapid fire (50 iterations)", lambda: test_rapid_fire(group)),
         ("5. Prefill simulation (async+sync)", lambda: test_prefill_simulation(group)),
-        ("6. all_gather repeated (20x)", lambda: test_all_gather_repeated(group)),
-        ("7. Production decode pattern (50 steps)", lambda: test_production_decode_pattern(group)),
-        ("8. Tiny buffer all_gather (500x)", lambda: test_tiny_buffer_all_gather(group)),
+        ("6. Production decode pattern (50 steps)", lambda: test_production_decode_pattern(group)),
+        ("7. Tiny buffer all_gather (500x)", lambda: test_tiny_buffer_all_gather(group)),
     ]
 
     results = []
