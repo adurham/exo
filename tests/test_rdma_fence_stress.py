@@ -259,6 +259,14 @@ def test_tiny_buffer_all_gather(group: mx.distributed.Group) -> None:
             mx.eval(gathered)
 
 
+def test_drain_cq(group: mx.distributed.Group) -> None:
+    """Drain any stale CQ entries by doing a barrier all_gather."""
+    token = mx.array([RANK], dtype=mx.int32)
+    mx.eval(token)
+    g = mx.distributed.all_gather(token.reshape(1), group=group)
+    mx.eval(g)
+
+
 def test_prefill_pipeline_send_recv(group: mx.distributed.Group) -> None:
     """Simulates the actual prefill pipeline: multiple chunks of send/recv
     with GPU compute between them, matching PipelineFirstLayer/PipelineLastLayer.
@@ -295,7 +303,8 @@ def main():
         ("5. Prefill simulation (async+sync)", lambda: test_prefill_simulation(group)),
         ("6. Production decode pattern (50 steps)", lambda: test_production_decode_pattern(group)),
         ("7. Tiny buffer all_gather (500x)", lambda: test_tiny_buffer_all_gather(group)),
-        ("8. Prefill pipeline 2.6MB send/recv (5 chunks)", lambda: test_prefill_pipeline_send_recv(group)),
+        ("8. CQ drain barrier", lambda: test_drain_cq(group)),
+        ("9. Prefill pipeline 2.6MB send/recv (5 chunks)", lambda: test_prefill_pipeline_send_recv(group)),
     ]
 
     results = []
