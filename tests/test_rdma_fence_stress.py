@@ -58,36 +58,35 @@ def init_group() -> mx.distributed.Group:
 
 
 def timed(name: str, fn, timeout: float = TIMEOUT):
-    """Run fn with a timeout. Returns (success, elapsed_ms)."""
+    """Run fn directly (no threads — daemon threads corrupt RDMA state).
+    Uses SIGALRM for deadlock detection."""
     print(f"[R{RANK}] {name} ... ", end="", flush=True)
     t0 = time.perf_counter()
+    import signal
+    class TimeoutError(Exception):
+        pass
+    def handler(signum, frame):
+        raise TimeoutError()
+    old = signal.signal(signal.SIGALRM, handler)
+    signal.alarm(int(timeout))
     try:
-        # Use a simple timeout — if it takes too long, it's deadlocked
-        import threading
-        result = [None]
-        error = [None]
-        def worker():
-            try:
-                result[0] = fn()
-            except Exception as e:
-                error[0] = e
-        t = threading.Thread(target=worker, daemon=True)
-        t.start()
-        t.join(timeout=timeout)
+        fn()
+        signal.alarm(0)
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        if t.is_alive():
-            print(f"TIMEOUT ({timeout}s) - DEADLOCK", flush=True)
-            return False, elapsed_ms
-        if error[0]:
-            print(f"ERROR: {error[0]}", flush=True)
-            traceback.print_exception(type(error[0]), error[0], error[0].__traceback__)
-            return False, elapsed_ms
         print(f"OK ({elapsed_ms:.1f}ms)", flush=True)
         return True, elapsed_ms
+    except TimeoutError:
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        print(f"TIMEOUT ({timeout}s) - DEADLOCK", flush=True)
+        return False, elapsed_ms
     except Exception as e:
+        signal.alarm(0)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         print(f"ERROR: {e} ({elapsed_ms:.1f}ms)", flush=True)
+        traceback.print_exception(type(e), e, e.__traceback__)
         return False, elapsed_ms
+    finally:
+        signal.signal(signal.SIGALRM, old)
 
 
 def make_gpu_chain(x: mx.array, n_ops: int) -> mx.array:
