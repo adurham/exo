@@ -32,6 +32,9 @@ TIMEOUT = 30  # seconds per test
 
 def init_group() -> mx.distributed.Group:
     # JACCL requires: MLX_IBV_DEVICES (JSON connectivity), MLX_RANK, MLX_JACCL_COORDINATOR
+    # NOTE: MLX_JACCL_NUM_BUFFERS and MLX_JACCL_FRAME_SIZE are inline const globals
+    # read at library load (import time). They MUST be set in the shell environment
+    # BEFORE python starts, not here. See run_rdma_fence_stress.sh.
     devices = [[None, "rdma_en5"], ["rdma_en5", None]]
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(devices, f)
@@ -39,8 +42,6 @@ def init_group() -> mx.distributed.Group:
     os.environ["MLX_IBV_DEVICES"] = devfile
     os.environ["MLX_RANK"] = str(RANK)
     os.environ["MLX_JACCL_COORDINATOR"] = COORDINATOR
-    os.environ["MLX_JACCL_NUM_BUFFERS"] = "4"
-    os.environ["MLX_JACCL_FRAME_SIZE"] = "8192"
     os.environ["MLX_METAL_FAST_SYNCH"] = "1"
     group = mx.distributed.init(backend="jaccl", strict=True)
     assert group.rank() == RANK
