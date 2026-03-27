@@ -29,6 +29,13 @@ COORDINATOR = os.environ.get("COORDINATOR", "0.0.0.0:59989")
 OTHER_RANK = 1 - RANK
 TIMEOUT = 30  # seconds per test
 
+# These must be set in the SHELL before python starts (inline const read at import).
+# Setting them in Python is too late.
+if os.environ.get("MLX_JACCL_NUM_BUFFERS") is None:
+    print("FATAL: MLX_JACCL_NUM_BUFFERS not set in shell environment.", flush=True)
+    print("Usage: MLX_JACCL_NUM_BUFFERS=4 MLX_JACCL_FRAME_SIZE=8192 RANK=0 COORDINATOR=... python3 tests/test_rdma_fence_stress.py", flush=True)
+    sys.exit(1)
+
 
 def init_group() -> mx.distributed.Group:
     # JACCL requires: MLX_IBV_DEVICES (JSON connectivity), MLX_RANK, MLX_JACCL_COORDINATOR
@@ -288,7 +295,7 @@ def main():
         ("5. Prefill simulation (async+sync)", lambda: test_prefill_simulation(group)),
         ("6. Production decode pattern (50 steps)", lambda: test_production_decode_pattern(group)),
         ("7. Tiny buffer all_gather (500x)", lambda: test_tiny_buffer_all_gather(group)),
-        ("8. Prefill pipeline send/recv (5 chunks)", lambda: test_prefill_pipeline_send_recv(group)),
+        ("8. Prefill pipeline 2.6MB send/recv (5 chunks)", lambda: test_prefill_pipeline_send_recv(group)),
     ]
 
     results = []

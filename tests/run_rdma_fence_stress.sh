@@ -29,13 +29,13 @@ echo "Starting test (coordinator=$STUDIO1_IP:$COORDINATOR_PORT)..."
 echo "---"
 
 # Launch both ranks in parallel, stream output with rank prefix
-ssh "$STUDIO1" "cd $REPO_DIR && RANK=0 COORDINATOR=0.0.0.0:$COORDINATOR_PORT .venv/bin/python tests/test_rdma_fence_stress.py" 2>&1 | sed 's/^/[studio1] /' &
+ssh "$STUDIO1" "cd $REPO_DIR && MLX_JACCL_NUM_BUFFERS=4 MLX_JACCL_FRAME_SIZE=8192 RANK=0 COORDINATOR=0.0.0.0:$COORDINATOR_PORT .venv/bin/python tests/test_rdma_fence_stress.py" 2>&1 | sed 's/^/[studio1] /' &
 PID1=$!
 
 # Small delay so rank 0 starts the coordinator first
 sleep 1
 
-ssh "$STUDIO2" "cd $REPO_DIR && RANK=1 COORDINATOR=$STUDIO1_IP:$COORDINATOR_PORT .venv/bin/python tests/test_rdma_fence_stress.py" 2>&1 | sed 's/^/[studio2] /' &
+ssh "$STUDIO2" "cd $REPO_DIR && MLX_JACCL_NUM_BUFFERS=4 MLX_JACCL_FRAME_SIZE=8192 RANK=1 COORDINATOR=$STUDIO1_IP:$COORDINATOR_PORT .venv/bin/python tests/test_rdma_fence_stress.py" 2>&1 | sed 's/^/[studio2] /' &
 PID2=$!
 
 # Wait for both
