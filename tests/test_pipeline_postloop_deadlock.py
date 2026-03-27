@@ -61,20 +61,27 @@ def simulate_pipeline_prefill(group, n_chunks=2):
             print(f"[R{rank}] iter {i}: dummy", flush=True)
             continue
 
-        # Real iteration: GPU compute + send/recv
-        x = mx.random.normal((64, HIDDEN)).astype(DTYPE)
-        mx.eval(x)
+        # Real iteration: GPU compute (simulating 30 model layers)
+        x = mx.random.normal((256, HIDDEN)).astype(DTYPE)
+        w = mx.random.normal((HIDDEN, HIDDEN)).astype(DTYPE)
+        y = x @ w  # Heavy GPU compute like model forward
+        mx.eval(y)
 
         if rank == 0:
-            # R0 sends hidden state
-            sent = mx.distributed.send(x, OTHER, group=group)
+            # R0 sends hidden state (queued, then flushed like production)
+            sent = mx.distributed.send(y, OTHER, group=group)
             mx.async_eval(sent)
             print(f"[R{rank}] iter {i}: async_send chunk {real_idx}", flush=True)
         else:
             # R1 receives hidden state
-            received = mx.distributed.recv_like(x, OTHER, group=group)
+            received = mx.distributed.recv_like(y, OTHER, group=group)
             mx.eval(received)
             print(f"[R{rank}] iter {i}: recv chunk {real_idx}", flush=True)
+
+        # Simulate cache eval (like mx.eval(*cache_states) in production)
+        cache = mx.random.normal((256, 1024)).astype(DTYPE)
+        cache_result = cache @ mx.random.normal((1024, 1024)).astype(DTYPE)
+        mx.eval(cache_result)
 
         # Drain async sends (like drain_flush_sends)
         if rank == 0:
