@@ -160,7 +160,40 @@ def mlx_distributed_init(
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
 
+        # RDMA health check — verify round-trip data integrity before
+        # model loading.  Catches stale QP state, corrupted connections,
+        # and buffer lifetime issues early.
+        _rdma_health_check(group, rank)
+
         return group
+
+
+def _rdma_health_check(group: mx.distributed.Group, rank: int) -> None:
+    """Verify RDMA connection with a round-trip all_gather + data check."""
+    import time
+
+    t0 = time.perf_counter()
+    # Test with multiple sizes matching production patterns
+    for label, arr in [
+        ("4B token", mx.array([rank + 42], dtype=mx.int32)),
+        ("16B header", mx.array([rank, 1, 2, 3], dtype=mx.int32)),
+        ("10KB hidden", mx.full((1, 5120), float(rank + 1), dtype=mx.bfloat16)),
+    ]:
+        mx.eval(arr)
+        gathered = mx.distributed.all_gather(arr, group=group)
+        mx.eval(gathered)
+        # Verify each rank's data is correct
+        for r in range(group.size()):
+            chunk = gathered[r] if gathered.ndim > 1 else gathered[r : r + 1]
+            expected_first = float(r + 42) if "token" in label else float(r + 1) if "hidden" in label else float(r)
+            actual = float(chunk.reshape(-1)[0].item())
+            if actual != expected_first:
+                raise RuntimeError(
+                    f"RDMA health check FAILED on {label}: rank {r} expected "
+                    f"{expected_first}, got {actual}. Connection is corrupt."
+                )
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    logger.info(f"Rank {rank} RDMA health check passed ({elapsed_ms:.0f}ms)")
 
 
 def initialize_mlx(
