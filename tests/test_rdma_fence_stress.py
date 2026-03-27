@@ -197,6 +197,60 @@ def test_all_gather_repeated(group: mx.distributed.Group) -> None:
         x = gathered[:1]  # use first rank's data for next iteration
 
 
+def test_production_decode_pattern(group: mx.distributed.Group) -> None:
+    """Exact buffer sizes from the PP decode path:
+    1. Hidden state all_gather: (1, H) bf16 where H=5120 (Qwen3.5-397B)
+    2. K>1 header all_gather: (1, K+1) int32 where K=3 → 16 bytes per rank
+    3. Token sync all_gather: (1,) int32 → 4 bytes per rank
+    4. K>1 result all_gather: (2,) int32 → 8 bytes per rank
+    These are the exact shapes from generate.py _pp_step."""
+    for step in range(50):
+        # 1. Hidden state exchange — (1, 5120) bf16 = 10240 bytes
+        hidden = mx.random.normal((1, 5120)).astype(mx.bfloat16)
+        mx.eval(hidden)
+        gathered_hidden = mx.distributed.all_gather(
+            hidden.reshape(1, -1), group=group
+        )
+        mx.eval(gathered_hidden)
+        assert gathered_hidden.shape == (2, 5120), f"hidden shape: {gathered_hidden.shape}"
+
+        # 2. K>1 header — (1, 4) int32 = 16 bytes
+        header = mx.zeros((1, 4), dtype=mx.int32)
+        mx.eval(header)
+        gathered_header = mx.distributed.all_gather(header, group=group)
+        mx.eval(gathered_header)
+        assert gathered_header.shape == (2, 4), f"header shape: {gathered_header.shape}"
+
+        # 3. Token sync — (1,) int32 = 4 bytes
+        token = mx.array([42], dtype=mx.int32)
+        mx.eval(token)
+        gathered_token = mx.distributed.all_gather(token.reshape(1), group=group)
+        mx.eval(gathered_token)
+        assert gathered_token.shape == (2,), f"token shape: {gathered_token.shape}"
+
+        # 4. K>1 result — (2,) int32 = 8 bytes
+        result = mx.array([0, 42], dtype=mx.int32)
+        mx.eval(result)
+        gathered_result = mx.distributed.all_gather(result.reshape(2), group=group)
+        mx.eval(gathered_result)
+
+
+def test_tiny_buffer_all_gather(group: mx.distributed.Group) -> None:
+    """Stress test with very small buffers — the sizes most likely to hit
+    page boundary issues. 100 iterations each."""
+    for nbytes_label, arr in [
+        ("4B int32", mx.array([1], dtype=mx.int32)),
+        ("8B 2xint32", mx.array([1, 2], dtype=mx.int32)),
+        ("16B 4xint32", mx.zeros(4, dtype=mx.int32)),
+        ("32B 8xint32", mx.zeros(8, dtype=mx.int32)),
+        ("64B 16xfloat32", mx.zeros(16, dtype=mx.float32)),
+    ]:
+        mx.eval(arr)
+        for i in range(100):
+            gathered = mx.distributed.all_gather(arr, group=group)
+            mx.eval(gathered)
+
+
 def main():
     group = init_group()
 
@@ -207,6 +261,8 @@ def main():
         ("4. Rapid fire (50 iterations)", lambda: test_rapid_fire(group)),
         ("5. Prefill simulation (async+sync)", lambda: test_prefill_simulation(group)),
         ("6. all_gather repeated (20x)", lambda: test_all_gather_repeated(group)),
+        ("7. Production decode pattern (50 steps)", lambda: test_production_decode_pattern(group)),
+        ("8. Tiny buffer all_gather (500x)", lambda: test_tiny_buffer_all_gather(group)),
     ]
 
     results = []
