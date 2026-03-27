@@ -237,12 +237,17 @@ def pipeline_parallel_prefill(
     if EXO_TRACING_ENABLED:
         t_post = time.perf_counter()
     for _post_i in range(2):
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: model start")
         with mx.stream(generation_stream):
             model(prompt[-1:][None], cache=_prompt_cache)
             quantize_cache_fn(_prompt_cache)
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: flush_prefill_sends")
         flush_prefill_sends()
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: mx.eval cache")
         mx.eval(*[c.state for c in _prompt_cache])  # type: ignore
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: drain_flush_sends")
         drain_flush_sends()
+        logger.info(f"[R{rank}] post-loop iter {_post_i}: done")
 
     # Touch heartbeat: model() calls above can take seconds.
     if distributed_prompt_progress_callback is not None:
