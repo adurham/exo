@@ -972,13 +972,18 @@ def mlx_generate(
     _draft_tokens = int(os.environ.get("EXO_DRAFT_TOKENS", "5"))
     _prefill_thread = None
     _tp_draft_fn = None
-    _is_tp = group is not None and group.size() > 1
+    # TP = multi-rank group WITHOUT pipeline layers.  PP uses the same group
+    # but communicates via PipelineFirstLayer/PipelineLastLayer, not TP all_reduce.
+    _is_tp = group is not None and group.size() > 1 and not _has_pipeline_communication_layer(model)
     _is_rank0 = group is None or group.rank() == 0
     from exo.worker.engines.mlx.utils_mlx import _DraftBroadcastSentinel
     _is_local_draft = draft_model is not None and (
         isinstance(draft_model, nn.Module) or isinstance(draft_model, _DraftBroadcastSentinel)
     )
     _is_remote_draft = draft_model is not None and hasattr(draft_model, 'prefill')
+
+    # Used for logging; set inside _is_local_draft but referenced unconditionally.
+    _pp_info_for_draft: object | None = None
 
     if _is_local_draft:
         # Local draft: only rank 0 runs the draft model and broadcasts tokens.
