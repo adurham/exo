@@ -134,19 +134,28 @@ def main():
     print(f"\n[R{RANK}] === REQUEST 1 ===", flush=True)
     simulate_pipeline_prefill(group, n_chunks=4)
 
-    # Simulate decode: 100 all_gather token syncs (like the 2000-token decode)
-    print(f"\n[R{RANK}] === DECODE (100 all_gathers) ===", flush=True)
-    for i in range(100):
-        # GPU compute (simulating model forward)
+    # Simulate decode: 2000 tokens with GPU compute + all_gather per token
+    # This matches the real decode path: model forward (GPU) → all_gather token
+    print(f"\n[R{RANK}] === DECODE (2000 tokens) ===", flush=True)
+    for i in range(2000):
+        # GPU compute: model forward (single token through layers)
         x = mx.random.normal((1, HIDDEN)).astype(DTYPE)
-        w = mx.random.normal((HIDDEN, HIDDEN)).astype(DTYPE)
-        y = x @ w
-        mx.eval(y)
+        for _layer in range(3):  # simulate a few GPU layers
+            x = x @ mx.random.normal((HIDDEN, HIDDEN)).astype(DTYPE)
+        mx.eval(x)
+
+        # Hidden state exchange via all_gather (like _pp_step)
+        gathered = mx.distributed.all_gather(x.reshape(1, -1), group=group)
+        mx.eval(gathered)
+
         # Token sync via all_gather
-        token = mx.array([i], dtype=mx.int32)
+        token = mx.array([i % 100], dtype=mx.int32)
         mx.eval(token)
         g = mx.distributed.all_gather(token.reshape(1), group=group)
         mx.eval(g)
+
+        if i % 500 == 0:
+            print(f"[R{RANK}] decode {i}/2000", flush=True)
     print(f"[R{RANK}] decode done", flush=True)
 
     # Second "request" — this is where the cluster deadlocks
