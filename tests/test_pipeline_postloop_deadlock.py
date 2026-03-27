@@ -51,6 +51,7 @@ def simulate_pipeline_prefill(group, n_chunks=2):
     print(f"[R{rank}] pipeline: {n_chunks} real + {n_leading} leading + {n_trailing} trailing = {n_total} iters", flush=True)
 
     # Main loop (offset pipeline)
+    pending_sends: list = []
     real_idx = 0
     for i in range(n_total):
         is_leading = i < n_leading
@@ -61,32 +62,37 @@ def simulate_pipeline_prefill(group, n_chunks=2):
             print(f"[R{rank}] iter {i}: dummy", flush=True)
             continue
 
-        # Real iteration: GPU compute (simulating 30 model layers)
+        # Real iteration: GPU compute producing 256×5120 bf16 hidden state (2.5MB)
+        # This matches the real model's output size for a 256-token chunk
         x = mx.random.normal((256, HIDDEN)).astype(DTYPE)
-        w = mx.random.normal((HIDDEN, HIDDEN)).astype(DTYPE)
-        y = x @ w  # Heavy GPU compute like model forward
-        mx.eval(y)
+        # Simulate 30 layers of GPU compute
+        for _layer in range(5):
+            x = x @ mx.random.normal((HIDDEN, HIDDEN)).astype(DTYPE)
+        mx.eval(x)  # eval GPU output BEFORE send (production pattern)
 
         if rank == 0:
-            # R0 sends hidden state (queued, then flushed like production)
-            sent = mx.distributed.send(y, OTHER, group=group)
-            mx.async_eval(sent)
-            print(f"[R{rank}] iter {i}: async_send chunk {real_idx}", flush=True)
+            # Queue send then flush (production pattern: queue_sends=True)
+            pending_sends.append(mx.distributed.send(x, OTHER, group=group))
         else:
             # R1 receives hidden state
-            received = mx.distributed.recv_like(y, OTHER, group=group)
+            received = mx.distributed.recv_like(x, OTHER, group=group)
             mx.eval(received)
             print(f"[R{rank}] iter {i}: recv chunk {real_idx}", flush=True)
 
-        # Simulate cache eval (like mx.eval(*cache_states) in production)
-        cache = mx.random.normal((256, 1024)).astype(DTYPE)
-        cache_result = cache @ mx.random.normal((1024, 1024)).astype(DTYPE)
-        mx.eval(cache_result)
+        # Flush queued sends (like flush_prefill_sends)
+        for s in pending_sends:
+            mx.async_eval(s)
 
-        # Drain async sends (like drain_flush_sends)
-        if rank == 0:
-            mx.eval(sent)
-            print(f"[R{rank}] iter {i}: drain done", flush=True)
+        # Simulate cache eval (like mx.eval(*cache_states) in production)
+        cache = mx.random.normal((256, 2048)).astype(DTYPE)
+        mx.eval(cache)
+
+        # Drain async sends
+        for s in pending_sends:
+            mx.eval(s)
+        if rank == 0 and pending_sends:
+            print(f"[R{rank}] iter {i}: send+drain chunk {real_idx}", flush=True)
+        pending_sends.clear()
 
         real_idx += 1
 
