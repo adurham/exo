@@ -186,6 +186,12 @@ def test_prefill_simulation(group: mx.distributed.Group) -> None:
         quantized = make_gpu_chain(cache, 5)
         mx.eval(quantized)
 
+        # Drain the async send — must complete before next iteration
+        if RANK == 0:
+            mx.eval(sent)
+        else:
+            mx.eval(received)
+
         # Drain the async send
         if RANK == 0:
             mx.eval(sent)
