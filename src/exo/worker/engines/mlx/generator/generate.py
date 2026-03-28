@@ -396,11 +396,15 @@ def prefill(
     set_pipeline_queue_sends(model, queue_sends=False)
     set_pipeline_prefill(model, is_prefill=False)
 
-    # stream_generate added 1 extra generated token to the cache, so we should trim it.
-    # Because of needing to roll back arrays cache, we will generate on 2 tokens so trim 1 more.
+    # The post-loop added 2 extra entries to the cache.  KV caches are trimmed
+    # by 2; ArraysCache (DeltaNet recurrent state) is restored to the snapshot
+    # taken after the LAST prefill chunk (before the post-loop).  This is
+    # snapshots[-1], NOT snapshots[-2] — the latter points to one chunk earlier
+    # (or the initial zero-state for short prompts), causing a state/cache
+    # mismatch that produces NaN on the first decode token.
     if EXO_TRACING_ENABLED:
         t_trim = time.perf_counter()
-    pre_gen = snapshots[-2] if has_ssm else None
+    pre_gen = snapshots[-1] if has_ssm else None
     for i, c in enumerate(cache):
         if has_ssm and isinstance(c, (ArraysCache, RotatingKVCache)):
             assert pre_gen is not None
