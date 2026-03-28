@@ -416,6 +416,19 @@ def prefill(
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
+    # --- DEBUG: check restored ArraysCache for NaN ---
+    if has_ssm:
+        for i, c in enumerate(cache):
+            if isinstance(c, (ArraysCache, RotatingKVCache)):
+                for j, arr in enumerate(c.cache if hasattr(c, 'cache') else []):
+                    if arr is not None:
+                        mx.eval(arr)
+                        if bool(mx.any(mx.isnan(arr)).item()):
+                            logger.warning(f"[RESTORE-CHECK] cache[{i}].cache[{j}] has NaN! shape={arr.shape}")
+                        else:
+                            logger.info(f"[RESTORE-CHECK] cache[{i}].cache[{j}] OK max={float(mx.abs(arr).max().item()):.4f} shape={arr.shape}")
+        logger.info(f"[RESTORE-CHECK] snapshot used: snapshots[{len(snapshots)-1}] of {len(snapshots)} total, token_count={pre_gen.token_count if pre_gen else '?'}")
+
     # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
         distributed_prompt_progress_callback()
