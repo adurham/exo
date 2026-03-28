@@ -614,11 +614,18 @@ def set_pipeline_compiled_decode(model: nn.Module, active: bool, compile_state: 
     """
     inner = get_inner_model(model)
     layers = get_layers(inner)
+    n_set = 0
     for layer in layers:
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
             layer._compiled_decode_active = active
             layer._compile_state = compile_state if active else None
             layer._hidden_idx = hidden_idx if active else -1
+            n_set += 1
+    import sys
+    print(f"[set_pipeline_compiled_decode] active={active} hidden_idx={hidden_idx} "
+          f"n_layers={len(layers)} n_pipeline_layers={n_set} "
+          f"layer_types={[type(l).__name__ for l in layers[:3]]}...{[type(l).__name__ for l in layers[-3:]]}",
+          file=sys.stderr, flush=True)
 
 
 class HybridPipelineLastLayer(CustomMlxLayer):
