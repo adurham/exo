@@ -490,8 +490,6 @@ class PipelineLastLayer(CustomMlxLayer):
         self._hidden_idx: int = -1
         self._speculative_mode: bool = False
 
-    _nan_check_count: int = 0
-
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         output: mx.array = self.original_layer(x, *args, **kwargs)
 
@@ -502,15 +500,6 @@ class PipelineLastLayer(CustomMlxLayer):
             return output
 
         if self._compiled_decode_active:
-            # --- DEBUG: NaN tracing ---
-            if self._nan_check_count < 3:
-                _guarded_eval(x, output)
-                _x_nan = bool(mx.any(mx.isnan(x)).item())
-                _o_nan = bool(mx.any(mx.isnan(output)).item())
-                _x_max = float(mx.abs(x).max().item()) if not _x_nan else -1.0
-                _o_max = float(mx.abs(output).max().item()) if not _o_nan else -1.0
-                logger.warning(f"[PipelineLast R{self.r}] compiled_decode n={self._nan_check_count} x_nan={_x_nan} x_max={_x_max:.4f} o_nan={_o_nan} o_max={_o_max:.4f} x_shape={x.shape} o_shape={output.shape}")
-                self._nan_check_count += 1
             # Compiled decode: write output to compile state list (send/all_gather handled outside compile)
             self._compile_state[self._hidden_idx] = output  # type: ignore
             return output
