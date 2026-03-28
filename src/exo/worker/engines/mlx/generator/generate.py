@@ -416,19 +416,23 @@ def prefill(
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
-    # Quick NaN/dtype check on restored DeltaNet state
+    # DeltaNet state can accumulate NaN during pipeline prefill (MoE
+    # amplification through quantized weights diverges the recurrent state).
+    # Zero out NaN so decode starts clean.  The float32 state kernel fix
+    # prevents NaN from recurring during single-token decode steps.
     if has_ssm:
-        _nan_count = 0
-        _dtypes: set[str] = set()
+        _nan_fixed = 0
         for c in cache:
             if isinstance(c, (ArraysCache, RotatingKVCache)) and hasattr(c, 'cache'):
-                for arr in c.cache:
+                for j, arr in enumerate(c.cache):
                     if arr is not None:
                         mx.eval(arr)
-                        _dtypes.add(str(arr.dtype))
                         if bool(mx.any(mx.isnan(arr)).item()):
-                            _nan_count += 1
-        logger.info(f"[prefill] DeltaNet state check: nan_arrays={_nan_count} dtypes={_dtypes}")
+                            c.cache[j] = mx.where(mx.isnan(arr), mx.zeros_like(arr), arr)
+                            mx.eval(c.cache[j])
+                            _nan_fixed += 1
+        if _nan_fixed > 0:
+            logger.warning(f"[prefill] sanitized NaN in {_nan_fixed} DeltaNet state arrays")
 
     # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
