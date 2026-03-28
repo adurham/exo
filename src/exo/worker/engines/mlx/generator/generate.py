@@ -416,8 +416,19 @@ def prefill(
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
-    # (NaN sanitization removed — root cause fixed in gated_delta.py by
-    # keeping DeltaNet recurrent state in float32 to prevent bfloat16 overflow.)
+    # Quick NaN/dtype check on restored DeltaNet state
+    if has_ssm:
+        _nan_count = 0
+        _dtypes: set[str] = set()
+        for c in cache:
+            if isinstance(c, (ArraysCache, RotatingKVCache)) and hasattr(c, 'cache'):
+                for arr in c.cache:
+                    if arr is not None:
+                        mx.eval(arr)
+                        _dtypes.add(str(arr.dtype))
+                        if bool(mx.any(mx.isnan(arr)).item()):
+                            _nan_count += 1
+        logger.info(f"[prefill] DeltaNet state check: nan_arrays={_nan_count} dtypes={_dtypes}")
 
     # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
