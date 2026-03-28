@@ -396,12 +396,8 @@ def prefill(
     set_pipeline_queue_sends(model, queue_sends=False)
     set_pipeline_prefill(model, is_prefill=False)
 
-    # The post-loop added 2 extra entries to the cache.  KV caches are trimmed
-    # by 2; ArraysCache (DeltaNet recurrent state) is restored to the snapshot
-    # taken after the LAST prefill chunk (before the post-loop).  This is
-    # snapshots[-1], NOT snapshots[-2] — the latter points to one chunk earlier
-    # (or the initial zero-state for short prompts), causing a state/cache
-    # mismatch that produces NaN on the first decode token.
+    # stream_generate added 1 extra generated token to the cache, so we should trim it.
+    # Because of needing to roll back arrays cache, we will generate on 2 tokens so trim 1 more.
     if EXO_TRACING_ENABLED:
         t_trim = time.perf_counter()
     pre_gen = snapshots[-2] if has_ssm else None
@@ -415,24 +411,6 @@ def prefill(
             c.trim(2)
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
-
-    # DeltaNet state can accumulate NaN during pipeline prefill (MoE
-    # amplification through quantized weights diverges the recurrent state).
-    # Zero out NaN so decode starts clean.  The float32 state kernel fix
-    # prevents NaN from recurring during single-token decode steps.
-    if has_ssm:
-        _nan_fixed = 0
-        for c in cache:
-            if isinstance(c, (ArraysCache, RotatingKVCache)) and hasattr(c, 'cache'):
-                for j, arr in enumerate(c.cache):
-                    if arr is not None:
-                        mx.eval(arr)
-                        if bool(mx.any(mx.isnan(arr)).item()):
-                            c.cache[j] = mx.where(mx.isnan(arr), mx.zeros_like(arr), arr)
-                            mx.eval(c.cache[j])
-                            _nan_fixed += 1
-        if _nan_fixed > 0:
-            logger.warning(f"[prefill] sanitized NaN in {_nan_fixed} DeltaNet state arrays")
 
     # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
@@ -994,18 +972,13 @@ def mlx_generate(
     _draft_tokens = int(os.environ.get("EXO_DRAFT_TOKENS", "5"))
     _prefill_thread = None
     _tp_draft_fn = None
-    # TP = multi-rank group WITHOUT pipeline layers.  PP uses the same group
-    # but communicates via PipelineFirstLayer/PipelineLastLayer, not TP all_reduce.
-    _is_tp = group is not None and group.size() > 1 and not _has_pipeline_communication_layer(model)
+    _is_tp = group is not None and group.size() > 1
     _is_rank0 = group is None or group.rank() == 0
     from exo.worker.engines.mlx.utils_mlx import _DraftBroadcastSentinel
     _is_local_draft = draft_model is not None and (
         isinstance(draft_model, nn.Module) or isinstance(draft_model, _DraftBroadcastSentinel)
     )
     _is_remote_draft = draft_model is not None and hasattr(draft_model, 'prefill')
-
-    # Used for logging; set inside _is_local_draft but referenced unconditionally.
-    _pp_info_for_draft: object | None = None
 
     if _is_local_draft:
         # Local draft: only rank 0 runs the draft model and broadcasts tokens.
