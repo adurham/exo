@@ -416,24 +416,8 @@ def prefill(
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
-    # DeltaNet recurrent state can accumulate NaN during prefill (bfloat16
-    # overflow in the state matrix for deeper layers).  Prefill tolerates
-    # this because chunk-wise processing computes output independently of
-    # accumulated state, but decode relies on the state directly.  Clamp
-    # NaN to zero so decode doesn't produce garbage tokens.
-    if has_ssm:
-        _nan_fixed = 0
-        for i, c in enumerate(cache):
-            if isinstance(c, (ArraysCache, RotatingKVCache)) and hasattr(c, 'cache'):
-                for j, arr in enumerate(c.cache):
-                    if arr is not None:
-                        mx.eval(arr)
-                        if bool(mx.any(mx.isnan(arr)).item()):
-                            c.cache[j] = mx.where(mx.isnan(arr), mx.zeros_like(arr), arr)
-                            mx.eval(c.cache[j])
-                            _nan_fixed += 1
-        if _nan_fixed > 0:
-            logger.warning(f"[prefill] sanitized NaN in {_nan_fixed} DeltaNet state arrays")
+    # (NaN sanitization removed — root cause fixed in gated_delta.py by
+    # keeping DeltaNet recurrent state in float32 to prevent bfloat16 overflow.)
 
     # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
