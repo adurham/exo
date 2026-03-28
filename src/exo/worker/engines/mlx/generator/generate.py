@@ -404,7 +404,7 @@ def prefill(
     # mismatch that produces NaN on the first decode token.
     if EXO_TRACING_ENABLED:
         t_trim = time.perf_counter()
-    pre_gen = snapshots[-1] if has_ssm else None
+    pre_gen = snapshots[-2] if has_ssm else None
     for i, c in enumerate(cache):
         if has_ssm and isinstance(c, (ArraysCache, RotatingKVCache)):
             assert pre_gen is not None
@@ -416,18 +416,24 @@ def prefill(
     if EXO_TRACING_ENABLED:
         logger.info(f"Cache trim took {(time.perf_counter() - t_trim) * 1000:.1f}ms")
 
-    # --- DEBUG: check restored ArraysCache for NaN ---
+    # DeltaNet recurrent state can accumulate NaN during prefill (bfloat16
+    # overflow in the state matrix for deeper layers).  Prefill tolerates
+    # this because chunk-wise processing computes output independently of
+    # accumulated state, but decode relies on the state directly.  Clamp
+    # NaN to zero so decode doesn't produce garbage tokens.
     if has_ssm:
+        _nan_fixed = 0
         for i, c in enumerate(cache):
-            if isinstance(c, (ArraysCache, RotatingKVCache)):
-                for j, arr in enumerate(c.cache if hasattr(c, 'cache') else []):
+            if isinstance(c, (ArraysCache, RotatingKVCache)) and hasattr(c, 'cache'):
+                for j, arr in enumerate(c.cache):
                     if arr is not None:
                         mx.eval(arr)
                         if bool(mx.any(mx.isnan(arr)).item()):
-                            logger.warning(f"[RESTORE-CHECK] cache[{i}].cache[{j}] has NaN! shape={arr.shape}")
-                        else:
-                            logger.info(f"[RESTORE-CHECK] cache[{i}].cache[{j}] OK max={float(mx.abs(arr).max().item()):.4f} shape={arr.shape}")
-        logger.info(f"[RESTORE-CHECK] snapshot used: snapshots[{len(snapshots)-1}] of {len(snapshots)} total, token_count={pre_gen.token_count if pre_gen else '?'}")
+                            c.cache[j] = mx.where(mx.isnan(arr), mx.zeros_like(arr), arr)
+                            mx.eval(c.cache[j])
+                            _nan_fixed += 1
+        if _nan_fixed > 0:
+            logger.warning(f"[prefill] sanitized NaN in {_nan_fixed} DeltaNet state arrays")
 
     # Touch heartbeat: cache trim above can take seconds at large context.
     if distributed_prompt_progress_callback is not None:
