@@ -445,12 +445,13 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.group = group
         self.is_prefill: bool = False
         self._compiled_decode_active: bool = False
+        self._pp_decode_active: bool = False
         self._compile_state: list[mx.array] | None = None
         self._hidden_idx: int = -1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        if self._compiled_decode_active and self.r != 0:
-            # Compiled decode: read hidden state from compile state list (recv handled outside compile)
+        if (self._compiled_decode_active or self._pp_decode_active) and self.r != 0:
+            # PP decode: read hidden state from state list (exchange handled by _pp_step)
             x = self._compile_state[self._hidden_idx]  # type: ignore
         elif self.r != 0:
             if EXO_TRACING_ENABLED:
@@ -486,6 +487,7 @@ class PipelineLastLayer(CustomMlxLayer):
         self.is_prefill: bool = False
         self.queue_sends: bool = False
         self._compiled_decode_active: bool = False
+        self._pp_decode_active: bool = False
         self._compile_state: list[mx.array] | None = None
         self._hidden_idx: int = -1
         self._speculative_mode: bool = False
@@ -499,8 +501,8 @@ class PipelineLastLayer(CustomMlxLayer):
                 self._compile_state[self._hidden_idx] = output
             return output
 
-        if self._compiled_decode_active:
-            # Compiled decode: write output to compile state list (send/all_gather handled outside compile)
+        if self._compiled_decode_active or self._pp_decode_active:
+            # PP decode: write output to state list (send/all_gather handled by _pp_step)
             self._compile_state[self._hidden_idx] = output  # type: ignore
             return output
 
@@ -614,18 +616,27 @@ def set_pipeline_compiled_decode(model: nn.Module, active: bool, compile_state: 
     """
     inner = get_inner_model(model)
     layers = get_layers(inner)
-    n_set = 0
     for layer in layers:
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
             layer._compiled_decode_active = active
             layer._compile_state = compile_state if active else None
             layer._hidden_idx = hidden_idx if active else -1
-            n_set += 1
-    import sys
-    print(f"[set_pipeline_compiled_decode] active={active} hidden_idx={hidden_idx} "
-          f"n_layers={len(layers)} n_pipeline_layers={n_set} "
-          f"layer_types={[type(l).__name__ for l in layers[:3]]}...{[type(l).__name__ for l in layers[-3:]]}",
-          file=sys.stderr, flush=True)
+
+
+def set_pipeline_pp_decode(model: nn.Module, active: bool, state_list: list[mx.array] | None = None, hidden_idx: int = -1) -> None:
+    """Enable PP decode mode: layers read/write hidden state from state_list instead of send/recv.
+
+    This is independent of mx.compile — speculation needs PP decode mode
+    without compilation (lazy arrays from compile are incompatible with
+    uncompiled speculative forwards).
+    """
+    inner = get_inner_model(model)
+    layers = get_layers(inner)
+    for layer in layers:
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+            layer._pp_decode_active = active
+            layer._compile_state = state_list if active else None
+            layer._hidden_idx = hidden_idx if active else -1
 
 
 class HybridPipelineLastLayer(CustomMlxLayer):
