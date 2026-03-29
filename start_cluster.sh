@@ -25,9 +25,9 @@
 : "${LOG_LEVEL:=DEBUG}"
 
 # Speculative decoding: PP mode with local draft
-: "${EXO_DRAFT_MODEL:=mlx-community/Qwen3.5-0.8B-MLX-8bit}"
-: "${EXO_DRAFT_TOKENS:=3}"
-: "${EXO_PP_DRAFT_K:=3}"
+: "${EXO_DRAFT_MODEL:=}"
+: "${EXO_DRAFT_TOKENS:=0}"
+: "${EXO_PP_DRAFT_K:=0}"
 # MTP speculation (alternative to draft model): set both to enable
 : "${EXO_MTP_SPECULATION:=0}"
 : "${EXO_MTP_MODEL:=mtp-qwen35-397b-4bit}"
@@ -392,6 +392,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV MLX_JACCL_NUM_BUFFERS=$MLX_JACCL_NUM_BUFFERS"
     EXO_ENV="$EXO_ENV MLX_JACCL_FRAME_SIZE=$MLX_JACCL_FRAME_SIZE"
     EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=$EXO_TRACING_ENABLED"
+    EXO_ENV="$EXO_ENV EXO_NAN_TRACE=1"
     EXO_ENV="$EXO_ENV EXO_KV_BITS=$EXO_KV_BITS"
     EXO_ENV="$EXO_ENV EXO_PP_LAYER_OFFSET=$EXO_PP_LAYER_OFFSET"
     EXO_ENV="$EXO_ENV EXO_TP_EVAL_INTERVAL=$EXO_TP_EVAL_INTERVAL"
