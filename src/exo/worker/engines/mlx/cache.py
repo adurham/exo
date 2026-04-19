@@ -1469,12 +1469,17 @@ def get_memory_used_percentage() -> float:
 def _model_is_pipeline_parallel(model: Model) -> bool:
     """True iff the model has pipeline-parallel layer wrappers installed.
 
-    Historical note: this used to gate QuantizedKVCache to PP-only because
-    older mlx-lm lacked ``QuantizedKVCache.merge`` and the BatchGenerator path
-    would crash with "does not yet support batching with history". Upstream
-    added ``merge`` in ``mlx_lm/models/cache.py`` (it dequantizes into
-    ``BatchKVCache`` on merge), so ``make_kv_cache`` now applies quantization
-    to TP models too. The helper is kept for any future PP-specific branches.
+    Only the PP path is safe to combine with QuantizedKVCache right now:
+    the single-node BatchGenerator code path in mlx-lm calls
+    ``_merge_caches`` on every step (even for a single in-flight request),
+    and QuantizedKVCache does not implement ``merge``. Attempting to use
+    a quantized cache in that path crashes with::
+
+        <class 'mlx_lm.models.cache.QuantizedKVCache'> does not yet
+        support batching with history
+
+    Detecting PP mode by layer type is cheap and avoids threading the
+    distributed group through every cache call site.
     """
     try:
         from exo.worker.engines.mlx.auto_parallel import (
@@ -1537,15 +1542,13 @@ def make_kv_cache(
                 f"Using TurboQuant KV cache (bits={TURBOQUANT_BITS}, sketch_dim={TURBOQUANT_SKETCH_DIM}) "
                 f"for {replaced}/{len(caches)} layers"
             )
-        elif KV_CACHE_BITS is not None:
-            # Replace KVCache entries with QuantizedKVCache. Keep ArraysCache
-            # (DeltaNet/SSM), RotatingKVCache, and any other cache types
-            # untouched. Works for both Pipeline and Tensor parallelism:
-            # upstream mlx-lm added `QuantizedKVCache.merge` (dequantizes into
-            # a BatchKVCache) so the BatchGenerator `_merge_caches` path no
-            # longer crashes with "does not yet support batching with history".
+        elif KV_CACHE_BITS is not None and _model_is_pipeline_parallel(model):
+            # Replace KVCache entries with QuantizedKVCache, but keep
+            # ArraysCache (DeltaNet/SSM) and other cache types unchanged.
+            # Restricted to PP mode: the single-node BatchGenerator path
+            # calls _merge_caches which requires cache.merge(), and
+            # QuantizedKVCache does not implement it.
             quantized = 0
-            skipped_types: set[str] = set()
             for i, c in enumerate(caches):
                 if isinstance(c, KVCache):
                     qc = QuantizedKVCache(
@@ -1554,17 +1557,17 @@ def make_kv_cache(
                     qc.step = 16384
                     caches[i] = qc
                     quantized += 1
-                else:
-                    skipped_types.add(type(c).__name__)
-            pp_tp = "PP" if _model_is_pipeline_parallel(model) else "TP"
             logger.info(
-                f"Using quantized KV cache (bits={KV_CACHE_BITS}, "
-                f"group_size={CACHE_GROUP_SIZE}, mode={pp_tp}) "
-                f"for {quantized}/{len(caches)} layers"
-                + (f" — skipped layer types: {sorted(skipped_types)}" if skipped_types else "")
+                f"Using quantized KV cache (bits={KV_CACHE_BITS}, group_size={CACHE_GROUP_SIZE}) for {quantized}/{len(caches)} layers"
             )
         else:
-            logger.info("Using MLX LM's make cache")
+            if KV_CACHE_BITS is not None:
+                logger.info(
+                    f"EXO_KV_CACHE_BITS={KV_CACHE_BITS} ignored in single-node mode "
+                    f"(QuantizedKVCache has no merge() support, required by BatchGenerator)"
+                )
+            else:
+                logger.info("Using MLX LM's make cache")
             # Increase KVCache step size to reduce Metal allocator fragmentation.
             # Default step=256 causes a mx.concatenate expansion every prefill chunk,
             # fragmenting memory (~11 GB overhead at 24k tokens). A larger step lets
