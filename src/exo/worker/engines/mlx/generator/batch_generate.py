@@ -1205,11 +1205,20 @@ class ExoBatchGenerator:
         _post_total = _t_callback_total + _t_detok_total + _t_stop_total + _t_logprobs_total + _t_response_build_total
         request_trace.record("decode.step.post_process", _step_tic + _next_elapsed, _step_end)
 
-        if self._mlx_gen._next_count % 64 == 0 and responses:
+        # _next_count was added by the old fast_next patch; on vanilla
+        # BatchGenerator (new mlx-lm) it doesn't exist — fall back to our own
+        # cumulative step counter for logging cadence.
+        _mlx_next_count = getattr(
+            self._mlx_gen, "_next_count", None
+        )
+        if _mlx_next_count is None:
+            _mlx_next_count = getattr(self, "_step_counter", 0) + 1
+            self._step_counter = _mlx_next_count  # pyright: ignore[reportAttributeAccessIssue]
+        if _mlx_next_count % 64 == 0 and responses:
             logger.debug(
                 f"step overhead: {_overhead * 1000:.2f}ms (next={_next_elapsed * 1000:.2f}ms total={_step_elapsed * 1000:.2f}ms)"
             )
-        if _trace and self._mlx_gen._next_count % 64 == 0 and responses:
+        if _trace and _mlx_next_count % 64 == 0 and responses:
             logger.info(
                 f"[PROF step] mlx_next={_next_elapsed * 1000:.2f}ms "
                 f"callback={_t_callback_total * 1000:.2f}ms "
