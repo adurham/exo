@@ -111,6 +111,35 @@ future upstream main merges shouldn't re-apply them automatically.
   connects.
 - Once fixed, drop the two revert commits and force-push main.
 
+## Open optimization projects
+
+### MiniMax fused MoE kernels
+
+`src/exo/worker/engines/mlx/patches/` only contains `qwen3_5/` and
+`qwen3_5_moe/` fused batched-MoE kernels. `mlx-community/MiniMax-M2.7-4bit-mxfp4`
+(256 experts, top-8, 62 layers) runs the vanilla MLX MoE path: unfused
+router → Python-level top-k → per-expert kernel launches → gather → TP
+all-reduce, repeated for every layer for every decode token.
+
+Symptom: at ~40K context under TP=2, MiniMax decode collapses to ~16 tok/s
+even though memory, KV cache, and attention all look healthy. The per-token
+MoE dispatch + 62 cross-rank all-reduces per step are the ceiling — context
+length makes it feel worse only because attention's absolute cost is also
+growing in parallel.
+
+What to build: a `patches/minimax/` module paralleling `patches/qwen3_5_moe/`
+— batched MoE dispatch (256-expert scatter/gather), shared-expert fusion if
+MiniMax has one, and whatever Q/K/V + RMSNorm hot block MiniMax attention
+has. Re-tune the Qwen3.5 kernel shapes for MiniMax's `hidden_size=3072`,
+`intermediate_size=1536`, `num_attention_heads=48`, `num_key_value_heads=8`.
+
+Reference:
+- `src/exo/worker/engines/mlx/patches/qwen3_5_moe/apply.py` — entry point
+- `src/exo/worker/engines/mlx/patches/__init__.py::maybe_apply_patches` — dispatch on `model_type`
+- `~/.claude/projects/-Users-adam-durham-repos-exo/memory/minimax_moe_decode_bottleneck.md` — the full diagnosis + numbers
+
+### MTPBatchGenerator port (see above) and jaccl refactor debug (see above)
+
 ## Updating these pins
 
 ```bash
