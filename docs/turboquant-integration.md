@@ -54,7 +54,7 @@ Tokens are buffered and compressed in chunks of 64 tokens. This amortizes the co
 | File | Role |
 |------|------|
 | `src/exo/shared/types/mlx.py` | `KVCacheType = Sequence[KVCache \| RotatingKVCache \| QuantizedKVCache \| ArraysCache \| CacheList]` |
-| `src/exo/worker/engines/mlx/cache.py` | `KVPrefixCache` (LRU prefix cache), `make_kv_cache()`, `trim_cache()`, `snapshot_ssm_states()` |
+| `src/exo/worker/engines/mlx/cache.py` | `KVPrefixCache` (radix-trie prefix cache — see [kv-cache-architecture.md](./kv-cache-architecture.md)), `make_kv_cache()`, `trim_cache()`, `snapshot_ssm_states()` |
 | `src/exo/worker/engines/mlx/constants.py` | `KV_CACHE_BITS`, `CACHE_GROUP_SIZE` (controls quantized cache creation) |
 | `src/exo/worker/engines/mlx/generator/generate.py` | `prefill()`, `pipeline_parallel_prefill()`, `mlx_generate()` |
 | `mlx-lm/mlx_lm/models/cache.py` | `KVCache`, `QuantizedKVCache`, `RotatingKVCache` class definitions |

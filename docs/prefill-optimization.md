@@ -185,11 +185,19 @@ Rank 1: [dummy ] [real_0] [real_1] [real_2]
 
 **Problem**: `KVPrefixCache` already exists and works, but its effectiveness depends on workload patterns. For interactive use (chat), the system prompt is often identical across requests.
 
-**Current behavior** (`cache.py:159-232`):
-- LRU eviction when memory exceeds threshold (85% on 128GB)
-- Token-level prefix matching
-- Media region validation
-- SSM snapshot restoration for partial matches
+**Current behavior** (as of the radix-trie rewrite — see
+[kv-cache-architecture.md](./kv-cache-architecture.md) for the full design):
+- Sessions stored as leaves in a radix trie; shared prefixes live on
+  internal nodes with per-edge K/V slices, so two sessions that share a
+  system prompt only pay for that prompt's KV once.
+- LRU eviction over leaves, with optional `max_sessions` / `max_bytes` caps
+  and a memory-pressure threshold (`EXO_MEMORY_THRESHOLD`, default 85% on
+  128 GB nodes).
+- Token-level prefix matching via trie walk, media-region content-hash
+  validation, SSM snapshot restoration for non-sliceable layers.
+- `update_kv_cache` has an extend-in-place fast path: when the new prompt
+  is a strict extension of the old leaf's tokens, it attaches a single new
+  edge for the suffix instead of rebuilding the path.
 
 **Proposal**: Exploit the attention sink concept from TurboQuant at the prefix cache level. For chat workloads:
 1. **Pin system prompt cache**: Never evict the system prompt's KV cache entry. It's shared across all requests.
