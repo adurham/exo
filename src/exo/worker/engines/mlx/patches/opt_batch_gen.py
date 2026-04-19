@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import gc
 import os
 import time
 from typing import Any, cast
 
 import mlx.core as mx
-from mlx_lm.generate import BatchGenerator, generation_stream
+from mlx_lm.generate import BatchGenerator, GenerationBatch, generation_stream
 
 _PRECOMPUTE_TOP_K = 20
 
@@ -48,7 +50,7 @@ class _Prof:
         cls.forward_max = 0.0
 
 
-def _fast_next(self: BatchGenerator) -> list[BatchGenerator.Response]:
+def _fast_next(self: BatchGenerator) -> list[GenerationBatch.Response]:
     global _pending_topk_idx, _pending_topk_val, _pending_selected_lps
 
     tic = time.perf_counter()
@@ -254,7 +256,7 @@ def _fast_next(self: BatchGenerator) -> list[BatchGenerator.Response]:
     return responses
 
 
-def _patched_public_next(self: BatchGenerator) -> list[BatchGenerator.Response]:
+def _patched_public_next(self: BatchGenerator) -> list[GenerationBatch.Response]:
     batch = self.active_batch
     # Only do decode with fast_next
     if batch is not None and not self.unprocessed_prompts:

@@ -9,6 +9,7 @@ from mlx_lm.generate import (
     BatchGenerator as MlxBatchGenerator,
 )
 from mlx_lm.generate import (
+    GenerationBatch,
     generation_stream,
     stream_generate,
 )
@@ -32,11 +33,14 @@ from exo.worker.engines.mlx.cache import (
     CacheSnapshot,
     KVPrefixCache,
     encode_prompt,
-    has_non_kv_caches,
     make_kv_cache,
 )
-from exo.worker.engines.mlx.sampling import resolve_sampling
-from exo.worker.engines.mlx.constants import DEFAULT_TOP_LOGPROBS, KV_BITS, KV_GROUP_SIZE, MAX_TOKENS
+from exo.worker.engines.mlx.constants import (
+    DEFAULT_TOP_LOGPROBS,
+    KV_BITS,
+    KV_GROUP_SIZE,
+    MAX_TOKENS,
+)
 from exo.worker.engines.mlx.generator.generate import (
     ban_token_ids,
     eos_ids_from_tokenizer,
@@ -44,6 +48,7 @@ from exo.worker.engines.mlx.generator.generate import (
     patch_embed_tokens,
     prefill,
 )
+from exo.worker.engines.mlx.sampling import resolve_sampling
 from exo.worker.engines.mlx.utils_mlx import (
     fix_unmatched_think_end_tokens,
     system_prompt_token_count,
@@ -115,11 +120,34 @@ class ExoBatchGenerator:
     def __post_init__(self) -> None:
         use_speculative = os.environ.get("EXO_SPECULATIVE", "0") == "1"
         stop_tokens = set(eos_ids_from_tokenizer(self.tokenizer))
+        # mlx-lm's new BatchGenerator expects stop_tokens as Sequence[Sequence[int]]
+        # — one "sequence" per stop. Wrap each EOS id so state-machine setup gets
+        # the shape it expects. Old forks accept flat ints; pass the shaped form,
+        # which is a superset.
+        stop_tokens_seq = [[t] for t in stop_tokens]
 
-        if use_speculative:
+        # MTPBatchGenerator subclasses and overrides mlx-lm's BatchGenerator.
+        # The mlx-lm fork main rewrote BatchGenerator (PromptProcessingBatch +
+        # GenerationBatch, no more `active_batch`/`unprocessed_prompts`). Until
+        # the MTP subclass is ported to the new API, detect the new API and
+        # fall back to standard generation so Huihui still runs (just without
+        # the MTP throughput win).
+        mtp_compatible = hasattr(MlxBatchGenerator, "active_batch") or hasattr(
+            MlxBatchGenerator, "unprocessed_prompts"
+        )
+        if use_speculative and not mtp_compatible:
+            logger.warning(
+                "EXO_SPECULATIVE=1 but this mlx-lm version split BatchGenerator "
+                "into _prompt_batch/_generation_batch — MTPBatchGenerator is not "
+                "ported yet. Running without MTP speculative decoding."
+            )
+
+        if use_speculative and mtp_compatible:
             try:
+                from exo.worker.engines.mlx.speculative.mtp_batch_generator import (
+                    MTPBatchGenerator,
+                )
                 from exo.worker.engines.mlx.speculative.mtp_module import MTPPredictor
-                from exo.worker.engines.mlx.speculative.mtp_batch_generator import MTPBatchGenerator
 
                 mtp_weights = self._resolve_mtp_weights()
                 gamma = int(os.environ.get("EXO_SPECULATIVE_GAMMA", "2"))
@@ -141,12 +169,12 @@ class ExoBatchGenerator:
                     # Skip warmup — OOMs on 397B (Metal abort, uncatchable)
                 else:
                     logger.warning("EXO_SPECULATIVE=1 but could not find MTP weights. Falling back.")
-                    self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens, prefill_step_size=4096)
+                    self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens_seq, prefill_step_size=4096)
             except Exception as e:
                 logger.warning(f"Failed to init MTP speculative: {e}. Falling back.")
-                self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens, prefill_step_size=4096)
+                self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens_seq, prefill_step_size=4096)
         else:
-            self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens, prefill_step_size=4096)
+            self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens_seq, prefill_step_size=4096)
 
         self._mlx_gen._needs_topk = False  # pyright: ignore[reportAttributeAccessIssue]
         self._pp_spec_eos = set(eos_ids_from_tokenizer(self.tokenizer))
@@ -469,6 +497,7 @@ class ExoBatchGenerator:
         import hashlib
         import json
         from pathlib import Path
+
         from huggingface_hub import hf_hub_download
         from safetensors.torch import load_file, save_file
 
@@ -528,7 +557,11 @@ class ExoBatchGenerator:
             return
 
         from mlx_lm.models import cache as cache_mod
-        from exo.worker.engines.mlx.speculative.mtp_module import speculative_forward, draft_tokens
+
+        from exo.worker.engines.mlx.speculative.mtp_module import (
+            draft_tokens,
+            speculative_forward,
+        )
 
         logger.info("Warming up speculative decoding kernels...")
         mtp = self._mlx_gen.mtp
@@ -565,10 +598,27 @@ class ExoBatchGenerator:
 
     @property
     def has_work(self) -> bool:
+        # New mlx-lm split BatchGenerator into _prompt_batch + _generation_batch
+        # with _unprocessed_sequences. Keep fallbacks to the old names so this
+        # module still works against older mlx-lm checkouts if someone pins
+        # back.
+        unprocessed = getattr(
+            self._mlx_gen, "_unprocessed_sequences", None
+        )
+        if unprocessed is None:
+            unprocessed = getattr(self._mlx_gen, "unprocessed_prompts", None)
+        has_unprocessed = bool(unprocessed) if unprocessed is not None else False
+
+        gen_batch = getattr(self._mlx_gen, "_generation_batch", None)
+        if gen_batch is not None:
+            has_generation = len(gen_batch) > 0
+        else:
+            has_generation = getattr(self._mlx_gen, "active_batch", None) is not None
+
         return (
             bool(self._active_tasks)
-            or bool(self._mlx_gen.unprocessed_prompts)
-            or self._mlx_gen.active_batch is not None
+            or has_unprocessed
+            or has_generation
             or self._pp_spec_gen is not None
         )
 
@@ -580,7 +630,7 @@ class ExoBatchGenerator:
         distributed_prompt_progress_callback: Callable[[], None] | None = None,
         on_generation_token: Callable[[], None] | None = None,
     ) -> int:
-        from exo.worker.engines.mlx.trace import request_trace, T
+        from exo.worker.engines.mlx.trace import T
 
         with T("submit.encode_prompt"):
             all_prompt_tokens = encode_prompt(self.tokenizer, prompt)
@@ -667,18 +717,17 @@ class ExoBatchGenerator:
             if vision is not None
             else contextlib.nullcontext()
         )
-        with vision_ctx:
-            with T("submit.prefill"):
-                _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
-                    self.model,
-                    self.tokenizer,
-                    sampler,
-                    prompt_tokens[:-1],
-                    cache,
-                    self.group,
-                    on_prefill_progress,
-                    distributed_prompt_progress_callback,
-                )
+        with vision_ctx, T("submit.prefill"):
+            _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
+                self.model,
+                self.tokenizer,
+                sampler,
+                prompt_tokens[:-1],
+                cache,
+                self.group,
+                on_prefill_progress,
+                distributed_prompt_progress_callback,
+            )
 
         # We need to clamp rotating kv caches to max size so that mlx lm's _merge_caches behaves
         with T("submit.clamp_rotating_caches"):
@@ -816,12 +865,13 @@ class ExoBatchGenerator:
         prefill_tps: float,
     ) -> int:
         """Set up PP speculative decode for this task."""
+        from exo.worker.engines.mlx.trace import T, request_trace
+
         from ..pp_speculation import (
+            _install_spec_layers,
             get_pipeline_info,
             pp_speculative_decode_loop,
-            _install_spec_layers,
         )
-        from exo.worker.engines.mlx.trace import request_trace, T
 
         with T("pp_spec.get_pipeline_info"):
             pp_info = get_pipeline_info(self.model)
@@ -902,7 +952,7 @@ class ExoBatchGenerator:
 
         return uid
 
-    def _step_pp_spec(self) -> list[MlxBatchGenerator.Response]:
+    def _step_pp_spec(self) -> list[GenerationBatch.Response]:
         """Get next token from PP speculative decode loop."""
         uid = self._pp_spec_uid
         assert uid is not None
@@ -912,26 +962,32 @@ class ExoBatchGenerator:
             tok = self._pp_first_token
             del self._pp_first_token
             is_eos = tok in self._pp_spec_eos
-            return [MlxBatchGenerator.Response(
+            return [GenerationBatch.Response(
                 uid=uid, token=tok, logprobs=mx.zeros(1),
-                finish_reason="stop" if is_eos else None, prompt_cache=lambda: [],
+                finish_reason="stop" if is_eos else None,
+                current_state=None, match_sequence=None,
+                prompt_cache=None, all_tokens=None,
             )]
 
         assert self._pp_spec_gen is not None
         try:
             tok_id, lp = next(self._pp_spec_gen)
             is_eos = tok_id in self._pp_spec_eos
-            return [MlxBatchGenerator.Response(
+            return [GenerationBatch.Response(
                 uid=uid, token=tok_id, logprobs=lp,
-                finish_reason="stop" if is_eos else None, prompt_cache=lambda: [],
+                finish_reason="stop" if is_eos else None,
+                current_state=None, match_sequence=None,
+                prompt_cache=None, all_tokens=None,
             )]
         except StopIteration:
             # max_tokens reached
             self._pp_spec_gen = None
             self._pp_spec_uid = None
-            return [MlxBatchGenerator.Response(
+            return [GenerationBatch.Response(
                 uid=uid, token=0, logprobs=mx.zeros(1),
-                finish_reason="length", prompt_cache=lambda: [],
+                finish_reason="length",
+                current_state=None, match_sequence=None,
+                prompt_cache=None, all_tokens=None,
             )]
 
     def step(self) -> list[tuple[int, GenerationResponse]]:
@@ -952,7 +1008,12 @@ class ExoBatchGenerator:
                 t.task_params.logprobs for t in self._active_tasks.values()
             )
             _step_tic = time.perf_counter()
-            responses = self._mlx_gen.next()
+            # New mlx-lm BatchGenerator.next() returns (prompt_resps, gen_resps).
+            # Use next_generated() to keep the old list-of-generations semantics.
+            if hasattr(self._mlx_gen, "next_generated"):
+                responses = self._mlx_gen.next_generated()
+            else:
+                responses = self._mlx_gen.next()  # legacy fork fallback
             _next_elapsed = time.perf_counter() - _step_tic
             request_trace.record("decode.step.mlx_next", _step_tic)
 
