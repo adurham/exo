@@ -29,6 +29,14 @@ class BaseInstance(TaggedModel):
     max_prefix_sessions: int | None = None
     max_prefix_bytes: int | None = None
 
+    # Per-instance KV cache quantization override. Resolution order at runtime:
+    #   1. instance.kv_cache_bits (if not None)    ← this field
+    #   2. EXO_KV_CACHE_BITS env var (if set)
+    #   3. No quantization
+    # Sentinel `0` means "explicitly disabled" (wins even when env sets a value).
+    # Positive N means "quantize KV to N bits". None means "fall through".
+    kv_cache_bits: int | None = None
+
     # Per-instance sampling defaults. Used when a request omits the field.
     # Resolution order: request → instance → cluster env → hardcoded fallback.
     default_temperature: float | None = None

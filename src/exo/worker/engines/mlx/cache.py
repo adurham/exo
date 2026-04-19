@@ -326,6 +326,7 @@ class KVPrefixCache:
         max_sessions: int | None = None,
         max_bytes: int | None = None,
         max_kv_tokens: int | None = None,
+        kv_cache_bits: int | None = None,
     ):
         self._root = _TrieNode(
             parent=None,
@@ -343,6 +344,11 @@ class KVPrefixCache:
         self._max_sessions = max_sessions
         self._max_bytes = max_bytes
         self._max_kv_tokens = max_kv_tokens
+        # Per-instance KV quantization override; see BaseInstance.kv_cache_bits.
+        # Forwarded to `make_kv_cache` on every cache-miss path so an instance
+        # can opt in (positive int), opt out (0), or defer to the global env
+        # (None) independently of siblings on the same process.
+        self._kv_cache_bits = kv_cache_bits
 
     # ── Dict-like views for external callers / tests ───────────────────────
     @property
@@ -646,7 +652,7 @@ class KVPrefixCache:
         )
         if match_length == 0:
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens),
+                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
                 prompt_tokens,
                 None,
                 False,
@@ -660,7 +666,7 @@ class KVPrefixCache:
         if donor_leaf is None:
             # Shouldn't happen: every node has ref_count > 0 ⇒ at least one leaf.
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens),
+                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
                 prompt_tokens,
                 None,
                 False,
@@ -682,7 +688,7 @@ class KVPrefixCache:
         if has_non_sliceable and snapshot is None:
             # No usable snapshot for SSM/rotating layers — force a full prefill.
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens),
+                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
                 prompt_tokens,
                 None,
                 False,
@@ -1492,10 +1498,30 @@ def _model_is_pipeline_parallel(model: Model) -> bool:
     return False
 
 
+def _effective_kv_cache_bits(override: int | None) -> int | None:
+    """Resolve the KV-quantization setting for a single make_kv_cache call.
+
+    Resolution order:
+      1. `override` (per-instance): int ≥ 1 quantizes, 0 explicitly disables,
+         None defers to the next step.
+      2. Module-level `KV_CACHE_BITS` (read from `EXO_KV_CACHE_BITS` at import).
+      3. None — no quantization.
+
+    Returns None when quantization should be skipped, else the bits to use.
+    """
+    if override is not None:
+        return override if override > 0 else None
+    return KV_CACHE_BITS
+
+
 def make_kv_cache(
-    model: Model, max_kv_size: int | None = None, keep: int = 0
+    model: Model,
+    max_kv_size: int | None = None,
+    keep: int = 0,
+    kv_cache_bits: int | None = None,
 ) -> KVCacheType:
     assert hasattr(model, "layers")
+    bits = _effective_kv_cache_bits(kv_cache_bits)
 
     if hasattr(model, "make_cache"):
         caches: KVCacheType = model.make_cache()  # type: ignore
@@ -1537,7 +1563,7 @@ def make_kv_cache(
                 f"Using TurboQuant KV cache (bits={TURBOQUANT_BITS}, sketch_dim={TURBOQUANT_SKETCH_DIM}) "
                 f"for {replaced}/{len(caches)} layers"
             )
-        elif KV_CACHE_BITS is not None:
+        elif bits is not None:
             # Replace KVCache entries with QuantizedKVCache. Keep ArraysCache
             # (DeltaNet/SSM), RotatingKVCache, and any other cache types
             # untouched. Works for both Pipeline and Tensor parallelism:
@@ -1548,9 +1574,7 @@ def make_kv_cache(
             skipped_types: set[str] = set()
             for i, c in enumerate(caches):
                 if isinstance(c, KVCache):
-                    qc = QuantizedKVCache(
-                        group_size=CACHE_GROUP_SIZE, bits=KV_CACHE_BITS
-                    )
+                    qc = QuantizedKVCache(group_size=CACHE_GROUP_SIZE, bits=bits)
                     qc.step = 16384
                     caches[i] = qc
                     quantized += 1
@@ -1558,10 +1582,14 @@ def make_kv_cache(
                     skipped_types.add(type(c).__name__)
             pp_tp = "PP" if _model_is_pipeline_parallel(model) else "TP"
             logger.info(
-                f"Using quantized KV cache (bits={KV_CACHE_BITS}, "
+                f"Using quantized KV cache (bits={bits}, "
                 f"group_size={CACHE_GROUP_SIZE}, mode={pp_tp}) "
                 f"for {quantized}/{len(caches)} layers"
-                + (f" — skipped layer types: {sorted(skipped_types)}" if skipped_types else "")
+                + (
+                    f" — skipped layer types: {sorted(skipped_types)}"
+                    if skipped_types
+                    else ""
+                )
             )
         else:
             logger.info("Using MLX LM's make cache")
@@ -1575,17 +1603,15 @@ def make_kv_cache(
         return caches
 
     if max_kv_size is None:
-        if KV_CACHE_BITS is not None:
+        if bits is not None:
             caches: KVCacheType = []
             for _ in model.layers:
-                qc = QuantizedKVCache(
-                    group_size=CACHE_GROUP_SIZE, bits=KV_CACHE_BITS
-                )
+                qc = QuantizedKVCache(group_size=CACHE_GROUP_SIZE, bits=bits)
                 qc.step = 16384
                 caches.append(qc)
             pp_tp = "PP" if _model_is_pipeline_parallel(model) else "TP"
             logger.info(
-                f"Using quantized KV cache (bits={KV_CACHE_BITS}, "
+                f"Using quantized KV cache (bits={bits}, "
                 f"group_size={CACHE_GROUP_SIZE}, mode={pp_tp}) "
                 f"for {len(caches)}/{len(caches)} layers (default-cache fallback path)"
             )

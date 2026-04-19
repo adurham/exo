@@ -37,6 +37,11 @@ fi
 # can't accumulate prefix history that crowds out MiniMax on the same node.
 : "${HUIHUI_MAX_KV_TOKENS:=36864}"
 : "${HUIHUI_MAX_PREFIX_SESSIONS:=1}"
+# KV cache quantization (bits). Huihui's working set is small (~18 GB weights
+# + 36k-token rotating KV), so bf16 fits fine and skipping quant avoids the
+# per-step dequantize cost that _merge_caches pays for QuantizedKVCache.
+# 0 = explicitly disable (overrides EXO_KV_CACHE_BITS env); positive N = bits.
+: "${HUIHUI_KV_CACHE_BITS:=0}"
 # Qwen3.5-35B-A3B "General Thinking" sampling profile (per upstream model card).
 # Huihui inherits the base Qwen3.5-35B-A3B recommendations unchanged.
 : "${HUIHUI_TEMPERATURE:=1.0}"
@@ -60,6 +65,10 @@ fi
 # headroom on both Studios for the Huihui scouts co-resident on each node.
 : "${MINIMAX_MAX_PREFIX_SESSIONS:=2}"
 : "${MINIMAX_MAX_KV_TOKENS:=}"
+# KV cache quantization (bits). MiniMax is the big-context workload — 4-bit KV
+# is what makes 196K × 2 sessions fit per node. 0 to disable, empty to defer
+# to EXO_KV_CACHE_BITS env.
+: "${MINIMAX_KV_CACHE_BITS:=4}"
 # MiniMax sampling defaults (per HF model card recommendation).
 : "${MINIMAX_TEMPERATURE:=1.0}"
 : "${MINIMAX_TOP_P:=0.95}"
@@ -549,6 +558,7 @@ create_instance_with_retry() {
     local def_repetition="${11:-}"
     local max_kv_tokens="${12:-}"
     local max_prefix_sessions="${13:-}"
+    local kv_cache_bits="${14:-}"
     local max_attempts=30
 
     for attempt in $(seq 1 $max_attempts); do
@@ -597,6 +607,7 @@ create_instance_with_retry() {
             --argjson repetition "${def_repetition:-null}" \
             --argjson kv "${max_kv_tokens:-null}" \
             --argjson sessions "${max_prefix_sessions:-null}" \
+            --argjson kv_bits "${kv_cache_bits:-null}" \
             '
             . as $i
             | ($i | keys[0]) as $tag
@@ -609,6 +620,7 @@ create_instance_with_retry() {
                 | (if $repetition != null then .defaultRepetitionPenalty = $repetition else . end)
                 | (if $kv       != null then .maxKvTokens             = $kv         else . end)
                 | (if $sessions != null then .maxPrefixSessions       = $sessions   else . end)
+                | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
               ) | {($tag): .[$tag]})}
         ')
 
@@ -655,6 +667,7 @@ create_single_node_instance() {
     local def_min_p="${10:-}"
     local def_presence="${11:-}"
     local def_repetition="${12:-}"
+    local kv_cache_bits="${13:-}"
     local max_attempts=20
 
     for attempt in $(seq 1 $max_attempts); do
@@ -689,6 +702,7 @@ create_single_node_instance() {
             --argjson min_p "${def_min_p:-null}" \
             --argjson presence "${def_presence:-null}" \
             --argjson repetition "${def_repetition:-null}" \
+            --argjson kv_bits "${kv_cache_bits:-null}" \
             '
             .previews
             | map(select(.sharding == "Pipeline"
@@ -709,6 +723,7 @@ create_single_node_instance() {
                     | (if $min_p    != null then .defaultMinP             = $min_p      else . end)
                     | (if $presence != null then .defaultPresencePenalty  = $presence   else . end)
                     | (if $repetition != null then .defaultRepetitionPenalty = $repetition else . end)
+                    | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
                   ) | {($tag): .[$tag]})}
               end
         ')
@@ -767,11 +782,13 @@ if [ "${HUIHUI_INSTANCES_PER_STUDIO:-0}" -gt 0 ]; then
             create_single_node_instance "$M4_1_NODE_ID" "$HUIHUI_MODEL_ID" "M4-1" "$i" \
                 "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
                 "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
-                "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" || true
+                "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
+                "$HUIHUI_KV_CACHE_BITS" || true
             create_single_node_instance "$M4_2_NODE_ID" "$HUIHUI_MODEL_ID" "M4-2" "$i" \
                 "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
                 "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
-                "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" || true
+                "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
+                "$HUIHUI_KV_CACHE_BITS" || true
         done
 
         # Wait until all expected instances have a Ready runner.
@@ -822,7 +839,8 @@ if [ "${MINIMAX_ENABLED:-0}" = "1" ]; then
         create_instance_with_retry "MiniMax M2.7" "$MINIMAX_MODEL_ID" "Tensor" "MlxJaccl" 2 \
             "$MINIMAX_TEMPERATURE" "$MINIMAX_TOP_P" "$MINIMAX_TOP_K" "$MINIMAX_MIN_P" \
             "$MINIMAX_PRESENCE_PENALTY" "$MINIMAX_REPETITION_PENALTY" \
-            "$MINIMAX_MAX_KV_TOKENS" "$MINIMAX_MAX_PREFIX_SESSIONS" || true
+            "$MINIMAX_MAX_KV_TOKENS" "$MINIMAX_MAX_PREFIX_SESSIONS" \
+            "$MINIMAX_KV_CACHE_BITS" || true
 
         echo -n "Waiting for 2 MiniMax runner(s) to become Ready..."
         READY=false

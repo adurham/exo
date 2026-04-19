@@ -5,8 +5,6 @@ from enum import Enum
 
 import mlx.core as mx
 from anyio import WouldBlock
-
-
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.models.model_cards import ModelTask
@@ -119,6 +117,7 @@ class Runner:
             max_kv_tokens=self.instance.max_kv_tokens,
             max_prefix_sessions=self.instance.max_prefix_sessions,
             max_prefix_bytes=self.instance.max_prefix_bytes,
+            kv_cache_bits=self.instance.kv_cache_bits,
             default_temperature=self.instance.default_temperature,
             default_top_p=self.instance.default_top_p,
             default_top_k=self.instance.default_top_k,
@@ -281,7 +280,7 @@ class Runner:
 
         _trace = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
 
-        from exo.worker.engines.mlx.trace import request_trace, T
+        from exo.worker.engines.mlx.trace import T, request_trace
         request_trace.reset()
 
         logger.info(f"received chat request: {starting_task}")
@@ -455,6 +454,8 @@ class Builder:
     max_kv_tokens: int | None = None
     max_prefix_sessions: int | None = None
     max_prefix_bytes: int | None = None
+    # Per-instance KV cache quantization override (see BaseInstance.kv_cache_bits).
+    kv_cache_bits: int | None = None
     default_temperature: float | None = None
     default_top_p: float | None = None
     default_top_k: int | None = None
@@ -491,16 +492,19 @@ class Builder:
             max_sessions=self.max_prefix_sessions,
             max_bytes=self.max_prefix_bytes,
             max_kv_tokens=self.max_kv_tokens,
+            kv_cache_bits=self.kv_cache_bits,
         )
         if (
             self.max_kv_tokens is not None
             or self.max_prefix_sessions is not None
             or self.max_prefix_bytes is not None
+            or self.kv_cache_bits is not None
         ):
             logger.info(
                 f"KV cache limits: max_kv_tokens={self.max_kv_tokens} "
                 f"max_prefix_sessions={self.max_prefix_sessions} "
-                f"max_prefix_bytes={self.max_prefix_bytes}"
+                f"max_prefix_bytes={self.max_prefix_bytes} "
+                f"kv_cache_bits={self.kv_cache_bits}"
             )
 
         device_rank = 0 if self.group is None else self.group.rank()
