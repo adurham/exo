@@ -1575,28 +1575,8 @@ def make_kv_cache(
         return caches
 
     if max_kv_size is None:
-        if KV_CACHE_BITS is not None:
-            caches: KVCacheType = []
-            for _ in model.layers:
-                qc = QuantizedKVCache(
-                    group_size=CACHE_GROUP_SIZE, bits=KV_CACHE_BITS
-                )
-                qc.step = 16384
-                caches.append(qc)
-            pp_tp = "PP" if _model_is_pipeline_parallel(model) else "TP"
-            logger.info(
-                f"Using quantized KV cache (bits={KV_CACHE_BITS}, "
-                f"group_size={CACHE_GROUP_SIZE}, mode={pp_tp}) "
-                f"for {len(caches)}/{len(caches)} layers (default-cache fallback path)"
-            )
-            return caches
         logger.info("Using default KV cache")
-        caches = [KVCache() for _ in model.layers]
-        # Match the step size used in the `make_cache` path — default 256 causes
-        # a concatenate expansion on every prefill chunk and fragments Metal.
-        for c in caches:
-            if isinstance(c, KVCache):
-                c.step = 16384
-        return caches
-    logger.info(f"Using rotating KV cache with {max_kv_size=} with {keep=}")
-    return [RotatingKVCache(max_size=max_kv_size, keep=keep) for _ in model.layers]
+        return [KVCache() for _ in model.layers]
+    else:
+        logger.info(f"Using rotating KV cache with {max_kv_size=} with {keep=}")
+        return [RotatingKVCache(max_size=max_kv_size, keep=keep) for _ in model.layers]
