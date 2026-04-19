@@ -64,6 +64,22 @@ from exo.worker.runner.bootstrap import logger
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 
 
+def _mlx_gen_elapsed_seconds(mlx_gen: Any) -> float:
+    """Best-effort cumulative generation time for an mlx-lm BatchGenerator.
+
+    Older mlx-lm forks kept a ``_stats.generation_time`` counter. The new
+    BatchGenerator tracks timing through a ``stats()`` context manager and
+    exposes only a monotonic ``_steps_counter``. Fall through a known-good
+    order; if nothing fits, use wall clock — tok/s stays meaningful.
+    """
+    stats = getattr(mlx_gen, "_stats", None)
+    if stats is not None:
+        gen_time = getattr(stats, "generation_time", None)
+        if gen_time is not None:
+            return float(gen_time)
+    return time.perf_counter()
+
+
 def _stop_sequences(task_params: TextGenerationTaskParams) -> list[str]:
     if task_params.stop is None:
         return []
@@ -843,7 +859,11 @@ class ExoBatchGenerator:
             on_generation_token=on_generation_token,
             generation_start_time=time.perf_counter(),
             prefill_tps=_prefill_tps,
-            generation_time_at_start=self._mlx_gen._stats.generation_time,
+            # New mlx-lm BatchGenerator removed `_stats` cumulative counters
+            # (generation_time lived on a stats context manager instead). Wall
+            # clock is an acceptable proxy for tok/s here since the active task
+            # is almost always generating or waiting on agree_on_tasks.
+            generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
             media_regions=media_regions,
         )
 
@@ -1124,7 +1144,7 @@ class ExoBatchGenerator:
                     self._pp_spec_uid = None
                 else:
                     gen_time_delta = (
-                        self._mlx_gen._stats.generation_time
+                        _mlx_gen_elapsed_seconds(self._mlx_gen)
                         - state.generation_time_at_start
                     )
                     generation_tps = (
