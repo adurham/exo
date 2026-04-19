@@ -364,6 +364,10 @@ class KVPrefixCache:
         """
         self._evict_if_needed()
 
+        # Measure how much of this new session already exists in the trie so we
+        # can see cross-session dedup in the logs.
+        _, shared_depth = self._longest_prefix_match(prompt_tokens, [])
+
         sliceable_mask = _sliceable_layer_mask(cache)
         node = self._insert_path(
             prompt_tokens=prompt_tokens,
@@ -373,8 +377,6 @@ class KVPrefixCache:
             media_regions=media_regions or [],
         )
 
-        # Build leaf-only per-layer cache for non-sliceable layers; sliceable
-        # layers live in the trie and are deepcopy'd on materialize.
         leaf_layer_caches = _extract_non_sliceable_layers(cache, sliceable_mask)
 
         leaf_id = self._next_leaf_id
@@ -393,7 +395,14 @@ class KVPrefixCache:
         self._leaves[leaf_id] = leaf
         self._increment_ref_count(node)
 
-        logger.info(f"KV cache added: {len(prompt_tokens)} tokens (leaf {leaf_id})")
+        total_len = int(prompt_tokens.shape[0])
+        unique = total_len - shared_depth
+        share_pct = (shared_depth * 100 // total_len) if total_len > 0 else 0
+        logger.info(
+            f"KV cache added: {total_len} tokens (leaf {leaf_id}) "
+            f"[shared_prefix={shared_depth} tok ({share_pct}%), unique={unique} tok, "
+            f"trie_leaves={len(self._leaves)}, trie_bytes={self._total_bytes()}]"
+        )
         return leaf_id
 
     def update_kv_cache(
