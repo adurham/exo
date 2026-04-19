@@ -60,6 +60,25 @@ class CacheSnapshot:
 
 
 def _detached_copy(a: mx.array) -> mx.array:
+    """Return an array that is safe to hold across in-place mutations of `a`.
+
+    MLX arrays use copy-on-write: an in-place __setitem__ on the source forks a
+    fresh backing allocation, so readers of the old array keep seeing the old
+    data. `mx.array(a)` is a near-free lazy alias that rides that same COW
+    guarantee. Reserved for callers in `copy_rotating_kv_cache` that require
+    fully-detached storage (numpy round-trip below) — the slice path used by
+    the radix trie uses this fast alias.
+    """
+    return mx.array(a)
+
+
+def _detached_copy_numpy(a: mx.array) -> mx.array:
+    """Force full independent storage via numpy round-trip.
+
+    Used only for RotatingKVCache snapshots, where we need the old backing
+    buffer to be released so the rotating-buffer leak described in
+    `copy_rotating_kv_cache` doesn't accumulate.
+    """
     dtype = a.dtype
     if dtype == mx.bfloat16:
         return mx.array(np.array(a.astype(mx.float32))).astype(mx.bfloat16)
@@ -77,8 +96,8 @@ def copy_rotating_kv_cache(cache: RotatingKVCache) -> RotatingKVCache | None:
     if cache.keys is None or cache.values is None:
         return None
     n = min(cache.max_size, cache.keys.shape[2])
-    k_slice = _detached_copy(cache.keys[..., -n:, :])
-    v_slice = _detached_copy(cache.values[..., -n:, :])
+    k_slice = _detached_copy_numpy(cache.keys[..., -n:, :])
+    v_slice = _detached_copy_numpy(cache.values[..., -n:, :])
     mx.eval(k_slice, v_slice)
     snap = RotatingKVCache.__new__(RotatingKVCache)
     snap.keys = k_slice
@@ -417,9 +436,13 @@ class KVPrefixCache:
     ) -> None:
         """Extend an existing leaf with new suffix tokens and refreshed cache.
 
-        Detaches the old leaf's path (decrementing ref counts, freeing orphaned
-        ancestors) and re-inserts with the new prompt. This covers the common
-        case of a continued conversation where the same leaf grows.
+        Fast path: if the old leaf's full path is a prefix of the new prompt
+        (the common case — same conversation continuing), attach a new edge
+        carrying only the suffix tokens and their K/V slice. No re-slicing of
+        the shared prefix, no trie rebuild.
+
+        Slow path: the prompt diverged (e.g. a system-prompt edit) — tear down
+        the old path and re-insert the whole prompt.
         """
         leaf = self._leaves.get(leaf_id)
         if leaf is None:
@@ -435,26 +458,160 @@ class KVPrefixCache:
             )
             return
 
-        # Merge snapshots: keep old ones at or before the restore point, add new.
         merged: list[CacheSnapshot] = []
         if leaf.leaf_snapshots:
             merged = [s for s in leaf.leaf_snapshots if s.token_count <= restore_pos]
         if snapshots:
             merged.extend(snapshots)
 
-        # Release old path.
-        was_pinned = leaf.pinned
-        self._decrement_ref_count(leaf.node)
-        del self._leaves[leaf_id]
+        old_depth = leaf.node.depth
+        new_length = int(prompt_tokens.shape[0])
 
-        # Re-insert under the same leaf_id so external references stay valid.
+        if new_length >= old_depth and self._leaf_is_prefix_of(
+            leaf, prompt_tokens, old_depth
+        ):
+            self._extend_leaf_suffix(
+                leaf=leaf,
+                prompt_tokens=prompt_tokens,
+                cache=cache,
+                ssm_snapshots=merged or None,
+                media_regions=media_regions or [],
+                prefill_tps=prefill_tps,
+                old_depth=old_depth,
+                new_length=new_length,
+            )
+            logger.info(
+                f"KV cache extended (leaf {leaf_id}): +{new_length - old_depth} tokens "
+                f"(kept {old_depth} shared, total {new_length})"
+            )
+            return
+
         sliceable_mask = _sliceable_layer_mask(cache)
-        node = self._insert_path(
+        self._rebuild_leaf_in_place(
+            leaf=leaf,
             prompt_tokens=prompt_tokens,
             cache=cache,
             sliceable_mask=sliceable_mask,
             ssm_snapshots=merged or None,
             media_regions=media_regions or [],
+            prefill_tps=prefill_tps,
+        )
+        logger.info(
+            f"KV cache rebuilt (leaf {leaf_id}): {new_length} tokens "
+            f"(diverged from old {old_depth})"
+        )
+
+    def _leaf_is_prefix_of(
+        self, leaf: _Leaf, new_prompt: mx.array, old_depth: int
+    ) -> bool:
+        """True iff the leaf's stored tokens are exactly a prefix of `new_prompt`."""
+        if old_depth == 0:
+            return True
+        old_np = _tokens_to_np(leaf.full_tokens)
+        new_np = _tokens_to_np(new_prompt)
+        if int(old_np.shape[0]) != old_depth:
+            return False
+        if int(new_np.shape[0]) < old_depth:
+            return False
+        return bool(np.array_equal(old_np[:old_depth], new_np[:old_depth]))
+
+    def _extend_leaf_suffix(
+        self,
+        leaf: _Leaf,
+        prompt_tokens: mx.array,
+        cache: KVCacheType,
+        ssm_snapshots: list[CacheSnapshot] | None,
+        media_regions: list["MediaRegion"],
+        prefill_tps: float,
+        old_depth: int,
+        new_length: int,
+    ) -> None:
+        """Attach a new suffix edge under the leaf's anchor node and move the
+        leaf there. Slices the cache only at [old_depth, new_length) — the
+        shared prefix is NOT re-sliced or re-copied.
+        """
+        sliceable_mask = _sliceable_layer_mask(cache)
+
+        # Pure metadata refresh: new prompt length equals the existing leaf.
+        if new_length == old_depth:
+            self._access_counter += 1
+            leaf.last_used = self._access_counter
+            leaf.full_tokens = prompt_tokens
+            leaf.prefill_tps = prefill_tps
+            leaf.leaf_snapshots = ssm_snapshots
+            leaf.leaf_layer_caches = _extract_non_sliceable_layers(
+                cache, sliceable_mask
+            )
+            return
+
+        old_node = leaf.node
+        suffix_tokens_np = _tokens_to_np(prompt_tokens)[old_depth:new_length]
+        first_suffix_token = int(suffix_tokens_np[0])
+
+        # Conflict: another leaf already diverged down this token. Safest to
+        # rebuild — rare enough that the extra cost doesn't matter.
+        if first_suffix_token in old_node.children:
+            self._rebuild_leaf_in_place(
+                leaf=leaf,
+                prompt_tokens=prompt_tokens,
+                cache=cache,
+                sliceable_mask=sliceable_mask,
+                ssm_snapshots=ssm_snapshots,
+                media_regions=media_regions,
+                prefill_tps=prefill_tps,
+            )
+            return
+
+        new_edge = self._build_edge_node(
+            parent=old_node,
+            prompt_tokens=prompt_tokens,
+            start=old_depth,
+            end=new_length,
+            cache=cache,
+            sliceable_mask=sliceable_mask,
+            ssm_snapshots=ssm_snapshots,
+            media_regions=media_regions,
+        )
+        old_node.children[first_suffix_token] = new_edge
+
+        # Moving the leaf deeper under the same ancestor chain: ancestors
+        # already count this leaf in their subtree, so only the new edge's
+        # own ref_count needs to go up. Walking the usual increment/decrement
+        # helpers on the shared chain would briefly zero old_node and orphan
+        # our freshly-attached new_edge before the increment lands.
+        new_edge.ref_count += 1
+        leaf.node = new_edge
+        leaf.full_tokens = prompt_tokens
+        leaf.prefill_tps = prefill_tps
+        leaf.leaf_snapshots = ssm_snapshots
+        leaf.leaf_layer_caches = _extract_non_sliceable_layers(
+            cache, sliceable_mask
+        )
+        self._access_counter += 1
+        leaf.last_used = self._access_counter
+
+    def _rebuild_leaf_in_place(
+        self,
+        leaf: _Leaf,
+        prompt_tokens: mx.array,
+        cache: KVCacheType,
+        sliceable_mask: list[bool],
+        ssm_snapshots: list[CacheSnapshot] | None,
+        media_regions: list["MediaRegion"],
+        prefill_tps: float,
+    ) -> None:
+        """Tear down the leaf's old path and re-insert, preserving leaf_id."""
+        was_pinned = leaf.pinned
+        leaf_id = leaf.leaf_id
+        self._decrement_ref_count(leaf.node)
+        del self._leaves[leaf_id]
+
+        node = self._insert_path(
+            prompt_tokens=prompt_tokens,
+            cache=cache,
+            sliceable_mask=sliceable_mask,
+            ssm_snapshots=ssm_snapshots,
+            media_regions=media_regions,
         )
         leaf_layer_caches = _extract_non_sliceable_layers(cache, sliceable_mask)
         self._access_counter += 1
@@ -466,12 +623,10 @@ class KVPrefixCache:
             last_used=self._access_counter,
             pinned=was_pinned,
             leaf_layer_caches=leaf_layer_caches,
-            leaf_snapshots=merged or None,
+            leaf_snapshots=ssm_snapshots,
         )
         self._leaves[leaf_id] = new_leaf
         self._increment_ref_count(node)
-
-        logger.info(f"KV cache updated (leaf {leaf_id}): {len(prompt_tokens)} tokens")
 
     def get_kv_cache(
         self,

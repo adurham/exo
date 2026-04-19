@@ -233,6 +233,58 @@ class TestRadixTrieStorage:
         stored = cache.prompts[id_s]
         assert int(stored.shape[0]) == 5
 
+    def test_update_fast_path_extends_without_touching_prefix(self):
+        """Conversation-extending update should attach a suffix edge rather than
+        rebuild the trie. The shared-prefix node keeps its identity (same Python
+        object) so we know no re-slicing happened.
+        """
+        cache = KVPrefixCache(None)
+        tokens_turn_1 = mx.array([1, 2, 3, 4, 5], dtype=mx.int32)
+        id_c = cache.add_kv_cache(
+            tokens_turn_1, _fake_kv_cache(num_layers=2, num_tokens=5)
+        )
+        root = cache._root  # pyright: ignore[reportPrivateUsage]
+        original_first_edge = root.children[1]  # node covering [1..5]
+
+        tokens_turn_2 = mx.array([1, 2, 3, 4, 5, 6, 7, 8], dtype=mx.int32)
+        cache.update_kv_cache(
+            leaf_id=id_c,
+            prompt_tokens=tokens_turn_2,
+            cache=_fake_kv_cache(num_layers=2, num_tokens=8),
+            snapshots=None,
+            restore_pos=5,
+        )
+
+        # Same shared-prefix node, now with a child edge covering [6,7,8].
+        first_edge_after = root.children[1]
+        assert first_edge_after is original_first_edge, (
+            "extend-in-place must not rebuild the shared prefix node"
+        )
+        assert set(first_edge_after.children.keys()) == {6}
+        suffix_edge = first_edge_after.children[6]
+        assert suffix_edge.edge_length == 3  # [6, 7, 8]
+        assert int(cache.prompts[id_c].shape[0]) == 8
+
+    def test_update_rebuilds_when_prefix_diverges(self):
+        """If the new prompt doesn't start with the old leaf's tokens, the
+        leaf's trie anchor must be re-rooted. Cache stays functional.
+        """
+        cache = KVPrefixCache(None)
+        tokens_a = mx.array([1, 2, 3, 4, 5], dtype=mx.int32)
+        id_c = cache.add_kv_cache(
+            tokens_a, _fake_kv_cache(num_layers=2, num_tokens=5)
+        )
+        tokens_b = mx.array([9, 9, 9, 1, 2, 3], dtype=mx.int32)
+        cache.update_kv_cache(
+            leaf_id=id_c,
+            prompt_tokens=tokens_b,
+            cache=_fake_kv_cache(num_layers=2, num_tokens=6),
+            snapshots=None,
+            restore_pos=0,
+        )
+        assert list(cache.prompts.keys()) == [id_c]
+        assert int(cache.prompts[id_c].shape[0]) == 6
+
     def test_media_region_mismatch_truncates_match(self):
         from exo.worker.engines.mlx.vision import MediaRegion
 
