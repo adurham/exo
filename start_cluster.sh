@@ -37,6 +37,9 @@ fi
 # can't accumulate prefix history that crowds out MiniMax on the same node.
 : "${HUIHUI_MAX_KV_TOKENS:=36864}"
 : "${HUIHUI_MAX_PREFIX_SESSIONS:=1}"
+# Hard byte cap for the prefix cache (across all leaves, after radix-trie
+# dedup). Empty = no byte cap (fall back to session-count cap alone).
+: "${HUIHUI_MAX_PREFIX_BYTES:=}"
 # KV cache quantization (bits). Huihui's working set is small (~18 GB weights
 # + 36k-token rotating KV), so bf16 fits fine and skipping quant avoids the
 # per-step dequantize cost that _merge_caches pays for QuantizedKVCache.
@@ -59,16 +62,26 @@ fi
 # scouts. No MTP weights upstream, so no spec-decode speedup. Default = on.
 : "${MINIMAX_MODEL_ID:=mlx-community/MiniMax-M2.7-5bit}"
 : "${MINIMAX_ENABLED:=1}"
-# Prefix caching: cache up to N past-prompt KV entries so multi-turn Hermes
-# conversations reuse prefill across turns instead of re-prefilling every time.
-# 2 keeps turn-to-turn reuse for the active conversation while leaving enough
-# headroom on both Studios for the Huihui scouts co-resident on each node.
-: "${MINIMAX_MAX_PREFIX_SESSIONS:=2}"
+# Prefix caching: the radix trie dedupes shared prefixes across leaves, so 4
+# sessions is enough for a Hermes orchestrator (parent + up to 3 children) or
+# a few concurrent channels without paying for unshared copies. Tighter than
+# the session cap is MINIMAX_MAX_PREFIX_BYTES below — the real budget.
+: "${MINIMAX_MAX_PREFIX_SESSIONS:=4}"
 : "${MINIMAX_MAX_KV_TOKENS:=}"
-# KV cache quantization (bits). MiniMax is the big-context workload — 4-bit KV
-# is what makes 196K × 2 sessions fit per node. 0 to disable, empty to defer
-# to EXO_KV_CACHE_BITS env.
-: "${MINIMAX_KV_CACHE_BITS:=4}"
+# Hard byte cap across all prefix-cache leaves (after trie dedup). At 8-bit KV
+# with MiniMax's 62 layers / 4 KV-heads-per-rank / 128 head_dim, ~62 KiB per
+# token per rank — so 5 GiB ≈ 80K unique cached tokens per rank, which covers
+# one ~48K Hermes session + a couple of delegated children after sharing the
+# system prompt. Leaves real headroom under the 124 GB wired_limit alongside
+# Huihui's ~20 GB resident footprint per node.
+: "${MINIMAX_MAX_PREFIX_BYTES:=5368709120}"
+# KV cache quantization (bits). 4-bit trades quality for footprint and at 48K+
+# contexts produces verbatim-recall drift (usernames / paths / exact strings
+# come back fuzzy — MLX's attention path dequantizes to bf16 anyway, so 4-bit
+# only saves steady-state storage, not attention-time peak). 8-bit halves the
+# quant error and fits under the per-node ceiling with Huihui co-resident.
+# 0 to disable entirely, empty to defer to EXO_KV_CACHE_BITS env.
+: "${MINIMAX_KV_CACHE_BITS:=8}"
 # MiniMax sampling defaults (per HF model card recommendation).
 : "${MINIMAX_TEMPERATURE:=1.0}"
 : "${MINIMAX_TOP_P:=0.95}"
@@ -559,6 +572,7 @@ create_instance_with_retry() {
     local max_kv_tokens="${12:-}"
     local max_prefix_sessions="${13:-}"
     local kv_cache_bits="${14:-}"
+    local max_prefix_bytes="${15:-}"
     local max_attempts=30
 
     for attempt in $(seq 1 $max_attempts); do
@@ -608,6 +622,7 @@ create_instance_with_retry() {
             --argjson kv "${max_kv_tokens:-null}" \
             --argjson sessions "${max_prefix_sessions:-null}" \
             --argjson kv_bits "${kv_cache_bits:-null}" \
+            --argjson bytes "${max_prefix_bytes:-null}" \
             '
             . as $i
             | ($i | keys[0]) as $tag
@@ -621,6 +636,7 @@ create_instance_with_retry() {
                 | (if $kv       != null then .maxKvTokens             = $kv         else . end)
                 | (if $sessions != null then .maxPrefixSessions       = $sessions   else . end)
                 | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
+                | (if $bytes    != null then .maxPrefixBytes          = $bytes      else . end)
               ) | {($tag): .[$tag]})}
         ')
 
@@ -668,6 +684,7 @@ create_single_node_instance() {
     local def_presence="${11:-}"
     local def_repetition="${12:-}"
     local kv_cache_bits="${13:-}"
+    local max_prefix_bytes="${14:-}"
     local max_attempts=20
 
     for attempt in $(seq 1 $max_attempts); do
@@ -703,6 +720,7 @@ create_single_node_instance() {
             --argjson presence "${def_presence:-null}" \
             --argjson repetition "${def_repetition:-null}" \
             --argjson kv_bits "${kv_cache_bits:-null}" \
+            --argjson bytes "${max_prefix_bytes:-null}" \
             '
             .previews
             | map(select(.sharding == "Pipeline"
@@ -724,6 +742,7 @@ create_single_node_instance() {
                     | (if $presence != null then .defaultPresencePenalty  = $presence   else . end)
                     | (if $repetition != null then .defaultRepetitionPenalty = $repetition else . end)
                     | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
+                    | (if $bytes    != null then .maxPrefixBytes          = $bytes      else . end)
                   ) | {($tag): .[$tag]})}
               end
         ')
@@ -783,12 +802,12 @@ if [ "${HUIHUI_INSTANCES_PER_STUDIO:-0}" -gt 0 ]; then
                 "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
                 "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
                 "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
-                "$HUIHUI_KV_CACHE_BITS" || true
+                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" || true
             create_single_node_instance "$M4_2_NODE_ID" "$HUIHUI_MODEL_ID" "M4-2" "$i" \
                 "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
                 "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
                 "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
-                "$HUIHUI_KV_CACHE_BITS" || true
+                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" || true
         done
 
         # Wait until all expected instances have a Ready runner.
@@ -840,7 +859,7 @@ if [ "${MINIMAX_ENABLED:-0}" = "1" ]; then
             "$MINIMAX_TEMPERATURE" "$MINIMAX_TOP_P" "$MINIMAX_TOP_K" "$MINIMAX_MIN_P" \
             "$MINIMAX_PRESENCE_PENALTY" "$MINIMAX_REPETITION_PENALTY" \
             "$MINIMAX_MAX_KV_TOKENS" "$MINIMAX_MAX_PREFIX_SESSIONS" \
-            "$MINIMAX_KV_CACHE_BITS" || true
+            "$MINIMAX_KV_CACHE_BITS" "$MINIMAX_MAX_PREFIX_BYTES" || true
 
         echo -n "Waiting for 2 MiniMax runner(s) to become Ready..."
         READY=false
