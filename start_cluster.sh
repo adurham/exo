@@ -57,7 +57,7 @@ fi
 
 # MiniMax-M2.7 (mxfp4): smaller (~64GB/rank) so it coexists with the Huihui
 # scouts. No MTP weights upstream, so no spec-decode speedup. Default = on.
-: "${MINIMAX_MODEL_ID:=mlx-community/MiniMax-M2.7-4bit-mxfp4}"
+: "${MINIMAX_MODEL_ID:=mlx-community/MiniMax-M2.7-5bit}"
 : "${MINIMAX_ENABLED:=1}"
 # Prefix caching: cache up to N past-prompt KV entries so multi-turn Hermes
 # conversations reuse prefill across turns instead of re-prefilling every time.
