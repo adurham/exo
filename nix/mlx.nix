@@ -46,10 +46,11 @@ let
     pyproject = true;
 
     src = fetchFromGitHub {
-      owner = "rltakashige";
-      repo = "mlx-jaccl-fix-small-recv";
+      owner = "adurham";
+      repo = "mlx";
       rev = uvLockMlxRev;
-      hash = "sha256-F047XI9dsWLfFqAzddSHJeLkIiEsCKc8n9fF70uShfA=";
+      # TODO: replace with the hash nix prints on first build after a rev bump.
+      hash = lib.fakeHash;
     };
 
     patches = [
