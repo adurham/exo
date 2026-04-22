@@ -100,16 +100,48 @@ future upstream main merges shouldn't re-apply them automatically.
 
 ### Work to re-enable the refactor
 
-- Repro in a 2-node minimal Python harness feeding the same
-  `MLX_IBV_DEVICES` + `MLX_JACCL_COORDINATOR` that start_cluster.sh uses.
-- Step through `jaccl::init(cfg, strict=true)` → `MeshGroup::MeshGroup` →
-  `SideChannel::SideChannel` → queue-pair bring-up with `lldb` on both
-  ranks.
-- Likely candidates: config parsing (devices as `string` vs `[string]`
-  in the new 3D tensor), early termination in `create_connections` when
-  diagonal entries are empty, or a missing bind/listen before the peer
-  connects.
-- Once fixed, drop the two revert commits and force-push main.
+The pre-refactor jaccl worked fine on our 2-rank Thunderbolt RDMA, so
+`#3412` is strictly a regression for this topology — not a pre-existing
+bug. Upstream is unaware because the intersection of (exo users × jaccl
+backend × 2 ranks × Apple-Silicon-over-Thunderbolt-Bridge × post-#3412
+release) is effectively just this cluster. A proper fix + upstream PR
+is the right long-term path rather than carrying reverts indefinitely.
+
+**Phase 1 — minimal repro (no exo in the loop).** ~20-line Python
+harness that calls `mx.distributed.init(backend="jaccl", strict=True)`
+with the same `MLX_IBV_DEVICES` + `MLX_JACCL_COORDINATOR` env that
+`start_cluster.sh` sets. Run against **upstream mlx main** (NOT our
+reverted fork) on both Studios. Capture the rank-0 traceback and the
+rank-1 `RuntimeError: [jaccl] Send failed with errno=22` cascade.
+~30 minutes. Temporarily takes MiniMax down during the test window —
+run in a maintenance window, not while the prediction-bot needs it.
+
+**Phase 2 — root cause.** Three candidates in probability order:
+
+1. *Config parsing* — devices parsed as `string` instead of `[string]`
+   in the new 3D tensor. Quickest check: log the parsed `Config`
+   object at the top of `jaccl::init` before `MeshGroup::MeshGroup`.
+2. *Empty-diagonal short-circuit in `create_connections`* — at N=2
+   the 3D mesh is degenerate; some `std::vector::at` call likely
+   indexes a missing row. `grep -n '\.at(' lib/jaccl/` — probably
+   only a handful of sites.
+3. *Bind/listen ordering in `SideChannel::SideChannel`* — timing log
+   on both ranks. Less likely (both ranks fail symmetrically, which
+   suggests a config/shape bug rather than a race).
+
+Variance here: config-parsing = ~1 hour, QP ordering = ~1 day.
+
+**Phase 3 — patch + local verify.** Fork upstream mlx into a working
+copy, apply the fix, `uv sync` against a local editable path
+(`pyproject.toml` has the commented-out lines for this at `[tool.uv.
+sources]` already). Run `start_cluster.sh` *without* the two revert
+commits. MiniMax READY at 2-rank = fix confirmed. ~1 hour + rebuild
+time.
+
+**Phase 4 — upstream PR.** Ship against `ml-explore/mlx` with a
+regression test (ideally a pure config-parsing unit test that doesn't
+need RDMA hardware). Reference `#3412` + `#3418`. Once merged, drop
+`1a176363` + `1cfcb5b6` from this fork and bump the pin.
 
 ## Open optimization projects
 
