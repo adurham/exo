@@ -33,7 +33,6 @@ from exo.shared.types.worker.downloads import (
     DownloadCompleted,
     DownloadFailed,
     DownloadOngoing,
-    DownloadPaused,
     DownloadPending,
     DownloadProgress,
 )
@@ -176,9 +175,9 @@ class DownloadCoordinator:
                 downloaded=downloaded,
                 total=total,
             )
-            self.download_status[model_id] = paused
+            self.download_status[model_id] = pending
             await self.event_sender.send(
-                NodeDownloadProgress(download_progress=paused)
+                NodeDownloadProgress(download_progress=pending)
             )
 
     async def _start_download(self, shard: ShardMetadata, repo_url: str | None = None) -> None:
