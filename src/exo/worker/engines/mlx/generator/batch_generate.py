@@ -48,7 +48,7 @@ from exo.worker.engines.mlx.generator.generate import (
     patch_embed_tokens,
     prefill,
 )
-from exo.worker.engines.mlx.sampling import resolve_sampling
+from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.utils_mlx import (
     fix_unmatched_think_end_tokens,
     system_prompt_token_count,
@@ -124,6 +124,7 @@ class ExoBatchGenerator:
     default_min_p: float | None = None
     default_presence_penalty: float | None = None
     default_repetition_penalty: float | None = None
+    default_frequency_penalty: float | None = None
 
     _mlx_gen: MlxBatchGenerator = field(init=False)
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
@@ -704,6 +705,7 @@ class ExoBatchGenerator:
         seed = task_params.seed if task_params.seed is not None else 42
         mx.random.seed(seed)
 
+        _card = card_sampling_values(task_params.model, task_params.enable_thinking)
         _resolved = resolve_sampling(
             request_temperature=task_params.temperature,
             request_top_p=task_params.top_p,
@@ -711,12 +713,21 @@ class ExoBatchGenerator:
             request_min_p=task_params.min_p,
             request_presence_penalty=task_params.presence_penalty,
             request_repetition_penalty=task_params.repetition_penalty,
+            request_frequency_penalty=task_params.frequency_penalty,
             instance_temperature=self.default_temperature,
             instance_top_p=self.default_top_p,
             instance_top_k=self.default_top_k,
             instance_min_p=self.default_min_p,
             instance_presence_penalty=self.default_presence_penalty,
             instance_repetition_penalty=self.default_repetition_penalty,
+            instance_frequency_penalty=self.default_frequency_penalty,
+            card_temperature=_card.temperature if _card else None,
+            card_top_p=_card.top_p if _card else None,
+            card_top_k=_card.top_k if _card else None,
+            card_min_p=_card.min_p if _card else None,
+            card_presence_penalty=_card.presence_penalty if _card else None,
+            card_repetition_penalty=_card.repetition_penalty if _card else None,
+            card_frequency_penalty=_card.frequency_penalty if _card else None,
         )
         with T("submit.make_sampler"):
             sampler = make_sampler(
@@ -790,6 +801,7 @@ class ExoBatchGenerator:
                     repetition_context_size=task_params.repetition_context_size or 20,
                     presence_penalty=_resolved["presence_penalty"],
                     presence_context_size=task_params.presence_context_size or 20,
+                    frequency_penalty=_resolved["frequency_penalty"],
                 )
             )
             if is_bench:

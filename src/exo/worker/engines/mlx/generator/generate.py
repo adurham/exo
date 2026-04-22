@@ -51,7 +51,7 @@ from exo.worker.engines.mlx.cache import (
     make_kv_cache,
     snapshot_ssm_states,
 )
-from exo.worker.engines.mlx.sampling import resolve_sampling
+from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.constants import (
     DEFAULT_TOP_LOGPROBS,
     KV_BITS,
@@ -606,6 +606,7 @@ def mlx_generate(
     instance_min_p: float | None = None,
     instance_presence_penalty: float | None = None,
     instance_repetition_penalty: float | None = None,
+    instance_frequency_penalty: float | None = None,
 ) -> Generator[GenerationResponse]:
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
@@ -662,6 +663,7 @@ def mlx_generate(
                 f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
             )
 
+    _card = card_sampling_values(task.model, task.enable_thinking)
     _resolved = resolve_sampling(
         request_temperature=task.temperature,
         request_top_p=task.top_p,
@@ -669,12 +671,21 @@ def mlx_generate(
         request_min_p=task.min_p,
         request_presence_penalty=task.presence_penalty,
         request_repetition_penalty=task.repetition_penalty,
+        request_frequency_penalty=task.frequency_penalty,
         instance_temperature=instance_temperature,
         instance_top_p=instance_top_p,
         instance_top_k=instance_top_k,
         instance_min_p=instance_min_p,
         instance_presence_penalty=instance_presence_penalty,
         instance_repetition_penalty=instance_repetition_penalty,
+        instance_frequency_penalty=instance_frequency_penalty,
+        card_temperature=_card.temperature if _card else None,
+        card_top_p=_card.top_p if _card else None,
+        card_top_k=_card.top_k if _card else None,
+        card_min_p=_card.min_p if _card else None,
+        card_presence_penalty=_card.presence_penalty if _card else None,
+        card_repetition_penalty=_card.repetition_penalty if _card else None,
+        card_frequency_penalty=_card.frequency_penalty if _card else None,
     )
 
     # 1.0 is a no-op for repetition_penalty — collapse to None so mlx-lm
@@ -690,6 +701,7 @@ def mlx_generate(
             repetition_context_size=task.repetition_context_size or 20,
             presence_penalty=_resolved["presence_penalty"],
             presence_context_size=task.presence_context_size or 20,
+            frequency_penalty=_resolved["frequency_penalty"],
         )
     )
     if is_bench:

@@ -133,7 +133,7 @@ type (`MlxRingInstance`, `MlxJacclInstance`).
 | `max_prefix_sessions: int \| None` | Leaf count cap for the radix trie. |
 | `max_prefix_bytes: int \| None` | Hard byte cap for the radix trie. |
 | `kv_cache_bits: int \| None` | Per-instance KV quantization override. `None` = defer to `EXO_KV_CACHE_BITS` env; `0` = explicitly disable (overrides env); positive N = quantize to N bits. |
-| `default_temperature/top_p/top_k/min_p/presence_penalty/repetition_penalty` | Sampling defaults; resolution order is request → instance → cluster env → hardcoded fallback. |
+| `default_temperature/top_p/top_k/min_p/presence_penalty/repetition_penalty/frequency_penalty` | Sampling defaults; resolution order is request → instance → card (`ModelCard.sampling_defaults`, thinking/non-thinking aware) → cluster env → hardcoded fallback. |
 
 ### kv_cache_bits resolution order
 

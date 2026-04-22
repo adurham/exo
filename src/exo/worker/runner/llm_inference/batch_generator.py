@@ -131,6 +131,7 @@ class SequentialGenerator(InferenceGenerator):
     default_min_p: float | None = None
     default_presence_penalty: float | None = None
     default_repetition_penalty: float | None = None
+    default_frequency_penalty: float | None = None
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
@@ -351,6 +352,7 @@ class SequentialGenerator(InferenceGenerator):
             instance_min_p=self.default_min_p,
             instance_presence_penalty=self.default_presence_penalty,
             instance_repetition_penalty=self.default_repetition_penalty,
+            instance_frequency_penalty=self.default_frequency_penalty,
         )
 
     def close(self) -> None:
@@ -377,6 +379,7 @@ class BatchGenerator(InferenceGenerator):
     default_min_p: float | None = None
     default_presence_penalty: float | None = None
     default_repetition_penalty: float | None = None
+    default_frequency_penalty: float | None = None
 
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _maybe_queue: list[TextGeneration] = field(default_factory=list, init=False)
@@ -408,6 +411,7 @@ class BatchGenerator(InferenceGenerator):
             default_min_p=self.default_min_p,
             default_presence_penalty=self.default_presence_penalty,
             default_repetition_penalty=self.default_repetition_penalty,
+            default_frequency_penalty=self.default_frequency_penalty,
         )
 
     def warmup(self):
