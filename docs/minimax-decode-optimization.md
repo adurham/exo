@@ -84,6 +84,10 @@ reduction length (48/2 × 64 = 1536 vs Qwen3.5's 2048).
 
 ### #2 — Quantized SDPA kernel
 
+**See [`minimax-quantized-sdpa-design.md`](./minimax-quantized-sdpa-design.md)
+for the full Phase 2 design.**
+
+
 Current hot loop is `_dequantize_then_sdpa` at
 `mlx-lm/mlx_lm/models/base.py:117-132`: `mx.dequantize(*keys)` and
 `mx.dequantize(*values)` on every SDPA call, every decode token.
