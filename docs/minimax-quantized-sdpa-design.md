@@ -433,6 +433,76 @@ attention actually uses it. Deploy via `start_cluster.sh` and profile
 with `EXO_MINIMAX_TRACE=1` to verify the predicted 20–30% decode
 speedup.
 
+#### Session 5 actual outcome (mlx `b1824c0e`, mlx-lm `77ed380`, exo `919c7c49`)
+
+Integration landed, v1 unit tests still 13/13 green. Live-cluster bench
+did NOT confirm the 20–30% decode speedup at the baseline config.
+
+**Cluster decode tok/s at 66K context (200-tok generation) —
+2-node M4 Studio tensor-parallel over jaccl RDMA, Huihui scouts
+co-resident:**
+
+| Config                     | Decode tok/s | vs 17 tok/s baseline |
+| -------------------------- | ------------ | -------------------- |
+| 5-bit KV, trace off        | 16.18        | **~flat (−5%)**      |
+| 8-bit KV, trace off (warm) | ~11.1        | (no 8-bit baseline)  |
+| 5-bit KV, trace on         | 2.24         | serialization artifact |
+| 8-bit KV, trace on         | 5.74         | serialization artifact |
+
+`EXO_MINIMAX_TRACE=1` forces `mx.eval()` at every span boundary; the
+forced fences serialize the new quant path much harder than the old
+dequantize+SDPA path (quant dispatches 2 kernels per call vs 1 copy +
+1 SDPA for the dequant path, so each fence serializes more work). Must
+be disabled to measure real inference speed.
+
+**Local microbench on the patched wheel, same (B=1, n_kv=2, head_dim=128)
+shape the cluster runs:**
+
+| bits | N=66K speedup | N=74K speedup |
+| ---- | ------------- | ------------- |
+| 4    | 1.28×         | 1.29×         |
+| **5**| **0.96×**     | **0.90×**     |
+| 8    | 1.52×         | 1.46×         |
+
+At bits=5, head_dim=128 the kernel widens `qk_per_thread` / `v_per_thread`
+to 8 to align with MLX's "8 values per 5 bytes" packing (noted in session
+3). That halves active simd lanes (16 of 32) and cancels the
+bandwidth-savings advantage of fusing the dequantize. At bits ∈ {4, 8}
+the packed layout aligns cleanly with `qk_per_thread=4`, all 32 lanes
+stay active, and the kernel wins 1.3–1.5×.
+
+**Root cause vs the design-doc bandwidth analysis:** the analysis
+modelled K/V-read bandwidth but not thread occupancy. 5-bit × head_dim=128
+on M4 simdgroups is compute-starved by the pack-factor alignment, not
+bandwidth-starved — so saving bandwidth doesn't speed decode up.
+
+**A secondary bug was fixed along the way** (mlx `b1824c0e`): the v1
+`ScaledDotProductAttentionQuant::eval_gpu` demanded every K/V input
+be row-contiguous, which forced a `contiguous_copy_gpu` on every
+`QuantizedKVCache.state` slice (~2.3 GB/decode-token at 74K). Without
+that fix the first cluster run landed at 5 tok/s (3× regression). The
+fix brings cluster behavior back in line with the microbench.
+
+**Phase 2 verdict (abort criterion triggered):** per the exit rule at
+the bottom of this doc, <15% decode gain on the cluster at the baseline
+config is a stop signal. Halting Phase 2; not proceeding into Phase 3.
+
+**What would unlock the 5-bit win (not scoped here):**
+
+1. Add a `BD=16` / `BD=8` variant of `sdpa_vector_2pass_1_quant` so
+   5-bit × head_dim=128 can keep all simd lanes active at the cost of
+   more threadgroups per block. Or keep BD=32 and vectorize the dequant
+   across 4 lanes so `qk_per_thread=4` covers 4 × 5 = 20 bits fetched
+   per thread with cross-lane shuffle.
+2. Or selectively route bits=5 through the existing dequantize+SDPA
+   path (in `fast.cpp::scaled_dot_product_attention_quant` add
+   `bits == 5 && head_dim == 128` to `use_fallback`). This leaves
+   bits=4 and bits=8 users with the quant-kernel win and preserves
+   baseline for bits=5. Low-risk, 10-line change.
+
+Option 2 is the minimum-invasive fix. Option 1 is the "make the kernel
+actually fast at 5-bit" project and is multi-day Metal work.
+
 ### Session 4 — integration + profile (1 day)
 
 8. Update `mlx_lm/models/base.py:117` to call the new entry point when

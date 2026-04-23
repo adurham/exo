@@ -52,6 +52,26 @@ ceiling drops to **~20–30 %** from levers #2 + #3 + #4 alone:
 from Phase 1 and is banked. **Phase 2 (lever #2, quantized SDPA) is
 now the sole remaining lever for decode throughput.**
 
+**Revised again after Phase 2 shipped (2026-04-23, session 5):** Lever
+#2's decode contribution at the baseline 5-bit KV config was ~0 %
+(cluster measured 16.2 tok/s vs 17.0 tok/s baseline). The v1 kernel
+wins the expected 1.3–1.5× at bits ∈ {4, 8} but loses ~10 % at
+bits=5 × head_dim=128 because the MLX 5-bit pack factor forces
+`qk_per_thread=8`, which halves active simd lanes. The bandwidth
+analysis was correct in isolation but missed thread-occupancy loss at
+the specific (bits, head_dim) the baseline profile actually runs.
+**Phase 2 is not a decode lever at 5-bit; the quant kernel is kept on
+disk as a win for 4-bit and 8-bit KV users.** See
+[`minimax-quantized-sdpa-design.md`](./minimax-quantized-sdpa-design.md)
+"Session 5 actual outcome" for the measurements and the two candidate
+follow-ups (BD=16 variant, or route bits=5 back through dequantize
++SDPA) that would unlock the 5-bit win if we want to revisit.
+
+With Phase 2 delivering no decode gain, **the 20–30 % combined
+ceiling from levers #2 + #3 + #4 is not achievable on this hardware at
+5-bit KV.** Phase 3 is not pursued until the 5-bit kernel cliff is
+fixed or the cluster default shifts to bits ∈ {4, 8}.
+
 ## Lever detail
 
 ### #1 — Kill the Q/K `all_gather`
