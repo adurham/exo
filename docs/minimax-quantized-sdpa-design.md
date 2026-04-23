@@ -302,6 +302,39 @@ Done (deep-read + design doc, this file).
 3. Add the C++ dispatch function + Python binding stub.
 4. Compile, confirm no regressions on the bf16 path.
 
+**Session 2 actual outcome:**
+
+Steps 1 and 2 landed (commit TBD). Key findings from reading
+`quantized.h`:
+
+- MLX's 5-bit packing is **8 values per 5 bytes**, not uint32-aligned
+  (my original sketch in "Kernel specification" above is wrong for
+  5-bit; left in the doc as a pedagogical example but the kernel uses
+  the real layout).
+- `quantized.h` exposes reusable helpers that avoid re-deriving the
+  bit layout: `load_vector<T,U,VPT,bits>` (pre-scales the input),
+  `qdot<U,VPT,bits>` (computes packed-weight dot product), and
+  `dequantize<U,N,bits>` (writes a threadgroup array of dequantized
+  values). The kernel uses `load_vector` + `qdot` for the K side so
+  the quant layout is handled by MLX-blessed code. For V we need a
+  per-thread dequantize (vs the threadgroup-writing helper); that's
+  tracked in the kernel's TODO comments.
+- **Discovered alignment issue at D=128, BITS=5**: the straightforward
+  BD=32 / qk_per_thread=4 layout doesn't align to 5-bit's 8-value pack
+  factor. Two options: widen qk_per_thread to 8 (halving the active
+  thread count), or shift to BD=16. Deferred to session 3.
+
+Landed:
+- `mlx/backend/metal/kernels/sdpa_vector_quant.h` — WIP kernel draft,
+  includes complete K-side with `load_vector`+`qdot`, BITS=8 fallback
+  on V-side, TODOs for 4-bit and 5-bit V unpack.
+- **Not yet instantiated** in `scaled_dot_product_attention.metal`, so
+  it compiles as dead code. Safe to deploy — no risk to the running
+  cluster until we explicitly wire it in.
+
+Steps 3 and 4 (C++ dispatch + Python binding + smoke test) move to
+Session 3.
+
 ### Session 3 — dequantize path + unit tests (1–2 days)
 
 5. Replace the `keys[i]` / `values[i]` loads with the dequantize logic
