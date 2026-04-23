@@ -192,6 +192,25 @@ Exit criterion: decode tok/s at 66K context improves 10–15 % over
 baseline. If no improvement, rethink — the profile is telling us
 something we don't yet understand.
 
+#### Phase 1 actual (landed 2026-04-23, commit `d47688b9`)
+
+First attempt (two separate ShardedRMSNorm calls) regressed decode ~14 %
+because it doubled the collective count per layer. Fused follow-up
+(single `all_sum` of a `(B, L, 2)` combined partial-SS tensor) restored
+one collective per layer and delivered:
+
+- **Attn total wall-time: 208.7 s → 180.5 s (−14 %)**
+- **TTFT: 255 s → 216 s (−16 %)** at 66K context
+- Pure decode wall-time: unchanged within noise (48.8 s → 49.8 s)
+
+The predicted decode win did not materialize. Cause: at L=1 decode,
+both the original `all_gather` and the replacement `all_sum` have
+negligible payload; per-call cost is ~800 µs of Metal↔CPU fencing
+regardless of payload size. Only prefill, where the payload scales
+with L, benefits. Lesson: do not model Apple-Silicon MLX collective
+wins from payload shrinkage alone — fence count is the dominant
+variable. All decode wins now depend on phase 2.
+
 ### Phase 2 — the big lever (~5–8 days)
 
 4. Quantized SDPA kernel (lever #2).
