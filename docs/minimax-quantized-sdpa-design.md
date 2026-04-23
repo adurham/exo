@@ -392,6 +392,47 @@ The design doc chose (A). Session 4 should execute it unless the cluster
 risk of a wheel-rebuild cycle changes the calculus — in which case (C)
 becomes a faster-to-validate fallback.
 
+### Session 4 actual outcome (mlx commit `21fd6384`)
+
+Executed plan (A). **All 13 unit tests pass locally.** The v1 decode
+kernel is correctness-verified against the dequantize-then-SDPA
+reference path.
+
+Landed:
+- `fast_primitives.h`, `fast.h`, `fast.cpp` — new `ScaledDotProductAttentionQuant`
+  primitive and `fast::scaled_dot_product_attention_quant` entry point.
+- `scaled_dot_product_attention.cpp` — `ScaledDotProductAttentionQuant::eval_gpu`
+  implementation that dispatches to `sdpa_vector_2pass_quant`.
+- `python/src/fast.cpp` — `mx.fast.scaled_dot_product_attention_quant(q,
+  k_packed, k_scales, k_biases, v_packed, v_scales, v_biases, *, scale,
+  group_size, bits, do_causal=False, sinks=None)`.
+- `python/tests/test_fast_sdpa_quant.py` — 13 test cases covering the
+  full v1 grid: bits ∈ {4, 5, 8} × head_dim ∈ {64, 128} × N ∈ {256,
+  8192, 66560}, plus fp16/fp32 dtype coverage, causal masking, and
+  the prefill fallback path.
+
+Kernel refinements (made during test-driven debugging):
+- Switched the K dot-product from `qdot` to explicit `dequantize_thread`
+  + manual dot. Reason: `qdot<bits=4>` requires values_per_thread % 4
+  == 0 because of its positional Q-prescale contract, which would have
+  forced `qk_per_thread > D/32` at D=64; explicit dot is simpler and
+  matches the V side's approach.
+
+Debugging note (for future sessions): setuptools' `build/lib.macosx*`
+and `build/temp.macosx*` directories are **not** automatically
+invalidated by uv when source headers change. If you edit a `.metal` or
+`.h` file and re-run `uv pip install mlx`, the wheel may re-install but
+ship the stale metallib. Workaround: delete those build dirs manually
+before each reinstall during kernel iteration.
+
+### Session 5 — integration + live-cluster profile
+
+Next step per the original plan: wire the new binding into mlx-lm's
+KV-cache attention path (`mlx_lm/models/base.py:117`) so MiniMax
+attention actually uses it. Deploy via `start_cluster.sh` and profile
+with `EXO_MINIMAX_TRACE=1` to verify the predicted 20–30% decode
+speedup.
+
 ### Session 4 — integration + profile (1 day)
 
 8. Update `mlx_lm/models/base.py:117` to call the new entry point when
