@@ -853,6 +853,40 @@ class GLM4MoeLiteShardingStrategy(TensorParallelShardingStrategy):
         return model
 
 
+def _fused_sharded_qk_norm(
+    queries: mx.array,
+    keys: mx.array,
+    q_norm: ShardedRMSNorm,
+    k_norm: ShardedRMSNorm,
+    group: mx.distributed.Group,
+) -> tuple[mx.array, mx.array]:
+    """Sharded RMSNorm over both Q and K in a single cross-rank all_sum.
+
+    Two separate ``ShardedRMSNorm`` invocations each fire their own
+    ``all_sum``; at the fence-dominated ~800 µs/call cost that doubles the
+    collective count vs the ``all_gather`` it replaced. This packs both
+    partial sum-of-squares into a (B, L, 2) tensor, all_sums once, then
+    applies the per-norm rsqrt + weight locally.
+    """
+    q_ss = queries.astype(mx.float32).square().sum(-1, keepdims=True)
+    k_ss = keys.astype(mx.float32).square().sum(-1, keepdims=True)
+    combined_ss = mx.concatenate([q_ss, k_ss], axis=-1)
+    combined_ss = mx.distributed.all_sum(combined_ss, group=group)
+
+    dim_q = queries.shape[-1] * group.size()
+    dim_k = keys.shape[-1] * group.size()
+
+    q_factor = mx.rsqrt(combined_ss[..., 0:1] / dim_q + q_norm.eps)
+    k_factor = mx.rsqrt(combined_ss[..., 1:2] / dim_k + k_norm.eps)
+
+    queries = (queries.astype(mx.float32) * q_factor * q_norm["weight"]).astype(
+        queries.dtype
+    )
+    keys = (keys.astype(mx.float32) * k_factor * k_norm["weight"]).astype(keys.dtype)
+
+    return queries, keys
+
+
 class WrappedMiniMaxAttention(CustomMlxLayer):
     def __init__(self, layer: _LayerCallable, group: mx.distributed.Group):
         super().__init__(layer)
@@ -874,14 +908,20 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         values: mx.array = self._original_layer.v_proj(x)
 
         # qk_norm is mathematically an RMSNorm over the joined
-        # head-stack. Each rank owns contiguous heads and q_norm / k_norm
-        # have been rewritten to ShardedRMSNorm at shard time (see
-        # MiniMaxShardingStrategy.shard_model), so cross-rank coupling is
-        # a single fp32 scalar all_sum per norm per layer — not the
-        # (batch × q_dim + k_dim) bf16 all_gather this block used to do.
+        # head-stack. q_norm / k_norm have been rewritten to
+        # ShardedRMSNorm at shard time (see MiniMaxShardingStrategy),
+        # and here we pack both partial sum-of-squares into a single
+        # cross-rank all_sum — matching the pre-sharded-norm baseline's
+        # collective count (1 per layer) instead of the 2 that separate
+        # norm calls would fire.
         if getattr(self, "use_qk_norm", False):
-            queries = self._original_layer.q_norm(queries)
-            keys = self._original_layer.k_norm(keys)
+            queries, keys = _fused_sharded_qk_norm(
+                queries,
+                keys,
+                self._original_layer.q_norm,  # type: ignore[arg-type]
+                self._original_layer.k_norm,  # type: ignore[arg-type]
+                self.group,
+            )
 
         queries = queries.reshape(
             batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
