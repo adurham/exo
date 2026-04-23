@@ -44,6 +44,14 @@ see `memory/minimax_moe_decode_bottleneck.md` for the corrected story.
 **Combined ceiling if #1 + #2 + #3 + #4 land: ~35–45 % decode speedup.**
 17 → 23–25 tok/s at 66K context.
 
+**Revised after Phase 1 landed (2026-04-23):** Lever #1's decode
+contribution was 0 % (payload-shrinkage doesn't help at decode's L=1
+payload — see phase-1-actual section below). The combined decode
+ceiling drops to **~20–30 %** from levers #2 + #3 + #4 alone:
+17 → 20.5–22 tok/s at 66K context. TTFT separately improved ~16 %
+from Phase 1 and is banked. **Phase 2 (lever #2, quantized SDPA) is
+now the sole remaining lever for decode throughput.**
+
 ## Lever detail
 
 ### #1 — Kill the Q/K `all_gather`
@@ -233,11 +241,21 @@ unexpected.
 
 ## Budget summary
 
+Original (pre-Phase-1-measurement) estimates:
+
 - **Phase 1**: 1.5 days → +10–15 % decode.
 - **Phase 1 + 2**: ~10 days → +30–45 % decode.
 - **Phase 1 + 2 + 3**: ~3 weeks → +35–50 % decode.
 
-17 tok/s → 23–25 tok/s at 66K context is realistic. 17 → 30+ is not.
+**Revised after Phase 1 landed:**
+
+- **Phase 1 actual**: ~0 % decode (TTFT −16 %, banked but orthogonal).
+- **Phase 2 alone**: 5–8 days → +20–30 % decode (unchanged estimate).
+- **Phase 2 + 3**: ~2–3 weeks → +25–35 % decode.
+
+17 tok/s → 21–23 tok/s at 66K context is the honest ceiling. 17 → 25+
+requires lever #2 to land at the upper end of its range AND Phase 3
+to stack cleanly on top, which we won't know until Phase 2 ships.
 
 ## Key file pointers
 
