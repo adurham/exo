@@ -460,6 +460,10 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_DEFAULT_TOP_K" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_K=$EXO_DEFAULT_TOP_K"
     [ -n "$EXO_DEFAULT_MIN_P" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_MIN_P=$EXO_DEFAULT_MIN_P"
 
+    # MiniMax decode profiling gates (both default off; forwarded to runners when set).
+    [ -n "$EXO_MINIMAX_TRACE" ]        && EXO_ENV="$EXO_ENV EXO_MINIMAX_TRACE=$EXO_MINIMAX_TRACE"
+    [ -n "$EXO_MINIMAX_NOOP_ALLSUM" ]  && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ALLSUM=$EXO_MINIMAX_NOOP_ALLSUM"
+
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
