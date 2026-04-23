@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import partial
@@ -35,6 +36,8 @@ from mlx_lm.models.kimi_k25 import Model as KimiK25Model
 from mlx_lm.models.llama import Model as LlamaModel
 from mlx_lm.models.minimax import MiniMaxAttention
 from mlx_lm.models.minimax import Model as MiniMaxModel
+from mlx_lm.models.minimax_trace import finalize as _minimax_finalize
+from mlx_lm.models.minimax_trace import span as _minimax_span
 from mlx_lm.models.ministral3 import Model as Ministral3Model
 from mlx_lm.models.nemotron_h import Model as NemotronHModel
 from mlx_lm.models.nemotron_h import (
@@ -66,6 +69,8 @@ from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 
 from exo.shared.types.worker.shards import PipelineShardMetadata
 from exo.worker.runner.bootstrap import logger
+
+_MINIMAX_NOOP_ALLSUM: bool = os.environ.get("EXO_MINIMAX_NOOP_ALLSUM", "0") == "1"
 
 if TYPE_CHECKING:
     from mlx_lm.models.cache import Cache
@@ -776,7 +781,13 @@ class ShardedMoE(CustomMlxLayer):
             x = sum_gradients(self.sharding_group)(x)
         y = self.original_layer.__call__(x)
         if self.sharding_group is not None:
-            y = mx.distributed.all_sum(y, group=self.sharding_group)
+            with _minimax_span("moe.all_sum"):
+                if _MINIMAX_NOOP_ALLSUM:
+                    y = _minimax_finalize(y)
+                else:
+                    y = _minimax_finalize(
+                        mx.distributed.all_sum(y, group=self.sharding_group)
+                    )
         return y
 
 
@@ -853,6 +864,7 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         mask: mx.array | None = None,
         cache: "Cache | None" = None,
     ) -> mx.array:
+      with _minimax_span("attn"):
         batch_dim, seq_dim, _ = x.shape
 
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
@@ -917,7 +929,7 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
 
         output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
 
-        return self._original_layer.o_proj(output)
+        return _minimax_finalize(self._original_layer.o_proj(output))
 
 
 class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
