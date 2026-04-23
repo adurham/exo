@@ -342,6 +342,56 @@ Session 3.
 6. Write the unit tests at each of (BITS × HD × N) combos listed above.
 7. Fix bit-layout bugs as they surface. Iterate until tests pass.
 
+**Session 3 actual outcome (mlx commit `f47e93a7`):**
+
+Steps 5 landed; 6–7 deferred to session 4 because the unit-test
+deliverable is gated on a callable Python entry point, and adding a new
+`ScaledDotProductAttentionQuant` primitive + `mx.fast.scaled_dot_product_attention_quant`
+binding is a cohesive unit of ~4 files / ~300 LOC that deserves its own
+session.
+
+Landed:
+- `sdpa_vector_quant.h` — kernel body complete. `dequantize_thread<U,N,bits>`
+  helper added (thread-local mirror of quantized.h's `dequantize<>`).
+  V-side per-thread unpack wired for bits ∈ {4, 5, 8}. BITS=5 × D=128
+  alignment resolved by widening `qk_per_thread` /`v_per_thread` to
+  `max(D/32, pack_factor)`; for 5-bit at D=128 that's 8 values/thread
+  and 16 active simd lanes (inactive lanes still safely contribute 0 to
+  `simd_sum`).
+- `scaled_dot_product_attention.cpp` — `sdpa_vector_2pass_quant(...)`
+  dispatch mirroring the bf16 2-pass path, accepting
+  `(k_packed, k_scales, k_biases, v_packed, v_scales, v_biases)`.
+  Reuses the block heuristic and the unchanged `sdpa_vector_2pass_2`
+  reduction. Decode-only v1 (mask/query_transposed fixed false).
+- `scaled_dot_product_attention.metal` — 18 instantiations (3 dtypes
+  × 2 head_dims × 3 bit-widths, group_size=64). The TU now transitively
+  includes `steel/gemm/gemm.h` + `quantized_utils.h` to match
+  `quantized.metal`.
+
+Verified:
+- `make mlx-metallib` compiles clean.
+- `make mlx` links clean.
+- `./tests/tests` — all 244 C++ test cases pass. Bf16 SDPA path
+  unchanged.
+
+**Scoping call for session 4:**
+
+The dispatch function in the cpp is ready-to-call but currently
+unreferenced. Wiring it through MLX's public API requires one of:
+
+- **(A) New primitive** `ScaledDotProductAttentionQuant` in
+  `fast_primitives.h` + new `fast::scaled_dot_product_attention_quant`
+  entry in `fast.h`/`fast.cpp` + new Python binding in `python/src/fast.cpp`.
+  Cleanest long-term, upstream-friendly, ~300 LOC across ~4 files, needs
+  a wheel rebuild + uv.lock bump to exercise.
+- **(C) Exo-side `mx.fast.metal_kernel`** wrapper that duplicates the
+  kernel source into Python. Faster to validate but loses the benefit
+  of the in-fork kernel and diverges from the design-doc plan.
+
+The design doc chose (A). Session 4 should execute it unless the cluster
+risk of a wheel-rebuild cycle changes the calculus — in which case (C)
+becomes a faster-to-validate fallback.
+
 ### Session 4 — integration + profile (1 day)
 
 8. Update `mlx_lm/models/base.py:117` to call the new entry point when
