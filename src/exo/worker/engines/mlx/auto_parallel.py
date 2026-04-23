@@ -34,7 +34,7 @@ from mlx_lm.models.gpt_oss import GptOssMoeModel
 from mlx_lm.models.gpt_oss import Model as GptOssModel
 from mlx_lm.models.kimi_k25 import Model as KimiK25Model
 from mlx_lm.models.llama import Model as LlamaModel
-from mlx_lm.models.minimax import MiniMaxAttention
+from mlx_lm.models.minimax import MiniMaxAttention, ShardedRMSNorm
 from mlx_lm.models.minimax import Model as MiniMaxModel
 from mlx_lm.models.minimax_trace import finalize as _minimax_finalize
 from mlx_lm.models.minimax_trace import span as _minimax_span
@@ -873,32 +873,15 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         keys: mx.array = self._original_layer.k_proj(x)
         values: mx.array = self._original_layer.v_proj(x)
 
+        # qk_norm is mathematically an RMSNorm over the joined
+        # head-stack. Each rank owns contiguous heads and q_norm / k_norm
+        # have been rewritten to ShardedRMSNorm at shard time (see
+        # MiniMaxShardingStrategy.shard_model), so cross-rank coupling is
+        # a single fp32 scalar all_sum per norm per layer — not the
+        # (batch × q_dim + k_dim) bf16 all_gather this block used to do.
         if getattr(self, "use_qk_norm", False):
-            q_dim = queries.shape[-1]
-            k_dim = keys.shape[-1]
-            n = self.group.size()
-
-            qk = mx.concatenate(
-                [queries, keys], axis=-1
-            )  # (batch_dim, seq_dim, q_dim + k_dim)
-            qk = mx.distributed.all_gather(
-                qk, group=self.group
-            )  # (n*batch_dim, seq_dim, q_dim + k_dim)
-
-            qk = qk.reshape(n, batch_dim, seq_dim, q_dim + k_dim).transpose(1, 2, 0, 3)
-            queries = qk[..., :q_dim].reshape(
-                batch_dim, seq_dim, -1
-            )  # (batch_dim, seq_dim, n * q_dim)
-            keys = qk[..., q_dim:].reshape(
-                batch_dim, seq_dim, -1
-            )  # (batch_dim, seq_dim, n * k_dim)
-
             queries = self._original_layer.q_norm(queries)
             keys = self._original_layer.k_norm(keys)
-
-            # Split back and take this rank's portion
-            queries = mx.split(queries, n, axis=-1)[self.group.rank()]
-            keys = mx.split(keys, n, axis=-1)[self.group.rank()]
 
         queries = queries.reshape(
             batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
@@ -950,6 +933,18 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
 
             layer.self_attn.num_attention_heads //= self.N
             layer.self_attn.num_key_value_heads //= self.N
+
+            # Replace the full-width q_norm/k_norm with a sharded-RMSNorm
+            # so the norm operates on this rank's local Q/K slice and
+            # cross-rank coupling is a single fp32 scalar all_sum instead
+            # of the full Q+K all_gather that the wrapper used to do.
+            if getattr(layer.self_attn, "use_qk_norm", False):
+                layer.self_attn.q_norm = ShardedRMSNorm.from_rms_norm(
+                    layer.self_attn.q_norm, group=self.group
+                )
+                layer.self_attn.k_norm = ShardedRMSNorm.from_rms_norm(
+                    layer.self_attn.k_norm, group=self.group
+                )
 
             layer.self_attn = WrappedMiniMaxAttention(layer.self_attn, self.group)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]
 
