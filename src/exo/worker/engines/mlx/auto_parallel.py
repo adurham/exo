@@ -3,10 +3,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import partial
 from inspect import signature
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 import mlx.core as mx
 import mlx.nn as nn
+from mlx.nn.layers.activations import silu as _nn_silu
 from mlx.nn.layers.distributed import (
     shard_inplace,
     shard_linear,
@@ -20,6 +21,13 @@ from mlx_lm.models.deepseek_v3 import DeepseekV3MLP
 from mlx_lm.models.deepseek_v3 import Model as DeepseekV3Model
 from mlx_lm.models.deepseek_v32 import DeepseekV32MLP
 from mlx_lm.models.deepseek_v32 import Model as DeepseekV32Model
+from mlx_lm.models.switch_layers import (
+    _gather_sort as _switch_gather_sort,  # type: ignore[attr-defined]
+)
+from mlx_lm.models.switch_layers import (
+    _scatter_unsort as _switch_scatter_unsort,  # type: ignore[attr-defined]
+)
+
 try:
     from mlx_lm.models.gemma4 import Model as Gemma4Model
     _HAS_GEMMA4 = True
@@ -71,6 +79,13 @@ from exo.shared.types.worker.shards import PipelineShardMetadata
 from exo.worker.runner.bootstrap import logger
 
 _MINIMAX_NOOP_ALLSUM: bool = os.environ.get("EXO_MINIMAX_NOOP_ALLSUM", "0") == "1"
+
+# mlx-lm's switch_layers helpers are private and untyped; aliased here so
+# FusedSwitchGLU can use them without pyright complaining per use site.
+_nn_silu_any: Any = _nn_silu
+_switch_gather_sort_any: Any = _switch_gather_sort
+_switch_scatter_unsort_any: Any = _switch_scatter_unsort
+
 
 if TYPE_CHECKING:
     from mlx_lm.models.cache import Cache
@@ -887,6 +902,109 @@ def _fused_sharded_qk_norm(
     return queries, keys
 
 
+class FusedSwitchGLU(nn.Module):
+    """Drop-in SwitchGLU replacement that fuses gate_proj + up_proj into a
+    single `mx.gather_qmm` dispatch.
+
+    mlx-lm's stock SwitchGLU runs two `gather_qmm`s for gate and up (+ one
+    for down). At MiniMax's 62 decoder layers that's 62 extra dispatches per
+    decode token — each with ~100-200 µs of dispatch+sync overhead on the
+    live cluster. Concatenating gate and up weights along the output axis
+    lets a single `gather_qmm` produce both halves simultaneously; we split
+    after, apply SwiGLU, then run down_proj unchanged.
+
+    Uses `__class__ = FusedSwitchGLU` rebind (preserves all attributes of
+    the pre-quantized/post-sharded SwitchGLU instance — we only override
+    `__call__`).
+    """
+
+    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:  # type: ignore[override]
+        self_any: Any = self
+
+        x = mx.expand_dims(x, (-2, -3))
+        do_sort = indices.size >= 64
+        idx: Any = indices
+        inv_order: Any = None
+        if do_sort:
+            x, idx, inv_order = _switch_gather_sort_any(x, indices)
+
+        gu: Any = mx.gather_qmm(
+            x,
+            self_any._fused_w_gu,
+            self_any._fused_s_gu,
+            self_any._fused_b_gu,
+            rhs_indices=idx,
+            transpose=True,
+            group_size=self_any._fused_group_size,
+            bits=self_any._fused_bits,
+            mode=self_any._fused_mode,
+            sorted_indices=do_sort,
+        )
+        n: int = self_any._fused_n_inter
+        x_gate = gu[..., :n]
+        x_up = gu[..., n:]
+        x = _nn_silu_any(x_gate) * x_up
+
+        x = self_any.down_proj(x, idx, sorted_indices=do_sort)
+        if do_sort:
+            x = _switch_scatter_unsort_any(x, inv_order, indices.shape)
+        return x.squeeze(-2)
+
+
+def _install_fused_gate_up(switch_mlp: nn.Module) -> None:
+    """Pre-concatenate gate_proj + up_proj weights on `switch_mlp` for a
+    single gather_qmm at forward time. Rebinds the instance to
+    :class:`FusedSwitchGLU` so its `__call__` uses the fused path.
+
+    Called after tensor-parallel sharding of gate_proj/up_proj — so the
+    output-dim axis is already `intermediate_size / N` per rank. Concat is
+    along that (local) output axis.
+    """
+    sm: Any = switch_mlp
+    gp: Any = sm.gate_proj
+    up: Any = sm.up_proj
+    gp_bits = getattr(gp, "bits", None)
+    up_bits = getattr(up, "bits", None)
+    gp_group = getattr(gp, "group_size", None)
+    up_group = getattr(up, "group_size", None)
+    assert gp_bits is not None and gp_bits == up_bits, \
+        f"gate/up bits mismatch: {gp_bits} vs {up_bits}"
+    assert gp_group is not None and gp_group == up_group, \
+        f"gate/up group_size mismatch: {gp_group} vs {up_group}"
+    gp_mode = getattr(gp, "mode", "affine")
+    up_mode = getattr(up, "mode", "affine")
+    assert gp_mode == up_mode, f"gate/up mode mismatch: {gp_mode} vs {up_mode}"
+
+    gp_w: mx.array = gp["weight"]
+    gp_s: mx.array = gp["scales"]
+    up_w: mx.array = up["weight"]
+    up_s: mx.array = up["scales"]
+    gp_b = gp.get("biases") if hasattr(gp, "get") else getattr(gp, "biases", None)
+    up_b = up.get("biases") if hasattr(up, "get") else getattr(up, "biases", None)
+
+    # Concat along output-dim axis (axis=1 of (num_experts, out_local, in_packed)).
+    fused_w: mx.array = mx.concatenate([gp_w, up_w], axis=1)
+    fused_s: mx.array = mx.concatenate([gp_s, up_s], axis=1)
+    fused_b: mx.array | None = (
+        mx.concatenate([gp_b, up_b], axis=1)
+        if gp_b is not None and up_b is not None
+        else None
+    )
+    mx.eval(fused_w, fused_s)
+    if fused_b is not None:
+        mx.eval(fused_b)
+
+    sm._fused_w_gu = fused_w
+    sm._fused_s_gu = fused_s
+    sm._fused_b_gu = fused_b
+    sm._fused_n_inter = int(gp_w.shape[1])
+    sm._fused_group_size = int(gp_group)
+    sm._fused_bits = int(gp_bits)
+    sm._fused_mode = gp_mode
+
+    switch_mlp.__class__ = FusedSwitchGLU
+
+
 class WrappedMiniMaxAttention(CustomMlxLayer):
     def __init__(self, layer: _LayerCallable, group: mx.distributed.Group):
         super().__init__(layer)
@@ -998,6 +1116,13 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
             self.all_to_sharded_linear_in_place(
                 layer.block_sparse_moe.switch_mlp.up_proj
             )
+
+            # Fuse gate + up into a single gather_qmm dispatch. Saves one
+            # Metal dispatch per decoder layer per decode token (62 per
+            # MiniMax forward pass). Must happen after sharding so the
+            # concatenated weight has the post-shard output-dim width.
+            _install_fused_gate_up(layer.block_sparse_moe.switch_mlp)
+
             layer.block_sparse_moe = ShardedMoE(layer.block_sparse_moe)  # pyright: ignore[reportAttributeAccessIssue, reportArgumentType]
             layer.block_sparse_moe.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             mx.eval(layer)
