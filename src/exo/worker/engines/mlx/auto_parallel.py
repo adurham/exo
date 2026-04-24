@@ -1054,9 +1054,13 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
 
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
 
-        queries: mx.array = self._original_layer.q_proj(x)
-        keys: mx.array = self._original_layer.k_proj(x)
-        values: mx.array = self._original_layer.v_proj(x)
+        with _minimax_span("attn.qkv_proj"):
+            queries: mx.array = self._original_layer.q_proj(x)
+            keys: mx.array = self._original_layer.k_proj(x)
+            values: mx.array = self._original_layer.v_proj(x)
+            queries = _minimax_finalize(queries)
+            keys = _minimax_finalize(keys)
+            values = _minimax_finalize(values)
 
         # qk_norm is mathematically an RMSNorm over the joined
         # head-stack. q_norm / k_norm have been rewritten to
@@ -1066,57 +1070,66 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         # collective count (1 per layer) instead of the 2 that separate
         # norm calls would fire.
         if getattr(self, "use_qk_norm", False):
-            queries, keys = _fused_sharded_qk_norm(
-                queries,
-                keys,
-                self._original_layer.q_norm,  # type: ignore[arg-type]
-                self._original_layer.k_norm,  # type: ignore[arg-type]
-                self.group,
-            )
+            with _minimax_span("attn.qk_norm"):
+                queries, keys = _fused_sharded_qk_norm(
+                    queries,
+                    keys,
+                    self._original_layer.q_norm,  # type: ignore[arg-type]
+                    self._original_layer.k_norm,  # type: ignore[arg-type]
+                    self.group,
+                )
+                queries = _minimax_finalize(queries)
+                keys = _minimax_finalize(keys)
 
-        queries = queries.reshape(
-            batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
-        ).transpose(0, 2, 1, 3)
-        keys = keys.reshape(
-            batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
-        ).transpose(0, 2, 1, 3)
-        values = values.reshape(
-            batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
-        ).transpose(0, 2, 1, 3)
+        with _minimax_span("attn.reshape_rope_cache"):
+            queries = queries.reshape(
+                batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
+            ).transpose(0, 2, 1, 3)
+            keys = keys.reshape(
+                batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
+            ).transpose(0, 2, 1, 3)
+            values = values.reshape(
+                batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
+            ).transpose(0, 2, 1, 3)
 
-        if cache is not None:
-            queries = self._original_layer.rope(queries, offset=cache.offset)
-            keys = self._original_layer.rope(keys, offset=cache.offset)
-            keys, values = cache.update_and_fetch(keys, values)
-        else:
-            queries = self._original_layer.rope(queries)
-            keys = self._original_layer.rope(keys)
+            if cache is not None:
+                queries = self._original_layer.rope(queries, offset=cache.offset)
+                keys = self._original_layer.rope(keys, offset=cache.offset)
+                keys, values = cache.update_and_fetch(keys, values)
+            else:
+                queries = self._original_layer.rope(queries)
+                keys = self._original_layer.rope(keys)
+            queries = _minimax_finalize(queries)
+            keys = _minimax_finalize(keys)
+            values = _minimax_finalize(values)
 
-        if _MINIMAX_NOOP_ATTN:
-            # Diagnostic noop: replace SDPA output with zeros of the same
-            # shape / dtype. Wall time with this flag set reveals how much
-            # of decode was spent inside attention (kernel + KV cache
-            # update + the Q/K/V projection reads feeding it).
-            output = mx.zeros(queries.shape, dtype=queries.dtype)
-        elif _MINIMAX_NOOP_SDPA:
-            # Narrower diagnostic: skip only the SDPA call itself. Q/K/V
-            # projections, RoPE, KV cache update all still run. Difference
-            # vs NOOP_ATTN reveals the SDPA kernel's isolated share of the
-            # attention budget.
-            output = mx.zeros(queries.shape, dtype=queries.dtype)
-        else:
-            output = scaled_dot_product_attention(
-                queries,
-                keys,
-                values,
-                cache=cache,
-                scale=self._original_layer.scale,  # type: ignore
-                mask=mask,
-            )
+        with _minimax_span("attn.sdpa"):
+            if _MINIMAX_NOOP_ATTN:
+                # Diagnostic noop: replace SDPA output with zeros of the same
+                # shape / dtype. Wall time with this flag set reveals how much
+                # of decode was spent inside attention (kernel + KV cache
+                # update + the Q/K/V projection reads feeding it).
+                output = mx.zeros(queries.shape, dtype=queries.dtype)
+            elif _MINIMAX_NOOP_SDPA:
+                # Narrower diagnostic: skip only the SDPA call itself. Q/K/V
+                # projections, RoPE, KV cache update all still run. Difference
+                # vs NOOP_ATTN reveals the SDPA kernel's isolated share of the
+                # attention budget.
+                output = mx.zeros(queries.shape, dtype=queries.dtype)
+            else:
+                output = scaled_dot_product_attention(
+                    queries,
+                    keys,
+                    values,
+                    cache=cache,
+                    scale=self._original_layer.scale,  # type: ignore
+                    mask=mask,
+                )
+            output = _minimax_finalize(output)
 
-        output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
-
-        return _minimax_finalize(self._original_layer.o_proj(output))
+        with _minimax_span("attn.o_proj"):
+            output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
+            return _minimax_finalize(self._original_layer.o_proj(output))
 
 
 class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
