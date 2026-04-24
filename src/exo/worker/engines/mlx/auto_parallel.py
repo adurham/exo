@@ -1002,6 +1002,14 @@ def _install_fused_gate_up(switch_mlp: nn.Module) -> None:
     sm._fused_bits = int(gp_bits)
     sm._fused_mode = gp_mode
 
+    # Free the now-redundant originals. Without this, gate_proj +
+    # up_proj + fused together triples the MoE weight memory footprint
+    # and blows the cluster per-node budget (OOM on MiniMax). After the
+    # __class__ rebind below, FusedSwitchGLU only references
+    # self.down_proj; gate_proj / up_proj are dead weight.
+    sm.gate_proj = nn.Module()
+    sm.up_proj = nn.Module()
+
     switch_mlp.__class__ = FusedSwitchGLU
 
 
