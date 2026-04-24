@@ -76,6 +76,11 @@ from mlx_lm.models.step3p5 import Step3p5MLP as Step35MLP
 from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 
 from exo.shared.types.worker.shards import PipelineShardMetadata
+from exo.worker.engines.mlx.patches.minimax.fused_qkv import (
+    fused_qkv_is_installed,
+    fused_qkv_proj,
+    install_fused_qkv,
+)
 from exo.worker.runner.bootstrap import logger
 
 _MINIMAX_NOOP_ALLSUM: bool = os.environ.get("EXO_MINIMAX_NOOP_ALLSUM", "0") == "1"
@@ -88,6 +93,14 @@ _MINIMAX_NOOP_MOE: bool = os.environ.get("EXO_MINIMAX_NOOP_MOE", "0") == "1"
 # (keeps projections, RoPE, norms, KV cache update). Lets us separate
 # the SDPA kernel cost from attention-infrastructure overhead.
 _MINIMAX_NOOP_SDPA: bool = os.environ.get("EXO_MINIMAX_NOOP_SDPA", "0") == "1"
+
+# Phase 3 (fused-attention kernel) Week-1 gate. When set, the attention
+# wrapper uses a single pre-merged Q/K/V weight matmul instead of three
+# separate q_proj/k_proj/v_proj calls — saves 2 dispatches/layer on the
+# bf16 path. See src/exo/worker/engines/mlx/patches/minimax/fused_qkv.py.
+# Off by default: production cluster's quantized MiniMax projections
+# aren't supported by the bf16-only Week-1 path and would silently skip.
+_MINIMAX_FUSED_ATTN: bool = os.environ.get("EXO_MINIMAX_FUSED_ATTN", "0") == "1"
 
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
@@ -1055,9 +1068,12 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
 
         with _minimax_span("attn.qkv_proj"):
-            queries: mx.array = self._original_layer.q_proj(x)
-            keys: mx.array = self._original_layer.k_proj(x)
-            values: mx.array = self._original_layer.v_proj(x)
+            if fused_qkv_is_installed(self._original_layer):
+                queries, keys, values = fused_qkv_proj(self._original_layer, x)
+            else:
+                queries = self._original_layer.q_proj(x)
+                keys = self._original_layer.k_proj(x)
+                values = self._original_layer.v_proj(x)
             queries = _minimax_finalize(queries)
             keys = _minimax_finalize(keys)
             values = _minimax_finalize(values)
@@ -1162,6 +1178,9 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
                 layer.self_attn.k_norm = ShardedRMSNorm.from_rms_norm(
                     layer.self_attn.k_norm, group=self.group
                 )
+
+            if _MINIMAX_FUSED_ATTN:
+                install_fused_qkv(layer.self_attn)
 
             layer.self_attn = WrappedMiniMaxAttention(layer.self_attn, self.group)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]
 
