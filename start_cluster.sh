@@ -463,6 +463,8 @@ for NODE in "${NODES[@]}"; do
     # MiniMax decode profiling gates (both default off; forwarded to runners when set).
     [ -n "$EXO_MINIMAX_TRACE" ]        && EXO_ENV="$EXO_ENV EXO_MINIMAX_TRACE=$EXO_MINIMAX_TRACE"
     [ -n "$EXO_MINIMAX_NOOP_ALLSUM" ]  && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ALLSUM=$EXO_MINIMAX_NOOP_ALLSUM"
+    [ -n "$EXO_MINIMAX_NOOP_ATTN" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ATTN=$EXO_MINIMAX_NOOP_ATTN"
+    [ -n "$EXO_MINIMAX_NOOP_MOE" ]     && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_MOE=$EXO_MINIMAX_NOOP_MOE"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then

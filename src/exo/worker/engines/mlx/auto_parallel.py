@@ -79,6 +79,11 @@ from exo.shared.types.worker.shards import PipelineShardMetadata
 from exo.worker.runner.bootstrap import logger
 
 _MINIMAX_NOOP_ALLSUM: bool = os.environ.get("EXO_MINIMAX_NOOP_ALLSUM", "0") == "1"
+# Diagnostic gates — each bypasses one major decoder-layer section with a
+# shape-preserving noop (answers get garbage but decode wall time reveals
+# that section's contribution). Never set in production.
+_MINIMAX_NOOP_ATTN: bool = os.environ.get("EXO_MINIMAX_NOOP_ATTN", "0") == "1"
+_MINIMAX_NOOP_MOE: bool = os.environ.get("EXO_MINIMAX_NOOP_MOE", "0") == "1"
 
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
@@ -794,7 +799,14 @@ class ShardedMoE(CustomMlxLayer):
     def __call__(self, x: mx.array) -> mx.array:
         if self.sharding_group is not None:
             x = sum_gradients(self.sharding_group)(x)
-        y = self.original_layer.__call__(x)
+        if _MINIMAX_NOOP_MOE:
+            # Diagnostic noop: skip the entire MoE (router + switch_mlp +
+            # weighted_reduce) and return a zero tensor with the same
+            # output shape. Wall time with this flag set reveals the full
+            # MoE section's contribution to per-token decode time.
+            y = mx.zeros(x.shape, dtype=x.dtype)
+        else:
+            y = self.original_layer.__call__(x)
         if self.sharding_group is not None:
             with _minimax_span("moe.all_sum"):
                 if _MINIMAX_NOOP_ALLSUM:
@@ -1076,14 +1088,21 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             queries = self._original_layer.rope(queries)
             keys = self._original_layer.rope(keys)
 
-        output = scaled_dot_product_attention(
-            queries,
-            keys,
-            values,
-            cache=cache,
-            scale=self._original_layer.scale,  # type: ignore
-            mask=mask,
-        )
+        if _MINIMAX_NOOP_ATTN:
+            # Diagnostic noop: replace SDPA output with zeros of the same
+            # shape / dtype. Wall time with this flag set reveals how much
+            # of decode was spent inside attention (kernel + KV cache
+            # update + the Q/K/V projection reads feeding it).
+            output = mx.zeros(queries.shape, dtype=queries.dtype)
+        else:
+            output = scaled_dot_product_attention(
+                queries,
+                keys,
+                values,
+                cache=cache,
+                scale=self._original_layer.scale,  # type: ignore
+                mask=mask,
+            )
 
         output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
 
