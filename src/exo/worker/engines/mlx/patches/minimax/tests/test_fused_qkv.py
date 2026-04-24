@@ -1,4 +1,4 @@
-"""Tests for Phase 3 Week-1 fused-QKV projection skeleton."""
+"""Tests for the MiniMax fused-QKV projection (Phase 3 Weeks 1-2)."""
 
 from __future__ import annotations
 
@@ -82,12 +82,70 @@ def test_fused_output_works_at_prefill_shapes() -> None:
     assert float(mx.max(mx.abs(v - v_ref)).item()) < 2e-2
 
 
-def test_install_skips_quantized_projection() -> None:
+def _quantize_all(attn: _MockMiniMaxAttn, bits: int, group_size: int = 64) -> None:
+    attn.q_proj = nn.QuantizedLinear.from_linear(attn.q_proj, group_size=group_size, bits=bits)
+    attn.k_proj = nn.QuantizedLinear.from_linear(attn.k_proj, group_size=group_size, bits=bits)
+    attn.v_proj = nn.QuantizedLinear.from_linear(attn.v_proj, group_size=group_size, bits=bits)
+    mx.eval(attn.parameters())
+
+
+@pytest.mark.parametrize("bits", [4, 5, 8])
+def test_install_quantized_projections(bits: int) -> None:
     attn = _make_attn()
-    attn.q_proj = nn.QuantizedLinear.from_linear(attn.q_proj, bits=4)
+    _quantize_all(attn, bits=bits)
+    ok = install_fused_qkv(attn)
+    assert ok is True, f"Install should succeed on bits={bits} QuantizedLinear trio"
+    assert fused_qkv_is_installed(attn)
+
+
+@pytest.mark.parametrize("bits", [4, 5, 8])
+def test_fused_quantized_matches_three_quant_linears(bits: int) -> None:
+    attn = _make_attn()
+    _quantize_all(attn, bits=bits)
+
+    x = mx.random.normal((1, 1, 3072)).astype(mx.bfloat16)
+    mx.eval(x)
+
+    q_ref = attn.q_proj(x)
+    k_ref = attn.k_proj(x)
+    v_ref = attn.v_proj(x)
+    mx.eval(q_ref, k_ref, v_ref)
+
+    install_fused_qkv(attn)
+    q, k, v = fused_qkv_proj(attn, x)
+    mx.eval(q, k, v)
+
+    # Packed-row concat is a no-op from the quantised_matmul's view, so
+    # numerics should be bit-identical. Use a very tight bound just in
+    # case tile ordering ever sneaks in — we still want to catch real
+    # divergence.
+    max_q = float(mx.max(mx.abs(q - q_ref)).item())
+    max_k = float(mx.max(mx.abs(k - k_ref)).item())
+    max_v = float(mx.max(mx.abs(v - v_ref)).item())
+    assert max_q < 1e-3, f"bits={bits} Q delta {max_q} exceeds tolerance"
+    assert max_k < 1e-3, f"bits={bits} K delta {max_k} exceeds tolerance"
+    assert max_v < 1e-3, f"bits={bits} V delta {max_v} exceeds tolerance"
+
+
+def test_install_skips_mismatched_quant_bits() -> None:
+    attn = _make_attn()
+    attn.q_proj = nn.QuantizedLinear.from_linear(attn.q_proj, group_size=64, bits=4)
+    attn.k_proj = nn.QuantizedLinear.from_linear(attn.k_proj, group_size=64, bits=8)
+    attn.v_proj = nn.QuantizedLinear.from_linear(attn.v_proj, group_size=64, bits=8)
     mx.eval(attn.parameters())
     ok = install_fused_qkv(attn)
-    assert ok is False, "Quantized Q projection must not be fused in Week 1"
+    assert ok is False, "Mismatched bits across Q/K/V must refuse the install"
+    assert not fused_qkv_is_installed(attn)
+
+
+def test_install_skips_mixed_linear_and_quantized() -> None:
+    attn = _make_attn()
+    # Keep Q as bf16 Linear, quantise K and V.
+    attn.k_proj = nn.QuantizedLinear.from_linear(attn.k_proj, group_size=64, bits=4)
+    attn.v_proj = nn.QuantizedLinear.from_linear(attn.v_proj, group_size=64, bits=4)
+    mx.eval(attn.parameters())
+    ok = install_fused_qkv(attn)
+    assert ok is False, "Mixed Linear / QuantizedLinear projections must refuse"
     assert not fused_qkv_is_installed(attn)
 
 
