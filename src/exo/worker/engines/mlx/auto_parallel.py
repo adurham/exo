@@ -886,7 +886,16 @@ def _fused_sharded_qk_norm(
     q_ss = queries.astype(mx.float32).square().sum(-1, keepdims=True)
     k_ss = keys.astype(mx.float32).square().sum(-1, keepdims=True)
     combined_ss = mx.concatenate([q_ss, k_ss], axis=-1)
-    combined_ss = mx.distributed.all_sum(combined_ss, group=group)
+    # EXO_MINIMAX_NOOP_ALLSUM gate (mirrors the MoE-side gate in
+    # ShardedMoE): pure measurement affordance. Skips the RDMA collective
+    # and leaves each rank working off its own partial sum-of-squares —
+    # answers are mathematically wrong, but decode wall time reflects the
+    # "what if collectives were free" ceiling. Pair with the MoE-side
+    # noop to get a full no-RDMA reference run.
+    if not _MINIMAX_NOOP_ALLSUM:
+        combined_ss = mx.distributed.all_sum(combined_ss, group=group)
+    else:
+        combined_ss = combined_ss * float(group.size())  # crude pretend-sum so magnitudes stay comparable
 
     dim_q = queries.shape[-1] * group.size()
     dim_k = keys.shape[-1] * group.size()
