@@ -466,6 +466,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_MINIMAX_NOOP_ATTN" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ATTN=$EXO_MINIMAX_NOOP_ATTN"
     [ -n "$EXO_MINIMAX_NOOP_MOE" ]     && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_MOE=$EXO_MINIMAX_NOOP_MOE"
     [ -n "$EXO_MINIMAX_NOOP_SDPA" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_SDPA=$EXO_MINIMAX_NOOP_SDPA"
+    # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
+    [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
