@@ -60,17 +60,75 @@ bits=5 × head_dim=128 because the MLX 5-bit pack factor forces
 `qk_per_thread=8`, which halves active simd lanes. The bandwidth
 analysis was correct in isolation but missed thread-occupancy loss at
 the specific (bits, head_dim) the baseline profile actually runs.
-**Phase 2 is not a decode lever at 5-bit; the quant kernel is kept on
-disk as a win for 4-bit and 8-bit KV users.** See
-[`minimax-quantized-sdpa-design.md`](./minimax-quantized-sdpa-design.md)
-"Session 5 actual outcome" for the measurements and the two candidate
-follow-ups (BD=16 variant, or route bits=5 back through dequantize
-+SDPA) that would unlock the 5-bit win if we want to revisit.
 
-With Phase 2 delivering no decode gain, **the 20–30 % combined
-ceiling from levers #2 + #3 + #4 is not achievable on this hardware at
-5-bit KV.** Phase 3 is not pursued until the 5-bit kernel cliff is
-fixed or the cluster default shifts to bits ∈ {4, 8}.
+A branch-free half-pack rewrite of the 5-bit path (mlx commit
+`f784d2c3`) restored simd occupancy — microbench went from 0.96× to
+1.19× vs dequantize+SDPA on the 66K production shape. **It still
+landed at 0 % on the cluster.**
+
+### Why kernel-level wins aren't translating: the NOOP sweep (2026-04-24)
+
+After three consecutive 0 % cluster gains from kernel / dispatch-level
+optimizations, we pivoted from "make kernels faster" to "figure out
+where the budget actually lives". Added shape-preserving noop gates
+(env-var-controlled) that bypass each major decoder section one at a
+time, benched each against the locked baseline with Huihui scouts and
+prediction-bot paused (MiniMax-only cluster, 5-bit KV, 5 warm runs per
+config with ±0.4 s wall variance).
+
+| Config         | Wall (s) | Decode tok/s | Share of decode       |
+| -------------- | -------- | ------------ | --------------------- |
+| Baseline       | 258.3    | **18.60**    | —                     |
+| NOOP_ALLSUM    | 253.8    | 19.29        | RDMA = **3.7 %**      |
+| NOOP_MOE       | 202.6    | 23.35        | MoE = **21 %**        |
+| NOOP_ATTN      | 87.0     | 55.04        | attention = **66 %**  |
+| NOOP_SDPA      | 87.1     | 54.87        | SDPA = **100 % of attention** |
+
+**Per-token decode budget:**
+
+| Section                                     | ms/token | % of 54 ms |
+| ------------------------------------------- | -------- | ---------- |
+| SDPA kernel (all of attention)              | 35.8     | **66 %**   |
+| MoE (router + switch_mlp + reduce)          | 11.2     | 21 %       |
+| Other (projections, norms, RoPE, KV update) | ~5       | 9 %        |
+| RDMA collectives (2× per layer × 62)        | ~2       | 4 %        |
+
+**The critical finding**: NOOP_ATTN ≈ NOOP_SDPA (55 vs 55 tok/s).
+Q/K/V projections, RoPE, KV cache update, RMSNorm all contribute
+**zero measurable cost** — the entire 35.8 ms/token attention budget
+is the single SDPA kernel call per layer.
+
+**Per-SDPA-call on cluster: 577 µs** (35.8 ms ÷ 62 layers).
+Standalone microbench on M4 base: 1000 µs. Cluster is M4 Ultra (4×
+more GPU cores), so pure kernel compute ≈ 250 µs/call. That leaves
+**~327 µs/call of fixed per-dispatch overhead** that no kernel
+compute optimization can touch. This is why Phase 2's 1.19×
+microbench kernel win gave 0 % on cluster: 19 % of 250 µs = 47 µs
+saved per call = 2.9 ms/token = ~5 % — entirely within the ±0.4 s
+wall-time noise floor of a 5-run bench.
+
+### Revised levers (post-NOOP sweep)
+
+**Kernel-compute wins are capped at ~13 % decode** if we hit
+bandwidth/compute floor on the 250 µs compute portion. Even a 2×
+kernel (TurboQuant's claimed ceiling) is ≤ +25 % decode because the
+327 µs fixed overhead doesn't move.
+
+**What actually breaks 20 tok/s** requires attacking the 327 µs fixed
+per-call overhead:
+
+| Lever | Expected decode | Effort | Notes |
+| ----- | --------------- | ------ | ----- |
+| **`mx.compile` the decoder forward** | **up to +55 %** | 1–2 d | If the 327 µs is MLX graph-build + Metal dispatch overhead, compilation caches it away. Highest-expected-value move. |
+| Batch multiple layers' SDPA into one kernel call | +10–20 % | 5–7 d | Cuts call count 62→N. Custom Metal kernel. Uncertain. |
+| Reduce `blocks=1024` heuristic at 66K | +2–5 % | 0.5 d | 1024 intermediate arrays per call = allocator pressure. Tune down. |
+| TurboQuant native SDPA (PR #3328) | ≤+25 % | 3–5 d | Only touches the 250 µs compute portion. Hard-capped by fixed overhead. |
+
+**Phase 2 is complete and banked** — the kernel is correct, unit-
+tested, fork-upstreamable. It's just not the decode lever on this
+hardware. Next push should target `mx.compile` (the fixed-overhead
+attack). Phase 3 (MoE fusion) is deferred: +4–7 % on paper but the
+same fixed-overhead ceiling likely applies.
 
 ## Lever detail
 

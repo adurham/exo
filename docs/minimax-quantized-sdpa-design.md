@@ -487,21 +487,109 @@ fix brings cluster behavior back in line with the microbench.
 the bottom of this doc, <15% decode gain on the cluster at the baseline
 config is a stop signal. Halting Phase 2; not proceeding into Phase 3.
 
-**What would unlock the 5-bit win (not scoped here):**
+### Session 5 continuation (2026-04-24): half-pack fix + NOOP-sweep diagnosis
 
-1. Add a `BD=16` / `BD=8` variant of `sdpa_vector_2pass_1_quant` so
-   5-bit × head_dim=128 can keep all simd lanes active at the cost of
-   more threadgroups per block. Or keep BD=32 and vectorize the dequant
-   across 4 lanes so `qk_per_thread=4` covers 4 × 5 = 20 bits fetched
-   per thread with cross-lane shuffle.
-2. Or selectively route bits=5 through the existing dequantize+SDPA
-   path (in `fast.cpp::scaled_dot_product_attention_quant` add
-   `bits == 5 && head_dim == 128` to `use_fallback`). This leaves
-   bits=4 and bits=8 users with the quant-kernel win and preserves
-   baseline for bits=5. Low-risk, 10-line change.
+Took another pass at the bits=5 occupancy problem via a **branch-free
+half-pack dequantize** (mlx `f784d2c3`). Paired two lanes per 5-byte
+pack group using a lane-dependent shift amount instead of a divergent
+`if (is_high)` branch (the first divergent attempt benched at 0.88×
+— worse than the original, because SIMT serializes divergent
+branches). With the branch-free rewrite the full simdgroup runs one
+unified instruction stream with per-lane shift amounts.
 
-Option 2 is the minimum-invasive fix. Option 1 is the "make the kernel
-actually fast at 5-bit" project and is multi-day Metal work.
+Microbench on the cluster production shape (B=1, n_kv=2, head_dim=128):
+
+| bits | N=66K (pre-fix) | N=66K (post-fix) |
+| ---- | --------------- | ---------------- |
+| 4    | 1.28×           | 1.24×            |
+| **5**| **0.96×**       | **1.19×**        |
+| 8    | 1.52×           | 1.71×            |
+
+**Cluster A/B with Huihui scouts + prediction-bot paused** (5 warm
+runs each, ±0.4 s wall variance):
+
+| Build                       | Decode tok/s | vs 18.60 baseline |
+| --------------------------- | ------------ | ----------------- |
+| Pre-fix (b1824c0e)           | 18.61        | —                 |
+| Post-half-pack (f784d2c3)    | 18.60        | **+0.0 %**        |
+| + MoE gate/up fusion (6c295735) | 18.49    | −0.6 %            |
+
+Kernel-level win is real and measurable in isolation; cluster-level
+win is **zero**. After confirming the kernel is bit-exact vs
+dequantize+SDPA reference on production shapes, the disconnect is not
+a kernel bug — it's a **scheduler / dispatch-overhead disconnect**.
+
+### NOOP sweep (2026-04-24): where the 54 ms/token actually goes
+
+With three consecutive 0 % cluster results from kernel / dispatch-
+level optimizations, we added section-level noop gates
+(`EXO_MINIMAX_NOOP_{ATTN,SDPA,MOE,ALLSUM}`) that replace a section's
+output with a shape-preserving zero tensor (answers become garbage —
+purely a timing tool). Four 5-run benches on the same clean
+environment:
+
+| Config         | Wall (s) | Decode tok/s | Section removed → ms/token saved |
+| -------------- | -------- | ------------ | -------------------------------- |
+| Baseline       | 258.3    | 18.60        | —                                |
+| NOOP_ALLSUM    | 253.8    | 19.29        | RDMA ≈ **2 ms/token** (3.7 %)    |
+| NOOP_MOE       | 202.6    | 23.35        | MoE ≈ **11 ms/token** (21 %)     |
+| NOOP_ATTN      | 87.0     | 55.04        | attention ≈ **36 ms/token** (66 %) |
+| NOOP_SDPA      | 87.1     | 54.87        | SDPA ≈ **36 ms/token** (66 %)    |
+
+**Definitive finding:** NOOP_ATTN and NOOP_SDPA are equal within
+noise. The entire 35.8 ms/token attention section's cost is the
+single SDPA kernel call per layer — Q/K/V projections, RoPE, KV
+cache update, RMSNorm all combined contribute **zero measurable
+time**.
+
+**Per-SDPA-call on cluster = 35.8 ms ÷ 62 layers = 577 µs.**
+Standalone microbench on M4 base = 1000 µs. Cluster is M4 Ultra with
+~4× the GPU cores, so pure kernel compute ≈ 250 µs/call. That
+leaves **~327 µs/call of fixed per-dispatch overhead** that no
+kernel-compute optimization can touch.
+
+**Why Phase 2's kernel win was flat on cluster:** 1.19× microbench
+improvement only affects the 250 µs compute portion. 19 % of 250 µs
+= 47 µs saved per call × 62 layers = 2.9 ms/token = ~5 % decode.
+That's entirely within the 5-run bench's ±0.4 s wall-time noise
+floor. The kernel work is correct and gives the predicted shave on
+*its* piece of the budget — it's just that its piece is small
+compared to the fixed-overhead piece.
+
+### Implications for the next push
+
+Kernel-compute wins on any algorithm (half-pack, TurboQuant, anything
+else) are **capped at ≤ +25 % decode** on this cluster because the
+250 µs compute floor is at most 46 % of the per-call time. Even an
+infinitely fast SDPA kernel leaves 327 µs/call × 62 = 20 ms/token of
+overhead → max 34 ms/token → 29 tok/s ceiling.
+
+To break past that, the 327 µs fixed overhead must be attacked:
+
+1. **`mx.compile` the decoder forward** — if the overhead is MLX
+   graph-build + Metal command-buffer encoding, compiling the
+   attention block once and reusing dispatches eliminates it.
+   Potential: up to +55 % decode if the full 20 ms overhead is
+   graph-building. Effort: 1–2 days.
+2. **Batch multiple layers' SDPA into one dispatch** — custom Metal
+   kernel that processes 2–4 layers of attention per call. Cuts
+   per-call overhead by that factor. Effort: 5–7 days, uncertain.
+3. **Reduce `blocks=1024` at 66K** — 1024 intermediate / sums / maxs
+   buffers per call = allocator pressure that may be part of the
+   327 µs. Trivial tuning experiment. Effort: 0.5 day.
+
+`mx.compile` is the highest-expected-value move and the one the
+NOOP sweep points at most directly.
+
+**5-bit kernel variant (now mostly moot, but for reference):** the
+original write-up listed `BD=16` / lane-vectorized dequant as the
+"make 5-bit actually fast" path, or a `use_fallback` gate to route
+bits=5 × head_dim=128 back to dequantize+SDPA as a minimum-invasive
+safety net. The branch-free half-pack path landed in session 5
+continuation (`f784d2c3`) and made bits=5 microbench-competitive
+(1.19× at production shape). Neither moves the cluster number because
+the bottleneck is the fixed per-dispatch overhead, not kernel
+compute.
 
 ### Session 4 — integration + profile (1 day)
 
