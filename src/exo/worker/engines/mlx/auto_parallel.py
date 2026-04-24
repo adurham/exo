@@ -84,6 +84,10 @@ _MINIMAX_NOOP_ALLSUM: bool = os.environ.get("EXO_MINIMAX_NOOP_ALLSUM", "0") == "
 # that section's contribution). Never set in production.
 _MINIMAX_NOOP_ATTN: bool = os.environ.get("EXO_MINIMAX_NOOP_ATTN", "0") == "1"
 _MINIMAX_NOOP_MOE: bool = os.environ.get("EXO_MINIMAX_NOOP_MOE", "0") == "1"
+# Finer-grained than NOOP_ATTN: skips ONLY scaled_dot_product_attention
+# (keeps projections, RoPE, norms, KV cache update). Lets us separate
+# the SDPA kernel cost from attention-infrastructure overhead.
+_MINIMAX_NOOP_SDPA: bool = os.environ.get("EXO_MINIMAX_NOOP_SDPA", "0") == "1"
 
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
@@ -1093,6 +1097,12 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
             # shape / dtype. Wall time with this flag set reveals how much
             # of decode was spent inside attention (kernel + KV cache
             # update + the Q/K/V projection reads feeding it).
+            output = mx.zeros(queries.shape, dtype=queries.dtype)
+        elif _MINIMAX_NOOP_SDPA:
+            # Narrower diagnostic: skip only the SDPA call itself. Q/K/V
+            # projections, RoPE, KV cache update all still run. Difference
+            # vs NOOP_ATTN reveals the SDPA kernel's isolated share of the
+            # attention budget.
             output = mx.zeros(queries.shape, dtype=queries.dtype)
         else:
             output = scaled_dot_product_attention(
