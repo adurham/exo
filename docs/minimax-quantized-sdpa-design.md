@@ -619,3 +619,69 @@ bit-layout debugging.
   speedup vs the dequantize-then-SDPA path is reproducible on the live
   cluster — the bandwidth analysis would be wrong and we'd have to
   re-evaluate.
+
+### 2026-04-24 session: unquant-port attempt + definitive Phase 2 close
+
+One more kernel-compute swing before accepting the NOOP-sweep's
+conclusion. Ported four optimizations from the adurham/mlx unquant
+SDPA kernel (the 2-pass variant that mlx main uses) into the quant
+kernel:
+
+1. Pre-scaled Q hoisted into thread-local register array before the
+   outer loop (mirrors `sdpa_vector_2pass_1`'s pattern).
+2. V memory-read hoisted to the top of each iteration, parallel with
+   K — lets the GPU issue both memory reads simultaneously. Matches
+   upstream commit `cb95faf9`.
+3. 5-byte half-pack group loaded once via `uint64` byte-assembly for
+   bits=5. Reduces 8 byte reads/value to 5 byte reads + register-local
+   extraction.
+4. Contiguous-chunk access (each block processes positions
+   `[block_idx * chunk_size, +chunk_size)` sequentially instead of
+   striding by `blocks`). Matches upstream commit `0bf7df7f`.
+
+All four landed in mlx `1f6eb6bd` and exo `15a19500`. All 13 unit
+tests pass unchanged.
+
+**Local M4 Max microbench at MiniMax production shape** (B=1, n_q=24,
+n_kv=4, head_dim=128, N=66560, bf16 queries):
+
+| bits | before | after | delta |
+| ---- | ------ | ----- | ----- |
+| 4    | 1363 µs | 940 µs  | −31 % |
+| 5    | 1828 µs | 1300 µs | −29 % |
+| 8    | 1278 µs | 950 µs  | −26 % |
+
+**Cluster decode: 0 %.** Identical before/after at both short (500-
+token) and long (50K-token) contexts. Same result as every prior
+kernel-compute optimization attempt.
+
+**Root cause confirmed via bf16-KV control experiment:** deployed
+MiniMax with `MINIMAX_KV_CACHE_BITS=0` (disable quant entirely, use
+bf16 KV cache). At 50K context, bf16 KV path is 3× faster than quant
+in local microbench (712 µs vs ~2000 µs). **Cluster decode with bf16
+KV: 27.79 tok/s. Cluster decode with 8-bit quant KV: 27.84 tok/s.**
+Within 0.5 % — the 3× kernel-compute difference is invisible on the
+cluster. Dispatch-scheduling, not compute, is the bottleneck.
+
+The kernel is correct, ported, upstream-parity-clean, and fast in
+microbench. It's not the cluster lever. Shipped anyway because it
+costs nothing on cluster and wins +26-29 % on single-node M4 Max runs.
+
+**Note on earlier 327 µs "fixed overhead" math:** the original
+analysis assumed M4 Ultra = 4× M4 Max GPU cores. Actual ratio is ~2×
+(40 → 80 cores). Corrected fixed-overhead estimate is smaller, but
+the conclusion still holds: kernel-compute optimizations don't move
+cluster tok/s.
+
+**Only cluster lever that worked in this session:** `MLX_SDPA_BLOCKS`
+env var added in mlx `1f6eb6bd` overrides the 2-pass blocks heuristic.
+Sweep on cluster found a sharp peak at `blocks=88` giving +6.5 %
+decode (26.14 → 27.86 tok/s at 50K context). Exo `6ae331fe` forwards
+the env var through `start_cluster.sh` to runner processes. See
+`memory/minimax_sdpa_blocks88.md` for the sweep data + cliff at
+blocks=92.
+
+**Phase 2 is definitively closed.** Next attack surface is dispatch-
+count reduction via kernel fusion — see
+[`minimax-fused-attention-prompt.md`](./minimax-fused-attention-prompt.md)
+for the Phase 3 session prompt.

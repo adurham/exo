@@ -130,6 +130,100 @@ hardware. Next push should target `mx.compile` (the fixed-overhead
 attack). Phase 3 (MoE fusion) is deferred: +4–7 % on paper but the
 same fixed-overhead ceiling likely applies.
 
+### Diagnostic session 2026-04-24: unquant-port + blocks sweep + Phase 3 pivot
+
+Took one more swing at kernel-compute wins before accepting Phase 2's
+conclusion: ported four optimizations from adurham/mlx upstream-fork's
+unquant SDPA kernel (Q hoist, V hoist, bits=5 half-pack uint64 load,
+contiguous-chunk access) into the quant kernel — all shipped in mlx
+`1f6eb6bd`. Local microbench wins were real:
+
+| bits | before | after | delta |
+| ---- | ------ | ----- | ----- |
+| 4    | 1363 µs | 940 µs  | −31 % |
+| 5    | 1828 µs | 1300 µs | −29 % |
+| 8    | 1278 µs | 950 µs  | −26 % |
+
+**Cluster: 0 %** — same pattern as every prior kernel-compute
+optimization.
+
+Decomposed `attn` span into 5 sub-spans (qkv_proj, qk_norm,
+reshape_rope_cache, sdpa, o_proj) via sub-span instrumentation in
+`src/exo/worker/engines/mlx/auto_parallel.py:1041-1125` (exo commit
+`6590fc46`). Confirms SDPA dominates attention at ~62 % of attn time
+on cluster, other sub-spans in noise. NOOP-sweep analysis holds up.
+
+**The one cluster win that did materialize: MLX_SDPA_BLOCKS=88.**
+
+Added env-var override for the 2-pass `blocks` heuristic in mlx
+`1f6eb6bd`; swept values on cluster:
+
+| MLX_SDPA_BLOCKS | cluster decode tok/s |
+| --------------- | -------------------- |
+| 40              | 21.0 |
+| 64              | 24.5 |
+| 72              | 26.8 |
+| 80              | 27.0 |
+| **88**          | **27.84** |
+| 92              | 23.5  (cliff) |
+| 96              | 23.2 |
+| 160             | 23.2 |
+| 512 (default)   | 26.14 |
+
+Sharp peak at 88, sharp cliff at 92. Explanation: M4 Ultra has ~80 GPU
+cores × 4 simdgroup slots = ~320 concurrent TG slots. blocks=88 × 4
+kv_heads = 352 TGs ≈ 1.1 dispatch rounds. blocks=92 × 4 = 368 TGs
+crosses a GPU-scheduler quantization boundary (exact cause unclear)
+and regresses sharply. Matches the unshipped mlx commit `21129617`
+("cap SDPA 2-pass blocks to limit threadgroup scheduling on M3/M4").
+
+Shipped as opt-in env var (exo commit `6ae331fe`, set
+`MLX_SDPA_BLOCKS=88` before invoking `start_cluster.sh` for MiniMax
+workloads). Not baked in as default because optimum is workload-
+specific (different head counts / context lengths / hardware tiers
+need different values).
+
+**Also validated: bf16 KV cache (no quant) gives identical cluster
+tok/s to 8-bit quant KV** — 27.79 vs 27.84 at blocks=88. The 3×
+kernel-compute difference between bf16 and quant SDPA shown by local
+microbench is invisible on cluster. This is the cleanest proof that
+cluster is dispatch-scheduling-bound, not compute-bound. Ruled out
+CPU-assisted SDPA port (snapshot-branch commit `a0580f93`) as an
+option — it attacks GPU compute, which isn't the bottleneck.
+
+**Post-session baseline:** 27.86 tok/s at 50K context with
+`MLX_SDPA_BLOCKS=88` + Huihui scouts + MiniMax bits=8 KV. +6.5 % over
+26.14 fresh-deploy baseline.
+
+## Phase 3 — fused attention Metal kernel
+
+**The only remaining cluster lever is dispatch-count reduction.** The
+diagnostic work above proves kernel compute doesn't matter; only
+dispatch scheduling does. Each layer currently issues 5–7 separate
+Metal dispatches for attention (Q proj, K proj, V proj, RoPE + cache
+update, SDPA, o_proj). × 62 layers = 310–434 dispatches per decode
+token just for attention.
+
+**Target:** one Metal kernel per layer that fuses {RMSNorm + QKV proj
++ QK-norm partial-SS + RoPE + KV cache write + SDPA + o_proj} into a
+single dispatch. Cross-rank collectives stay outside — MLX has no
+GPU-resident collective primitive.
+
+**Expected win:** +10–20 % cluster decode if dispatch overhead really
+is ~200 µs/call and we collapse 5 calls to 1. If <10 %, the fixed-
+overhead model is wrong and we need deeper diagnostic work
+(Instruments / Metal GPU capture) before any more kernel work.
+
+**Effort:** 1–2 weeks, dedicated session. Significant Metal kernel
+authoring. Unit tests and bench cycles against live cluster.
+
+**Scope v1:** decode only (q_seq_len=1), 8-bit KV (matches cluster),
+head_dim=128 (matches MiniMax M2.7). v2 fills in the bits × head_dim
+grid once v1 ships a cluster gain.
+
+**Full prompt for starting this as a new session:** see
+[`minimax-fused-attention-prompt.md`](./minimax-fused-attention-prompt.md).
+
 ## Lever detail
 
 ### #1 — Kill the Q/K `all_gather`

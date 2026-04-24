@@ -143,6 +143,44 @@ regression test (ideally a pure config-parsing unit test that doesn't
 need RDMA hardware). Reference `#3412` + `#3418`. Once merged, drop
 `1a176363` + `1cfcb5b6` from this fork and bump the pin.
 
+## adurham/mlx main — quantized SDPA kernel + dispatch knob
+
+Pinned (as of exo `6ae331fe`): `1f6eb6bd` (`sdpa: port unquant 2-pass
+perf improvements to quant kernel`).
+
+### Custom primitives carried on main
+
+- `mx.fast.scaled_dot_product_attention_quant(q, k_packed, k_scales,
+  k_biases, v_packed, v_scales, v_biases, *, scale, group_size, bits,
+  do_causal, sinks)` — Metal kernel that fuses the quant dequantize
+  into the 2-pass FlashDecoding inner loop. Decode-only gate
+  (`q.shape(2) == 1`); prefill / unsupported configs fall through to
+  `dequantize() + scaled_dot_product_attention()`. Used by MiniMax
+  decode via `mlx_lm/models/base.py:117`.
+- Kernel body lives in `mlx/backend/metal/kernels/sdpa_vector_quant.h`.
+  Carries 4 optimizations ported from the unquant `sdpa_vector_2pass_1`
+  path (Q hoist + pre-scale, V memory-read hoist, bits=5 half-pack
+  uint64 load, contiguous-chunk access). Local M4 Max microbench
+  −26–29 % vs unoptimized; **cluster M4 Ultra neutral** (see
+  `docs/minimax-quantized-sdpa-design.md` + `memory/phase2_real_goal.md`).
+
+### MLX_SDPA_BLOCKS env var
+
+`scaled_dot_product_attention.cpp` carries an env-var override for the
+2-pass blocks heuristic: `sdpa_2pass_blocks_override()` reads
+`MLX_SDPA_BLOCKS`, and if set to a positive int, overrides both the
+bf16 and quantized dispatches. No-op when unset.
+
+**Empirical sweet-spot on the 2-rank M4 Ultra cluster for MiniMax-
+M2.7 at 50K context: `MLX_SDPA_BLOCKS=88`** gives +6.5 % decode
+(26.14 → 27.86 tok/s). Sharp cliff at `blocks=92`. Reason: matches
+~320 concurrent simdgroup slots on M4 Ultra (4 kv_heads × 88 = 352
+TGs ≈ 1.1 dispatch rounds). See `memory/minimax_sdpa_blocks88.md` for
+the full sweep + cluster config context.
+
+Forwarded through `start_cluster.sh` as of exo `6ae331fe`. Not baked
+in as default because optimum is workload-specific.
+
 ## Open optimization projects
 
 ### MiniMax fused MoE kernels
