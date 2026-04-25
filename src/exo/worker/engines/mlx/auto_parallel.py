@@ -1156,6 +1156,7 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
     ) -> nn.Module:
         model = cast(MiniMaxModel, model)
         total = len(model.layers)
+        fused_qkv_layers = 0
         for i, layer in enumerate(model.layers):
             mx.eval(layer.parameters())
             # Shard the self attention
@@ -1179,8 +1180,8 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
                     layer.self_attn.k_norm, group=self.group
                 )
 
-            if _MINIMAX_FUSED_ATTN:
-                install_fused_qkv(layer.self_attn)
+            if _MINIMAX_FUSED_ATTN and install_fused_qkv(layer.self_attn):
+                fused_qkv_layers += 1
 
             layer.self_attn = WrappedMiniMaxAttention(layer.self_attn, self.group)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]
 
@@ -1206,6 +1207,11 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
             mx.eval(layer)
             if on_layer_loaded is not None:
                 on_layer_loaded(i, total)
+        if _MINIMAX_FUSED_ATTN:
+            logger.info(
+                f"MiniMax fused QKV: {fused_qkv_layers}/{total} layers "
+                f"installed (rank {self.group.rank()}/{self.N})"
+            )
         return model
 
 
