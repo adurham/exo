@@ -195,33 +195,107 @@ option — it attacks GPU compute, which isn't the bottleneck.
 `MLX_SDPA_BLOCKS=88` + Huihui scouts + MiniMax bits=8 KV. +6.5 % over
 26.14 fresh-deploy baseline.
 
-## Phase 3 — fused attention Metal kernel
+## Phase 3 — fused attention (Python-level fusions, 2026-04-24)
 
-**The only remaining cluster lever is dispatch-count reduction.** The
-diagnostic work above proves kernel compute doesn't matter; only
-dispatch scheduling does. Each layer currently issues 5–7 separate
-Metal dispatches for attention (Q proj, K proj, V proj, RoPE + cache
-update, SDPA, o_proj). × 62 layers = 310–434 dispatches per decode
-token just for attention.
+**Plan:** dispatch-count-reduction was the only remaining cluster lever.
+Original target was a single fused Metal kernel per layer (RMSNorm +
+QKV proj + QK-norm + RoPE + KV cache write + SDPA + o_proj → one
+dispatch) with projected +10–20 % decode. Started with low-risk
+Python-level fusions to validate the dispatch-count hypothesis on the
+cluster before committing to the multi-week kernel write.
 
-**Target:** one Metal kernel per layer that fuses {RMSNorm + QKV proj
-+ QK-norm partial-SS + RoPE + KV cache write + SDPA + o_proj} into a
-single dispatch. Cross-rank collectives stay outside — MLX has no
-GPU-resident collective primitive.
+**Validation experiment** (`bench/minimax_dispatch_count.py` + the
+local `mx.metal.dispatch_count()` env-gated counter shipped in mlx
+commit `22ef1101`): measured **21 dispatches per attention block per
+decode token** on the per-rank shape (n_q=24, n_kv=4, head_dim=128).
+That is **~3× higher** than the original prompt's "5–7 dispatches per
+layer" estimate. Sub-op breakdown:
 
-**Expected win:** +10–20 % cluster decode if dispatch overhead really
-is ~200 µs/call and we collapse 5 calls to 1. If <10 %, the fixed-
-overhead model is wrong and we need deeper diagnostic work
-(Instruments / Metal GPU capture) before any more kernel work.
+| Sub-op            | Dispatches |
+| ----------------- | ---------- |
+| qkv_proj          | 6 (3 matmuls × 2) |
+| qk_norm           | 2 (already fused via _fused_sharded_qk_norm) |
+| reshape_rope_cache| 12 (2 rope_Q + 2 rope_K + 8 cache.update_and_fetch) |
+| sdpa              | 2 (the two-pass kernel) |
+| o_proj            | 1 |
 
-**Effort:** 1–2 weeks, dedicated session. Significant Metal kernel
-authoring. Unit tests and bench cycles against live cluster.
+Reshapes and transposes at decode L=1 are **free** (lazy views /
+metadata changes), which surprised me — initial budget-allocation
+intuition assumed they cost. The 12 in `reshape_rope_cache` come from
+RoPE (4) and `cache.update_and_fetch`'s `mx.quantize(K)` +
+`mx.quantize(V)` + 6 in-place slice writes (3 components × 2 for K and
+V, each is a separate dispatch).
 
-**Scope v1:** decode only (q_seq_len=1), 8-bit KV (matches cluster),
-head_dim=128 (matches MiniMax M2.7). v2 fills in the bits × head_dim
-grid once v1 ships a cluster gain.
+### Phase 3 outcomes (cluster A/B, 50K context, MLX_SDPA_BLOCKS=88, Huihui scouts on)
 
-**Full prompt for starting this as a new session:** see
+Three Python-level fusions landed via `EXO_MINIMAX_FUSED_ATTN=1`
+(`src/exo/worker/engines/mlx/patches/minimax/fused_qkv.py` +
+`WrappedMiniMaxAttention` integration in `auto_parallel.py`).
+
+| Week | Fusion | Dispatch save / layer | Cluster decode delta |
+| ---- | ------ | --------------------- | -------------------- |
+| 1    | Fused QKV projection (bf16 path) | 6 → 1 (saves 5) | not benched alone |
+| 2    | Fused QKV projection (`QuantizedAllToShardedLinear`, production 5-bit path) | 6 → 1 (saves 5) | **+1.5 %** (23.90 → 24.26 tok/s) |
+| 3    | Joined Q+K RoPE call (concat axis=1, single rope) | 4 → 3 (saves 1) | **≈0 %** (24.26 → 24.24, within noise) |
+
+**Per-fusion dispatch savings translated to wall-time clearly bend
+non-linearly.** Week 2 saved 5 dispatches/layer for +1.5 %; Week 3
+saved 1 dispatch/layer for 0 %. The naive linear extrapolation
+(+1.5 % ÷ 5 = +0.3 %/dispatch) does not hold at single-dispatch
+granularity. Likely cause: M4 Ultra's GPU-scheduler concurrency
+absorbs single-dispatch-overhead changes that the M4 Max bench
+estimate didn't account for. The cluster crosses a discrete
+"is one batch of N dispatches dispatched concurrently or not"
+boundary somewhere between 1 and 5 saved dispatches.
+
+**Original Phase 3 prompt's abort criterion** ("3 full cluster
+deploys show <5 % cluster gain") has been hit: 4 cluster deploys
+this session, cumulative gain +1.5 %.
+
+### Why pure-Python further work is exhausted
+
+Mapped the remaining levers without writing Metal:
+
+- **Joined Q+K RoPE (concat axis=-1):** concat costs 2 dispatches → wash.
+- **Joined K+V quantize via `mx.stack` or `mx.concatenate`:** stack/concat
+  cost 1 dispatch each, and the added dispatch erases the saved quantize.
+  Confirmed empirically.
+- **Single-call quantize on the QKV-merged-matmul slab's K+V slice:**
+  same as above — needs a reshape that materializes.
+- **Reducing the 6 in-place cache writes:** the writes are atomic per
+  underlying mx.array `__setitem__`. No Python-level join keeps the same
+  layout. Restructuring the cache (e.g., one uint32 buffer + one bf16
+  buffer per rank, holding K+V components as views) would reduce 6 → 2
+  but needs a `QuantizedKVCache` subclass + verifying the SDPA quant
+  kernel handles non-contiguous views. Multi-day work, not Python-level.
+
+### Scoreboard (state at end of 2026-04-24)
+
+| Lever | Cluster decode |
+| ----- | -------------- |
+| Pre-2026-04-24 baseline (no MLX_SDPA_BLOCKS, no fused-attn) | ~26.14 tok/s |
+| `MLX_SDPA_BLOCKS=88` | **+6.5 %** → 27.86 tok/s |
+| Fused QKV (Week 2, default-on at `EXO_MINIMAX_FUSED_ATTN=1`) | **+1.5 %** atop blocks=88 |
+| Joined Q+K RoPE (Week 3) | ≈0 % (noise) |
+
+### What's left on the table
+
+To break out of the diminishing-returns curve, the remaining options
+require either kernel-level Metal authoring or invasive cache layout
+changes:
+
+| Option | Approach | Predicted gain | Effort |
+| ------ | -------- | -------------- | ------ |
+| **A** | Custom JIT Metal kernel for fused KV quantize only (8 → 7) | ≈0 % (1 dispatch saved, on the cluster's flat part of the curve) | half-day |
+| **B** | Custom `QuantizedKVCache` subclass with 2 unified backing buffers (1 uint32 + 1 bf16) + fused-quantize kernel; 6 writes → 2, plus 1 saved quantize | +1–2 % | 1–2 days, invasive |
+| **C** | Switch live cluster to bf16 KV cache (skip quantize entirely; 8 → 2 dispatches in the cache update) | +1.5–2.5 %, BUT memory doubles (probably busts the 50K + Huihui co-residency budget) | 1 day, semantic |
+| **D** | Original prompt: extend MLX C++ `sdpa_vector_2pass_1_quant` in-place to absorb QKV proj + qk-norm + RoPE + cache write + SDPA + o_proj into one fused kernel | +3–5 % | 1–2 weeks, dedicated |
+
+`MLX_SDPA_BLOCKS=88` was the +6.5 % structural win; everything since
+has been single-digit-percent at best, even if the kernel work in D
+does land.
+
+**Full original prompt for D as a new session:** see
 [`minimax-fused-attention-prompt.md`](./minimax-fused-attention-prompt.md).
 
 ## Lever detail

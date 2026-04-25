@@ -4,6 +4,31 @@ Drop-in prompt to start a new session focused on the fused-attention
 kernel project. Self-contained so the agent can resume without this
 transcript.
 
+> **Status as of 2026-04-24 (post-Week-3):** Phase 3 attempted three
+> Python-level dispatch-fusion levers under `EXO_MINIMAX_FUSED_ATTN=1`
+> and netted **+1.5 % cluster decode** (Week 2 fused QKV) plus a Week-3
+> joined-RoPE wash (≈0 %). Local microbench confirmed the dispatch
+> count drops to 17/layer with both fusions active, but per-dispatch
+> wall-time savings on M4 Ultra are non-linear (single-dispatch saves
+> register as 0 %). The **C++ MLX-patch path described below is now
+> the only remaining +3–5 % lever.** See `docs/minimax-decode-
+> optimization.md` § "Phase 3 outcomes" for the full scoreboard and
+> what's already been ruled out.
+>
+> Things you DON'T need to redo:
+> - dispatch-count instrumentation (mlx@22ef1101 ships
+>   `mx.metal.dispatch_count()` behind `MLX_DISPATCH_COUNT=1`)
+> - sub-op profiling (`bench/minimax_dispatch_count.py` +
+>   `bench/minimax_rope_cache_breakdown.py`)
+> - cluster A/B harness (`bench/minimax_cluster_ab.py`)
+> - fused QKV scaffold (`src/exo/worker/engines/mlx/patches/minimax/`)
+> - `MLX_SDPA_MAX_TG` analysis (resolved as identical to `BLOCKS=88` at
+>   the cluster's tg_per_block; see memory)
+> - The "0/62 layers installed" sharded-class trap — already fixed in
+>   exo@116ad61f. `nn.QuantizedLinear` and
+>   `mlx.nn.distributed.QuantizedAllToShardedLinear` are now both
+>   recognised.
+
 ---
 
 ```
