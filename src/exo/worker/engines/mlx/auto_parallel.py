@@ -1098,23 +1098,36 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
                 keys = _minimax_finalize(keys)
 
         with _minimax_span("attn.reshape_rope_cache"):
+            n_q_heads = self._original_layer.num_attention_heads
+            n_kv_heads = self._original_layer.num_key_value_heads
             queries = queries.reshape(
-                batch_dim, seq_dim, self._original_layer.num_attention_heads, -1
+                batch_dim, seq_dim, n_q_heads, -1
             ).transpose(0, 2, 1, 3)
             keys = keys.reshape(
-                batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
+                batch_dim, seq_dim, n_kv_heads, -1
             ).transpose(0, 2, 1, 3)
             values = values.reshape(
-                batch_dim, seq_dim, self._original_layer.num_key_value_heads, -1
+                batch_dim, seq_dim, n_kv_heads, -1
             ).transpose(0, 2, 1, 3)
 
-            if cache is not None:
-                queries = self._original_layer.rope(queries, offset=cache.offset)
-                keys = self._original_layer.rope(keys, offset=cache.offset)
-                keys, values = cache.update_and_fetch(keys, values)
+            offset = cache.offset if cache is not None else 0
+            if _MINIMAX_FUSED_ATTN:
+                # Concat Q and K along the head axis and run a single RoPE
+                # call across both. The concat costs 1 dispatch and
+                # replaces 2 separate RoPE calls (2 dispatches each) with
+                # one (2 dispatches), saving 1 dispatch per layer at zero
+                # numerical cost — RoPE rotates each head independently
+                # in the last dim. Splitting back is a free view.
+                qk_joined = mx.concatenate([queries, keys], axis=1)
+                qk_rotated = self._original_layer.rope(qk_joined, offset=offset)
+                queries = qk_rotated[:, :n_q_heads]
+                keys = qk_rotated[:, n_q_heads:]
             else:
-                queries = self._original_layer.rope(queries)
-                keys = self._original_layer.rope(keys)
+                queries = self._original_layer.rope(queries, offset=offset)
+                keys = self._original_layer.rope(keys, offset=offset)
+
+            if cache is not None:
+                keys, values = cache.update_and_fetch(keys, values)
             queries = _minimax_finalize(queries)
             keys = _minimax_finalize(keys)
             values = _minimax_finalize(values)
