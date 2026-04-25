@@ -298,6 +298,24 @@ does land.
 **Full original prompt for D as a new session:** see
 [`minimax-fused-attention-prompt.md`](./minimax-fused-attention-prompt.md).
 
+**Architecture decision (2026-04-24):** Option D ships as **two MLX
+primitives**, not one mega-kernel — the `use_qk_norm=True` cross-rank
+`all_sum` forces a Pre/Post split. See
+[`minimax-fused-attention-design.md`](./minimax-fused-attention-design.md)
+for the committed design (per-week deliverables, primitive surface,
+exo integration via `EXO_MINIMAX_FUSED_KERNEL=1`). 5 dispatches/layer
+target vs 21 today.
+
+**Decision (2026-04-24, post-NOOP-revalidation): Option D and all
+other custom-kernel levers are shelved.** Cross-rank cost is 5 % of
+decode (not the 20-30 % a "comm is the bottleneck" story would
+require), MoE compute is 26 %, attention is 69 % — shape is
+essentially unchanged from the old sweep. Custom-kernel track record
+on this cluster is 0/3. Ship 24.26 tok/s as the ceiling. See
+[`minimax-rdma-moe-validation-2026-04-24.md`](./minimax-rdma-moe-validation-2026-04-24.md)
+for the full data and the PP-vs-TP rough-math that closes out the
+"switch parallelism mode" lever.
+
 ## Lever detail
 
 ### #1 — Kill the Q/K `all_gather`
