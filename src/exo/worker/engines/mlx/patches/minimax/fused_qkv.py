@@ -30,6 +30,17 @@ from typing import Any
 import mlx.core as mx
 import mlx.nn as nn
 from loguru import logger
+from mlx.nn.layers.distributed import (
+    AllToShardedLinear,
+    QuantizedAllToShardedLinear,
+)
+
+# Plain projection (single device) and the all-to-sharded variants exo
+# wraps q/k/v_proj in during tensor-parallel sharding. Both surfaces
+# expose ``weight`` (and ``scales`` / ``biases`` for the quantised pair)
+# at the right per-rank shape — concat-along-output-dim works identically.
+_BF16_LINEAR_TYPES: tuple[type, ...] = (nn.Linear, AllToShardedLinear)
+_QUANT_LINEAR_TYPES: tuple[type, ...] = (nn.QuantizedLinear, QuantizedAllToShardedLinear)
 
 # Sentinel attributes set on the attention module after a successful
 # install. ``WrappedMiniMaxAttention`` checks ``_INSTALLED_ATTR`` on each
@@ -77,19 +88,15 @@ def install_fused_qkv(attn: nn.Module) -> bool:
             )
             return False
 
-    all_quant = all(
-        isinstance(p, nn.QuantizedLinear) for p in (q_proj, k_proj, v_proj)
-    )
-    all_bf16 = all(
-        isinstance(p, nn.Linear) and not isinstance(p, nn.QuantizedLinear)
-        for p in (q_proj, k_proj, v_proj)
-    )
+    projs = (q_proj, k_proj, v_proj)
+    all_quant = all(isinstance(p, _QUANT_LINEAR_TYPES) for p in projs)
+    all_bf16 = all(isinstance(p, _BF16_LINEAR_TYPES) for p in projs)
     if all_quant:
         return _install_quantized(attn, q_proj, k_proj, v_proj)
     if all_bf16:
         return _install_bf16(attn, q_proj, k_proj, v_proj)
 
-    types = [type(p).__name__ for p in (q_proj, k_proj, v_proj)]
+    types = [type(p).__name__ for p in projs]
     logger.info(
         f"install_fused_qkv: mixed or unsupported projection types {types} — "
         "fused QKV path disabled for this layer"
@@ -98,7 +105,7 @@ def install_fused_qkv(attn: nn.Module) -> bool:
 
 
 def _install_bf16(
-    attn: nn.Module, q_proj: nn.Linear, k_proj: nn.Linear, v_proj: nn.Linear
+    attn: nn.Module, q_proj: nn.Module, k_proj: nn.Module, v_proj: nn.Module
 ) -> bool:
     wq = q_proj["weight"]
     wk = k_proj["weight"]
@@ -126,11 +133,11 @@ def _install_bf16(
 
 def _install_quantized(
     attn: nn.Module,
-    q_proj: nn.QuantizedLinear,
-    k_proj: nn.QuantizedLinear,
-    v_proj: nn.QuantizedLinear,
+    q_proj: nn.Module,
+    k_proj: nn.Module,
+    v_proj: nn.Module,
 ) -> bool:
-    projs: list[nn.QuantizedLinear] = [q_proj, k_proj, v_proj]
+    projs: list[nn.Module] = [q_proj, k_proj, v_proj]
     bits_set = {int(p.bits) for p in projs}
     group_set = {int(p.group_size) for p in projs}
     mode_set = {str(p.mode) for p in projs}
