@@ -23,6 +23,7 @@ Last refresh: 2026-04-26.
 | `exo-explore/exo` | [#1989](https://github.com/exo-explore/exo/pull/1989) | fix: route by in-flight tasks only — completed tasks were skewing load balance | review required |
 | `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | review required |
 | `exo-explore/exo` | [#1991](https://github.com/exo-explore/exo/pull/1991) | fix: map presence_penalty and frequency_penalty from ChatCompletionRequest | review required |
+| `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | review required |
 
 ### Open issues / design questions (3)
 
@@ -55,7 +56,7 @@ Last refresh: 2026-04-26.
 | Presence/Frequency API mapping | **PR #1991** | Wires up the presence_penalty and frequency_penalty from the API layer to the upstream sampling resolver. |
 | DeepSeek-V4 cluster integration | wait on whichever DSv4 PR lands | Three competing mlx-lm DSv4 PRs as of 2026-04-26, all OPEN/BLOCKED awaiting review: Blaizzy [#1192](https://github.com/ml-explore/mlx-lm/pull/1192) (most recently active), rlt [#1195](https://github.com/ml-explore/mlx-lm/pull/1195), machiabeli [#1189](https://github.com/ml-explore/mlx-lm/pull/1189). Fork's tokenizer fallback should drop once one lands. Sharding strategy is generic. |
 | MTP speculative decoding | blocked, NEEDS-CLEANUP | Auto-disabled in fork main: `MTPBatchGenerator` uses old BatchGenerator API. Port-to-new-API is a prerequisite. ~30 debug commits in the chain — brittle weight-loading path. |
-| P2P model distribution | not started | ~13 commits with experiment churn (sendfile vs curl vs HEAD-vs-no-HEAD). Needs rebase to a clean 2–3 commit series before PR. |
+| P2P model distribution | **PR #1992** | Reauthored from the original 16-commit chain (3 redundant after upstream PR #1829 landed; 5 dropped as cancel/no-op pairs). 2 clean commits: P2P core + cancel→pause/`DownloadPaused` refactor. Adds X-File-SHA256 header + receiver-side hash verification, EXO_FILE_SERVER_MAX_CONCURRENCY cap with 503/Retry-After, real path-traversal defense (the original fork's `is_relative_to(model_dir)` check let `..` escape laterally into a sibling model — caught and fixed). 61 new tests; security-relevant cases use raw sockets to bypass aiohttp client URL normalization. `docs/p2p-model-distribution.md` covers the security stance. |
 | Phase-3 fused QKV / joined RoPE | depends on mlx#3454 + Phase-2 | Python-level kernel fusion. Off by default (`EXO_MINIMAX_FUSED_ATTN`). Wants `dispatch_count()` to land first. |
 | Fused MoE dispatches | not started | Qwen3.5-specific kernel optimizations. ~6% prefill win. Pattern is generic. |
 | Pipeline-parallel speculation | not started | Long chain, generic over draft model. Off by default (`EXO_PP_DRAFT_MODEL`). |
@@ -118,10 +119,9 @@ Last refresh: 2026-04-26.
 
 ## Recommended next actions
 
-1. **Wait for review feedback** on the 10 open PRs and 3 issues before drafting more. They were all opened 2026-04-26; give a few days.
+1. **Wait for review feedback** on the 10 open PRs and 3 issues before drafting more. All but P2P (#1992) were opened 2026-04-26; #1992 went up the same day after a re-author. Give a few days.
 2. **If radix-trie issue #1986 gets a green light** → split into the 3-PR sequence (caps → pin → trie+extend-in-place).
 3. **If sampling-tier issue #1987 gets a green light** → defer per-instance + cluster-env per maintainer guidance. (The uncontroversial API mapping fixes have already been submitted as PR #1991).
 4. **DSv4 cluster sharding (exo)** waits on whichever DSv4 PR (Blaizzy #1192 / machiabeli #1189 / rlt #1195) lands.
 5. **If Thump604 returns** → revive #3293/#3307 with their authorship, fold our `MLX_SDPA_FUSED_THRESHOLD` env var into that conversation.
 6. **MTP** stays blocked until `MTPBatchGenerator` is ported to the new BatchGenerator API.
-7. **P2P download** is a real Tier-2 candidate but needs a rebase pass to clean up experiment churn before PR.
