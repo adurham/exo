@@ -872,22 +872,19 @@ class DeepSeekV4ShardingStrategy(TensorParallelShardingStrategy):
         for i, layer in enumerate(layers):
             mx.eval(layer.parameters())
 
-            layer.attn.wq_b = self.all_to_sharded_linear(layer.attn.wq_b)
-            layer.attn.wo_b = self.sharded_to_all_linear(layer.attn.wo_b)
-            layer.attn.n_heads //= self.N
-
-            # `attn_sink` is a per-head bias of shape `(n_heads,)`. After
-            # we shrink n_heads on this rank, scaled_dot_product_attention
-            # expects sinks of the same length — otherwise it raises
-            # `[scaled_dot_product_attention] Received invalid shape for
-            # sinks`. Split contiguously: rank r owns heads
-            # `r*new_n_heads .. (r+1)*new_n_heads`.
-            new_n_heads = layer.attn.n_heads
-            r = self.group.rank()
-            layer.attn.attn_sink = layer.attn.attn_sink[
-                r * new_n_heads : (r + 1) * new_n_heads
-            ]
-
+            # Replicate attention on every rank. DSv4's V4Attention uses a
+            # LoRA-decomposed Q/output projection plus a `_grouped_output_
+            # projection` that manually reshapes `wo_a.weight/.scales/.biases`
+            # — bypassing any shard_linear wrapper. Sharding wq_b across
+            # heads makes that manual reshape see half the per-group input
+            # dim and crashes inside `mx.quantized_matmul` with
+            # "Last dimension of first input with shape (..., 2048) does
+            # not match the expanded quantized matrix (4096, 1024)".
+            # Memory-wise the attention block is ~700 MB/layer at 4-bit
+            # (≈30 GB across 43 layers, replicated on both ranks). The
+            # MoE below is the bulk of the model (~130 GB), so sharding
+            # only the MoE still leaves comfortable headroom on 128 GB
+            # nodes (~95 GB/rank vs the no-shard 160 GB).
             layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
             self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
