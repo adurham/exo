@@ -133,12 +133,15 @@ def place_instance(
                 f"Requested Tensor sharding but this model does not support tensor parallelism: {command.model_card.model_id}"
             )
         # TODO: the condition here for tensor parallel is not correct, but it works good enough for now.
+        # Pure-MQA models (kv_heads == 1, e.g. DeepSeek V4 Flash) replicate the
+        # single K/V head across ranks rather than splitting it; treat that as
+        # a valid TP candidate even though `1 % N != 0` for N > 1.
         kv_heads = command.model_card.num_key_value_heads
         cycles_with_sufficient_memory = [
             cycle
             for cycle in cycles_with_sufficient_memory
             if command.model_card.hidden_size % len(cycle) == 0
-            and (kv_heads is None or kv_heads % len(cycle) == 0)
+            and (kv_heads is None or kv_heads == 1 or kv_heads % len(cycle) == 0)
         ]
         if not cycles_with_sufficient_memory:
             raise ValueError(
