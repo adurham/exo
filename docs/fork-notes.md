@@ -10,6 +10,7 @@ File map:
 | Dependency pins | `uv.lock` (`mlx` and `mlx-lm` have `git = "…?branch=main#<sha>"`) |
 | Fork sources | `pyproject.toml` `[tool.uv.sources]` |
 | KV cache config → runtime | [kv-cache-architecture.md](./kv-cache-architecture.md) |
+| Upstream PR/issue tracker | [upstream-prs.md](./upstream-prs.md) |
 
 ## adurham/mlx-lm main
 
@@ -143,6 +144,10 @@ regression test (ideally a pure config-parsing unit test that doesn't
 need RDMA hardware). Reference `#3412` + `#3418`. Once merged, drop
 `1a176363` + `1cfcb5b6` from this fork and bump the pin.
 
+> **Upstream tracking:** classified "won't upstream the revert" in
+> [upstream-prs.md](./upstream-prs.md) — an issue + reproducer is the
+> right artifact, not a revert PR.
+
 ## adurham/mlx main — quantized SDPA kernel + dispatch knob
 
 Pinned (as of exo `6ae331fe`): `1f6eb6bd` (`sdpa: port unquant 2-pass
@@ -165,6 +170,11 @@ perf improvements to quant kernel`).
   `docs/minimax-quantized-sdpa-design.md` + `memory/phase2_real_goal.md`).
 
 ### MLX_SDPA_BLOCKS env var
+
+> **Upstream tracking:** opened as PR #3455 (see
+> [upstream-prs.md](./upstream-prs.md)) — applies to upstream's existing
+> 2-pass kernel without needing the broader Phase-2 quant work.
+
 
 `scaled_dot_product_attention.cpp` carries an env-var override for the
 2-pass blocks heuristic: `sdpa_2pass_blocks_override()` reads
