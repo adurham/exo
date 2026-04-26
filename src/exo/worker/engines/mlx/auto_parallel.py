@@ -876,6 +876,18 @@ class DeepSeekV4ShardingStrategy(TensorParallelShardingStrategy):
             layer.attn.wo_b = self.sharded_to_all_linear(layer.attn.wo_b)
             layer.attn.n_heads //= self.N
 
+            # `attn_sink` is a per-head bias of shape `(n_heads,)`. After
+            # we shrink n_heads on this rank, scaled_dot_product_attention
+            # expects sinks of the same length — otherwise it raises
+            # `[scaled_dot_product_attention] Received invalid shape for
+            # sinks`. Split contiguously: rank r owns heads
+            # `r*new_n_heads .. (r+1)*new_n_heads`.
+            new_n_heads = layer.attn.n_heads
+            r = self.group.rank()
+            layer.attn.attn_sink = layer.attn.attn_sink[
+                r * new_n_heads : (r + 1) * new_n_heads
+            ]
+
             layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
             self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
