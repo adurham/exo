@@ -226,3 +226,95 @@ Net recommendation: **don't invest further. Ship.**
 - Cluster deploy knob to keep on: `MLX_SDPA_BLOCKS=88` and
   `EXO_MINIMAX_FUSED_ATTN=1`. Both forwarded by start_cluster.sh.
 - Restore Huihui: `HUIHUI_INSTANCES_PER_STUDIO=1` and redeploy.
+
+## Addendum (2026-04-25): prefill investigation
+
+After the decode validation closed out, ran a parallel investigation
+on the prefill side (~94 % of wall time at 50K context, 383 tok/s
+prompt throughput).
+
+### Step-size sweep (`EXO_PREFILL_STEP_SIZE`)
+
+| Step | prompt_tps | Δ vs 4096 |
+| ---- | ---------- | --------- |
+| 4096 (default) | 383.7 | — |
+| 8192 | 386.4 | +0.7 % |
+| 16384 | 388.0 | +1.1 % |
+
+Diminishing returns confirm chunk-size is not the bottleneck.
+Dispatch-overhead-at-chunk-boundary hypothesis falsified.
+
+### Live GPU power measurement
+
+`macmon` snapshot from rank 0 during the running prefill bench:
+
+| Field | Value |
+| ----- | ----- |
+| `gpu_power` | **30.8 W** |
+| `gpu_usage` | 99.6 % |
+| `gpu_freq` | 1576 MHz |
+| `gpu_temp` | 69 °C |
+| `cpu_power` | 9.1 W |
+| `ram_power` | 8.5 W |
+| `sys_power` (whole machine) | 114 W |
+
+GPU drawing only ~31 W at 99.6 % utilization, well below thermal
+limits — classic **stall-bound** signature. "100 % utilization"
+means the GPU has work scheduled, not that shader cores are doing
+math. The remaining 63 % of the work-cycles are the cores waiting on:
+DRAM bandwidth (546 GB/s ceiling on 5-bit MoE weight reads),
+threadgroup sync barriers, and dispatch boundaries. We've separately
+ruled out dispatch-boundary stalls via the step-size sweep, so the
+dominant stall cause is most likely **DRAM bandwidth on MoE weight
+reads** — physical limit, not tunable.
+
+The dashboard's "140-155 W per node" is `sys_power` (whole-machine
+input including PSU overhead, CPU, ANE, DRAM, etc.), not GPU-only.
+The ~10 W asymmetry between nodes during prefill is consistent with
+**MoE expert routing imbalance**: top-8 of 256 experts isn't
+guaranteed to split 4/4 between ranks, so one rank ends up with
+slightly more compute on average each token.
+
+### Per-span breakdown at prefill
+
+Trace overhead at prefill is small (~3 %, vs ~70 % at decode), so the
+trace numbers are usable for relative shares. After patching the
+un-instrumented sites
+(`mlx-lm@872a271` — pre/post-attn norms, residuals, embed, mask,
+final norm, LM head), share of wall time at 136 s for 50K + 1 token:
+
+| Section | % of wall |
+| ------- | --------- |
+| `attn` (parent: SDPA + Q/K/V proj + qk_norm + reshape/RoPE/cache + o_proj) | **~69 %** |
+| → `attn.sdpa` alone (Apple's flash-attention `steel_attention`) | **~55 %** |
+| `moe.switch_mlp` | **~25 %** |
+| `model.lm_head` | ~4 % |
+| `moe.all_sum` + `moe.router_topk` + `moe.weighted_reduce` | ~5 % |
+| Layer norms + residuals + embedding + final norm + attn mask | ~3 % |
+| **Total** | **~106 %** (slight over-count from Python overhead) |
+
+Same shape as decode: attention ~70 %, MoE compute ~25 %, everything
+else small. The trace's `%` column was misread on the first pass —
+it normalizes to total tracked time including parent-and-children
+double-counted, not to wall time. Always work in absolute `total_ms`
+for share-of-wall reasoning.
+
+### Prefill conclusion
+
+Prefill is bandwidth-stall-bound on MoE weight reads. Apple's
+`steel_attention` covers the attention slice optimally. No tunable
+levers remain. Same ceiling as decode: stock Apple code and stock
+MLX MoE are doing everything they can on this hardware.
+
+### Memories saved this session
+
+- `cluster_hardware_m4_max_not_ultra.md` — cluster is 2× M4 Max
+  (40-GPU-core / 128GB), NOT M4 Ultra. Real Apple specs.
+- `feedback_minimax_bench_huihui_off.md` — always disable Huihui
+  for MiniMax benches.
+- `feedback_minimax_trace_kills_tps.md` — never combine TRACE with
+  tps measurement (~70 % decode hit; prefill less affected at ~3 %).
+- `feedback_minimax_decode_session_scope.md` — within MiniMax decode
+  sessions, no pivots to other models as alternatives.
+- `minimax_rdma_moe_validation.md` — the validation findings (this
+  doc as a memory pointer).

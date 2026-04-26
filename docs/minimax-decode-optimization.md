@@ -306,15 +306,25 @@ for the committed design (per-week deliverables, primitive surface,
 exo integration via `EXO_MINIMAX_FUSED_KERNEL=1`). 5 dispatches/layer
 target vs 21 today.
 
-**Decision (2026-04-24, post-NOOP-revalidation): Option D and all
-other custom-kernel levers are shelved.** Cross-rank cost is 5 % of
-decode (not the 20-30 % a "comm is the bottleneck" story would
-require), MoE compute is 26 %, attention is 69 % — shape is
-essentially unchanged from the old sweep. Custom-kernel track record
-on this cluster is 0/3. Ship 24.26 tok/s as the ceiling. See
-[`minimax-rdma-moe-validation-2026-04-24.md`](./minimax-rdma-moe-validation-2026-04-24.md)
-for the full data and the PP-vs-TP rough-math that closes out the
-"switch parallelism mode" lever.
+**Decision (2026-04-24/25, post-NOOP-revalidation + prefill investigation):
+Option D and all other custom-kernel levers are shelved.**
+
+- Decode: cross-rank = 5 %, MoE compute = 26 %, attention = 69 %.
+- Prefill: same shape — `attn.sdpa` alone is ~55 % of wall, MoE
+  compute ~25 %.
+- Step-size sweep flat (4096 → 16384 = +1.1 %, noise).
+- GPU drawing only 31 W at 99.6 % utilization on M4 Max — workload
+  is **DRAM-bandwidth-stall-bound** (5-bit MoE weight reads against
+  the 546 GB/s ceiling), not compute-bound.
+- Custom-kernel track record on this cluster is 0/3. PP-vs-TP would
+  add a ~20 ms idle tax at batch=1 to save ~1 ms comm.
+
+**Ship 24.26 tok/s decode + 388 prompt_tps prefill as the ceiling on
+2× M4 Max (40-GPU-core / 128GB). +30 % from stock Apple code +
+Python-level fusion. No remaining levers have positive expected value.**
+
+See [`minimax-rdma-moe-validation-2026-04-24.md`](./minimax-rdma-moe-validation-2026-04-24.md)
+for the full data, including the prefill addendum.
 
 ## Lever detail
 
