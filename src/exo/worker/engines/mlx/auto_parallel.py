@@ -21,6 +21,7 @@ from mlx_lm.models.deepseek_v3 import DeepseekV3MLP
 from mlx_lm.models.deepseek_v3 import Model as DeepseekV3Model
 from mlx_lm.models.deepseek_v32 import DeepseekV32MLP
 from mlx_lm.models.deepseek_v32 import Model as DeepseekV32Model
+from mlx_lm.models.deepseek_v4 import Model as DeepseekV4Model
 from mlx_lm.models.switch_layers import (
     _gather_sort as _switch_gather_sort,  # type: ignore[attr-defined]
 )
@@ -580,6 +581,14 @@ def tensor_auto_parallel(
             all_to_sharded_linear_in_place,
             sharded_to_all_linear_in_place,
         )
+    elif isinstance(model, DeepseekV4Model):
+        tensor_parallel_sharding_strategy = DeepSeekV4ShardingStrategy(
+            group,
+            all_to_sharded_linear,
+            sharded_to_all_linear,
+            all_to_sharded_linear_in_place,
+            sharded_to_all_linear_in_place,
+        )
     elif isinstance(model, MiniMaxModel):
         tensor_parallel_sharding_strategy = MiniMaxShardingStrategy(
             group,
@@ -833,6 +842,53 @@ class ShardedMoE(CustomMlxLayer):
                         mx.distributed.all_sum(y, group=self.sharding_group)
                     )
         return y
+
+
+class DeepSeekV4ShardingStrategy(TensorParallelShardingStrategy):
+    """Sharding for DeepSeek V4 Flash / Pro.
+
+    Mirrors the model's built-in `Model.shard()` (mlx_lm/models/deepseek_v4.py)
+    using exo's segment-aware shard wrappers, with per-layer `mx.eval` so the
+    full unsharded checkpoint never has to land in RAM at once on 128 GB nodes.
+    DSv4 uses different attribute names than DeepSeek V2/V3/V3.2 — `attn`
+    (not `self_attn`), `ffn` (not `mlp`), `wq_b`/`wo_b` (LoRA-decomposed Q and
+    output projections, not `q_b_proj`/`o_proj`) — so it cannot reuse
+    DeepSeekShardingStrategy.
+
+    The MoE handles its own cross-rank reduction via `sum_gradients` inside
+    `DeepseekV4MoE.__call__` once `sharding_group` is set; no ShardedMoE
+    wrapper is needed here.
+    """
+
+    def shard_model(
+        self,
+        model: nn.Module,
+        on_layer_loaded: LayerLoadedCallback | None,
+    ) -> nn.Module:
+        model = cast(DeepseekV4Model, model)
+        layers = model.model.layers
+        total = len(layers)
+
+        for i, layer in enumerate(layers):
+            mx.eval(layer.parameters())
+
+            layer.attn.wq_b = self.all_to_sharded_linear(layer.attn.wq_b)
+            layer.attn.wo_b = self.sharded_to_all_linear(layer.attn.wo_b)
+            layer.attn.n_heads //= self.N
+
+            layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
+            self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
+            self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.up_proj)
+            self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.gate_proj)
+            self.sharded_to_all_linear_in_place(layer.ffn.switch_mlp.down_proj)
+            self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.up_proj)
+
+            mx.eval(layer)
+            if on_layer_loaded is not None:
+                on_layer_loaded(i, total)
+
+        return model
 
 
 class GLM4MoeLiteShardingStrategy(TensorParallelShardingStrategy):

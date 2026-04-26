@@ -90,6 +90,32 @@ fi
 : "${MINIMAX_PRESENCE_PENALTY:=}"
 : "${MINIMAX_REPETITION_PENALTY:=}"
 
+# DeepSeek V4 Flash (~80 GB/rank at 4-bit): 158B total / 13B activated, hybrid
+# Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
+# YARN. Larger than MiniMax — won't coexist with Huihui scouts. Set
+# DSV4_ENABLED=1 to use, and disable MiniMax + scouts.
+: "${DSV4_MODEL_ID:=mlx-community/deepseek-ai-DeepSeek-V4-Flash-4bit}"
+: "${DSV4_ENABLED:=0}"
+# Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
+# benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
+# Two sessions = active turn + previous turn, mirroring MiniMax.
+: "${DSV4_MAX_PREFIX_SESSIONS:=2}"
+: "${DSV4_MAX_KV_TOKENS:=}"
+: "${DSV4_MAX_PREFIX_BYTES:=}"
+# KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
+# per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
+# 1M-context budgets; bf16 is fine at typical 50-200K usage. Empty = defer
+# to EXO_KV_CACHE_BITS env (default 4).
+: "${DSV4_KV_CACHE_BITS:=}"
+# Sampling defaults — official DeepSeek V4 Flash card recommends
+# temperature=1.0, top_p=1.0 for local deployment. Other params unset.
+: "${DSV4_TEMPERATURE:=1.0}"
+: "${DSV4_TOP_P:=1.0}"
+: "${DSV4_TOP_K:=}"
+: "${DSV4_MIN_P:=}"
+: "${DSV4_PRESENCE_PENALTY:=}"
+: "${DSV4_REPETITION_PENALTY:=}"
+
 # Qwen3.5-397B-A17B (~105GB/rank): ships trained MTP weights for ~2-3× decode
 # speedup, but pushes both nodes to ~85-90% RAM by itself — won't coexist with
 # Huihui scouts. Set QWEN35_ENABLED=1 to use, and disable MiniMax + scouts.
@@ -895,6 +921,58 @@ if [ "${MINIMAX_ENABLED:-0}" = "1" ]; then
         if [ "$READY" = false ]; then
             echo ""
             echo "  WARNING: MiniMax only $READY_COUNT/2 runners reached Ready."
+            echo "  Check ~/exo.log on the Studios."
+        fi
+    fi
+fi
+
+# ── Auto-place DeepSeek V4 Flash with RDMA ──
+# Single 2-node Tensor + MlxJaccl instance spanning both Studios. Replaces
+# MiniMax for the prediction-bot orchestrator slot. ~80 GB/rank at 4-bit
+# leaves ~48 GB headroom for KV cache + activations on each 128 GB node.
+# DSv4 + MiniMax + Huihui cannot coexist — disable the others first.
+if [ "${DSV4_ENABLED:-0}" = "1" ]; then
+    echo ""
+    echo "Auto-placing DeepSeek V4 Flash ($DSV4_MODEL_ID) across both Studios via RDMA..."
+
+    EXISTING_DSV4=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" \
+        '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
+    if [ -z "$EXISTING_DSV4" ] || [ "$EXISTING_DSV4" = "null" ]; then
+        EXISTING_DSV4=0
+    fi
+
+    if [ "$EXISTING_DSV4" -ge 1 ]; then
+        echo "  DeepSeek V4 instance already running. Skipping."
+    else
+        create_instance_with_retry "DeepSeek V4 Flash" "$DSV4_MODEL_ID" "Tensor" "MlxJaccl" 2 \
+            "$DSV4_TEMPERATURE" "$DSV4_TOP_P" "$DSV4_TOP_K" "$DSV4_MIN_P" \
+            "$DSV4_PRESENCE_PENALTY" "$DSV4_REPETITION_PENALTY" \
+            "$DSV4_MAX_KV_TOKENS" "$DSV4_MAX_PREFIX_SESSIONS" \
+            "$DSV4_KV_CACHE_BITS" "$DSV4_MAX_PREFIX_BYTES" || true
+
+        echo -n "Waiting for 2 DeepSeek V4 runner(s) to become Ready..."
+        READY=false
+        READY_COUNT=0
+        for i in {1..180}; do
+            READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" '
+                . as $root
+                | [ $root.instances | to_entries[]
+                    | select(.value.MlxJacclInstance.shardAssignments.modelId == $m)
+                    | .value.MlxJacclInstance.shardAssignments.runnerToShard | keys[] ] as $rids
+                | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
+            ' 2>/dev/null)
+            if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
+            if [ "$READY_COUNT" -ge 2 ]; then
+                echo " READY ($READY_COUNT/2)"
+                READY=true
+                break
+            fi
+            echo -n "."
+            sleep 2
+        done
+        if [ "$READY" = false ]; then
+            echo ""
+            echo "  WARNING: DeepSeek V4 only $READY_COUNT/2 runners reached Ready."
             echo "  Check ~/exo.log on the Studios."
         fi
     fi
