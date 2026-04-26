@@ -94,7 +94,7 @@ fi
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
 # YARN. Larger than MiniMax — won't coexist with Huihui scouts. Set
 # DSV4_ENABLED=1 to use, and disable MiniMax + scouts.
-: "${DSV4_MODEL_ID:=mlx-community/deepseek-ai-DeepSeek-V4-Flash-4bit}"
+: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-4bit}"
 : "${DSV4_ENABLED:=0}"
 # Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).

@@ -73,18 +73,15 @@ huggingface.co/deepseek-ai/DeepSeek-V4-Flash/raw/main/config.json):
   MoE experts are FP4 in the official release
 
 MLX-community quantizations available (Apr 2026):
-- mlx-community/deepseek-ai-DeepSeek-V4-Flash-3bit (smallest, ~60 GB)
-- mlx-community/deepseek-ai-DeepSeek-V4-Flash-4bit (~80 GB)
-- mlx-community/deepseek-ai-DeepSeek-V4-Flash-8bit (~160 GB — tight
-  fit at 256 GB cluster total, but fits)
+- mlx-community/DeepSeek-V4-Flash-4bit (~150 GB)
+- mlx-community/DeepSeek-V4-Flash-8bit (~160 GB — tight fit at
+  256 GB cluster total, but fits)
 
 Memory math for cluster (256 GB total, 2-rank TP):
-- 4-bit: ~80 GB / 2 ranks ≈ ~40 GB/rank → comfortable, fits with
-  large KV cache headroom for 1M context
+- 4-bit: ~150 GB / 2 ranks ≈ ~75 GB/rank → fits with KV cache
+  headroom for long context
 - 8-bit: ~160 GB / 2 ranks ≈ ~80 GB/rank → tight; KV cache needs
   to be sized carefully for long context
-- 3-bit: ~60 GB / 2 ranks ≈ ~30 GB/rank → lots of headroom; use
-  if quality tolerates
 
 MQA + tiny KV cache is a meaningful change vs MiniMax. With 1 KV
 head and head_dim=512, KV cache per token = 2 * 1 * 512 * 2 bytes
@@ -97,7 +94,7 @@ Phase 1 — does it load?
 
 The first concrete question: does mlx-lm 0.31.3+ have a
 `models/deepseek_v4.py`? If yes, exo should be able to load
-mlx-community/deepseek-ai-DeepSeek-V4-Flash-4bit out of the box
+mlx-community/DeepSeek-V4-Flash-4bit out of the box
 (after maybe a sharding strategy in auto_parallel.py).
 
 Steps:

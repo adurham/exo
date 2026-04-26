@@ -582,41 +582,6 @@ def load_tokenizer_for_model_id(
         eos_token_ids=eos_token_ids,
     )
 
-    # DeepSeek V4 ships a Python `encoding_dsv4` module instead of a jinja
-    # chat_template, so the tokenizer has `chat_template = None` and the
-    # warmup path crashes the moment it tries to render even a trivial prompt.
-    # Inject a minimal DSv3-style template as a fallback so warmup (and any
-    # generic chat-completion path) can render. Real conversation formatting
-    # for DSv4 should ultimately go through a dsml-encoding-style hook in
-    # render_chat_template; this is the unblock-the-load floor.
-    if "deepseek-v4" in model_id_lower:
-        existing_template = getattr(
-            tokenizer._tokenizer, "chat_template", None
-        )
-        if not existing_template:
-            tokenizer._tokenizer.chat_template = (
-                "{% if not add_generation_prompt is defined %}"
-                "{% set add_generation_prompt = false %}"
-                "{% endif %}"
-                "{%- set ns = namespace(system_prompt='') -%}"
-                "{%- for message in messages -%}"
-                "{%- if message['role'] == 'system' -%}"
-                "{%- set ns.system_prompt = message['content'] -%}"
-                "{%- endif -%}"
-                "{%- endfor -%}"
-                "{{ bos_token }}{{ ns.system_prompt }}"
-                "{%- for message in messages -%}"
-                "{%- if message['role'] == 'user' -%}"
-                "{{ '<｜User｜>' + message['content'] }}"
-                "{%- elif message['role'] == 'assistant' -%}"
-                "{{ '<｜Assistant｜>' + message['content'] + '<｜end▁of▁sentence｜>' }}"
-                "{%- endif -%}"
-                "{%- endfor -%}"
-                "{%- if add_generation_prompt -%}"
-                "{{ '<｜Assistant｜>' }}"
-                "{%- endif -%}"
-            )
-
     return tokenizer
 
 
