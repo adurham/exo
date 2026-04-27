@@ -19,11 +19,9 @@ from mlx_lm.models.base import (
 from mlx_lm.models.cache import ArraysCache, KVCache
 from mlx_lm.models.deepseek_v3 import DeepseekV3MLP
 from mlx_lm.models.deepseek_v3 import Model as DeepseekV3Model
-from mlx_lm.models.deepseek_v4 import DeepseekV4MoE, V4Attention
 from mlx_lm.models.deepseek_v4 import Model as DeepseekV4Model
 from mlx_lm.models.deepseek_v32 import DeepseekV32MLP
 from mlx_lm.models.deepseek_v32 import Model as DeepseekV32Model
-from mlx_lm.models.deepseek_v4 import Model as DeepseekV4Model
 from mlx_lm.models.switch_layers import (
     _gather_sort as _switch_gather_sort,  # type: ignore[attr-defined]
 )
@@ -105,6 +103,13 @@ _MINIMAX_NOOP_SDPA: bool = os.environ.get("EXO_MINIMAX_NOOP_SDPA", "0") == "1"
 # Off by default: production cluster's quantized MiniMax projections
 # aren't supported by the bf16-only Week-1 path and would silently skip.
 _MINIMAX_FUSED_ATTN: bool = os.environ.get("EXO_MINIMAX_FUSED_ATTN", "0") == "1"
+
+# Fuse DSv4 MoE switch_mlp gate_proj + up_proj into a single gather_qmm
+# dispatch. Saves one Metal dispatch per layer per decode token (43 per
+# DSv4 forward pass at ~100-200 µs each). Off by default while we
+# validate decode quality vs unfused. See `_install_dsv4_fused_gate_up`
+# below.
+_DSV4_FUSED_MOE: bool = os.environ.get("EXO_DSV4_FUSED_MOE", "0") == "1"
 
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
@@ -880,6 +885,12 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             self.sharded_to_all_linear_in_place(layer.ffn.switch_mlp.down_proj)
             self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.up_proj)
 
+            # Fuse gate + up into a single gather_qmm dispatch (43 fewer
+            # Metal dispatches per decode token). Off by default while we
+            # validate decode quality.
+            if _DSV4_FUSED_MOE:
+                _install_dsv4_fused_gate_up(layer.ffn.switch_mlp)
+
             mx.eval(layer)
             mx.clear_cache()
             yield ModelLoadingResponse(layers_loaded=i, total=total)
@@ -1101,6 +1112,131 @@ def _install_fused_gate_up(switch_mlp: nn.Module) -> None:
     sm.up_proj = nn.Module()
 
     switch_mlp.__class__ = FusedSwitchGLU
+
+
+class FusedDeepseekV4SwitchGLU(nn.Module):
+    """Drop-in DeepseekV4SwitchGLU replacement that fuses gate_proj +
+    up_proj into a single ``mx.gather_qmm`` dispatch.
+
+    Mirrors ``DeepseekV4SwitchGLU.__call__``'s 3-arg ``(x, indices,
+    scores)`` signature, preserves the model's ``self.activation``
+    (``LimitedSwiGLU`` for DSv4) and per-token expert sum. Uses
+    ``__class__ = FusedDeepseekV4SwitchGLU`` rebind so all instance
+    attributes (activation, sort_threshold, down_proj, fused weight
+    handles) survive.
+
+    Saves one Metal dispatch per decoder layer per decode token (43 per
+    DSv4 forward at ~100-200 µs each on the M4 Max cluster). Concat
+    order in the fused weight is ``[up, gate]`` to match DSv4's call
+    order (``up_proj`` runs before ``gate_proj`` in
+    ``DeepseekV4SwitchGLU.__call__``).
+    """
+
+    sort_threshold: int = 8
+
+    def __call__(self, x: mx.array, indices: mx.array, scores: mx.array) -> mx.array:  # type: ignore[override]
+        self_any: Any = self
+        out_shape = x.shape
+        route_shape = indices.shape
+        x = mx.expand_dims(x, (-2, -3))
+
+        do_sort = indices.size >= self.sort_threshold
+        inv_order: Any = None
+        if do_sort:
+            flat_indices = indices.flatten()
+            order = mx.argsort(flat_indices)
+            inv_order = mx.argsort(order)
+            x = x.flatten(0, -3)[order // route_shape[-1]]
+            indices = flat_indices[order]
+            scores = scores.flatten()[order]
+
+        gu: Any = mx.gather_qmm(
+            x,
+            self_any._fused_w_gu,
+            self_any._fused_s_gu,
+            self_any._fused_b_gu,
+            rhs_indices=indices,
+            transpose=True,
+            group_size=self_any._fused_group_size,
+            bits=self_any._fused_bits,
+            mode=self_any._fused_mode,
+            sorted_indices=do_sort,
+        )
+        n: int = self_any._fused_n_inter
+        x_up = gu[..., :n]
+        x_gate = gu[..., n:]
+
+        x = self_any.activation(x_up, x_gate)
+        x = x * scores.astype(x.dtype)[..., None, None]
+        x = self_any.down_proj(x, indices, sorted_indices=do_sort)
+
+        if do_sort:
+            x = _switch_scatter_unsort_any(x, inv_order, route_shape)
+
+        x = x.squeeze(-2)
+        return x.sum(axis=-2).astype(x.dtype).reshape(out_shape)
+
+
+def _install_dsv4_fused_gate_up(switch_mlp: nn.Module) -> None:
+    """Pre-concatenate up_proj + gate_proj weights on a DSv4 ``switch_mlp``
+    for a single ``gather_qmm`` at forward time. Rebinds the instance to
+    :class:`FusedDeepseekV4SwitchGLU` so its ``__call__`` uses the fused
+    path.
+
+    Must be called after tensor-parallel sharding of gate_proj/up_proj —
+    output-dim axis is already ``moe_intermediate_size / N`` per rank.
+    Concat is along that (local) output axis. Concat order is
+    ``[up, gate]`` to match DSv4's call order.
+    """
+    sm: Any = switch_mlp
+    gp: Any = sm.gate_proj
+    up: Any = sm.up_proj
+    gp_bits = getattr(gp, "bits", None)
+    up_bits = getattr(up, "bits", None)
+    gp_group = getattr(gp, "group_size", None)
+    up_group = getattr(up, "group_size", None)
+    assert gp_bits is not None and gp_bits == up_bits, \
+        f"gate/up bits mismatch: {gp_bits} vs {up_bits}"
+    assert gp_group is not None and gp_group == up_group, \
+        f"gate/up group_size mismatch: {gp_group} vs {up_group}"
+    gp_mode = getattr(gp, "mode", "affine")
+    up_mode = getattr(up, "mode", "affine")
+    assert gp_mode == up_mode, f"gate/up mode mismatch: {gp_mode} vs {up_mode}"
+
+    gp_w: mx.array = gp["weight"]
+    gp_s: mx.array = gp["scales"]
+    up_w: mx.array = up["weight"]
+    up_s: mx.array = up["scales"]
+    gp_b = gp.get("biases") if hasattr(gp, "get") else getattr(gp, "biases", None)
+    up_b = up.get("biases") if hasattr(up, "get") else getattr(up, "biases", None)
+
+    fused_w: mx.array = mx.concatenate([up_w, gp_w], axis=1)
+    fused_s: mx.array = mx.concatenate([up_s, gp_s], axis=1)
+    fused_b: mx.array | None = (
+        mx.concatenate([up_b, gp_b], axis=1)
+        if gp_b is not None and up_b is not None
+        else None
+    )
+    mx.eval(fused_w, fused_s)
+    if fused_b is not None:
+        mx.eval(fused_b)
+
+    sm._fused_w_gu = fused_w
+    sm._fused_s_gu = fused_s
+    sm._fused_b_gu = fused_b
+    sm._fused_n_inter = int(up_w.shape[1])
+    sm._fused_group_size = int(gp_group)
+    sm._fused_bits = int(gp_bits)
+    sm._fused_mode = gp_mode
+
+    # Free the now-redundant originals — gate_proj + up_proj + fused
+    # together would triple the MoE weight footprint per layer. After
+    # the __class__ rebind FusedDeepseekV4SwitchGLU only references
+    # self.down_proj.
+    sm.gate_proj = nn.Module()
+    sm.up_proj = nn.Module()
+
+    switch_mlp.__class__ = FusedDeepseekV4SwitchGLU
 
 
 class WrappedMiniMaxAttention(CustomMlxLayer):
