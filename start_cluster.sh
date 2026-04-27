@@ -131,9 +131,12 @@ fi
 : "${DSV4_PREFILL_STEP_SIZE:=512}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
-# 1M-context budgets; bf16 is fine at typical 50-200K usage. Empty = defer
-# to EXO_KV_CACHE_BITS env (default 4).
-: "${DSV4_KV_CACHE_BITS:=}"
+# 1M-context budgets; bf16 is fine at typical 50-200K usage.
+# 0 = explicitly disable. rlt's V4Cache wraps a sliding-window RotatingKVCache
+# whose interaction with fork's QuantizedKVCache wrapper hasn't been validated;
+# leaving it bf16 until we confirm the quant path round-trips cleanly through
+# the compressor branches.
+: "${DSV4_KV_CACHE_BITS:=0}"
 # Sampling defaults — official DeepSeek V4 Flash card recommends
 # temperature=1.0, top_p=1.0 for local deployment. Other params unset.
 : "${DSV4_TEMPERATURE:=1.0}"
