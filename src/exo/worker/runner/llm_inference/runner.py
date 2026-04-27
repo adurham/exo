@@ -117,6 +117,7 @@ class Runner:
             max_kv_tokens=self.instance.max_kv_tokens,
             max_prefix_sessions=self.instance.max_prefix_sessions,
             max_prefix_bytes=self.instance.max_prefix_bytes,
+            prefill_step_size=self.instance.prefill_step_size,
             kv_cache_bits=self.instance.kv_cache_bits,
             default_temperature=self.instance.default_temperature,
             default_top_p=self.instance.default_top_p,
@@ -455,6 +456,8 @@ class Builder:
     max_kv_tokens: int | None = None
     max_prefix_sessions: int | None = None
     max_prefix_bytes: int | None = None
+    # Per-instance prefill chunk override (see BaseInstance.prefill_step_size).
+    prefill_step_size: int | None = None
     # Per-instance KV cache quantization override (see BaseInstance.kv_cache_bits).
     kv_cache_bits: int | None = None
     default_temperature: float | None = None
@@ -535,6 +538,7 @@ class Builder:
                 event_sender=self.event_sender,
                 vision_processor=vision_processor,
                 max_kv_tokens=self.max_kv_tokens,
+                prefill_step_size=self.prefill_step_size,
                 **sampling_kwargs,
             )
         logger.info("using BatchGenerator")
@@ -550,5 +554,6 @@ class Builder:
             event_sender=self.event_sender,
             vision_processor=vision_processor,
             max_kv_tokens=self.max_kv_tokens,
+            prefill_step_size=self.prefill_step_size,
             **sampling_kwargs,
         )

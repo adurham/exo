@@ -29,6 +29,13 @@ class BaseInstance(TaggedModel):
     max_prefix_sessions: int | None = None
     max_prefix_bytes: int | None = None
 
+    # Per-instance prefill chunk size override. Resolution order at runtime:
+    #   1. instance.prefill_step_size (if not None)  ← this field
+    #   2. EXO_PREFILL_STEP_SIZE env var (if set)
+    #   3. Hardcoded default 4096
+    # DSv4 sparse-index attention cubic-blowup forces ≤1024 here.
+    prefill_step_size: int | None = None
+
     # Per-instance KV cache quantization override. Resolution order at runtime:
     #   1. instance.kv_cache_bits (if not None)    ← this field
     #   2. EXO_KV_CACHE_BITS env var (if set)

@@ -125,6 +125,7 @@ class SequentialGenerator(InferenceGenerator):
     vision_processor: VisionProcessor | None = None
     check_for_cancel_every: int = 50
     max_kv_tokens: int | None = None
+    prefill_step_size: int | None = None
     default_temperature: float | None = None
     default_top_p: float | None = None
     default_top_k: int | None = None
@@ -346,6 +347,7 @@ class SequentialGenerator(InferenceGenerator):
             group=self.group,
             vision_processor=self.vision_processor,
             max_kv_tokens=self.max_kv_tokens,
+            prefill_step_size=self.prefill_step_size,
             instance_temperature=self.default_temperature,
             instance_top_p=self.default_top_p,
             instance_top_k=self.default_top_k,
@@ -373,6 +375,7 @@ class BatchGenerator(InferenceGenerator):
     check_for_cancel_every: int = 50
     vision_processor: VisionProcessor | None = None
     max_kv_tokens: int | None = None
+    prefill_step_size: int | None = None
     default_temperature: float | None = None
     default_top_p: float | None = None
     default_top_k: int | None = None
@@ -405,6 +408,7 @@ class BatchGenerator(InferenceGenerator):
             vision_processor=self.vision_processor,
             model_id=self.model_id,
             max_kv_tokens=self.max_kv_tokens,
+            prefill_step_size=self.prefill_step_size,
             default_temperature=self.default_temperature,
             default_top_p=self.default_top_p,
             default_top_k=self.default_top_k,

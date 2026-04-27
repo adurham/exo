@@ -322,6 +322,7 @@ def prefill(
     group: mx.distributed.Group | None,
     on_prefill_progress: Callable[[int, int], None] | None,
     distributed_prompt_progress_callback: Callable[[], None] | None,
+    prefill_step_size: int | None = None,
 ) -> tuple[float, int, list[CacheSnapshot]]:
     """Prefill the KV cache with prompt tokens.
 
@@ -386,7 +387,8 @@ def prefill(
 
     is_pipeline = _has_pipeline_communication_layer(model)
 
-    prefill_step_size = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
+    if prefill_step_size is None:
+        prefill_step_size = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
 
     try:
         if is_pipeline and num_tokens >= prefill_step_size:
@@ -600,6 +602,7 @@ def mlx_generate(
     vision_processor: VisionProcessor | None = None,
     is_warmup: bool = False,
     max_kv_tokens: int | None = None,
+    prefill_step_size: int | None = None,
     instance_temperature: float | None = None,
     instance_top_p: float | None = None,
     instance_top_k: int | None = None,
@@ -745,6 +748,7 @@ def mlx_generate(
             group,
             on_prefill_progress,
             distributed_prompt_progress_callback,
+            prefill_step_size=prefill_step_size,
         )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
