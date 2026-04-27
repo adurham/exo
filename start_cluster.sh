@@ -27,6 +27,11 @@ else
     : "${EXO_KV_CACHE_BITS:=4}"
 fi
 : "${EXO_COMPUTE_DTYPE:=bf16}"
+# 2-pass SDPA block count override. Empirical sweet-spot 88 on M4 Max for
+# MiniMax (+6.5% decode at 50K context); same SDPA kernel path used by
+# DSv4 with kv_heads=1, so worth carrying as a default. Sharp regression
+# above 92 — see minimax_sdpa_blocks88 memory + mlx PR #3455.
+: "${MLX_SDPA_BLOCKS:=88}"
 : "${EXO_SPECULATIVE_GAMMA:=3}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
