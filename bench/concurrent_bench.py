@@ -226,10 +226,12 @@ def main() -> int:
 
     matching_instances: list[str] = []
     for inst_id, inst in (state.get("instances") or {}).items():
-        ring = inst.get("MlxRingInstance") or {}
-        sa = ring.get("shardAssignments") or {}
-        if sa.get("modelId") == args.model:
-            matching_instances.append(inst_id)
+        for variant_key in ("MlxRingInstance", "MlxJacclInstance", "MlxInstance"):
+            variant = inst.get(variant_key) or {}
+            sa = variant.get("shardAssignments") or {}
+            if sa.get("modelId") == args.model:
+                matching_instances.append(inst_id)
+                break
     if not matching_instances:
         logger.error(
             f"No running instances found for model {args.model}. "

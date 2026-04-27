@@ -4,26 +4,31 @@ Cross-repo tracker for what `adurham/{exo,mlx,mlx-lm}` carries on top of upstrea
 and what's been pushed forward to upstream review. Companion to
 [fork-notes.md](./fork-notes.md), which tracks dependency pins.
 
-Last refresh: 2026-04-26.
+Last refresh: 2026-04-27.
 
 ---
 
 ## Status board
 
-### Open PRs (10)
+### Open PRs (8)
 
 | Repo | PR | Title | Status |
 |---|---|---|---|
 | `ml-explore/mlx-lm` | [#1204](https://github.com/ml-explore/mlx-lm/pull/1204) | minimax: validate head_dim against checkpoint, drop unused shared_intermediate_size | review required, CI not run yet |
-| `ml-explore/mlx` | [#3454](https://github.com/ml-explore/mlx/pull/3454) | Add `mx.metal.dispatch_count()` for kernel-dispatch diagnostics | review required, CI not run yet |
-| `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | review required |
-| `ml-explore/mlx` | [#3456](https://github.com/ml-explore/mlx/pull/3456) | fix: address GPU locks by synchronizing GPU and CPU memory with DSB barrier | review required |
+| `ml-explore/mlx` | [#3454](https://github.com/ml-explore/mlx/pull/3454) | Add `mx.metal.dispatch_count()` for kernel-dispatch diagnostics | zcbenz: wants per-CommandEncoder counter (multi-stream attribution); macOS 15.0 CI failed |
+| `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | **APPROVED** by zcbenz 2026-04-27, awaiting merge |
+| `ml-explore/mlx` | [#3456](https://github.com/ml-explore/mlx/pull/3456) | fix: address GPU locks by synchronizing GPU and CPU memory with DSB barrier | **CHANGES_REQUESTED** by zcbenz — wants Apple-Metal-engineer-level proof of the DMB ISH/DSB SY claim. Coordinate with @rltakashige + @vskiwi |
 | `exo-explore/exo` | [#1985](https://github.com/exo-explore/exo/pull/1985) | feat: Prometheus `/metrics` endpoint | review required |
 | `exo-explore/exo` | [#1988](https://github.com/exo-explore/exo/pull/1988) | feat: `EXO_KV_CACHE_BITS` env var + step=16384 for QuantizedKVCache | review required |
-| `exo-explore/exo` | [#1989](https://github.com/exo-explore/exo/pull/1989) | fix: route by in-flight tasks only — completed tasks were skewing load balance | review required |
 | `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | review required |
-| `exo-explore/exo` | [#1991](https://github.com/exo-explore/exo/pull/1991) | fix: map presence_penalty and frequency_penalty from ChatCompletionRequest | review required |
 | `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | review required |
+
+### Recently merged (2)
+
+| Repo | PR | Title |
+|---|---|---|
+| `exo-explore/exo` | [#1989](https://github.com/exo-explore/exo/pull/1989) | fix: route by in-flight tasks only — completed tasks were skewing load balance |
+| `exo-explore/exo` | [#1991](https://github.com/exo-explore/exo/pull/1991) | fix: map presence_penalty and frequency_penalty from ChatCompletionRequest |
 
 ### Open issues / design questions (3)
 
@@ -72,9 +77,9 @@ Last refresh: 2026-04-26.
 | `mx.metal.dispatch_count()` | **PR #3454** | Cleaned vs fork: dropped env-gate (always-on), added Python test. PR description asks maintainer about env-gate vs always-on. |
 | Chunked SDPA + LogSumExp | needs Thump604 coordination | Thump604's work; their PRs #3293 (head_dim=256) and #3307 (chunked) **both closed without merge** 2026-04-04 after zcbenz asked for perf-regression data and a separate issue. Author hasn't returned. |
 | `MLX_SDPA_FUSED_THRESHOLD` env var | folded into Thump604 work | The gate this parameterizes (`sdpa_full_large_hd_ok`, head_dim 192/256, `key_sequence_length > 16384`) doesn't exist upstream — it would have to land via re-revival of #3293/#3307. |
-| `MLX_SDPA_BLOCKS` env var (`sdpa_2pass_blocks_override`) | **PR #3455** | Bundled into Phase-2 commit `1f6eb6bd` but conceptually independent. Tunes the 2-pass blocks heuristic for both bf16 and quant dispatches. Empirical sweet-spot 88 at 50K/M4 Ultra/MiniMax (+6.5%). Could land standalone since the override applies to upstream's existing 2-pass kernel. ~10 lines. |
+| `MLX_SDPA_BLOCKS` env var | **PR #3455** | Bundled into Phase-2 commit `1f6eb6bd` but conceptually independent. Tunes the 2-pass blocks heuristic for both bf16 and quant dispatches. Empirical sweet-spot 88 at 50K/M4 Ultra/MiniMax (+6.5%). Could land standalone since the override applies to upstream's existing 2-pass kernel. ~10 lines. **Round-1 review (zcbenz, 2026-04-26)**: dropped the test, switched to `env::get_var`, renamed away from `override` keyword. **Round-2 (zcbenz, 2026-04-27 UTC)**: helper function dropped — env read inlined directly at the call site (`a7a77ab6`). |
 | Quantized SDPA kernel (Phase-2) | NEEDS-CLEANUP, large surface | Tightly coupled to `quantized.h` packing; head_dim limited to 64/128; needs upstream-facing docs of the bits/group contract; depends on upstream wanting QuantizedKVCache. Multi-PR series if pursued. |
-| RDMA GPU lock fix (DSB barrier) | **PR #3456** | Core insight (DSB SY barrier for ARM64 GPU/CPU coherence) is correct. Distilled iterative "nuclear" hacks into a clean single-commit fix with rationale. |
+| RDMA GPU lock fix (DSB barrier) | **PR #3456** | Write-side `__dsb` patch in `Fence::update` — addresses CPU↔GPU/DMA coherence on ARM64 (DMB ISH inner-shareable doesn't reach GPU; DSB SY full-system does). **NOT NEW WORK** — prior art is mlx#3141 (vskiwi, closed Feb 24, 2026) + still-open issue mlx#3142 (rltakashige). PR description rewritten 2026-04-26 to acknowledge that history. Two open follow-up questions: (1) currently ships `__dsb(0xE)` / DSB ST matching the original Feb 16 commit, but the empirical Feb 17 finding on M3 Ultra was that `0xF` / DSB SY is required — happy to upgrade. (2) Read-side fix per vskiwi's [Mar 8 #3142 comment](https://github.com/ml-explore/mlx/issues/3142#issuecomment-4018576460) not included; should it ride along? See `docs/fork-notes.md` for full history + cluster A/B attempt (couldn't reproduce on 2× M4 Max — matches vskiwi's 2-node observation). If revived, **coordinate with @rltakashige + @vskiwi** rather than landing under adurham's name. |
 | Jaccl refactor revert | won't upstream | Reverts upstream #3412 + #3418; should be a bug report on ml-explore/mlx for the 2-rank RDMA init failure, not a revert PR. |
 
 ### mlx-lm (`ml-explore/mlx-lm`)

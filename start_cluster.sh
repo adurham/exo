@@ -38,7 +38,7 @@ fi
 
 # Model placed automatically at startup; 1 instance per Studio (2 total) for prediction-bot.
 : "${HUIHUI_MODEL_ID:=mlx-community/Huihui-Qwen3.5-35B-A3B-abliterated-mxfp4}"
-: "${HUIHUI_INSTANCES_PER_STUDIO:=1}"
+: "${HUIHUI_INSTANCES_PER_STUDIO:=0}"
 # Scout instances only ever serve a single request type — cap KV memory so they
 # can't accumulate prefix history that crowds out MiniMax on the same node.
 : "${HUIHUI_MAX_KV_TOKENS:=36864}"
@@ -70,7 +70,7 @@ fi
 # under the 124 GB wired_limit for Huihui scouts (~18 GB/node) to co-reside.
 # No MTP weights upstream, so no spec-decode speedup. Default = on.
 : "${MINIMAX_MODEL_ID:=mlx-community/MiniMax-M2.7-5bit}"
-: "${MINIMAX_ENABLED:=1}"
+: "${MINIMAX_ENABLED:=0}"
 # Prefix caching: the radix trie dedupes shared prefixes across leaves, so 4
 # sessions is enough for a Hermes orchestrator (parent + up to 3 children) or
 # a few concurrent channels without paying for unshared copies. Tighter than
@@ -101,12 +101,12 @@ fi
 : "${MINIMAX_PRESENCE_PENALTY:=}"
 : "${MINIMAX_REPETITION_PENALTY:=}"
 
-# DeepSeek V4 Flash (~80 GB/rank at 4-bit): 158B total / 13B activated, hybrid
+# DeepSeek V4 Flash (~100 GB/rank at 6-bit): 158B total / 13B activated, hybrid
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
 # YARN. Larger than MiniMax — won't coexist with Huihui scouts. Set
-# DSV4_ENABLED=1 to use, and disable MiniMax + scouts.
-: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-4bit}"
-: "${DSV4_ENABLED:=0}"
+# DSV4_ENABLED=0 to skip; MiniMax + scouts must stay off while it's enabled.
+: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-6bit}"
+: "${DSV4_ENABLED:=1}"
 # Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
 # Two sessions = active turn + previous turn, mirroring MiniMax.
@@ -955,8 +955,9 @@ fi
 
 # ── Auto-place DeepSeek V4 Flash with RDMA ──
 # Single 2-node Tensor + MlxJaccl instance spanning both Studios. Replaces
-# MiniMax for the prediction-bot orchestrator slot. ~80 GB/rank at 4-bit
-# leaves ~48 GB headroom for KV cache + activations on each 128 GB node.
+# MiniMax for the prediction-bot orchestrator slot. ~100 GB/rank at 6-bit
+# leaves ~24 GB headroom for KV cache + activations on each 128 GB node
+# (under the 124 GB iogpu.wired_limit_mb).
 # DSv4 + MiniMax + Huihui cannot coexist — disable the others first.
 if [ "${DSV4_ENABLED:-0}" = "1" ]; then
     echo ""

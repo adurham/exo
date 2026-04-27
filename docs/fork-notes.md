@@ -163,6 +163,116 @@ need RDMA hardware). Reference `#3412` + `#3418`. Once merged, drop
 > [upstream-prs.md](./upstream-prs.md) — an issue + reproducer is the
 > right artifact, not a revert PR.
 
+## adurham/mlx main — DSB barrier in `Fence::update`
+
+Pinned (as of exo `6ae331fe`): `1f6eb6bd` (carries the patch as part of the
+broader pin).
+
+### What we're carrying
+
+In `mlx/backend/metal/fence.cpp::Fence::update` (CPU fast-path, ~6 lines):
+
+```cpp
+// ARM64 std::atomic seq_cst → STLR + DMB ISH (Inner Shareable, CPU-only).
+// GPU/DMA sit outside that domain. Use DSB SY (Full System) to force the
+// store to coherence visible to all observers.
+f.cpu_value()->store(count, std::memory_order_seq_cst);
+__dsb(0xF);
+```
+
+Plus the GPU-side `fence.metal` "nuclear" rewrite (outer-30 × inner-1M spin
+with a system-scope `__metal_atomic_load_explicit` fallback) and a
+`MAX_ACTIVE_TASKS` 10→5 throttle in `transforms.cpp`. All from
+@rltakashige's `address-rdma-gpu-locks` branch (Feb 16-25, 2026).
+
+### Why
+
+Issue **[ml-explore/mlx#3142](https://github.com/ml-explore/mlx/issues/3142)** — `[BUG] GPU locking using METAL_FAST_SYNCH=1 and the JACCL backend`,
+opened by @rltakashige Feb 18, 2026. Still **OPEN**.
+
+Symptom (per #3142 and vskiwi's #3141 writeup): on multi-rank jaccl/RDMA
+inference with `MLX_METAL_FAST_SYNCH=1`, the GPU's `fence_wait` Metal
+kernel can spin on a stale cached value indefinitely after the CPU has
+already written the updated counter. The CPU-side fast-fence store
+compiles to `STLR + DMB ISH` (Inner Shareable scope — CPU cores only); the
+GPU and DMA engines sit in the Full System domain and may not observe the
+update. `DSB SY` after the store forces it to a point of coherence visible
+to all observers.
+
+### History — read this before changing anything in this area
+
+- **Feb 16, 2026** — @rltakashige's first attempt landed on his
+  `address-rdma-gpu-locks` branch (commit `dccc5415`, originally
+  `__dsb(0xE)` / DSB ST).
+- **Feb 17** — same branch switched to `__dsb(0xF)` / DSB SY ("Use DSB SY
+  and not ST.") after empirical testing showed ST insufficient on Apple
+  Silicon. Then explicit `std::atomic::store(seq_cst)` for clarity.
+- **Feb 18-25** — same branch added the GPU-side spin-loop changes and
+  the `MAX_ACTIVE_TASKS` throttle ("Sorry, going to use a nuclear
+  solution for now." → "make nuclear solution even more nuclear 2").
+- **Feb 18** — @vskiwi opened **PR [#3141](https://github.com/ml-explore/mlx/pull/3141)** with a polished writeup of the same
+  fix (CPU-side DSB SY + GPU-side system-scope atomic load fallback),
+  tested on 4× M3 Ultra 512 GB / GLM-5 754B tensor parallel.
+- **Feb 19** — @awni merged **#3144** (cross-CB fence sync — adjacent
+  but does *not* address coherence).
+- **Feb 19** — vskiwi reported being unable to reproduce the deadlock on
+  a clean cluster after #3144 landed. **PR #3141 closed Feb 24** by mutual
+  agreement (@angeloskath, @vskiwi). Issue #3142 stayed open.
+- **Mar 8** — vskiwi posted a [follow-up in #3142](https://github.com/ml-explore/mlx/issues/3142#issuecomment-4018576460) identifying a **read-side**
+  coherence gap: `Fence::wait`'s spin loop also needs `__dsb(0xF)`. Their
+  evidence: `sample` of a deadlocked process showed 271/271 samples stuck
+  in the read loop. **Our fork does NOT carry this read-side fix.**
+- **Apr 26** — opened our own PR [#3456](https://github.com/ml-explore/mlx/pull/3456) (just the write-side patch).
+  Description rewritten same day with the full prior-art context above
+  after @zcbenz pushed back ("you need to prove this is not AI
+  hallucinations first") — that pushback makes sense given #3141's history.
+
+### Reproduction status — A/B is hard
+
+The bug reproduces under specific conditions (per #3141 / #3142):
+- 4 nodes preferred over 2; repro frequency increases with rank count
+- Large tensor-parallel models (GLM-5 754B observed)
+- Per-layer `mx.eval` during exo's TP weight sharding (~78 rapid fence
+  cycles immediately after JACCL init); `mlx_lm.sharded_load`'s bulk-eval
+  pattern does *not* consistently trigger
+- macOS 26.2 → silent data corruption; 26.3+ → SIGABRT or hang
+
+**Our 2× M4 Max cluster sits below the threshold.** Attempted A/B test
+2026-04-26: built four binary-distinct mlx variants (no-fix / DSB ST /
+DSB SY / DSB SY + nuclear), ran each on real jaccl/RDMA over Thunderbolt
+with `MLX_METAL_FAST_SYNCH=1`, payloads 4 KB → 16 MB, sustained 60-110 s.
+**All four variants pass.** Synthetic 2-rank loads do not reliably
+reproduce the hang — matches @vskiwi's experience that closed #3141.
+
+What we do have: the patch has run on the cluster since Feb 16, 2026 with
+zero observed fence deadlocks during normal MiniMax/Huihui operation.
+That's an absence-of-symptom over ~2 months, not a controlled A/B. Be
+precise about that distinction when discussing this with reviewers.
+
+### Known gaps in our fork's fix
+
+1. **Read-side**: vskiwi's Mar 8 #3142 comment proposes adding
+   `__dsb(0xF)` inside `Fence::wait`'s spin loop. Our fork doesn't have
+   it. Adding it would be strictly more correct but is untested on our
+   hardware.
+2. **Hazard tracking**: vskiwi's #3142 Feb 18 comment also recommends
+   `HazardTrackingModeUntracked → HazardTrackingModeDefault` in
+   `allocator.cpp:15` to address a separate buffer-lifetime crash they
+   saw at long contexts. Our fork doesn't carry this either; we haven't
+   observed the crash.
+
+### Coordination
+
+If the upstream PR gets serious traction, **coordinate with @rltakashige
+and @vskiwi** — they originated the work, have the larger-cluster repro
+environment, and the right move is for one of them (not adurham) to be
+the upstream author of any successor to #3141.
+
+> **Upstream tracking:** opened as PR #3456 (see
+> [upstream-prs.md](./upstream-prs.md)) — write-side only, deferring the
+> read-side and hazard-tracking pieces to follow-ups or a #3141 revival
+> by the original authors.
+
 ## adurham/mlx main — quantized SDPA kernel + dispatch knob
 
 Pinned (as of exo `6ae331fe`): `1f6eb6bd` (`sdpa: port unquant 2-pass
