@@ -120,6 +120,9 @@ fi
 # MTP weights) becomes available.
 if [ "${DSV4_ENABLED}" = "1" ]; then
     : "${EXO_SPECULATIVE:=0}"
+    # Fused MoE gate+up dispatch — +1.2% c=1 / +1.1% c=2 on
+    # mlx-community/DeepSeek-V4-Flash-6bit. See dsv4_fused_moe memory.
+    : "${EXO_DSV4_FUSED_MOE:=1}"
 else
     : "${EXO_SPECULATIVE:=1}"
 fi
