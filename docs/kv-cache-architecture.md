@@ -176,15 +176,6 @@ Concrete chain from a request landing on the runner:
 
 ## Known follow-ups
 
-- **MTPBatchGenerator port.** `src/exo/worker/engines/mlx/speculative/mtp_batch_generator.py`
-  subclasses mlx-lm's old `BatchGenerator` and uses `active_batch` /
-  `unprocessed_prompts` / `_next()` returning a list. Upstream rewrote the
-  class into `PromptProcessingBatch` + `GenerationBatch` (with `next()`
-  returning a tuple). The exo runtime auto-detects the new API and falls
-  back to plain `BatchGenerator`, logging
-  `EXO_SPECULATIVE=1 but … MTPBatchGenerator is not ported yet` — Huihui
-  still runs, just without the ~40% MTP throughput win. See
-  `docs/fork-notes.md` for the port plan.
 - **jaccl refactor revert on the mlx fork.** Upstream's #3412 breaks 2-rank
   RDMA init for our config (`ValueError: vector` from `mx.distributed.init`).
   Reverted on `adurham/mlx` main at `1cfcb5b6`. See `docs/fork-notes.md`.

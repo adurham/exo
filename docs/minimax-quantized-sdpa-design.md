@@ -244,9 +244,10 @@ path.
    small divergence budget (quant path is numerically identical if the
    kernel is correct).
 
-3. **Profile re-run**: `EXO_MINIMAX_TRACE=1` after integration, confirm
+3. **Profile re-run**: `EXO_PROFILER=spans` after integration, confirm
    the `attn` span shrinks ~30–40 % (bandwidth-bound path) and total
-   decode wall-time moves accordingly.
+   decode wall-time moves accordingly. (Was `EXO_MINIMAX_TRACE=1` — now
+   generic via `mlx_lm/profiler.py`.)
 
 ## Perf targets
 
@@ -430,7 +431,7 @@ before each reinstall during kernel iteration.
 Next step per the original plan: wire the new binding into mlx-lm's
 KV-cache attention path (`mlx_lm/models/base.py:117`) so MiniMax
 attention actually uses it. Deploy via `start_cluster.sh` and profile
-with `EXO_MINIMAX_TRACE=1` to verify the predicted 20–30% decode
+with `EXO_PROFILER=spans` to verify the predicted 20–30% decode
 speedup.
 
 #### Session 5 actual outcome (mlx `b1824c0e`, mlx-lm `77ed380`, exo `919c7c49`)
@@ -449,7 +450,7 @@ co-resident:**
 | 5-bit KV, trace on         | 2.24         | serialization artifact |
 | 8-bit KV, trace on         | 5.74         | serialization artifact |
 
-`EXO_MINIMAX_TRACE=1` forces `mx.eval()` at every span boundary; the
+`EXO_PROFILER=spans` forces `mx.eval()` at every span boundary; the
 forced fences serialize the new quant path much harder than the old
 dequantize+SDPA path (quant dispatches 2 kernels per call vs 1 copy +
 1 SDPA for the dequant path, so each fence serializes more work). Must

@@ -233,7 +233,7 @@ Reference:
 - `src/exo/worker/engines/mlx/patches/__init__.py::maybe_apply_patches` — dispatch on `model_type`
 - `~/.claude/projects/-Users-adam-durham-repos-exo/memory/minimax_moe_decode_bottleneck.md` — the full diagnosis + numbers
 
-### MTPBatchGenerator port (see above) and jaccl refactor debug (see above)
+### Jaccl refactor debug (see above)
 
 ## Updating these pins
 

@@ -1,5 +1,11 @@
 # MiniMax cross-rank cost validation (2026-04-24)
 
+> **Note (2026-04-26):** The span tracer was generalised into
+> `mlx_lm/profiler.py`. References below to `EXO_MINIMAX_TRACE=1` are
+> the env var that was set on the day of this bench; the equivalent
+> today is `EXO_PROFILER=spans`. Keeping the historical references for
+> faithfulness to the bench record.
+
 Re-run of the NOOP sweep at the *current optimized config*
 (`MLX_SDPA_BLOCKS=88` + `EXO_MINIMAX_FUSED_ATTN=1`, ~24.26 tok/s
 baseline) with **Huihui scouts off** to get a contamination-free read

@@ -186,7 +186,7 @@ Cluster-deploy guardrails
 
 Infrastructure that's in place
 
-- Sub-span tracer: EXO_MINIMAX_TRACE=1 now produces per-op breakdown
+- Sub-span tracer: EXO_PROFILER=spans now produces per-op breakdown
   (attn.qkv_proj, attn.qk_norm, attn.reshape_rope_cache, attn.sdpa,
   attn.o_proj + moe.*). SIGUSR1 to the runner process dumps span
   stats. Use this to verify the fused kernel collapses multiple sub-

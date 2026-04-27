@@ -9,8 +9,8 @@ of the MLX / Apple Silicon attention + MoE kernel landscape.
 `mlx-community/MiniMax-M2.7-5bit`, 2-node tensor-parallel ring over
 Thunderbolt-5 RDMA (jaccl), 66K context, 200-token decode.
 
-Per-layer wall-time breakdown (via `EXO_MINIMAX_TRACE=1`, instrumentation
-at `mlx-lm/mlx_lm/models/minimax_trace.py` + `ShardedMoE` /
+Per-layer wall-time breakdown (via `EXO_PROFILER=spans`, instrumentation
+at `mlx-lm/mlx_lm/profiler.py` + `ShardedMoE` /
 `WrappedMiniMaxAttention` span points in
 `src/exo/worker/engines/mlx/auto_parallel.py`):
 
