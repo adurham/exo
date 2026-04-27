@@ -10,11 +10,12 @@ Last refresh: 2026-04-27.
 
 ## Status board
 
-### Open PRs (9)
+### Open PRs (10)
 
 | Repo | PR | Title | Status |
 |---|---|---|---|
 | `ml-explore/mlx-lm` | [#1204](https://github.com/ml-explore/mlx-lm/pull/1204) | minimax: validate head_dim against checkpoint, drop unused shared_intermediate_size | review required, CI not run yet |
+| `ml-explore/mlx-lm` | [#1216](https://github.com/ml-explore/mlx-lm/pull/1216) | fix(utils): skip already-quantized layers in load_model._quantize predicate | review required, opened 2026-04-27 |
 | `ml-explore/mlx` | [#3454](https://github.com/ml-explore/mlx/pull/3454) | Add `mx.metal.dispatch_count()` for kernel-dispatch diagnostics | zcbenz: wants per-CommandEncoder counter (multi-stream attribution); macOS 15.0 CI failed |
 | `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | **APPROVED** by zcbenz 2026-04-27, awaiting merge |
 | `ml-explore/mlx` | [#3456](https://github.com/ml-explore/mlx/pull/3456) | fix: address GPU locks by synchronizing GPU and CPU memory with DSB barrier | **CHANGES_REQUESTED** by zcbenz — wants Apple-Metal-engineer-level proof of the DMB ISH/DSB SY claim. Coordinate with @rltakashige + @vskiwi |
