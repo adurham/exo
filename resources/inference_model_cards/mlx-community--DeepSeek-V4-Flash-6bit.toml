@@ -1,0 +1,22 @@
+model_id = "mlx-community/DeepSeek-V4-Flash-6bit"
+n_layers = 43
+hidden_size = 4096
+num_key_value_heads = 1
+supports_tensor = true
+tasks = ["TextGeneration"]
+family = "deepseek"
+quantization = "6bit"
+base_model = "DeepSeek V4 Flash"
+capabilities = ["text", "thinking", "thinking_toggle"]
+
+context_length = 1048576
+
+[storage_size]
+in_bytes = 153299734711
+
+# Source: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash
+# Model card recommends temperature=1.0, top_p=1.0 for local deployment.
+# Think Max reasoning mode recommends >=384K context window.
+[sampling_defaults]
+temperature = 1.0
+top_p = 1.0
