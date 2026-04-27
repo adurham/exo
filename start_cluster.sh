@@ -531,6 +531,9 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_MINIMAX_NOOP_SDPA" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_SDPA=$EXO_MINIMAX_NOOP_SDPA"
     # Phase 3 fused-QKV projection (merges q_proj/k_proj/v_proj into one matmul).
     [ -n "$EXO_MINIMAX_FUSED_ATTN" ]   && EXO_ENV="$EXO_ENV EXO_MINIMAX_FUSED_ATTN=$EXO_MINIMAX_FUSED_ATTN"
+    # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
+    # while we validate decode quality vs unfused.
+    [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
     [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
 
