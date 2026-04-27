@@ -14,7 +14,13 @@ File map:
 
 ## adurham/mlx-lm main
 
-Pinned (as of exo `65655ced`): `6f2a29680ac8db93f3eca62a0efd2ae631d241a5`.
+Pinned (as of exo `8dfce1f4`, 2026-04-27): `dsv4-perf-bisect@034a42aaf355ade60dce0e79843efb5f87fa392e`. The `:main` branch carries today's `_quantize` predicate fix (commit `5aa2d89`, see below) plus a temporary graft of rltakashige's `deepseek_v4.py` (commit `876cfd9`, used during the upstream-PR-#1978 pivot experiment — left in place but not on the active branch). The cluster runs `:dsv4-perf-bisect` (Blaizzy variant) via `pyproject.toml`.
+
+### `_quantize` predicate fix (commit `5aa2d89`)
+
+`load_model._quantize`'s `class_predicate` returned the per-layer override dict before checking `to_quantized`, so models that pre-quantize specific layers in `__init__` (e.g. DSv4's `DeepseekV4MoE` calling `SwitchLinear.to_quantized(..., mode="mxfp4")` on its experts) trip with `ValueError: Unable to quantize model of type QuantizedSwitchLinear`. One-line reorder; works for any pre-quantizing model.
+
+Filed upstream as **mlx-lm PR [#1216](https://github.com/ml-explore/mlx-lm/pull/1216)**. Drop the fork patch when that lands.
 
 ### Why we're on main, not a snapshot
 
@@ -317,6 +323,15 @@ Forwarded through `start_cluster.sh` as of exo `6ae331fe`. Not baked
 in as default because optimum is workload-specific.
 
 ## Open optimization projects
+
+### DeepSeek V4 sharding + fused MoE (in upstream review)
+
+Today's work on adurham/exo:main, filed as two stacked upstream PRs:
+
+- **exo PR [#1996](https://github.com/exo-explore/exo/pull/1996)** — drops upstream's full-attention DSv4 sharding (`_shard_v4_attention_heads` + `_AllSumLinear`) for a MoE-only strategy. Replicates attention on every rank, shards only the MoE block. Fixes the saturated-softmax gibberish observed running upstream PR #1978 + `mlx-community/DeepSeek-V4-Flash-6bit`.
+- **exo PR [#1999](https://github.com/exo-explore/exo/pull/1999)** — stacks on #1996; adds an opt-in `_FusedSwitchGLU` that fuses `gate_proj + up_proj` into a single `gather_qmm` dispatch. **+1.2% c=1 / +1.1% c=2** on `mlx-community/DeepSeek-V4-Flash-6bit` (2× M4 Max RDMA), gated behind `EXO_DSV4_FUSED_MOE=1`. Default-on for DSv4 in `start_cluster.sh`.
+
+Bench baseline at 34.6 tok/s c=1; 75.2 tok/s aggregate at c=8 (sub-linear scaling, no errors, tail ratio 1.00). Long-context degradation `-17%` at 32K vs 50w is dominated by DSv4 compressor pool compute — not KV-bandwidth-bound (KV bits=4 was neutral at 32K).
 
 ### MiniMax fused MoE kernels
 
