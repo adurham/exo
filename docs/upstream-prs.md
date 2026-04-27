@@ -10,7 +10,7 @@ Last refresh: 2026-04-27.
 
 ## Status board
 
-### Open PRs (8)
+### Open PRs (9)
 
 | Repo | PR | Title | Status |
 |---|---|---|---|
@@ -22,6 +22,7 @@ Last refresh: 2026-04-27.
 | `exo-explore/exo` | [#1988](https://github.com/exo-explore/exo/pull/1988) | feat: `EXO_KV_CACHE_BITS` env var + step=16384 for QuantizedKVCache | review required |
 | `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | review required |
 | `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | review required |
+| `exo-explore/exo` | [#1996](https://github.com/exo-explore/exo/pull/1996) | fix(deepseek_v4): drop full-attention sharding for MoE-only strategy | review required, opened 2026-04-27 with bench evidence |
 
 ### Recently merged (2)
 
