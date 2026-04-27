@@ -27,8 +27,8 @@ else
     : "${EXO_KV_CACHE_BITS:=4}"
 fi
 : "${EXO_COMPUTE_DTYPE:=bf16}"
-: "${EXO_SPECULATIVE:=1}"
 : "${EXO_SPECULATIVE_GAMMA:=3}"
+# EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
 # c>=6, producing a 16% per-request regression and 25% bad-run rate.
@@ -107,6 +107,16 @@ fi
 # DSV4_ENABLED=0 to skip; MiniMax + scouts must stay off while it's enabled.
 : "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-6bit}"
 : "${DSV4_ENABLED:=1}"
+# Speculative decoding uses EXO_PP_DRAFT_MODEL (Qwen3.5 0.8B) as the draft;
+# its tokenizer is incompatible with DSv4's, so drafted tokens come back as
+# gibberish when verified through DSv4 logits. Force speculation off whenever
+# DSv4 is the active model. Re-enable later if a DSv4-compatible draft (or
+# MTP weights) becomes available.
+if [ "${DSV4_ENABLED}" = "1" ]; then
+    : "${EXO_SPECULATIVE:=0}"
+else
+    : "${EXO_SPECULATIVE:=1}"
+fi
 # Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
 # Two sessions = active turn + previous turn, mirroring MiniMax.
