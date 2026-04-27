@@ -25,6 +25,10 @@ members = [
     "exo-pyo3-bindings",
 ]
 constraints = [{ name = "transformers", specifier = ">=5.0.0,<5.4.0" }]
+overrides = [
+    { name = "mlx", marker = "sys_platform == 'darwin'", git = "https://github.com/adurham/mlx.git?branch=main" },
+    { name = "mlx", marker = "sys_platform == 'linux'", specifier = "==0.31.1" },
+]
 
 [[package]]
 name = "absl-py"
@@ -375,6 +379,7 @@ dependencies = [
     { name = "hypercorn", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "loguru", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mflux", marker = "sys_platform == 'darwin' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
+    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx", version = "0.31.2.dev20260424+1f6eb6bd", source = { git = "https://github.com/adurham/mlx.git?branch=main#1f6eb6bde69dcbe91249d6662953ed29ff6a285f" }, marker = "sys_platform == 'darwin' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx-lm", marker = "sys_platform == 'darwin' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx-vlm", marker = "sys_platform == 'darwin' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
@@ -397,19 +402,22 @@ build = [
     { name = "nanobind", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
 ]
 cpu = [
-    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
+    { name = "mlx", version = "0.31.2.dev20260424+1f6eb6bd", source = { git = "https://github.com/adurham/mlx.git?branch=main#1f6eb6bde69dcbe91249d6662953ed29ff6a285f" }, marker = "(sys_platform == 'darwin' and extra == 'extra-3-exo-cpu') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx-cpu", marker = "sys_platform == 'linux'" },
     { name = "mlx-lm", marker = "sys_platform == 'linux'" },
     { name = "mlx-vlm", marker = "sys_platform == 'linux'" },
 ]
 cuda12 = [
-    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13')" },
+    { name = "mlx", version = "0.31.2.dev20260424+1f6eb6bd", source = { git = "https://github.com/adurham/mlx.git?branch=main#1f6eb6bde69dcbe91249d6662953ed29ff6a285f" }, marker = "(sys_platform == 'darwin' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx-cuda-12", marker = "sys_platform == 'linux'" },
     { name = "mlx-lm", marker = "sys_platform == 'linux'" },
     { name = "mlx-vlm", marker = "sys_platform == 'linux'" },
 ]
 cuda13 = [
-    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13')" },
+    { name = "mlx", version = "0.31.2.dev20260424+1f6eb6bd", source = { git = "https://github.com/adurham/mlx.git?branch=main#1f6eb6bde69dcbe91249d6662953ed29ff6a285f" }, marker = "(sys_platform == 'darwin' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx-cuda-13", marker = "sys_platform == 'linux'" },
     { name = "mlx-lm", marker = "sys_platform == 'linux'" },
     { name = "mlx-vlm", marker = "sys_platform == 'linux'" },
@@ -445,10 +453,10 @@ requires-dist = [
     { name = "mlx-cpu", marker = "sys_platform == 'linux' and extra == 'cpu'", specifier = "==0.31.1" },
     { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda12'", specifier = "==0.31.1" },
     { name = "mlx-cuda-13", marker = "sys_platform == 'linux' and extra == 'cuda13'", specifier = "==0.31.1" },
-    { name = "mlx-lm", marker = "sys_platform == 'darwin'", git = "https://github.com/adurham/mlx-lm.git?branch=dsv4-perf-bisect" },
-    { name = "mlx-lm", marker = "sys_platform == 'linux' and extra == 'cpu'", git = "https://github.com/adurham/mlx-lm.git?branch=dsv4-perf-bisect" },
-    { name = "mlx-lm", marker = "sys_platform == 'linux' and extra == 'cuda12'", git = "https://github.com/adurham/mlx-lm.git?branch=dsv4-perf-bisect" },
-    { name = "mlx-lm", marker = "sys_platform == 'linux' and extra == 'cuda13'", git = "https://github.com/adurham/mlx-lm.git?branch=dsv4-perf-bisect" },
+    { name = "mlx-lm", marker = "sys_platform == 'darwin'", git = "https://github.com/adurham/mlx-lm.git?branch=main" },
+    { name = "mlx-lm", marker = "sys_platform == 'linux' and extra == 'cpu'", git = "https://github.com/adurham/mlx-lm.git?branch=main" },
+    { name = "mlx-lm", marker = "sys_platform == 'linux' and extra == 'cuda12'", git = "https://github.com/adurham/mlx-lm.git?branch=main" },
+    { name = "mlx-lm", marker = "sys_platform == 'linux' and extra == 'cuda13'", git = "https://github.com/adurham/mlx-lm.git?branch=main" },
     { name = "mlx-vlm", marker = "sys_platform == 'darwin'", specifier = ">=0.3.11" },
     { name = "mlx-vlm", marker = "sys_platform == 'linux' and extra == 'cpu'", specifier = ">=0.3.11" },
     { name = "mlx-vlm", marker = "sys_platform == 'linux' and extra == 'cuda12'", specifier = ">=0.3.11" },
@@ -1261,9 +1269,10 @@ wheels = [
 [[package]]
 name = "mlx-lm"
 version = "0.31.3"
-source = { git = "https://github.com/adurham/mlx-lm.git?branch=dsv4-perf-bisect#034a42aaf355ade60dce0e79843efb5f87fa392e" }
+source = { git = "https://github.com/adurham/mlx-lm.git?branch=main#876cfd988347a7e5ecd17f8848de6cffb3605990" }
 dependencies = [
     { name = "jinja2", marker = "sys_platform == 'darwin' or (sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
+    { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx", version = "0.31.2.dev20260424+1f6eb6bd", source = { git = "https://github.com/adurham/mlx.git?branch=main#1f6eb6bde69dcbe91249d6662953ed29ff6a285f" }, marker = "sys_platform == 'darwin' or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "numpy", marker = "sys_platform == 'darwin' or (sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "protobuf", marker = "sys_platform == 'darwin' or (sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
