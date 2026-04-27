@@ -13,12 +13,6 @@ from mlx_lm.models.cache import (
     QuantizedKVCache,
     RotatingKVCache,
 )
-from mlx_lm.models.deepseek_v4 import (
-    DeepseekV4Cache,
-)
-from mlx_lm.models.deepseek_v4 import (
-    _CompressorBranch as CompressorBranch,  # type: ignore
-)
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.types.memory import Memory
@@ -61,7 +55,7 @@ class CacheSnapshot:
     def __init__(
         self,
         states: list[
-            RotatingKVCache | ArraysCache | CacheList | DeepseekV4Cache | None
+            RotatingKVCache | ArraysCache | CacheList | None
         ],
         token_count: int,
     ):
@@ -154,45 +148,9 @@ def _detached_copy_or_none(a: mx.array | None) -> mx.array | None:
     return out
 
 
-def _copy_compressor_branch(b: CompressorBranch) -> CompressorBranch:
-    out = CompressorBranch.__new__(CompressorBranch)
-    out.buffer_kv = _detached_copy_or_none(b.buffer_kv)
-    out.buffer_gate = _detached_copy_or_none(b.buffer_gate)
-    out.prev_kv = _detached_copy_or_none(b.prev_kv)
-    out.prev_gate = _detached_copy_or_none(b.prev_gate)
-    out.pool = _detached_copy_or_none(b.pool)
-    out.buffer_lengths = deepcopy(b.buffer_lengths)
-    out.pool_lengths = deepcopy(b.pool_lengths)
-    out.buffer_count = deepcopy(b.buffer_count)
-    out._new_pool_lengths = deepcopy(b._new_pool_lengths)
-    return out
-
-
-def _copy_v4_cache(c: DeepseekV4Cache) -> DeepseekV4Cache:
-    snap = DeepseekV4Cache.__new__(DeepseekV4Cache)
-
-    local: RotatingKVCache = c.local
-    local_snap = copy_rotating_kv_cache(local)
-    if local_snap is None:
-        local_snap = RotatingKVCache.__new__(RotatingKVCache)
-        local_snap.keys = None
-        local_snap.values = None
-        local_snap.offset = local.offset
-        local_snap._idx = 0
-        local_snap.keep = local.keep
-        local_snap.max_size = local.max_size
-    snap.local = local_snap
-
-    snap._branches = {
-        key: _copy_compressor_branch(branch) for key, branch in c._branches.items()
-    }
-    snap._pending_lengths = deepcopy(c._pending_lengths)
-    return snap
-
-
 def copy_snapshot_entry(
-    entry: ArraysCache | RotatingKVCache | CacheList | DeepseekV4Cache | None,
-) -> ArraysCache | RotatingKVCache | CacheList | DeepseekV4Cache | None:
+    entry: ArraysCache | RotatingKVCache | CacheList | None,
+) -> ArraysCache | RotatingKVCache | CacheList | None:
     match entry:
         case None:
             return None
@@ -203,13 +161,11 @@ def copy_snapshot_entry(
             return _copy_arrays_cache(entry)
         case CacheList():
             return _copy_cache_list(entry)
-        case DeepseekV4Cache():
-            return _copy_v4_cache(entry)
 
 
 def snapshot_ssm_states(cache: KVCacheType) -> CacheSnapshot:
     states: list[
-        RotatingKVCache | ArraysCache | CacheList | DeepseekV4Cache | None
+        RotatingKVCache | ArraysCache | CacheList | None
     ] = []
     for c in cache:
         if isinstance(c, ArraysCache):
@@ -218,8 +174,6 @@ def snapshot_ssm_states(cache: KVCacheType) -> CacheSnapshot:
             states.append(copy_rotating_kv_cache(c))
         elif isinstance(c, CacheList) and not bool(c.is_trimmable()):  # type: ignore[reportUnknownMemberType]
             states.append(_copy_cache_list(c))
-        elif isinstance(c, DeepseekV4Cache):
-            states.append(_copy_v4_cache(c))
         else:
             states.append(None)
     token_count = cache_length(cache)
@@ -247,7 +201,7 @@ def is_non_trimmable_cache_entry(c: object) -> bool:
         return True
     if isinstance(c, CacheList):
         return not bool(c.is_trimmable())  # type: ignore[reportUnknownMemberType]
-    return isinstance(c, DeepseekV4Cache)
+    return False
 
 
 def has_non_kv_caches(cache: KVCacheType) -> bool:
@@ -1569,8 +1523,7 @@ def _entry_length(
     | RotatingKVCache
     | QuantizedKVCache
     | ArraysCache
-    | CacheList
-    | DeepseekV4Cache,
+    | CacheList,
 ) -> int:
     # Use .offset attribute which KVCache types have (len() not implemented in older QuantizedKVCache).
     if hasattr(c, "offset"):
