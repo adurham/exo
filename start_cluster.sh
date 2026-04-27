@@ -66,8 +66,9 @@ fi
 # Both fit on the cluster individually but together they exhaust RAM (Huihui
 # scouts also need ~18GB per node). Toggle via the *_ENABLED env vars.
 
-# MiniMax-M2.7 (mxfp4): smaller (~64GB/rank) so it coexists with the Huihui
-# scouts. No MTP weights upstream, so no spec-decode speedup. Default = on.
+# MiniMax-M2.7 (5bit): ~157 GB, ~80 GB/rank under TP=2, leaves headroom
+# under the 124 GB wired_limit for Huihui scouts (~18 GB/node) to co-reside.
+# No MTP weights upstream, so no spec-decode speedup. Default = on.
 : "${MINIMAX_MODEL_ID:=mlx-community/MiniMax-M2.7-5bit}"
 : "${MINIMAX_ENABLED:=1}"
 # Prefix caching: the radix trie dedupes shared prefixes across leaves, so 4
