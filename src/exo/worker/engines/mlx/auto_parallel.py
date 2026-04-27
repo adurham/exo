@@ -1,6 +1,6 @@
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from functools import partial
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
@@ -14,11 +14,13 @@ from mlx.nn.layers.distributed import (
     sum_gradients,
 )
 from mlx_lm.models.base import (
-    scaled_dot_product_attention,  # pyright: ignore[reportUnknownVariableType]
+    scaled_dot_product_attention,
 )
 from mlx_lm.models.cache import ArraysCache, KVCache
 from mlx_lm.models.deepseek_v3 import DeepseekV3MLP
 from mlx_lm.models.deepseek_v3 import Model as DeepseekV3Model
+from mlx_lm.models.deepseek_v4 import DeepseekV4MoE, V4Attention
+from mlx_lm.models.deepseek_v4 import Model as DeepseekV4Model
 from mlx_lm.models.deepseek_v32 import DeepseekV32MLP
 from mlx_lm.models.deepseek_v32 import Model as DeepseekV32Model
 from mlx_lm.models.deepseek_v4 import Model as DeepseekV4Model
@@ -76,6 +78,7 @@ from mlx_lm.models.step3p5 import Model as Step35Model
 from mlx_lm.models.step3p5 import Step3p5MLP as Step35MLP
 from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
 
+from exo.shared.types.worker.runner_response import ModelLoadingResponse
 from exo.shared.types.worker.shards import PipelineShardMetadata
 from exo.worker.engines.mlx.patches.minimax.fused_qkv import (
     fused_qkv_is_installed,
@@ -112,8 +115,6 @@ _switch_scatter_unsort_any: Any = _switch_scatter_unsort
 
 if TYPE_CHECKING:
     from mlx_lm.models.cache import Cache
-
-LayerLoadedCallback = Callable[[int, int], None]  # (layers_loaded, total_layers)
 
 
 _pending_prefill_sends: list[tuple[mx.array, int, mx.distributed.Group]] = []
@@ -339,8 +340,7 @@ def pipeline_auto_parallel(
     model: nn.Module,
     group: mx.distributed.Group,
     model_shard_meta: PipelineShardMetadata,
-    on_layer_loaded: LayerLoadedCallback | None,
-) -> nn.Module:
+) -> Generator[ModelLoadingResponse, None, nn.Module]:
     """
     Automatically parallelize a model across multiple devices.
     Args:
@@ -360,8 +360,8 @@ def pipeline_auto_parallel(
     total = len(layers)
     for i, layer in enumerate(layers):
         mx.eval(layer)  # type: ignore
-        if on_layer_loaded is not None:
-            on_layer_loaded(i, total)
+        mx.clear_cache()
+        yield ModelLoadingResponse(layers_loaded=i, total=total)
 
     layers[0] = PipelineFirstLayer(layers[0], device_rank, group=group)
     layers[-1] = PipelineLastLayer(
@@ -372,24 +372,20 @@ def pipeline_auto_parallel(
     )
 
     if isinstance(inner_model_instance, GptOssMoeModel):
-        inner_model_instance.layer_types = inner_model_instance.layer_types[  # type: ignore
+        inner_model_instance.layer_types = inner_model_instance.layer_types[
             start_layer:end_layer
         ]
         # We can assume the model has at least one layer thanks to placement.
         # If a layer type doesn't exist, we can set it to 0.
         inner_model_instance.swa_idx = (
             0
-            if "sliding_attention" not in inner_model_instance.layer_types  # type: ignore
-            else inner_model_instance.layer_types.index(  # type: ignore
-                "sliding_attention"
-            )
+            if "sliding_attention" not in inner_model_instance.layer_types
+            else inner_model_instance.layer_types.index("sliding_attention")
         )
         inner_model_instance.ga_idx = (
             0
-            if "full_attention" not in inner_model_instance.layer_types  # type: ignore
-            else inner_model_instance.layer_types.index(  # type: ignore
-                "full_attention"
-            )
+            if "full_attention" not in inner_model_instance.layer_types
+            else inner_model_instance.layer_types.index("full_attention")
         )
 
     if isinstance(inner_model_instance, Step35InnerModel):
@@ -523,8 +519,7 @@ def patch_tensor_model[T](model: T) -> T:
 def tensor_auto_parallel(
     model: nn.Module,
     group: mx.distributed.Group,
-    on_layer_loaded: LayerLoadedCallback | None,
-) -> nn.Module:
+) -> Generator[ModelLoadingResponse, None, nn.Module]:
     all_to_sharded_linear = partial(
         shard_linear,
         sharding="all-to-sharded",
@@ -582,7 +577,7 @@ def tensor_auto_parallel(
             sharded_to_all_linear_in_place,
         )
     elif isinstance(model, DeepseekV4Model):
-        tensor_parallel_sharding_strategy = DeepSeekV4ShardingStrategy(
+        tensor_parallel_sharding_strategy = DeepseekV4ShardingStrategy(
             group,
             all_to_sharded_linear,
             sharded_to_all_linear,
@@ -666,7 +661,7 @@ def tensor_auto_parallel(
     else:
         raise ValueError(f"Unsupported model type: {type(model)}")
 
-    model = tensor_parallel_sharding_strategy.shard_model(model, on_layer_loaded)
+    model = yield from tensor_parallel_sharding_strategy.shard_model(model)
     return patch_tensor_model(model)
 
 
@@ -690,16 +685,14 @@ class TensorParallelShardingStrategy(ABC):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module: ...
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]: ...
 
 
 class LlamaShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(LlamaModel, model)
         total = len(model.layers)
         for i, layer in enumerate(model.layers):
@@ -717,8 +710,8 @@ class LlamaShardingStrategy(TensorParallelShardingStrategy):
             layer.mlp.down_proj = self.sharded_to_all_linear(layer.mlp.down_proj)
             layer.mlp.up_proj = self.all_to_sharded_linear(layer.mlp.up_proj)
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model
 
 
@@ -729,7 +722,14 @@ def _set_layers(model: nn.Module, layers: list[_LayerCallable]) -> None:
 
         # Update DeepSeek V3 specific parameters when layers are shrunk
         if isinstance(
-            model, (DeepseekV3Model, DeepseekV32Model, Glm4MoeModel, KimiK25Model)
+            model,
+            (
+                DeepseekV3Model,
+                DeepseekV32Model,
+                DeepseekV4Model,
+                Glm4MoeModel,
+                KimiK25Model,
+            ),
         ) and hasattr(inner_model_instance, "num_layers"):
             logger.info(
                 f"Setting num_layers to {len(layers)} for model {model.model.__class__.__name__}"
@@ -752,8 +752,7 @@ class DeepSeekShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(DeepseekV3Model, model)
         total = len(model.layers)
 
@@ -809,8 +808,8 @@ class DeepSeekShardingStrategy(TensorParallelShardingStrategy):
                 layer.mlp.sharding_group = self.group
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
 
         return model
 
@@ -844,58 +843,174 @@ class ShardedMoE(CustomMlxLayer):
         return y
 
 
-class DeepSeekV4ShardingStrategy(TensorParallelShardingStrategy):
-    """Sharding for DeepSeek V4 Flash / Pro.
+class ShardedMoEV4(CustomMlxLayer):
+    """Same as ShardedMoE but for DeepseekV4MoE which takes (x, input_ids)."""
 
-    Mirrors the model's built-in `Model.shard()` (mlx_lm/models/deepseek_v4.py)
-    using exo's segment-aware shard wrappers, with per-layer `mx.eval` so the
-    full unsharded checkpoint never has to land in RAM at once on 128 GB nodes.
-    DSv4 uses different attribute names than DeepSeek V2/V3/V3.2 — `attn`
-    (not `self_attn`), `ffn` (not `mlp`), `wq_b`/`wo_b` (LoRA-decomposed Q and
-    output projections, not `q_b_proj`/`o_proj`) — so it cannot reuse
-    DeepSeekShardingStrategy.
+    def __init__(self, layer: DeepseekV4MoE):
+        super().__init__(cast(_LayerCallable, cast(object, layer)))
+        self._v4_inner = layer
+        self.sharding_group: mx.distributed.Group | None = None
 
-    The MoE handles its own cross-rank reduction via `sum_gradients` inside
-    `DeepseekV4MoE.__call__` once `sharding_group` is set; no ShardedMoE
-    wrapper is needed here.
+    def __call__(self, x: mx.array, input_ids: mx.array) -> mx.array:
+        if self.sharding_group is not None:
+            x = sum_gradients(self.sharding_group)(x)
+        y = self._v4_inner(x, input_ids)
+        if self.sharding_group is not None:
+            y = mx.distributed.all_sum(y, group=self.sharding_group)
+        return y
+
+
+def _shard_quantized_rows(
+    q: nn.QuantizedLinear,
+    head_dim: int,
+    slicer: Callable[[mx.array, int], mx.array],
+) -> None:
+    weight = q["weight"]
+    scales = q["scales"]
+    assert isinstance(weight, mx.array)
+    assert isinstance(scales, mx.array)
+    q.weight = slicer(weight, head_dim)
+    q.scales = slicer(scales, head_dim)
+    biases = q.get("biases")
+    if isinstance(biases, mx.array):
+        q.biases = slicer(biases, head_dim)
+
+
+class _AllSumLinear(nn.Module):
+    """Wraps an unsharded wo_b that takes a head-sharded partial wo_a output.
+
+    Flow per rank:
+      1. all_sum the incoming partial wo_a output (summed across the head
+         input shards → full wo_a_out on every rank)
+      2. apply the unsharded wo_b → full hidden on every rank
+
+    One collective per layer on the smaller of (n_groups * o_lora_rank) vs
+    hidden. wo_b compute is replicated, but at decode B=1 it's only ~30M FLOPs
+    per layer and 61 extra all_gathers/token cost more than running wo_b on
+    every rank.
     """
 
+    def __init__(self, inner: nn.Module, group: mx.distributed.Group):
+        super().__init__()
+        self.inner = inner
+        self._group = group
+
+    def __call__(self, x: mx.array) -> mx.array:
+        x = mx.distributed.all_sum(x, group=self._group)
+        return cast(Callable[[mx.array], mx.array], self.inner)(x)
+
+
+def _shard_v4_attention_heads(
+    attn: V4Attention,
+    world_size: int,
+    rank: int,
+) -> None:
+    """Interleaved-per-group head sharding for V4Attention.
+
+    V4 uses a grouped low-rank output projection: `_grouped_output_projection`
+    reshapes the flat `n_heads * head_dim` dim into `(o_groups, heads_per_group,
+    head_dim)`, so group g owns heads `[g * heads_per_group : (g+1) * heads_per_group]`.
+
+    A naive contiguous `shard_linear("all-to-sharded")` on wq_b puts whole
+    original groups on each rank — the per-rank "group g" ends up containing
+    heads that don't belong to original group g. That breaks the wo_a grouped
+    weight mapping. We instead slice heads interleaved-by-group: each rank
+    owns `heads_per_group / N` heads *from every original group*, kept in
+    group-major order so SDPA → reshape → wo_a preserves the group mapping.
+
+    Affects `wq_b.weight` / `wq_b.bias`, `attn_sink`. wo_a is sharded via a
+    normal input-dim block split (the default axis-(-1) behavior of
+    shard_inplace), which now correctly aligns with the interleaved head
+    layout because the last dim of out after reshape is `heads_per_group/N *
+    head_dim` per group.
+    """
+    n_heads: int = attn.n_heads
+    head_dim: int = attn.head_dim
+    o_groups: int = attn.n_groups
+    assert n_heads % o_groups == 0, "n_heads must be divisible by o_groups"
+    heads_per_group = n_heads // o_groups
+    assert heads_per_group % world_size == 0, (
+        f"heads_per_group ({heads_per_group}) must be divisible by world_size "
+        f"({world_size}) for interleaved per-group head sharding"
+    )
+    hpg_per_rank = heads_per_group // world_size
+    start = rank * hpg_per_rank
+    end = start + hpg_per_rank
+
+    def _slice_head_major_flat(arr: mx.array, stride: int) -> mx.array:
+        """Slice arr on axis 0 where the flat 0-axis is (o_groups *
+        heads_per_group * stride), returning a fresh contiguous allocation
+        so the full unsharded array can be freed. Without the contiguous
+        copy the slice is a view and the original weight stays resident —
+        OOM on large V4. Quantized packed weights don't round-trip through
+        numpy so we use mx.contiguous directly."""
+        rest = arr.shape[1:]
+        reshaped = arr.reshape(o_groups, heads_per_group, stride, *rest)
+        sliced = reshaped[:, start:end].reshape(o_groups * hpg_per_rank * stride, *rest)
+        detached = mx.contiguous(sliced)
+        mx.eval(detached)
+        return detached
+
+    wq_b: nn.Module = attn.wq_b
+    if isinstance(wq_b, nn.QuantizedLinear):
+        # Packed weight: (n_heads*head_dim, q_lora_rank/el_per_int).
+        # scales/biases: (n_heads*head_dim, q_lora_rank/group_size).
+        # Slice axis 0 interleaved-by-group with head_dim stride.
+        _shard_quantized_rows(wq_b, head_dim, _slice_head_major_flat)
+    else:
+        dense = wq_b
+        assert isinstance(dense, nn.Linear)
+        w = dense.weight
+        q_lora_rank = w.shape[-1]
+        w_sharded = _slice_head_major_flat(w, head_dim)
+        has_bias = "bias" in dense
+        new_wq_b = nn.Linear(q_lora_rank, w_sharded.shape[0], bias=has_bias)
+        new_wq_b.weight = w_sharded
+        if has_bias:
+            b = dense.bias
+            assert b is not None
+            new_wq_b.bias = _slice_head_major_flat(b[:, None], head_dim).reshape(-1)
+        attn.wq_b = new_wq_b
+
+    sink = attn.attn_sink
+    reshaped = sink.reshape(o_groups, heads_per_group)[:, start:end].reshape(-1)
+    detached_sink = mx.contiguous(reshaped)
+    mx.eval(detached_sink)
+    attn.attn_sink = detached_sink
+    attn.n_heads = o_groups * hpg_per_rank
+
+
+class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(DeepseekV4Model, model)
-        layers = model.model.layers
-        total = len(layers)
+        total = len(model.layers)
 
-        for i, layer in enumerate(layers):
+        for i, layer in enumerate(model.layers):
             mx.eval(layer.parameters())
 
-            # Replicate attention on every rank. DSv4's V4Attention uses a
-            # LoRA-decomposed Q/output projection plus a `_grouped_output_
-            # projection` that manually reshapes `wo_a.weight/.scales/.biases`
-            # — bypassing any shard_linear wrapper. Sharding wq_b across
-            # heads makes that manual reshape see half the per-group input
-            # dim and crashes inside `mx.quantized_matmul` with
-            # "Last dimension of first input with shape (..., 2048) does
-            # not match the expanded quantized matrix (4096, 1024)".
-            # Memory-wise the attention block is ~700 MB/layer at 4-bit
-            # (≈30 GB across 43 layers, replicated on both ranks). The
-            # MoE below is the bulk of the model (~130 GB), so sharding
-            # only the MoE still leaves comfortable headroom on 128 GB
-            # nodes (~95 GB/rank vs the no-shard 160 GB).
-            layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
-            self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
-            self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
-            self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.up_proj)
-            self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.gate_proj)
-            self.sharded_to_all_linear_in_place(layer.ffn.switch_mlp.down_proj)
-            self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.up_proj)
+            # Head-parallel attention with interleaved-per-group sharding.
+            _shard_v4_attention_heads(layer.attn, self.N, self.group.rank())
+            self.sharded_to_all_linear_in_place(layer.attn.wo_a)
+            layer.attn.wo_b = _AllSumLinear(layer.attn.wo_b, self.group)  # type: ignore[assignment]
+
+            ffn = layer.ffn
+            if getattr(ffn, "shared_experts", None) is not None:
+                self.all_to_sharded_linear_in_place(ffn.shared_experts.gate_proj)
+                self.sharded_to_all_linear_in_place(ffn.shared_experts.down_proj)
+                self.all_to_sharded_linear_in_place(ffn.shared_experts.up_proj)
+            self.all_to_sharded_linear_in_place(ffn.switch_mlp.gate_proj)
+            self.sharded_to_all_linear_in_place(ffn.switch_mlp.down_proj)
+            self.all_to_sharded_linear_in_place(ffn.switch_mlp.up_proj)
+            wrapped = ShardedMoEV4(ffn)
+            wrapped.sharding_group = self.group
+            layer.ffn = wrapped  # type: ignore[assignment]
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
 
         return model
 
@@ -904,8 +1019,7 @@ class GLM4MoeLiteShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(GLM4MoeLiteModel, model)
         total = len(model.layers)  # type: ignore
         for i, layer in enumerate(model.layers):  # type: ignore
@@ -956,8 +1070,9 @@ class GLM4MoeLiteShardingStrategy(TensorParallelShardingStrategy):
                 layer.mlp = ShardedMoE(layer.mlp)  # type: ignore
                 layer.mlp.sharding_group = self.group  # type: ignore
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
 
         return model
 
@@ -1230,8 +1345,7 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(MiniMaxModel, model)
         total = len(model.layers)
         fused_qkv_layers = 0
@@ -1283,8 +1397,9 @@ class MiniMaxShardingStrategy(TensorParallelShardingStrategy):
             layer.block_sparse_moe = ShardedMoE(layer.block_sparse_moe)  # pyright: ignore[reportAttributeAccessIssue, reportArgumentType]
             layer.block_sparse_moe.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         if _MINIMAX_FUSED_ATTN:
             logger.info(
                 f"MiniMax fused QKV: {fused_qkv_layers}/{total} layers "
@@ -1297,8 +1412,7 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(
             Qwen3Model
             | Qwen3MoeModel
@@ -1453,8 +1567,9 @@ class QwenShardingStrategy(TensorParallelShardingStrategy):
                 layer.mlp.up_proj = self.all_to_sharded_linear(layer.mlp.up_proj)
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model
 
 
@@ -1462,8 +1577,7 @@ class Glm4MoeShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(Glm4MoeModel, model)
         total = len(model.layers)
         for i, layer in enumerate(model.layers):
@@ -1499,8 +1613,9 @@ class Glm4MoeShardingStrategy(TensorParallelShardingStrategy):
                 layer.mlp.up_proj = self.all_to_sharded_linear(layer.mlp.up_proj)
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model
 
 
@@ -1508,8 +1623,7 @@ class GptOssShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(GptOssMoeModel, model)
         total = len(model.layers)
 
@@ -1538,10 +1652,11 @@ class GptOssShardingStrategy(TensorParallelShardingStrategy):
             self.all_to_sharded_linear_in_place(layer.mlp.experts.up_proj)
 
             layer.mlp = ShardedMoE(layer.mlp)  # type: ignore
-            layer.mlp.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            layer.mlp.sharding_group = self.group
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model
 
 
@@ -1549,8 +1664,7 @@ class Step35ShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(Step35Model, model)
         total = len(model.layers)
 
@@ -1583,8 +1697,9 @@ class Step35ShardingStrategy(TensorParallelShardingStrategy):
                 self.sharded_to_all_linear_in_place(layer.mlp.switch_mlp.down_proj)
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model
 
 
@@ -1592,8 +1707,7 @@ class NemotronHShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(NemotronHModel, model)
         rank = self.group.rank()
         total = len(model.layers)
@@ -1626,8 +1740,8 @@ class NemotronHShardingStrategy(TensorParallelShardingStrategy):
                 layer.mixer = mixer  # pyright: ignore[reportAttributeAccessIssue]
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model
 
     def _shard_mamba2_mixer(self, mixer: NemotronHMamba2Mixer, rank: int) -> None:
@@ -1734,8 +1848,7 @@ class Gemma4ShardingStrategy(TensorParallelShardingStrategy):
     def shard_model(
         self,
         model: nn.Module,
-        on_layer_loaded: LayerLoadedCallback | None,
-    ) -> nn.Module:
+    ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(Gemma4Model, model)
         layers = model.language_model.model.layers
         total = len(layers)
@@ -1744,9 +1857,11 @@ class Gemma4ShardingStrategy(TensorParallelShardingStrategy):
 
             attn = layer.self_attn
             attn.q_proj = self.all_to_sharded_linear(attn.q_proj)
-            attn.k_proj = self.all_to_sharded_linear(attn.k_proj)
-            if not attn.use_k_eq_v:
-                attn.v_proj = self.all_to_sharded_linear(attn.v_proj)
+            has_kv: bool = cast(bool, attn.has_kv)
+            if has_kv:
+                attn.k_proj = self.all_to_sharded_linear(attn.k_proj)
+                if not attn.use_k_eq_v:
+                    attn.v_proj = self.all_to_sharded_linear(attn.v_proj)
             attn.o_proj = self.sharded_to_all_linear(attn.o_proj)
             attn.n_heads //= self.N
             attn.n_kv_heads //= self.N
@@ -1763,6 +1878,6 @@ class Gemma4ShardingStrategy(TensorParallelShardingStrategy):
                 layer.experts.sharding_group = self.group
 
             mx.eval(layer)
-            if on_layer_loaded is not None:
-                on_layer_loaded(i, total)
+            mx.clear_cache()
+            yield ModelLoadingResponse(layers_loaded=i, total=total)
         return model

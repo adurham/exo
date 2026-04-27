@@ -35,7 +35,7 @@ from exo.shared.constants import (
     EXO_MODELS_DIRS,
     EXO_MODELS_READ_ONLY_DIRS,
 )
-from exo.shared.models.model_cards import ModelTask
+from exo.shared.models.model_cards import ModelCard, ModelTask
 from exo.shared.types.common import ModelId
 from exo.shared.types.memory import Memory
 from exo.shared.types.worker.downloads import (
@@ -118,7 +118,9 @@ class InsufficientDiskSpaceError(Exception):
     """Raised when no writable model directory has enough free space."""
 
 
-def resolve_existing_model(model_id: ModelId) -> Path | None:
+def resolve_existing_model(
+    model_id: ModelId, card: ModelCard | None = None
+) -> Path | None:
     """Search all model directories for a complete, pre-existing model.
 
     Checks read-only directories first, then writable directories.
@@ -128,7 +130,7 @@ def resolve_existing_model(model_id: ModelId) -> Path | None:
     normalized = model_id.normalize()
     for search_dir in (*EXO_MODELS_READ_ONLY_DIRS, *EXO_MODELS_DIRS):
         candidate = search_dir / normalized
-        if candidate.is_dir() and is_model_directory_complete(candidate):
+        if candidate.is_dir() and is_model_directory_complete(candidate, card):
             return candidate
     return None
 
@@ -163,6 +165,29 @@ def select_download_dir(required_bytes: int) -> Path:
         f"No writable model directory has {required_bytes / (1024**3):.1f} GiB free. "
         f"Checked: {[str(d) for d in EXO_MODELS_DIRS]}"
     )
+
+
+async def select_download_dir_for_shard(
+    model_id: ModelId,
+    filtered_file_list: list[FileListEntry],
+    total_size: int,
+) -> Path:
+    for candidate_dir in EXO_MODELS_DIRS:
+        if not candidate_dir.exists():
+            continue
+        sub = candidate_dir / model_id.normalize()
+        if not await aios.path.isdir(sub):
+            continue
+        existing_bytes = 0
+        for file_entry in filtered_file_list:
+            existing_bytes += await get_downloaded_size(sub / file_entry.path)
+        remaining = max(total_size - existing_bytes, 0)
+        try:
+            if shutil.disk_usage(candidate_dir).free >= remaining:
+                return candidate_dir
+        except OSError:
+            continue
+    return select_download_dir(total_size)
 
 
 async def resolve_model_dir(model_id: ModelId) -> Path:
@@ -279,10 +304,26 @@ def _scan_model_directory(
     return list(entries_by_path.values())
 
 
-def is_model_directory_complete(model_dir: Path) -> bool:
-    """Check if a model directory contains all required weight files."""
+def is_model_directory_complete(model_dir: Path, card: ModelCard | None = None) -> bool:
+    """Check if a model directory contains all required weight files.
+    Also checks for sibling weights repo.
+    """
     file_list = _scan_model_directory(model_dir, recursive=True)
-    return file_list is not None and all(f.size is not None for f in file_list)
+    if file_list is None or not all(f.size is not None for f in file_list):
+        return False
+    if (
+        card is not None
+        and card.vision is not None
+        and card.vision.weights_repo != str(card.model_id)
+    ):
+        vision_id = ModelId(card.vision.weights_repo)
+        normalized = vision_id.normalize()
+        for search_dir in (*EXO_MODELS_READ_ONLY_DIRS, *EXO_MODELS_DIRS):
+            candidate = search_dir / normalized
+            if candidate.is_dir() and is_model_directory_complete(candidate):
+                return True
+        return False
+    return True
 
 
 async def _build_file_list_from_local_directory(
@@ -914,7 +955,9 @@ async def download_shard(
             else EXO_DEFAULT_MODELS_DIR / model_id.normalize()
         )
     else:
-        models_dir = select_download_dir(total_size)
+        models_dir = await select_download_dir_for_shard(
+            model_id, filtered_file_list, total_size
+        )
         target_dir = models_dir / model_id.normalize()
         await aios.makedirs(target_dir, exist_ok=True)
     file_progress: dict[str, RepoFileDownloadProgress] = {}

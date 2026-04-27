@@ -28,7 +28,8 @@ from exo.shared.constants import (
 )
 from exo.shared.types.common import ModelId
 from exo.shared.types.memory import Memory
-from exo.utils.pydantic_ext import CamelCaseModel
+from exo.shared.types.text_generation import ReasoningDialect
+from exo.utils.pydantic_ext import FrozenModel
 
 # kinda ugly...
 # TODO: load search path from config.toml
@@ -100,7 +101,7 @@ class ModelTask(str, Enum):
     ImageToImage = "ImageToImage"
 
 
-class ComponentInfo(CamelCaseModel):
+class ComponentInfo(FrozenModel):
     component_name: str
     component_path: str
     storage_size: Memory
@@ -109,7 +110,7 @@ class ComponentInfo(CamelCaseModel):
     safetensors_index_filename: str | None = None
 
 
-class VisionCardConfig(CamelCaseModel):
+class VisionCardConfig(FrozenModel):
     image_token_id: int
     model_type: str
     weights_repo: str = ""
@@ -117,7 +118,7 @@ class VisionCardConfig(CamelCaseModel):
     processor_repo: str | None = None
 
 
-class SamplingValues(CamelCaseModel):
+class SamplingValues(FrozenModel):
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
@@ -132,7 +133,7 @@ class SamplingDefaults(SamplingValues):
     non_thinking: SamplingValues | None = None
 
 
-class ModelCard(CamelCaseModel):
+class ModelCard(FrozenModel):
     model_id: ModelId
     storage_size: Memory
     n_layers: PositiveInt
@@ -145,6 +146,7 @@ class ModelCard(CamelCaseModel):
     quantization: str = ""
     base_model: str = ""
     capabilities: list[str] = []
+    reasoning_dialect: ReasoningDialect = "none"
     context_length: int = 0
     uses_cfg: bool = False
     trust_remote_code: bool = True
@@ -270,6 +272,7 @@ class ConfigData(BaseModel):
         return self.architectures in [
             ["Glm4MoeLiteForCausalLM"],
             ["GlmMoeDsaForCausalLM"],
+            ["DeepseekV4ForCausalLM"],
             ["DeepseekV32ForCausalLM"],
             ["DeepseekV3ForCausalLM"],
             ["Qwen3NextForCausalLM"],

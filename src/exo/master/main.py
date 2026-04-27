@@ -168,6 +168,7 @@ class Master:
                                     instance.shard_assignments.model_id
                                     == command.task_params.model
                                 ):
+                                    in_flight = {TaskStatus.Pending, TaskStatus.Running}
                                     task_count = sum(
                                         1
                                         for task in self.state.tasks.values()
@@ -209,6 +210,7 @@ class Master:
                                     instance.shard_assignments.model_id
                                     == command.task_params.model
                                 ):
+                                    in_flight = {TaskStatus.Pending, TaskStatus.Running}
                                     task_count = sum(
                                         1
                                         for task in self.state.tasks.values()
@@ -262,6 +264,7 @@ class Master:
                                     instance.shard_assignments.model_id
                                     == command.task_params.model
                                 ):
+                                    in_flight = {TaskStatus.Pending, TaskStatus.Running}
                                     task_count = sum(
                                         1
                                         for task in self.state.tasks.values()

@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field, field_validator
 from exo.shared.models.model_cards import ModelCard, ModelId
 from exo.shared.types.common import CommandId, NodeId
 from exo.shared.types.memory import Memory
-from exo.shared.types.text_generation import ReasoningEffort
+from exo.shared.types.text_generation import ReasoningDialect, ReasoningEffort
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
 from exo.shared.types.worker.shards import Sharding, ShardMetadata
-from exo.utils.pydantic_ext import CamelCaseModel
+from exo.utils.pydantic_ext import FrozenModel
 
 FinishReason = Literal[
     "stop", "length", "tool_calls", "content_filter", "function_call", "error"
@@ -48,6 +48,7 @@ class ModelListModel(BaseModel):
     quantization: str = Field(default="")
     base_model: str = Field(default="")
     capabilities: list[str] = Field(default_factory=list)
+    reasoning_dialect: ReasoningDialect = "none"
 
 
 class ModelList(BaseModel):
@@ -418,38 +419,38 @@ class ImageListResponse(BaseModel, frozen=True):
     data: list[ImageListItem]
 
 
-class StartDownloadParams(CamelCaseModel):
+class StartDownloadParams(FrozenModel):
     target_node_id: NodeId
     shard_metadata: ShardMetadata
 
 
-class StartDownloadResponse(CamelCaseModel):
+class StartDownloadResponse(FrozenModel):
     command_id: CommandId
 
 
-class DeleteDownloadResponse(CamelCaseModel):
+class DeleteDownloadResponse(FrozenModel):
     command_id: CommandId
 
 
-class CancelDownloadParams(CamelCaseModel):
+class CancelDownloadParams(FrozenModel):
     target_node_id: NodeId
     model_id: ModelId
 
 
-class CancelDownloadResponse(CamelCaseModel):
+class CancelDownloadResponse(FrozenModel):
     command_id: CommandId
 
 
-class PauseDownloadParams(CamelCaseModel):
+class PauseDownloadParams(FrozenModel):
     target_node_id: NodeId
     model_id: ModelId
 
 
-class PauseDownloadResponse(CamelCaseModel):
+class PauseDownloadResponse(FrozenModel):
     command_id: CommandId
 
 
-class TraceEventResponse(CamelCaseModel):
+class TraceEventResponse(FrozenModel):
     name: str
     start_us: int
     duration_us: int
@@ -457,12 +458,12 @@ class TraceEventResponse(CamelCaseModel):
     category: str
 
 
-class TraceResponse(CamelCaseModel):
+class TraceResponse(FrozenModel):
     task_id: str
     traces: list[TraceEventResponse]
 
 
-class TraceCategoryStats(CamelCaseModel):
+class TraceCategoryStats(FrozenModel):
     total_us: int
     count: int
     min_us: int
@@ -470,31 +471,31 @@ class TraceCategoryStats(CamelCaseModel):
     avg_us: float
 
 
-class TraceRankStats(CamelCaseModel):
+class TraceRankStats(FrozenModel):
     by_category: dict[str, TraceCategoryStats]
 
 
-class TraceStatsResponse(CamelCaseModel):
+class TraceStatsResponse(FrozenModel):
     task_id: str
     total_wall_time_us: int
     by_category: dict[str, TraceCategoryStats]
     by_rank: dict[int, TraceRankStats]
 
 
-class TraceListItem(CamelCaseModel):
+class TraceListItem(FrozenModel):
     task_id: str
     created_at: str
     file_size: int
 
 
-class TraceListResponse(CamelCaseModel):
+class TraceListResponse(FrozenModel):
     traces: list[TraceListItem]
 
 
-class DeleteTracesRequest(CamelCaseModel):
+class DeleteTracesRequest(FrozenModel):
     task_ids: list[str]
 
 
-class DeleteTracesResponse(CamelCaseModel):
+class DeleteTracesResponse(FrozenModel):
     deleted: list[str]
     not_found: list[str]

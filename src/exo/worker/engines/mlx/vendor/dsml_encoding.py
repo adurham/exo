@@ -17,6 +17,13 @@ TOOL_CALLS_START = f"<{DSML_TOKEN}function_calls>"
 TOOL_CALLS_END = f"</{DSML_TOKEN}function_calls>"
 _ORPHAN_THINK_END = ASSISTANT_TOKEN + THINKING_END
 _FIXED_THINK_BLOCK = ASSISTANT_TOKEN + THINKING_START + "\n" + THINKING_END
+_FUNCTION_RESULTS_CLOSE = "</function_results>"
+_ORPHAN_TOOL_RESULT_SUFFIX = _FUNCTION_RESULTS_CLOSE + "\n\n" + THINKING_END
+_EMPTY_THINK_BLOCKS = (
+    THINKING_START + "\n\n" + THINKING_END,
+    THINKING_START + "\n" + THINKING_END,
+    THINKING_START + THINKING_END,
+)
 
 
 def encode_messages(
@@ -27,15 +34,25 @@ def encode_messages(
     add_default_bos_token: bool = True,
     tools: Any = None,  # pyright: ignore[reportAny]
 ) -> str:
+    # V3.2 (like V4) is `tool_conditional`: when tools are in play, prior-turn
+    # reasoning_content must be retained so multi-step tool chains stay
+    # coherent.
+    effective_drop_thinking = drop_thinking
+    if tools:
+        effective_drop_thinking = False
     prompt: str = deepseek_v32.encode_messages(
         messages,
         thinking_mode=thinking_mode,
         context=context,
-        drop_thinking=drop_thinking,
+        drop_thinking=effective_drop_thinking,
         add_default_bos_token=add_default_bos_token,
         tools=tools,
     )
-    return prompt.replace(_ORPHAN_THINK_END, _FIXED_THINK_BLOCK)
+    prompt = prompt.replace(_ORPHAN_TOOL_RESULT_SUFFIX, _FUNCTION_RESULTS_CLOSE)
+    prompt = prompt.replace(_ORPHAN_THINK_END, _FIXED_THINK_BLOCK)
+    for empty in _EMPTY_THINK_BLOCKS:
+        prompt = prompt.replace(empty, "")
+    return prompt
 
 
 _INVOKE_PATTERN = re.compile(
