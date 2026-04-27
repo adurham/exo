@@ -32,29 +32,17 @@ commit chain `519024e4`, `2b1b4bf9`, `97bd2126`.
   `_merge_caches` without the stale
   `does not yet support batching with history` error.
 
-### What needs a port — **MTP speculative decoding**
+### What was ported — **MTP speculative decoding** ✓
 
-`src/exo/worker/engines/mlx/speculative/mtp_batch_generator.py` subclasses
-mlx-lm's `BatchGenerator` and uses:
+`MTPBatchGenerator` ported to the new mlx-lm API (commit `5abedbf`). Now
+subclasses `BatchGenerator` correctly, uses `_generation_batch` /
+`_unprocessed_sequences` / `SequenceStateMachine`, and `_next()` returns
+`(prompt_resps, gen_resps)`. Deque token buffer drains one per call; GDN
+cache rolled back for rejected drafts via `c.offset` / `c.rollback()`.
 
-- `self.active_batch` — gone. Replace with `self._generation_batch` (non-empty when `len(self._generation_batch) > 0`).
-- `self.unprocessed_prompts` — gone. Replace with `self._unprocessed_sequences` (deque).
-- `self.stop_tokens` instance attr — gone. Stop logic lives in `SequenceStateMachine` now; use `self._default_state_machine`.
-- `self._next()` returning `List[Response]` — now returns `(prompt_resps, gen_resps)`. Fast-path consumers should call `self._generation_batch.next()` directly (returns `List[GenerationBatch.Response]`) and skip the prompt side.
-
-Exo detects the new API at runtime (`hasattr(MlxBatchGenerator, "active_batch")`)
-and falls back to plain `BatchGenerator` with the warning:
-
-```
-EXO_SPECULATIVE=1 but this mlx-lm version split BatchGenerator into
-_prompt_batch/_generation_batch — MTPBatchGenerator is not ported yet.
-Running without MTP speculative decoding.
-```
-
-Huihui (prediction-bot scout) still runs. The 40% MTP throughput win is the
-cost of the fallback. Qwen3.5-397B-A17B (the other MTP user) is currently
-disabled in `start_cluster.sh` (`QWEN35_ENABLED=0`); re-enabling it requires
-this port.
+**QWEN35_ENABLED still 0** — flip to 1 in `start_cluster.sh` after confirming
+the live smoke test shows "MTP speculative decoding enabled" in the log and no
+regressions on Huihui.
 
 ### What needs a port — **opt_batch_gen fast-next patch**
 
@@ -65,6 +53,33 @@ old `Response` class. The patch is already gated off when
 `EXO_SPECULATIVE=1` (start_cluster.sh sets that), so on the live cluster
 it's not loaded. If it's ever re-enabled, the internal references need the
 same rename (`active_batch → _generation_batch`, Response → GenerationBatch.Response).
+
+### DeepSeek-V4 prefill chunk cap
+
+DSv4's `compress_ratio == 4` attention layers (`mlx_lm/models/deepseek_v4.py:1439-1448`)
+flatten the per-query top-`k` indexer gather to a dense KV of length `L × k`,
+then pass it to `scaled_dot_product_attention`. The score tensor is therefore
+`(B, n_heads, L, L × k)` — cubic in `L` until `k` saturates at
+`index_topk=512` (i.e. `L ≥ 2048`), then quadratic. Single allocation must fit
+under Apple Silicon's per-buffer cap of ~80 GiB (`86,586,540,032` bytes on
+M4 Max).
+
+Hard ceiling on prefill chunk size — observed and projected:
+
+| L (chunk) | k = min(512, L/4) | per-layer score buf (bf16) |
+|---|---|---|
+| 1024 | 256 | 34 GB |
+| 1280 | 320 | 67 GB |
+| 1500 | 375 | **108 GB** ← crashes |
+| 1904 | 476 | **221 GB** ← observed 2026-04-26 (227 GB Metal rejection) |
+| 2048 | 512 | 275 GB |
+
+**Set `EXO_PREFILL_STEP_SIZE ≤ 1024` (we use 512) for DSv4.** The default 2048
+or `start_cluster.sh`'s 4096 will OOM on any multi-turn chat where the prior
+assistant turn pushes total prompt past ~1.2K tokens. Reported on Blaizzy
+[#1192](https://github.com/ml-explore/mlx-lm/pull/1192#issuecomment-4323191525);
+real fix is upstream (sparse query-grouped SDPA that never materializes the
+dense `L × k` view).
 
 ## adurham/mlx main
 

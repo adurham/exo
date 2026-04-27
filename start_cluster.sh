@@ -10,7 +10,13 @@
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_PREFILL_STEP_SIZE:=4096}"
-: "${EXO_PROFILE_LAYERS:=0}"
+# Optional mlx-lm profiler hook. Comma-separated variants:
+#   spans         — per-span wall-time accumulator (was EXO_MINIMAX_TRACE)
+#   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;
+#                   EXO_PROFILER_LEVEL=2 also snapshots before each layer)
+# Unset ⇒ all hook calls in mlx-lm short-circuit to no-ops.
+: "${EXO_PROFILER:=}"
+: "${EXO_PROFILER_LEVEL:=1}"
 : "${EXO_LAYER_EVAL_INTERVAL:=1}"
 : "${EXO_DRAFT_KV_WINDOW:=4096}"
 : "${EXO_TURBOQUANT:=}"
@@ -40,6 +46,8 @@ fi
 # Hard byte cap for the prefix cache (across all leaves, after radix-trie
 # dedup). Empty = no byte cap (fall back to session-count cap alone).
 : "${HUIHUI_MAX_PREFIX_BYTES:=}"
+# Per-instance prefill chunk size. Empty = fall through to EXO_PREFILL_STEP_SIZE.
+: "${HUIHUI_PREFILL_STEP_SIZE:=}"
 # KV cache quantization (bits). Huihui's working set is small (~18 GB weights
 # + 36k-token rotating KV), so bf16 fits fine and skipping quant avoids the
 # per-step dequantize cost that _merge_caches pays for QuantizedKVCache.
@@ -75,6 +83,8 @@ fi
 # system prompt. Leaves real headroom under the 124 GB wired_limit alongside
 # Huihui's ~20 GB resident footprint per node.
 : "${MINIMAX_MAX_PREFIX_BYTES:=5368709120}"
+# Per-instance prefill chunk size. Empty = fall through to EXO_PREFILL_STEP_SIZE.
+: "${MINIMAX_PREFILL_STEP_SIZE:=}"
 # KV cache quantization (bits). 4-bit trades quality for footprint and at 48K+
 # contexts produces verbatim-recall drift (usernames / paths / exact strings
 # come back fuzzy — MLX's attention path dequantizes to bf16 anyway, so 4-bit
@@ -102,6 +112,12 @@ fi
 : "${DSV4_MAX_PREFIX_SESSIONS:=2}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
+# DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
+# at prefill — cubic in L until k saturates at index_topk=512, so any single
+# chunk above ~1.2K tokens crashes Metal allocation. Cap at 512 for safety
+# margin until upstream PR #1192 lands the query-grouped sparse-SDPA fix.
+# See dsv4_prefill_blowup memory + docs/upstream-prs.md.
+: "${DSV4_PREFILL_STEP_SIZE:=512}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage. Empty = defer
@@ -467,7 +483,8 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
     EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
-    EXO_ENV="$EXO_ENV EXO_PROFILE_LAYERS=$EXO_PROFILE_LAYERS"
+    [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
+    [ -n "$EXO_PROFILER_LEVEL" ] && EXO_ENV="$EXO_ENV EXO_PROFILER_LEVEL=$EXO_PROFILER_LEVEL"
     EXO_ENV="$EXO_ENV EXO_LAYER_EVAL_INTERVAL=$EXO_LAYER_EVAL_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_DRAFT_KV_WINDOW=$EXO_DRAFT_KV_WINDOW"
     EXO_ENV="$EXO_ENV EXO_KV_CACHE_BITS=$EXO_KV_CACHE_BITS"
@@ -486,8 +503,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_DEFAULT_TOP_K" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_K=$EXO_DEFAULT_TOP_K"
     [ -n "$EXO_DEFAULT_MIN_P" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_MIN_P=$EXO_DEFAULT_MIN_P"
 
-    # MiniMax decode profiling gates (both default off; forwarded to runners when set).
-    [ -n "$EXO_MINIMAX_TRACE" ]        && EXO_ENV="$EXO_ENV EXO_MINIMAX_TRACE=$EXO_MINIMAX_TRACE"
+    # MiniMax decode diagnostic gates (default off; forwarded to runners when set).
+    # The MiniMax-specific tracer was generalised into EXO_PROFILER=spans above.
     [ -n "$EXO_MINIMAX_NOOP_ALLSUM" ]  && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ALLSUM=$EXO_MINIMAX_NOOP_ALLSUM"
     [ -n "$EXO_MINIMAX_NOOP_ATTN" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ATTN=$EXO_MINIMAX_NOOP_ATTN"
     [ -n "$EXO_MINIMAX_NOOP_MOE" ]     && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_MOE=$EXO_MINIMAX_NOOP_MOE"
@@ -610,6 +627,7 @@ create_instance_with_retry() {
     local max_prefix_sessions="${13:-}"
     local kv_cache_bits="${14:-}"
     local max_prefix_bytes="${15:-}"
+    local prefill_step="${16:-}"
     local max_attempts=30
 
     for attempt in $(seq 1 $max_attempts); do
@@ -660,6 +678,7 @@ create_instance_with_retry() {
             --argjson sessions "${max_prefix_sessions:-null}" \
             --argjson kv_bits "${kv_cache_bits:-null}" \
             --argjson bytes "${max_prefix_bytes:-null}" \
+            --argjson prefill_step "${prefill_step:-null}" \
             '
             . as $i
             | ($i | keys[0]) as $tag
@@ -674,6 +693,7 @@ create_instance_with_retry() {
                 | (if $sessions != null then .maxPrefixSessions       = $sessions   else . end)
                 | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
                 | (if $bytes    != null then .maxPrefixBytes          = $bytes      else . end)
+                | (if $prefill_step != null then .prefillStepSize     = $prefill_step else . end)
               ) | {($tag): .[$tag]})}
         ')
 
@@ -722,6 +742,7 @@ create_single_node_instance() {
     local def_repetition="${12:-}"
     local kv_cache_bits="${13:-}"
     local max_prefix_bytes="${14:-}"
+    local prefill_step="${15:-}"
     local max_attempts=20
 
     for attempt in $(seq 1 $max_attempts); do
@@ -758,6 +779,7 @@ create_single_node_instance() {
             --argjson repetition "${def_repetition:-null}" \
             --argjson kv_bits "${kv_cache_bits:-null}" \
             --argjson bytes "${max_prefix_bytes:-null}" \
+            --argjson prefill_step "${prefill_step:-null}" \
             '
             .previews
             | map(select(.sharding == "Pipeline"
@@ -780,6 +802,7 @@ create_single_node_instance() {
                     | (if $repetition != null then .defaultRepetitionPenalty = $repetition else . end)
                     | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
                     | (if $bytes    != null then .maxPrefixBytes          = $bytes      else . end)
+                    | (if $prefill_step != null then .prefillStepSize     = $prefill_step else . end)
                   ) | {($tag): .[$tag]})}
               end
         ')
@@ -839,12 +862,14 @@ if [ "${HUIHUI_INSTANCES_PER_STUDIO:-0}" -gt 0 ]; then
                 "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
                 "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
                 "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
-                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" || true
+                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" \
+                "$HUIHUI_PREFILL_STEP_SIZE" || true
             create_single_node_instance "$M4_2_NODE_ID" "$HUIHUI_MODEL_ID" "M4-2" "$i" \
                 "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
                 "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
                 "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
-                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" || true
+                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" \
+                "$HUIHUI_PREFILL_STEP_SIZE" || true
         done
 
         # Wait until all expected instances have a Ready runner.
@@ -896,7 +921,8 @@ if [ "${MINIMAX_ENABLED:-0}" = "1" ]; then
             "$MINIMAX_TEMPERATURE" "$MINIMAX_TOP_P" "$MINIMAX_TOP_K" "$MINIMAX_MIN_P" \
             "$MINIMAX_PRESENCE_PENALTY" "$MINIMAX_REPETITION_PENALTY" \
             "$MINIMAX_MAX_KV_TOKENS" "$MINIMAX_MAX_PREFIX_SESSIONS" \
-            "$MINIMAX_KV_CACHE_BITS" "$MINIMAX_MAX_PREFIX_BYTES" || true
+            "$MINIMAX_KV_CACHE_BITS" "$MINIMAX_MAX_PREFIX_BYTES" \
+            "$MINIMAX_PREFILL_STEP_SIZE" || true
 
         echo -n "Waiting for 2 MiniMax runner(s) to become Ready..."
         READY=false
@@ -948,7 +974,8 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
             "$DSV4_TEMPERATURE" "$DSV4_TOP_P" "$DSV4_TOP_K" "$DSV4_MIN_P" \
             "$DSV4_PRESENCE_PENALTY" "$DSV4_REPETITION_PENALTY" \
             "$DSV4_MAX_KV_TOKENS" "$DSV4_MAX_PREFIX_SESSIONS" \
-            "$DSV4_KV_CACHE_BITS" "$DSV4_MAX_PREFIX_BYTES" || true
+            "$DSV4_KV_CACHE_BITS" "$DSV4_MAX_PREFIX_BYTES" \
+            "$DSV4_PREFILL_STEP_SIZE" || true
 
         echo -n "Waiting for 2 DeepSeek V4 runner(s) to become Ready..."
         READY=false

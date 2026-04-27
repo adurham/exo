@@ -6,57 +6,12 @@ Falls back to vanilla MoE when called without _residual (from vanilla decoder pa
 """
 
 import mlx.core as mx
-from mlx.nn.layers.activations import silu as nn_silu
 
 from .common import COMPUTE_DTYPE
 from .kernels.batched_merged_down_proj_8bit import batched_merged_down_proj_8bit
 from .kernels.batched_moe_epilogue import batched_moe_epilogue
 from .kernels.batched_oproj_gate_gemv_8bit import batched_oproj_gate_gemv
 from .kernels.batched_softmax_topk_swiglu_8bit import batched_softmax_topk_swiglu_8bit
-
-
-def _fused_switch_glu(switch_mlp, x, indices):
-    """SwitchGLU with fused gate+up gather_qmm (2 dispatches instead of 3).
-
-    Uses pre-concatenated gate+up weights (_fused_w_gu) for a single gather_qmm,
-    then splits the output and applies SwiGLU activation before down_proj.
-    """
-    from mlx_lm.models.switch_layers import _gather_sort, _scatter_unsort
-
-    x = mx.expand_dims(x, (-2, -3))
-    do_sort = indices.size >= 64
-    idx = indices
-    inv_order = None
-    if do_sort:
-        x, idx, inv_order = _gather_sort(x, indices)
-
-    n_inter = switch_mlp._fused_n_inter
-
-    # Single gather_qmm for gate+up (N=2*n_inter) instead of two (N=n_inter each)
-    gu = mx.gather_qmm(
-        x,
-        switch_mlp._fused_w_gu,
-        switch_mlp._fused_s_gu,
-        switch_mlp._fused_b_gu,
-        rhs_indices=idx,
-        transpose=True,
-        group_size=switch_mlp._fused_group_size,
-        bits=switch_mlp.gate_proj.bits,
-        mode=switch_mlp.gate_proj.mode,
-        sorted_indices=do_sort,
-    )
-
-    # Split into gate and up, apply SwiGLU
-    x_gate = gu[..., :n_inter]
-    x_up = gu[..., n_inter:]
-    x = nn_silu(x_gate) * x_up
-
-    # down_proj (unchanged — still a single gather_qmm)
-    x = switch_mlp.down_proj(x, idx, sorted_indices=do_sort)
-
-    if do_sort:
-        x = _scatter_unsort(x, inv_order, indices.shape)
-    return x.squeeze(-2)
 
 
 def _fused_shared_expert(moe, x):
@@ -115,11 +70,9 @@ def _batched_oproj_moe_call(self, attn_out_3d, _residual=None):
         if self.norm_topk_prob:
             scores = scores / scores.sum(axis=-1, keepdims=True)
 
-        # Fused gate+up: one gather_qmm instead of two
-        if hasattr(self.switch_mlp, '_fused_w_gu'):
-            y = _fused_switch_glu(self.switch_mlp, x, inds)
-        else:
-            y = self.switch_mlp(x, inds)
+        # Fused gate+up via BatchedSwitchGLU.__call__ when switch_mlp has been
+        # promoted; falls back to the vanilla SwitchGLU path otherwise.
+        y = self.switch_mlp(x, inds)
         y = (y * scores[..., None]).sum(axis=-2)
 
         # Fused shared expert: one matmul instead of two for gate+up

@@ -45,8 +45,8 @@ from mlx_lm.models.kimi_k25 import Model as KimiK25Model
 from mlx_lm.models.llama import Model as LlamaModel
 from mlx_lm.models.minimax import MiniMaxAttention, ShardedRMSNorm
 from mlx_lm.models.minimax import Model as MiniMaxModel
-from mlx_lm.models.minimax_trace import finalize as _minimax_finalize
-from mlx_lm.models.minimax_trace import span as _minimax_span
+from mlx_lm.profiler import finalize as _minimax_finalize
+from mlx_lm.profiler import span as _minimax_span
 from mlx_lm.models.ministral3 import Model as Ministral3Model
 from mlx_lm.models.nemotron_h import Model as NemotronHModel
 from mlx_lm.models.nemotron_h import (

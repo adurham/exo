@@ -66,6 +66,68 @@ def _set_self_qos_class_darwin(qos_class_name: str) -> None:
         )
 
 
+def _maybe_register_profiler_hook() -> None:
+    """Install an mlx-lm profiler hook based on ``EXO_PROFILER`` / ``EXO_PROFILER_LEVEL``.
+
+    ``EXO_PROFILER`` is a comma-separated list of hook variants:
+      * ``spans`` — per-span wall-time accumulator (replaces the old
+        ``EXO_MINIMAX_TRACE``); dumps on SIGUSR1 / atexit.
+      * ``layer_memory`` — per-layer Metal memory snapshots (replaces the
+        old ``EXO_PROFILE_LAYERS``); ``EXO_PROFILER_LEVEL=2`` adds pre-layer
+        snapshots in addition to the post-layer ones.
+
+    Unset / empty ⇒ no hook registered, all calls short-circuit to no-ops.
+    """
+    raw = os.environ.get("EXO_PROFILER", "").strip()
+    if not raw:
+        return
+
+    requested = {p.strip().lower() for p in raw.split(",") if p.strip()}
+    valid = {"spans", "layer_memory"}
+    unknown = requested - valid
+    if unknown:
+        logger.warning(
+            f"Unknown EXO_PROFILER variants {sorted(unknown)}; valid: "
+            f"{sorted(valid)}. Skipping unknown."
+        )
+    requested &= valid
+    if not requested:
+        return
+
+    try:
+        from mlx_lm.profiler import (
+            CompositeHook,
+            MemorySnapshotHook,
+            SpanProfilerHook,
+            install_signal_dump,
+            register,
+        )
+    except ImportError as e:
+        logger.warning(f"Profiler hook unavailable in mlx-lm: {e}")
+        return
+
+    hooks: list[object] = []
+    span_hook: SpanProfilerHook | None = None
+    if "spans" in requested:
+        span_hook = SpanProfilerHook()
+        hooks.append(span_hook)
+    if "layer_memory" in requested:
+        level = int(os.environ.get("EXO_PROFILER_LEVEL", "1"))
+        hooks.append(MemorySnapshotHook(level=level))
+
+    if not hooks:
+        return
+
+    if len(hooks) == 1:
+        register(hooks[0])  # pyright: ignore[reportArgumentType]
+    else:
+        register(CompositeHook(*hooks))  # pyright: ignore[reportArgumentType]
+
+    if span_hook is not None:
+        install_signal_dump(span_hook)
+    logger.info(f"mlx-lm profiler hook registered: {sorted(requested)}")
+
+
 def entrypoint(
     bound_instance: BoundInstance,
     event_sender: MpSender[Event],
@@ -92,6 +154,8 @@ def entrypoint(
         os.environ["MLX_METAL_FAST_SYNCH"] = "1"
 
     logger.info(f"Fast synch flag: {os.environ['MLX_METAL_FAST_SYNCH']}")
+
+    _maybe_register_profiler_hook()
 
     # Import main after setting global logger - this lets us just import logger from this module
     try:

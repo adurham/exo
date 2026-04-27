@@ -118,6 +118,7 @@ class ExoBatchGenerator:
     vision_processor: VisionProcessor | None = None
     model_id: str = ""
     max_kv_tokens: int | None = None
+    prefill_step_size: int | None = None
     default_temperature: float | None = None
     default_top_p: float | None = None
     default_top_k: int | None = None
@@ -139,27 +140,12 @@ class ExoBatchGenerator:
         stop_tokens = set(eos_ids_from_tokenizer(self.tokenizer))
         # mlx-lm's new BatchGenerator expects stop_tokens as Sequence[Sequence[int]]
         # — one "sequence" per stop. Wrap each EOS id so state-machine setup gets
-        # the shape it expects. Old forks accept flat ints; pass the shaped form,
-        # which is a superset.
+        # the shape it expects.
         stop_tokens_seq = [[t] for t in stop_tokens]
 
-        # MTPBatchGenerator subclasses and overrides mlx-lm's BatchGenerator.
-        # The mlx-lm fork main rewrote BatchGenerator (PromptProcessingBatch +
-        # GenerationBatch, no more `active_batch`/`unprocessed_prompts`). Until
-        # the MTP subclass is ported to the new API, detect the new API and
-        # fall back to standard generation so Huihui still runs (just without
-        # the MTP throughput win).
-        mtp_compatible = hasattr(MlxBatchGenerator, "active_batch") or hasattr(
-            MlxBatchGenerator, "unprocessed_prompts"
-        )
-        if use_speculative and not mtp_compatible:
-            logger.warning(
-                "EXO_SPECULATIVE=1 but this mlx-lm version split BatchGenerator "
-                "into _prompt_batch/_generation_batch — MTPBatchGenerator is not "
-                "ported yet. Running without MTP speculative decoding."
-            )
+        prefill_step_size = self.prefill_step_size or 4096
 
-        if use_speculative and mtp_compatible:
+        if use_speculative:
             try:
                 from exo.worker.engines.mlx.speculative.mtp_batch_generator import (
                     MTPBatchGenerator,
@@ -179,19 +165,35 @@ class ExoBatchGenerator:
                         gamma=gamma,
                         temp=temp,
                         alpha=alpha,
-                        stop_tokens=stop_tokens,
-                        prefill_step_size=4096,
+                        stop_tokens=stop_tokens_seq,
+                        prefill_step_size=prefill_step_size,
                     )
-                    logger.info(f"MTP speculative decoding enabled (γ={gamma}, T={temp})")
+                    logger.info(
+                        f"MTP speculative decoding enabled (γ={gamma}, T={temp})"
+                    )
                     # Skip warmup — OOMs on 397B (Metal abort, uncatchable)
                 else:
-                    logger.warning("EXO_SPECULATIVE=1 but could not find MTP weights. Falling back.")
-                    self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens_seq, prefill_step_size=4096)
+                    logger.warning(
+                        "EXO_SPECULATIVE=1 but could not find MTP weights. Falling back."
+                    )
+                    self._mlx_gen = MlxBatchGenerator(
+                        model=self.model,
+                        stop_tokens=stop_tokens_seq,
+                        prefill_step_size=prefill_step_size,
+                    )
             except Exception as e:
                 logger.warning(f"Failed to init MTP speculative: {e}. Falling back.")
-                self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens_seq, prefill_step_size=4096)
+                self._mlx_gen = MlxBatchGenerator(
+                    model=self.model,
+                    stop_tokens=stop_tokens_seq,
+                    prefill_step_size=prefill_step_size,
+                )
         else:
-            self._mlx_gen = MlxBatchGenerator(model=self.model, stop_tokens=stop_tokens_seq, prefill_step_size=4096)
+            self._mlx_gen = MlxBatchGenerator(
+                model=self.model,
+                stop_tokens=stop_tokens_seq,
+                prefill_step_size=prefill_step_size,
+            )
 
         self._mlx_gen._needs_topk = False  # pyright: ignore[reportAttributeAccessIssue]
         self._pp_spec_eos = set(eos_ids_from_tokenizer(self.tokenizer))
@@ -754,6 +756,7 @@ class ExoBatchGenerator:
                 self.group,
                 on_prefill_progress,
                 distributed_prompt_progress_callback,
+                prefill_step_size=self.prefill_step_size,
             )
 
         # We need to clamp rotating kv caches to max size so that mlx lm's _merge_caches behaves

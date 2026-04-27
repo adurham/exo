@@ -71,27 +71,23 @@ def ceil_div(a, b):
 
 
 def _patch_swiglu_weights(moe):
-    """Stack gate+up weights for fused 8-bit SwiGLU kernel.
+    """Promote ``moe.switch_mlp`` to :class:`BatchedSwitchGLU` and fuse gate+up.
 
-    Creates concatenated (E, 2*N_INTER, K/4) weight, (E, 2*N_INTER, K/gs) scales/biases
-    from the separate gate_proj and up_proj QuantizedSwitchLinear layers.
+    The fused-weight attributes (``_fused_w_gu`` / ``_fused_s_gu`` /
+    ``_fused_b_gu`` / ``_fused_n_inter`` / ``_fused_k_hidden`` /
+    ``_fused_group_size``) live on the ``switch_mlp`` itself so the
+    routed-experts kernel and the batched MoE kernel both read them from
+    the same place.
     """
-    gate_proj = moe.switch_mlp.gate_proj
-    up_proj = moe.switch_mlp.up_proj
+    from mlx_lm.models.switch_layers import BatchedSwitchGLU, SwitchGLU
 
-    moe.switch_mlp._fused_w_gu = mx.concatenate(
-        [gate_proj.weight, up_proj.weight], axis=1)
-    moe.switch_mlp._fused_s_gu = mx.concatenate(
-        [gate_proj.scales, up_proj.scales], axis=1)
-    moe.switch_mlp._fused_b_gu = mx.concatenate(
-        [gate_proj.biases, up_proj.biases], axis=1)
-    moe.switch_mlp._fused_n_inter = gate_proj.output_dims
-    moe.switch_mlp._fused_k_hidden = gate_proj.input_dims
-    moe.switch_mlp._fused_group_size = gate_proj.group_size
-
-    mx.eval(moe.switch_mlp._fused_w_gu,
-            moe.switch_mlp._fused_s_gu,
-            moe.switch_mlp._fused_b_gu)
+    swl = moe.switch_mlp
+    if not isinstance(swl, BatchedSwitchGLU) and isinstance(swl, SwitchGLU):
+        # In-place class swap: SwitchGLU and BatchedSwitchGLU share the same
+        # __init__ signature and parameters, so reassigning __class__ is safe
+        # and avoids reallocating the projection weights.
+        swl.__class__ = BatchedSwitchGLU
+    swl.fuse_weights()
 
 
 def _patch_shared_expert(moe):
