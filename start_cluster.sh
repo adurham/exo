@@ -142,7 +142,7 @@ fi
 # whose interaction with fork's QuantizedKVCache wrapper hasn't been validated;
 # leaving it bf16 until we confirm the quant path round-trips cleanly through
 # the compressor branches.
-: "${DSV4_KV_CACHE_BITS:=0}"
+: "${DSV4_KV_CACHE_BITS:=4}"
 # Sampling defaults — official DeepSeek V4 Flash card recommends
 # temperature=1.0, top_p=1.0 for local deployment. Other params unset.
 : "${DSV4_TEMPERATURE:=1.0}"
