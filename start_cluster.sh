@@ -985,7 +985,7 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
     if [ "$EXISTING_DSV4" -ge 1 ]; then
         echo "  DeepSeek V4 instance already running. Skipping."
     else
-        create_instance_with_retry "DeepSeek V4 Flash" "$DSV4_MODEL_ID" "Tensor" "MlxJaccl" 2 \
+        create_instance_with_retry "DeepSeek V4 Flash" "$DSV4_MODEL_ID" "Pipeline" "MlxRing" 2 \
             "$DSV4_TEMPERATURE" "$DSV4_TOP_P" "$DSV4_TOP_K" "$DSV4_MIN_P" \
             "$DSV4_PRESENCE_PENALTY" "$DSV4_REPETITION_PENALTY" \
             "$DSV4_MAX_KV_TOKENS" "$DSV4_MAX_PREFIX_SESSIONS" \
