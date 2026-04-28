@@ -14,13 +14,51 @@ File map:
 
 ## adurham/mlx-lm main
 
-Pinned (as of exo `8dfce1f4`, 2026-04-27): `dsv4-perf-bisect@034a42aaf355ade60dce0e79843efb5f87fa392e`. The `:main` branch carries today's `_quantize` predicate fix (commit `5aa2d89`, see below) plus a temporary graft of rltakashige's `deepseek_v4.py` (commit `876cfd9`, used during the upstream-PR-#1978 pivot experiment — left in place but not on the active branch). The cluster runs `:dsv4-perf-bisect` (Blaizzy variant) via `pyproject.toml`.
+Pinned (as of exo `a5bd7311`, 2026-04-28): `main@87f46251c4b4c095e8d992962f1475d6b3f70da9`. `:main` is now the canonical fork branch — the rltakashige graft has been reverted, the cluster's Blaizzy-derived `deepseek_v4.py` is consolidated onto `:main`, and `:dsv4-perf-bisect` is retired (still exists on `origin` for history but unused).
+
+Patches carried on `:main` against `ml-explore/mlx-lm:main`:
+
+1. `_quantize` predicate fix — `5aa2d89` (filed upstream as PR #1216).
+2. Cluster-working `deepseek_v4.py` (Blaizzy variant w/ DSv4-Flash sharding-friendly compressor + indexer) — `e98e75c`.
+3. `EXO_PROFILER` spans in `V4Attention.__call__` + `DeepseekV4MoE.__call__` — `98ebfde`. 14 named spans; runtime no-ops without `EXO_PROFILER` set.
+4. Sparse SDPA matmul rewrite — `87f4625` (see below).
 
 ### `_quantize` predicate fix (commit `5aa2d89`)
 
 `load_model._quantize`'s `class_predicate` returned the per-layer override dict before checking `to_quantized`, so models that pre-quantize specific layers in `__init__` (e.g. DSv4's `DeepseekV4MoE` calling `SwitchLinear.to_quantized(..., mode="mxfp4")` on its experts) trip with `ValueError: Unable to quantize model of type QuantizedSwitchLinear`. One-line reorder; works for any pre-quantizing model.
 
 Filed upstream as **mlx-lm PR [#1216](https://github.com/ml-explore/mlx-lm/pull/1216)**. Drop the fork patch when that lands.
+
+### DSv4 profiler spans (commit `98ebfde`)
+
+`V4Attention.__call__` and `DeepseekV4MoE.__call__` are wrapped with 14 named spans via `mlx_lm.profiler` (the same hook the MiniMax instrumentation uses):
+
+- V4Attention: `attn_q_lora`, `attn_kv_proj`, `attn_rope`, `attn_cache_update`, `attn_compressor`, `attn_indexer`, `attn_gather`, `attn_sdpa_sparse`, `attn_sdpa_dense`, `attn_o_proj`
+- DeepseekV4MoE: `moe_gate`, `moe_switch_mlp`, `moe_shared`, `moe_all_sum`
+
+Names use underscores (no dots) so each is a top-level entry in `SpanStats.dump()` — the % column denominator becomes the sum of all non-overlapping spans, giving correct attribution. Runner registers the `SpanProfilerHook` only when `EXO_PROFILER=spans` is set; with no hook registered, `_span()` returns the null context manager and `_finalize()` is a no-op, so production deploys add zero kernel-time overhead.
+
+Fork-only — intrusive instrumentation, unlikely to be upstreamed in this form. `start_cluster.sh` already forwards `EXO_PROFILER` to runners.
+
+### Sparse SDPA matmul rewrite (commit `87f4625`) — **4.2× wall-time speedup at 32K**
+
+`_sparse_pooled_attention` had two `(broadcast)·(broadcast).sum()` patterns that materialized a `(B, H, L, k, D)` intermediate before reducing — at 32K-prefill shapes (H=64, L=512, k=512, D=128) that's ~4 GB of bf16 traffic per layer per chunk for *each* of the score path and the output path. Profiling on the cluster (2× M4 Max, `mlx-community/DeepSeek-V4-Flash-6bit`) showed `attn_sdpa_sparse` averaging 298 ms/call and consuming **73-78%** of total wall time at 32K context.
+
+Both expressions are exactly a batched matmul over `L`:
+- `pooled_scores[b,h,l,k] = sum_d q_scaled[b,h,l,d] * pooled[b,0,l,k,d]` → `(q.transpose(0,2,1,3) @ pooled[:,0].swapaxes(-1,-2)).transpose(0,2,1,3)`
+- `out_pooled[b,h,l,d] = sum_k pooled_weights[b,h,l,k] * pooled[b,0,l,k,d]` → mirror form
+
+Rewriting as transpose-then-matmul lets MLX's GEMM kernel tile through without ever materializing the 5-D tensor. Equivalence verified numerically (max abs diff ≈ 1e-6, FP-accumulation order noise).
+
+Live bench, 32K context, `concurrent_bench --concurrency 1 --max-tokens 200`, no profiler:
+
+| | Wall | Decode |
+|---|---|---|
+| Pre-opt (lock pinned to `98ebfde`) | 415.06s | 28.6 tok/s |
+| Post-opt (lock pinned to `87f4625`) | **98.19s** | 28.8 tok/s |
+| Δ | **−76% / 4.2×** | unchanged ✓ |
+
+Decode rate identical (sparse path fires only at L>1 prefill; L=1 decode goes through `attn_sdpa_dense`), so the win is entirely on prefill. Generic improvement to upstream's `deepseek_v4.py` — strong candidate for an upstream PR to `ml-explore/mlx-lm`.
 
 ### Why we're on main, not a snapshot
 
@@ -232,6 +270,18 @@ to all observers.
   Description rewritten same day with the full prior-art context above
   after @zcbenz pushed back ("you need to prove this is not AI
   hallucinations first") — that pushback makes sense given #3141's history.
+- **Apr 28** — **PR #3456 closed without merge.** zcbenz consulted the
+  Apple Metal team and confirmed there is no supported CPU↔GPU atomic
+  memory coherence primitive in Metal and no public way to implement a
+  guaranteed-working GPU spinlock. Their position: the DSB barrier "may
+  appear to work but only triggers implementation quirks, not because
+  Apple Silicon follows ARM specs" — unlikely to hold across all
+  hardware/macOS versions. zcbenz offered to merge flag-gated as an
+  explicitly documented hack; declined, to avoid landing unsupported
+  behavior in upstream under our name. **The patch stays fork-only.**
+  If the underlying hang ever needs an upstream fix, the right path is
+  Apple shipping it directly (or a successor to #3141 from
+  @rltakashige / @vskiwi with their larger-cluster repro).
 
 ### Reproduction status — A/B is hard
 
@@ -252,8 +302,13 @@ reproduce the hang — matches @vskiwi's experience that closed #3141.
 
 What we do have: the patch has run on the cluster since Feb 16, 2026 with
 zero observed fence deadlocks during normal MiniMax/Huihui operation.
-That's an absence-of-symptom over ~2 months, not a controlled A/B. Be
-precise about that distinction when discussing this with reviewers.
+**This is weaker evidence than it looks.** The bug is non-deterministic
+even on configs that hit it (rlt: "fairly difficult to reproduce";
+vskiwi closed #3141 because they couldn't reliably repro on a clean
+cluster), so 2 months of clean operation on a config below the known
+repro threshold is consistent with both "patch is helping" *and* "patch
+is doing nothing because the bug rarely fires here anyway." Don't argue
+from this observation either direction.
 
 ### Known gaps in our fork's fix
 
@@ -274,10 +329,43 @@ and @vskiwi** — they originated the work, have the larger-cluster repro
 environment, and the right move is for one of them (not adurham) to be
 the upstream author of any successor to #3141.
 
-> **Upstream tracking:** opened as PR #3456 (see
-> [upstream-prs.md](./upstream-prs.md)) — write-side only, deferring the
-> read-side and hazard-tracking pieces to follow-ups or a #3141 revival
-> by the original authors.
+### Disposition — keep for now, low confidence it's earning its keep
+
+Decision 2026-04-28 (post-#3456 closure): **keep the patch on
+adurham/mlx:main, but treat it as expendable.**
+
+Rationale:
+- We can't reproduce the bug on 2× M4 Max (sub-threshold per the repro
+  conditions above), so we have no positive evidence the patch is doing
+  anything for our cluster.
+- The Apple Metal team's position is that the barrier only "appears to
+  work" via implementation quirks and is not guaranteed across hardware
+  or macOS versions — so it may already be silently no-op on our config
+  and we wouldn't know.
+- The bug is non-deterministic enough that "2 months no deadlocks"
+  doesn't argue either way (see Reproduction status above).
+- Cost of carrying it is low (one rebase conflict surface in
+  `fence.cpp` / `fence.metal` / `transforms.cpp`), so there's no
+  urgency to remove.
+
+Forward plan:
+- **Drop on the next fork rebase** unless we've observed a fence
+  deadlock in the interim. Git history preserves the patch if we need
+  to restore.
+- **Restore immediately** if we ever scale to ≥4 nodes, run >500B-param
+  TP models, or hit a fence-related hang.
+- **Don't reopen #3456.** Apple's position is settled; any upstream
+  successor needs to come from rlt/vskiwi at their cluster scale, or
+  from Apple themselves.
+- **Don't add the read-side fix or hazard-tracking change** (Known
+  gaps above) on speculation alone — same reasoning, we have no repro
+  to validate against.
+
+> **Upstream tracking:** PR #3456 closed without merge 2026-04-28 (see
+> [upstream-prs.md](./upstream-prs.md) "Recently closed without merge").
+> Apple Metal team confirmed no supported CPU↔GPU coherence primitive;
+> the patch stays fork-only and is scheduled to drop on next rebase
+> absent symptoms.
 
 ## adurham/mlx main — quantized SDPA kernel + dispatch knob
 
@@ -331,7 +419,7 @@ Today's work on adurham/exo:main, filed as two stacked upstream PRs:
 - **exo PR [#1996](https://github.com/exo-explore/exo/pull/1996)** — drops upstream's full-attention DSv4 sharding (`_shard_v4_attention_heads` + `_AllSumLinear`) for a MoE-only strategy. Replicates attention on every rank, shards only the MoE block. Fixes the saturated-softmax gibberish observed running upstream PR #1978 + `mlx-community/DeepSeek-V4-Flash-6bit`.
 - **exo PR [#1999](https://github.com/exo-explore/exo/pull/1999)** — stacks on #1996; adds an opt-in `_FusedSwitchGLU` that fuses `gate_proj + up_proj` into a single `gather_qmm` dispatch. **+1.2% c=1 / +1.1% c=2** on `mlx-community/DeepSeek-V4-Flash-6bit` (2× M4 Max RDMA), gated behind `EXO_DSV4_FUSED_MOE=1`. Default-on for DSv4 in `start_cluster.sh`.
 
-Bench baseline at 34.6 tok/s c=1; 75.2 tok/s aggregate at c=8 (sub-linear scaling, no errors, tail ratio 1.00). Long-context degradation `-17%` at 32K vs 50w is dominated by DSv4 compressor pool compute — not KV-bandwidth-bound (KV bits=4 was neutral at 32K).
+Bench baseline at 34.6 tok/s c=1; 75.2 tok/s aggregate at c=8 (sub-linear scaling, no errors, tail ratio 1.00). Long-context degradation `-17%` decode at 32K vs 50w was originally suspected to be the DSv4 compressor pool — **profiling 2026-04-28 refuted that** (compressor is only ~2% of decode). Real picture: at 32K the `_sparse_pooled_attention` prefill path was 73% of total wall time; the matmul rewrite (mlx-lm `87f4625`, see above) cut wall by 4.2×. Decode regression is now spread across many small ops; `attn_indexer` (5% of decode, scales with pooled cache size) is the next-most-likely context-scaling lever.
 
 ### MiniMax fused MoE kernels
 

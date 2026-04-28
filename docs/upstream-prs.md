@@ -4,26 +4,24 @@ Cross-repo tracker for what `adurham/{exo,mlx,mlx-lm}` carries on top of upstrea
 and what's been pushed forward to upstream review. Companion to
 [fork-notes.md](./fork-notes.md), which tracks dependency pins.
 
-Last refresh: 2026-04-27.
+Last refresh: 2026-04-28.
 
 ---
 
 ## Status board
 
-### Open PRs (11)
+### Open PRs (9)
 
 | Repo | PR | Title | Status |
 |---|---|---|---|
 | `ml-explore/mlx-lm` | [#1204](https://github.com/ml-explore/mlx-lm/pull/1204) | minimax: validate head_dim against checkpoint, drop unused shared_intermediate_size | review required, CI not run yet |
 | `ml-explore/mlx-lm` | [#1216](https://github.com/ml-explore/mlx-lm/pull/1216) | fix(utils): skip already-quantized layers in load_model._quantize predicate | review required, opened 2026-04-27 |
-| `ml-explore/mlx` | [#3454](https://github.com/ml-explore/mlx/pull/3454) | Add `mx.metal.dispatch_count()` for kernel-dispatch diagnostics | zcbenz: wants per-CommandEncoder counter (multi-stream attribution); macOS 15.0 CI failed |
 | `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | **APPROVED** by zcbenz 2026-04-27, awaiting merge |
-| `ml-explore/mlx` | [#3456](https://github.com/ml-explore/mlx/pull/3456) | fix: address GPU locks by synchronizing GPU and CPU memory with DSB barrier | **CHANGES_REQUESTED** by zcbenz — wants Apple-Metal-engineer-level proof of the DMB ISH/DSB SY claim. Coordinate with @rltakashige + @vskiwi |
 | `exo-explore/exo` | [#1985](https://github.com/exo-explore/exo/pull/1985) | feat: Prometheus `/metrics` endpoint | review required |
 | `exo-explore/exo` | [#1988](https://github.com/exo-explore/exo/pull/1988) | feat: `EXO_KV_CACHE_BITS` env var + step=16384 for QuantizedKVCache | review required |
 | `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | review required |
 | `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | review required |
-| `exo-explore/exo` | [#1996](https://github.com/exo-explore/exo/pull/1996) | fix(deepseek_v4): drop full-attention sharding for MoE-only strategy | review required, opened 2026-04-27 with bench evidence |
+| `exo-explore/exo` | [#1996](https://github.com/exo-explore/exo/pull/1996) | fix(deepseek_v4): drop full-attention sharding for MoE-only strategy | rltakashige commented 2026-04-28 — `mlx-community/DeepSeek-V4-Flash-6bit` is sanitized for Blaizzy's variant, not theirs; claims their implementation is "considerably better in performance and stability." Their only published bench (PR #1195) is 30.1 tok/s single-node, vs our 34.6 tok/s on 2-node M4 Max RDMA TP — claim doesn't survive contact. **Holding ground; no reply yet.** Position: PR is scoped to compatibility with the de facto public checkpoint, not a claim about which implementation is better. Revisit if any DSv4 PR merges upstream. |
 | `exo-explore/exo` | [#1999](https://github.com/exo-explore/exo/pull/1999) | perf(deepseek_v4): fuse switch_mlp gate_proj + up_proj into single gather_qmm | review required, stacks on #1996, +1.2% c=1 / +1.1% c=2 bench-validated |
 
 ### Recently merged (2)
@@ -32,6 +30,13 @@ Last refresh: 2026-04-27.
 |---|---|---|
 | `exo-explore/exo` | [#1989](https://github.com/exo-explore/exo/pull/1989) | fix: route by in-flight tasks only — completed tasks were skewing load balance |
 | `exo-explore/exo` | [#1991](https://github.com/exo-explore/exo/pull/1991) | fix: map presence_penalty and frequency_penalty from ChatCompletionRequest |
+
+### Recently closed without merge (2)
+
+| Repo | PR | Title | Resolution |
+|---|---|---|---|
+| `ml-explore/mlx` | [#3456](https://github.com/ml-explore/mlx/pull/3456) | fix: address GPU locks by synchronizing GPU and CPU memory with DSB barrier | Closed 2026-04-28 by zcbenz. Apple Metal team confirmed there is no supported CPU↔GPU atomic memory coherence primitive and no public way to implement a guaranteed-working GPU spinlock; the DSB barrier "may appear to work but only triggers implementation quirks, not because Apple Silicon follows ARM specs." zcbenz offered to merge it flag-gated as a documented hack — declined to avoid landing unsupported behavior in upstream. **Patch stays fork-only** (see fork-notes.md). If the hang ever needs an upstream fix, the right path is Apple shipping it directly. |
+| `ml-explore/mlx` | [#3454](https://github.com/ml-explore/mlx/pull/3454) | Add `mx.metal.dispatch_count()` for kernel-dispatch diagnostics | Closed 2026-04-28 by adurham. zcbenz pointed out that `mx.export_to_dot` already covers the fusion-validation use case: counting primitive nodes in the exported DOT graph distinguishes fused (1 `ScaledDotProductAttention` node) from unfused (5-node `Transpose → Matmul → Multiply → Softmax → Matmul`) at the same granularity needed for our Phase-3 fused-QKV / joined-RoPE validation. Patch is **not** carried on `adurham/mlx:main` either — Phase-3 is shipped, no current need. Branch's git history preserves the patch if a kernel-internal fusion case ever needs runtime dispatch counting. |
 
 ### Open issues / design questions (3)
 
@@ -44,6 +49,35 @@ Last refresh: 2026-04-27.
 ### Comments left (1)
 
 - `ml-explore/mlx-lm` [#941](https://github.com/ml-explore/mlx-lm/pull/941) — +1 on `QuantizedKVCache.merge()`; offered to drive the `BatchQuantizedKVCache` redesign maintainer asked for.
+
+### Fork sync state (2026-04-28)
+
+| Fork | vs upstream/main | Notes |
+|---|---|---|
+| `adurham/mlx-lm` | 0 behind, 57 ahead | Fully current |
+| `adurham/mlx` | 0 behind, 40 ahead | Fully current |
+| `adurham/exo` | **4 behind**, 359 ahead | **Merge deferred** — see below |
+
+#### Deferred: exo upstream merge (4 commits)
+
+Attempted 2026-04-28; aborted due to **7 conflicts** in cluster-critical files. Dominant blocker is `f0d1371d` MLX P/D (#1993, +4000/-84, 53 files) — major prefill/decode disaggregation feature. Secondary: `c80b10c0` engine abstraction (#2000) renames `runner/llm_inference/runner.py → runner/runner.py` and deletes `runner/image_models/runner.py`, both of which our fork has commits on. Two trivial commits (#1997, #1998) merge cleanly.
+
+Conflict severity by fork-commit count touching each file:
+
+| File | Fork commits | Caused by |
+|---|---|---|
+| `engines/mlx/generator/generate.py` | 47 | #1993 |
+| `engines/mlx/generator/batch_generate.py` | 44 | #2000 + #1993 |
+| `engines/mlx/cache.py` | 24 | #1993 |
+| `engines/mlx/auto_parallel.py` | 22 | #1993 |
+| `runner/llm_inference/runner.py` (renamed → `runner/runner.py`) | 18 | #2000 |
+| `runner/llm_inference/batch_generator.py` | 12 | #2000 + #1993 |
+| `master/main.py` | 5 | #1993 |
+| `runner/image_models/runner.py` (deleted) | 2 | #2000 |
+
+Pickup plan + scope estimate (1-2 days) in memory `exo_upstream_merge_2026_04_28_deferred.md`. Phase 1 is a comprehension pass on the new `worker/disaggregated/` module to determine whether it applies to our 2-node TP cluster — that question changes whether conflict resolution is mostly textual or architectural.
+
+**Don't attempt the merge while perf work is in flight** (DSv4 long-context profile session is currently running in another session against `engines/mlx/generator/generate.py`).
 
 ---
 
@@ -62,7 +96,7 @@ Last refresh: 2026-04-27.
 | Radix-trie KV prefix cache | **Issue #1986** | 1200+ LoC; depends on two prereq features (caps, `pin()`) that aren't upstream either. Asked maintainer for PR-shape preference. PR #1929 was self-closed for paperwork (wrong base fork). |
 | Instance sampling resolver | **Issue #1987** | Partially superseded by upstream #1947 (card tier merged 2026-04-21). Asked about per-instance + cluster-env tiers. |
 | Presence/Frequency API mapping | **PR #1991** | Wires up the presence_penalty and frequency_penalty from the API layer to the upstream sampling resolver. |
-| DeepSeek-V4 cluster integration | wait on whichever DSv4 PR lands | Three competing mlx-lm DSv4 PRs as of 2026-04-26, all OPEN/BLOCKED awaiting review: Blaizzy [#1192](https://github.com/ml-explore/mlx-lm/pull/1192) (most recently active), rlt [#1195](https://github.com/ml-explore/mlx-lm/pull/1195), machiabeli [#1189](https://github.com/ml-explore/mlx-lm/pull/1189). Fork's tokenizer fallback should drop once one lands. Sharding strategy is generic. |
+| DeepSeek-V4 cluster integration | wait on whichever DSv4 PR lands | Three competing mlx-lm DSv4 PRs as of 2026-04-26, all OPEN/BLOCKED awaiting review: Blaizzy [#1192](https://github.com/ml-explore/mlx-lm/pull/1192) (most recently active), rlt [#1195](https://github.com/ml-explore/mlx-lm/pull/1195), machiabeli [#1189](https://github.com/ml-explore/mlx-lm/pull/1189). Fork's tokenizer fallback should drop once one lands. Sharding strategy is generic. **Cluster currently runs Blaizzy variant via mlx-lm pin to `adurham/mlx-lm:main`** (which carries Blaizzy's `deepseek_v4.py` + `_quantize` predicate fix on top); 34.6 tok/s c=1 on 2× M4 Max RDMA. **Don't pivot to rlt's variant unless their PR merges upstream** — rlt's only published bench (PR #1195) is 30.1 tok/s single-node which doesn't beat ours, and switching would cost a 155 GB redownload + quality revalidation + rebench from scratch. |
 | MTP speculative decoding | **complete, pending smoke test** | `MTPBatchGenerator` ported to new mlx-lm API (`PromptProcessingBatch`/`GenerationBatch`/`SequenceStateMachine`). Deque token buffer, correct GDN rollback, per-token state machine. Flip `QWEN35_ENABLED=0 → 1` in `start_cluster.sh` after live smoke test confirms no regressions. |
 | P2P model distribution | **PR #1992** | Reauthored from the original 16-commit chain (3 redundant after upstream PR #1829 landed; 5 dropped as cancel/no-op pairs). 2 clean commits: P2P core + cancel→pause/`DownloadPaused` refactor. Adds X-File-SHA256 header + receiver-side hash verification, EXO_FILE_SERVER_MAX_CONCURRENCY cap with 503/Retry-After, real path-traversal defense (the original fork's `is_relative_to(model_dir)` check let `..` escape laterally into a sibling model — caught and fixed). 61 new tests; security-relevant cases use raw sockets to bypass aiohttp client URL normalization. `docs/p2p-model-distribution.md` covers the security stance. |
 | Phase-3 fused QKV / joined RoPE | depends on mlx#3454 + Phase-2 | Python-level kernel fusion. Off by default (`EXO_MINIMAX_FUSED_ATTN`). Wants `dispatch_count()` to land first. |
@@ -73,16 +107,16 @@ Last refresh: 2026-04-27.
 
 ### mlx (`ml-explore/mlx`)
 
-38 ahead, 1 behind. 6 change-groups.
+38 ahead, 1 behind. 6 change-groups (1 active PR, 2 closed-without-merge fork-evaluated).
 
 | Group | Status | Notes |
 |---|---|---|
-| `mx.metal.dispatch_count()` | **PR #3454** | Cleaned vs fork: dropped env-gate (always-on), added Python test. PR description asks maintainer about env-gate vs always-on. |
+| `mx.metal.dispatch_count()` | **PR #3454 closed 2026-04-28** | zcbenz pointed at `mx.export_to_dot` as covering the use case (graph node count distinguishes fused vs unfused at the same granularity we used the runtime counter for). Not carried on `adurham/mlx:main` either — Phase-3 is shipped, no current need. Closed branch's git history preserves the patch if a kernel-internal fusion case (where the graph stays the same but the kernel does more work) ever needs runtime dispatch counting. |
 | Chunked SDPA + LogSumExp | needs Thump604 coordination | Thump604's work; their PRs #3293 (head_dim=256) and #3307 (chunked) **both closed without merge** 2026-04-04 after zcbenz asked for perf-regression data and a separate issue. Author hasn't returned. |
 | `MLX_SDPA_FUSED_THRESHOLD` env var | folded into Thump604 work | The gate this parameterizes (`sdpa_full_large_hd_ok`, head_dim 192/256, `key_sequence_length > 16384`) doesn't exist upstream — it would have to land via re-revival of #3293/#3307. |
 | `MLX_SDPA_BLOCKS` env var | **PR #3455** | Bundled into Phase-2 commit `1f6eb6bd` but conceptually independent. Tunes the 2-pass blocks heuristic for both bf16 and quant dispatches. Empirical sweet-spot 88 at 50K/M4 Ultra/MiniMax (+6.5%). Could land standalone since the override applies to upstream's existing 2-pass kernel. ~10 lines. **Round-1 review (zcbenz, 2026-04-26)**: dropped the test, switched to `env::get_var`, renamed away from `override` keyword. **Round-2 (zcbenz, 2026-04-27 UTC)**: helper function dropped — env read inlined directly at the call site (`a7a77ab6`). |
 | Quantized SDPA kernel (Phase-2) | NEEDS-CLEANUP, large surface | Tightly coupled to `quantized.h` packing; head_dim limited to 64/128; needs upstream-facing docs of the bits/group contract; depends on upstream wanting QuantizedKVCache. Multi-PR series if pursued. |
-| RDMA GPU lock fix (DSB barrier) | **PR #3456** | Write-side `__dsb` patch in `Fence::update` — addresses CPU↔GPU/DMA coherence on ARM64 (DMB ISH inner-shareable doesn't reach GPU; DSB SY full-system does). **NOT NEW WORK** — prior art is mlx#3141 (vskiwi, closed Feb 24, 2026) + still-open issue mlx#3142 (rltakashige). PR description rewritten 2026-04-26 to acknowledge that history. Two open follow-up questions: (1) currently ships `__dsb(0xE)` / DSB ST matching the original Feb 16 commit, but the empirical Feb 17 finding on M3 Ultra was that `0xF` / DSB SY is required — happy to upgrade. (2) Read-side fix per vskiwi's [Mar 8 #3142 comment](https://github.com/ml-explore/mlx/issues/3142#issuecomment-4018576460) not included; should it ride along? See `docs/fork-notes.md` for full history + cluster A/B attempt (couldn't reproduce on 2× M4 Max — matches vskiwi's 2-node observation). If revived, **coordinate with @rltakashige + @vskiwi** rather than landing under adurham's name. |
+| RDMA GPU lock fix (DSB barrier) | **fork-only — PR #3456 closed 2026-04-28** | Write-side `__dsb` patch in `Fence::update`. zcbenz consulted the Apple Metal team and confirmed there is **no supported CPU↔GPU atomic memory coherence primitive** in Metal and no public way to implement a guaranteed-working GPU spinlock. The DSB barrier "may appear to work but only triggers implementation quirks, not because Apple Silicon follows ARM specs" — unlikely to hold across all hardware/macOS versions. zcbenz offered to merge flag-gated as an explicitly documented hack; declined to avoid landing unsupported behavior under adurham's name. Patch stays fork-only. Original prior art: mlx#3141 (vskiwi, closed Feb 24 2026) + still-open issue mlx#3142 (rltakashige). If the hang ever needs an upstream fix, the right path is Apple shipping it directly. See `docs/fork-notes.md` for the patch we still carry and the cluster A/B attempt (couldn't reproduce on 2× M4 Max — matches vskiwi's 2-node observation). |
 | Jaccl refactor revert | won't upstream | Reverts upstream #3412 + #3418; should be a bug report on ml-explore/mlx for the 2-rank RDMA init failure, not a revert PR. |
 
 ### mlx-lm (`ml-explore/mlx-lm`)
@@ -92,6 +126,8 @@ Last refresh: 2026-04-27.
 | Group | Status | Notes |
 |---|---|---|
 | MiniMax config validation + dead-field cleanup | **PR #1204** | Validates `head_dim × num_heads` against `q_proj` shape; drops unused `shared_intermediate_size`. `test_all_models` passes. |
+| DSv4 sparse SDPA matmul rewrite | **candidate, not yet filed** | mlx-lm `87f4625`. Replaces two `(broadcast)·(broadcast).sum()` patterns in `_sparse_pooled_attention` with batched matmul over L. Eliminates the `(B, H, L, k, D)` intermediate (~4 GB at 32K shapes per layer per chunk). **Bench-validated 4.2× wall-time speedup at 32K** on `mlx-community/DeepSeek-V4-Flash-6bit` (415s → 98s, decode unchanged at 28.8 tok/s). Pure semantic rewrite — equivalent up to FP-accumulation noise (`max abs diff ≈ 1e-6`). Generic; applies to any DSv4 deployment. Worth filing as a clean PR once the multi-DSv4-PR situation upstream settles (Blaizzy #1192 / machiabeli #1189 / rlt #1195 still in flight). See `fork-notes.md` for details. |
+| DSv4 `EXO_PROFILER` spans | **fork-only, not for upstream** | mlx-lm `98ebfde`. 14 named spans wrapping `V4Attention.__call__` + `DeepseekV4MoE.__call__`. No-op when `EXO_PROFILER` unset. Intrusive instrumentation — upstream wouldn't accept inline `with span(...)` blocks; their preference is hookable abstractions which we already use here. Fork-carried indefinitely as a debugging tool. |
 | `_skip_lm_head` guard | **Issue #1203** | Asked maintainer about return-type asymmetry / compile-graph homogeneity before PR'ing 5-model change. Upstream's PipelineMixin inverts our rank convention (rank 0 = last layers). |
 | `QuantizedKVCache.merge()` | **superseded by #941** | ochafik PR open since 2026-03-02, stalled on maintainer (angeloskath) wanting `BatchQuantizedKVCache` redesign. Comment left offering to help drive that. |
 | GDN float32 precision fixes | not ours to upstream | Multi-author cluster: dmcc73 (precision), rlt (lightning indexer), Apple/angeloskath (padding eval). Competing PR #1066 (kernelpool, Kahan-compensation approach). Needs DM coordination, not unilateral PR. |
@@ -127,7 +163,7 @@ Last refresh: 2026-04-27.
 
 ## Recommended next actions
 
-1. **Wait for review feedback** on the 10 open PRs and 3 issues before drafting more. All but P2P (#1992) were opened 2026-04-26; #1992 went up the same day after a re-author. Give a few days.
+1. **Wait for review feedback** on the 9 open PRs and 3 issues before drafting more. All but P2P (#1992) were opened 2026-04-26; #1992 went up the same day after a re-author. Give a few days. (mlx#3454 + mlx#3456 both closed 2026-04-28 — see "Recently closed without merge".)
 2. **If radix-trie issue #1986 gets a green light** → split into the 3-PR sequence (caps → pin → trie+extend-in-place).
 3. **If sampling-tier issue #1987 gets a green light** → defer per-instance + cluster-env per maintainer guidance. (The uncontroversial API mapping fixes have already been submitted as PR #1991).
 4. **DSv4 cluster sharding (exo)** waits on whichever DSv4 PR (Blaizzy #1192 / machiabeli #1189 / rlt #1195) lands.
