@@ -1269,7 +1269,7 @@ wheels = [
 [[package]]
 name = "mlx-lm"
 version = "0.31.3"
-source = { git = "https://github.com/adurham/mlx-lm.git?branch=main#98ebfdef767ea0db4a83743b78a25271b902ab11" }
+source = { git = "https://github.com/adurham/mlx-lm.git?branch=main#87f46251c4b4c095e8d992962f1475d6b3f70da9" }
 dependencies = [
     { name = "jinja2", marker = "sys_platform == 'darwin' or (sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
     { name = "mlx", version = "0.31.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-3-exo-cpu') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda12') or (sys_platform == 'linux' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda12') or (extra == 'extra-3-exo-cpu' and extra == 'extra-3-exo-cuda13') or (extra == 'extra-3-exo-cuda12' and extra == 'extra-3-exo-cuda13')" },
