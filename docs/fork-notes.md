@@ -14,7 +14,7 @@ File map:
 
 ## adurham/mlx-lm main
 
-Pinned (as of exo `a5bd7311`, 2026-04-28): `main@87f46251c4b4c095e8d992962f1475d6b3f70da9`. `:main` is now the canonical fork branch — the rltakashige graft has been reverted, the cluster's Blaizzy-derived `deepseek_v4.py` is consolidated onto `:main`, and `:dsv4-perf-bisect` is retired (still exists on `origin` for history but unused).
+Pinned (as of exo `31ac5da4`, 2026-04-27): `main@2a1dcf653e3e95181c381d4d6329c2c0a92ce032`. `:main` is now the canonical fork branch — the rltakashige graft has been reverted, the cluster's Blaizzy-derived `deepseek_v4.py` is consolidated onto `:main`, and `:dsv4-perf-bisect` is retired (still exists on `origin` for history but unused).
 
 Patches carried on `:main` against `ml-explore/mlx-lm:main`:
 
@@ -22,6 +22,8 @@ Patches carried on `:main` against `ml-explore/mlx-lm:main`:
 2. Cluster-working `deepseek_v4.py` (Blaizzy variant w/ DSv4-Flash sharding-friendly compressor + indexer) — `e98e75c`.
 3. `EXO_PROFILER` spans in `V4Attention.__call__` + `DeepseekV4MoE.__call__` — `98ebfde`. 14 named spans; runtime no-ops without `EXO_PROFILER` set.
 4. Sparse SDPA matmul rewrite — `87f4625` (see below).
+5. Indexer fp32→bf16 — `f4dd9e7` (see below).
+6. MoEGate fp32→bf16 + Compressor softmax cleanup — `2a1dcf6` (see below).
 
 ### `_quantize` predicate fix (commit `5aa2d89`)
 
@@ -59,6 +61,42 @@ Live bench, 32K context, `concurrent_bench --concurrency 1 --max-tokens 200`, no
 | Δ | **−76% / 4.2×** | unchanged ✓ |
 
 Decode rate identical (sparse path fires only at L>1 prefill; L=1 decode goes through `attn_sdpa_dense`), so the win is entirely on prefill. Generic improvement to upstream's `deepseek_v4.py` — strong candidate for an upstream PR to `ml-explore/mlx-lm`.
+
+### Indexer fp32→bf16 (commit `f4dd9e7`) — **+3.4% decode at 100K, −10% wall at 100K**
+
+`Indexer.__call__` had three explicit `.astype(mx.float32)` casts in the score path: `q.astype(fp32) @ pooled.swapaxes(-1, -2).astype(fp32)` and `weights = self.weights_proj(x).astype(fp32) * (n_heads**-0.5)`. The fp32 GEMM was 2× the bandwidth/FLOPs vs bf16 on a hot decode-time op whose cost scales with pooled-cache size. Live profile (`EXO_PROFILER=spans`, 32K bench) had `attn_indexer` at 6.6% of decode at 32K, extrapolating to ~19% at 100K.
+
+Drop the casts. MLX's bf16 GEMM accumulates in fp32 internally so the matmul is preserved up to the final downcast; `mx.argpartition` top-k selection is robust to small score perturbations because top-k routing decisions are inherently fuzzy at the boundary.
+
+Live bench, c=1, max-tokens=200, no profiler:
+
+| | 32K decode | 32K wall | 100K decode | 100K wall |
+|---|---|---|---|---|
+| Pre (lock @ `87f4625`) | 29.0 tok/s | 97.93s | 26.4 tok/s | 480.81s |
+| Post (lock @ `f4dd9e7`) | 29.3 tok/s | 94.55s | 27.3 tok/s | **432.79s** |
+| Δ | +1.0% (noise) | −3.5% | **+3.4%** | **−10.0%** (saved 48s prefill) |
+
+Quality smoke test: standard chat-completion prompts produce coherent technically-accurate output — no regression. Generic improvement to upstream's `deepseek_v4.py`; clean upstream candidate.
+
+### MoEGate fp32→bf16 + Compressor softmax cleanup (commit `2a1dcf6`)
+
+Same playbook applied to two more sites:
+
+1. `MoEGate.__call__` had `flat.astype(fp32) @ self.weight.T.astype(fp32)` for the routing matmul. `moe_gate` was the **largest** decode contributor at 14.9% (32K). Drop both casts and rename the weight cache from `_weight_T_f32` → `_weight_T`. Logits become bf16; downstream `_expert_select` pipes through sigmoid/softmax(precise=True) which preserves precision for the top-k routing decision.
+2. `Compressor.__call__` cast gate to fp32 before `mx.softmax(precise=True)`. The `precise=True` flag already promotes internally regardless of input dtype — the cast was vestigial.
+
+Live bench, c=1, max-tokens=200, no profiler (deltas vs `f4dd9e7` baseline; cumulative deltas vs original `87f4625` baseline):
+
+| | Pre (`f4dd9e7`) | Post (`2a1dcf6`) | Δ vs prior | Cumulative Δ |
+|---|---|---|---|---|
+| 32K decode | 29.3 tok/s | 29.6 tok/s | +1.0% (noise) | **+2.1%** vs 29.0 |
+| 32K wall | 94.55s | 94.37s | unchanged | **−3.6%** vs 97.93s |
+| 100K decode | 27.3 tok/s | **27.7 tok/s** | **+1.5%** | **+4.9%** vs 26.4 |
+| 100K wall | 432.79s | 431.98s | unchanged | **−10.2%** vs 480.81s |
+
+Quality clean. Generic improvement to upstream's `deepseek_v4.py`; clean upstream candidate.
+
+**fp32 cast audit exhausted.** V4Attention's q_lora/kv_proj/o_proj are already bf16 via `nn.Linear`. Remaining fp32 sites in the file are HC code (weights stored fp32, math depends on it), tiny scalars, training-only paths, and RoPE position indices — none worth touching.
 
 ### Why we're on main, not a snapshot
 
@@ -229,6 +267,20 @@ with a system-scope `__metal_atomic_load_explicit` fallback) and a
 `MAX_ACTIVE_TASKS` 10→5 throttle in `transforms.cpp`. All from
 @rltakashige's `address-rdma-gpu-locks` branch (Feb 16-25, 2026).
 
+**Read-side companion patch (added 2026-04-27, commit `d6ecdaa9`):**
+
+```cpp
+// Symmetric to Fence::update's seq_cst store + DSB SY: without a
+// read-side full-system barrier the CPU can sit on a stale cache
+// line that the GPU has already updated.
+while (f.cpu_value()->load(std::memory_order_seq_cst) < count) {
+  __dsb(0xF);
+}
+```
+
+Mirrors the write side. Closes Known Gap #1 below. Added in response to
+the 2026-04-27 partial-deadlock observation (see "Reproduction status").
+
 ### Why
 
 Issue **[ml-explore/mlx#3142](https://github.com/ml-explore/mlx/issues/3142)** — `[BUG] GPU locking using METAL_FAST_SYNCH=1 and the JACCL backend`,
@@ -282,6 +334,21 @@ to all observers.
   If the underlying hang ever needs an upstream fix, the right path is
   Apple shipping it directly (or a successor to #3141 from
   @rltakashige / @vskiwi with their larger-cluster repro).
+- **Apr 27, evening** — **first 2-node-cluster repro.** DSv4-Flash-6bit
+  on 2× M4 Max RDMA, multi-turn chat workload (~7K-token context,
+  prefill chunks at 4096 env / 512 actual). Decode-step max times (PROF
+  log lines, normally ~30ms steady-state) spiked to 5070, 6295, 9276,
+  and **34097 ms**, paired across both ranks (5070/5018, 6295/6331,
+  9276/9356, 34097/34097 — consistent with one rank's GPU stall blocking
+  the other in cross-rank `all_sum`). Self-recovered every time rather
+  than full-deadlocking — consistent with this being the read-side
+  variant of the coherence gap, where the existing nuclear GPU spin
+  eventually nudges things forward. No RDMA/jaccl error in either log;
+  pure GPU stall, application-silent. Recovery: instance delete →
+  supervisors clean up runners → `start_cluster.sh` restart. **Used to
+  require a node reboot; the existing nuclear patches cap blast radius
+  enough that we can recover without rebooting now.** Triggered the
+  read-side fix (commit `d6ecdaa9` above).
 
 ### Reproduction status — A/B is hard
 
@@ -293,34 +360,42 @@ The bug reproduces under specific conditions (per #3141 / #3142):
   pattern does *not* consistently trigger
 - macOS 26.2 → silent data corruption; 26.3+ → SIGABRT or hang
 
-**Our 2× M4 Max cluster sits below the threshold.** Attempted A/B test
-2026-04-26: built four binary-distinct mlx variants (no-fix / DSB ST /
-DSB SY / DSB SY + nuclear), ran each on real jaccl/RDMA over Thunderbolt
-with `MLX_METAL_FAST_SYNCH=1`, payloads 4 KB → 16 MB, sustained 60-110 s.
-**All four variants pass.** Synthetic 2-rank loads do not reliably
-reproduce the hang — matches @vskiwi's experience that closed #3141.
+**Our 2× M4 Max cluster was previously thought to sit below the threshold.**
+Attempted A/B test 2026-04-26: built four binary-distinct mlx variants
+(no-fix / DSB ST / DSB SY / DSB SY + nuclear), ran each on real
+jaccl/RDMA over Thunderbolt with `MLX_METAL_FAST_SYNCH=1`, payloads
+4 KB → 16 MB, sustained 60-110 s. **All four variants pass.** Synthetic
+2-rank loads do not reliably reproduce the hang.
 
-What we do have: the patch has run on the cluster since Feb 16, 2026 with
-zero observed fence deadlocks during normal MiniMax/Huihui operation.
-**This is weaker evidence than it looks.** The bug is non-deterministic
-even on configs that hit it (rlt: "fairly difficult to reproduce";
-vskiwi closed #3141 because they couldn't reliably repro on a clean
-cluster), so 2 months of clean operation on a config below the known
-repro threshold is consistent with both "patch is helping" *and* "patch
-is doing nothing because the bug rarely fires here anyway." Don't argue
-from this observation either direction.
+**That premise was invalidated 2026-04-27**: real DSv4 inference on
+this same cluster produced the partial-deadlock pattern (paired
+multi-second decode-step spikes, see History above). Not the synthetic
+A/B harness — the actual MoE-heavy long-context multi-turn workload.
+
+**Repro signal going forward: PROF `max=` decode-step time** in
+`exo.worker.runner.llm_inference.runner:handle_generation_tasks` log
+lines. Steady-state ~30ms at decode; anything >200ms is interesting,
+>1000ms is a partial-deadlock event, paired with same-magnitude spike
+on the other rank. No need to construct a synthetic load — DSv4
+production traffic exercises it.
+
+Caveat carried forward: the bug is non-deterministic even on configs
+that hit it (rlt: "fairly difficult to reproduce"). A run that doesn't
+spike doesn't prove a fix works; need bench windows long enough for
+spikes to accumulate.
 
 ### Known gaps in our fork's fix
 
-1. **Read-side**: vskiwi's Mar 8 #3142 comment proposes adding
-   `__dsb(0xF)` inside `Fence::wait`'s spin loop. Our fork doesn't have
-   it. Adding it would be strictly more correct but is untested on our
-   hardware.
+1. ~~**Read-side**: vskiwi's Mar 8 #3142 comment proposes adding~~
+   ~~`__dsb(0xF)` inside `Fence::wait`'s spin loop.~~ **Closed
+   2026-04-27 (commit `d6ecdaa9`)** in response to the partial-deadlock
+   observation above. See "What we're carrying" for the patch.
 2. **Hazard tracking**: vskiwi's #3142 Feb 18 comment also recommends
    `HazardTrackingModeUntracked → HazardTrackingModeDefault` in
    `allocator.cpp:15` to address a separate buffer-lifetime crash they
    saw at long contexts. Our fork doesn't carry this either; we haven't
-   observed the crash.
+   observed the crash. Don't add on speculation alone — different
+   symptom from the fence hang.
 
 ### Coordination
 
@@ -329,43 +404,46 @@ and @vskiwi** — they originated the work, have the larger-cluster repro
 environment, and the right move is for one of them (not adurham) to be
 the upstream author of any successor to #3141.
 
-### Disposition — keep for now, low confidence it's earning its keep
+### Disposition — keep, earning its keep
 
-Decision 2026-04-28 (post-#3456 closure): **keep the patch on
-adurham/mlx:main, but treat it as expendable.**
+Decision 2026-04-27 (revised, post-partial-deadlock observation):
+**keep the patch chain on adurham/mlx:main; do NOT drop on next
+rebase.** The 2026-04-28 "expendable, drop on next rebase" decision is
+superseded.
 
 Rationale:
-- We can't reproduce the bug on 2× M4 Max (sub-threshold per the repro
-  conditions above), so we have no positive evidence the patch is doing
-  anything for our cluster.
-- The Apple Metal team's position is that the barrier only "appears to
-  work" via implementation quirks and is not guaranteed across hardware
-  or macOS versions — so it may already be silently no-op on our config
-  and we wouldn't know.
-- The bug is non-deterministic enough that "2 months no deadlocks"
-  doesn't argue either way (see Reproduction status above).
-- Cost of carrying it is low (one rebase conflict surface in
-  `fence.cpp` / `fence.metal` / `transforms.cpp`), so there's no
-  urgency to remove.
+- The "we can't reproduce on 2× M4 Max" premise is invalidated by the
+  2026-04-27 partial-deadlock observation. DSv4 production traffic
+  exercises the symptom.
+- The fact that the existing nuclear patches turned what used to be
+  full-deadlocks-requiring-reboot into self-recovering 5-34s spikes is
+  positive evidence they're doing real work, even under the Apple Metal
+  team's "implementation quirk" framing.
+- Read-side fix added 2026-04-27 (`d6ecdaa9`) — needs cluster bench to
+  validate against the PROF max-step regression signal.
 
 Forward plan:
-- **Drop on the next fork rebase** unless we've observed a fence
-  deadlock in the interim. Git history preserves the patch if we need
-  to restore.
-- **Restore immediately** if we ever scale to ≥4 nodes, run >500B-param
-  TP models, or hit a fence-related hang.
+- **Keep all four pieces** (write-side DSB, GPU-side nuclear spin,
+  `MAX_ACTIVE_TASKS=5`, read-side DSB).
+- **Validate the read-side fix** by running DSv4 production-shaped
+  workload long enough to catch the partial-deadlock signal, comparing
+  PROF max-step distributions before/after.
+- **Restore the "drop on rebase" disposition only if** the read-side
+  fix demonstrably eliminates the spikes AND we can show the
+  write-side+nuclear patches alone are sufficient — which we currently
+  can't.
 - **Don't reopen #3456.** Apple's position is settled; any upstream
   successor needs to come from rlt/vskiwi at their cluster scale, or
-  from Apple themselves.
-- **Don't add the read-side fix or hazard-tracking change** (Known
-  gaps above) on speculation alone — same reasoning, we have no repro
-  to validate against.
+  from Apple themselves. The 2-node repro changes the evidence picture
+  but not the upstream policy answer.
+- **Hazard-tracking change (Known Gap #2) stays unimplemented** — it
+  addresses a different symptom (buffer-lifetime crash at long
+  contexts) we haven't observed.
 
 > **Upstream tracking:** PR #3456 closed without merge 2026-04-28 (see
 > [upstream-prs.md](./upstream-prs.md) "Recently closed without merge").
 > Apple Metal team confirmed no supported CPU↔GPU coherence primitive;
-> the patch stays fork-only and is scheduled to drop on next rebase
-> absent symptoms.
+> the patch chain stays fork-only.
 
 ## adurham/mlx main — quantized SDPA kernel + dispatch knob
 
