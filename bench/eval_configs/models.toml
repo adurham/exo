@@ -183,6 +183,15 @@ temperature = 1.0
 top_p = 0.95
 enable_thinking = true
 
+# Source: HuggingFace model card (deepseek-ai/DeepSeek-V4-Flash) recommends
+# temp=1.0, top_p=1.0. Matches start_cluster.sh DSV4_TEMPERATURE/TOP_P.
+[[model]]
+name = "DeepSeek V4 Flash"
+patterns = ["DeepSeek-V4-Flash"]
+reasoning = true
+temperature = 1.0
+top_p = 1.0
+
 # ─── NVIDIA Nemotron ───────────────────────────────────────────────────
 # Source: HuggingFace model cards
 # All variants: temp=1.0, top_p=0.95, enable_thinking=true
