@@ -81,7 +81,7 @@ members = ["rust/exo_pyo3_bindings", "bench"]
 [tool.uv.sources]
 exo-pyo3-bindings = { workspace = true }
 mlx = { git = "https://github.com/adurham/mlx.git", branch = "main", marker = "sys_platform == 'darwin'" }
-mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "dsv4-perf-bisect" }
+mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "main" }
 # Uncomment to use local mlx/mlx-lm development versions:
 # mlx = { path = "/Users/Shared/mlx", editable=true }
 # mlx-lm = { path = "/Users/Shared/mlx-lm", editable=true }
