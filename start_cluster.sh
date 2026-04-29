@@ -538,6 +538,7 @@ for NODE in "${NODES[@]}"; do
     # while we validate decode quality vs unfused.
     [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
+    [ -n "$EXO_DSV4_INDEXER_WINDOW" ]  && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
     [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
 
