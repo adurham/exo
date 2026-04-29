@@ -137,7 +137,7 @@ fi
 # chunk above ~1.2K tokens crashes Metal allocation. Cap at 512 for safety
 # margin until upstream PR #1192 lands the query-grouped sparse-SDPA fix.
 # See dsv4_prefill_blowup memory + docs/upstream-prs.md.
-: "${DSV4_PREFILL_STEP_SIZE:=512}"
+: "${DSV4_PREFILL_STEP_SIZE:=128}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage.
