@@ -137,7 +137,7 @@ fi
 # chunk above ~1.2K tokens crashes Metal allocation. Cap at 512 for safety
 # margin until upstream PR #1192 lands the query-grouped sparse-SDPA fix.
 # See dsv4_prefill_blowup memory + docs/upstream-prs.md.
-: "${DSV4_PREFILL_STEP_SIZE:=128}"
+: "${DSV4_PREFILL_STEP_SIZE:=256}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage.
@@ -537,6 +537,7 @@ for NODE in "${NODES[@]}"; do
     # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
     # while we validate decode quality vs unfused.
     [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
+    [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
     [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
 
