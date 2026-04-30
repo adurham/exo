@@ -7,6 +7,13 @@
 # ── Tunable defaults (override via environment before running) ──
 : "${EXO_FAST_SYNCH:=1}"
 : "${EXO_DISABLE_METAL_TIMEOUT:=1}"
+# GPU command buffer queue depth. Lower = more headroom for macOS
+# WindowServer to slot 60Hz frames in between our dispatches; saturated
+# queue has triggered WindowServer userspace watchdog (40s stuck in
+# IOGPUFamily) which kills WindowServer and aborts our runner via the
+# Metal completion handler. Default upstream is 10. Forked default 5
+# is the first stop on the bisect.
+: "${EXO_MAX_ACTIVE_TASKS:=5}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_PREFILL_STEP_SIZE:=4096}"
@@ -503,6 +510,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1"
     EXO_ENV="$EXO_ENV EXO_LIBP2P_NAMESPACE=$EXO_LIBP2P_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
+    EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
     EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
     EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
