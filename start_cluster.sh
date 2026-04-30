@@ -567,10 +567,14 @@ for NODE in "${NODES[@]}"; do
     # Rotate log: keep previous run as exo.log.prev, then append
     ssh "$NODE" "cp ~/exo.log ~/exo.log.prev 2>/dev/null; : > ~/exo.log"
 
+    # caffeinate -s wraps the exo process. -s keeps the system from idle-
+    # sleeping AND interrupts WindowServer's GPU compositing competition,
+    # which together with AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1 stops the IOGPU
+    # watchdog from killing long-running ML workloads (mlx#3267).
     if [ "$NODE" == "macstudio-m4-1" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID caffeinate -s .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
     elif [ "$NODE" == "macstudio-m4-2" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID caffeinate -s .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
     else
          ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
     fi
