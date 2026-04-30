@@ -183,19 +183,24 @@ temperature = 1.0
 top_p = 0.95
 enable_thinking = true
 
-# Source: HuggingFace model card (deepseek-ai/DeepSeek-V4-Flash) recommends
-# temp=1.0, top_p=1.0. But empirically the model fails to emit </think>
-# at temp=1.0 on long reasoning chains (>10K thinking tokens) — it
-# wanders without converging, hits length limit, no answer extracted.
-# At temp=0.6 the model emits </think> reliably and produces correct
-# AIME answers in ~500-800 reasoning tokens. Diverges from the model
-# card but matches actual working behavior.
+# Source: deepseek-ai/DeepSeek-V4-Flash model card.
+# Recommended sampling: temperature=1.0, top_p=1.0.
+# Three reasoning modes per model card:
+#   Non-think (enable_thinking=False)  — `</think> summary`, fast intuitive
+#   Think High (enable_thinking=True)  — `<think> ... </think> summary`,
+#                                        needs much higher max_tokens than
+#                                        the bench's default 16K to converge
+#   Think Max (special system prompt)  — model card requires ≥384K context
+# Don't override max_tokens to <128K for reasoning runs — the model truncates
+# mid-thought, never emits </think>, and the eval extracts no answer.
+# REASONING_MAX_TOKENS=131072 is the harness default; let it stand.
+# For routine quality validation prefer --enable-thinking 0 (Non-think mode).
 [[model]]
 name = "DeepSeek V4 Flash"
 patterns = ["DeepSeek-V4-Flash"]
 reasoning = true
-temperature = 0.6
-top_p = 0.95
+temperature = 1.0
+top_p = 1.0
 
 # ─── NVIDIA Nemotron ───────────────────────────────────────────────────
 # Source: HuggingFace model cards
