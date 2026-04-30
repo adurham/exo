@@ -14,6 +14,12 @@
 # Metal completion handler. Default upstream is 10. Forked default 5
 # is the first stop on the bisect.
 : "${EXO_MAX_ACTIVE_TASKS:=5}"
+# DSv4 indexer sliding-window. 0 (the model default when this env var is
+# unset) makes the indexer attend over the full cumulative pooled —
+# decode rate halves by ~20K tokens, memory grows linearly, and the runner
+# eventually silent-SIGABRTs around the 12-minute mark on long generations.
+# 8192 was the validated "winning combo" per the dsv4 sliding-indexer plan.
+: "${EXO_DSV4_INDEXER_WINDOW:=8192}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_PREFILL_STEP_SIZE:=4096}"
