@@ -507,7 +507,14 @@ for NODE in "${NODES[@]}"; do
     echo "Starting Exo on $NODE..."
     
     # Build the node environment string
-    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1"
+    # AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1: Apple GPU driver env var that relaxes
+    # the command buffer context store timeout. Without it, macOS's IOGPU
+    # watchdog kills our process with kIOGPUCommandBufferCallbackErrorImpacting-
+    # Interactivity when long ML workloads block WindowServer compositing —
+    # silent SIGABRT that MLX's check_error never gets to log because the
+    # kernel kills us first. Recommended by MLX maintainer in mlx#3267 and
+    # confirmed working by reporter.
+    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
     EXO_ENV="$EXO_ENV EXO_LIBP2P_NAMESPACE=$EXO_LIBP2P_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
