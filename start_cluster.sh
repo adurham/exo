@@ -520,7 +520,11 @@ for NODE in "${NODES[@]}"; do
     # silent SIGABRT that MLX's check_error never gets to log because the
     # kernel kills us first. Recommended by MLX maintainer in mlx#3267 and
     # confirmed working by reporter.
-    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
+    # DYLD_INSERT_LIBRARIES interposer catches direct abort()/exit() calls
+    # and dumps a native backtrace before the real handler runs. We've ruled
+    # out every C++ throw site we can find for the silent SIGABRT — this
+    # forces the abort source into the log no matter where it comes from.
+    EXO_ENV="DYLD_INSERT_LIBRARIES=/tmp/abort_tracer.dylib PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
     EXO_ENV="$EXO_ENV EXO_LIBP2P_NAMESPACE=$EXO_LIBP2P_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
