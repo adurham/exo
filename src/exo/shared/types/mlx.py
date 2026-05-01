@@ -6,21 +6,30 @@ from mlx import core as mx
 from mlx import nn as nn
 from mlx_lm.models.cache import (
     ArraysCache,
+    BatchPoolingCache,
+    BatchRotatingKVCache,
     CacheList,
     KVCache,
+    PoolingCache,
     QuantizedKVCache,
     RotatingKVCache,
 )
-from mlx_lm.models.deepseek_v4 import DeepseekV4Cache
 
-# This list contains one cache entry per transformer layer
+# This list contains one cache entry per transformer layer.
+# DeepSeek-V4 layers no longer use a unified DeepseekV4Cache (removed in
+# Blaizzy PR #1192's cache refactor). Each layer now uses a CacheList of
+# (RotatingKVCache + 2× PoolingCache) constructed by the model's
+# make_cache() method. Batched generation swaps these for the Batch* variants
+# in mlx_lm.generate._make_cache.
 KVCacheType = Sequence[
     KVCache
     | RotatingKVCache
+    | BatchRotatingKVCache
     | QuantizedKVCache
     | ArraysCache
     | CacheList
-    | DeepseekV4Cache
+    | PoolingCache
+    | BatchPoolingCache
 ]
 
 
