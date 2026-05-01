@@ -1115,28 +1115,26 @@ def _install_fused_gate_up(switch_mlp: nn.Module) -> None:
 
 
 class FusedDeepseekV4SwitchGLU(nn.Module):
-    """Drop-in DeepseekV4SwitchGLU replacement that fuses gate_proj +
-    up_proj into a single ``mx.gather_qmm`` dispatch.
+    """Drop-in ``SwitchGLU`` replacement for DSv4-Flash MoE that fuses
+    gate_proj + up_proj into a single ``mx.gather_qmm`` dispatch.
 
-    Mirrors ``DeepseekV4SwitchGLU.__call__``'s 3-arg ``(x, indices,
-    scores)`` signature, preserves the model's ``self.activation``
-    (``LimitedSwiGLU`` for DSv4) and per-token expert sum. Uses
-    ``__class__ = FusedDeepseekV4SwitchGLU`` rebind so all instance
-    attributes (activation, sort_threshold, down_proj, fused weight
-    handles) survive.
+    Mirrors upstream ``SwitchGLU.__call__``'s 2-arg ``(x, indices)``
+    signature post-PR-#1192: scores multiplication and per-token expert
+    sum now happen outside in ``DeepseekV4MoE.__call__``, so this fused
+    version returns the same per-expert shape as the unfused version
+    (``(..., topk, hidden)``).
 
     Saves one Metal dispatch per decoder layer per decode token (43 per
     DSv4 forward at ~100-200 µs each on the M4 Max cluster). Concat
-    order in the fused weight is ``[up, gate]`` to match DSv4's call
-    order (``up_proj`` runs before ``gate_proj`` in
-    ``DeepseekV4SwitchGLU.__call__``).
+    order in the fused weight is ``[up, gate]`` matching the order in
+    upstream ``SwitchGLU.__call__`` (up_proj computed first, gate_proj
+    second).
     """
 
     sort_threshold: int = 8
 
-    def __call__(self, x: mx.array, indices: mx.array, scores: mx.array) -> mx.array:  # type: ignore[override]
+    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:  # type: ignore[override]
         self_any: Any = self
-        out_shape = x.shape
         route_shape = indices.shape
         x = mx.expand_dims(x, (-2, -3))
 
@@ -1148,7 +1146,6 @@ class FusedDeepseekV4SwitchGLU(nn.Module):
             inv_order = mx.argsort(order)
             x = x.flatten(0, -3)[order // route_shape[-1]]
             indices = flat_indices[order]
-            scores = scores.flatten()[order]
 
         gu: Any = mx.gather_qmm(
             x,
@@ -1167,14 +1164,12 @@ class FusedDeepseekV4SwitchGLU(nn.Module):
         x_gate = gu[..., n:]
 
         x = self_any.activation(x_up, x_gate)
-        x = x * scores.astype(x.dtype)[..., None, None]
         x = self_any.down_proj(x, indices, sorted_indices=do_sort)
 
         if do_sort:
             x = _switch_scatter_unsort_any(x, inv_order, route_shape)
 
-        x = x.squeeze(-2)
-        return x.sum(axis=-2).astype(x.dtype).reshape(out_shape)
+        return x.squeeze(-2)
 
 
 def _install_dsv4_fused_gate_up(switch_mlp: nn.Module) -> None:

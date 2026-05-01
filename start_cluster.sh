@@ -135,12 +135,10 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     : "${EXO_SPECULATIVE:=0}"
     # Fused MoE gate+up dispatch — +1.2% c=1 / +1.1% c=2 on
     # mlx-community/DeepSeek-V4-Flash-6bit. See dsv4_fused_moe memory.
-    # Disabled after PR #1192 merge — upstream's new DeepseekV4MoE.__call__
-    # passes only (x, inds) to switch_mlp instead of (x, indices, scores), so
-    # our FusedDeepseekV4SwitchGLU's 3-arg signature crashes the runner.
-    # Re-enable once auto_parallel.py:FusedDeepseekV4SwitchGLU is updated to
-    # match the new signature.
-    : "${EXO_DSV4_FUSED_MOE:=0}"
+    # Re-enabled after auto_parallel.py:FusedDeepseekV4SwitchGLU was rewritten
+    # for PR #1192's 2-arg switch_mlp(x, inds) signature. Scores multiplication
+    # and per-token expert sum now happen outside in DeepseekV4MoE.__call__.
+    : "${EXO_DSV4_FUSED_MOE:=1}"
 else
     : "${EXO_SPECULATIVE:=1}"
 fi
