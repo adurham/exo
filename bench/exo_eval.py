@@ -10,6 +10,7 @@ Supported benchmarks:
   mmlu_pro       - Multi-task language understanding (12K questions, 10-choice MC)
   aime_2024      - Math olympiad 2024 (30 problems, integer answers)
   aime_2025      - Math olympiad 2025 (30 problems, integer answers)
+  math_500       - Hendrycks MATH-500 (500 problems, boxed answers, mixed difficulty)
   humaneval      - Python code generation (164 problems, pass@1)
   livecodebench  - Competitive programming (880+ problems, pass@1)
 
@@ -191,6 +192,26 @@ def check_aime_answer(extracted: str, gold: int) -> bool:
         return False
 
 
+def check_math_latex_answer(extracted: str, gold: str) -> bool:
+    """Check if extracted answer matches gold LaTeX expression.
+
+    For MATH-500-style problems where gold is a LaTeX string
+    (e.g. r'\\left( 3, \\frac{\\pi}{2} \\right)'). Tries:
+    1. exact string equality after whitespace strip
+    2. math_verify SymPy-based equivalence (handles equivalent forms)
+    """
+    extracted_s = extracted.strip()
+    gold_s = gold.strip()
+    if extracted_s == gold_s:
+        return True
+    try:
+        from math_verify import parse, verify
+
+        return verify(parse(gold_s), parse(extracted_s))
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Code execution — official evaluation harnesses
 # ---------------------------------------------------------------------------
@@ -341,6 +362,14 @@ BENCHMARKS: dict[str, BenchmarkConfig] = {
         split="train",
         kind="math",
     ),
+    "math_500": BenchmarkConfig(
+        name="math_500",
+        description="Hendrycks MATH-500 (500 problems, boxed answers, mixed difficulty 1-5)",
+        dataset_name="HuggingFaceH4/MATH-500",
+        dataset_config=None,
+        split="test",
+        kind="math_latex",
+    ),
     "humaneval": BenchmarkConfig(
         name="humaneval",
         description="Python code generation (164 problems, pass@1)",
@@ -444,6 +473,15 @@ def format_mmlu_pro_question(doc: dict) -> tuple[str, str]:
 def format_aime_question(doc: dict) -> tuple[str, int]:
     """Returns (prompt, correct_answer_int)."""
     return f"{_AIME_INSTRUCTION}\n\n{doc['problem']}", int(doc["answer"])
+
+
+def format_math_500_question(doc: dict) -> tuple[str, str]:
+    """Returns (prompt, correct_answer_latex_str).
+
+    MATH-500 uses LaTeX expressions for `answer`, not integers. We pass
+    the gold through as a string and rely on math_verify for equivalence.
+    """
+    return f"{_AIME_INSTRUCTION}\n\n{doc['problem']}", str(doc["answer"])
 
 
 def format_humaneval_question(doc: dict) -> tuple[str, dict]:
@@ -838,6 +876,8 @@ async def evaluate_benchmark(
         elif benchmark_name.startswith("aime"):
             prompt, gold_int = format_aime_question(doc)
             gold = str(gold_int)
+        elif benchmark_name == "math_500":
+            prompt, gold = format_math_500_question(doc)
         elif benchmark_name == "humaneval":
             prompt, exec_meta = format_humaneval_question(doc)
             gold = "pass"
@@ -928,6 +968,20 @@ async def evaluate_benchmark(
                 extracted = extract_boxed_answer(response)
                 correct = (
                     check_aime_answer(extracted, int(gold)) if extracted else False
+                )
+                result = QuestionResult(
+                    question_id=question_id,
+                    prompt=prompt,
+                    response=response,
+                    extracted_answer=extracted,
+                    gold_answer=gold,
+                    correct=correct,
+                    **stats,
+                )
+            elif config.kind == "math_latex":
+                extracted = extract_boxed_answer(response)
+                correct = (
+                    check_math_latex_answer(extracted, gold) if extracted else False
                 )
                 result = QuestionResult(
                     question_id=question_id,
