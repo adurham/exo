@@ -124,7 +124,7 @@ fi
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
 # YARN. Larger than MiniMax — won't coexist with Huihui scouts. Set
 # DSV4_ENABLED=0 to skip; MiniMax + scouts must stay off while it's enabled.
-: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-8bit}"
+: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-6bit}"
 : "${DSV4_ENABLED:=1}"
 # Speculative decoding uses EXO_PP_DRAFT_MODEL (Qwen3.5 0.8B) as the draft;
 # its tokenizer is incompatible with DSv4's, so drafted tokens come back as
