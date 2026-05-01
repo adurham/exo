@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 import time
 import uuid
@@ -69,6 +70,45 @@ from exo.worker.runner.bootstrap import logger
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 REMOTE_PREFILL_MIN_TOKENS = 1000
+
+
+_MEM_PROFILE_PATH = os.environ.get("EXO_MEMORY_PROFILE_PATH")
+_MEM_PROFILE_INTERVAL = int(os.environ.get("EXO_MEMORY_PROFILE_INTERVAL", "256"))
+
+
+def _mem_profile_record(
+    profile_path: str,
+    step_count: int,
+    total_tokens: int,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """Append a memory snapshot to the profile JSONL.
+
+    Captures GPU active and peak memory (Metal-side), then resets peak so
+    each window's `peak_bytes` reflects the high-water mark since the
+    previous snapshot — that's what tells us about transient spikes.
+    `active_bytes` is the currently-allocated steady-state.
+
+    `extra` lets callers stamp event-specific metadata (e.g. `phase=startup`,
+    `phase=after_prefill`) for offline analysis.
+    """
+    try:
+        active = int(mx.metal.get_active_memory())
+        peak = int(mx.metal.get_peak_memory())
+        record = {
+            "ts": time.time(),
+            "step": step_count,
+            "tokens": total_tokens,
+            "active_bytes": active,
+            "peak_bytes": peak,
+        }
+        if extra:
+            record.update(extra)
+        with open(profile_path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        mx.metal.reset_peak_memory()
+    except Exception as exc:
+        logger.warning(f"memory profile write failed: {exc}")
 
 
 def _mlx_gen_elapsed_seconds(mlx_gen: Any) -> float:
@@ -204,6 +244,18 @@ class ExoBatchGenerator:
 
         self._mlx_gen._needs_topk = False  # pyright: ignore[reportAttributeAccessIssue]
         self._pp_spec_eos = set(eos_ids_from_tokenizer(self.tokenizer))
+
+        if _MEM_PROFILE_PATH:
+            _mem_profile_record(
+                _MEM_PROFILE_PATH,
+                step_count=0,
+                total_tokens=0,
+                extra={"phase": "post_init"},
+            )
+            logger.info(
+                f"memory profile enabled → {_MEM_PROFILE_PATH} "
+                f"(interval={_MEM_PROFILE_INTERVAL} steps)"
+            )
 
         # Enable PP speculation if draft model is configured and we're in PP mode
         draft_path = os.environ.get("EXO_PP_DRAFT_MODEL", "")
@@ -1279,6 +1331,17 @@ class ExoBatchGenerator:
                 f"logprobs={_t_logprobs_total * 1000:.2f}ms "
                 f"response_build={_t_response_build_total * 1000:.2f}ms "
                 f"total={_step_elapsed * 1000:.2f}ms"
+            )
+
+        if _MEM_PROFILE_PATH and _mlx_next_count % _MEM_PROFILE_INTERVAL == 0:
+            _total_tokens = sum(
+                int(t.completion_tokens) for t in self._active_tasks.values()
+            )
+            _mem_profile_record(
+                _MEM_PROFILE_PATH,
+                step_count=int(_mlx_next_count),
+                total_tokens=_total_tokens,
+                extra={"phase": "decode"},
             )
 
         return results

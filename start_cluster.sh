@@ -39,6 +39,8 @@
 # Unset ⇒ all hook calls in mlx-lm short-circuit to no-ops.
 : "${EXO_PROFILER:=}"
 : "${EXO_PROFILER_LEVEL:=1}"
+: "${EXO_MEMORY_PROFILE_PATH:=}"
+: "${EXO_MEMORY_PROFILE_INTERVAL:=256}"
 : "${EXO_LAYER_EVAL_INTERVAL:=1}"
 : "${EXO_DRAFT_KV_WINDOW:=4096}"
 : "${EXO_TURBOQUANT:=}"
@@ -532,11 +534,12 @@ for NODE in "${NODES[@]}"; do
     # silent SIGABRT that MLX's check_error never gets to log because the
     # kernel kills us first. Recommended by MLX maintainer in mlx#3267 and
     # confirmed working by reporter.
-    # DYLD_INSERT_LIBRARIES interposer catches direct abort()/exit() calls
-    # and dumps a native backtrace before the real handler runs. We've ruled
-    # out every C++ throw site we can find for the silent SIGABRT — this
-    # forces the abort source into the log no matter where it comes from.
-    EXO_ENV="DYLD_INSERT_LIBRARIES=/tmp/abort_tracer.dylib PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
+    # IOGPU silent SIGABRT root-caused (ResidencySet::insert calling
+    # IOGPUMetalResidencySet::addAllocation which unconditionally aborts on
+    # certain conditions). Fixed in fork mlx/backend/metal/resident.cpp by
+    # routing all allocations through unwired_set_. The DYLD interposer that
+    # caught it is no longer needed.
+    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
     EXO_ENV="$EXO_ENV EXO_LIBP2P_NAMESPACE=$EXO_LIBP2P_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
@@ -544,6 +547,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
     [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
+    [ -n "$EXO_MEMORY_PROFILE_PATH" ] && EXO_ENV="$EXO_ENV EXO_MEMORY_PROFILE_PATH=$EXO_MEMORY_PROFILE_PATH EXO_MEMORY_PROFILE_INTERVAL=$EXO_MEMORY_PROFILE_INTERVAL"
     [ -n "$EXO_PROFILER_LEVEL" ] && EXO_ENV="$EXO_ENV EXO_PROFILER_LEVEL=$EXO_PROFILER_LEVEL"
     EXO_ENV="$EXO_ENV EXO_LAYER_EVAL_INTERVAL=$EXO_LAYER_EVAL_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_DRAFT_KV_WINDOW=$EXO_DRAFT_KV_WINDOW"
