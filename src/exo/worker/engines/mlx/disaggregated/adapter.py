@@ -6,10 +6,16 @@ from mlx_lm.models.cache import (
     ArraysCache,
     CacheList,
     KVCache,
+    PoolingCache,
     QuantizedKVCache,
     RotatingKVCache,
 )
-from mlx_lm.models.deepseek_v4 import DeepseekV4Cache
+
+# DSv4 layers no longer use a unified DeepseekV4Cache (removed in
+# Blaizzy PR #1192's cache refactor). Each layer now uses a CacheList of
+# (RotatingKVCache + 2× PoolingCache). The disaggregated wire protocol
+# raises NotImplementedError for these complex cache types anyway, so
+# the only behavioral change is the type-match arm.
 
 from exo.worker.disaggregated.protocol import (
     DType,
@@ -101,7 +107,7 @@ def send_mlx_kv_cache(
     tokens_sent = 0
     for layer_idx, c in enumerate(caches):
         match c:
-            case QuantizedKVCache() | CacheList() | DeepseekV4Cache():
+            case QuantizedKVCache() | CacheList() | PoolingCache():
                 raise NotImplementedError
             case KVCache() | RotatingKVCache():
                 keys = c.keys
