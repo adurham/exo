@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import time
+import uuid
 from copy import deepcopy
 from typing import Callable, Generator, cast, get_args
 
@@ -26,7 +27,6 @@ from exo.api.types import (
 )
 from exo.shared.types.common import ModelId
 from exo.shared.types.memory import Memory
-from exo.shared.types.mlx import KVCacheType, Model
 from exo.shared.types.text_generation import (
     InputMessage,
     InputMessageContent,
@@ -58,6 +58,8 @@ from exo.worker.engines.mlx.constants import (
     KV_GROUP_SIZE,
     MAX_TOKENS,
 )
+from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
@@ -72,6 +74,8 @@ from exo.worker.engines.mlx.vision import (
     prepare_vision,
 )
 from exo.worker.runner.bootstrap import logger
+
+REMOTE_PREFILL_MIN_TOKENS = 1000
 
 generation_stream = mx.new_stream(mx.default_device())
 
@@ -738,18 +742,45 @@ def mlx_generate(
         if vision is not None
         else contextlib.nullcontext()
     )
+    use_remote = (
+        len(prompt_tokens) > REMOTE_PREFILL_MIN_TOKENS
+        and task.prefill_endpoint is not None
+    )
+    remote_prefilled = False
+    prefill_tps = 0.0
+    prefill_tokens = 0
+    ssm_snapshots_list: list[CacheSnapshot] = []
     with maybe_vision_ctx:
-        prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
-            model,
-            tokenizer,
-            sampler,
-            prompt_tokens[:-1],
-            caches,
-            group,
-            on_prefill_progress,
-            distributed_prompt_progress_callback,
-            prefill_step_size=prefill_step_size,
-        )
+        if use_remote and task.prefill_endpoint is not None:
+            try:
+                prefill_tps, prefill_tokens, ssm_snapshots_list = remote_prefill(
+                    prompt_tokens[:-1],
+                    caches,
+                    on_prefill_progress,
+                    endpoint=task.prefill_endpoint,
+                    request_id=str(uuid.uuid4()),
+                    model_id=str(task.model),
+                    start_pos=prefix_hit_length,
+                )
+                remote_prefilled = True
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Remote prefill failed, falling back to local prefill"
+                )
+        if not remote_prefilled:
+            # Keep prefill_step_size kwarg — required for our DSv4-Flash
+            # `EXO_DSV4_PREFILL_STEP_SIZE=256` tuning (per dsv4_prefill_chunk_size_curve memory).
+            prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
+                model,
+                tokenizer,
+                sampler,
+                prompt_tokens[:-1],
+                caches,
+                group,
+                on_prefill_progress,
+                distributed_prompt_progress_callback,
+                prefill_step_size=prefill_step_size,
+            )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
     if kv_prefix_cache is not None and matched_index is not None and is_exact_hit:

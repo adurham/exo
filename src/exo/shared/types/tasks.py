@@ -102,3 +102,6 @@ Task = (
     | ImageEdits
     | Shutdown
 )
+TextTask = TextGeneration
+ImageTask = ImageGeneration | ImageEdits
+GenerationTask = TextTask | ImageTask
