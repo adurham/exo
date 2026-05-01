@@ -19,7 +19,16 @@
 # decode rate halves by ~20K tokens, memory grows linearly, and the runner
 # eventually silent-SIGABRTs around the 12-minute mark on long generations.
 # 8192 was the validated "winning combo" per the dsv4 sliding-indexer plan.
-: "${EXO_DSV4_INDEXER_WINDOW:=8192}"
+# Unset by default = model default (0, unbounded lookback). W=8192 caps
+# the indexer at ~65K raw tokens of lookback — for Think Max territory
+# (200K+ context), the original prompt would fall outside that window.
+# Decode rate without bounding takes a hit; recover via lower index_topk.
+: "${EXO_DSV4_INDEXER_WINDOW:=}"
+# Lower index_topk recovers decode work per indexer step. Default model
+# config = 512. 192 was validated +29% prefill at 100K (memory
+# dsv4_optimization_results) but quality at topk<512 marked "unvalidated".
+# Trade-off: narrower per-position attention vs full lookback range.
+: "${EXO_DSV4_INDEX_TOPK:=192}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 : "${EXO_PREFILL_STEP_SIZE:=4096}"
