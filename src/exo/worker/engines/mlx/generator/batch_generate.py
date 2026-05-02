@@ -95,13 +95,22 @@ def _mem_profile_record(
     try:
         active = int(mx.metal.get_active_memory())
         peak = int(mx.metal.get_peak_memory())
+        cache = int(mx.metal.get_cache_memory())
         record = {
             "ts": time.time(),
             "step": step_count,
             "tokens": total_tokens,
             "active_bytes": active,
             "peak_bytes": peak,
+            "cache_bytes": cache,
         }
+        try:
+            import psutil
+            mi = psutil.Process().memory_info()
+            record["rss_bytes"] = int(mi.rss)
+            record["vms_bytes"] = int(mi.vms)
+        except Exception:
+            pass
         if extra:
             record.update(extra)
         with open(profile_path, "a") as f:
