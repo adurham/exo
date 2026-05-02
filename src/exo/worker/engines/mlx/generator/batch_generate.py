@@ -216,6 +216,18 @@ def _mem_profile_record(
             "peak_bytes": peak,
             "cache_bytes": cache,
         }
+        # Fork-only: live ArrayDesc count. Sampled here so the heap snapshot
+        # taken at the same wall-clock can be cross-referenced. Guarded
+        # because upstream MLX and older fork pins don't expose it.
+        live_arraydesc_fn = cast(
+            "Callable[[], int] | None",
+            getattr(mx.metal, "live_array_desc_count", None),
+        )
+        if live_arraydesc_fn is not None:
+            try:
+                record["live_array_desc"] = int(live_arraydesc_fn())
+            except Exception:
+                pass
         try:
             import psutil
             mi = psutil.Process().memory_info()
