@@ -123,28 +123,23 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     else:
         mx.eval(inputs)
 
-    # Eager-eval the prompt cache state. Without this, RotatingKVCache /
+    # Eager-detach the prompt cache state. Without this, RotatingKVCache /
     # KVCache / QuantizedKVCache accumulate a graph chain back through every
     # prior decode step in self.keys / self.values: each step's SliceUpdate
     # has the previous step's SliceUpdate output as an input, and the chain
     # survives across step boundaries because the per-step async_eval's
-    # traversal doesn't reach the cache state (the cache primitive may run
-    # on a different rank under TP, or the eval target may not transitively
-    # depend on cache.values when only keys are read).
+    # internal detach pass doesn't always cleanly cascade through the cache.
     #
     # Profiling DSv4-Flash-6bit showed exactly one quad of {SliceUpdate,
     # Broadcast, AsType, Full} leaked per layer per token (43/tok each on
-    # a 43-layer model).
-    #
-    # eager_eval_caches forces a synchronous mx.eval over the cache's
-    # mx.array attributes, which materializes the graph (status →
-    # evaluated) and triggers eval's internal detach. Cost: one extra GPU
-    # fence per step. Helper is no-op when MLX_LM_EAGER_EVAL_CACHES=0.
+    # a 43-layer model). The fork's mx.detach binding now does a recursive
+    # subgraph walk, so calling it on cache.keys/values after mx.eval
+    # bulletproof-clears the chain. Metadata-only — no GPU work, no sync.
     try:
         from mlx_lm.models.cache import (
-            eager_eval_caches,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
+            eager_detach_caches,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
         )
-        eager_eval_caches(self.prompt_cache)
+        eager_detach_caches(self.prompt_cache)
     except ImportError:
         pass
 
