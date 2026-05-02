@@ -101,7 +101,38 @@ _MLX_CLEAR_CACHE_INTERVAL = int(
 # per decode step. Default 256 is a balance between leak control and GC
 # overhead. Set to 0 to disable.
 import gc  # noqa: E402  (placed after env reads for clarity)
-_GC_COLLECT_INTERVAL = int(os.environ.get("EXO_GC_COLLECT_INTERVAL", "256"))
+_GC_COLLECT_INTERVAL = int(os.environ.get("EXO_GC_COLLECT_INTERVAL", "0"))
+
+# Periodic macOS malloc_zone_pressure_relief() to force freed-but-cached
+# chunks back to the OS. The MLX C++ side is correctly releasing
+# ArrayDesc shared_ptr instances on eval+detach (verified via the live
+# atomic counter — oscillates around 500K, doesn't grow), but the
+# underlying libsystem_malloc holds the freed control-block chunks for
+# reuse and doesn't shrink RSS until pressure_relief() is called or
+# memory pressure forces eviction. Without this, process RSS grows at
+# ~155 KB/decoded-token even though *live* allocations are bounded.
+#
+# malloc_zone_pressure_relief(NULL, 0) asks ALL malloc zones to munmap
+# their freed pages. Returns bytes released. Cost: walks each zone's
+# free list (microseconds typically; can be milliseconds under heavy
+# fragmentation).
+import ctypes  # noqa: E402
+_MALLOC_RELIEF_INTERVAL = int(os.environ.get("EXO_MALLOC_RELIEF_INTERVAL", "0"))
+_libsystem_malloc: Any = None
+_malloc_zone_pressure_relief: Any = None
+if _MALLOC_RELIEF_INTERVAL > 0:
+    try:
+        _libsystem_malloc = ctypes.CDLL("/usr/lib/system/libsystem_malloc.dylib")
+        _malloc_zone_pressure_relief = (
+            _libsystem_malloc.malloc_zone_pressure_relief
+        )
+        _malloc_zone_pressure_relief.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        _malloc_zone_pressure_relief.restype = ctypes.c_size_t
+    except Exception as exc:
+        logger.warning(
+            f"libsystem_malloc.malloc_zone_pressure_relief unavailable: {exc}"
+        )
+        _malloc_zone_pressure_relief = None
 
 # tracemalloc-based Python heap top-allocator dump. Enabled when
 # EXO_TRACEMALLOC_PATH is set. Captures a snapshot every
@@ -1455,6 +1486,20 @@ class ExoBatchGenerator:
             and _mlx_next_count % _GC_COLLECT_INTERVAL == 0
         ):
             gc.collect()
+
+        if (
+            _MALLOC_RELIEF_INTERVAL > 0
+            and _malloc_zone_pressure_relief is not None
+            and _mlx_next_count % _MALLOC_RELIEF_INTERVAL == 0
+        ):
+            try:
+                released = _malloc_zone_pressure_relief(None, 0)
+                if released > 0 and _mlx_next_count % (_MALLOC_RELIEF_INTERVAL * 10) == 0:
+                    logger.info(
+                        f"[mem] malloc pressure_relief released {released / (1024**2):.1f} MB"
+                    )
+            except Exception:
+                pass
 
         return results
 
