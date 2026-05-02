@@ -89,6 +89,20 @@ _MLX_CLEAR_CACHE_INTERVAL = int(
     os.environ.get("EXO_MLX_CLEAR_CACHE_INTERVAL", "0")
 )
 
+# Periodic gc.collect() to break Python ref cycles on the MLX array graph.
+# `heap` snapshot during DSv4 long decode showed 2.4M std::__shared_ptr_emplace
+# <mlx::core::array::ArrayDesc> instances accumulating (~240 per decode token,
+# never freed) even though `mlx::core::eval` calls `array::detach()` after
+# evaluation. The ArrayDescs were held alive by Python wrapper references
+# trapped in ref cycles until Python's gen-0/gen-1/gen-2 collectors finally
+# kicked in. By that point steady-state had drifted significantly.
+#
+# Cost: gc.collect() walks the full heap. Cheap once, but expensive if called
+# per decode step. Default 256 is a balance between leak control and GC
+# overhead. Set to 0 to disable.
+import gc  # noqa: E402  (placed after env reads for clarity)
+_GC_COLLECT_INTERVAL = int(os.environ.get("EXO_GC_COLLECT_INTERVAL", "256"))
+
 # tracemalloc-based Python heap top-allocator dump. Enabled when
 # EXO_TRACEMALLOC_PATH is set. Captures a snapshot every
 # EXO_TRACEMALLOC_INTERVAL decode steps and writes the top-N growers
@@ -1435,6 +1449,12 @@ class ExoBatchGenerator:
             and _mlx_next_count % _MLX_CLEAR_CACHE_INTERVAL == 0
         ):
             mx.clear_cache()
+
+        if (
+            _GC_COLLECT_INTERVAL > 0
+            and _mlx_next_count % _GC_COLLECT_INTERVAL == 0
+        ):
+            gc.collect()
 
         return results
 
