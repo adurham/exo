@@ -123,6 +123,29 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     else:
         mx.eval(inputs)
 
+    # Eager-detach the prompt cache state. Without this, RotatingKVCache /
+    # KVCache / QuantizedKVCache accumulate a graph chain back through every
+    # prior decode step in self.keys / self.values: each step's SliceUpdate
+    # has the previous step's SliceUpdate output as an input, and that
+    # chain is never broken because eval's traversal-time detach doesn't
+    # reach the cache state across step boundaries. Profiling DSv4-Flash-6bit
+    # showed exactly one quad of {SliceUpdate, Broadcast, AsType, Full}
+    # leaked per layer per token (43/tok each on a 43-layer model).
+    #
+    # Helper is no-op on upstream MLX (no mx.detach binding) or when
+    # MLX_LM_EAGER_DETACH_CACHES=0. Cost: one Python call that hands
+    # ~2*n_layers mx.array refs to a metadata-only C++ function. No GPU
+    # work, no synchronization.
+    try:
+        from mlx_lm.models.cache import (
+            eager_detach_caches,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
+        )
+        eager_detach_caches(self.prompt_cache)
+    except ImportError:
+        # Older mlx-lm without the helper — leak is unbounded but the runner
+        # still functions.
+        pass
+
     token_list = cast(list[int], inputs.tolist())
     for sti, ti in zip(self.tokens, token_list, strict=True):
         sti.append(ti)
