@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -123,25 +124,22 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     else:
         mx.eval(inputs)
 
-    # Eager-detach the prompt cache state. Without this, RotatingKVCache /
-    # KVCache / QuantizedKVCache accumulate a graph chain back through every
-    # prior decode step in self.keys / self.values: each step's SliceUpdate
-    # has the previous step's SliceUpdate output as an input, and the chain
-    # survives across step boundaries because the per-step async_eval's
-    # internal detach pass doesn't always cleanly cascade through the cache.
+    # Drain the per-stream worker queue. Each scheduled lambda captures
+    # the arrays it operates on by value (via shared_ptr<ArrayDesc>);
+    # those refs only release when the lambda is popped, executed, and
+    # destroyed. If the queue runs faster than it drains, captured
+    # ArrayDescs accumulate. Profiling DSv4-Flash-6bit showed exactly
+    # 4 primitives leaking in lockstep at 43/tok each — one quad per
+    # layer per token — and explicit detach via mx.detach didn't bound
+    # the leak (the chain's input ArrayDescs aren't held by the array
+    # graph; they're held by in-flight worker lambdas that haven't
+    # finished). Sync the stream(s) to force the queue to drain before
+    # the next step queues its own work.
     #
-    # Profiling DSv4-Flash-6bit showed exactly one quad of {SliceUpdate,
-    # Broadcast, AsType, Full} leaked per layer per token (43/tok each on
-    # a 43-layer model). The fork's mx.detach binding now does a recursive
-    # subgraph walk, so calling it on cache.keys/values after mx.eval
-    # bulletproof-clears the chain. Metadata-only — no GPU work, no sync.
-    try:
-        from mlx_lm.models.cache import (
-            eager_detach_caches,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
-        )
-        eager_detach_caches(self.prompt_cache)
-    except ImportError:
-        pass
+    # Cost: one fence wait per step. For a 33-tok/s decode that's 30 ms
+    # per step; the wait is microseconds when the queue is empty.
+    if os.environ.get("MLX_LM_SYNC_AFTER_STEP", "1") not in ("0", "", "false", "False"):
+        mx.synchronize()
 
     token_list = cast(list[int], inputs.tolist())
     for sti, ti in zip(self.tokens, token_list, strict=True):
