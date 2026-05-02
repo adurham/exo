@@ -526,132 +526,176 @@ Reference:
 
 ### Jaccl refactor debug (see above)
 
-## adurham/mlx main — MTL heap+small_size scalar-buffer leak fix
+## adurham/mlx main — MTL cache-bucket coalesce + ArrayDesc counter
 
-Pinned (as of exo `b2191d01`, 2026-05-01): `4d543e19` (carries the patches
-as part of the broader pin).
+Pinned (as of exo `7df68448`, 2026-05-02): `c4c817ff` (carries the
+patches as part of the broader pin).
 
 ### What we're carrying
 
-Two constants in `mlx/backend/metal/allocator.h`:
+One block in `MetalAllocator::malloc` in `mlx/backend/metal/allocator.cpp`:
 
 ```cpp
-// upstream:
-static constexpr int small_size_ = 256;
-static constexpr int heap_size_ = 1 << 20;       // 1 MB
-
-// our fork:
-static constexpr int small_size_ = 16384;        // raise routing threshold
-static constexpr size_t heap_size_ = 1ULL << 28; // 256 MB
+// after upstream's vm_page_size align-up:
+} else if (size < small_size_) {
+    // Coalesce sub-`small_size_` requests to `small_size_` so they share
+    // a single buffer_cache_ bucket. Without this, each distinct small
+    // size (4, 8, 16, ...) gets its own bucket and async-eval pipelining
+    // keeps the cache cold for the most-frequent sizes (size-4 scalars
+    // in DSv4 decode). With coalescing, every small request can reuse
+    // any prior small allocation → ~100% cache hit rate after warmup →
+    // no fall-through to device_->newBuffer (which would each consume a
+    // fresh vm_page_size VM region per scalar — the long-decode RSS
+    // leak we previously observed at ~770 KB/decoded token).
+    size = small_size_;
+}
 ```
 
-Plus a debug knob (`6e635096`, off by default): `MLX_LOG_NEW_BUFFER_PATH`
-appends every cache-miss `device_->newBuffer` size to a file. Used to find
-the root cause of this leak; left in for future MLX leak hunts.
+`small_size_` and `heap_size_` constants stay at upstream values
+(256 / 1 MB) — coalesce makes the heap path irrelevant for small
+allocations after warmup.
+
+Plus two debug knobs (off by default):
+
+- `MLX_LOG_NEW_BUFFER_PATH=/path/to.log` (debug commit `6e635096`)
+  appends every cache-miss `device_->newBuffer` size to a file. Used
+  to find the root cause; left in for future MLX leak hunts.
+- `MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=N` (debug commit `c4c817ff`) logs
+  live `ArrayDesc` count to stderr every N constructions. Used to
+  verify the residual is bounded (oscillates around 200K-400K) rather
+  than monotonically growing. Left in for future leak hunts.
 
 ### Why
 
-`MetalAllocator::malloc()` routes allocations < `small_size_` to a Metal
-heap, falling through to `device_->newBuffer` on heap-full or oversized
-requests:
+`MetalAllocator::malloc()` first checks the buffer_cache_ for a reusable
+buffer of the requested size:
 
 ```cpp
-if (size < small_size_ && heap_) {
-    buf = heap_->newBuffer(size, resource_options);
-}
+MTL::Buffer* buf = buffer_cache_.reuse_from_cache(size);
 if (!buf) {
-    buf = device_->newBuffer(size, resource_options);   // ← per-alloc 16KB VM region
+    if (size < small_size_ && heap_) {
+        buf = heap_->newBuffer(size, resource_options);
+    }
+    if (!buf) {
+        buf = device_->newBuffer(size, resource_options);  // ← VM region per call
+    }
 }
 ```
 
-Two compounding upstream issues with that combination:
+`buffer_cache_` is a `multimap<size_t, BufferHolder*>` keyed on EXACT
+byte size. With many distinct small sizes alive (size-2 bf16 scalars,
+size-4 fp32 scalars, size-8 indices, size-8192 hidden activations),
+each unique size has its own cache bucket. Async-eval pipelining keeps
+the cache cold for any specific size during the malloc phase of a later
+step (free hasn't happened yet for that size's previous instance), so
+`reuse_from_cache()` returns nullptr for most small requests.
 
-1. `heap_size_ = 1 MB` holds at most ~4096 small buffers (256-byte
-   alignment). DSv4-Flash decode allocates ~50 scalar `mx.array` values
-   per step (offsets, indices, lengths into RoPE / SDPA / RMS norm).
-   Async-eval pipelining keeps multiple steps' worth of small buffers
-   alive simultaneously. The heap fills within seconds. Subsequent
-   scalar mallocs hit `device_->newBuffer(size=4)` which consumes a
-   fresh `vm_page_size` (16 KB) IOAccelerator (graphics) VM region per
-   allocation.
-2. `small_size_ = 256` means sizes 256 < N < 16K bypass the heap
-   entirely and go straight to `device_->newBuffer` whenever the buffer
-   cache misses. Most prominent: size 8192 (hidden_dim bf16 activations,
-   ~11 cache misses per decode step) and size 2048.
+Each cache miss falls through to `heap_->newBuffer` (heap saturates
+quickly at 1MB upstream default — ~4096 slots) and then
+`device_->newBuffer(size=4)` which consumes a fresh `vm_page_size`
+(16 KB) IOAccelerator (graphics) VM region per scalar.
 
-Net effect on DSv4-Flash long decode: **~770 KB of new IOAccelerator
-(graphics) VM regions per decoded token at steady state**. macOS jetsam
-killed the runner around 100K decoded tokens (50-67 min into a deep
-think). `mx.metal.get_active_memory()` was flat at 73.9 GB throughout —
-the leak was outside MLX's tracked active memory entirely.
+Measured cache-miss histogram on DSv4-Flash decode (via
+`MLX_LOG_NEW_BUFFER_PATH` over 2K decoded tokens, 147K cache-miss
+allocs):
+- 50 size-4 / step (fp32 scalars — offsets, indices, lengths)
+- 9 size-2 / step (bf16 scalars)
+- 11 size-8192 / step (hidden_dim bf16 activations)
+- ~Total: ~70 cache-miss allocs / step × 16 KB each ≈ 1.1 MB / step
 
-Bumping `heap_size_` to 256 MB and `small_size_` to `vm_page_size`
-(16 KB) routes everything sub-page through the heap, which manages reuse
-internally without per-alloc VM region churn. The 256 MB heap is
-wired-memory-backed; trivially fits on a 128 GB system.
+Net effect: ~770 KB of new IOAccelerator (graphics) VM regions per
+decoded token at steady state. macOS jetsam killed the runner around
+100K decoded tokens (50-67 min into a deep think).
+`mx.metal.get_active_memory()` was flat at 73.9 GB throughout — the
+leak was outside MLX's tracked active memory entirely.
 
-### Verified impact
+The fix: round all sub-`small_size_` requests up to `small_size_` BEFORE
+the cache lookup. After warmup, every small request finds a cached
+buffer in the single shared bucket → ~100% cache hit rate → zero
+fall-through to `device_->newBuffer`. Wastes <small_size_ (256) bytes
+per scalar in MTLBuffer capacity (caller wrote 4 bytes; buffer is 256).
+Negligible.
 
-Steady-state RSS growth, DSv4-Flash-6bit, 2-node TP, decode tokens
-9984 → 15104:
+### Verified impact (final coalesce config)
 
-| Range | Without fix | With fix |
-|-------|-------------|----------|
-| 9984 → 11264 | 648 KB/tok | 211 KB/tok |
-| 11264 → 12544 | 672 KB/tok | 188 KB/tok |
-| 12544 → 15104 | 707 KB/tok | 195 KB/tok |
+Decode rate at 10K decoded tokens (DSv4-Flash-6bit, 2-node TP):
 
-vmmap region count at 5-10K decoded (with fix): ~2,400 IOAccelerator
-(graphics) regions, near startup baseline. Without fix: 14K-224K at the
-same depth.
+| Config | Decode tok/s | RSS rate (KB/tok) |
+|--------|--------------|--------------------|
+| Upstream (heap=1MB, small_size=256) | 32.1 | ~770 (after heap saturates ~10K) |
+| heap=256MB only | 29.3 | 200 |
+| heap=256MB + small_size=16384 | 28.5 | 195 |
+| **heap=1MB + coalesce<256→256** | **32.1** | **155** |
 
-Context ceiling on a single-Q deep Think generation: ~100K → ~370K
-tokens. ~3.7×.
+The coalesce variant matches upstream decode rate AND eliminates the
+original `device_->newBuffer` storm. `MLX_LOG_NEW_BUFFER_PATH` confirms
+zero cache-miss allocations during decode — every request hits the
+shared bucket.
+
+vmmap region count at 5-10K decoded (with coalesce fix): ~2,400
+IOAccelerator (graphics) regions, near startup baseline. Without fix:
+14K-224K at the same depth.
+
+Context ceiling on a single-Q deep Think generation: ~100K → ~400K
+tokens (5× lift on RSS rate, ~4× on practical ceiling).
 
 ### Worth upstreaming
 
-Yes. Both bugs are upstream regressions for any model that allocates
-many small `mx.array` scalars per step on long workloads. One-line
-constant changes per fix. Could also be made adaptive (grow heap when
-full, larger `small_size_` threshold tied to `vm_page_size`) but the
-simple constant bumps are low-risk and obviously correct given the math.
+Yes. The coalesce change is one block of code in `MetalAllocator::malloc`
+with no risk to correctness (Metal kernels only read/write the bytes
+they expect; the extra capacity is unused), and is clearly correct given
+the math. Massive win for any model with many small `mx.array` values
+per step on long workloads.
 
-The diagnostic-only `MLX_LOG_NEW_BUFFER_PATH` debug commit is
-fork-only — keep here, don't upstream.
+`heap_size_` and `small_size_` constants stay at upstream values once
+coalesce is in place — coalesce makes the heap path irrelevant for
+small allocations after warmup. The earlier fork patches that bumped
+those (commits `2c6e86db`, `4d543e19`, `8b16ce4c`, `3f356da5`,
+`506204e5`) were superseded by `a6afdd82`.
+
+The diagnostic `MLX_LOG_NEW_BUFFER_PATH` and
+`MLX_LOG_ARRAY_DESC_COUNT_INTERVAL` debug commits are fork-only —
+keep here, don't upstream.
 
 ### Things tried that DIDN'T help (don't re-try without new evidence)
 
 - `mx.clear_cache()` periodic (interval 50, 500). Drains MLX's caching
   allocator pool but doesn't release the leaked IOAccelerator VM
-  regions. Helps the first ~10K decoded tokens then the leak resumes
-  unchanged. `EXO_MLX_CLEAR_CACHE_INTERVAL` knob shipped but kept at 0
-  in defaults.
+  regions. `EXO_MLX_CLEAR_CACHE_INTERVAL` knob shipped, default 0.
 - `MLX_DISABLE_COMPILE=1` — no effect.
-- `gc.collect()` periodic (interval 256). No measured effect on the
-  ~190 KB/tok residual after the heap fixes. ArrayDescs are not held by
-  Python ref cycles. `EXO_GC_COLLECT_INTERVAL` knob shipped but A/B is
-  pending and the default may move to 0.
+- `gc.collect()` periodic. No measured effect on residual; ArrayDescs
+  aren't Python ref cycles. ~3% decode-rate cost. `EXO_GC_COLLECT_INTERVAL`
+  knob shipped, default 0.
 - `tracemalloc` — Python heap is only ~125 B/tok; ruled out Python heap
   as the leak source.
 - `leaks` tool — flagged 128K `PyTokenizer::__setstate__` "leaks" but
-  total only 14 MB; misleading red herring (startup-time deserialization
-  artifacts, not per-step).
+  total only 14 MB; misleading red herring.
 - `MallocStackLogging=1` — `MallocStackLoggingLiteZone` itself becomes
-  the largest MALLOC_SMALL consumer, biasing the data. Use only as last
-  resort when other tools are exhausted.
+  the largest MALLOC_SMALL consumer, biasing the data.
+- `heap_size_=64MB` — saturates at ~18K decode tokens, leak returns.
+- `heap_size_=256MB` alone — fixes the leak but costs ~9% decode perf
+  vs upstream `heap_size_=1MB`. Coalesce fixes both.
+- `small_size_=16384` — marginal additional reduction, no perf benefit.
+- `malloc_zone_pressure_relief(NULL, 0)` periodic — returned 0 bytes
+  released. `EXO_MALLOC_RELIEF_INTERVAL` knob shipped, default 0.
 
 ### Residual after the fix
 
-195 KB/tok of host-side (MALLOC_SMALL) growth remains, dominated by
+~155 KB/tok of host-side (MALLOC_SMALL) growth remains, dominated by
 `std::__shared_ptr_emplace<mlx::core::array::ArrayDesc>` instances
 accumulating ~240 per decoded token (heap snapshot via `heap` tool).
-`array::detach()` IS called after eval (`mlx/transforms.cpp:313`) so
-the C++-side graph chain is broken in the eval path, but the
-shared_ptrs hang on via some C++ runtime path (Stream/Scheduler queue,
-compile cache, or similar) that `gc.collect()` can't reach. Real
-root-cause hunting on this would require patching MLX C++ to log
-shared_ptr<ArrayDesc> creation/destruction sites — multi-day effort.
+The fork's live `ArrayDesc` atomic counter shows live count oscillating
+around 200-400K (bounded, NOT growing). The discrepancy with heap's
+1.46M+ instances at 6K decoded is unresolved — possibly accumulated
+freed-but-cached libsystem_malloc chunks, but
+`malloc_zone_pressure_relief()` returns 0. Real root-cause hunting
+would require patching MLX C++ to log shared_ptr<ArrayDesc>
+creation/destruction sites with stack traces — multi-day effort.
 Deferred.
+
+DeepSeek's design intent is ~10 KB/tok at FP8; bf16 expectation is
+~20-40 KB/tok. We're 4-8× over, but the practical ceiling is now
+~400K tokens which is comfortable for most workloads.
 
 See [memory/mlx_metal_heap_size_leak.md](#) for the full diagnostic
 trail.
