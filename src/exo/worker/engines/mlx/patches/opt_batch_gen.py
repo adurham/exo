@@ -123,27 +123,29 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     else:
         mx.eval(inputs)
 
-    # Eager-detach the prompt cache state. Without this, RotatingKVCache /
+    # Eager-eval the prompt cache state. Without this, RotatingKVCache /
     # KVCache / QuantizedKVCache accumulate a graph chain back through every
     # prior decode step in self.keys / self.values: each step's SliceUpdate
-    # has the previous step's SliceUpdate output as an input, and that
-    # chain is never broken because eval's traversal-time detach doesn't
-    # reach the cache state across step boundaries. Profiling DSv4-Flash-6bit
-    # showed exactly one quad of {SliceUpdate, Broadcast, AsType, Full}
-    # leaked per layer per token (43/tok each on a 43-layer model).
+    # has the previous step's SliceUpdate output as an input, and the chain
+    # survives across step boundaries because the per-step async_eval's
+    # traversal doesn't reach the cache state (the cache primitive may run
+    # on a different rank under TP, or the eval target may not transitively
+    # depend on cache.values when only keys are read).
     #
-    # Helper is no-op on upstream MLX (no mx.detach binding) or when
-    # MLX_LM_EAGER_DETACH_CACHES=0. Cost: one Python call that hands
-    # ~2*n_layers mx.array refs to a metadata-only C++ function. No GPU
-    # work, no synchronization.
+    # Profiling DSv4-Flash-6bit showed exactly one quad of {SliceUpdate,
+    # Broadcast, AsType, Full} leaked per layer per token (43/tok each on
+    # a 43-layer model).
+    #
+    # eager_eval_caches forces a synchronous mx.eval over the cache's
+    # mx.array attributes, which materializes the graph (status →
+    # evaluated) and triggers eval's internal detach. Cost: one extra GPU
+    # fence per step. Helper is no-op when MLX_LM_EAGER_EVAL_CACHES=0.
     try:
         from mlx_lm.models.cache import (
-            eager_detach_caches,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
+            eager_eval_caches,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownVariableType]
         )
-        eager_detach_caches(self.prompt_cache)
+        eager_eval_caches(self.prompt_cache)
     except ImportError:
-        # Older mlx-lm without the helper — leak is unbounded but the runner
-        # still functions.
         pass
 
     token_list = cast(list[int], inputs.tolist())
