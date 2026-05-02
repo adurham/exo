@@ -124,22 +124,26 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     else:
         mx.eval(inputs)
 
-    # Drain the per-stream worker queue. Each scheduled lambda captures
-    # the arrays it operates on by value (via shared_ptr<ArrayDesc>);
-    # those refs only release when the lambda is popped, executed, and
-    # destroyed. If the queue runs faster than it drains, captured
-    # ArrayDescs accumulate. Profiling DSv4-Flash-6bit showed exactly
-    # 4 primitives leaking in lockstep at 43/tok each — one quad per
-    # layer per token — and explicit detach via mx.detach didn't bound
-    # the leak (the chain's input ArrayDescs aren't held by the array
-    # graph; they're held by in-flight worker lambdas that haven't
-    # finished). Sync the stream(s) to force the queue to drain before
-    # the next step queues its own work.
+    # Periodically clear the per-thread compile cache. Profiling
+    # DSv4-Flash-6bit showed 4 primitives leaking in lockstep at 43/tok
+    # each (one quad per layer per token) — and crucially mx.detach,
+    # mx.synchronize, and gc.collect all failed to bound it. The
+    # remaining suspect is the compile cache: each cached trace holds
+    # a tape that references arrays, and a long-lived tape can keep
+    # ArrayDescs alive across step boundaries even after eval's detach
+    # cascade has run. Clearing periodically forces re-trace on next
+    # call but bounds the cumulative ArrayDesc footprint.
     #
-    # Cost: one fence wait per step. For a 33-tok/s decode that's 30 ms
-    # per step; the wait is microseconds when the queue is empty.
-    if os.environ.get("MLX_LM_SYNC_AFTER_STEP", "1") not in ("0", "", "false", "False"):
-        mx.synchronize()
+    # Default off. Set MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL=N to clear
+    # every Nth step. N=256 is a good starting point: enough that the
+    # re-trace cost is amortized, low enough that retained ArrayDescs
+    # don't grow more than ~50K between clears.
+    _interval = int(os.environ.get("MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL", "0"))
+    if _interval > 0:
+        _step_no = getattr(self, "_compile_clear_step", 0) + 1
+        self._compile_clear_step = _step_no  # pyright: ignore[reportAttributeAccessIssue]
+        if _step_no % _interval == 0 and hasattr(mx, "clear_compile_cache"):
+            mx.clear_compile_cache()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
     token_list = cast(list[int], inputs.tolist())
     for sti, ti in zip(self.tokens, token_list, strict=True):
