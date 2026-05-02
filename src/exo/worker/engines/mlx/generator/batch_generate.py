@@ -75,6 +75,59 @@ REMOTE_PREFILL_MIN_TOKENS = 1000
 _MEM_PROFILE_PATH = os.environ.get("EXO_MEMORY_PROFILE_PATH")
 _MEM_PROFILE_INTERVAL = int(os.environ.get("EXO_MEMORY_PROFILE_INTERVAL", "256"))
 
+# tracemalloc-based Python heap top-allocator dump. Enabled when
+# EXO_TRACEMALLOC_PATH is set. Captures a snapshot every
+# EXO_TRACEMALLOC_INTERVAL decode steps and writes the top-N growers
+# (compared to the prior snapshot) to the path. Massive overhead — only
+# enable for memory-leak hunts, not perf measurement.
+_TRACEMALLOC_PATH = os.environ.get("EXO_TRACEMALLOC_PATH")
+_TRACEMALLOC_INTERVAL = int(os.environ.get("EXO_TRACEMALLOC_INTERVAL", "2000"))
+_TRACEMALLOC_TOP_N = int(os.environ.get("EXO_TRACEMALLOC_TOP_N", "20"))
+_tracemalloc_prev_snapshot: Any = None
+
+if _TRACEMALLOC_PATH:
+    import tracemalloc as _tracemalloc
+    _tracemalloc.start(25)
+
+
+def _tracemalloc_dump(profile_path: str, step: int, tokens: int) -> None:
+    """Diff current tracemalloc snapshot against the previous one and write
+    the top-N growers (filename:lineno → bytes-grown) to a JSONL log.
+
+    First call records the baseline and emits no diff. Subsequent calls
+    write the growth between consecutive intervals — exactly what we need
+    to spot per-token leaks.
+    """
+    global _tracemalloc_prev_snapshot
+    try:
+        snap = _tracemalloc.take_snapshot()
+        if _tracemalloc_prev_snapshot is None:
+            _tracemalloc_prev_snapshot = snap
+            return
+        stats = snap.compare_to(_tracemalloc_prev_snapshot, "lineno")[
+            :_TRACEMALLOC_TOP_N
+        ]
+        record = {
+            "ts": time.time(),
+            "step": step,
+            "tokens": tokens,
+            "top_growers": [
+                {
+                    "loc": str(s.traceback[0]) if s.traceback else "?",
+                    "size_diff_bytes": int(s.size_diff),
+                    "count_diff": int(s.count_diff),
+                    "size_bytes": int(s.size),
+                    "count": int(s.count),
+                }
+                for s in stats
+            ],
+        }
+        with open(profile_path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        _tracemalloc_prev_snapshot = snap
+    except Exception as exc:
+        logger.warning(f"tracemalloc dump failed: {exc}")
+
 
 def _mem_profile_record(
     profile_path: str,
@@ -1351,6 +1404,16 @@ class ExoBatchGenerator:
                 step_count=int(_mlx_next_count),
                 total_tokens=_total_tokens,
                 extra={"phase": "decode"},
+            )
+
+        if _TRACEMALLOC_PATH and _mlx_next_count % _TRACEMALLOC_INTERVAL == 0:
+            _total_tokens_t = sum(
+                int(t.completion_tokens) for t in self._active_tasks.values()
+            )
+            _tracemalloc_dump(
+                _TRACEMALLOC_PATH,
+                step=int(_mlx_next_count),
+                tokens=_total_tokens_t,
             )
 
         return results
