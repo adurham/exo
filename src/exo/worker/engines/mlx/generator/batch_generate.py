@@ -208,7 +208,7 @@ def _mem_profile_record(
         active = int(mx.metal.get_active_memory())
         peak = int(mx.metal.get_peak_memory())
         cache = int(mx.metal.get_cache_memory())
-        record = {
+        record: dict[str, Any] = {
             "ts": time.time(),
             "step": step_count,
             "tokens": total_tokens,
@@ -226,6 +226,23 @@ def _mem_profile_record(
         if live_arraydesc_fn is not None:
             try:
                 record["live_array_desc"] = int(live_arraydesc_fn())
+            except Exception:
+                pass
+        # Fork-only: per-primitive-type live ArrayDesc breakdown. Empty when
+        # MLX_PER_TYPE_TRACK / MLX_PER_TYPE_DUMP_INTERVAL are unset. The map
+        # is small (~50-100 entries) and the snapshot is mutex-protected;
+        # keep this inside the existing throttled record path.
+        per_type_fn = cast(
+            "Callable[[], dict[str, int]] | None",
+            getattr(mx.metal, "live_array_desc_count_by_type", None),
+        )
+        if per_type_fn is not None:
+            try:
+                snapshot = per_type_fn()
+                if snapshot:
+                    record["live_array_desc_by_type"] = {
+                        k: int(v) for k, v in snapshot.items() if v > 0
+                    }
             except Exception:
                 pass
         try:
