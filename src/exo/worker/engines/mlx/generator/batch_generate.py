@@ -75,6 +75,20 @@ REMOTE_PREFILL_MIN_TOKENS = 1000
 _MEM_PROFILE_PATH = os.environ.get("EXO_MEMORY_PROFILE_PATH")
 _MEM_PROFILE_INTERVAL = int(os.environ.get("EXO_MEMORY_PROFILE_INTERVAL", "256"))
 
+# Periodic mx.clear_cache() to release MLX's caching allocator pool back
+# to the OS. Without this, the allocator holds freed GPU buffers for reuse
+# indefinitely; IOGPU/Metal residency descriptors track all of them and
+# count toward process RSS even when the buffers themselves aren't
+# "active" from MLX's perspective. On long Think-mode decode (>50K tokens)
+# this is the dominant source of RSS growth and ultimately what OOMs the
+# runner — not the bf16 KV cache scaling we initially suspected.
+#
+# Trade-off: clearing forces subsequent allocations to come from a cold
+# pool, costing decode tok/s. Empirical sweet spot TBD; defaults to off.
+_MLX_CLEAR_CACHE_INTERVAL = int(
+    os.environ.get("EXO_MLX_CLEAR_CACHE_INTERVAL", "0")
+)
+
 # tracemalloc-based Python heap top-allocator dump. Enabled when
 # EXO_TRACEMALLOC_PATH is set. Captures a snapshot every
 # EXO_TRACEMALLOC_INTERVAL decode steps and writes the top-N growers
@@ -1415,6 +1429,12 @@ class ExoBatchGenerator:
                 step=int(_mlx_next_count),
                 tokens=_total_tokens_t,
             )
+
+        if (
+            _MLX_CLEAR_CACHE_INTERVAL > 0
+            and _mlx_next_count % _MLX_CLEAR_CACHE_INTERVAL == 0
+        ):
+            mx.clear_cache()
 
         return results
 
