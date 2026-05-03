@@ -719,6 +719,11 @@ class KVPrefixCache:
         match_node, match_length = self._longest_prefix_match(
             prompt_tokens, query_regions
         )
+        logger.info(
+            f"[PFXDBG] get_kv_cache: prompt_len={max_length} "
+            f"trie_match_length={match_length} "
+            f"trie_leaves={len(self._leaves)}"
+        )
         if match_length == 0:
             return (
                 make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
@@ -753,6 +758,19 @@ class KVPrefixCache:
 
         restore_pos, snapshot = self._resolve_restore_position(
             donor_leaf, target, has_non_sliceable
+        )
+        leaf_snap_count = (
+            len(donor_leaf.leaf_snapshots) if donor_leaf.leaf_snapshots else 0
+        )
+        leaf_snap_depths = (
+            [s.token_count for s in donor_leaf.leaf_snapshots]
+            if donor_leaf.leaf_snapshots
+            else []
+        )
+        logger.info(
+            f"[PFXDBG] get_kv_cache: target={target} has_non_sliceable={has_non_sliceable} "
+            f"leaf_snaps={leaf_snap_count} depths={leaf_snap_depths[:10]} "
+            f"restore_pos={restore_pos} snap={'yes' if snapshot else 'no'}"
         )
         if has_non_sliceable and snapshot is None:
             # No usable snapshot for SSM/rotating layers — force a full prefill.

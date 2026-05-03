@@ -1627,6 +1627,16 @@ class ExoBatchGenerator:
         if self.kv_prefix_cache is None:
             return
 
+        n_snaps = len(cache_snapshots) if cache_snapshots else 0
+        snap_depths = (
+            [s.token_count for s in cache_snapshots] if cache_snapshots else []
+        )
+        logger.info(
+            f"[PFXDBG] _save_prefix_cache: prompt_len={int(all_prompt_tokens.shape[0])} "
+            f"prefix_hit_length={prefix_hit_length} matched_index={matched_index} "
+            f"n_snaps={n_snaps} snap_depths={snap_depths[:10]}{'...' if len(snap_depths)>10 else ''}"
+        )
+
         try:
             hit_ratio = (
                 prefix_hit_length / len(all_prompt_tokens)
