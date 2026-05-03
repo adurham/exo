@@ -28,6 +28,8 @@ BS>1 batched-MTP is NOT yet enabled here — that's Phase 5.
 """
 from __future__ import annotations
 
+import logging
+import os
 from collections import deque
 from typing import Any, Optional, Sequence
 
@@ -35,6 +37,12 @@ import mlx.core as mx
 
 from .mtp_batch_generator import MTPBatchGenerator
 from .mtp_module import draft_tokens
+
+logger = logging.getLogger(__name__)
+
+# Log acceptance distribution every N spec cycles when EXO_DSV4_MTP_LOG=1.
+# Set to 0 / unset to silence.
+_LOG_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_LOG_INTERVAL", "0"))
 
 
 class DSv4MTPPredictor:
@@ -212,6 +220,32 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
     drafts simply aren't yielded; the cache state matches what the
     target model would produce after ``n_min + 1`` non-spec steps.
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Acceptance-rate counters (lightweight; only matter when
+        # EXO_DSV4_MTP_LOG_INTERVAL > 0).
+        self._spec_cycles: int = 0
+        self._spec_total_accepted: int = 0
+        self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
+
+    def _record_acceptance(self, n_accepted: int) -> None:
+        if _LOG_INTERVAL <= 0:
+            return
+        self._spec_cycles += 1
+        self._spec_total_accepted += n_accepted
+        if 0 <= n_accepted <= self.gamma:
+            self._spec_accept_hist[n_accepted] += 1
+        if self._spec_cycles % _LOG_INTERVAL == 0:
+            mean = self._spec_total_accepted / self._spec_cycles
+            hist = ",".join(
+                f"{i}:{c}" for i, c in enumerate(self._spec_accept_hist)
+            )
+            logger.warning(
+                f"[MTP] cycles={self._spec_cycles} "
+                f"mean_accept={mean:.3f}/{self.gamma} "
+                f"hist={hist}"
+            )
 
     # ── BS>1 dispatch ──────────────────────────────────────────────────
 
@@ -636,6 +670,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     n_accepted += 1
                 else:
                     break
+        self._record_acceptance(n_accepted)
 
         # 5. Roll back the target's KV caches for the rejected drafts.
         #    DSv4's CacheList implements trim() recursively; raw caches
