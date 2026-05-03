@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections import deque
 from typing import Any, Optional, Sequence
 
@@ -69,6 +70,56 @@ logger = logging.getLogger(__name__)
 # Log acceptance distribution every N spec cycles when EXO_DSV4_MTP_LOG=1.
 # Set to 0 / unset to silence.
 _LOG_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_LOG_INTERVAL", "0"))
+
+# Per-cycle phase timing. When EXO_DSV4_MTP_PROFILE > 0, brackets the
+# draft / verify / accept phases with mx.eval + perf_counter, summarising
+# every N cycles. Inserts evals at phase boundaries which serialises
+# pipelining — measurements are upper bounds on real production walls.
+_PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
+
+
+class _PhaseTimer:
+    """Per-cycle phase timer for MTP profiling.
+
+    Tracks N samples per named phase and emits ``{mean, min, max}`` in
+    milliseconds every ``_PROFILE_INTERVAL`` cycles. Active only when
+    that env var is non-zero.
+    """
+
+    def __init__(self) -> None:
+        self.cycles: int = 0
+        self.batch_size_seen: dict[int, int] = {}  # B → cycle count
+        self.samples: dict[str, list[float]] = {}
+
+    def record(self, phase: str, ms: float) -> None:
+        self.samples.setdefault(phase, []).append(ms)
+
+    def end_cycle(self, batch_size: int) -> None:
+        self.cycles += 1
+        self.batch_size_seen[batch_size] = (
+            self.batch_size_seen.get(batch_size, 0) + 1
+        )
+        if _PROFILE_INTERVAL > 0 and self.cycles % _PROFILE_INTERVAL == 0:
+            self.dump()
+
+    def dump(self) -> None:
+        bs_summary = ",".join(
+            f"B={b}:{c}" for b, c in sorted(self.batch_size_seen.items())
+        )
+        lines = [f"[MTP-PROF] cycles={self.cycles} {bs_summary}"]
+        for phase in ("draft", "verify", "accept", "rollback", "total"):
+            xs = self.samples.get(phase)
+            if not xs:
+                continue
+            mean = sum(xs) / len(xs)
+            lines.append(
+                f"  {phase:10s} mean={mean:6.2f}ms "
+                f"min={min(xs):6.2f}ms max={max(xs):6.2f}ms n={len(xs)}"
+            )
+        logger.warning("\n".join(lines))
+
+
+_phase_timer = _PhaseTimer() if _PROFILE_INTERVAL > 0 else None
 
 
 class DSv4MTPPredictor:
@@ -434,6 +485,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # gen_batch._next_logprobs is a list of length N.
         y_logprobs_list = list(gen_batch._next_logprobs)
 
+        prof = _phase_timer
+        if prof is not None:
+            t_cycle_start = time.perf_counter()
+
         # 1. Draft γ tokens — chained, batched across uids.
         # Stack pre_norms into (N, 1, hidden_size).
         stacked_pre_norm = mx.concatenate(pre_norms, axis=0)  # (N, 1, hidden)
@@ -442,6 +497,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )
         # draft_ids_list[i] is mx.array shape (N,) — uid b's i-th draft.
         # draft_probs_list[i] is mx.array shape (N, vocab) at temp>0, else None.
+
+        if prof is not None:
+            mx.eval(*draft_ids_list)
+            t_after_draft = time.perf_counter()
+            prof.record("draft", (t_after_draft - t_cycle_start) * 1000.0)
 
         # 2. Build verify input (N, γ+1) and run a single batched
         #    target forward. Cache rollback uses trim() afterwards.
@@ -458,6 +518,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             self._captured,
         )
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
+
+        if prof is not None:
+            mx.eval(verify_pre_norm, verify_logits)
+            t_after_verify = time.perf_counter()
+            prof.record("verify", (t_after_verify - t_after_draft) * 1000.0)
 
         # 3. Per-uid acceptance check (min-strategy).
         target_tokens = mx.argmax(
@@ -536,6 +601,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 bonus_vals.append(bonus)
                 bonus_lps.append(logprobs_all[n, k])
 
+        if prof is not None:
+            t_after_accept = time.perf_counter()
+            prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
+
         # 4. Per-stream cache rollback. Each stream b rolls back by
         #    γ - n_accepted_per[b]. Uses PerStreamBatchRotatingKVCache's
         #    trim_per_stream() to update per-stream offsets without
@@ -587,6 +656,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gen_batch._next_tokens = mx.array(bonus_vals)
         gen_batch._next_logprobs = bonus_lps
         mx.async_eval(gen_batch._next_tokens)
+
+        if prof is not None:
+            t_after_rollback = time.perf_counter()
+            prof.record(
+                "rollback", (t_after_rollback - t_after_accept) * 1000.0
+            )
+            prof.record(
+                "total", (t_after_rollback - t_cycle_start) * 1000.0
+            )
+            prof.end_cycle(N)
 
         # 7. Bookkeeping.
         total_yielded = sum(len(t) for t in all_tokens_per)
@@ -691,11 +770,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         temp = self._request_temp.get(uid, self.temp)
         alpha = self.alpha
 
+        prof = _phase_timer
+        if prof is not None:
+            t_cycle_start = time.perf_counter()
+
         # 1. Draft γ tokens via MTP — chained, fully lazy.
         next_token_arr = y.reshape(1, 1)
         draft_ids, draft_probs = draft_tokens(
             self.mtp, pre_norm, next_token_arr, gamma, temp
         )
+
+        if prof is not None:
+            mx.eval(*draft_ids)
+            t_after_draft = time.perf_counter()
+            prof.record("draft", (t_after_draft - t_cycle_start) * 1000.0)
 
         # 2. Verify forward over [y, draft_0, ..., draft_{γ-1}] through
         #    the target. DSv4 has no GDN — just a vanilla forward.
@@ -711,6 +799,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             gen_batch.prompt_cache,
             self._captured,
         )
+
+        if prof is not None:
+            mx.eval(verify_pre_norm, verify_logits)
+            t_after_verify = time.perf_counter()
+            prof.record("verify", (t_after_verify - t_after_draft) * 1000.0)
 
         # 3. Acceptance check (lazy until item() in step 4).
         target_tokens = mx.argmax(verify_logits[:, :gamma, :], axis=-1)
@@ -774,6 +867,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     break
         self._record_acceptance(n_accepted)
 
+        if prof is not None:
+            t_after_accept = time.perf_counter()
+            prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
+
         # 5. Roll back the target's KV caches for the rejected drafts.
         #    DSv4's CacheList implements trim() recursively; raw caches
         #    expose offset for the legacy path.
@@ -828,6 +925,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gen_batch._next_tokens = mx.array([bonus_val])
         gen_batch._next_logprobs = [bonus_lp]
         mx.async_eval(gen_batch._next_tokens)
+
+        if prof is not None:
+            t_after_rollback = time.perf_counter()
+            prof.record(
+                "rollback", (t_after_rollback - t_after_accept) * 1000.0
+            )
+            prof.record(
+                "total", (t_after_rollback - t_cycle_start) * 1000.0
+            )
+            prof.end_cycle(1)
 
         # 10. Bookkeeping.
         self._gen_tokens_counter += len(all_tokens)
