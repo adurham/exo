@@ -733,6 +733,7 @@ async def evaluate_benchmark(
     concurrency: int = 1,
     limit: int | None = None,
     offset: int = 0,
+    indices: list[int] | None = None,
     timeout: float | None = None,
     reasoning_effort: str | None = None,
     top_p: float | None = None,
@@ -784,12 +785,25 @@ async def evaluate_benchmark(
         ds = ds.sort("question_id")
 
     total = len(ds)
-    if offset > 0:
-        ds = ds.select(range(min(offset, total), total))
+    if indices is not None:
+        # Explicit list of dataset indices — overrides offset/limit. Used for
+        # targeted re-runs (e.g. retry only the questions that failed on a
+        # different model variant).
+        clamped = [i for i in indices if 0 <= i < total]
+        if not clamped:
+            logger.error(
+                f"No --indices values fall in [0, {total}); nothing to evaluate."
+            )
+            return []
+        ds = ds.select(clamped)
         total = len(ds)
-    if limit and limit < total:
-        ds = ds.select(range(limit))
-        total = limit
+    else:
+        if offset > 0:
+            ds = ds.select(range(min(offset, total), total))
+            total = len(ds)
+        if limit and limit < total:
+            ds = ds.select(range(limit))
+            total = limit
 
     logger.info(
         f"Evaluating {benchmark_name}: {total} questions, concurrency={concurrency}, "
@@ -1416,6 +1430,16 @@ def main() -> int:
         default=0,
         help="Skip first N questions (0-based).",
     )
+    ap.add_argument(
+        "--indices",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated explicit list of question indices to run "
+            "(e.g. '8,9,12,16,17,22'). Overrides --offset/--limit. Useful "
+            "for targeted re-runs of a specific subset."
+        ),
+    )
 
     reasoning_group = ap.add_mutually_exclusive_group()
     reasoning_group.add_argument(
@@ -1692,6 +1716,15 @@ def main() -> int:
         )
     )
 
+    # Parse comma-separated --indices into a list.
+    parsed_indices: list[int] | None = None
+    if args.indices:
+        try:
+            parsed_indices = [int(s.strip()) for s in args.indices.split(",") if s.strip()]
+        except ValueError:
+            logger.error(f"Invalid --indices value: {args.indices!r}")
+            return 1
+
     # Common kwargs for evaluate_benchmark
     eval_kwargs: dict[str, Any] = {
         "reasoning_effort": reasoning_effort,
@@ -1701,6 +1734,7 @@ def main() -> int:
         "enable_thinking": enable_thinking,
         "difficulty": args.difficulty,
         "offset": args.offset,
+        "indices": parsed_indices,
         "release_version": args.release_version,
     }
 
