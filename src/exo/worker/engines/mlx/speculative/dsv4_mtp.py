@@ -133,6 +133,20 @@ class DSv4MTPPredictor:
         if hidden_state.ndim == 2:
             hidden_state = hidden_state.reshape(B, S, -1)
 
+        # The MTP cache is persistent across requests in the predictor
+        # instance. If batch size changes (request set added / removed
+        # / c=1↔c=2 transition), the cached KV state is stale and would
+        # crash a concatenate at the next attention update. Reset on
+        # any batch-size mismatch — the next chained-draft step will
+        # repopulate from scratch (one MTP forward of overhead, much
+        # cheaper than a wrong-shape crash).
+        if self._cache is not None:
+            cached_keys = getattr(self._cache, "keys", None)
+            if cached_keys is not None and getattr(cached_keys, "shape", None):
+                cache_B = cached_keys.shape[0]
+                if cache_B != B:
+                    self._cache = None
+
         if self._cache is None:
             self.reset_cache()
 
