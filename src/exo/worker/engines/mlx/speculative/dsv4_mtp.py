@@ -35,8 +35,34 @@ from typing import Any, Optional, Sequence
 
 import mlx.core as mx
 
+from mlx_lm.models.cache import (
+    BatchRotatingKVCache,
+    CacheList,
+    PerStreamBatchRotatingKVCache,
+)
+
 from .mtp_batch_generator import MTPBatchGenerator
 from .mtp_module import draft_tokens
+
+
+def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
+    """In-place class swap: BatchRotatingKVCache → PerStreamBatchRotatingKVCache.
+
+    Walks the cache structure (handling CacheList nesting) and swaps
+    the class pointer on every BatchRotatingKVCache it finds. The
+    instance state is preserved verbatim — the per-stream subclass
+    only adds methods (``trim_per_stream``) and overrides
+    ``_update_in_place`` / ``make_mask``; no new attributes are
+    needed at construction time.
+    """
+    if isinstance(cache_obj, CacheList):
+        for sub in cache_obj.caches:
+            _upgrade_cache_to_per_stream(sub)
+        return
+    if isinstance(cache_obj, BatchRotatingKVCache) and not isinstance(
+        cache_obj, PerStreamBatchRotatingKVCache
+    ):
+        cache_obj.__class__ = PerStreamBatchRotatingKVCache
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +340,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         the last position per batch entry into the per-uid dict.
         Prefilled uids whose pre_norm was already captured stay in
         the dict; freshly-prefilled ones get added.
+
+        At BS>1 entry, also upgrades each ``BatchRotatingKVCache`` in
+        ``gen_batch.prompt_cache`` to :class:`PerStreamBatchRotatingKVCache`
+        in-place (class pointer swap; state is preserved). From this
+        point forward writes are per-stream physical and rollback is
+        per-stream — what makes spec at BS>1 actually work without
+        the min-strategy regression.
         """
         prompt_responses, generation_responses = super(
             MTPBatchGenerator, self
@@ -321,11 +354,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if not generation_responses:
             return prompt_responses, generation_responses
 
+        gen_batch = self._generation_batch
+        if len(gen_batch) > 1:
+            for c in gen_batch.prompt_cache:
+                _upgrade_cache_to_per_stream(c)
+
         decode_pre_norm = self._captured.get("pre_norm")
         if decode_pre_norm is not None:
             mx.eval(decode_pre_norm)
             B = decode_pre_norm.shape[0]
-            gen_batch = self._generation_batch
             for b_idx, uid in enumerate(gen_batch.uids):
                 if b_idx >= B:
                     break
@@ -414,33 +451,30 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 while k < gamma and matches_arr[n][k]:
                     k += 1
                 n_accepted_per.append(k)
-            n_min = min(n_accepted_per)
 
-            # Compose all_tokens per uid. Bonus token comes from the
-            # verify forward at position n_min+1 for every uid (since
-            # we're advancing all caches by n_min+1).
+            # Per-stream yield. Each uid keeps its own accepted drafts
+            # (no min-strategy capping). Bonus comes from verify_logits
+            # at the stream's first-rejection position.
             all_tokens_per: list[list[tuple[int, mx.array]]] = []
-            draft_int = draft_concat.tolist()  # (N, γ) int
-            all_next_arr = all_next.tolist()  # (N, γ+1) int
-            for n, uid in enumerate(uids):
-                row: list[tuple[int, mx.array]] = []
-                # First yielded: y (the previously-sampled token).
-                row.append((int(next_tokens_arr[n, 0].item()), y_logprobs_list[n]))
-                # Then n_min accepted drafts from THIS uid's drafts.
-                for k in range(n_min):
-                    row.append((int(draft_int[n][k]), logprobs_all[n, k]))
-                all_tokens_per.append(row)
-            bonus_vals = [int(all_next_arr[n][n_min]) for n in range(N)]
-            bonus_lps = [logprobs_all[n, n_min] for n in range(N)]
-        else:
-            # Temp>0 stochastic acceptance. Sequential per-uid but the
-            # heavy lifting (verify forward) is already batched.
-            # NOTE: a fully-batched stochastic verify is possible but
-            # involves more bookkeeping; this path is rarely hot.
-            n_accepted_per = []
-            all_tokens_per = []
+            draft_int = draft_concat.tolist()
+            all_next_arr = all_next.tolist()
             bonus_vals: list[int] = []
             bonus_lps: list[Any] = []
+            for n, uid in enumerate(uids):
+                acc = n_accepted_per[n]
+                row: list[tuple[int, mx.array]] = []
+                row.append((int(next_tokens_arr[n, 0].item()), y_logprobs_list[n]))
+                for k in range(acc):
+                    row.append((int(draft_int[n][k]), logprobs_all[n, k]))
+                all_tokens_per.append(row)
+                bonus_vals.append(int(all_next_arr[n][acc]))
+                bonus_lps.append(logprobs_all[n, acc])
+        else:
+            # Temp>0 stochastic acceptance, per-stream.
+            n_accepted_per = []
+            all_tokens_per = []
+            bonus_vals = []
+            bonus_lps = []
             logprobs_all = verify_logits - mx.logsumexp(
                 verify_logits, axis=-1, keepdims=True
             )
@@ -459,41 +493,62 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     k += 1
                 n_accepted_per.append(k)
 
-            n_min = min(n_accepted_per)
-
-            for n, uid in enumerate(uids):
                 row = [(int(next_tokens_arr[n, 0].item()), y_logprobs_list[n])]
-                for k in range(n_min):
-                    row.append((int(draft_concat[n, k].item()), logprobs_all[n, k]))
+                for kk in range(k):
+                    row.append((int(draft_concat[n, kk].item()), logprobs_all[n, kk]))
                 all_tokens_per.append(row)
-                # bonus token: temp-sampled at position n_min for this uid
                 bonus = int(
-                    mx.random.categorical(verify_logits[n, n_min] * (1.0 / self.temp)).item()
+                    mx.random.categorical(verify_logits[n, k] * (1.0 / self.temp)).item()
                 )
                 bonus_vals.append(bonus)
-                bonus_lps.append(logprobs_all[n, n_min])
+                bonus_lps.append(logprobs_all[n, k])
 
-        # 4. Roll back target caches by (γ - n_min) — single scalar
-        #    rollback works because every stream advances by the same
-        #    amount under min-strategy.
-        rollback = gamma - n_min
-        if rollback > 0:
-            for c in gen_batch.prompt_cache:
-                if hasattr(c, "trim"):
-                    c.trim(rollback)
-                elif hasattr(c, "offset"):
-                    c.offset -= rollback
-            mtp_cache = self.mtp._cache
-            if mtp_cache is not None:
-                if hasattr(mtp_cache, "trim"):
-                    mtp_cache.trim(rollback)
-                elif hasattr(mtp_cache, "offset"):
-                    mtp_cache.offset -= rollback
+        # 4. Per-stream cache rollback. Each stream b rolls back by
+        #    γ - n_accepted_per[b]. Uses PerStreamBatchRotatingKVCache's
+        #    trim_per_stream() to update per-stream offsets without
+        #    touching the physical buffer max — subsequent writes will
+        #    land at each stream's own offset position.
+        rollback_per_stream = mx.array(
+            [gamma - acc for acc in n_accepted_per], dtype=mx.int32
+        )
+        n_min = min(n_accepted_per)
+        n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
 
-        # 5. Update per-uid pre_norm to verify_pre_norm at n_min for
-        #    next cycle.
+        for c in gen_batch.prompt_cache:
+            if isinstance(c, CacheList):
+                # Inside CacheList: rotating KV is per-stream-aware,
+                # pooling/indexer are uniform (advance ≤1 entry per
+                # cycle at γ << compress_ratio so min-strategy is
+                # essentially exact).
+                for sub in c.caches:
+                    if isinstance(sub, PerStreamBatchRotatingKVCache):
+                        sub.trim_per_stream(rollback_per_stream)
+                    elif hasattr(sub, "trim"):
+                        sub.trim(n_min_rollback)
+                    elif hasattr(sub, "offset"):
+                        sub.offset -= n_min_rollback
+            elif isinstance(c, PerStreamBatchRotatingKVCache):
+                c.trim_per_stream(rollback_per_stream)
+            elif hasattr(c, "trim"):
+                c.trim(n_min_rollback)
+            elif hasattr(c, "offset"):
+                c.offset -= n_min_rollback
+
+        # MTP-side cache: also per-stream when possible.
+        mtp_cache = self.mtp._cache
+        if mtp_cache is not None:
+            if isinstance(mtp_cache, PerStreamBatchRotatingKVCache):
+                mtp_cache.trim_per_stream(rollback_per_stream)
+            elif hasattr(mtp_cache, "trim"):
+                mtp_cache.trim(n_min_rollback)
+            elif hasattr(mtp_cache, "offset"):
+                mtp_cache.offset -= n_min_rollback
+
+        # 5. Update per-uid pre_norm to each stream's first-rejection
+        #    position in verify_pre_norm.
         for n, uid in enumerate(uids):
-            self._mtp_pre_norm[uid] = verify_pre_norm[n : n + 1, n_min : n_min + 1, :]
+            acc = n_accepted_per[n]
+            self._mtp_pre_norm[uid] = verify_pre_norm[n : n + 1, acc : acc + 1, :]
 
         # 6. Stage bonus tokens for next call.
         gen_batch._next_tokens = mx.array(bonus_vals)
