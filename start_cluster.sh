@@ -157,6 +157,12 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # for PR #1192's 2-arg switch_mlp(x, inds) signature. Scores multiplication
     # and per-token expert sum now happen outside in DeepseekV4MoE.__call__.
     : "${EXO_DSV4_FUSED_MOE:=1}"
+    # MTP self-spec gate. DEFAULT OFF — only activates when (a) the
+    # checkpoint contains mtp.* weights (mlx-community variants strip
+    # them; use scripts/patch_dsv4_mtp.py to add them back from
+    # upstream) AND (b) EXO_DSV4_MTP=1 is set. Pair with
+    # EXO_SPECULATIVE=1 to actually use the MTP path.
+    : "${EXO_DSV4_MTP:=0}"
 else
     : "${EXO_SPECULATIVE:=1}"
 fi
@@ -599,6 +605,7 @@ for NODE in "${NODES[@]}"; do
     # while we validate decode quality vs unfused.
     [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
+    [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     [ -n "$EXO_DSV4_INDEXER_WINDOW" ]  && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
     [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
