@@ -141,7 +141,7 @@ fi
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
 # YARN. Larger than MiniMax — won't coexist with Huihui scouts. Set
 # DSV4_ENABLED=0 to skip; MiniMax + scouts must stay off while it's enabled.
-: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-6bit}"
+: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash-8bit}"
 : "${DSV4_ENABLED:=1}"
 # Speculative decoding uses EXO_PP_DRAFT_MODEL (Qwen3.5 0.8B) as the draft;
 # its tokenizer is incompatible with DSv4's, so drafted tokens come back as
@@ -151,7 +151,8 @@ fi
 if [ "${DSV4_ENABLED}" = "1" ]; then
     : "${EXO_SPECULATIVE:=0}"
     # Fused MoE gate+up dispatch — +1.2% c=1 / +1.1% c=2 on
-    # mlx-community/DeepSeek-V4-Flash-6bit. See dsv4_fused_moe memory.
+    # mlx-community/DeepSeek-V4-Flash (any quant; experts are FP4 across
+    # 4/6/8/bf16 variants). See dsv4_fused_moe memory.
     # Re-enabled after auto_parallel.py:FusedDeepseekV4SwitchGLU was rewritten
     # for PR #1192's 2-arg switch_mlp(x, inds) signature. Scores multiplication
     # and per-token expert sum now happen outside in DeepseekV4MoE.__call__.
