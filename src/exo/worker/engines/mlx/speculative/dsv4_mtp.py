@@ -52,12 +52,27 @@ class DSv4MTPPredictor:
 
     def __init__(self, model: Any, mtp_idx: int = 0) -> None:
         self.model = model
+        # For DSv4: outer `Model` owns `lm_head`; inner `model.model`
+        # (DeepseekV4Model) owns `embed_tokens`, `norm`, and `mtp`.
+        # Don't conflate the two — Qwen3.5's MTPPredictor used the
+        # same name for both because that model's lm_head lives on
+        # the inner model.
         inner = getattr(model, "model", None) or model.language_model.model
-        text_model = getattr(model, "model", None) or model.language_model
         self._inner = inner
         self.embed_tokens = inner.embed_tokens
         self.final_norm = inner.norm
-        self.lm_head = getattr(text_model, "lm_head", None)
+        # lm_head: try outer model first (DSv4 layout), fall back to
+        # inner / language_model (Qwen3.5-style layouts).
+        self.lm_head = (
+            getattr(model, "lm_head", None)
+            or getattr(inner, "lm_head", None)
+            or getattr(getattr(model, "language_model", None), "lm_head", None)
+        )
+        if self.lm_head is None:
+            raise RuntimeError(
+                "DSv4MTPPredictor: could not locate lm_head on the model. "
+                "Checked model.lm_head, model.model.lm_head, model.language_model.lm_head."
+            )
 
         if not hasattr(inner, "mtp") or len(inner.mtp) <= mtp_idx:
             raise RuntimeError(
