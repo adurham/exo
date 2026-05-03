@@ -4,7 +4,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generator, cast
+from typing import Any, Callable, Generator, Literal, cast
 
 import mlx.core as mx
 from mlx_lm.generate import (
@@ -304,6 +304,10 @@ class _EngineTask:
     reasoning_tokens: int = 0
     prefill_tps: float = 0.0
     media_regions: list[MediaRegion] = field(default_factory=list)
+    # Whether the radix-trie returned an exact-match (full prompt
+    # already cached). Distinguishes "exact" from "partial" hits when
+    # populating GenerationStats.prefix_cache_hit.
+    is_exact_hit: bool = False
 
 
 @dataclass(eq=False)
@@ -933,12 +937,15 @@ class ExoBatchGenerator:
 
         prefix_hit_length = 0
         matched_index: int | None = None
+        is_exact_hit = False
         prompt_tokens = all_prompt_tokens
 
         with T("submit.kv_prefix_cache_lookup"):
             if self.kv_prefix_cache is not None and not is_bench:
-                cache, remaining_tokens, matched_index, _is_exact = self.kv_prefix_cache.get_kv_cache(
-                    self.model, all_prompt_tokens, media_regions=media_regions
+                cache, remaining_tokens, matched_index, is_exact_hit = (
+                    self.kv_prefix_cache.get_kv_cache(
+                        self.model, all_prompt_tokens, media_regions=media_regions
+                    )
                 )
                 prefix_hit_length = len(all_prompt_tokens) - len(remaining_tokens)
                 if prefix_hit_length > 0:
@@ -1095,8 +1102,8 @@ class ExoBatchGenerator:
             with T("submit.pp_spec_setup"):
                 return self._submit_pp_spec(
                     task_params, all_prompt_tokens, prefix_hit_length, matched_index,
-                    cache_snapshots, cache, last_tokens, sampler, logits_processors,
-                    max_tokens, on_generation_token, _prefill_tps,
+                    is_exact_hit, cache_snapshots, cache, last_tokens, sampler,
+                    logits_processors, max_tokens, on_generation_token, _prefill_tps,
             )
 
         uids = self._mlx_gen.insert(
@@ -1147,6 +1154,7 @@ class ExoBatchGenerator:
             all_prompt_tokens=all_prompt_tokens,
             prefix_hit_length=prefix_hit_length,
             matched_index=matched_index,
+            is_exact_hit=is_exact_hit,
             cache_snapshots=cache_snapshots or None,
             detokenizer=self.tokenizer.detokenizer,
             on_generation_token=on_generation_token,
@@ -1168,6 +1176,7 @@ class ExoBatchGenerator:
         all_prompt_tokens: mx.array,
         prefix_hit_length: int,
         matched_index: int | None,
+        is_exact_hit: bool,
         cache_snapshots: list[CacheSnapshot] | None,
         cache: list[Any],
         last_tokens: mx.array,
@@ -1256,6 +1265,7 @@ class ExoBatchGenerator:
             all_prompt_tokens=all_prompt_tokens,
             prefix_hit_length=prefix_hit_length,
             matched_index=matched_index,
+            is_exact_hit=is_exact_hit,
             cache_snapshots=cache_snapshots or None,
             detokenizer=self.tokenizer.detokenizer,
             on_generation_token=on_generation_token,
@@ -1456,12 +1466,24 @@ class ExoBatchGenerator:
                     getattr(self._mlx_gen, "_spec_total_accepted", 0) or 0
                 )
 
+                # Classify the prefix-cache outcome for this request.
+                # Field was previously never assigned anywhere — every
+                # request defaulted to "none" so the metric always read
+                # 0% hit rate even when the cache was working.
+                if state.is_exact_hit:
+                    prefix_cache_kind: Literal["none", "partial", "exact"] = "exact"
+                elif state.prefix_hit_length > 0:
+                    prefix_cache_kind = "partial"
+                else:
+                    prefix_cache_kind = "none"
+
                 stats = GenerationStats(
                     prompt_tps=state.prefill_tps,
                     generation_tps=generation_tps,
                     prompt_tokens=len(state.all_prompt_tokens),
                     generation_tokens=state.completion_tokens,
                     peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
+                    prefix_cache_hit=prefix_cache_kind,
                     mtp_cycles_cumulative=mtp_cycles_cum,
                     mtp_accepted_drafts_cumulative=mtp_accepted_cum,
                 )

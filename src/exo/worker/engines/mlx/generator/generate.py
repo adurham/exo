@@ -6,7 +6,7 @@ import sys
 import time
 import uuid
 from copy import deepcopy
-from typing import Callable, Generator, cast, get_args
+from typing import Callable, Generator, Literal, cast, get_args
 
 import mlx.core as mx
 from mlx_lm.generate import (
@@ -977,12 +977,24 @@ def mlx_generate(
 
         stats: GenerationStats | None = None
         if is_done:
+            # Classify prefix-cache outcome from the request setup
+            # earlier in this function. Field was previously left at
+            # default "none" so the metric always read 0% even when
+            # the cache was hitting.
+            if is_exact_hit:
+                prefix_cache_kind: Literal["none", "partial", "exact"] = "exact"
+            elif prefix_hit_length > 0:
+                prefix_cache_kind = "partial"
+            else:
+                prefix_cache_kind = "none"
+
             stats = GenerationStats(
                 prompt_tps=float(prefill_tps or out.prompt_tps),
                 generation_tps=float(out.generation_tps),
                 prompt_tokens=int(prefill_tokens + out.prompt_tokens),
                 generation_tokens=int(out.generation_tokens),
                 peak_memory_usage=Memory.from_gb(out.peak_memory),
+                prefix_cache_hit=prefix_cache_kind,
             )
             if not stop_matched and out.finish_reason not in get_args(FinishReason):
                 logger.warning(
