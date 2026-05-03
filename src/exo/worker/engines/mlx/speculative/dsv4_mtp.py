@@ -483,15 +483,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # Per-stream yield. Each uid keeps its own accepted drafts
             # (no min-strategy capping). Bonus comes from verify_logits
             # at the stream's first-rejection position.
+            #
+            # All host-side reads are batched into single .tolist() calls
+            # before the loop; the per-stream loop body is pure Python
+            # list ops with no further syncs.
             all_tokens_per: list[list[tuple[int, mx.array]]] = []
             draft_int = draft_concat.tolist()
             all_next_arr = all_next.tolist()
+            next_tokens_int = next_tokens_arr.reshape(N).tolist()
             bonus_vals: list[int] = []
             bonus_lps: list[Any] = []
             for n, uid in enumerate(uids):
                 acc = n_accepted_per[n]
                 row: list[tuple[int, mx.array]] = []
-                row.append((int(next_tokens_arr[n, 0].item()), y_logprobs_list[n]))
+                row.append((next_tokens_int[n], y_logprobs_list[n]))
                 for k in range(acc):
                     row.append((int(draft_int[n][k]), logprobs_all[n, k]))
                 all_tokens_per.append(row)

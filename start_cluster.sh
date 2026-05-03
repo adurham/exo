@@ -63,7 +63,7 @@ fi
 # has a different access pattern than MiniMax's full SDPA. Leave unset
 # globally; benchmark and override per-model when needed.
 : "${MLX_SDPA_BLOCKS:=}"
-: "${EXO_SPECULATIVE_GAMMA:=3}"
+: "${EXO_SPECULATIVE_GAMMA:=2}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
@@ -149,7 +149,11 @@ fi
 # DSv4 is the active model. Re-enable later if a DSv4-compatible draft (or
 # MTP weights) becomes available.
 if [ "${DSV4_ENABLED}" = "1" ]; then
-    : "${EXO_SPECULATIVE:=0}"
+    # MTP self-spec at γ=2 with per-stream cache + compaction beats
+    # the non-MTP baseline at both c=1 (+49%) and c=2 (+10%) on
+    # cluster, with bit-identical outputs at temp=0 (rejection-sampling
+    # guarantee). See dsv4_mtp_session_2026_05_03_v2 memory.
+    : "${EXO_SPECULATIVE:=1}"
     # Fused MoE gate+up dispatch — +1.2% c=1 / +1.1% c=2 on
     # mlx-community/DeepSeek-V4-Flash (any quant; experts are FP4 across
     # 4/6/8/bf16 variants). See dsv4_fused_moe memory.
@@ -157,12 +161,12 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # for PR #1192's 2-arg switch_mlp(x, inds) signature. Scores multiplication
     # and per-token expert sum now happen outside in DeepseekV4MoE.__call__.
     : "${EXO_DSV4_FUSED_MOE:=1}"
-    # MTP self-spec gate. DEFAULT OFF — only activates when (a) the
+    # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
-    # upstream) AND (b) EXO_DSV4_MTP=1 is set. Pair with
-    # EXO_SPECULATIVE=1 to actually use the MTP path.
-    : "${EXO_DSV4_MTP:=0}"
+    # upstream) AND (b) EXO_DSV4_MTP is non-zero. Set to 0 to fall back
+    # to non-MTP decode.
+    : "${EXO_DSV4_MTP:=1}"
 else
     : "${EXO_SPECULATIVE:=1}"
 fi
