@@ -353,11 +353,17 @@ def prefill(
             f"Prefill progress: {processed}/{total} tokens ({tok_per_sec:.1f} tok/s)"
         )
         if has_ssm:
-            # Only keep the last 2 snapshots — the rollback at the end uses
-            # snapshots[-2] exclusively.  Earlier snapshots are never read, so
-            # deepcopy-ing the entire cache on every chunk is wasted work.
-            if len(snapshots) >= 2:
-                snapshots.pop(0)
+            # Keep ALL chunk-boundary snapshots so the cross-request
+            # prefix cache can serve partial-prefix hits at non-sliceable-
+            # layer depths. Was previously "last 2 only" (rollback only),
+            # which made the prefix cache structurally unable to hit on
+            # mid-prompt prefix matches — every cross-session lookup fell
+            # through to a full re-prefill.
+            #
+            # Memory cost: each snapshot deep-copies the cache. For DSv4
+            # 8-bit at sliding_window=128 it's ~12 MB/snapshot; a 9K
+            # Hermes prompt at chunk_size=256 produces ~36 snaps =
+            # ~430 MB per leaf. Bounded by DSV4_MAX_PREFIX_SESSIONS.
             snapshots.append(snapshot_ssm_states(cache))
 
         if on_prefill_progress is not None:
