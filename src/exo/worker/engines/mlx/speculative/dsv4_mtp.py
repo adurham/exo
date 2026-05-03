@@ -106,17 +106,16 @@ class _PhaseTimer:
         bs_summary = ",".join(
             f"B={b}:{c}" for b, c in sorted(self.batch_size_seen.items())
         )
-        lines = [f"[MTP-PROF] cycles={self.cycles} {bs_summary}"]
+        logger.warning(f"[MTP-PROF] cycles={self.cycles} {bs_summary}")
         for phase in ("draft", "verify", "accept", "rollback", "total"):
             xs = self.samples.get(phase)
             if not xs:
                 continue
             mean = sum(xs) / len(xs)
-            lines.append(
-                f"  {phase:10s} mean={mean:6.2f}ms "
+            logger.warning(
+                f"[MTP-PROF]   {phase:10s} mean={mean:6.2f}ms "
                 f"min={min(xs):6.2f}ms max={max(xs):6.2f}ms n={len(xs)}"
             )
-        logger.warning("\n".join(lines))
 
 
 _phase_timer = _PhaseTimer() if _PROFILE_INTERVAL > 0 else None
