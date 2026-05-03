@@ -117,11 +117,24 @@ class DSv4MTPPredictor:
         self.mtp_module = inner.mtp[mtp_idx]
         self._cache: Optional[Any] = None
 
-    def reset_cache(self) -> None:
+    def reset_cache(self, batch_size: int = 1) -> None:
         """Reset the MTP attention's KV cache. Call when the target
         model's prompt cache resets or when starting a new sequence.
+
+        At ``batch_size > 1`` constructs a
+        :class:`PerStreamBatchRotatingKVCache` so spec rollback can
+        per-stream-trim the MTP cache the same way the target caches
+        do. A shared scalar-offset cache at B>1 leaves rejected drafts
+        in the buffer for the lower-acceptance stream and tanks
+        downstream draft quality.
         """
-        self._cache = self.mtp_module.make_cache()
+        if batch_size > 1:
+            self._cache = PerStreamBatchRotatingKVCache(
+                max_size=self.mtp_module.config.sliding_window,
+                left_padding=[0] * batch_size,
+            )
+        else:
+            self._cache = self.mtp_module.make_cache()
 
     def predict(
         self,
@@ -172,9 +185,24 @@ class DSv4MTPPredictor:
                 cache_B = cached_keys.shape[0]
                 if cache_B != B:
                     self._cache = None
+            # Class-mismatch reset: per-stream class needed at B>1 but
+            # we currently hold a plain RotatingKVCache (or vice versa).
+            elif (B > 1) != isinstance(self._cache, PerStreamBatchRotatingKVCache):
+                self._cache = None
 
         if self._cache is None:
-            self.reset_cache()
+            self.reset_cache(batch_size=B)
+
+        # Per-stream cache returns keys padded out to max(offset) per
+        # the layout described in cache.py:2256. Without a per-stream
+        # right-padding mask the lower-offset streams attend to stale
+        # / cross-stream KV at positions past their own offset. Build
+        # the mask once here and thread it through the MTP block.
+        mtp_mask: Optional[mx.array] = None
+        if isinstance(self._cache, PerStreamBatchRotatingKVCache):
+            mtp_mask = self._cache.make_mask(
+                S, window_size=self.mtp_module.config.sliding_window, return_array=True
+            )
 
         out = self.mtp_module(
             prev_hidden=hidden_state,
@@ -182,7 +210,7 @@ class DSv4MTPPredictor:
             embed_tokens=self.embed_tokens,
             final_norm=self.final_norm,
             lm_head=self.lm_head,
-            mask=None,
+            mask=mtp_mask,
             cache=self._cache,
             return_hidden=return_hidden,
         )
