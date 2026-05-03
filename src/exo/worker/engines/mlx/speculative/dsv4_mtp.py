@@ -610,13 +610,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
 
         # 4. Per-stream cache rollback. Each stream b rolls back by
-        #    γ - n_accepted_per[b]. Uses PerStreamBatchRotatingKVCache's
-        #    trim_per_stream() to update per-stream offsets without
-        #    touching the physical buffer max — subsequent writes will
-        #    land at each stream's own offset position.
-        rollback_per_stream = mx.array(
-            [gamma - acc for acc in n_accepted_per], dtype=mx.int32
-        )
+        #    γ - n_accepted_per[b]. Pass the Python int list straight
+        #    to trim_per_stream so it does its arithmetic without
+        #    syncing self.offset — at 43+ layers that saves ~6ms per
+        #    spec cycle on cluster.
+        rollback_per_stream_py = [gamma - acc for acc in n_accepted_per]
         n_min = min(n_accepted_per)
         n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
 
@@ -628,13 +626,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # essentially exact).
                 for sub in c.caches:
                     if isinstance(sub, PerStreamBatchRotatingKVCache):
-                        sub.trim_per_stream(rollback_per_stream)
+                        sub.trim_per_stream(rollback_per_stream_py)
                     elif hasattr(sub, "trim"):
                         sub.trim(n_min_rollback)
                     elif hasattr(sub, "offset"):
                         sub.offset -= n_min_rollback
             elif isinstance(c, PerStreamBatchRotatingKVCache):
-                c.trim_per_stream(rollback_per_stream)
+                c.trim_per_stream(rollback_per_stream_py)
             elif hasattr(c, "trim"):
                 c.trim(n_min_rollback)
             elif hasattr(c, "offset"):
@@ -644,7 +642,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         mtp_cache = self.mtp._cache
         if mtp_cache is not None:
             if isinstance(mtp_cache, PerStreamBatchRotatingKVCache):
-                mtp_cache.trim_per_stream(rollback_per_stream)
+                mtp_cache.trim_per_stream(rollback_per_stream_py)
             elif hasattr(mtp_cache, "trim"):
                 mtp_cache.trim(n_min_rollback)
             elif hasattr(mtp_cache, "offset"):
