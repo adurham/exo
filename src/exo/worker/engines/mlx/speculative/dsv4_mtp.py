@@ -79,43 +79,48 @@ _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
 
 
 class _PhaseTimer:
-    """Per-cycle phase timer for MTP profiling.
+    """Per-cycle phase timer for MTP profiling, sliced by batch size.
 
-    Tracks N samples per named phase and emits ``{mean, min, max}`` in
-    milliseconds every ``_PROFILE_INTERVAL`` cycles. Active only when
-    that env var is non-zero.
+    Keeps a per-(B, phase) buffer of samples and emits ``{mean, min,
+    max}`` in milliseconds every ``_PROFILE_INTERVAL`` cycles. Active
+    only when that env var is non-zero.
     """
 
     def __init__(self) -> None:
         self.cycles: int = 0
-        self.batch_size_seen: dict[int, int] = {}  # B → cycle count
-        self.samples: dict[str, list[float]] = {}
+        self.cycles_by_b: dict[int, int] = {}
+        # samples[B][phase] = list of ms.
+        self.samples: dict[int, dict[str, list[float]]] = {}
+        self._pending: dict[str, float] = {}
 
     def record(self, phase: str, ms: float) -> None:
-        self.samples.setdefault(phase, []).append(ms)
+        self._pending[phase] = ms
 
     def end_cycle(self, batch_size: int) -> None:
         self.cycles += 1
-        self.batch_size_seen[batch_size] = (
-            self.batch_size_seen.get(batch_size, 0) + 1
-        )
+        self.cycles_by_b[batch_size] = self.cycles_by_b.get(batch_size, 0) + 1
+        bucket = self.samples.setdefault(batch_size, {})
+        for phase, ms in self._pending.items():
+            bucket.setdefault(phase, []).append(ms)
+        self._pending = {}
         if _PROFILE_INTERVAL > 0 and self.cycles % _PROFILE_INTERVAL == 0:
             self.dump()
 
     def dump(self) -> None:
         bs_summary = ",".join(
-            f"B={b}:{c}" for b, c in sorted(self.batch_size_seen.items())
+            f"B={b}:{c}" for b, c in sorted(self.cycles_by_b.items())
         )
         logger.warning(f"[MTP-PROF] cycles={self.cycles} {bs_summary}")
-        for phase in ("draft", "verify", "accept", "rollback", "total"):
-            xs = self.samples.get(phase)
-            if not xs:
-                continue
-            mean = sum(xs) / len(xs)
-            logger.warning(
-                f"[MTP-PROF]   {phase:10s} mean={mean:6.2f}ms "
-                f"min={min(xs):6.2f}ms max={max(xs):6.2f}ms n={len(xs)}"
-            )
+        for b in sorted(self.samples.keys()):
+            for phase in ("draft", "verify", "accept", "rollback", "total"):
+                xs = self.samples[b].get(phase)
+                if not xs:
+                    continue
+                mean = sum(xs) / len(xs)
+                logger.warning(
+                    f"[MTP-PROF]   B={b} {phase:10s} mean={mean:6.2f}ms "
+                    f"min={min(xs):6.2f}ms max={max(xs):6.2f}ms n={len(xs)}"
+                )
 
 
 _phase_timer = _PhaseTimer() if _PROFILE_INTERVAL > 0 else None
