@@ -353,12 +353,18 @@ def prefill(
             f"Prefill progress: {processed}/{total} tokens ({tok_per_sec:.1f} tok/s)"
         )
         if has_ssm:
-            _snap = snapshot_ssm_states(cache)
-            snapshots.append(_snap)
-            logger.info(
-                f"[PFXDBG] progress_callback: processed={processed} total={total} "
-                f"snap.token_count={_snap.token_count} n_snaps={len(snapshots)}"
-            )
+            # Keep ALL chunk-boundary snapshots so the cross-request
+            # prefix cache can serve partial-prefix hits at non-sliceable-
+            # layer depths. Was previously "last 2 only" (rollback only),
+            # which made the prefix cache structurally unable to hit on
+            # mid-prompt prefix matches — every cross-session lookup fell
+            # through to a full re-prefill.
+            #
+            # Memory cost is bounded by chunk count × per-snapshot bytes
+            # × DSV4_MAX_PREFIX_SESSIONS. For DSv4 8-bit at chunk_size=256
+            # over a 9K-token Hermes prompt that's ~36 snaps × ~12 MB
+            # × 4 sessions ≈ 1.7 GB ceiling.
+            snapshots.append(snapshot_ssm_states(cache))
 
         if on_prefill_progress is not None:
             on_prefill_progress(processed, total)

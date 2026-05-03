@@ -31,7 +31,11 @@
 : "${EXO_DSV4_INDEX_TOPK:=192}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
-: "${EXO_PREFILL_STEP_SIZE:=4096}"
+# DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
+# dsv4_prefill_chunk_size_curve memory. Smaller chunks also produce
+# more chunk-boundary cache snapshots, which is what the prefix-cache
+# uses to serve mid-prompt partial-prefix hits across requests.
+: "${EXO_PREFILL_STEP_SIZE:=256}"
 # Optional mlx-lm profiler hook. Comma-separated variants:
 #   spans         — per-span wall-time accumulator (was EXO_MINIMAX_TRACE)
 #   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;
