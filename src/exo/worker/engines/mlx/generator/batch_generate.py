@@ -344,21 +344,32 @@ class ExoBatchGenerator:
 
         if use_speculative:
             try:
-                from exo.worker.engines.mlx.speculative.mtp_batch_generator import (
-                    MTPBatchGenerator,
+                # DSv4 path: MTP module is part of the loaded model
+                # (mlx-lm's deepseek_v4.sanitize keeps mtp.* keys when
+                # num_nextn_predict_layers > 0). No separate weights
+                # file needed; the spec generator constructs a thin
+                # predictor wrapper over `model.model.mtp[0]`.
+                inner = getattr(self.model, "model", None)
+                is_dsv4_with_mtp = (
+                    inner is not None
+                    and type(inner).__name__ == "DeepseekV4Model"
+                    and hasattr(inner, "mtp")
+                    and len(inner.mtp) > 0
                 )
-                from exo.worker.engines.mlx.speculative.mtp_module import MTPPredictor
 
-                mtp_weights = self._resolve_mtp_weights()
-                gamma = int(os.environ.get("EXO_SPECULATIVE_GAMMA", "2"))
+                if is_dsv4_with_mtp:
+                    from exo.worker.engines.mlx.speculative.dsv4_mtp import (
+                        DSv4MTPBatchGenerator,
+                        DSv4MTPPredictor,
+                    )
 
-                if mtp_weights:
-                    mtp = MTPPredictor(self.model, mtp_weights, quantize=False)
-                    temp = float(os.environ.get("EXO_SPECULATIVE_TEMP", "0.7"))
+                    gamma = int(os.environ.get("EXO_SPECULATIVE_GAMMA", "2"))
+                    temp = float(os.environ.get("EXO_SPECULATIVE_TEMP", "0.0"))
                     alpha = float(os.environ.get("EXO_SPECULATIVE_ALPHA", "1.0"))
-                    self._mlx_gen = MTPBatchGenerator(
+                    mtp_pred = DSv4MTPPredictor(self.model, mtp_idx=0)
+                    self._mlx_gen = DSv4MTPBatchGenerator(
                         model=self.model,
-                        mtp_predictor=mtp,
+                        mtp_predictor=mtp_pred,
                         gamma=gamma,
                         temp=temp,
                         alpha=alpha,
@@ -366,18 +377,46 @@ class ExoBatchGenerator:
                         prefill_step_size=prefill_step_size,
                     )
                     logger.info(
-                        f"MTP speculative decoding enabled (γ={gamma}, T={temp})"
+                        f"DSv4 MTP speculative decoding enabled (γ={gamma}, T={temp})"
                     )
-                    # Skip warmup — OOMs on 397B (Metal abort, uncatchable)
                 else:
-                    logger.warning(
-                        "EXO_SPECULATIVE=1 but could not find MTP weights. Falling back."
+                    # Qwen3.5-style path: separate MTP weights file.
+                    from exo.worker.engines.mlx.speculative.mtp_batch_generator import (
+                        MTPBatchGenerator,
                     )
-                    self._mlx_gen = MlxBatchGenerator(
-                        model=self.model,
-                        stop_tokens=stop_tokens_seq,
-                        prefill_step_size=prefill_step_size,
+                    from exo.worker.engines.mlx.speculative.mtp_module import (
+                        MTPPredictor,
                     )
+
+                    mtp_weights = self._resolve_mtp_weights()
+                    gamma = int(os.environ.get("EXO_SPECULATIVE_GAMMA", "2"))
+
+                    if mtp_weights:
+                        mtp = MTPPredictor(self.model, mtp_weights, quantize=False)
+                        temp = float(os.environ.get("EXO_SPECULATIVE_TEMP", "0.7"))
+                        alpha = float(os.environ.get("EXO_SPECULATIVE_ALPHA", "1.0"))
+                        self._mlx_gen = MTPBatchGenerator(
+                            model=self.model,
+                            mtp_predictor=mtp,
+                            gamma=gamma,
+                            temp=temp,
+                            alpha=alpha,
+                            stop_tokens=stop_tokens_seq,
+                            prefill_step_size=prefill_step_size,
+                        )
+                        logger.info(
+                            f"MTP speculative decoding enabled (γ={gamma}, T={temp})"
+                        )
+                        # Skip warmup — OOMs on 397B (Metal abort, uncatchable)
+                    else:
+                        logger.warning(
+                            "EXO_SPECULATIVE=1 but could not find MTP weights. Falling back."
+                        )
+                        self._mlx_gen = MlxBatchGenerator(
+                            model=self.model,
+                            stop_tokens=stop_tokens_seq,
+                            prefill_step_size=prefill_step_size,
+                        )
             except Exception as e:
                 logger.warning(f"Failed to init MTP speculative: {e}. Falling back.")
                 self._mlx_gen = MlxBatchGenerator(

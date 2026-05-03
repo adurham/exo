@@ -872,7 +872,12 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
     ) -> Generator[ModelLoadingResponse, None, nn.Module]:
         model = cast(DeepseekV4Model, model)
         layers = model.model.layers
-        total = len(layers)
+        # Optional MTP heads (present only when checkpoint contains
+        # mtp.* weights and num_nextn_predict_layers > 0). Each MTP
+        # block has the same DeepseekV4MoE ffn structure as a regular
+        # layer, so identical sharding applies.
+        mtp_blocks = list(getattr(model.model, "mtp", []) or [])
+        total = len(layers) + len(mtp_blocks)
 
         for i, layer in enumerate(layers):
             mx.eval(layer.parameters())
@@ -894,6 +899,25 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             mx.eval(layer)
             mx.clear_cache()
             yield ModelLoadingResponse(layers_loaded=i, total=total)
+
+        # Same MoE-only sharding pattern for each MTP block.
+        for j, mtp in enumerate(mtp_blocks):
+            mx.eval(mtp.parameters())
+
+            mtp.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            self.all_to_sharded_linear_in_place(mtp.ffn.shared_experts.gate_proj)
+            self.sharded_to_all_linear_in_place(mtp.ffn.shared_experts.down_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.shared_experts.up_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.gate_proj)
+            self.sharded_to_all_linear_in_place(mtp.ffn.switch_mlp.down_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.up_proj)
+
+            if _DSV4_FUSED_MOE:
+                _install_dsv4_fused_gate_up(mtp.ffn.switch_mlp)
+
+            mx.eval(mtp)
+            mx.clear_cache()
+            yield ModelLoadingResponse(layers_loaded=len(layers) + j, total=total)
 
         return model
 
