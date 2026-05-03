@@ -375,7 +375,6 @@ class ExoBatchGenerator:
                         alpha=alpha,
                         stop_tokens=stop_tokens_seq,
                         prefill_step_size=prefill_step_size,
-                        model_id=self.model_id,
                     )
                     logger.info(
                         f"DSv4 MTP speculative decoding enabled (γ={gamma}, T={temp})"
@@ -1447,12 +1446,24 @@ class ExoBatchGenerator:
                         else 0.0
                     )
 
+                # MTP self-spec cumulative counters from the generator
+                # if it's a DSv4MTPBatchGenerator. Master diffs successive
+                # completions to drive Prometheus.
+                mtp_cycles_cum = int(
+                    getattr(self._mlx_gen, "_spec_cycles", 0) or 0
+                )
+                mtp_accepted_cum = int(
+                    getattr(self._mlx_gen, "_spec_total_accepted", 0) or 0
+                )
+
                 stats = GenerationStats(
                     prompt_tps=state.prefill_tps,
                     generation_tps=generation_tps,
                     prompt_tokens=len(state.all_prompt_tokens),
                     generation_tokens=state.completion_tokens,
                     peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
+                    mtp_cycles_cumulative=mtp_cycles_cum,
+                    mtp_accepted_drafts_cumulative=mtp_accepted_cum,
                 )
                 total_prompt_tokens = len(state.all_prompt_tokens)
                 usage = Usage(

@@ -299,19 +299,21 @@ def record_generation_complete(
     _peak_memory.labels(instance_id=iid, model_id=model_id).set(
         float(stats.peak_memory_usage.in_bytes)
     )
+    _record_mtp_delta_from_stats(iid, model_id, stats)
 
 
 def record_mtp_cycle(model_id: str, n_accepted: int) -> None:
-    """Record one MTP self-speculative cycle from the worker generator.
+    """Record one MTP self-speculative cycle.
 
-    A cycle = γ MTP draft forwards + 1 verify forward through the target.
+    A cycle×stream sample = one stream's view of one MTP cycle (γ
+    MTP draft forwards + 1 verify forward through the target).
     ``n_accepted`` is the number of drafts the verify pass committed
-    (0..γ, inclusive of γ when all drafts are accepted).
+    for that stream (0..γ).
 
-    Unlike ``record_generation_complete``, this is NOT master-gated —
-    only the rank-0 worker of a TP shard runs MTP cycles, so each
-    cycle is counted exactly once even when Prometheus scrapes every
-    node.
+    At BS=1 there's one sample per cycle. At BS>1 there are B samples
+    per cycle (one per concurrent stream). Mean acceptance per stream
+    per cycle = ``exo_mtp_accepted_drafts_total / exo_mtp_cycles_total``
+    regardless of B.
     """
     _mtp_cycles.labels(model_id=model_id).inc()
     if n_accepted > 0:
@@ -319,6 +321,43 @@ def record_mtp_cycle(model_id: str, n_accepted: int) -> None:
     _mtp_acceptance_bucket.labels(
         model_id=model_id, accepted=str(n_accepted)
     ).inc()
+
+
+# Per-instance state: last seen MTP cumulative counters from each
+# worker's GenerationStats. Master diffs across successive completions
+# to derive per-completion deltas without double-counting on restart.
+_mtp_last_seen: dict[tuple[str, str], tuple[int, int]] = {}
+
+
+def _record_mtp_delta_from_stats(
+    instance_id: str, model_id: str, stats: GenerationStats
+) -> None:
+    """Increment MTP Prometheus counters from a worker's cumulative
+    snapshot in ``GenerationStats``. Computes the delta against the
+    previous snapshot from the same (instance_id, model_id), so each
+    cycle×stream sample counts exactly once.
+
+    A worker process restart resets cumulative back to 0 — when delta
+    would be negative, we treat the new value as a fresh start (no
+    backfill) rather than emit a negative delta.
+    """
+    cur_cycles = int(stats.mtp_cycles_cumulative)
+    cur_accepted = int(stats.mtp_accepted_drafts_cumulative)
+    if cur_cycles == 0 and cur_accepted == 0:
+        return  # not an MTP path, or worker just started
+    key = (instance_id, model_id)
+    last_cycles, last_accepted = _mtp_last_seen.get(key, (0, 0))
+    if cur_cycles < last_cycles or cur_accepted < last_accepted:
+        # Worker restart — fresh baseline, no Prometheus increment.
+        _mtp_last_seen[key] = (cur_cycles, cur_accepted)
+        return
+    d_cycles = cur_cycles - last_cycles
+    d_accepted = cur_accepted - last_accepted
+    if d_cycles > 0:
+        _mtp_cycles.labels(model_id=model_id).inc(d_cycles)
+    if d_accepted > 0:
+        _mtp_accepted_drafts.labels(model_id=model_id).inc(d_accepted)
+    _mtp_last_seen[key] = (cur_cycles, cur_accepted)
 
 
 def record_node_gathered_info(node_id: NodeId, info: GatheredInfo) -> None:

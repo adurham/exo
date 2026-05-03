@@ -344,31 +344,34 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
     target model would produce after ``n_min + 1`` non-spec steps.
     """
 
-    def __init__(self, *args: Any, model_id: str = "", **kwargs: Any) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Acceptance-rate counters (always update — used by both the
-        # opt-in EXO_DSV4_MTP_LOG_INTERVAL warning emission and the
-        # always-on Prometheus exporter below).
+        # Acceptance-rate counters. Always updated — read by the
+        # opt-in EXO_DSV4_MTP_LOG_INTERVAL warning, by the
+        # EXO_DSV4_MTP_PROFILE phase timer, and by GenerationStats's
+        # cumulative MTP fields that flow to master Prometheus.
         self._spec_cycles: int = 0
         self._spec_total_accepted: int = 0
         self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
-        self._model_id: str = model_id
 
     def _record_acceptance(self, n_accepted: int) -> None:
+        """Record one MTP draft-acceptance sample.
+
+        At BS=1 this is one call per spec cycle. At BS>1 the batched
+        path calls this once PER STREAM (B times per cycle), so
+        counter semantics are "per cycle×stream sample":
+
+        * ``self._spec_cycles`` = cycles × concurrent streams
+        * ``self._spec_total_accepted`` = sum of accepted drafts
+          across all stream-cycles
+        * histogram bins each stream's per-cycle acceptance count
+
+        Mean acceptance per stream per cycle = total_accepted / cycles.
+        """
         self._spec_cycles += 1
         self._spec_total_accepted += n_accepted
         if 0 <= n_accepted <= self.gamma:
             self._spec_accept_hist[n_accepted] += 1
-        # Always emit to Prometheus — record_mtp_cycle is not master-
-        # gated; only rank-0 of the TP shard runs MTP cycles, so each
-        # cycle is counted exactly once across the cluster.
-        if self._model_id:
-            try:
-                from exo.metrics import record_mtp_cycle
-                record_mtp_cycle(self._model_id, n_accepted)
-            except Exception:  # noqa: BLE001
-                # Metrics must never crash decode. Swallow silently.
-                pass
         if _LOG_INTERVAL <= 0:
             return
         if self._spec_cycles % _LOG_INTERVAL == 0:
@@ -616,6 +619,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 )
                 bonus_vals.append(bonus)
                 bonus_lps.append(logprobs_all[n, k])
+
+        # Record per-stream MTP acceptance for telemetry. One sample
+        # per uid per cycle; histogram bins each stream's per-cycle
+        # acceptance count, and totals reflect cycle×stream samples.
+        for _n_acc in n_accepted_per:
+            self._record_acceptance(_n_acc)
 
         if prof is not None:
             t_after_accept = time.perf_counter()

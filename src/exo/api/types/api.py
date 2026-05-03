@@ -167,6 +167,12 @@ class GenerationStats(BaseModel):
     generation_tokens: int
     peak_memory_usage: Memory
     prefix_cache_hit: Literal["none", "partial", "exact"] = "none"
+    # MTP self-spec cumulative counters since the worker process started.
+    # Master computes deltas across successive completion stats from the
+    # same instance to drive Prometheus counters; receivers that don't
+    # care about MTP can ignore these.
+    mtp_cycles_cumulative: int = 0
+    mtp_accepted_drafts_cumulative: int = 0
 
 
 class ImageGenerationStats(BaseModel):
