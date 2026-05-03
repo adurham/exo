@@ -126,6 +126,33 @@ _prefix_cache_hits: Final[Counter] = Counter(
     registry=_registry,
 )
 
+# --- MTP self-speculative decode ---
+# Recorded by the worker generator (rank-0 of the TP shard), not the
+# master — only one node ever runs MTP cycles per inference, so no
+# double-count risk across nodes when Prometheus scrapes everywhere.
+
+_mtp_cycles: Final[Counter] = Counter(
+    "exo_mtp_cycles_total",
+    "MTP self-speculative cycles processed (one verify forward + γ drafts).",
+    ["model_id"],
+    registry=_registry,
+)
+
+_mtp_accepted_drafts: Final[Counter] = Counter(
+    "exo_mtp_accepted_drafts_total",
+    "Cumulative draft tokens accepted across MTP cycles. "
+    "Divide by exo_mtp_cycles_total for mean acceptance per cycle.",
+    ["model_id"],
+    registry=_registry,
+)
+
+_mtp_acceptance_bucket: Final[Counter] = Counter(
+    "exo_mtp_acceptance_bucket_total",
+    "MTP cycles bucketed by accepted-draft count (0..γ).",
+    ["model_id", "accepted"],
+    registry=_registry,
+)
+
 _peak_memory: Final[Gauge] = Gauge(
     "exo_peak_memory_bytes",
     "Peak memory reported at completion of the most recent request.",
@@ -272,6 +299,26 @@ def record_generation_complete(
     _peak_memory.labels(instance_id=iid, model_id=model_id).set(
         float(stats.peak_memory_usage.in_bytes)
     )
+
+
+def record_mtp_cycle(model_id: str, n_accepted: int) -> None:
+    """Record one MTP self-speculative cycle from the worker generator.
+
+    A cycle = γ MTP draft forwards + 1 verify forward through the target.
+    ``n_accepted`` is the number of drafts the verify pass committed
+    (0..γ, inclusive of γ when all drafts are accepted).
+
+    Unlike ``record_generation_complete``, this is NOT master-gated —
+    only the rank-0 worker of a TP shard runs MTP cycles, so each
+    cycle is counted exactly once even when Prometheus scrapes every
+    node.
+    """
+    _mtp_cycles.labels(model_id=model_id).inc()
+    if n_accepted > 0:
+        _mtp_accepted_drafts.labels(model_id=model_id).inc(n_accepted)
+    _mtp_acceptance_bucket.labels(
+        model_id=model_id, accepted=str(n_accepted)
+    ).inc()
 
 
 def record_node_gathered_info(node_id: NodeId, info: GatheredInfo) -> None:

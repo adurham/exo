@@ -344,21 +344,33 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
     target model would produce after ``n_min + 1`` non-spec steps.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, model_id: str = "", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Acceptance-rate counters (lightweight; only matter when
-        # EXO_DSV4_MTP_LOG_INTERVAL > 0).
+        # Acceptance-rate counters (always update — used by both the
+        # opt-in EXO_DSV4_MTP_LOG_INTERVAL warning emission and the
+        # always-on Prometheus exporter below).
         self._spec_cycles: int = 0
         self._spec_total_accepted: int = 0
         self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
+        self._model_id: str = model_id
 
     def _record_acceptance(self, n_accepted: int) -> None:
-        if _LOG_INTERVAL <= 0:
-            return
         self._spec_cycles += 1
         self._spec_total_accepted += n_accepted
         if 0 <= n_accepted <= self.gamma:
             self._spec_accept_hist[n_accepted] += 1
+        # Always emit to Prometheus — record_mtp_cycle is not master-
+        # gated; only rank-0 of the TP shard runs MTP cycles, so each
+        # cycle is counted exactly once across the cluster.
+        if self._model_id:
+            try:
+                from exo.metrics import record_mtp_cycle
+                record_mtp_cycle(self._model_id, n_accepted)
+            except Exception:  # noqa: BLE001
+                # Metrics must never crash decode. Swallow silently.
+                pass
+        if _LOG_INTERVAL <= 0:
+            return
         if self._spec_cycles % _LOG_INTERVAL == 0:
             mean = self._spec_total_accepted / self._spec_cycles
             hist = ",".join(

@@ -375,6 +375,7 @@ class ExoBatchGenerator:
                         alpha=alpha,
                         stop_tokens=stop_tokens_seq,
                         prefill_step_size=prefill_step_size,
+                        model_id=self.model_id,
                     )
                     logger.info(
                         f"DSv4 MTP speculative decoding enabled (γ={gamma}, T={temp})"
