@@ -88,7 +88,11 @@ _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 # of pooled state, so 4 snaps × 4 leaves = ~3 GB — comfortable headroom.
 # 4 still covers ~1K tokens of partial-hit window, enough for typical agent
 # turn extension (gen ~150 tok + tool-result ~500 tok).
-_SNAPSHOT_RETENTION = 4
+# Lowered 4→2 to give long-context Hermes sessions ~3-5 GB headroom for
+# Hermes auxiliary calls (memory_manager.sync_all, title_generation) that
+# otherwise pile concurrent KV pressure and trigger macOS thrash near the
+# 128 GB ceiling. 2 still covers a single agent-turn extension.
+_SNAPSHOT_RETENTION = 2
 
 
 @contextlib.contextmanager

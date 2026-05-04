@@ -178,7 +178,7 @@ fi
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
 # 4 sessions = a Hermes orchestrator (parent + up to 3 delegated children)
 # or a few concurrent tabs without paying for unshared copies.
-: "${DSV4_MAX_PREFIX_SESSIONS:=4}"
+: "${DSV4_MAX_PREFIX_SESSIONS:=8}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
 # DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
