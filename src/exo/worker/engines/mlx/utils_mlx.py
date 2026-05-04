@@ -1093,9 +1093,17 @@ def mx_all_gather_tasks(
 
     n_tasks = len(tasks)
     my_rank = 0 if group is None else group.rank()
+    # Route through the CPU stream (same as mx_any). On the default GPU
+    # stream this all_gather aliases its output buffer with whatever bf16
+    # decode op happened to land there last, and we read back float-bit
+    # patterns as garbage int32s in the billions (e.g. 0x3E983B5F).
+    # mx_any does this correctly — match it.
+    _cpu = mx.default_stream(mx.Device(mx.cpu))
     all_counts = cast(
         list[int],
-        mx.distributed.all_gather(mx.array([n_tasks]), group=group).tolist(),
+        mx.distributed.all_gather(
+            mx.array([n_tasks]), group=group, stream=_cpu
+        ).tolist(),
     )
     max_tasks = max(all_counts)
     world_size: int = 1 if group is None else group.size()
@@ -1133,7 +1141,7 @@ def mx_all_gather_tasks(
 
     gathered = cast(
         list[list[list[int]]],
-        mx.distributed.all_gather(mx.array(padded), group=group)
+        mx.distributed.all_gather(mx.array(padded), group=group, stream=_cpu)
         .reshape(world_size, max_tasks, -1)
         .tolist(),
     )
