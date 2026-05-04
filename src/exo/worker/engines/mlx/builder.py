@@ -38,11 +38,17 @@ class MlxBuilder(Builder):
     tokenizer: TokenizerWrapper | None = None
     group: mx.distributed.Group | None = None
     vision_processor: VisionProcessor | None = None
+    # Captured during connect/load so build() can read instance-level
+    # caps (max_prefix_sessions, max_prefix_bytes, max_kv_tokens,
+    # kv_cache_bits) when constructing the prefix cache.
+    bound_instance: BoundInstance | None = None
 
     def connect(self, bound_instance: BoundInstance) -> None:
         self.group = initialize_mlx(bound_instance)
+        self.bound_instance = bound_instance
 
     def load(self, bound_instance: BoundInstance) -> Generator[ModelLoadingResponse]:
+        self.bound_instance = bound_instance
         (
             self.inference_model,
             self.tokenizer,
@@ -80,7 +86,20 @@ class MlxBuilder(Builder):
                 self.tokenizer.tool_parser,  # type: ignore
             )
 
-        kv_prefix_cache = KVPrefixCache(self.group)
+        # Plumb instance-level caps to the prefix cache. Without this
+        # max_sessions stayed None and the trie grew unbounded — the
+        # eviction code at cache.py:_evict_if_needed only fires on a
+        # cap, so a missing cap meant 100% no-op. Was the root cause
+        # of repeated OOM wedges as Hermes accumulated leaves across
+        # turns.
+        instance = self.bound_instance.instance if self.bound_instance else None
+        kv_prefix_cache = KVPrefixCache(
+            self.group,
+            max_sessions=getattr(instance, "max_prefix_sessions", None),
+            max_bytes=getattr(instance, "max_prefix_bytes", None),
+            max_kv_tokens=getattr(instance, "max_kv_tokens", None),
+            kv_cache_bits=getattr(instance, "kv_cache_bits", None),
+        )
 
         device_rank = 0 if self.group is None else self.group.rank()
         if os.environ.get("EXO_NO_BATCH"):
