@@ -35,6 +35,9 @@ hosts_*.json
 
 # bench files
 bench/**/*.json
+bench/eval_results_*/
+bench/*.sh
+eval_results/
 
 # tmp
 tmp/models

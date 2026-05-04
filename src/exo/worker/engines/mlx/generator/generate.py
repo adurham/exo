@@ -83,9 +83,12 @@ _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 
 # Retain at most this many chunk-boundary cache snapshots per request.
 # Trade-off: more snaps = wider partial-prefix-hit coverage across requests
-# at the cost of memory per leaf (each snap deep-copies pooled state). 8 is
-# enough for multi-turn Hermes loops where each turn extends by ≤ 2K tokens.
-_SNAPSHOT_RETENTION = 8
+# at the cost of memory per leaf (each snap deep-copies pooled state, which
+# scales with prefill depth). At 16K-avg Hermes prompts, each snap is ~180 MB
+# of pooled state, so 4 snaps × 4 leaves = ~3 GB — comfortable headroom.
+# 4 still covers ~1K tokens of partial-hit window, enough for typical agent
+# turn extension (gen ~150 tok + tool-result ~500 tok).
+_SNAPSHOT_RETENTION = 4
 
 
 @contextlib.contextmanager

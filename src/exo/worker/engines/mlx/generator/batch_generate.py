@@ -1482,7 +1482,16 @@ class ExoBatchGenerator:
                     generation_tps=generation_tps,
                     prompt_tokens=len(state.all_prompt_tokens),
                     generation_tokens=state.completion_tokens,
-                    peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
+                    # mx.get_peak_memory() returns bytes. Convert to GiB
+                    # (binary 1024^3) — matches the rest of the codebase
+                    # (generate.py:290/403/845) and the actual physical
+                    # RAM the cluster nodes have. Previously divided by
+                    # 1e9 (decimal SI gigabytes), which made the metric
+                    # read ~7% larger than actual usage and confused
+                    # near-OOM diagnosis.
+                    peak_memory_usage=Memory.from_gb(
+                        mx.get_peak_memory() / 1024**3
+                    ),
                     prefix_cache_hit=prefix_cache_kind,
                     mtp_cycles_cumulative=mtp_cycles_cum,
                     mtp_accepted_drafts_cumulative=mtp_accepted_cum,
