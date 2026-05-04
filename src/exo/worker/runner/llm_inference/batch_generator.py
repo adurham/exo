@@ -501,9 +501,14 @@ class BatchGenerator(Engine):
     ]:
         from exo.worker.engines.mlx.trace import T
 
-        if not self._queue:
-            with T("batch_gen.agree_on_tasks"):
-                self.agree_on_tasks()
+        # agree_on_tasks() is a collective (mx.distributed.all_gather). Both
+        # ranks must call it together — gating on per-rank `self._queue` lets
+        # one rank skip it while the other waits forever inside, deadlocking
+        # the cluster on the next iteration's all_reduce. The collective itself
+        # short-circuits cheaply (utils_mlx.py:1102) when no rank has new
+        # tasks, so calling unconditionally is safe.
+        with T("batch_gen.agree_on_tasks"):
+            self.agree_on_tasks()
 
         # Submit any queued tasks to the engine
         while self._queue and len(self._active_tasks) < EXO_MAX_CONCURRENT_REQUESTS:
