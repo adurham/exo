@@ -48,6 +48,12 @@ _MEMORY_THRESHOLD = float(
     os.environ.get("EXO_MEMORY_THRESHOLD", _default_memory_threshold())
 )
 
+# Per-rank tracing for cross-rank divergence hunts. When 1, KVPrefixCache
+# logs every lookup/eviction/insert with rank tag and prompt fingerprint so
+# both nodes' worker logs can be diffed to detect rank-divergent state.
+# Default off — pure observability, no behavior change.
+_PREFIX_CACHE_TRACE = bool(int(os.environ.get("EXO_PREFIX_CACHE_TRACE", "0")))
+
 
 class CacheSnapshot:
     """Snapshot of states at a known token position."""
@@ -419,6 +425,22 @@ class KVPrefixCache:
         # (None) independently of siblings on the same process.
         self._kv_cache_bits = kv_cache_bits
 
+    def _trace(self, msg: str) -> None:
+        if not _PREFIX_CACHE_TRACE:
+            return
+        rank = self._group.rank() if self._group is not None else 0
+        logger.info(f"[prefix-cache trace rank={rank}] {msg}")
+
+    @staticmethod
+    def _fingerprint(tokens: mx.array) -> str:
+        """Short fingerprint for cross-rank prompt-identity check."""
+        n = int(tokens.shape[0])
+        if n == 0:
+            return "len=0"
+        head: list[int] = np.asarray(tokens[: min(8, n)]).tolist()  # type: ignore[assignment]
+        tail: list[int] = np.asarray(tokens[max(0, n - 8) :]).tolist()  # type: ignore[assignment]
+        return f"len={n} head={head} tail={tail}"
+
     # ── Dict-like views for external callers / tests ───────────────────────
     @property
     def prompts(self) -> dict[int, mx.array]:
@@ -488,6 +510,11 @@ class KVPrefixCache:
         )
         self._leaves[leaf_id] = leaf
         self._increment_ref_count(node)
+        self._trace(
+            f"add_kv_cache leaf={leaf_id} leaves={len(self._leaves)} "
+            f"access_counter={self._access_counter} "
+            f"prompt={self._fingerprint(prompt_tokens)}"
+        )
 
         total_len = int(prompt_tokens.shape[0])
         unique = total_len - shared_depth
@@ -524,6 +551,10 @@ class KVPrefixCache:
             logger.info(
                 f"KV cache update: leaf {leaf_id} not found, falling back to add"
             )
+            self._trace(
+                f"update_kv_cache leaf={leaf_id} NOT_FOUND leaves={len(self._leaves)} "
+                f"restore_pos={restore_pos} prompt={self._fingerprint(prompt_tokens)}"
+            )
             self.add_kv_cache(
                 prompt_tokens=prompt_tokens,
                 cache=cache,
@@ -532,6 +563,14 @@ class KVPrefixCache:
                 prefill_tps=prefill_tps,
             )
             return
+        self._trace(
+            f"update_kv_cache leaf={leaf_id} leaves={len(self._leaves)} "
+            f"old_depth={leaf.node.depth} new_length={int(prompt_tokens.shape[0])} "
+            f"restore_pos={restore_pos} "
+            f"merged_snaps={len([s for s in (leaf.leaf_snapshots or []) if s.token_count <= restore_pos])}"
+            f"+{len(snapshots) if snapshots else 0} "
+            f"prompt={self._fingerprint(prompt_tokens)}"
+        )
 
         merged: list[CacheSnapshot] = []
         if leaf.leaf_snapshots:
@@ -720,6 +759,11 @@ class KVPrefixCache:
             prompt_tokens, query_regions
         )
         if match_length == 0:
+            self._trace(
+                f"get_kv_cache MISS leaves={len(self._leaves)} "
+                f"access_counter={self._access_counter} "
+                f"prompt={self._fingerprint(prompt_tokens)}"
+            )
             return (
                 make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
                 prompt_tokens,
@@ -774,6 +818,14 @@ class KVPrefixCache:
         self._access_counter += 1
         donor_leaf.last_used = self._access_counter
         remaining = prompt_tokens[restore_pos:]
+        self._trace(
+            f"get_kv_cache HIT leaves={len(self._leaves)} "
+            f"matched_leaf={donor_leaf.leaf_id} match_length={match_length} "
+            f"restore_pos={restore_pos} remaining_len={int(remaining.shape[0])} "
+            f"is_exact={is_exact} access_counter={self._access_counter} "
+            f"snapshot_count={len(donor_leaf.leaf_snapshots) if donor_leaf.leaf_snapshots else 0} "
+            f"prompt={self._fingerprint(prompt_tokens)}"
+        )
         return materialized, remaining, donor_leaf.leaf_id, is_exact
 
     def get_memory_used_percentage(self) -> float:
@@ -1178,10 +1230,16 @@ class KVPrefixCache:
             return False
         lru = min(candidates, key=lambda leaf: leaf.last_used)
         evicted_tokens = int(lru.full_tokens.shape[0])
+        evicted_last_used = lru.last_used
         self._decrement_ref_count(lru.node)
         del self._leaves[lru.leaf_id]
         logger.info(
             f"KV cache evicted leaf {lru.leaf_id} ({evicted_tokens} tokens) — {reason}"
+        )
+        self._trace(
+            f"evict leaf={lru.leaf_id} tokens={evicted_tokens} "
+            f"last_used={evicted_last_used} leaves_after={len(self._leaves)} "
+            f"reason={reason}"
         )
         return True
 
