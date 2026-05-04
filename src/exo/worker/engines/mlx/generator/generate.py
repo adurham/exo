@@ -81,6 +81,12 @@ generation_stream = mx.new_stream(mx.default_device())
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 
+# Retain at most this many chunk-boundary cache snapshots per request.
+# Trade-off: more snaps = wider partial-prefix-hit coverage across requests
+# at the cost of memory per leaf (each snap deep-copies pooled state). 8 is
+# enough for multi-turn Hermes loops where each turn extends by ≤ 2K tokens.
+_SNAPSHOT_RETENTION = 8
+
 
 @contextlib.contextmanager
 def patch_embed_tokens(
@@ -353,18 +359,22 @@ def prefill(
             f"Prefill progress: {processed}/{total} tokens ({tok_per_sec:.1f} tok/s)"
         )
         if has_ssm:
-            # Keep ALL chunk-boundary snapshots so the cross-request
-            # prefix cache can serve partial-prefix hits at non-sliceable-
-            # layer depths. Was previously "last 2 only" (rollback only),
-            # which made the prefix cache structurally unable to hit on
-            # mid-prompt prefix matches — every cross-session lookup fell
-            # through to a full re-prefill.
+            # Keep up to _SNAPSHOT_RETENTION most-recent chunk-boundary
+            # snapshots. Original "last 2 only" was too tight (rollback-
+            # only — broke cross-request prefix cache); "keep all" OOM'd
+            # m4-2 at 99% memory after a few Hermes turns because each
+            # snapshot deep-copies pooled-attention state that grows
+            # with prefill depth.
             #
-            # Memory cost is bounded by chunk count × per-snapshot bytes
-            # × DSV4_MAX_PREFIX_SESSIONS. For DSv4 8-bit at chunk_size=256
-            # over a 9K-token Hermes prompt that's ~36 snaps × ~12 MB
-            # × 4 sessions ≈ 1.7 GB ceiling.
+            # 8 retains: rollback uses [-2] (immediate prior chunk),
+            # cross-request hits land for any match_length within
+            # ~7 × prefill_step_size of the snapshotted leaf's end.
+            # For DSv4 chunk_size=256 that's ~1.8K tokens of partial-
+            # hit coverage from a leaf's tail. Multi-turn Hermes flows
+            # where each turn extends by <1.8K tokens hit cleanly.
             snapshots.append(snapshot_ssm_states(cache))
+            if len(snapshots) > _SNAPSHOT_RETENTION:
+                snapshots.pop(0)
 
         if on_prefill_progress is not None:
             on_prefill_progress(processed, total)
