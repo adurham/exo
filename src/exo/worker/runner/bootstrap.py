@@ -143,6 +143,21 @@ def entrypoint(
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (min(max(soft, 2048), hard), hard))
 
+    # Enable core dumps when EXO_RUNNER_COREDUMP=1. Defaults to off; gated
+    # because production cores can pin tens of GB of address space to disk
+    # on a SEGV. Pair with `sudo chmod 1777 /cores/` (or sysctl
+    # kern.corefile=<writable-path>) so the unprivileged runner can land
+    # the file.
+    if os.environ.get("EXO_RUNNER_COREDUMP") == "1":
+        try:
+            resource.setrlimit(
+                resource.RLIMIT_CORE,
+                (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
+            )
+            logger.info("Core dumps enabled (RLIMIT_CORE=unlimited)")
+        except (ValueError, OSError) as e:
+            logger.warning(f"Failed to raise RLIMIT_CORE: {e}")
+
     # Pin QoS so siblings on the same machine don't drift apart under contention.
     # Defaults to user_initiated on Darwin; set EXO_RUNNER_QOS=off to disable.
     qos_choice = os.environ.get("EXO_RUNNER_QOS", "user_initiated")
