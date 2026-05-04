@@ -1092,6 +1092,7 @@ def mx_all_gather_tasks(
     uuid_byte_length = 36
 
     n_tasks = len(tasks)
+    my_rank = 0 if group is None else group.rank()
     all_counts = cast(
         list[int],
         mx.distributed.all_gather(mx.array([n_tasks]), group=group).tolist(),
@@ -1109,12 +1110,19 @@ def mx_all_gather_tasks(
     # taking the peer rank down with it via the unfinished RDMA call.
     # No realistic workload submits more than a handful of pending tasks at
     # once, so any value over 1024 is almost certainly garbage.
+    #
+    # We also log local n_tasks alongside all_counts[my_rank] so we can
+    # localize the corruption: if they differ, JACCL clobbered our own
+    # slot in the gather output (transport bug); if they match, the
+    # corruption is in our local Python state (rare).
     if max_tasks > 1024:
+        local_vs_received = all_counts[my_rank] if my_rank < len(all_counts) else "<oob>"
         raise RuntimeError(
             f"mx_all_gather_tasks: implausible max_tasks={max_tasks} from "
-            f"all_counts={all_counts!r} — JACCL all_gather likely returned "
-            f"a corrupted buffer. Crashing the runner cleanly so the "
-            f"supervisor can restart it (better than a 152 GB metal::malloc)."
+            f"all_counts={all_counts!r} (rank={my_rank}, local n_tasks={n_tasks}, "
+            f"received self={local_vs_received}) — JACCL all_gather likely "
+            f"returned a corrupted buffer. Crashing the runner cleanly so "
+            f"the supervisor can restart it (better than a 152 GB metal::malloc)."
         )
 
     padded = [encode_task_id(task.task_id) for task in tasks] + [
