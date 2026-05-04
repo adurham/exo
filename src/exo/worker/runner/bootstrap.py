@@ -2,6 +2,7 @@ import ctypes
 import os
 import resource
 import sys
+import traceback
 
 import loguru
 
@@ -190,8 +191,17 @@ def entrypoint(
     except ClosedResourceError:
         logger.warning("Runner communication closed unexpectedly")
     except Exception as e:
-        logger.opt(exception=e).warning(
-            f"Runner {bound_instance.bound_runner_id} crashed with critical exception {e}"
+        # Use plain traceback.format_exc() instead of logger.opt(exception=e),
+        # which invokes loguru's better_exceptions diagnose pass. That pass
+        # introspects every frame's locals; with Hermes-sized payloads
+        # (large prompts + tool definitions in the local scope) it deadlocks
+        # for minutes inside _format_value, freezing the runner mid-crash.
+        # While the runner hangs in the formatter, the peer rank busy-polls
+        # the RDMA collective forever — wedging the entire cluster on what
+        # should have been a clean runner-restart cycle.
+        logger.warning(
+            f"Runner {bound_instance.bound_runner_id} crashed with critical exception {e}\n"
+            f"{traceback.format_exc()}"
         )
         event_sender.send(
             RunnerStatusUpdated(
