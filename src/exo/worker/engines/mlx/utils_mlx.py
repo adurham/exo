@@ -1102,6 +1102,21 @@ def mx_all_gather_tasks(
     if max_tasks == 0:
         return [], []
 
+    # Sanity guard against JACCL transport corruption: if the all_gather
+    # return buffer was bit-flipped, max_tasks can come back as a garbage
+    # int in the billions. Without this guard, the next mx.array(padded)
+    # silently asks Metal for ~152 GB and crashes the runner mid-collective,
+    # taking the peer rank down with it via the unfinished RDMA call.
+    # No realistic workload submits more than a handful of pending tasks at
+    # once, so any value over 1024 is almost certainly garbage.
+    if max_tasks > 1024:
+        raise RuntimeError(
+            f"mx_all_gather_tasks: implausible max_tasks={max_tasks} from "
+            f"all_counts={all_counts!r} — JACCL all_gather likely returned "
+            f"a corrupted buffer. Crashing the runner cleanly so the "
+            f"supervisor can restart it (better than a 152 GB metal::malloc)."
+        )
+
     padded = [encode_task_id(task.task_id) for task in tasks] + [
         [0] * uuid_byte_length
     ] * (max_tasks - n_tasks)

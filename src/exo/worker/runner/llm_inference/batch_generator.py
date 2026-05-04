@@ -150,7 +150,18 @@ class SequentialGenerator(Engine):
         self._maybe_queue.append(task)
 
     def agree_on_tasks(self) -> None:
-        """Agree between all ranks about the task ordering (some may have received in different order or not at all)."""
+        """Agree between all ranks about the task ordering (some may have received in different order or not at all).
+
+        Fast path: a single mx_any of `bool(self._maybe_queue)` decides if ANY
+        rank has new submissions. In the common decode-loop case (no rank has
+        anything queued), we skip the 2× all_gather entirely. This pattern
+        mirrors `agree_on_cancellations_fast` and is necessary because the
+        unconditional call site fires at decode rate (~30 Hz); driving JACCL
+        all_gather at that rate has been observed to corrupt return buffers
+        (max_tasks bit-flipped to ~1B → 152 GB metal::malloc OOM).
+        """
+        if not mx_any(len(self._maybe_queue) > 0, self.group):
+            return
         agreed, different = mx_all_gather_tasks(self._maybe_queue, self.group)
         self._queue.extend(task for task in self._maybe_queue if task in agreed)
         self._maybe_queue = [task for task in self._maybe_queue if task in different]
@@ -437,7 +448,18 @@ class BatchGenerator(Engine):
         self._maybe_queue.append(task)
 
     def agree_on_tasks(self) -> None:
-        """Agree between all ranks about the task ordering (some may have received in different order or not at all)."""
+        """Agree between all ranks about the task ordering (some may have received in different order or not at all).
+
+        Fast path: a single mx_any of `bool(self._maybe_queue)` decides if ANY
+        rank has new submissions. In the common decode-loop case (no rank has
+        anything queued), we skip the 2× all_gather entirely. This pattern
+        mirrors `agree_on_cancellations_fast` and is necessary because the
+        unconditional call site fires at decode rate (~30 Hz); driving JACCL
+        all_gather at that rate has been observed to corrupt return buffers
+        (max_tasks bit-flipped to ~1B → 152 GB metal::malloc OOM at c=2).
+        """
+        if not mx_any(len(self._maybe_queue) > 0, self.group):
+            return
         _t0 = time.perf_counter()
         agreed, different = mx_all_gather_tasks(self._maybe_queue, self.group)
         self._queue.extend(task for task in self._maybe_queue if task in agreed)
