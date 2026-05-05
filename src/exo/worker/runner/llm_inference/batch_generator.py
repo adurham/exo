@@ -561,7 +561,15 @@ class BatchGenerator(Engine):
                 )
             self._active_tasks[uid] = (task, queue, output_generator)
 
-        if not self._gen.has_work:
+        # `self._gen.has_work` is per-rank state (active_tasks +
+        # gen_batch + prompt_batch). Without a collective gate, ranks
+        # can take divergent paths here: the rank with work calls
+        # self._gen.step() (issuing TP all_reduces from the model
+        # forward) while the rank without work returns early. The
+        # active rank then busy-polls JACCL forever for a peer send
+        # that never comes and the cluster wedges.
+        # Memory: jaccl_phase_a_finding_2026_05_05.md, hermes_wedge_root_cause_2026_05_04.md.
+        if not mx_any(self._gen.has_work, self.group):
             return self._apply_cancellations()
 
         results = self._gen.step()
