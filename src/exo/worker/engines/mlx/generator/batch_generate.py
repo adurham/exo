@@ -58,6 +58,7 @@ from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampli
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     fix_unmatched_think_end_tokens,
+    mx_any,
     system_prompt_token_count,
 )
 from exo.worker.engines.mlx.vision import (
@@ -1314,7 +1315,16 @@ class ExoBatchGenerator:
             )]
 
     def step(self) -> list[tuple[int, GenerationResponse]]:
-        if not self.has_work:
+        # `has_work` is per-rank state. In TP mode the outer gate at
+        # batch_generator.step():564 is already collective, but mlx-lm's
+        # step here may also be called from non-TP paths — keep this
+        # gate collective when a sharding group is present so all ranks
+        # branch identically. Memory: jaccl_phase_a_finding_2026_05_05.md.
+        local_has_work = self.has_work
+        if self.group is not None and self.group.size() > 1:
+            if not mx_any(local_has_work, self.group):
+                return []
+        elif not local_has_work:
             return []
 
         _trace = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
