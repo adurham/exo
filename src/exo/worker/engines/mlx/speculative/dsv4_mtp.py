@@ -439,11 +439,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # In TP mode the per-rank `_token_buffer` can diverge if any
         # earlier collective wasn't bit-exact across ranks (e.g. JACCL
         # c=2 transport corruption); without a collective gate, ranks
-        # take different branches here and the next iteration issues
-        # a different op stream → JACCL detects size mismatch as a
-        # call_id LEN_ERR and the cluster crashes. Agree on the drain
-        # decision via mx_any so all ranks branch identically. See
-        # memory: jaccl_phase_a_finding_2026_05_05.
+        # take different branches here and yield asymmetrically — the
+        # downstream `on_generation_token` → `agree_on_cancellations`
+        # callbacks then issue different op streams across ranks and
+        # JACCL detects the mismatch as call_id LEN_ERR. Drain only
+        # when ALL ranks have buffer for the uid so yield counts stay
+        # symmetric. If any rank lacks buffer, fall through to MTP
+        # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
         if len(gen_batch) >= 1:
             group = self._get_sharding_group()
             if group is None or group.size() == 1:
@@ -451,24 +453,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     if uid in self._token_buffer and self._token_buffer[uid]:
                         return [], self._yield_buffered(uid)
             else:
-                local_any = any(
-                    uid in self._token_buffer and bool(self._token_buffer[uid])
-                    for uid in gen_batch.uids
-                )
-                if mx_any(local_any, group):
-                    for uid in gen_batch.uids:
-                        local = (
-                            uid in self._token_buffer
-                            and bool(self._token_buffer[uid])
-                        )
-                        if mx_any(local, group):
-                            if local:
-                                return [], self._yield_buffered(uid)
-                            # Some peer wants to drain this uid but we
-                            # have no buffer locally — yield nothing
-                            # and skip MTP to keep collective lock-step.
-                            return [], []
-                    return [], []
+                for uid in gen_batch.uids:
+                    local = (
+                        uid in self._token_buffer
+                        and bool(self._token_buffer[uid])
+                    )
+                    # `all_have` = "all ranks have buffer for this uid"
+                    # = NOT (any rank lacks buffer). One mx_any per uid.
+                    all_have = not mx_any(not local, group)
+                    if all_have:
+                        return [], self._yield_buffered(uid)
 
         spec_eligible = (
             self.gamma > 0
