@@ -428,25 +428,41 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         prefill pending, no unprocessed sequences. The BS=1 path
         keeps the parent's behavior; BS>1 takes the new batched
         path.
-
-        TP mode: every gating decision below is collective-resolved
-        (mx_any/mx_all) so all ranks issue the same op stream
-        regardless of per-rank state divergence. See
-        memory: jaccl_phase_a_finding_2026_05_05.
         """
-        group = self._get_sharding_group()
-
-        if group is None or group.size() == 1:
-            return self._next_single_rank(*args, **kwargs)
-        return self._next_multi_rank(group, *args, **kwargs)
-
-    def _next_single_rank(self, *args: Any, **kwargs: Any):
-        """Original single-rank dispatch (no collective gates needed)."""
         gen_batch = self._generation_batch
+
+        # Drain buffered tokens first (one per call), per the parent
+        # API. At BS>1 we may have multiple uids with buffered tokens
+        # — drain whichever has them first; the gen_batch still
+        # advances normally on subsequent calls.
+        #
+        # In TP mode the per-rank `_token_buffer` can diverge if any
+        # earlier collective wasn't bit-exact across ranks (e.g. JACCL
+        # c=2 transport corruption); without a collective gate, ranks
+        # take different branches here and yield asymmetrically — the
+        # downstream `on_generation_token` → `agree_on_cancellations`
+        # callbacks then issue different op streams across ranks and
+        # JACCL detects the mismatch as call_id LEN_ERR. Drain only
+        # when ALL ranks have buffer for the uid so yield counts stay
+        # symmetric. If any rank lacks buffer, fall through to MTP
+        # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
         if len(gen_batch) >= 1:
-            for uid in gen_batch.uids:
-                if uid in self._token_buffer and self._token_buffer[uid]:
-                    return [], self._yield_buffered(uid)
+            group = self._get_sharding_group()
+            if group is None or group.size() == 1:
+                for uid in gen_batch.uids:
+                    if uid in self._token_buffer and self._token_buffer[uid]:
+                        return [], self._yield_buffered(uid)
+            else:
+                for uid in gen_batch.uids:
+                    local = (
+                        uid in self._token_buffer
+                        and bool(self._token_buffer[uid])
+                    )
+                    # `all_have` = "all ranks have buffer for this uid"
+                    # = NOT (any rank lacks buffer). One mx_any per uid.
+                    all_have = not mx_any(not local, group)
+                    if all_have:
+                        return [], self._yield_buffered(uid)
 
         spec_eligible = (
             self.gamma > 0
@@ -455,6 +471,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             and len(self._unprocessed_sequences) == 0
         )
         if spec_eligible:
+            # All uids must be prefilled (have a captured pre_norm).
             uids = list(gen_batch.uids)
             need_first_step = [u for u in uids if u not in self._mtp_prefilled]
             if need_first_step:
@@ -463,81 +480,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 return [], self._speculative_next(uids[0])
             return [], self._speculative_next_batch(uids)
 
-        result = super(MTPBatchGenerator, self)._next(*args, **kwargs)
-        for uid in self._generation_batch.uids:
-            self._mtp_prefilled.discard(uid)
-        return result
-
-    def _next_multi_rank(
-        self, group: "mx.distributed.Group", *args: Any, **kwargs: Any
-    ):
-        """Multi-rank dispatch with collective-gated control flow.
-
-        Every check that gates collective issuance is voted across
-        ranks so all ranks branch identically — buffer drain, spec
-        eligibility, uid set, prefill state. When ranks disagree on
-        anything, fall back to the non-spec path (super()._next),
-        which always issues a uniform op stream regardless of state.
-        """
-        gen_batch = self._generation_batch
-
-        # Step 1: drain — drain only when ALL ranks have buffer for the
-        # uid (yield counts must match across ranks to keep
-        # downstream on_generation_token callbacks in lock-step).
-        if len(gen_batch) >= 1:
-            for uid in gen_batch.uids:
-                local = (
-                    uid in self._token_buffer
-                    and bool(self._token_buffer[uid])
-                )
-                all_have = not mx_any(not local, group)
-                if all_have:
-                    return [], self._yield_buffered(uid)
-
-        # Step 2: collective spec_eligible. Use mx_all (= NOT mx_any
-        # of NOT local) so the spec branch fires only when every rank
-        # is locally eligible. self.gamma is a class invariant; the
-        # other three are per-rank state that can diverge.
-        local_spec_eligible = (
-            self.gamma > 0
-            and len(gen_batch) >= 1
-            and len(self._prompt_batch) == 0
-            and len(self._unprocessed_sequences) == 0
-        )
-        all_spec_eligible = not mx_any(not local_spec_eligible, group)
-
-        if all_spec_eligible:
-            # Step 3: agree on uid count. If counts differ, the BS=1
-            # vs BS>1 dispatch below would diverge and so would the
-            # batched verify forward shape — fall back instead.
-            local_count = len(gen_batch.uids)
-            counts = cast(
-                "list[int]",
-                mx.distributed.all_gather(
-                    mx.array([local_count], dtype=mx.int32),
-                    group=group,
-                    stream=mx.default_stream(mx.Device(mx.cpu)),
-                ).tolist(),
-            )
-            if min(counts) == max(counts):
-                uids = list(gen_batch.uids)
-
-                # Step 4: collective need_first_step. If ANY rank
-                # has any uid not yet prefilled, all ranks must
-                # take the first_step path.
-                local_need_first = any(
-                    u not in self._mtp_prefilled for u in uids
-                )
-                any_need_first = mx_any(local_need_first, group)
-                if any_need_first:
-                    return self._first_step_and_capture_batch(uids)
-                if len(uids) == 1:
-                    return [], self._speculative_next(uids[0])
-                return [], self._speculative_next_batch(uids)
-            # Counts differ — fall through to fallback.
-
-        # Fallback: standard non-spec path (super()._next runs a
-        # plain decode forward — same op stream on every rank).
+        # Fallback: standard non-spec path. Drop prefill flags so the
+        # next BS=1 idle window re-captures from a clean forward.
         result = super(MTPBatchGenerator, self)._next(*args, **kwargs)
         for uid in self._generation_batch.uids:
             self._mtp_prefilled.discard(uid)
