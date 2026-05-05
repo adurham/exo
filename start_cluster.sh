@@ -630,6 +630,10 @@ for NODE in "${NODES[@]}"; do
     # for finding the first cross-rank divergence in the call sequence;
     # don't leave on permanently (fflush per call slows decode).
     [ -n "${JACCL_TRACE_CALLS:-}" ]    && EXO_ENV="$EXO_ENV JACCL_TRACE_CALLS=$JACCL_TRACE_CALLS"
+    # Per-call output-hash diagnostic; orthogonal to JACCL_TRACE_CALLS
+    # gating but uses the same trace file. Identifies transport
+    # non-bit-exactness as a divergent hash at a specific call_id.
+    [ -n "${JACCL_TRACE_HASH:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_HASH=$JACCL_TRACE_HASH"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
