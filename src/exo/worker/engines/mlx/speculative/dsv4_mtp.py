@@ -32,7 +32,7 @@ import logging
 import os
 import time
 from collections import deque
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, cast
 
 import mlx.core as mx
 
@@ -44,6 +44,7 @@ from mlx_lm.models.cache import (
 
 from .mtp_batch_generator import MTPBatchGenerator
 from .mtp_module import draft_tokens
+from exo.worker.engines.mlx.utils_mlx import mx_any
 
 
 def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
@@ -353,6 +354,39 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._spec_cycles: int = 0
         self._spec_total_accepted: int = 0
         self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
+        self._cached_sharding_group: Optional[mx.distributed.Group] = None
+
+    def _get_sharding_group(self) -> "Optional[mx.distributed.Group]":
+        """Return the TP sharding group used by FFN/attention all_sums.
+
+        Caches the lookup; falls back to None when the model isn't
+        sharded. Used by `_next` to gate the buffer-drain branch
+        collectively so ranks stay in lock-step under JACCL c=2.
+        """
+        if self._cached_sharding_group is not None:
+            return self._cached_sharding_group
+        model: Any = self.model  # type: ignore[reportUnknownMemberType]
+        inner: Any = (
+            getattr(model, "model", None)
+            or getattr(model, "language_model", None)
+        )
+        if inner is None:
+            return None
+        layers: Any = getattr(inner, "layers", None) or getattr(
+            getattr(inner, "model", None), "layers", None
+        )
+        if not layers:
+            return None
+        layer0: Any = layers[0]
+        for attr in ("ffn", "mlp", "block_sparse_moe"):
+            sub: Any = getattr(layer0, attr, None)
+            if sub is not None:
+                g: Any = getattr(sub, "sharding_group", None)
+                if g is not None:
+                    cast_g = cast("mx.distributed.Group", g)
+                    self._cached_sharding_group = cast_g
+                    return cast_g
+        return None
 
     def _record_acceptance(self, n_accepted: int) -> None:
         """Record one MTP draft-acceptance sample.
@@ -401,10 +435,40 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # API. At BS>1 we may have multiple uids with buffered tokens
         # — drain whichever has them first; the gen_batch still
         # advances normally on subsequent calls.
+        #
+        # In TP mode the per-rank `_token_buffer` can diverge if any
+        # earlier collective wasn't bit-exact across ranks (e.g. JACCL
+        # c=2 transport corruption); without a collective gate, ranks
+        # take different branches here and the next iteration issues
+        # a different op stream → JACCL detects size mismatch as a
+        # call_id LEN_ERR and the cluster crashes. Agree on the drain
+        # decision via mx_any so all ranks branch identically. See
+        # memory: jaccl_phase_a_finding_2026_05_05.
         if len(gen_batch) >= 1:
-            for uid in gen_batch.uids:
-                if uid in self._token_buffer and self._token_buffer[uid]:
-                    return [], self._yield_buffered(uid)
+            group = self._get_sharding_group()
+            if group is None or group.size() == 1:
+                for uid in gen_batch.uids:
+                    if uid in self._token_buffer and self._token_buffer[uid]:
+                        return [], self._yield_buffered(uid)
+            else:
+                local_any = any(
+                    uid in self._token_buffer and bool(self._token_buffer[uid])
+                    for uid in gen_batch.uids
+                )
+                if mx_any(local_any, group):
+                    for uid in gen_batch.uids:
+                        local = (
+                            uid in self._token_buffer
+                            and bool(self._token_buffer[uid])
+                        )
+                        if mx_any(local, group):
+                            if local:
+                                return [], self._yield_buffered(uid)
+                            # Some peer wants to drain this uid but we
+                            # have no buffer locally — yield nothing
+                            # and skip MTP to keep collective lock-step.
+                            return [], []
+                    return [], []
 
         spec_eligible = (
             self.gamma > 0
