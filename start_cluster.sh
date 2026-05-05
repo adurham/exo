@@ -624,6 +624,12 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
     [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
+    # JACCL per-call trace (Phase 0 c=2 corruption diagnostic). When set
+    # to 1, every collective entry writes one line to
+    # /tmp/jaccl_trace_rank_${MLX_RANK}.log on each runner host. Use
+    # for finding the first cross-rank divergence in the call sequence;
+    # don't leave on permanently (fflush per call slows decode).
+    [ -n "${JACCL_TRACE_CALLS:-}" ]    && EXO_ENV="$EXO_ENV JACCL_TRACE_CALLS=$JACCL_TRACE_CALLS"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
