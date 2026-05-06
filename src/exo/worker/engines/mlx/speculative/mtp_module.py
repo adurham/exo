@@ -579,10 +579,10 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(None)
         else:
+            # temp>0: stochastic sampling — see dsv4_mtp's
+            # _draft_tokens_batched for why we skip the cross-rank sync.
             q = mx.softmax(logits / temp, axis=-1)
             tok_arr = mx.random.categorical(logits * (1.0 / temp)).reshape(1, 1)
-            if sync_drafts:
-                tok_arr = mx.distributed.all_min(tok_arr.astype(mx.int32), group=sync_group)
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(q)
 

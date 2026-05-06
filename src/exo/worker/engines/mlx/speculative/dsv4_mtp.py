@@ -945,14 +945,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(None)
             else:
+                # temp>0: stochastic sampling. all_min would bias the
+                # distribution heavily toward small token IDs. Cross-rank
+                # determinism here would require seeding mx.random
+                # identically per call OR broadcasting from one rank,
+                # neither implemented yet. The Phase E cascade-stop
+                # bandages (uid intersection + _num_tokens all_max) keep
+                # the cluster stable; output may be partial.
                 q = mx.softmax(logits / temp, axis=-1)  # (N, vocab)
                 tok_arr = mx.random.categorical(
                     logits * (1.0 / temp)
                 ).reshape(-1, 1)  # (N, 1)
-                if sync_drafts:
-                    tok_arr = mx.distributed.all_min(
-                        tok_arr.astype(mx.int32), group=sync_group
-                    )
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(q)
             # h returned by predict at S=1 has shape (N, 1, hidden) —
