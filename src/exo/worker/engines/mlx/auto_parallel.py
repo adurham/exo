@@ -922,8 +922,23 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
         # Memory cost is small: one layer's worth of unsharded MoE
         # weights per rank (~3-5 GB at FP4 expert quant for DSv4 8bit),
         # easily within the 128 GB / rank budget.
+        #
+        # Fused gate+up install IS still applied — it's a per-rank
+        # weight-layout optimisation (concat gate_proj+up_proj along
+        # output dim → single gather_qmm dispatch) and operates
+        # identically on full weights as on sharded weights. Skipping
+        # it leaves switch_mlp on the upstream SwitchGLU __call__ which
+        # produces subtly different bf16 outputs than the fused path;
+        # on cluster, dropping the fused install at temp>0 caused the
+        # chained MTP draft to collapse to BOS spam, even though temp=0
+        # argmax remained correct.
         for j, mtp in enumerate(mtp_blocks):
             mx.eval(mtp.parameters())
+
+            if _DSV4_FUSED_MOE:
+                _install_dsv4_fused_gate_up(mtp.ffn.switch_mlp)
+
+            mx.eval(mtp)
             mx.clear_cache()
             yield ModelLoadingResponse(layers_loaded=len(layers) + j, total=total)
 
