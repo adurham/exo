@@ -471,26 +471,63 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         """
         gen_batch = self._generation_batch
 
-        # Collective `_num_tokens` sync. Empirically (Phase E.1 trace
+        # Collective gen_batch sync. Empirically (Phase E.1 trace
         # comparison 2026-05-05) MTP draft state diverges across ranks
         # at long context after several spec cycles even though every
-        # collective output hash matches — drafts for one of c=2's two
-        # uids start mismatching while the other stays bit-exact. Once
-        # `n_accepted_per` differs across ranks, per-uid `_num_tokens`
-        # accumulates at different rates, eventually one rank crosses
-        # `max_tokens` first, triggers `_filter_finished_uid`, shrinks
-        # gen_batch.uids on that rank only, and the next forward
-        # all_sum has different message size on each rank → JACCL
-        # LEN_ERR cluster wedge. Forcing `_num_tokens` to the per-uid
-        # max across ranks keeps length-limit decisions symmetric so
-        # all ranks filter the same uids at the same step. The reported
-        # token count is slightly inflated for the slower rank, but
-        # this only affects when generation ends, not which tokens are
-        # actually emitted (the leading rank's tokens). Memory:
+        # collective output hash matches. Drafts diverge for one uid
+        # while another stays bit-exact, then `n_accepted_per` differs,
+        # then per-uid `_num_tokens` and yielded tokens differ, then
+        # length-finish (max_tokens) and stop-finish (state machine
+        # match) fire on different ranks at different steps, then
+        # `_filter_finished_uid` removes different uids per rank, then
+        # the next forward all_sum has different message size on each
+        # rank → JACCL LEN_ERR cluster wedge.
+        #
+        # Two-step sync at the top of every `_next` keeps collective
+        # forwards in lock-step across ranks:
+        #   1) gen_batch.uids ← intersection across ranks (any rank
+        #      that filters a uid causes ALL ranks to filter it).
+        #   2) gen_batch._num_tokens ← max across ranks (any rank that
+        #      hits length-finish causes ALL ranks to hit it).
+        # Yielded tokens still come from one rank only (master picks
+        # device_rank=0); the other rank's yields are discarded by the
+        # outer master event router. Memory:
         # next_session_plan_jaccl_c2_prefix_cache.md (Phase E).
-        if len(gen_batch) >= 1:
-            sync_group = self._get_sharding_group()
-            if sync_group is not None and sync_group.size() > 1:
+        sync_group = self._get_sharding_group()
+        if sync_group is not None and sync_group.size() > 1 and len(gen_batch) >= 1:
+            # Step 1 — uid intersection. Encode each rank's uid set as
+            # a presence bitmask of bounded size; all_sum to count how
+            # many ranks have each uid; keep only uids present on ALL.
+            uid_bound = 1024
+            local_presence: list[int] = [0] * uid_bound
+            for _u in gen_batch.uids:
+                if 0 <= _u < uid_bound:
+                    local_presence[_u] = 1
+            presence_arr = mx.array(local_presence, dtype=mx.int32)
+            counted = mx.distributed.all_sum(presence_arr, group=sync_group)
+            mx.eval(counted)
+            n_ranks = sync_group.size()
+            counted_lst = cast(list[int], counted.tolist())
+            keep_uids: set[int] = {
+                _u for _u, _c in enumerate(counted_lst) if _c == n_ranks
+            }
+            keep_indices: list[int] = [
+                _i for _i, _u in enumerate(gen_batch.uids) if _u in keep_uids
+            ]
+            if len(keep_indices) < len(gen_batch.uids):
+                drop_uids = [u for u in gen_batch.uids if u not in keep_uids]
+                gen_batch.filter(keep_indices)
+                # Clean up MTP-side state for dropped uids on ranks
+                # that hadn't filtered them locally. _cleanup_uid pops
+                # _mtp_pre_norm, _mtp_prefilled, _token_buffer,
+                # _request_temp.
+                for _u in drop_uids:
+                    self._cleanup_uid(_u)
+
+            # Step 2 — _num_tokens max. After filter, both ranks have
+            # the same uid set in the same order, so the int array is
+            # length-equivalent for all_max.
+            if len(gen_batch) >= 1:
                 synced = mx.distributed.all_max(
                     mx.array(gen_batch._num_tokens), group=sync_group
                 )
