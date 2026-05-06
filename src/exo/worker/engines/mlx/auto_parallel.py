@@ -895,6 +895,44 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             # validate decode quality.
             if _DSV4_FUSED_MOE:
                 _install_dsv4_fused_gate_up(layer.ffn.switch_mlp)
+                # Phase H follow-up: same fusion for shared_experts MLP.
+                # gate_proj + up_proj are mxfp8 quantized regular Linears
+                # (not SwitchLinear), so this fuses via a single
+                # mx.quantized_matmul instead of gather_qmm. Saves one
+                # additional dispatch per layer per decode token.
+                fuse_fn = getattr(layer.ffn.shared_experts, "fuse_gate_up_weights", None)
+                if fuse_fn is not None:
+                    fuse_fn()
+                # Compressor wkv + wgate fusion. Compressors are NOT
+                # sharded — both projections live entirely on each rank,
+                # same group/bits/mode. Concatenating along the output
+                # axis collapses two quantized_matmul dispatches into one
+                # per compressor per decode token. Both
+                # CompressedAttention.compressor and
+                # SparseCompressedAttention.compressor (plus the indexer's
+                # internal Compressor) share the same shape.
+                attn_obj = getattr(layer, "attn", None)
+                if attn_obj is not None:
+                    # wq_a + wkv fusion: same input x, different output dims
+                    # (q_lora_rank vs head_dim). Neither projection is sharded
+                    # so the concat lives entirely on each rank. Saves one
+                    # quantized_matmul dispatch per attention block per
+                    # decode token (60 dispatches/cycle on DSv4-Flash).
+                    qa_fuse = getattr(attn_obj, "fuse_qa_kv_weights", None)
+                    if qa_fuse is not None:
+                        qa_fuse()
+                    comp = getattr(attn_obj, "compressor", None)
+                    if comp is not None:
+                        comp_fuse = getattr(comp, "fuse_kv_gate_weights", None)
+                        if comp_fuse is not None:
+                            comp_fuse()
+                    indexer = getattr(attn_obj, "indexer", None)
+                    if indexer is not None:
+                        idx_comp = getattr(indexer, "compressor", None)
+                        if idx_comp is not None:
+                            idx_comp_fuse = getattr(idx_comp, "fuse_kv_gate_weights", None)
+                            if idx_comp_fuse is not None:
+                                idx_comp_fuse()
 
             mx.eval(layer)
             mx.clear_cache()
@@ -918,6 +956,15 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
 
             if _DSV4_FUSED_MOE:
                 _install_dsv4_fused_gate_up(mtp.ffn.switch_mlp)
+                fuse_fn = getattr(mtp.ffn.shared_experts, "fuse_gate_up_weights", None)
+                if fuse_fn is not None:
+                    fuse_fn()
+                # MTP attention is a LocalAttention — fuse wq_a + wkv too.
+                attn_obj = getattr(mtp, "attn", None)
+                if attn_obj is not None:
+                    qa_fuse = getattr(attn_obj, "fuse_qa_kv_weights", None)
+                    if qa_fuse is not None:
+                        qa_fuse()
 
             mx.eval(mtp)
             mx.clear_cache()
