@@ -545,6 +545,28 @@ class MTPPredictor:
         return self._attn_mlp(h)
 
 
+def broadcast_from_canonical(arr, sync_group):
+    """Broadcast ``arr`` from ``sync_group`` rank 0 to every rank.
+
+    Implementation: each rank multiplies ``arr`` by an indicator (1 only
+    on rank 0, 0 elsewhere) and the result is fed into ``all_sum``. Rank
+    0 contributes the actual value; all others contribute zeros — after
+    the reduction every rank holds rank 0's original value.
+
+    Used to force cross-rank determinism on stochastic outputs (random
+    samples, uniforms, rejection-sampled corrections) and on argmax
+    outputs that drift due to MLX-level numerical non-determinism in
+    unsharded MTP modules. Cheaper than broadcasting full distributions
+    and avoids the ``all_min`` bias toward small token IDs that breaks
+    temp>0 sampling. Memory: jaccl_phase_f_outcome_2026_05_06.md.
+
+    Caller must ensure ``sync_group`` is non-None and ``size() > 1``;
+    bypass the call when running single-rank.
+    """
+    contribution = arr if sync_group.rank() == 0 else mx.zeros_like(arr)
+    return mx.distributed.all_sum(contribution, group=sync_group)
+
+
 def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None):
     """Draft γ tokens by chaining MTP predictions — fully lazy, no mx.eval.
 
@@ -554,11 +576,12 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     Args:
         first_token_arr: mx.array of shape (1,1) — the token to start from
         sync_group: optional TP sharding group. When provided and size>1,
-            all_min the post-argmax/sample token IDs across ranks each
-            step. Forces draft determinism across ranks since the MTP
-            module's logits can drift by ~1ulp due to MLX-level numerics
-            even with bit-exact inputs and unsharded weights. Memory:
-            jaccl_phase_e_outcome_2026_05_05.md.
+            broadcast each step's token ID from rank 0 to all other ranks
+            (and the per-step ``q`` softmax used for the acceptance ratio).
+            Forces draft determinism across ranks since the MTP module's
+            logits can drift by ~1ulp due to MLX-level numerics even with
+            bit-exact inputs and unsharded weights. Memory:
+            jaccl_phase_f_outcome_2026_05_06.md.
     Returns: (draft_ids, draft_probs) where draft_ids[i] is a lazy mx.array
              scalar, draft_probs[i] is the full draft distribution (or None if greedy)
     """
@@ -575,14 +598,23 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
         if temp == 0:
             tok_arr = mx.argmax(logits, axis=-1).reshape(1, 1)
             if sync_drafts:
-                tok_arr = mx.distributed.all_min(tok_arr.astype(mx.int32), group=sync_group)
+                tok_arr = broadcast_from_canonical(
+                    tok_arr.astype(mx.int32), sync_group
+                )
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(None)
         else:
-            # temp>0: stochastic sampling — see dsv4_mtp's
-            # _draft_tokens_batched for why we skip the cross-rank sync.
             q = mx.softmax(logits / temp, axis=-1)
             tok_arr = mx.random.categorical(logits * (1.0 / temp)).reshape(1, 1)
+            if sync_drafts:
+                tok_arr = broadcast_from_canonical(
+                    tok_arr.astype(mx.int32), sync_group
+                )
+                # NOTE: q (softmax) stays per-rank. The downstream
+                # acceptance check (ratio = p/q with verify-side p) will
+                # diverge by ~1ulp; we sync n_accepted at the end of the
+                # spec cycle rather than broadcasting a vocab-sized q
+                # every draft step.
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(q)
 

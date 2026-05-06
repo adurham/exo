@@ -639,6 +639,11 @@ for NODE in "${NODES[@]}"; do
     # to find the first asymmetric Python state on the prefix-cache
     # share path. Memory: next_session_plan_jaccl_c2_prefix_cache.md.
     [ -n "${JACCL_TRACE_STEP:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_STEP=$JACCL_TRACE_STEP"
+    # Per-MTP-chain-step drift diagnostic; writes JSONL to
+    # /tmp/mtp_drift_rank_${rank}_pid${pid}.log. Cross-rank diff
+    # localises where in the unsharded MTP chain logits first
+    # drift across ranks. Memory: jaccl_phase_f_outcome_2026_05_06.md.
+    [ -n "${EXO_MTP_DRIFT_DUMP:-}" ]    && EXO_ENV="$EXO_ENV EXO_MTP_DRIFT_DUMP=$EXO_MTP_DRIFT_DUMP"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then

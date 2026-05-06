@@ -43,7 +43,7 @@ from mlx_lm.models.cache import (
 )
 
 from .mtp_batch_generator import MTPBatchGenerator
-from .mtp_module import draft_tokens
+from .mtp_module import broadcast_from_canonical, draft_tokens
 from exo.worker.engines.mlx.utils_mlx import mx_any
 
 
@@ -356,6 +356,82 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
         self._cached_sharding_group: Optional[mx.distributed.Group] = None
         self._jaccl_spec_handle: Optional[BinaryIO] = None
+        self._mtp_drift_handle: Optional[BinaryIO] = None
+        self._mtp_drift_step: int = 0
+
+    def _mtp_drift_dump(
+        self,
+        cycle_n: int,
+        chain_step: int,
+        hidden_pre: mx.array,
+        logits: mx.array,
+        tok_pre_sync: mx.array,
+        tok_post_sync: mx.array,
+    ) -> None:
+        """Per-MTP-chain-step drift trace when EXO_MTP_DRIFT_DUMP=1.
+
+        Cross-rank diff of this file localises which MTP forward step
+        first produces divergent logits across ranks — i.e. when the
+        ~1ulp drift accumulates enough to flip an argmax. Captures four
+        per-step quantities:
+
+        * ``hidden_hash`` — uint32 of all hidden_state values, hashed.
+          Phase E.1 evidence says this is bit-exact across ranks at
+          cycle 5 entry; this trace re-verifies on cluster.
+        * ``logits_top16_argmax`` — argmax of top-16 logit values.
+          Drift first manifests here: when two near-tied logits flip
+          order across ranks, argmax flips.
+        * ``logits_max_abs_delta`` — bf16 ulp count between the two
+          largest logit values; sized so cross-rank comparison shows
+          how close the contest was.
+        * ``tok_pre_sync`` / ``tok_post_sync`` — argmax before vs
+          after the broadcast_from_canonical sync. Equal pre⇒
+          drift didn't flip an argmax this step. Different pre⇒
+          drift flipped an argmax (the case Phase F catches).
+
+        Default off; zero overhead when env unset.
+        """
+        if os.environ.get("EXO_MTP_DRIFT_DUMP") != "1":
+            return
+
+        import json
+
+        if self._mtp_drift_handle is None:
+            group = self._get_sharding_group()
+            rank = group.rank() if group is not None else 0
+            path = f"/tmp/mtp_drift_rank_{rank}_pid{os.getpid()}.log"
+            self._mtp_drift_handle = open(  # noqa: SIM115
+                path, "ab", buffering=0
+            )
+
+        # Materialise so .item() / .tolist() reads don't pay async-eval
+        # roundtrips at cluster scale; the dump is opt-in so the cost
+        # only matters when it's enabled.
+        hidden_hash_arr = mx.sum(
+            hidden_pre.astype(mx.float32) * 1e6
+        ).astype(mx.int64)
+        top_logits, top_idx = mx.topk(logits.astype(mx.float32), k=16, axis=-1)
+        # Range of top-16 logits as a proxy for "how tied was the argmax".
+        logit_spread = (top_logits[..., 0] - top_logits[..., 15]).astype(
+            mx.float32
+        )
+        mx.eval(
+            hidden_hash_arr, top_idx, logit_spread, tok_pre_sync, tok_post_sync
+        )
+
+        rec = {
+            "cycle": cycle_n,
+            "chain_step": chain_step,
+            "hidden_hash": int(hidden_hash_arr.item()),
+            "top_idx": cast(list[int], top_idx.tolist()),
+            "logit_spread": cast(list[float], logit_spread.tolist())
+            if logit_spread.ndim > 0
+            else float(logit_spread.item()),
+            "tok_pre_sync": cast(list[int], tok_pre_sync.tolist()),
+            "tok_post_sync": cast(list[int], tok_post_sync.tolist()),
+        }
+        line = (json.dumps(rec) + "\n").encode("utf-8")
+        self._mtp_drift_handle.write(line)
 
     def _jaccl_dump_spec(
         self,
@@ -643,6 +719,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gen_batch = self._generation_batch
         N = len(uids)
         gamma = self.gamma
+        sync_group = self._get_sharding_group()
+        sync_drafts = sync_group is not None and sync_group.size() > 1
 
         # Verify each uid has the prerequisites.
         ys: list[mx.array] = []
@@ -759,13 +837,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             )
         else:
             # Temp>0 stochastic acceptance, per-stream.
-            n_accepted_per = []
-            all_tokens_per = []
-            bonus_vals = []
-            bonus_lps = []
+            #
+            # Per-rank divergence sources at temp>0:
+            #   * draft_probs_list[i] (q) is per-rank — same MLX numerical
+            #     drift as drafts (~1ulp on softmax of MTP logits).
+            #   * mx.random.uniform / mx.random.categorical are per-rank
+            #     RNG, so samples differ across ranks even with bit-exact
+            #     inputs.
+            # ⇒ accept_ratios diverge (q drift) AND comparison with
+            # uniforms diverges (RNG mismatch), so per-rank `k` differs.
+            # We compute `k` per-rank then broadcast rank-0's value via
+            # masked all_sum; same trick for the bonus sample which is
+            # also drawn per-rank. After the broadcast all ranks build
+            # all_tokens_per / bonus_vals from identical inputs.
             logprobs_all = verify_logits - mx.logsumexp(
                 verify_logits, axis=-1, keepdims=True
             )
+            k_local: list[int] = []
             for n, uid in enumerate(uids):
                 accept_ratios: list[mx.array] = []
                 for i in range(gamma):
@@ -779,17 +867,47 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 k = 0
                 while k < gamma and uniforms[k].item() < accept_ratios[k].item():
                     k += 1
-                n_accepted_per.append(k)
+                k_local.append(k)
 
-                row = [(int(next_tokens_arr[n, 0].item()), y_logprobs_list[n])]
-                for kk in range(k):
-                    row.append((int(draft_concat[n, kk].item()), logprobs_all[n, kk]))
-                all_tokens_per.append(row)
-                bonus = int(
-                    mx.random.categorical(verify_logits[n, k] * (1.0 / self.temp)).item()
+            if sync_drafts:
+                k_arr = broadcast_from_canonical(
+                    mx.array(k_local, dtype=mx.int32), sync_group
                 )
-                bonus_vals.append(bonus)
+                n_accepted_per = cast(list[int], k_arr.tolist())
+            else:
+                n_accepted_per = k_local
+
+            all_tokens_per = []
+            bonus_lps = []
+            bonus_local: list[int] = []
+            next_tokens_int_t = next_tokens_arr.reshape(N).tolist()
+            draft_concat_int = draft_concat.tolist()
+            for n, uid in enumerate(uids):
+                k = n_accepted_per[n]
+                row: list[tuple[int, mx.array]] = [
+                    (int(next_tokens_int_t[n]), y_logprobs_list[n])
+                ]
+                for kk in range(k):
+                    row.append(
+                        (int(draft_concat_int[n][kk]), logprobs_all[n, kk])
+                    )
+                all_tokens_per.append(row)
+                bonus_local.append(
+                    int(
+                        mx.random.categorical(
+                            verify_logits[n, k] * (1.0 / self.temp)
+                        ).item()
+                    )
+                )
                 bonus_lps.append(logprobs_all[n, k])
+
+            if sync_drafts:
+                bonus_arr = broadcast_from_canonical(
+                    mx.array(bonus_local, dtype=mx.int32), sync_group
+                )
+                bonus_vals = cast(list[int], bonus_arr.tolist())
+            else:
+                bonus_vals = bonus_local
 
         # Record per-stream MTP acceptance for telemetry. One sample
         # per uid per cycle; histogram bins each stream's per-cycle
@@ -913,16 +1031,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         SHOULD be bit-exact across ranks given bit-exact inputs. In
         practice (Phase E.1 trace 2026-05-05) MLX produces tiny logit
         drift between ranks at cycle 5+, flipping argmax for tied/
-        near-tied positions. Without intervention the divergent draft
-        tokens cascade through the verify forward into asymmetric
-        n_accepted_per → asymmetric _num_tokens → asymmetric
-        _filter_finished_uid → JACCL LEN_ERR cluster wedge AND
-        garbled output even when the wedge is bandaged downstream.
+        near-tied positions. At temp>0 the per-rank RNG state also
+        produces fully divergent samples even with bit-exact logits.
+        Without intervention the divergent draft tokens cascade through
+        the verify forward into asymmetric n_accepted_per → asymmetric
+        _num_tokens → asymmetric _filter_finished_uid → JACCL LEN_ERR
+        cluster wedge AND garbled output even when the wedge is
+        bandaged downstream.
 
-        Force determinism by all_min'ing the draft token IDs across
-        ranks after every argmax/sample. Cost is one small int32
-        collective per draft step (~4*N bytes); negligible vs the
-        bf16 model forwards. Memory: jaccl_phase_f_outcome.md.
+        Force determinism by broadcasting rank-0's post-argmax (temp=0)
+        or post-categorical (temp>0) token IDs to every rank each step
+        (masked all_sum: rank 0 contributes its actual int32 ids, all
+        others contribute zeros, all_sum gives every rank rank-0's
+        values). Cost is one small int32 collective per draft step
+        (~4*N bytes); negligible vs the bf16 model forwards. Memory:
+        jaccl_phase_f_outcome.md.
         """
         draft_ids: list[mx.array] = []
         draft_probs: list[Any] = []
@@ -931,31 +1054,53 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         sync_group = self._get_sharding_group()
         sync_drafts = sync_group is not None and sync_group.size() > 1
 
+        drift_dump = os.environ.get("EXO_MTP_DRIFT_DUMP") == "1"
+
         for i in range(gamma):
+            hidden_for_dump = h if drift_dump else None
             logits, h = self.mtp.predict(
                 h, tok_arr, return_hidden=True, draft_mode=False
             )
             # logits: at S=1, predict() squeezes to (N, vocab).
             if temp == 0:
-                tok_arr = mx.argmax(logits, axis=-1).reshape(-1, 1)  # (N, 1)
+                tok_pre_sync = mx.argmax(logits, axis=-1).reshape(-1, 1)
                 if sync_drafts:
-                    tok_arr = mx.distributed.all_min(
-                        tok_arr.astype(mx.int32), group=sync_group
+                    tok_arr = broadcast_from_canonical(
+                        tok_pre_sync.astype(mx.int32), sync_group
+                    )
+                else:
+                    tok_arr = tok_pre_sync
+                if drift_dump and hidden_for_dump is not None:
+                    self._mtp_drift_dump(
+                        cycle_n=self._spec_cycles,
+                        chain_step=i,
+                        hidden_pre=hidden_for_dump,
+                        logits=logits,
+                        tok_pre_sync=tok_pre_sync,
+                        tok_post_sync=tok_arr,
                     )
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(None)
             else:
-                # temp>0: stochastic sampling. all_min would bias the
-                # distribution heavily toward small token IDs. Cross-rank
-                # determinism here would require seeding mx.random
-                # identically per call OR broadcasting from one rank,
-                # neither implemented yet. The Phase E cascade-stop
-                # bandages (uid intersection + _num_tokens all_max) keep
-                # the cluster stable; output may be partial.
                 q = mx.softmax(logits / temp, axis=-1)  # (N, vocab)
-                tok_arr = mx.random.categorical(
+                tok_pre_sync = mx.random.categorical(
                     logits * (1.0 / temp)
                 ).reshape(-1, 1)  # (N, 1)
+                if sync_drafts:
+                    tok_arr = broadcast_from_canonical(
+                        tok_pre_sync.astype(mx.int32), sync_group
+                    )
+                else:
+                    tok_arr = tok_pre_sync
+                if drift_dump and hidden_for_dump is not None:
+                    self._mtp_drift_dump(
+                        cycle_n=self._spec_cycles,
+                        chain_step=i,
+                        hidden_pre=hidden_for_dump,
+                        logits=logits,
+                        tok_pre_sync=tok_pre_sync,
+                        tok_post_sync=tok_arr,
+                    )
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(q)
             # h returned by predict at S=1 has shape (N, 1, hidden) —
@@ -977,6 +1122,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         """
         gen_batch = self._generation_batch
         idx = gen_batch.uids.index(uid)
+        sync_group = self._get_sharding_group()
+        sync_drafts = sync_group is not None and sync_group.size() > 1
 
         y = gen_batch._next_tokens
         if y is None or not gen_batch._next_logprobs:
@@ -998,19 +1145,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_cycle_start = time.perf_counter()
 
         # 1. Draft γ tokens via MTP — chained, fully lazy.
-        # NOTE: We do NOT pass sync_group here despite the same MLX
-        # numerical drift potentially affecting BS=1 too. Empirically
-        # adding the all_min in this BS=1 chained-predict path causes
-        # the runner to hang at c=1 (eval-graph synchronization issue
-        # not yet root-caused). For BS>1 the sync is in
-        # _draft_tokens_batched; for BS=1 we rely on the fact that
-        # cache divergence across ranks (per-rank trim values) doesn't
-        # break TP forward shape because each rank already has its own
-        # cache shards and ranks tolerate slightly different offsets at
-        # c=1. If a BS=1 wedge surfaces, revisit this.
+        # Pass sync_group so each chained-predict step's tok_arr is
+        # broadcast from rank 0 to every rank (masked all_sum). Without
+        # this the per-rank MTP forward drifts by ~1ulp at cycle 5+ and
+        # drafts diverge across ranks; at temp>0 the per-rank RNG also
+        # diverges. The acceptance count and bonus token below are
+        # broadcast separately at temp>0; at temp=0 the post-draft
+        # token sequence and verify forward are bit-exact downstream so
+        # only draft sync is needed.
         next_token_arr = y.reshape(1, 1)
         draft_ids, draft_probs = draft_tokens(
             self.mtp, pre_norm, next_token_arr, gamma, temp,
+            sync_group=sync_group,
         )
 
         if prof is not None:
@@ -1098,6 +1244,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     n_accepted += 1
                 else:
                     break
+
+        # Cross-rank n_accepted broadcast at temp>0. matches at temp=0 is
+        # already bit-exact across ranks (target_tokens via TP-collective
+        # verify forward, draft_concat via the in-chain broadcast above)
+        # so n_accepted is identical across ranks without further sync.
+        # At temp>0 accept_ratios depend on per-rank q (~1ulp drift) and
+        # uniforms are per-rank RNG, so n_accepted drifts; broadcast
+        # rank-0's value to every rank.
+        if temp != 0 and sync_drafts:
+            n_accepted_arr = broadcast_from_canonical(
+                mx.array([n_accepted], dtype=mx.int32), sync_group
+            )
+            n_accepted = int(n_accepted_arr.item())
+
         self._record_acceptance(n_accepted)
 
         if prof is not None:
@@ -1142,6 +1302,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             else:
                 bonus_val = int(corrections[n_accepted].item())
             bonus_lp = logprobs_all[n_accepted]
+
+        # Cross-rank bonus broadcast at temp>0. At temp=0 bonus is
+        # derived from all_next (argmax over verify_logits), already
+        # bit-exact via the TP-collective verify forward. At temp>0 the
+        # bonus is either bonus_token (mx.random.categorical, per-rank
+        # RNG) or corrections[n_accepted] (categorical over residual
+        # using per-rank q) — both rank-divergent.
+        if temp != 0 and sync_drafts:
+            bonus_arr = broadcast_from_canonical(
+                mx.array([bonus_val], dtype=mx.int32), sync_group
+            )
+            bonus_val = int(bonus_arr.item())
 
         # 7. Update MTP pre_norm to the verify-pass hidden at the
         #    accepted position, ready for the next cycle.
