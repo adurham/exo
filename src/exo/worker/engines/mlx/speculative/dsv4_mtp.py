@@ -471,6 +471,32 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         """
         gen_batch = self._generation_batch
 
+        # Collective `_num_tokens` sync. Empirically (Phase E.1 trace
+        # comparison 2026-05-05) MTP draft state diverges across ranks
+        # at long context after several spec cycles even though every
+        # collective output hash matches — drafts for one of c=2's two
+        # uids start mismatching while the other stays bit-exact. Once
+        # `n_accepted_per` differs across ranks, per-uid `_num_tokens`
+        # accumulates at different rates, eventually one rank crosses
+        # `max_tokens` first, triggers `_filter_finished_uid`, shrinks
+        # gen_batch.uids on that rank only, and the next forward
+        # all_sum has different message size on each rank → JACCL
+        # LEN_ERR cluster wedge. Forcing `_num_tokens` to the per-uid
+        # max across ranks keeps length-limit decisions symmetric so
+        # all ranks filter the same uids at the same step. The reported
+        # token count is slightly inflated for the slower rank, but
+        # this only affects when generation ends, not which tokens are
+        # actually emitted (the leading rank's tokens). Memory:
+        # next_session_plan_jaccl_c2_prefix_cache.md (Phase E).
+        if len(gen_batch) >= 1:
+            sync_group = self._get_sharding_group()
+            if sync_group is not None and sync_group.size() > 1:
+                synced = mx.distributed.all_max(
+                    mx.array(gen_batch._num_tokens), group=sync_group
+                )
+                mx.eval(synced)
+                gen_batch._num_tokens = cast(list[int], synced.tolist())
+
         # Drain buffered tokens first (one per call), per the parent
         # API. At BS>1 we may have multiple uids with buffered tokens
         # — drain whichever has them first; the gen_batch still
