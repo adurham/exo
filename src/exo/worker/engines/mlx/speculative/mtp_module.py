@@ -602,13 +602,20 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     tok_arr = first_token_arr
     sync_drafts = sync_group is not None and sync_group.size() > 1
 
+    # Temporary diagnostic gate: EXO_DSV4_MTP_NO_BROADCAST=1 disables
+    # the cross-rank broadcast on temp=0 drafts. Used to isolate whether
+    # broadcast_from_canonical is the source of the 2026-05-06 broken-
+    # English regression. Remove once the regression is rooted.
+    import os as _os_local
+    _disable_broadcast = _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
+
     for i in range(gamma):
         logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
                                       draft_mode=fast_lm_head)
 
         if temp == 0:
             tok_arr = mx.argmax(logits, axis=-1).reshape(1, 1)
-            if sync_drafts:
+            if sync_drafts and not _disable_broadcast:
                 tok_arr = broadcast_from_canonical(
                     tok_arr.astype(mx.int32), sync_group
                 )
