@@ -900,40 +900,42 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             mx.clear_cache()
             yield ModelLoadingResponse(layers_loaded=i, total=total)
 
-        # Replicate MTP block weights across ranks (NO sharding).
+        # Phase H Lever 1 (2026-05-06): re-shard MTP MoE across ranks.
+        # Reverts the 4e87391 unshard. The Phase E.1 cycle-5+ drift cure
+        # there was overkill — the actual drift source was a ~1ulp
+        # non-determinism in the sharded gather_qmm output that the
+        # post-MoE all_sum *should* have absorbed if it were forced to
+        # synchronize. Pairing this re-shard with `mx.eval(y)` after
+        # `mx.distributed.all_sum` in DeepseekV4MoE.__call__ flushes the
+        # collective output into a freshly-evaluated array, eliminating
+        # the lazy-graph-vs-collective ordering window that lets per-rank
+        # GPU stragglers feed slightly-different inputs to the next layer.
         #
-        # MTP modules are unsharded by design: each rank holds the full
-        # MoE weights and computes the full forward independently. With
-        # bit-exact inputs (verified post-Phase-F via verify-side TP
-        # collective), each rank's MTP forward produces bit-exact outputs
-        # — no all_sum, no sum_gradients, no path through MoE that could
-        # introduce ~1ulp drift across ranks via Metal kernel scheduling
-        # or reduction-order non-determinism.
+        # The all_sum itself is mathematically deterministic across ranks
+        # (ring all-reduce of the same per-expert subset sums produces
+        # identical bytes on every rank); the question is purely whether
+        # the lazy graph evaluates the all_sum output before the next
+        # MoE layer's forward, on every rank, in lockstep. mx.eval after
+        # the all_sum forces that.
         #
-        # This is the root-cause fix for the c=2 same-prompt MTP draft
-        # divergence first observed in Phase E.1: cycles 1-4 produced
-        # bit-identical drafts, cycle 5 diverged because the sharded MTP
-        # MoE's TP collectives accumulated enough drift for the argmax to
-        # flip on a near-tied position. Replicating MTP eliminates the
-        # divergence at the source; Phase G's broadcast_from_canonical
-        # remains as defense-in-depth covering any residual non-MTP
-        # source of cross-rank drift (e.g. RNG at temp>0).
+        # Throughput payoff: B=2 draft phase wall drops from ~98ms mean
+        # (unsharded) toward ~5ms (sharded — same as B=1), per the
+        # Phase H profile. Phase G's broadcast_from_canonical stays as
+        # defense-in-depth against per-rank RNG drift at temp>0.
         #
-        # Memory cost is small: one layer's worth of unsharded MoE
-        # weights per rank (~3-5 GB at FP4 expert quant for DSv4 8bit),
-        # easily within the 128 GB / rank budget.
-        #
-        # Fused gate+up install IS still applied — it's a per-rank
-        # weight-layout optimisation (concat gate_proj+up_proj along
-        # output dim → single gather_qmm dispatch) and operates
-        # identically on full weights as on sharded weights. Skipping
-        # it leaves switch_mlp on the upstream SwitchGLU __call__ which
-        # produces subtly different bf16 outputs than the fused path;
-        # on cluster, dropping the fused install at temp>0 caused the
-        # chained MTP draft to collapse to BOS spam, even though temp=0
-        # argmax remained correct.
+        # If md5(/tmp/jaccl_spec_rank_*.log) diverges across ranks at
+        # c=2 same-prompt temp=0: revert this commit immediately —
+        # the cycle-5+ drift is back and the all_sum fence wasn't enough.
         for j, mtp in enumerate(mtp_blocks):
             mx.eval(mtp.parameters())
+
+            mtp.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            self.all_to_sharded_linear_in_place(mtp.ffn.shared_experts.gate_proj)
+            self.sharded_to_all_linear_in_place(mtp.ffn.shared_experts.down_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.shared_experts.up_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.gate_proj)
+            self.sharded_to_all_linear_in_place(mtp.ffn.switch_mlp.down_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.up_proj)
 
             if _DSV4_FUSED_MOE:
                 _install_dsv4_fused_gate_up(mtp.ffn.switch_mlp)
