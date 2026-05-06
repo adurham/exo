@@ -900,40 +900,21 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             mx.clear_cache()
             yield ModelLoadingResponse(layers_loaded=i, total=total)
 
-        # Replicate MTP block weights across ranks (NO sharding).
-        #
-        # MTP modules are unsharded by design: each rank holds the full
-        # MoE weights and computes the full forward independently. With
-        # bit-exact inputs (verified post-Phase-F via verify-side TP
-        # collective), each rank's MTP forward produces bit-exact outputs
-        # — no all_sum, no sum_gradients, no path through MoE that could
-        # introduce ~1ulp drift across ranks via Metal kernel scheduling
-        # or reduction-order non-determinism.
-        #
-        # This is the root-cause fix for the c=2 same-prompt MTP draft
-        # divergence first observed in Phase E.1: cycles 1-4 produced
-        # bit-identical drafts, cycle 5 diverged because the sharded MTP
-        # MoE's TP collectives accumulated enough drift for the argmax to
-        # flip on a near-tied position. Replicating MTP eliminates the
-        # divergence at the source; Phase G's broadcast_from_canonical
-        # remains as defense-in-depth covering any residual non-MTP
-        # source of cross-rank drift (e.g. RNG at temp>0).
-        #
-        # Memory cost is small: one layer's worth of unsharded MoE
-        # weights per rank (~3-5 GB at FP4 expert quant for DSv4 8bit),
-        # easily within the 128 GB / rank budget.
-        #
-        # Fused gate+up install IS still applied — it's a per-rank
-        # weight-layout optimisation (concat gate_proj+up_proj along
-        # output dim → single gather_qmm dispatch) and operates
-        # identically on full weights as on sharded weights. Skipping
-        # it leaves switch_mlp on the upstream SwitchGLU __call__ which
-        # produces subtly different bf16 outputs than the fused path;
-        # on cluster, dropping the fused install at temp>0 caused the
-        # chained MTP draft to collapse to BOS spam, even though temp=0
-        # argmax remained correct.
+        # MTP-quality bisect 2026-05-06 (revert of 4e87391 + de10431):
+        # the unshard caused MTP=1 γ=2 temp=0 decode to produce broken
+        # English. Restore the same MoE-only sharding pattern as main
+        # layers — each rank holds half the experts, sum_gradients on
+        # input + all_sum on output. This is the pre-Phase-G state.
         for j, mtp in enumerate(mtp_blocks):
             mx.eval(mtp.parameters())
+
+            mtp.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            self.all_to_sharded_linear_in_place(mtp.ffn.shared_experts.gate_proj)
+            self.sharded_to_all_linear_in_place(mtp.ffn.shared_experts.down_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.shared_experts.up_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.gate_proj)
+            self.sharded_to_all_linear_in_place(mtp.ffn.switch_mlp.down_proj)
+            self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.up_proj)
 
             if _DSV4_FUSED_MOE:
                 _install_dsv4_fused_gate_up(mtp.ffn.switch_mlp)
