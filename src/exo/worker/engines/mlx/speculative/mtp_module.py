@@ -548,23 +548,37 @@ class MTPPredictor:
 def broadcast_from_canonical(arr, sync_group):
     """Broadcast ``arr`` from ``sync_group`` rank 0 to every rank.
 
-    Implementation: each rank multiplies ``arr`` by an indicator (1 only
-    on rank 0, 0 elsewhere) and the result is fed into ``all_sum``. Rank
-    0 contributes the actual value; all others contribute zeros — after
-    the reduction every rank holds rank 0's original value.
+    Implementation: every rank multiplies ``arr`` by a scalar indicator
+    (1 on rank 0, 0 elsewhere) and the result is fed into ``all_sum``.
+    Rank 0 contributes the actual value, all others contribute zeros —
+    after the reduction every rank holds rank 0's original value.
+
+    The multiply-by-indicator form (rather than ``arr if rank == 0 else
+    mx.zeros_like(arr)``) is critical for cross-rank lazy-graph
+    consistency: every rank's contribution has identical operator
+    dependencies (``arr → multiply → all_sum``). With the asymmetric
+    branch form rank 0 dependencies were ``arr → all_sum`` and other
+    ranks had ``zeros_like(arr) → all_sum``, so MLX could dispatch the
+    all_sum at different points in each rank's call sequence and JACCL
+    ended up pairing different collectives by wr_id (observed once as
+    LEN_ERR ``byte_len=4096`` on the uid-intersection all_sum the next
+    cycle, when ranks fell out of lock-step). Memory:
+    jaccl_phase_f_outcome_2026_05_06.md.
 
     Used to force cross-rank determinism on stochastic outputs (random
     samples, uniforms, rejection-sampled corrections) and on argmax
     outputs that drift due to MLX-level numerical non-determinism in
     unsharded MTP modules. Cheaper than broadcasting full distributions
     and avoids the ``all_min`` bias toward small token IDs that breaks
-    temp>0 sampling. Memory: jaccl_phase_f_outcome_2026_05_06.md.
+    temp>0 sampling.
 
     Caller must ensure ``sync_group`` is non-None and ``size() > 1``;
     bypass the call when running single-rank.
     """
-    contribution = arr if sync_group.rank() == 0 else mx.zeros_like(arr)
-    return mx.distributed.all_sum(contribution, group=sync_group)
+    on_rank_0 = mx.array(
+        1 if sync_group.rank() == 0 else 0, dtype=arr.dtype
+    )
+    return mx.distributed.all_sum(arr * on_rank_0, group=sync_group)
 
 
 def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None):
