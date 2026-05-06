@@ -998,12 +998,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_cycle_start = time.perf_counter()
 
         # 1. Draft γ tokens via MTP — chained, fully lazy.
-        # sync_group forces draft-token determinism across ranks; see
-        # _draft_tokens_batched for the rationale.
+        # NOTE: We do NOT pass sync_group here despite the same MLX
+        # numerical drift potentially affecting BS=1 too. Empirically
+        # adding the all_min in this BS=1 chained-predict path causes
+        # the runner to hang at c=1 (eval-graph synchronization issue
+        # not yet root-caused). For BS>1 the sync is in
+        # _draft_tokens_batched; for BS=1 we rely on the fact that
+        # cache divergence across ranks (per-rank trim values) doesn't
+        # break TP forward shape because each rank already has its own
+        # cache shards and ranks tolerate slightly different offsets at
+        # c=1. If a BS=1 wedge surfaces, revisit this.
         next_token_arr = y.reshape(1, 1)
         draft_ids, draft_probs = draft_tokens(
             self.mtp, pre_norm, next_token_arr, gamma, temp,
-            sync_group=self._get_sharding_group(),
         )
 
         if prof is not None:
