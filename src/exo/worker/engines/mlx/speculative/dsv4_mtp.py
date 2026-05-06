@@ -32,7 +32,7 @@ import logging
 import os
 import time
 from collections import deque
-from typing import Any, Optional, Sequence, cast
+from typing import Any, BinaryIO, Optional, Sequence, cast
 
 import mlx.core as mx
 
@@ -355,6 +355,46 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._spec_total_accepted: int = 0
         self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
         self._cached_sharding_group: Optional[mx.distributed.Group] = None
+        self._jaccl_spec_handle: Optional[BinaryIO] = None
+
+    def _jaccl_dump_spec(
+        self,
+        uids: "Sequence[int]",
+        target_tokens_lst: list[list[int]],
+        draft_lst: list[list[int]],
+        matches_lst: list[list[bool]],
+        n_accepted_per: list[int],
+        next_tokens_int: list[int],
+        bonus_vals: list[int],
+    ) -> None:
+        """Log one spec cycle when JACCL_TRACE_STEP=1. Cross-rank diff
+        of this file pinpoints which mx.array first goes non-bit-exact
+        across ranks — target_tokens (verify forward), draft_concat
+        (MTP forward), or just matches (one of the above is off).
+        Memory: next_session_plan_jaccl_c2_prefix_cache.md.
+        """
+        if os.environ.get("JACCL_TRACE_STEP") != "1":
+            return
+
+        import json
+
+        if self._jaccl_spec_handle is None:
+            group = self._get_sharding_group()
+            rank = group.rank() if group is not None else 0
+            path = f"/tmp/jaccl_spec_rank_{rank}_pid{os.getpid()}.log"
+            self._jaccl_spec_handle = open(path, "ab", buffering=0)  # noqa: SIM115
+
+        rec = {
+            "uids": list(uids),
+            "next_tokens": next_tokens_int,
+            "target": target_tokens_lst,
+            "draft": draft_lst,
+            "matches": [[bool(b) for b in row] for row in matches_lst],
+            "n_acc": n_accepted_per,
+            "bonus": bonus_vals,
+        }
+        line = (json.dumps(rec) + "\n").encode("utf-8")
+        self._jaccl_spec_handle.write(line)
 
     def _get_sharding_group(self) -> "Optional[mx.distributed.Group]":
         """Return the TP sharding group used by FFN/attention all_sums.
@@ -614,6 +654,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             mx.async_eval(matches, all_next, logprobs_all, verify_pre_norm)
             # Per-uid n_accepted = first-mismatch index.
             matches_arr = matches.tolist()  # list[list[bool]] (N, γ)
+            target_arr = cast(list[list[int]], target_tokens.tolist())
             n_accepted_per: list[int] = []
             for n in range(N):
                 k = 0
@@ -643,6 +684,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 all_tokens_per.append(row)
                 bonus_vals.append(int(all_next_arr[n][acc]))
                 bonus_lps.append(logprobs_all[n, acc])
+
+            self._jaccl_dump_spec(
+                uids,
+                target_arr,
+                cast(list[list[int]], draft_int),
+                cast(list[list[bool]], matches_arr),
+                n_accepted_per,
+                cast(list[int], next_tokens_int),
+                bonus_vals,
+            )
         else:
             # Temp>0 stochastic acceptance, per-stream.
             n_accepted_per = []
