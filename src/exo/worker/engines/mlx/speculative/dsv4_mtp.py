@@ -446,22 +446,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # when ALL ranks have buffer for the uid so yield counts stay
         # symmetric. If any rank lacks buffer, fall through to MTP
         # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
+        # Buffer-drain branch is only safe when single-rank — `for uid in
+        # gen_batch.uids` is itself a per-rank loop whose count can
+        # diverge across ranks if `_filter_finished_uid` fires
+        # asymmetrically (which happens at long contexts even with
+        # bit-exact TP). Each iteration issues a collective in TP mode,
+        # so a count mismatch ⇒ call_id divergence ⇒ JACCL LEN_ERR or
+        # wedge. In TP mode skip drain entirely; MTP will overwrite the
+        # buffer on the next cycle (line 717: assign-not-append) so
+        # memory stays bounded. ~10-30% throughput cost vs the in-sync
+        # case. Memory: jaccl_phase_a_finding_2026_05_05.md.
         if len(gen_batch) >= 1:
             group = self._get_sharding_group()
             if group is None or group.size() == 1:
                 for uid in gen_batch.uids:
                     if uid in self._token_buffer and self._token_buffer[uid]:
-                        return [], self._yield_buffered(uid)
-            else:
-                for uid in gen_batch.uids:
-                    local = (
-                        uid in self._token_buffer
-                        and bool(self._token_buffer[uid])
-                    )
-                    # `all_have` = "all ranks have buffer for this uid"
-                    # = NOT (any rank lacks buffer). One mx_any per uid.
-                    all_have = not mx_any(not local, group)
-                    if all_have:
                         return [], self._yield_buffered(uid)
 
         spec_eligible = (
