@@ -545,7 +545,7 @@ class MTPPredictor:
         return self._attn_mlp(h)
 
 
-def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False):
+def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None):
     """Draft γ tokens by chaining MTP predictions — fully lazy, no mx.eval.
 
     The entire chain stays in the MLX computation graph. Draft token ids
@@ -553,6 +553,12 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
 
     Args:
         first_token_arr: mx.array of shape (1,1) — the token to start from
+        sync_group: optional TP sharding group. When provided and size>1,
+            all_min the post-argmax/sample token IDs across ranks each
+            step. Forces draft determinism across ranks since the MTP
+            module's logits can drift by ~1ulp due to MLX-level numerics
+            even with bit-exact inputs and unsharded weights. Memory:
+            jaccl_phase_e_outcome_2026_05_05.md.
     Returns: (draft_ids, draft_probs) where draft_ids[i] is a lazy mx.array
              scalar, draft_probs[i] is the full draft distribution (or None if greedy)
     """
@@ -560,6 +566,7 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     draft_probs = []
     h = hidden
     tok_arr = first_token_arr
+    sync_drafts = sync_group is not None and sync_group.size() > 1
 
     for i in range(gamma):
         logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
@@ -567,11 +574,15 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
 
         if temp == 0:
             tok_arr = mx.argmax(logits, axis=-1).reshape(1, 1)
+            if sync_drafts:
+                tok_arr = mx.distributed.all_min(tok_arr.astype(mx.int32), group=sync_group)
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(None)
         else:
             q = mx.softmax(logits / temp, axis=-1)
             tok_arr = mx.random.categorical(logits * (1.0 / temp)).reshape(1, 1)
+            if sync_drafts:
+                tok_arr = mx.distributed.all_min(tok_arr.astype(mx.int32), group=sync_group)
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(q)
 

@@ -907,11 +907,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         Uses ``self.mtp.predict(...)`` once per draft step — each call
         runs the MTP module forward at shape (N, 1).
+
+        Cross-rank determinism: the MTP module is unsharded (full
+        weights on every rank, sharding_group=None) so its forward
+        SHOULD be bit-exact across ranks given bit-exact inputs. In
+        practice (Phase E.1 trace 2026-05-05) MLX produces tiny logit
+        drift between ranks at cycle 5+, flipping argmax for tied/
+        near-tied positions. Without intervention the divergent draft
+        tokens cascade through the verify forward into asymmetric
+        n_accepted_per → asymmetric _num_tokens → asymmetric
+        _filter_finished_uid → JACCL LEN_ERR cluster wedge AND
+        garbled output even when the wedge is bandaged downstream.
+
+        Force determinism by all_min'ing the draft token IDs across
+        ranks after every argmax/sample. Cost is one small int32
+        collective per draft step (~4*N bytes); negligible vs the
+        bf16 model forwards. Memory: jaccl_phase_f_outcome.md.
         """
         draft_ids: list[mx.array] = []
         draft_probs: list[Any] = []
         h = stacked_pre_norm
         tok_arr = next_tokens_arr  # (N, 1)
+        sync_group = self._get_sharding_group()
+        sync_drafts = sync_group is not None and sync_group.size() > 1
 
         for i in range(gamma):
             logits, h = self.mtp.predict(
@@ -920,6 +938,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # logits: at S=1, predict() squeezes to (N, vocab).
             if temp == 0:
                 tok_arr = mx.argmax(logits, axis=-1).reshape(-1, 1)  # (N, 1)
+                if sync_drafts:
+                    tok_arr = mx.distributed.all_min(
+                        tok_arr.astype(mx.int32), group=sync_group
+                    )
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(None)
             else:
@@ -927,6 +949,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 tok_arr = mx.random.categorical(
                     logits * (1.0 / temp)
                 ).reshape(-1, 1)  # (N, 1)
+                if sync_drafts:
+                    tok_arr = mx.distributed.all_min(
+                        tok_arr.astype(mx.int32), group=sync_group
+                    )
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(q)
             # h returned by predict at S=1 has shape (N, 1, hidden) —
@@ -969,9 +995,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_cycle_start = time.perf_counter()
 
         # 1. Draft γ tokens via MTP — chained, fully lazy.
+        # sync_group forces draft-token determinism across ranks; see
+        # _draft_tokens_batched for the rationale.
         next_token_arr = y.reshape(1, 1)
         draft_ids, draft_probs = draft_tokens(
-            self.mtp, pre_norm, next_token_arr, gamma, temp
+            self.mtp, pre_norm, next_token_arr, gamma, temp,
+            sync_group=self._get_sharding_group(),
         )
 
         if prof is not None:
