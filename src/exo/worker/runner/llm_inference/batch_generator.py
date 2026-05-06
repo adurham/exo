@@ -406,6 +406,8 @@ class BatchGenerator(Engine):
             Iterator[GenerationChunk | None],
         ],
     ] = field(default_factory=dict, init=False)
+    _jaccl_step_count: int = field(default=0, init=False)
+    _jaccl_step_handle: BinaryIO | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         self._gen = ExoBatchGenerator(
@@ -516,12 +518,86 @@ class BatchGenerator(Engine):
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
 
+    def _jaccl_dump_step(self, label: str) -> None:
+        """Snapshot per-rank Python state once per step() call when
+        JACCL_TRACE_STEP=1. Writes one JSON line per call to
+        /tmp/jaccl_step_rank_${rank}_pid${pid}.log so cross-rank diff
+        can identify the first asymmetric state on the prefix-cache
+        share path. No collectives — pure local reads. Off by default;
+        zero overhead when env unset.
+        Memory: next_session_plan_jaccl_c2_prefix_cache.md.
+        """
+        if os.environ.get("JACCL_TRACE_STEP") != "1":
+            return
+
+        import json
+        from collections import deque as _deque
+        from typing import Sized, cast
+
+        if self._jaccl_step_handle is None:
+            rank = self.group.rank() if self.group is not None else 0
+            path = f"/tmp/jaccl_step_rank_{rank}_pid{os.getpid()}.log"
+            self._jaccl_step_handle = open(path, "ab", buffering=0)  # noqa: SIM115
+
+        rec: dict[str, object] = {
+            "step": self._jaccl_step_count,
+            "label": label,
+            "active_uids": sorted(self._active_tasks.keys()),
+            "queue_len": len(self._queue),
+            "maybe_queue_len": len(self._maybe_queue),
+        }
+
+        mlx_gen: object = getattr(self._gen, "_mlx_gen", None)
+        if mlx_gen is not None:
+            gen_batch: object = getattr(mlx_gen, "_generation_batch", None)
+            if gen_batch is not None:
+                uids = cast(list[int], getattr(gen_batch, "uids", []))
+                num_tokens = cast(list[int], getattr(gen_batch, "_num_tokens", []))
+                max_tokens = cast(list[int], getattr(gen_batch, "max_tokens", []))
+                rec["gen_batch_uids"] = list(uids)
+                rec["gen_batch_num_tokens"] = list(num_tokens)
+                rec["gen_batch_max_tokens"] = list(max_tokens)
+
+            unprocessed = cast(
+                "_deque[object] | None",
+                getattr(mlx_gen, "_unprocessed_sequences", None),
+            )
+            rec["unprocessed_count"] = (
+                len(unprocessed) if unprocessed is not None else 0
+            )
+            prompt_batch = cast(
+                "Sized | None", getattr(mlx_gen, "_prompt_batch", None)
+            )
+            rec["prompt_batch_len"] = (
+                len(prompt_batch) if prompt_batch is not None else 0
+            )
+
+            tb = cast(
+                "dict[int, _deque[object]] | None",
+                getattr(mlx_gen, "_token_buffer", None),
+            )
+            if tb is not None:
+                rec["token_buffer"] = {
+                    str(uid): len(buf) for uid, buf in sorted(tb.items())
+                }
+            mtp_prefilled = cast(
+                "set[int] | None", getattr(mlx_gen, "_mtp_prefilled", None)
+            )
+            if mtp_prefilled is not None:
+                rec["mtp_prefilled"] = sorted(mtp_prefilled)
+
+        line = (json.dumps(rec, default=str) + "\n").encode("utf-8")
+        self._jaccl_step_handle.write(line)
+
     def step(
         self,
     ) -> Iterator[
         tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
     ]:
         from exo.worker.engines.mlx.trace import T
+
+        self._jaccl_dump_step("step_entry")
+        self._jaccl_step_count += 1
 
         # agree_on_tasks() is a collective (mx.distributed.all_gather). Both
         # ranks must call it together — gating on per-rank `self._queue` lets
@@ -571,6 +647,8 @@ class BatchGenerator(Engine):
         # Memory: jaccl_phase_a_finding_2026_05_05.md, hermes_wedge_root_cause_2026_05_04.md.
         if not mx_any(self._gen.has_work, self.group):
             return self._apply_cancellations()
+
+        self._jaccl_dump_step("pre_gen_step")
 
         results = self._gen.step()
 

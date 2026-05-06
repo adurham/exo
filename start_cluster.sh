@@ -634,6 +634,11 @@ for NODE in "${NODES[@]}"; do
     # gating but uses the same trace file. Identifies transport
     # non-bit-exactness as a divergent hash at a specific call_id.
     [ -n "${JACCL_TRACE_HASH:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_HASH=$JACCL_TRACE_HASH"
+    # Per-step BatchGenerator state snapshot; writes JSONL to
+    # /tmp/jaccl_step_rank_${rank}_pid${pid}.log. Diff across ranks
+    # to find the first asymmetric Python state on the prefix-cache
+    # share path. Memory: next_session_plan_jaccl_c2_prefix_cache.md.
+    [ -n "${JACCL_TRACE_STEP:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_STEP=$JACCL_TRACE_STEP"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
