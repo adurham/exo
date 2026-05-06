@@ -548,37 +548,34 @@ class MTPPredictor:
 def broadcast_from_canonical(arr, sync_group):
     """Broadcast ``arr`` from ``sync_group`` rank 0 to every rank.
 
-    Implementation: every rank multiplies ``arr`` by a scalar indicator
-    (1 on rank 0, 0 elsewhere) and the result is fed into ``all_sum``.
-    Rank 0 contributes the actual value, all others contribute zeros —
-    after the reduction every rank holds rank 0's original value.
+    Implementation: ``mx.distributed.all_gather`` concatenates every
+    rank's array along axis 0; we slice off rank 0's contribution. This
+    has identical operator dependencies on every rank (``arr →
+    all_gather → slice``) so MLX schedules the collective at the same
+    point in each rank's call sequence — keeping JACCL in lock-step.
 
-    The multiply-by-indicator form (rather than ``arr if rank == 0 else
-    mx.zeros_like(arr)``) is critical for cross-rank lazy-graph
-    consistency: every rank's contribution has identical operator
-    dependencies (``arr → multiply → all_sum``). With the asymmetric
-    branch form rank 0 dependencies were ``arr → all_sum`` and other
-    ranks had ``zeros_like(arr) → all_sum``, so MLX could dispatch the
-    all_sum at different points in each rank's call sequence and JACCL
-    ended up pairing different collectives by wr_id (observed once as
-    LEN_ERR ``byte_len=4096`` on the uid-intersection all_sum the next
-    cycle, when ranks fell out of lock-step). Memory:
-    jaccl_phase_f_outcome_2026_05_06.md.
+    A previous implementation used masked all_sum (``arr * indicator``
+    where indicator was 1 on rank 0 and 0 elsewhere), but the
+    multiply-by-zero on non-rank-0 evidently let MLX desynchronise the
+    chained-MTP outputs at temp>0 (every chained-step output collapsed
+    to BOS/0 across the cluster, observed at c=1 temp=0.7 and c=2 long
+    same temp=0.7). all_gather + slice has no zero-multiply trap and
+    is the canonical broadcast primitive in MLX.
 
     Used to force cross-rank determinism on stochastic outputs (random
     samples, uniforms, rejection-sampled corrections) and on argmax
     outputs that drift due to MLX-level numerical non-determinism in
     unsharded MTP modules. Cheaper than broadcasting full distributions
     and avoids the ``all_min`` bias toward small token IDs that breaks
-    temp>0 sampling.
+    temp>0 sampling. Memory: jaccl_phase_f_outcome_2026_05_06.md.
 
     Caller must ensure ``sync_group`` is non-None and ``size() > 1``;
-    bypass the call when running single-rank.
+    bypass the call when running single-rank. ``arr`` must have at
+    least one dimension (axis 0 is the rank-stride after the gather).
     """
-    on_rank_0 = mx.array(
-        1 if sync_group.rank() == 0 else 0, dtype=arr.dtype
-    )
-    return mx.distributed.all_sum(arr * on_rank_0, group=sync_group)
+    gathered = mx.distributed.all_gather(arr, group=sync_group)
+    n0 = arr.shape[0]
+    return gathered[:n0]
 
 
 def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None):
