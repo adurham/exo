@@ -625,28 +625,38 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # when ALL ranks have buffer for the uid so yield counts stay
         # symmetric. If any rank lacks buffer, fall through to MTP
         # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
-        # Buffer drain. The upstream gen_batch.uids ← intersection sync
-        # at the top of _next (Step 1, lines ~572-602) has already
-        # aligned `gen_batch.uids` across ranks: any uid filtered on
-        # one rank is filtered on all. After that sync the per-uid
-        # drain loop runs an identical iteration count on every rank,
-        # so downstream collective sequences stay symmetric and the
-        # JACCL LEN_ERR concern that motivated commit 222b8b5e (which
-        # disabled drain entirely in TP) no longer applies.
+        # Buffer-drain rules:
+        #  * Single-rank or non-TP: drain freely.
+        #  * TP at c=1: drain freely. There's exactly one uid by
+        #    definition, so the per-uid loop runs once on every rank
+        #    and `_filter_finished_uid` can't fire asymmetrically (the
+        #    one uid either finishes on all ranks together via the same
+        #    state-machine match, or on none). Yield counts stay
+        #    cross-rank-symmetric.
+        #  * TP at c>1: skip drain. `for uid in gen_batch.uids` length
+        #    can diverge across ranks at long contexts when
+        #    `_filter_finished_uid` fires asymmetrically (rank 0 has
+        #    1 uid, rank 1 has 2). Mismatched per-uid loop counts ⇒
+        #    each rank issues a different number of downstream
+        #    collective sequences ⇒ JACCL LEN_ERR / wedge. The cost is
+        #    that the MTP-yields-multiple-tokens-per-cycle gain is lost
+        #    on TP c>1 — buffered drafts get clobbered on the next
+        #    cycle (line 717: assign-not-append). Worth it to keep the
+        #    cluster up at long context. Memory:
+        #    jaccl_phase_a_finding_2026_05_05.md.
         #
-        # Earlier code skipped drain in all TP modes which silently
-        # dropped accepted MTP drafts: the spec cycle yields y_N + k
-        # accepted drafts, returns y_N, stuffs the rest into a buffer
-        # that was never drained, and the next cycle clobbered the
-        # buffer (line 717: assign-not-append). Net result was 1 token
-        # per cycle at TP regardless of acceptance — the broken-English
-        # / every-other-token-missing regression (2026-05-06 →
-        # 2026-05-07). Drain unconditionally now; the uid-intersection
-        # sync is the load-bearing safety net.
+        # Earlier code skipped drain in *all* TP modes including c=1,
+        # which silently dropped accepted drafts at single-stream
+        # generation — the source of the broken-English MTP=1
+        # regression observed 2026-05-06.
         if len(gen_batch) >= 1:
-            for uid in gen_batch.uids:
-                if uid in self._token_buffer and self._token_buffer[uid]:
-                    return [], self._yield_buffered(uid)
+            group = self._get_sharding_group()
+            tp_active = group is not None and group.size() > 1
+            drain_safe = not tp_active or len(gen_batch) == 1
+            if drain_safe:
+                for uid in gen_batch.uids:
+                    if uid in self._token_buffer and self._token_buffer[uid]:
+                        return [], self._yield_buffered(uid)
 
         spec_eligible = (
             self.gamma > 0
