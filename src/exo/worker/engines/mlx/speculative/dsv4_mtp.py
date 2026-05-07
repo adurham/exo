@@ -625,19 +625,35 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # when ALL ranks have buffer for the uid so yield counts stay
         # symmetric. If any rank lacks buffer, fall through to MTP
         # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
-        # Buffer-drain branch is only safe when single-rank — `for uid in
-        # gen_batch.uids` is itself a per-rank loop whose count can
-        # diverge across ranks if `_filter_finished_uid` fires
-        # asymmetrically (which happens at long contexts even with
-        # bit-exact TP). Each iteration issues a collective in TP mode,
-        # so a count mismatch ⇒ call_id divergence ⇒ JACCL LEN_ERR or
-        # wedge. In TP mode skip drain entirely; MTP will overwrite the
-        # buffer on the next cycle (line 717: assign-not-append) so
-        # memory stays bounded. ~10-30% throughput cost vs the in-sync
-        # case. Memory: jaccl_phase_a_finding_2026_05_05.md.
+        # Buffer-drain rules:
+        #  * Single-rank or non-TP: drain freely.
+        #  * TP at c=1: drain freely. There's exactly one uid by
+        #    definition, so the per-uid loop runs once on every rank
+        #    and `_filter_finished_uid` can't fire asymmetrically (the
+        #    one uid either finishes on all ranks together via the same
+        #    state-machine match, or on none). Yield counts stay
+        #    cross-rank-symmetric.
+        #  * TP at c>1: skip drain. `for uid in gen_batch.uids` length
+        #    can diverge across ranks at long contexts when
+        #    `_filter_finished_uid` fires asymmetrically (rank 0 has
+        #    1 uid, rank 1 has 2). Mismatched per-uid loop counts ⇒
+        #    each rank issues a different number of downstream
+        #    collective sequences ⇒ JACCL LEN_ERR / wedge. The cost is
+        #    that the MTP-yields-multiple-tokens-per-cycle gain is lost
+        #    on TP c>1 — buffered drafts get clobbered on the next
+        #    cycle (line 717: assign-not-append). Worth it to keep the
+        #    cluster up at long context. Memory:
+        #    jaccl_phase_a_finding_2026_05_05.md.
+        #
+        # Earlier code skipped drain in *all* TP modes including c=1,
+        # which silently dropped accepted drafts at single-stream
+        # generation — the source of the broken-English MTP=1
+        # regression observed 2026-05-06.
         if len(gen_batch) >= 1:
             group = self._get_sharding_group()
-            if group is None or group.size() == 1:
+            tp_active = group is not None and group.size() > 1
+            drain_safe = not tp_active or len(gen_batch) == 1
+            if drain_safe:
                 for uid in gen_batch.uids:
                     if uid in self._token_buffer and self._token_buffer[uid]:
                         return [], self._yield_buffered(uid)
