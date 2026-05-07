@@ -40,6 +40,7 @@ from exo.worker.engines.mlx.generator.generate import (
 from exo.worker.engines.mlx.types import Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
+    get_coord_group,
     mx_all_gather_tasks,
     mx_any,
 )
@@ -159,10 +160,13 @@ class SequentialGenerator(Engine):
         unconditional call site fires at decode rate (~30 Hz); driving JACCL
         all_gather at that rate has been observed to corrupt return buffers
         (max_tasks bit-flipped to ~1B → 152 GB metal::malloc OOM).
+
+        Coord subgroup: see BatchGenerator.agree_on_tasks rationale.
         """
-        if not mx_any(len(self._maybe_queue) > 0, self.group):
+        coord = get_coord_group(self.group)
+        if not mx_any(len(self._maybe_queue) > 0, coord):
             return
-        agreed, different = mx_all_gather_tasks(self._maybe_queue, self.group)
+        agreed, different = mx_all_gather_tasks(self._maybe_queue, coord)
         self._queue.extend(task for task in self._maybe_queue if task in agreed)
         self._maybe_queue = [task for task in self._maybe_queue if task in different]
 
@@ -176,10 +180,11 @@ class SequentialGenerator(Engine):
             if task_id in self._all_tasks:
                 self._maybe_cancel.append(self._all_tasks[task_id])
 
-        if mx_any(has_cancel_all, self.group):
+        coord = get_coord_group(self.group)
+        if mx_any(has_cancel_all, coord):
             self._cancelled_tasks.add(CANCEL_ALL_TASKS)
 
-        agreed, different = mx_all_gather_tasks(self._maybe_cancel, self.group)
+        agreed, different = mx_all_gather_tasks(self._maybe_cancel, coord)
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
 
@@ -198,15 +203,16 @@ class SequentialGenerator(Engine):
             if task_id in self._all_tasks:
                 self._maybe_cancel.append(self._all_tasks[task_id])
 
+        coord = get_coord_group(self.group)
         has_anything = has_cancel_all or len(self._maybe_cancel) > 0
-        if not mx_any(has_anything, self.group):
+        if not mx_any(has_anything, coord):
             return  # Fast path: no rank has cancellations — 1 collective op total
 
         # Slow path: at least one rank has cancels — full protocol
-        if mx_any(has_cancel_all, self.group):
+        if mx_any(has_cancel_all, coord):
             self._cancelled_tasks.add(CANCEL_ALL_TASKS)
 
-        agreed, different = mx_all_gather_tasks(self._maybe_cancel, self.group)
+        agreed, different = mx_all_gather_tasks(self._maybe_cancel, coord)
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
 
@@ -459,11 +465,17 @@ class BatchGenerator(Engine):
         unconditional call site fires at decode rate (~30 Hz); driving JACCL
         all_gather at that rate has been observed to corrupt return buffers
         (max_tasks bit-flipped to ~1B → 152 GB metal::malloc OOM at c=2).
+
+        Coord group: use the sibling subgroup so this small mx_any /
+        all_gather doesn't share the model TP group's `next_call_id_`
+        counter. Cross-stream call_id race fixed 2026-05-07. See
+        `get_coord_group` in utils_mlx.
         """
-        if not mx_any(len(self._maybe_queue) > 0, self.group):
+        coord = get_coord_group(self.group)
+        if not mx_any(len(self._maybe_queue) > 0, coord):
             return
         _t0 = time.perf_counter()
-        agreed, different = mx_all_gather_tasks(self._maybe_queue, self.group)
+        agreed, different = mx_all_gather_tasks(self._maybe_queue, coord)
         self._queue.extend(task for task in self._maybe_queue if task in agreed)
         self._maybe_queue = [task for task in self._maybe_queue if task in different]
         _dt = time.perf_counter() - _t0
@@ -471,7 +483,10 @@ class BatchGenerator(Engine):
             logger.info(f"[PROF] agree_on_tasks={_dt*1000:.1f}ms")
 
     def agree_on_cancellations(self) -> None:
-        """Agree between all ranks about which tasks to cancel."""
+        """Agree between all ranks about which tasks to cancel.
+
+        Uses the coord subgroup, see ``agree_on_tasks`` rationale.
+        """
         _t0 = time.perf_counter()
         has_cancel_all = False
         for task_id in self.cancel_receiver.collect():
@@ -481,10 +496,11 @@ class BatchGenerator(Engine):
             if task_id in self._all_tasks:
                 self._maybe_cancel.append(self._all_tasks[task_id])
 
-        if mx_any(has_cancel_all, self.group):
+        coord = get_coord_group(self.group)
+        if mx_any(has_cancel_all, coord):
             self._cancelled_tasks.add(CANCEL_ALL_TASKS)
 
-        agreed, different = mx_all_gather_tasks(self._maybe_cancel, self.group)
+        agreed, different = mx_all_gather_tasks(self._maybe_cancel, coord)
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
         _dt = time.perf_counter() - _t0
@@ -497,6 +513,8 @@ class BatchGenerator(Engine):
         Uses a single mx_any to check if ANY rank has cancellations. Only runs
         the expensive all_gather if someone actually has something to cancel.
         Saves ~4 distributed ops per call in the common (no-cancel) case.
+
+        Coord group, see ``agree_on_tasks`` rationale.
         """
         has_cancel_all = False
         for task_id in self.cancel_receiver.collect():
@@ -506,15 +524,16 @@ class BatchGenerator(Engine):
             if task_id in self._all_tasks:
                 self._maybe_cancel.append(self._all_tasks[task_id])
 
+        coord = get_coord_group(self.group)
         has_anything = has_cancel_all or len(self._maybe_cancel) > 0
-        if not mx_any(has_anything, self.group):
+        if not mx_any(has_anything, coord):
             return  # Fast path: no rank has cancellations — 1 collective op total
 
         # Slow path: at least one rank has cancels — full protocol
-        if mx_any(has_cancel_all, self.group):
+        if mx_any(has_cancel_all, coord):
             self._cancelled_tasks.add(CANCEL_ALL_TASKS)
 
-        agreed, different = mx_all_gather_tasks(self._maybe_cancel, self.group)
+        agreed, different = mx_all_gather_tasks(self._maybe_cancel, coord)
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
 
@@ -645,7 +664,10 @@ class BatchGenerator(Engine):
         # active rank then busy-polls JACCL forever for a peer send
         # that never comes and the cluster wedges.
         # Memory: jaccl_phase_a_finding_2026_05_05.md, hermes_wedge_root_cause_2026_05_04.md.
-        if not mx_any(self._gen.has_work, self.group):
+        # Coord group: gate fires per-step at decode rate, must not
+        # share call_id space with the model TP forward. Race fix
+        # 2026-05-07 — see get_coord_group in utils_mlx.
+        if not mx_any(self._gen.has_work, get_coord_group(self.group)):
             return self._apply_cancellations()
 
         self._jaccl_dump_step("pre_gen_step")
