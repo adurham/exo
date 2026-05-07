@@ -625,38 +625,31 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # when ALL ranks have buffer for the uid so yield counts stay
         # symmetric. If any rank lacks buffer, fall through to MTP
         # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
-        # Buffer-drain rules:
-        #  * Single-rank or non-TP: drain freely.
-        #  * TP at c=1: drain freely. There's exactly one uid by
-        #    definition, so the per-uid loop runs once on every rank
-        #    and `_filter_finished_uid` can't fire asymmetrically (the
-        #    one uid either finishes on all ranks together via the same
-        #    state-machine match, or on none). Yield counts stay
-        #    cross-rank-symmetric.
-        #  * TP at c>1: skip drain. `for uid in gen_batch.uids` length
-        #    can diverge across ranks at long contexts when
-        #    `_filter_finished_uid` fires asymmetrically (rank 0 has
-        #    1 uid, rank 1 has 2). Mismatched per-uid loop counts ⇒
-        #    each rank issues a different number of downstream
-        #    collective sequences ⇒ JACCL LEN_ERR / wedge. The cost is
-        #    that the MTP-yields-multiple-tokens-per-cycle gain is lost
-        #    on TP c>1 — buffered drafts get clobbered on the next
-        #    cycle (line 717: assign-not-append). Worth it to keep the
-        #    cluster up at long context. Memory:
-        #    jaccl_phase_a_finding_2026_05_05.md.
+        # Buffer drain. The upstream gen_batch.uids ← intersection sync
+        # at the top of _next (Step 1, lines ~572-602) has aligned uids
+        # across ranks, so the per-uid drain loop runs an identical
+        # iteration count on every rank — no LEN_ERR risk.
         #
-        # Earlier code skipped drain in *all* TP modes including c=1,
-        # which silently dropped accepted drafts at single-stream
-        # generation — the source of the broken-English MTP=1
-        # regression observed 2026-05-06.
+        # Drain ONE buffered token PER UID per call (not the first uid
+        # with buffer). At c=1 this is just the single uid. At c>1 this
+        # returns simultaneous responses for every uid that has a
+        # buffered draft, matching the symmetric API contract the spec
+        # cycle itself produces. An earlier "return on first uid with
+        # buffer" version (commit 0bed280d → reverted in a1ad44c9)
+        # starved later uids whenever an earlier uid's buffer was
+        # non-empty, producing tokens=0 for stream1 at c=2.
+        #
+        # Earlier-earlier code (commit 222b8b5e) skipped drain entirely
+        # in TP regardless of c, which silently dropped accepted drafts
+        # — the source of the broken-English MTP=1 regression observed
+        # 2026-05-06.
         if len(gen_batch) >= 1:
-            group = self._get_sharding_group()
-            tp_active = group is not None and group.size() > 1
-            drain_safe = not tp_active or len(gen_batch) == 1
-            if drain_safe:
-                for uid in gen_batch.uids:
-                    if uid in self._token_buffer and self._token_buffer[uid]:
-                        return [], self._yield_buffered(uid)
+            drain_responses: list[Any] = []
+            for uid in list(gen_batch.uids):
+                if uid in self._token_buffer and self._token_buffer[uid]:
+                    drain_responses.extend(self._yield_buffered(uid))
+            if drain_responses:
+                return [], drain_responses
 
         spec_eligible = (
             self.gamma > 0
