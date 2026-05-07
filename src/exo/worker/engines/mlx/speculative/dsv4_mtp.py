@@ -1002,7 +1002,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if self._steps_counter % 512 == 0:
             mx.clear_cache()
 
-        # 8. State machine + length checks per yielded token, per uid.
+        # 9. State machine + length checks per yielded token, per uid.
         responses_per: list[list[Any]] = []
         for n, uid in enumerate(uids):
             idx = gen_batch.uids.index(uid)
@@ -1010,22 +1010,43 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 self._build_yielded_responses(uid, idx, all_tokens_per[n])
             )
 
-        # Yield first response per uid; buffer the rest.
-        first_responses: list[Any] = []
+        # 10. Yield ALL accepted-draft responses in a single call (no
+        #     buffering). Returning 1+k responses per uid in one
+        #     `_speculative_next_batch` return — instead of yielding 1
+        #     and buffering k for subsequent `_next()` calls — keeps
+        #     the per-cycle `step()` count at 1 and therefore the
+        #     `agree_on_tasks` collective rate at 1/cycle (same as
+        #     non-spec). The earlier "yield first + buffer rest" form
+        #     made the per-cycle step count `1 + max_k` (drain calls
+        #     between spec cycles), which exposed the high-rate JACCL
+        #     `mx_any` corruption documented at
+        #     `runner/llm_inference/batch_generator.py:461` ("driving
+        #     JACCL all_gather at that rate has been observed to
+        #     corrupt return buffers"). The runner's step() iterates
+        #     `for response in responses` so multi-response-per-call
+        #     is supported by the framework.
+        #
+        #     Order: per-uid clustered (all of uid_0's tokens, then all
+        #     of uid_1's tokens). The runner's per-response loop is
+        #     stateless across uids, so order within the call doesn't
+        #     affect correctness.
+        all_responses: list[Any] = []
         for n, uid in enumerate(uids):
             row = responses_per[n]
             if not row:
                 continue
-            first = row[0]
-            rest = row[1:]
-            if rest:
-                self._token_buffer[uid] = deque(rest)
-            elif first.finish_reason is not None:
-                self._filter_finished_uid(uid)
-                self._cleanup_uid(uid)
-            first_responses.append(first)
+            for resp in row:
+                all_responses.append(resp)
+                if resp.finish_reason is not None:
+                    # Stop emitting more tokens for this uid past the
+                    # finish boundary; tokens after a finish should be
+                    # discarded the same way the parent
+                    # GenerationBatch.next() discards them.
+                    self._filter_finished_uid(uid)
+                    self._cleanup_uid(uid)
+                    break
 
-        return first_responses
+        return all_responses
 
     def _draft_tokens_batched(
         self,
