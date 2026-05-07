@@ -1321,11 +1321,17 @@ class ExoBatchGenerator:
         # gate collective when a sharding group is present so all ranks
         # branch identically. Memory: jaccl_phase_a_finding_2026_05_05.md.
         local_has_work = self.has_work
+        _gpu_probe_local = bool(os.environ.get("MLX_GPU_TIME"))
+        _t_mx_any_start = time.perf_counter() if _gpu_probe_local else 0.0
         if self.group is not None and self.group.size() > 1:
             if not mx_any(local_has_work, self.group):
                 return []
         elif not local_has_work:
             return []
+        if _gpu_probe_local:
+            _t_mx_any_ns = int((time.perf_counter() - _t_mx_any_start) * 1e9)
+            self._gpu_probe_mx_any_total = getattr(self, "_gpu_probe_mx_any_total", 0) + _t_mx_any_ns
+            self._gpu_probe_mx_any_count = getattr(self, "_gpu_probe_mx_any_count", 0) + 1
 
         _trace = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
         from exo.worker.engines.mlx.trace import request_trace
@@ -1561,9 +1567,18 @@ class ExoBatchGenerator:
             _mlx_next_count = getattr(self, "_step_counter", 0) + 1
             self._step_counter = _mlx_next_count  # pyright: ignore[reportAttributeAccessIssue]
         if _mlx_next_count % 64 == 0 and responses:
+            _gpu_probe_local = bool(os.environ.get("MLX_GPU_TIME"))
+            _mxa_total = getattr(self, "_gpu_probe_mx_any_total", 0)
+            _mxa_count = getattr(self, "_gpu_probe_mx_any_count", 0)
+            _mxa_avg_ms = (_mxa_total / _mxa_count / 1e6) if (_gpu_probe_local and _mxa_count > 0) else 0.0
             logger.debug(
                 f"step overhead: {_overhead * 1000:.2f}ms (next={_next_elapsed * 1000:.2f}ms total={_step_elapsed * 1000:.2f}ms)"
             )
+            if _gpu_probe_local:
+                logger.info(
+                    f"[STEP_TIMING] mx_any_avg_ms={_mxa_avg_ms:.3f} (n={_mxa_count}) "
+                    f"next={_next_elapsed * 1000:.2f}ms total={_step_elapsed * 1000:.2f}ms"
+                )
         if _trace and _mlx_next_count % 64 == 0 and responses:
             logger.info(
                 f"[PROF step] mlx_next={_next_elapsed * 1000:.2f}ms "
