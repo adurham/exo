@@ -640,23 +640,6 @@ for NODE in "${NODES[@]}"; do
     # gating but uses the same trace file. Identifies transport
     # non-bit-exactness as a divergent hash at a specific call_id.
     [ -n "${JACCL_TRACE_HASH:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_HASH=$JACCL_TRACE_HASH"
-    # Subgroup split init progress trace (logs per-rank to stderr at
-    # each QP-exchange step). Use to localize a deadlock during
-    # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
-    [ -n "${JACCL_TRACE_SPLIT:-}" ]    && EXO_ENV="$EXO_ENV JACCL_TRACE_SPLIT=$JACCL_TRACE_SPLIT"
-    # When set, MeshGroup::split opens a fresh ibv_context per
-    # subgroup instead of borrowing the parent's. Required on macOS
-    # librdma to fully isolate QPs across subgroups; without it both
-    # subgroups share the parent's context and post-init collectives
-    # deadlock after a few calls.
-    [ -n "${JACCL_SPLIT_FRESH_CTX:-}" ] && EXO_ENV="$EXO_ENV JACCL_SPLIT_FRESH_CTX=$JACCL_SPLIT_FRESH_CTX"
-    # When set, MeshGroup::split makes the subgroup share the parent
-    # group's CPU stream (cpu::CommandEncoder thread) instead of
-    # allocating its own. Funnels master + coord lambdas onto one
-    # FIFO encoder thread — needed on macOS where two distinct
-    # encoder threads dispatching concurrently into separate QP sets
-    # appears to deadlock at the librdma layer.
-    [ -n "${JACCL_SPLIT_PARENT_STREAM:-}" ] && EXO_ENV="$EXO_ENV JACCL_SPLIT_PARENT_STREAM=$JACCL_SPLIT_PARENT_STREAM"
     # Per-step BatchGenerator state snapshot; writes JSONL to
     # /tmp/jaccl_step_rank_${rank}_pid${pid}.log. Diff across ranks
     # to find the first asymmetric Python state on the prefix-cache
