@@ -361,7 +361,9 @@ class Runner:
                 _t_step_end = time.perf_counter()
 
             finished: list[TaskId] = []
+            _n_results_this_cycle = 0
             for task_id, result in results:
+                _n_results_this_cycle += 1
                 match result:
                     case CancelledResponse():
                         finished.append(task_id)
@@ -387,10 +389,9 @@ class Runner:
                 _probe_sum_total_ns += _total_ns
                 if _probe_cycle_count % _probe_log_every == 0:
                     n = _probe_cycle_count
-                    n_results = len(results)
                     sys.stderr.write(
                         f"[RUNNER_LOOP pid={_os.getpid()}] "
-                        f"cycles={n} ntasks={n_results} "
+                        f"cycles={n} ntasks={_n_results_this_cycle} "
                         f"avg_step_ms={_probe_sum_step_ns/n/1e6:.2f} "
                         f"avg_send_ms={_probe_sum_send_ns/n/1e6:.2f} "
                         f"avg_total_ms={_probe_sum_total_ns/n/1e6:.2f}\n"
