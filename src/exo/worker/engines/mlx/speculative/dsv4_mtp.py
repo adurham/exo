@@ -651,11 +651,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # regression observed 2026-05-06.
         if len(gen_batch) >= 1:
             group = self._get_sharding_group()
-            # DIAG: drain at c>1 too to reproduce the wedge under
-            # JACCL_TRACE_HASH=1 and find the actual cross-rank
-            # divergence point. Revert after diagnosing.
             tp_active = group is not None and group.size() > 1
-            drain_safe = True  # was: not tp_active or len(gen_batch) == 1
+            drain_safe = not tp_active or len(gen_batch) == 1
             if drain_safe:
                 for uid in gen_batch.uids:
                     if uid in self._token_buffer and self._token_buffer[uid]:
