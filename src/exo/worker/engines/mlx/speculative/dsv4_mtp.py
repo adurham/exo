@@ -919,7 +919,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
 
-        # 4. Per-stream cache rollback. Each stream b rolls back by
+        # 4. Complete the MTP cache for cycle N by writing d_{γ-1} per
+        #    stream. The draft loop wrote γ entries per stream
+        #    (positions y_b, d_0_b, ..., d_{γ-2}_b); the verify forward
+        #    wrote γ+1 entries to the main cache (..., d_{γ-1}_b). One
+        #    extra batched MTP predict closes the off-by-one — see the
+        #    matching commentary in `_speculative_next` (c=1) for the
+        #    full derivation. After this, both caches hold γ+1 cycle-N
+        #    entries per stream, so per-stream rollback by
+        #    `γ - n_accepted_per[b]` retains acc+1 entries per stream
+        #    in both.
+        self.mtp.predict(
+            verify_pre_norm[:, gamma - 1 : gamma, :],
+            draft_concat[:, gamma - 1 : gamma],
+            return_hidden=False,
+        )
+
+        # 5. Per-stream cache rollback. Each stream b rolls back by
         #    γ - n_accepted_per[b]. Pass the Python int list straight
         #    to trim_per_stream so it does its arithmetic without
         #    syncing self.offset — at 43+ layers that saves ~6ms per
@@ -958,13 +974,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             elif hasattr(mtp_cache, "offset"):
                 mtp_cache.offset -= n_min_rollback
 
-        # 5. Update per-uid pre_norm to each stream's first-rejection
+        # 6. Update per-uid pre_norm to each stream's first-rejection
         #    position in verify_pre_norm.
         for n, uid in enumerate(uids):
             acc = n_accepted_per[n]
             self._mtp_pre_norm[uid] = verify_pre_norm[n : n + 1, acc : acc + 1, :]
 
-        # 6. Stage bonus tokens for next call.
+        # 7. Stage bonus tokens for next call.
         gen_batch._next_tokens = mx.array(bonus_vals)
         gen_batch._next_logprobs = bonus_lps
         mx.async_eval(gen_batch._next_tokens)
@@ -979,14 +995,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             )
             prof.end_cycle(N)
 
-        # 7. Bookkeeping.
+        # 8. Bookkeeping.
         total_yielded = sum(len(t) for t in all_tokens_per)
         self._gen_tokens_counter += total_yielded
         self._steps_counter += 1
         if self._steps_counter % 512 == 0:
             mx.clear_cache()
 
-        # 8. State machine + length checks per yielded token, per uid.
+        # 9. State machine + length checks per yielded token, per uid.
         responses_per: list[list[Any]] = []
         for n, uid in enumerate(uids):
             idx = gen_batch.uids.index(uid)
@@ -1264,9 +1280,32 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
 
-        # 5. Roll back the target's KV caches for the rejected drafts.
-        #    DSv4's CacheList implements trim() recursively; raw caches
-        #    expose offset for the legacy path.
+        # 5. Complete the MTP cache for cycle N, then roll back rejected
+        #    drafts.
+        #
+        #    The draft loop ran γ predicts, writing γ entries to the MTP
+        #    cache at positions y_N, d_0, ..., d_{γ-2}. The verify
+        #    forward wrote γ+1 entries to the main cache at positions
+        #    y_N, d_0, ..., d_{γ-1}. Without intervention the MTP cache
+        #    is permanently one position behind the main cache: trimming
+        #    by `γ - n_accepted` keeps n entries in MTP vs n+1 in main,
+        #    and on n_accepted=γ cycles MTP keeps γ entries vs main's
+        #    γ+1 — the missing d_{γ-1} becomes a positional gap that
+        #    accumulates and corrupts MTP-relative attention context
+        #    (the "broken English at MTP=1" regression).
+        #
+        #    Fix: write d_{γ-1} into the MTP cache via one extra
+        #    predict. Input is target's pre_norm at d_{γ-2}
+        #    (verify_pre_norm[:, γ-1]) combined with d_{γ-1} — the same
+        #    inputs an extended chained-draft step γ would have used.
+        #    After this both caches hold γ+1 cycle-N entries, and the
+        #    same `γ - n_accepted` rollback retains n+1 in both.
+        self.mtp.predict(
+            verify_pre_norm[:, gamma - 1 : gamma, :],
+            draft_concat[:, gamma - 1 : gamma],
+            return_hidden=False,
+        )
+
         rollback = gamma - n_accepted
         if rollback > 0:
             for c in gen_batch.prompt_cache:
@@ -1275,10 +1314,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(c, "offset"):
                     c.offset -= rollback
 
-            # Also roll back the MTP module's own cache by the same
-            # amount: each rejected draft cycle advanced the MTP cache
-            # one step too. n_accepted MTP steps land in the next
-            # cycle's pre_norm; the rest are wasted.
             mtp_cache = self.mtp._cache
             if mtp_cache is not None:
                 if hasattr(mtp_cache, "trim"):
