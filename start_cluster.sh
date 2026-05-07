@@ -511,7 +511,7 @@ for NODE in "${NODES[@]}"; do
     
     # Update and Build Logic
     TARGET_BRANCH="main"
-    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH'" || { echo "Failed to update repo on $NODE"; exit 1; }
+    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
     
     echo "Ensuring build dependencies on $NODE..."
     ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
