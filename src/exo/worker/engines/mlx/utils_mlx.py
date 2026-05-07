@@ -1029,66 +1029,6 @@ def mx_any(bool_: bool, group: mx.distributed.Group | None) -> bool:
     return num_true.item() > 0
 
 
-# Per-process cache of coordination subgroups. Split off the model TP
-# group exactly once per parent so all non-model-forward collectives
-# (agree_on_tasks, agree_on_cancellations, has_work gate, upstream uid
-# sync, MTP draft broadcast, etc.) share an isolated `next_call_id_`
-# counter / QPs / buffer pool from the model TP group.
-#
-# Why: at c=2 with frequent step()s, the runner's small CPU-side mx_any
-# collectives interleave with the model forward's TP all_sum collectives
-# in the encoder dispatch queue. They share a single atomic call_id
-# counter on the parent group; tiny scheduling differences across ranks
-# cause call_id N to encode op A on rank 0 (e.g. 1-byte mx_any) and op
-# B on rank 1 (e.g. 16384-byte bf16 all_sum). UC FIFO matching surfaces
-# that as IBV_WC_LOC_LEN_ERR / silent buffer corruption (max_tasks
-# bit-flipped to ~1B → 152 GB metal::malloc OOM at c=2). Diagnosed via
-# JACCL_TRACE_HASH=1 2026-05-07.
-#
-# Splitting into a sibling subgroup gives the coord traffic its own
-# next_call_id_ counter, ibv_context, PD/CQ/QPs, and buffer pool
-# (mlx@97741a86 + 73b08d67). Cross-subgroup traffic can't share UC
-# FIFOs, so model TP and coord traffic stop interfering.
-#
-# Keyed by id(parent_group). Color = 0xC00D ("coord") is just a stable
-# arbitrary value; both ranks must call split with the same color.
-_COORD_GROUP_CACHE: dict[int, mx.distributed.Group | None] = {}
-_COORD_GROUP_COLOR: int = 0xC00D
-
-
-def get_coord_group(
-    group: mx.distributed.Group | None,
-) -> mx.distributed.Group | None:
-    """Return the sibling coord subgroup for ``group``, splitting once on
-    first use. Returns ``group`` itself when there's no need to split
-    (single-rank or non-TP). Both ranks must call this in matching
-    order — same code path on both ranks at the same point.
-    """
-    if group is None or group.size() <= 1:
-        return group
-    cached = _COORD_GROUP_CACHE.get(id(group))
-    if cached is not None:
-        return cached
-    sub = group.split(_COORD_GROUP_COLOR)
-    _COORD_GROUP_CACHE[id(group)] = sub
-    return sub
-
-
-def prewarm_coord_group(group: mx.distributed.Group | None) -> None:
-    """Eagerly create the coord subgroup at a known lockstep sync point
-    (typically end of runner warmup) so both ranks call split() in
-    matching order before any coord-routed traffic. Then run a tiny
-    mx_any to verify the subgroup actually transfers — surfaces any
-    QP-exchange wedge as a fast warmup failure rather than a silent
-    decode-time deadlock.
-    """
-    if group is None or group.size() <= 1:
-        return
-    coord = get_coord_group(group)
-    # Verification probe — single-byte all_sum on the coord subgroup.
-    _ = mx_any(False, coord)
-
-
 def mx_barrier(group: mx.distributed.Group | None):
     if group is None:
         return
