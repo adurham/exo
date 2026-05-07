@@ -1,4 +1,5 @@
 import queue
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -338,8 +339,26 @@ class Runner:
 
         self.submit_generation(starting_task)
 
+        # Track A probe: per-cycle attribution (gated MLX_GPU_TIME=1).
+        # Helps separate generator.step() wall from send_chunk + queue
+        # overhead between cycles.
+        import os as _os
+        _runner_probe = bool(_os.environ.get("MLX_GPU_TIME"))
+        _probe_log_every = int(_os.environ.get("MLX_GPU_TIME_LOG_EVERY", "32"))
+        _probe_cycle_count = 0
+        _probe_sum_step_ns = 0
+        _probe_sum_send_ns = 0
+        _probe_sum_total_ns = 0
+        _probe_last_total_start: float = 0.0
+        if _runner_probe:
+            _probe_last_total_start = time.perf_counter()
+
         while self.active_tasks:
+            if _runner_probe:
+                _t_step_start = time.perf_counter()
             results = self.generator.step()
+            if _runner_probe:
+                _t_step_end = time.perf_counter()
 
             finished: list[TaskId] = []
             for task_id, result in results:
@@ -354,6 +373,29 @@ class Runner:
 
             for task_id in finished:
                 self.active_tasks.pop(task_id, None)
+
+            if _runner_probe:
+                _t_loop_end = time.perf_counter()
+                # total = step + send_chunks + finished_pop + queue check
+                _step_ns = int((_t_step_end - _t_step_start) * 1e9)
+                _send_ns = int((_t_loop_end - _t_step_end) * 1e9)
+                _total_ns = int((_t_loop_end - _probe_last_total_start) * 1e9)
+                _probe_last_total_start = _t_loop_end
+                _probe_cycle_count += 1
+                _probe_sum_step_ns += _step_ns
+                _probe_sum_send_ns += _send_ns
+                _probe_sum_total_ns += _total_ns
+                if _probe_cycle_count % _probe_log_every == 0:
+                    n = _probe_cycle_count
+                    n_results = len(results)
+                    sys.stderr.write(
+                        f"[RUNNER_LOOP pid={_os.getpid()}] "
+                        f"cycles={n} ntasks={n_results} "
+                        f"avg_step_ms={_probe_sum_step_ns/n/1e6:.2f} "
+                        f"avg_send_ms={_probe_sum_send_ns/n/1e6:.2f} "
+                        f"avg_total_ms={_probe_sum_total_ns/n/1e6:.2f}\n"
+                    )
+                    sys.stderr.flush()
 
             try:
                 item = self._work_queue.get_nowait()
