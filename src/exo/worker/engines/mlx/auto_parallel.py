@@ -111,6 +111,14 @@ _MINIMAX_FUSED_ATTN: bool = os.environ.get("EXO_MINIMAX_FUSED_ATTN", "0") == "1"
 # below.
 _DSV4_FUSED_MOE: bool = os.environ.get("EXO_DSV4_FUSED_MOE", "0") == "1"
 
+# Phase H: install mx.compile traces for DSv4 layer body. Targets the
+# ~5 ms/step Python lazy-graph-build overhead identified by the GPU%
+# probe — at decode the GPU sits idle for ~5 ms at the start of every
+# step waiting for Python to traverse 60 layers × ~25 mx.array ops.
+# Pre-tracing the FFN (and later attention) body collapses that into
+# a handful of compile-cache lookups. Off by default while we validate.
+_DSV4_COMPILE_FFN: bool = os.environ.get("EXO_DSV4_COMPILE_FFN", "0") == "1"
+
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
 _nn_silu_any: Any = _nn_silu
@@ -933,6 +941,14 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
                             idx_comp_fuse = getattr(idx_comp, "fuse_kv_gate_weights", None)
                             if idx_comp_fuse is not None:
                                 idx_comp_fuse()
+            # Phase H mx.compile: pre-trace the FFN body so 60 layers'
+            # worth of Python lazy-graph build per decode step collapses
+            # to ~60 compile-cache lookups. Independent of FUSED_MOE so
+            # it can be enabled/disabled separately for A/B.
+            if _DSV4_COMPILE_FFN:
+                install_compiled = getattr(layer.ffn, "install_compiled_forward", None)
+                if install_compiled is not None:
+                    install_compiled()
 
             mx.eval(layer)
             mx.clear_cache()
@@ -965,6 +981,10 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
                     qa_fuse = getattr(attn_obj, "fuse_qa_kv_weights", None)
                     if qa_fuse is not None:
                         qa_fuse()
+            if _DSV4_COMPILE_FFN:
+                install_compiled = getattr(mtp.ffn, "install_compiled_forward", None)
+                if install_compiled is not None:
+                    install_compiled()
 
             mx.eval(mtp)
             mx.clear_cache()
