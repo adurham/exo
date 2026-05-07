@@ -44,7 +44,7 @@ from mlx_lm.models.cache import (
 
 from .mtp_batch_generator import MTPBatchGenerator
 from .mtp_module import broadcast_from_canonical, draft_tokens
-from exo.worker.engines.mlx.utils_mlx import get_coord_group, mx_any
+from exo.worker.engines.mlx.utils_mlx import mx_any
 
 
 def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
@@ -570,18 +570,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # outer master event router. Memory:
         # next_session_plan_jaccl_c2_prefix_cache.md (Phase E).
         sync_group = self._get_sharding_group()
-        # Coord subgroup: this upstream sync fires per-_next call
-        # (~25-60 Hz at decode), interleaving with the model TP
-        # forward's bf16 all_sums. Sharing `next_call_id_` with the
-        # model group caused the c=2 cross-rank op-mismatch race
-        # observed at call_id 4058 via JACCL_TRACE_HASH=1 on
-        # 2026-05-07 (rank 0 saw a 1-byte all_sum, rank 1 saw a
-        # 16384-byte bf16 all_sum). Routing this collective onto
-        # the coord sibling subgroup gives it an isolated call_id
-        # space and its own UC FIFO so cross-stream call_ids can no
-        # longer collide. See get_coord_group in utils_mlx.
-        coord_group = get_coord_group(sync_group)
-        if coord_group is not None and coord_group.size() > 1 and len(gen_batch) >= 1:
+        if sync_group is not None and sync_group.size() > 1 and len(gen_batch) >= 1:
             # Step 1 — uid intersection. Encode each rank's uid set as
             # a presence bitmask of bounded size; all_sum to count how
             # many ranks have each uid; keep only uids present on ALL.
@@ -591,9 +580,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if 0 <= _u < uid_bound:
                     local_presence[_u] = 1
             presence_arr = mx.array(local_presence, dtype=mx.int32)
-            counted = mx.distributed.all_sum(presence_arr, group=coord_group)
+            counted = mx.distributed.all_sum(presence_arr, group=sync_group)
             mx.eval(counted)
-            n_ranks = coord_group.size()
+            n_ranks = sync_group.size()
             counted_lst = cast(list[int], counted.tolist())
             keep_uids: set[int] = {
                 _u for _u, _c in enumerate(counted_lst) if _c == n_ranks
@@ -616,7 +605,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # length-equivalent for all_max.
             if len(gen_batch) >= 1:
                 synced = mx.distributed.all_max(
-                    mx.array(gen_batch._num_tokens), group=coord_group
+                    mx.array(gen_batch._num_tokens), group=sync_group
                 )
                 mx.eval(synced)
                 gen_batch._num_tokens = cast(list[int], synced.tolist())
@@ -747,12 +736,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         N = len(uids)
         gamma = self.gamma
         sync_group = self._get_sharding_group()
-        # Coord subgroup for ALL non-model-forward collectives in the
-        # spec cycle (broadcast_from_canonical for draft / n_accepted
-        # / bonus sync). Keeps these small int32 collectives off the
-        # model TP next_call_id_ counter — the c=2 race fix from
-        # 2026-05-07. See get_coord_group.
-        coord_group = get_coord_group(sync_group)
         sync_drafts = sync_group is not None and sync_group.size() > 1
 
         # Verify each uid has the prerequisites.
@@ -904,7 +887,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
             if sync_drafts:
                 k_arr = broadcast_from_canonical(
-                    mx.array(k_local, dtype=mx.int32), coord_group
+                    mx.array(k_local, dtype=mx.int32), sync_group
                 )
                 n_accepted_per = cast(list[int], k_arr.tolist())
             else:
@@ -936,7 +919,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
             if sync_drafts:
                 bonus_arr = broadcast_from_canonical(
-                    mx.array(bonus_local, dtype=mx.int32), coord_group
+                    mx.array(bonus_local, dtype=mx.int32), sync_group
                 )
                 bonus_vals = cast(list[int], bonus_arr.tolist())
             else:
@@ -1085,11 +1068,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         h = stacked_pre_norm
         tok_arr = next_tokens_arr  # (N, 1)
         sync_group = self._get_sharding_group()
-        # Coord group for draft broadcasts: keeps the int32 token-sync
-        # collectives off the model TP next_call_id_ counter
-        # (2026-05-07 c=2 race fix). The collective rate scales with
-        # γ × cycles, so isolation matters here. See get_coord_group.
-        coord_group = get_coord_group(sync_group)
         sync_drafts = sync_group is not None and sync_group.size() > 1
 
         drift_dump = os.environ.get("EXO_MTP_DRIFT_DUMP") == "1"
@@ -1104,7 +1082,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 tok_pre_sync = mx.argmax(logits, axis=-1).reshape(-1, 1)
                 if sync_drafts:
                     tok_arr = broadcast_from_canonical(
-                        tok_pre_sync.astype(mx.int32), coord_group
+                        tok_pre_sync.astype(mx.int32), sync_group
                     )
                 else:
                     tok_arr = tok_pre_sync
@@ -1126,7 +1104,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 ).reshape(-1, 1)  # (N, 1)
                 if sync_drafts:
                     tok_arr = broadcast_from_canonical(
-                        tok_pre_sync.astype(mx.int32), coord_group
+                        tok_pre_sync.astype(mx.int32), sync_group
                     )
                 else:
                     tok_arr = tok_pre_sync
@@ -1161,11 +1139,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gen_batch = self._generation_batch
         idx = gen_batch.uids.index(uid)
         sync_group = self._get_sharding_group()
-        # Coord subgroup for non-model-forward collectives in this cycle
-        # (draft sync inside draft_tokens, n_accepted broadcast, bonus
-        # broadcast). Isolated next_call_id_ counter from the model TP
-        # group — c=2 race fix 2026-05-07.
-        coord_group = get_coord_group(sync_group)
         sync_drafts = sync_group is not None and sync_group.size() > 1
 
         y = gen_batch._next_tokens
@@ -1188,11 +1161,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_cycle_start = time.perf_counter()
 
         # 1. Draft γ tokens via MTP — chained, fully lazy.
-        # Pass coord_group so each chained-predict step's tok_arr
-        # broadcast goes through the isolated coord subgroup (separate
-        # next_call_id_ from the model TP group). Without this the
-        # per-rank MTP forward drifts by ~1ulp at cycle 5+ and drafts
-        # diverge across ranks; at temp>0 the per-rank RNG also
+        # Pass sync_group so each chained-predict step's tok_arr is
+        # broadcast from rank 0 to every rank (masked all_sum). Without
+        # this the per-rank MTP forward drifts by ~1ulp at cycle 5+ and
+        # drafts diverge across ranks; at temp>0 the per-rank RNG also
         # diverges. The acceptance count and bonus token below are
         # broadcast separately at temp>0; at temp=0 the post-draft
         # token sequence and verify forward are bit-exact downstream so
@@ -1200,7 +1172,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         next_token_arr = y.reshape(1, 1)
         draft_ids, draft_probs = draft_tokens(
             self.mtp, pre_norm, next_token_arr, gamma, temp,
-            sync_group=coord_group,
+            sync_group=sync_group,
         )
 
         if prof is not None:
@@ -1298,7 +1270,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # rank-0's value to every rank.
         if temp != 0 and sync_drafts:
             n_accepted_arr = broadcast_from_canonical(
-                mx.array([n_accepted], dtype=mx.int32), coord_group
+                mx.array([n_accepted], dtype=mx.int32), sync_group
             )
             n_accepted = int(n_accepted_arr.item())
 
@@ -1355,7 +1327,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # using per-rank q) — both rank-divergent.
         if temp != 0 and sync_drafts:
             bonus_arr = broadcast_from_canonical(
-                mx.array([bonus_val], dtype=mx.int32), coord_group
+                mx.array([bonus_val], dtype=mx.int32), sync_group
             )
             bonus_val = int(bonus_arr.item())
 
