@@ -627,28 +627,38 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # uniformly. Memory: jaccl_phase_a_finding_2026_05_05.
         # Buffer drain. The upstream gen_batch.uids ← intersection sync
         # at the top of _next (Step 1, lines ~572-602) has aligned uids
-        # across ranks, so the per-uid drain loop runs an identical
-        # iteration count on every rank — no LEN_ERR risk.
+        # across ranks, so per-uid loop runs identical iteration counts
+        # on every rank.
         #
-        # Drain ONE buffered token PER UID per call (not the first uid
-        # with buffer). At c=1 this is just the single uid. At c>1 this
-        # returns simultaneous responses for every uid that has a
-        # buffered draft, matching the symmetric API contract the spec
-        # cycle itself produces. An earlier "return on first uid with
-        # buffer" version (commit 0bed280d → reverted in a1ad44c9)
-        # starved later uids whenever an earlier uid's buffer was
-        # non-empty, producing tokens=0 for stream1 at c=2.
+        # At c=1 (single uid): drain freely.
+        # At c>1: only drain when EVERY uid in gen_batch has a buffered
+        # token. This keeps per-call response count = N matching the
+        # spec cycle's first-responses output, so downstream
+        # `on_generation_token` callback counts (which issue collectives
+        # via agree_on_cancellations / agree_on_tasks) stay symmetric
+        # cycle-by-cycle. If any uid's buffer is empty (asymmetric
+        # acceptance has emptied it sooner than peers), fall through to
+        # the spec cycle which refills all buffers symmetrically.
+        # That refill clobbers any uid that still had buffer leftover
+        # — same drop pattern as pre-fix at uneven acceptance, but now
+        # the common case (all uids buffered together) yields all
+        # accepted drafts.
         #
-        # Earlier-earlier code (commit 222b8b5e) skipped drain entirely
-        # in TP regardless of c, which silently dropped accepted drafts
-        # — the source of the broken-English MTP=1 regression observed
-        # 2026-05-06.
+        # Earlier "drain whichever uid has buffer first" (commit
+        # 0bed280d → reverted in a1ad44c9) starved stream1 at c=2 because
+        # stream0 was always first in iteration order. Earlier-earlier
+        # "skip drain entirely in TP" (commit 222b8b5e) dropped every
+        # accepted draft at c=1 too — the broken-English regression.
         if len(gen_batch) >= 1:
-            drain_responses: list[Any] = []
-            for uid in list(gen_batch.uids):
-                if uid in self._token_buffer and self._token_buffer[uid]:
+            uids = list(gen_batch.uids)
+            all_have_buffer = all(
+                uid in self._token_buffer and self._token_buffer[uid]
+                for uid in uids
+            )
+            if all_have_buffer:
+                drain_responses: list[Any] = []
+                for uid in uids:
                     drain_responses.extend(self._yield_buffered(uid))
-            if drain_responses:
                 return [], drain_responses
 
         spec_eligible = (
