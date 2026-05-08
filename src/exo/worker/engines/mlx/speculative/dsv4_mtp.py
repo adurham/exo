@@ -909,6 +909,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     k += 1
                 n_accepted_per.append(k)
 
+            # Cross-rank n_accepted broadcast — UNCONDITIONAL. The
+            # earlier "matches at temp=0 is bit-exact across ranks"
+            # assumption is wrong: MLX's TP verify forward has ~1ulp
+            # drift in verify_logits; tied/near-tied positions flip
+            # argmax across ranks → matches diverges → n_accepted
+            # diverges → per-uid yield count diverges → cross-rank
+            # _num_tokens drift (papered over by next-cycle all_max
+            # but per-rank _token_buffer deque depths stay drifted)
+            # → wedge at BS-transition. Trace 2026-05-08 confirmed
+            # divergence on uid 5 num_tokens by 1 within same cycle.
+            if sync_drafts:
+                k_arr = broadcast_from_canonical(
+                    mx.array(n_accepted_per, dtype=mx.int32), coord_group
+                )
+                n_accepted_per = cast(list[int], k_arr.tolist())
+
             # Per-stream yield. Each uid keeps its own accepted drafts
             # (no min-strategy capping). Bonus comes from verify_logits
             # at the stream's first-rejection position.
@@ -931,6 +947,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 all_tokens_per.append(row)
                 bonus_vals.append(int(all_next_arr[n][acc]))
                 bonus_lps.append(logprobs_all[n, acc])
+
+            # Cross-rank bonus_vals broadcast — UNCONDITIONAL. Same
+            # reasoning as n_accepted: bonus comes from all_next
+            # (argmax verify_logits at position acc) which can drift
+            # across ranks at tied positions.
+            if sync_drafts:
+                bonus_arr = broadcast_from_canonical(
+                    mx.array(bonus_vals, dtype=mx.int32), coord_group
+                )
+                bonus_vals = cast(list[int], bonus_arr.tolist())
 
             self._jaccl_dump_spec(
                 uids,
