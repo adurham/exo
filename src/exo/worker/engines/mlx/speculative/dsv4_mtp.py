@@ -909,54 +909,54 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     k += 1
                 n_accepted_per.append(k)
 
-            # Cross-rank n_accepted broadcast — UNCONDITIONAL. The
-            # earlier "matches at temp=0 is bit-exact across ranks"
-            # assumption is wrong: MLX's TP verify forward has ~1ulp
-            # drift in verify_logits; tied/near-tied positions flip
-            # argmax across ranks → matches diverges → n_accepted
-            # diverges → per-uid yield count diverges → cross-rank
-            # _num_tokens drift (papered over by next-cycle all_max
-            # but per-rank _token_buffer deque depths stay drifted)
-            # → wedge at BS-transition. Trace 2026-05-08 confirmed
-            # divergence on uid 5 num_tokens by 1 within same cycle.
-            if sync_drafts:
-                k_arr = broadcast_from_canonical(
-                    mx.array(n_accepted_per, dtype=mx.int32), coord_group
-                )
-                n_accepted_per = cast(list[int], k_arr.tolist())
-
-            # Per-stream yield. Each uid keeps its own accepted drafts
-            # (no min-strategy capping). Bonus comes from verify_logits
-            # at the stream's first-rejection position.
-            #
-            # All host-side reads are batched into single .tolist() calls
-            # before the loop; the per-stream loop body is pure Python
-            # list ops with no further syncs.
-            all_tokens_per: list[list[tuple[int, mx.array]]] = []
+            # Compute LOCAL bonus_vals using LOCAL n_accepted_per
+            # (pre-broadcast). bonus_lps stay local — they're only
+            # used for response.logprobs (informational; master picks
+            # rank 0 only).
             draft_int = draft_concat.tolist()
             all_next_arr = all_next.tolist()
             next_tokens_int = next_tokens_arr.reshape(N).tolist()
             bonus_vals: list[int] = []
             bonus_lps: list[Any] = []
-            for n, uid in enumerate(uids):
+            for n in range(N):
                 acc = n_accepted_per[n]
-                row: list[tuple[int, mx.array]] = []
-                row.append((next_tokens_int[n], y_logprobs_list[n]))
-                for k in range(acc):
-                    row.append((int(draft_int[n][k]), logprobs_all[n, k]))
-                all_tokens_per.append(row)
                 bonus_vals.append(int(all_next_arr[n][acc]))
                 bonus_lps.append(logprobs_all[n, acc])
 
-            # Cross-rank bonus_vals broadcast — UNCONDITIONAL. Same
-            # reasoning as n_accepted: bonus comes from all_next
-            # (argmax verify_logits at position acc) which can drift
-            # across ranks at tied positions.
+            # Cross-rank n_accepted_per + bonus_vals broadcast —
+            # UNCONDITIONAL, COMBINED. Earlier "matches at temp=0 is
+            # bit-exact across ranks" assumption is wrong: MLX's TP
+            # verify forward has ~1ulp drift in verify_logits;
+            # tied/near-tied positions flip argmax across ranks →
+            # matches diverges → n_accepted diverges → per-uid yield
+            # count diverges → cross-rank _num_tokens drift (papered
+            # over by next-cycle all_max but per-rank _token_buffer
+            # deque depths stay drifted) → wedge at BS-transition.
+            # Trace 2026-05-08 confirmed divergence on uid 5
+            # num_tokens by 1 within same cycle.
+            #
+            # Combined into a single 2N-int32 broadcast: saves one
+            # ACK barrier round-trip per cycle (~50-100µs on coord QP).
             if sync_drafts:
-                bonus_arr = broadcast_from_canonical(
-                    mx.array(bonus_vals, dtype=mx.int32), coord_group
+                combined_arr = broadcast_from_canonical(
+                    mx.array(n_accepted_per + bonus_vals, dtype=mx.int32),
+                    coord_group,
                 )
-                bonus_vals = cast(list[int], bonus_arr.tolist())
+                combined = cast(list[int], combined_arr.tolist())
+                n_accepted_per = combined[:N]
+                bonus_vals = combined[N:]
+
+            # Build all_tokens_per using canonical n_accepted_per so
+            # accepted-draft prefix length matches across ranks.
+            all_tokens_per: list[list[tuple[int, mx.array]]] = []
+            for n in range(N):
+                acc = n_accepted_per[n]
+                row: list[tuple[int, mx.array]] = [
+                    (next_tokens_int[n], y_logprobs_list[n])
+                ]
+                for k in range(acc):
+                    row.append((int(draft_int[n][k]), logprobs_all[n, k]))
+                all_tokens_per.append(row)
 
             self._jaccl_dump_spec(
                 uids,
@@ -1001,29 +1001,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     k += 1
                 k_local.append(k)
 
-            if sync_drafts:
-                k_arr = broadcast_from_canonical(
-                    mx.array(k_local, dtype=mx.int32), coord_group
-                )
-                n_accepted_per = cast(list[int], k_arr.tolist())
-            else:
-                n_accepted_per = k_local
-
-            all_tokens_per = []
+            # Compute LOCAL bonus_local using LOCAL k_local (per-rank
+            # random sample at per-rank acceptance index), then combine
+            # n_accepted_per + bonus_vals into ONE broadcast — saves
+            # one ACK barrier round-trip per cycle vs the prior two
+            # separate broadcasts.
             bonus_lps = []
             bonus_local: list[int] = []
             next_tokens_int_t = next_tokens_arr.reshape(N).tolist()
             draft_concat_int = draft_concat.tolist()
-            for n, uid in enumerate(uids):
-                k = n_accepted_per[n]
-                row: list[tuple[int, mx.array]] = [
-                    (int(next_tokens_int_t[n]), y_logprobs_list[n])
-                ]
-                for kk in range(k):
-                    row.append(
-                        (int(draft_concat_int[n][kk]), logprobs_all[n, kk])
-                    )
-                all_tokens_per.append(row)
+            for n in range(N):
+                k = k_local[n]
                 bonus_local.append(
                     int(
                         mx.random.categorical(
@@ -1034,12 +1022,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 bonus_lps.append(logprobs_all[n, k])
 
             if sync_drafts:
-                bonus_arr = broadcast_from_canonical(
-                    mx.array(bonus_local, dtype=mx.int32), coord_group
+                combined_arr = broadcast_from_canonical(
+                    mx.array(k_local + bonus_local, dtype=mx.int32),
+                    coord_group,
                 )
-                bonus_vals = cast(list[int], bonus_arr.tolist())
+                combined = cast(list[int], combined_arr.tolist())
+                n_accepted_per = combined[:N]
+                bonus_vals = combined[N:]
             else:
+                n_accepted_per = k_local
                 bonus_vals = bonus_local
+
+            # Build all_tokens_per using canonical n_accepted_per.
+            all_tokens_per = []
+            for n in range(N):
+                k = n_accepted_per[n]
+                row: list[tuple[int, mx.array]] = [
+                    (int(next_tokens_int_t[n]), y_logprobs_list[n])
+                ]
+                for kk in range(k):
+                    row.append(
+                        (int(draft_concat_int[n][kk]), logprobs_all[n, kk])
+                    )
+                all_tokens_per.append(row)
 
         # Record per-stream MTP acceptance for telemetry. One sample
         # per uid per cycle; histogram bins each stream's per-cycle
@@ -1388,24 +1393,48 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 else:
                     break
 
-        # Cross-rank n_accepted broadcast — UNCONDITIONAL at TP.
-        # Earlier code skipped this at temp=0, assuming target_tokens
-        # (argmax verify_logits) is bit-exact across ranks. In practice
-        # MLX's TP verify forward has ~1ulp drift in verify_logits;
-        # tied/near-tied positions can flip argmax across ranks, so
-        # `matches[i]` (=target_tokens[i] == draft_concat[i]) diverges
-        # → `n_accepted` diverges → different yield count →
-        # `gen_batch._num_tokens` diverges (papered over by the next
-        # cycle's all_max but the per-rank `_token_buffer` deque
-        # depths stay diverged) → at BS-transition (c=2→c=1) the
-        # buffer drain logic fires asymmetrically and wedges. Trace
-        # captured 2026-05-08 (seq 115: r0 num_tokens=[50],
-        # r1 num_tokens=[49] within same cycle). Always broadcast.
+        # Compute local bonus_val using local n_accepted, BEFORE the
+        # cross-rank broadcast. This lets us combine n_accepted +
+        # bonus_val into ONE broadcast (one ACK barrier round-trip
+        # instead of two). Each rank's local values may differ — we
+        # only commit the canonical (rank 0) pair below.
+        if n_accepted == gamma:
+            if temp == 0:
+                assert all_next is not None
+                bonus_val = int(all_next[gamma].item())
+            else:
+                assert bonus_token is not None
+                bonus_val = int(bonus_token.item())
+            bonus_lp = logprobs_all[gamma]
+        else:
+            if temp == 0:
+                assert all_next is not None
+                bonus_val = int(all_next[n_accepted].item())
+            else:
+                bonus_val = int(corrections[n_accepted].item())
+            bonus_lp = logprobs_all[n_accepted]
+
+        # Cross-rank n_accepted + bonus_val broadcast — UNCONDITIONAL,
+        # COMBINED. Earlier code skipped at temp=0 assuming target_tokens
+        # (argmax verify_logits) was bit-exact across ranks; MLX's TP
+        # verify forward has ~1ulp drift, tied positions flip argmax,
+        # `matches` diverges → n_accepted diverges → yield-count drift
+        # → BS-transition wedge (trace 2026-05-08).
+        #
+        # Combined into a single 2-int32 broadcast: each ACK barrier
+        # round-trip on the dedicated coord ACK QP costs ~50-100µs;
+        # at γ=2 with ~30 cycles/sec/stream this saves one round-trip
+        # per cycle = ~3% wall time per stream.
         if sync_drafts:
-            n_accepted_arr = broadcast_from_canonical(
-                mx.array([n_accepted], dtype=mx.int32), coord_group
+            combined_arr = broadcast_from_canonical(
+                mx.array([n_accepted, bonus_val], dtype=mx.int32),
+                coord_group,
             )
-            n_accepted = int(n_accepted_arr.item())
+            combined = cast(list[int], combined_arr.tolist())
+            n_accepted = combined[0]
+            bonus_val = combined[1]
+        # bonus_lp stays local — only used for response.logprobs
+        # (informational, master picks rank 0's response only).
 
         self._record_acceptance(n_accepted)
 
@@ -1434,36 +1463,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     mtp_cache.trim(rollback)
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
-
-        # 6. Compute bonus token + logprobs.
-        if n_accepted == gamma:
-            if temp == 0:
-                assert all_next is not None
-                bonus_val = int(all_next[gamma].item())
-            else:
-                assert bonus_token is not None
-                bonus_val = int(bonus_token.item())
-            bonus_lp = logprobs_all[gamma]
-        else:
-            if temp == 0:
-                assert all_next is not None
-                bonus_val = int(all_next[n_accepted].item())
-            else:
-                bonus_val = int(corrections[n_accepted].item())
-            bonus_lp = logprobs_all[n_accepted]
-
-        # Cross-rank bonus broadcast — UNCONDITIONAL at TP. Same
-        # reasoning as n_accepted above: at temp=0 bonus_val comes
-        # from `all_next[k]` (argmax verify_logits at position k),
-        # which can drift by ~1ulp across ranks and flip the argmax
-        # at tied positions. Different bonus_val → next cycle's y_N
-        # diverges → verify forward input differs → drift cascades.
-        # Always broadcast from canonical rank.
-        if sync_drafts:
-            bonus_arr = broadcast_from_canonical(
-                mx.array([bonus_val], dtype=mx.int32), coord_group
-            )
-            bonus_val = int(bonus_arr.item())
 
         # 7. Update MTP pre_norm to the verify-pass hidden at the
         #    accepted position, ready for the next cycle.
