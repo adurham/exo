@@ -165,6 +165,11 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # for PR #1192's 2-arg switch_mlp(x, inds) signature. Scores multiplication
     # and per-token expert sum now happen outside in DeepseekV4MoE.__call__.
     : "${EXO_DSV4_FUSED_MOE:=1}"
+    # Phase H mx.compile of the FFN body (gate → switch_mlp → shared_experts
+    # → post_combine → all_sum). +1.3% c=2 100K with MoE only; new
+    # V4Block-level pre/post fusions (2026-05-08) extend this further.
+    # Default-on so the cluster always picks up the compile-cache wins.
+    : "${EXO_DSV4_COMPILE_FFN:=1}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from

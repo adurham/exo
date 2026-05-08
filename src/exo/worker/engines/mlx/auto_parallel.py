@@ -949,6 +949,14 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
                 install_compiled = getattr(layer.ffn, "install_compiled_forward", None)
                 if install_compiled is not None:
                     install_compiled()
+                # Phase H+ (2026-05-08): also pre-trace the four pure
+                # layer-plumbing chunks (HC + norm pre-attn / pre-ffn,
+                # and hc_expand post-attn / post-ffn). Cache mutation
+                # in attention forces the split rather than a single
+                # whole-layer compile.
+                install_block = getattr(layer, "install_compiled_forward", None)
+                if install_block is not None:
+                    install_block()
 
             mx.eval(layer)
             mx.clear_cache()
