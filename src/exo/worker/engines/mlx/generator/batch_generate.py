@@ -58,6 +58,7 @@ from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampli
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     fix_unmatched_think_end_tokens,
+    get_coord_group,
     mx_any,
     system_prompt_token_count,
 )
@@ -1320,11 +1321,16 @@ class ExoBatchGenerator:
         # step here may also be called from non-TP paths — keep this
         # gate collective when a sharding group is present so all ranks
         # branch identically. Memory: jaccl_phase_a_finding_2026_05_05.md.
+        # Coord subgroup: this gate fires once per step at decode rate
+        # alongside the model TP forward; without isolation the small
+        # mx_any all_sum interleaves with model bf16 all_sums in the
+        # encoder queue and the call_id counter races (2026-05-07
+        # diagnosis via JACCL_TRACE_HASH). See get_coord_group.
         local_has_work = self.has_work
         _gpu_probe_local = bool(os.environ.get("MLX_GPU_TIME"))
         _t_mx_any_start = time.perf_counter() if _gpu_probe_local else 0.0
         if self.group is not None and self.group.size() > 1:
-            if not mx_any(local_has_work, self.group):
+            if not mx_any(local_has_work, get_coord_group(self.group)):
                 return []
         elif not local_has_work:
             return []
