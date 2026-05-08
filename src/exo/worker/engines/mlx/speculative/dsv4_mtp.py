@@ -357,6 +357,39 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._cached_sharding_group: Optional[mx.distributed.Group] = None
         self._jaccl_spec_handle: Optional[BinaryIO] = None
         self._mtp_drift_handle: Optional[BinaryIO] = None
+        self._mtp_trace_handle: Optional[BinaryIO] = None
+        self._mtp_trace_seq: int = 0
+
+    def _filter_finished_uid(self, uid: int) -> None:
+        """Override to log when a uid is filtered (per-rank, EOS or
+        length). Used to capture asymmetric filter timing across ranks
+        at BS-transition. Trace is gated on
+        EXO_DSV4_MTP_TRANSITION_TRACE=1.
+        """
+        if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
+            gen_batch = self._generation_batch
+            self._mtp_trace_log("filter_finished_uid", {
+                "filter_uid": uid,
+                "uids_before": list(gen_batch.uids),
+                "num_tokens": list(gen_batch._num_tokens),
+            })
+        super()._filter_finished_uid(uid)
+
+    def _mtp_trace_log(self, event: str, data: dict[str, Any]) -> None:
+        """Append a JSONL line tagged with rank+seq+event to the
+        per-rank transition-trace file. Gated on
+        EXO_DSV4_MTP_TRANSITION_TRACE=1; no-op otherwise.
+        """
+        if self._mtp_trace_handle is None:
+            sg = self._get_sharding_group()
+            rank = sg.rank() if sg is not None else 0
+            path = f"/tmp/dsv4_mtp_trace_rank_{rank}_pid{os.getpid()}.log"
+            self._mtp_trace_handle = open(path, "ab", buffering=0)  # noqa: SIM115
+        import json as _json
+        self._mtp_trace_seq += 1
+        rec = {"seq": self._mtp_trace_seq, "event": event, **data}
+        line = (_json.dumps(rec, default=str) + "\n").encode("utf-8")
+        self._mtp_trace_handle.write(line)
         self._mtp_drift_step: int = 0
 
     def _mtp_drift_dump(
@@ -547,6 +580,24 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         """
         gen_batch = self._generation_batch
 
+        # BS-transition diagnostic. Dumps per-cycle state to
+        # /tmp/dsv4_mtp_trace_rank_${rank}_pid${pid}.log when
+        # EXO_DSV4_MTP_TRANSITION_TRACE=1 is set. Used to localize
+        # cross-rank divergence at the c=2→c=1 transition (one stream
+        # hits EOS, other keeps going). Memory:
+        # jaccl_ack_qp_fix_2026_05_07.md — open issue at session end.
+        if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
+            self._mtp_trace_log("_next ENTER", {
+                "uids": list(gen_batch.uids),
+                "num_tokens": list(gen_batch._num_tokens),
+                "buffered_uids": [
+                    u for u, b in self._token_buffer.items() if b
+                ],
+                "prefilled": sorted(self._mtp_prefilled),
+                "unprocessed": len(self._unprocessed_sequences),
+                "prompt_batch": len(self._prompt_batch),
+            })
+
         # Collective gen_batch sync. Empirically (Phase E.1 trace
         # comparison 2026-05-05) MTP draft state diverges across ranks
         # at long context after several spec cycles even though every
@@ -601,6 +652,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             keep_indices: list[int] = [
                 _i for _i, _u in enumerate(gen_batch.uids) if _u in keep_uids
             ]
+            if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
+                # Counted entries that were non-zero (peer thought uid
+                # was alive at any point). Helps spot rank divergence.
+                nonzero_uids = {
+                    _u: _c for _u, _c in enumerate(counted_lst) if _c > 0
+                }
+                self._mtp_trace_log("upstream_sync", {
+                    "local_uids": list(gen_batch.uids),
+                    "counted_uids": nonzero_uids,
+                    "n_ranks": n_ranks,
+                    "keep_uids": sorted(keep_uids),
+                    "will_filter": len(keep_indices) < len(gen_batch.uids),
+                })
             if len(keep_indices) < len(gen_batch.uids):
                 drop_uids = [u for u in gen_batch.uids if u not in keep_uids]
                 gen_batch.filter(keep_indices)
@@ -675,6 +739,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             and len(self._prompt_batch) == 0
             and len(self._unprocessed_sequences) == 0
         )
+        if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
+            self._mtp_trace_log("dispatch_decision", {
+                "spec_eligible": spec_eligible,
+                "gamma": self.gamma,
+                "n_uids": len(gen_batch),
+                "n_prompt_batch": len(self._prompt_batch),
+                "n_unprocessed": len(self._unprocessed_sequences),
+                "uids": list(gen_batch.uids),
+            })
         if spec_eligible:
             # All uids must be prefilled (have a captured pre_norm).
             uids = list(gen_batch.uids)

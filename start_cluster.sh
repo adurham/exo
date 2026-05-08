@@ -673,6 +673,10 @@ for NODE in "${NODES[@]}"; do
     # localises where in the unsharded MTP chain logits first
     # drift across ranks. Memory: jaccl_phase_f_outcome_2026_05_06.md.
     [ -n "${EXO_MTP_DRIFT_DUMP:-}" ]    && EXO_ENV="$EXO_ENV EXO_MTP_DRIFT_DUMP=$EXO_MTP_DRIFT_DUMP"
+    # Per-cycle dsv4_mtp BS-transition trace. Writes JSONL to
+    # /tmp/dsv4_mtp_trace_rank_${rank}_pid${pid}.log. Used to
+    # localize cross-rank divergence at the c=2→c=1 transition.
+    [ -n "${EXO_DSV4_MTP_TRANSITION_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TRANSITION_TRACE=$EXO_DSV4_MTP_TRANSITION_TRACE"
 
     # Metal GPU timeout mitigations
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
