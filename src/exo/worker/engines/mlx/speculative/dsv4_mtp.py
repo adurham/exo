@@ -1362,14 +1362,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 else:
                     break
 
-        # Cross-rank n_accepted broadcast at temp>0. matches at temp=0 is
-        # already bit-exact across ranks (target_tokens via TP-collective
-        # verify forward, draft_concat via the in-chain broadcast above)
-        # so n_accepted is identical across ranks without further sync.
-        # At temp>0 accept_ratios depend on per-rank q (~1ulp drift) and
-        # uniforms are per-rank RNG, so n_accepted drifts; broadcast
-        # rank-0's value to every rank.
-        if temp != 0 and sync_drafts:
+        # Cross-rank n_accepted broadcast — UNCONDITIONAL at TP.
+        # Earlier code skipped this at temp=0, assuming target_tokens
+        # (argmax verify_logits) is bit-exact across ranks. In practice
+        # MLX's TP verify forward has ~1ulp drift in verify_logits;
+        # tied/near-tied positions can flip argmax across ranks, so
+        # `matches[i]` (=target_tokens[i] == draft_concat[i]) diverges
+        # → `n_accepted` diverges → different yield count →
+        # `gen_batch._num_tokens` diverges (papered over by the next
+        # cycle's all_max but the per-rank `_token_buffer` deque
+        # depths stay diverged) → at BS-transition (c=2→c=1) the
+        # buffer drain logic fires asymmetrically and wedges. Trace
+        # captured 2026-05-08 (seq 115: r0 num_tokens=[50],
+        # r1 num_tokens=[49] within same cycle). Always broadcast.
+        if sync_drafts:
             n_accepted_arr = broadcast_from_canonical(
                 mx.array([n_accepted], dtype=mx.int32), coord_group
             )
@@ -1420,13 +1426,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 bonus_val = int(corrections[n_accepted].item())
             bonus_lp = logprobs_all[n_accepted]
 
-        # Cross-rank bonus broadcast at temp>0. At temp=0 bonus is
-        # derived from all_next (argmax over verify_logits), already
-        # bit-exact via the TP-collective verify forward. At temp>0 the
-        # bonus is either bonus_token (mx.random.categorical, per-rank
-        # RNG) or corrections[n_accepted] (categorical over residual
-        # using per-rank q) — both rank-divergent.
-        if temp != 0 and sync_drafts:
+        # Cross-rank bonus broadcast — UNCONDITIONAL at TP. Same
+        # reasoning as n_accepted above: at temp=0 bonus_val comes
+        # from `all_next[k]` (argmax verify_logits at position k),
+        # which can drift by ~1ulp across ranks and flip the argmax
+        # at tied positions. Different bonus_val → next cycle's y_N
+        # diverges → verify forward input differs → drift cascades.
+        # Always broadcast from canonical rank.
+        if sync_drafts:
             bonus_arr = broadcast_from_canonical(
                 mx.array([bonus_val], dtype=mx.int32), coord_group
             )
