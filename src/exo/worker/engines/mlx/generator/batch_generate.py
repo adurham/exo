@@ -1013,26 +1013,6 @@ class ExoBatchGenerator:
         _prefill_tokens: int = 0
         cache_snapshots: list[CacheSnapshot] = []
         remote_prefilled = False
-        # Defer prefill to mlx-lm's PromptProcessingBatch so multiple
-        # in-flight prompts can prefill BATCHED. The legacy path here
-        # ran ``prefill()`` SYNCHRONOUSLY in submit() — at c=2 long
-        # context that meant stream 1 sat idle for ~6 min while stream 0
-        # prefilled, then ran another ~6 min sequential prefill.
-        # Result: c=2 100K MTP=0 collapsed to ~7.7 tok/s/stream because
-        # the two streams ran serially through prefill. Skipping local
-        # prefill here lets mlx-lm batch them (model.__call__ with
-        # batch=2 fires the same TP collectives in lockstep across
-        # ranks, since both ranks see the same task queue via
-        # agree_on_tasks).
-        # Bench mode is fully covered (no prefix-cache write needed).
-        # Non-bench / disaggregated / vision paths still take the
-        # legacy path until we extend BatchGenerator-side prefill to
-        # handle them.
-        defer_prefill = (
-            is_bench
-            and not (use_remote and task_params.prefill_endpoint is not None)
-            and vision is None
-        )
         with vision_ctx, T("submit.prefill"):
             if use_remote and task_params.prefill_endpoint is not None:
                 try:
@@ -1051,7 +1031,7 @@ class ExoBatchGenerator:
                         "Remote prefill failed, falling back to local prefill"
                     )
 
-            if not remote_prefilled and not defer_prefill:
+            if not remote_prefilled:
                 # Keep prefill_step_size kwarg for our DSv4-Flash tuning
                 # (DSV4_PREFILL_STEP_SIZE=256 per memory).
                 _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
@@ -1095,12 +1075,7 @@ class ExoBatchGenerator:
                     media_regions,
                 )
 
-        # When local prefill was skipped (defer_prefill), pass the FULL
-        # uncached prompt to mlx-lm so its PromptProcessingBatch will
-        # prefill it in batch with any other in-flight streams. When
-        # local prefill ran, only the last 2 tokens are needed (the
-        # cache already holds the rest).
-        last_tokens = prompt_tokens if defer_prefill else prompt_tokens[-2:]
+        last_tokens = prompt_tokens[-2:]
 
         with T("submit.make_logits_processors"):
             # 1.0 is a no-op for repetition_penalty — collapse to None so mlx-lm
