@@ -119,6 +119,16 @@ _DSV4_FUSED_MOE: bool = os.environ.get("EXO_DSV4_FUSED_MOE", "0") == "1"
 # a handful of compile-cache lookups. Off by default while we validate.
 _DSV4_COMPILE_FFN: bool = os.environ.get("EXO_DSV4_COMPILE_FFN", "0") == "1"
 
+# Phase H+ (2026-05-08): also pre-trace the V4Block plumbing chunks
+# (HC + norm pre-attn / post-attn / full FFN section). Independent gate
+# from COMPILE_FFN so we can A/B isolate the layer-level fusion gain.
+# Default = follow COMPILE_FFN; set EXO_DSV4_COMPILE_LAYER=0 to disable
+# explicitly while keeping the MoE-body compile.
+_DSV4_COMPILE_LAYER: bool = (
+    os.environ.get("EXO_DSV4_COMPILE_LAYER", "1" if _DSV4_COMPILE_FFN else "0")
+    == "1"
+)
+
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
 _nn_silu_any: Any = _nn_silu
@@ -949,14 +959,15 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
                 install_compiled = getattr(layer.ffn, "install_compiled_forward", None)
                 if install_compiled is not None:
                     install_compiled()
-                # Phase H+ (2026-05-08): also pre-trace the four pure
-                # layer-plumbing chunks (HC + norm pre-attn / pre-ffn,
-                # and hc_expand post-attn / post-ffn). Cache mutation
-                # in attention forces the split rather than a single
-                # whole-layer compile.
-                install_block = getattr(layer, "install_compiled_forward", None)
-                if install_block is not None:
-                    install_block()
+                # Phase H+ (2026-05-08): also pre-trace the V4Block
+                # plumbing chunks (HC + norm pre-attn / post-attn / full
+                # FFN section). Gated by COMPILE_LAYER so we can A/B.
+                if _DSV4_COMPILE_LAYER:
+                    install_block = getattr(
+                        layer, "install_compiled_forward", None
+                    )
+                    if install_block is not None:
+                        install_block()
 
             mx.eval(layer)
             mx.clear_cache()

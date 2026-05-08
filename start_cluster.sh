@@ -170,6 +170,9 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # V4Block-level pre/post fusions (2026-05-08) extend this further.
     # Default-on so the cluster always picks up the compile-cache wins.
     : "${EXO_DSV4_COMPILE_FFN:=1}"
+    # Phase H+ (2026-05-08) V4Block-level compile fusions on top of
+    # the MoE-body compile gated by COMPILE_FFN. Set =0 to A/B isolate.
+    : "${EXO_DSV4_COMPILE_LAYER:=1}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
@@ -625,6 +628,7 @@ for NODE in "${NODES[@]}"; do
     # while we validate decode quality vs unfused.
     [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
     [ -n "${EXO_DSV4_COMPILE_FFN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_FFN=$EXO_DSV4_COMPILE_FFN"
+    [ -n "${EXO_DSV4_COMPILE_LAYER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_LAYER=$EXO_DSV4_COMPILE_LAYER"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
