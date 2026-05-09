@@ -43,10 +43,10 @@
 : "${EXO_DSV4_BATCHED_PREFILL:=1}"
 # Rendezvous window: how long the runner waits for additional concurrent
 # tasks after the first one arrives, before kicking off prefill. Adds the
-# same delay to c=1 first-token. 50ms is comfortably above the ~3ms cross-rank
-# propagation observed for HTTP-barrier-fired bench requests, while staying
-# below typical interactive HTTP RTT.
-: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=50}"
+# same delay to c=1 first-token. 100ms is the empirically-validated default
+# (50ms missed the rendezvous on remote-rank tasks; 200ms costs c=1 latency
+# unnecessarily). Set to 0 to disable rendezvous.
+: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=100}"
 # Optional mlx-lm profiler hook. Comma-separated variants:
 #   spans         — per-span wall-time accumulator (was EXO_MINIMAX_TRACE)
 #   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;
