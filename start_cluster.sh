@@ -36,15 +36,17 @@
 # more chunk-boundary cache snapshots, which is what the prefix-cache
 # uses to serve mid-prompt partial-prefix hits across requests.
 : "${EXO_PREFILL_STEP_SIZE:=256}"
-# Batched prefill across all queued tasks. Off by default — flip to 1 after
-# Phase 5+6 cluster-side validation per
-# memory:plan_c2_batched_prefill_2026_05_08.md. Closes the c=2 long-context
-# prefill-serialization tax (7.7 → ~17 tok/s/stream at 100K MTP=0).
-: "${EXO_DSV4_BATCHED_PREFILL:=0}"
+# Batched prefill across all queued tasks. Default ON 2026-05-08 after Phase 5
+# cluster validation: c=2 100K MTP=0 went from 7.7 → 13.0 tok/s/stream (+69%)
+# with both streams symmetric (no serialization tax remaining). c=1 path falls
+# through the heterogeneity gate untouched. Memory: c2_batched_prefill_results_2026_05_08.md.
+: "${EXO_DSV4_BATCHED_PREFILL:=1}"
 # Rendezvous window: how long the runner waits for additional concurrent
 # tasks after the first one arrives, before kicking off prefill. Adds the
-# same delay to c=1 first-token. Only matters when batched prefill is on.
-: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=100}"
+# same delay to c=1 first-token. 50ms is comfortably above the ~3ms cross-rank
+# propagation observed for HTTP-barrier-fired bench requests, while staying
+# below typical interactive HTTP RTT.
+: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=50}"
 # Optional mlx-lm profiler hook. Comma-separated variants:
 #   spans         — per-span wall-time accumulator (was EXO_MINIMAX_TRACE)
 #   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;

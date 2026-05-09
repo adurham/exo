@@ -107,7 +107,7 @@ EXO_MAX_CONCURRENT_REQUESTS = int(os.getenv("EXO_MAX_CONCURRENT_REQUESTS", "8"))
 # at c=2 long context that serialized stream 1 behind stream 0's full prefill
 # (~6 min at 100K), collapsing per-stream throughput to ~7.7 tok/s. Off by
 # default; flip to 1 in start_cluster.sh after Phase 5+6 validation.
-EXO_DSV4_BATCHED_PREFILL = os.getenv("EXO_DSV4_BATCHED_PREFILL", "0") == "1"
+EXO_DSV4_BATCHED_PREFILL = os.getenv("EXO_DSV4_BATCHED_PREFILL", "1") == "1"
 
 # Rendezvous window (ms) for batched prefill: when ``EXO_DSV4_BATCHED_PREFILL``
 # is on, after the runner pulls its first GenerationTask from the work queue
@@ -117,9 +117,13 @@ EXO_DSV4_BATCHED_PREFILL = os.getenv("EXO_DSV4_BATCHED_PREFILL", "0") == "1"
 # requests can never land in the engine's queue at the same step() iteration
 # as the first one — the batched-prefill gate at
 # ``BatchGenerator.step()`` would never see ``len(queue) >= 2``.
-# Adds the same latency to c=1 first-token times (so it stays modest).
+# 50ms is comfortably above the ~3ms cross-rank propagation observed for
+# HTTP-barrier-fired bench requests; the same 50ms is added to c=1
+# first-token latency, which is well under typical HTTP RTT for
+# interactive use. Set to 0 to disable rendezvous entirely (back to
+# original per-task path even with batched prefill enabled).
 EXO_BATCHED_PREFILL_RENDEZVOUS_MS = int(
-    os.getenv("EXO_BATCHED_PREFILL_RENDEZVOUS_MS", "100")
+    os.getenv("EXO_BATCHED_PREFILL_RENDEZVOUS_MS", "50")
 )
 
 EXO_MAX_INSTANCE_RETRIES = 5
