@@ -9,7 +9,7 @@ from typing import BinaryIO
 import mlx.core as mx
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
-from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS
+from exo.shared.constants import EXO_DSV4_BATCHED_PREFILL, EXO_MAX_CONCURRENT_REQUESTS
 from exo.shared.types.chunks import ErrorChunk, GenerationChunk, PrefillProgressChunk
 from exo.shared.types.common import ModelId
 from exo.shared.types.events import ChunkGenerated, Event
@@ -644,7 +644,57 @@ class BatchGenerator(Engine):
         with T("batch_gen.agree_on_tasks"):
             self.agree_on_tasks()
 
-        # Submit any queued tasks to the engine
+        # Submit any queued tasks to the engine. When EXO_DSV4_BATCHED_PREFILL
+        # is on AND the queue has 2+ tasks, run a single batched-prefill pass
+        # over them so they share the prefill phase instead of serializing.
+        # The legacy submit() path runs prefill SYNCHRONOUSLY per task; at c=2
+        # long context that meant stream 0 monopolized the runner main loop
+        # for ~6 min while stream 1 sat idle, then stream 1 ran another ~6 min
+        # sequential prefill, collapsing per-stream throughput to ~7.7 tok/s.
+        # See ``ExoBatchGenerator.submit_batched`` for the heterogeneity
+        # gating (bench-only, no vision, no remote prefill, no MTP/PP-spec).
+        if EXO_DSV4_BATCHED_PREFILL:
+            available_slots = EXO_MAX_CONCURRENT_REQUESTS - len(self._active_tasks)
+            if available_slots > 1 and len(self._queue) >= 2:
+                tasks_batch: list[TextGeneration] = []
+                for _ in range(min(available_slots, len(self._queue))):
+                    tasks_batch.append(self._queue.popleft())
+
+                try:
+                    with T("batch_gen.batched_start_task"):
+                        uids = self._batched_start_task(tasks_batch)
+                except PrefillCancelled:
+                    # Treat batched prefill cancellation as "all tasks
+                    # cancelled" — they all go back through the cancellation
+                    # path. Phase 5 stress-tests this.
+                    uids = []
+                except Exception as e:
+                    # Surface the error against the first task in the batch;
+                    # raise so the runner sees the failure and the cluster
+                    # cleanly tears down rather than stalling.
+                    if tasks_batch:
+                        self._send_error(tasks_batch[0], e)
+                    raise
+
+                for task, uid in zip(tasks_batch, uids, strict=True):
+                    queue = GeneratorQueue[GenerationResponse]()
+                    if task.task_params.bench:
+                        output_generator: Iterator[GenerationChunk | None] = map(
+                            lambda r: map_responses_to_chunks(r, self.model_id),
+                            queue.gen(),
+                        )
+                    else:
+                        output_generator = apply_all_parsers(
+                            queue.gen(),
+                            apply_chat_template(self.tokenizer, task.task_params),
+                            self.tool_parser,
+                            self.tokenizer,
+                            type(self.model),
+                            self.model_id,
+                            task.task_params.tools,
+                        )
+                    self._active_tasks[uid] = (task, queue, output_generator)
+
         while self._queue and len(self._active_tasks) < EXO_MAX_CONCURRENT_REQUESTS:
             task = self._queue.popleft()
             try:
@@ -803,6 +853,98 @@ class BatchGenerator(Engine):
                 distributed_prompt_progress_callback=distributed_prompt_progress_callback,
                 on_generation_token=on_generation_token,
             )
+
+    def _batched_start_task(
+        self, tasks: list[TextGeneration]
+    ) -> list[int]:
+        """Build per-task callbacks and run a SINGLE batched prefill across tasks.
+
+        Mirrors ``_start_task`` per task (chat template, prefill-progress event,
+        cancellation polling, generation-token callback) but bundles all of them
+        into one ``ExoBatchGenerator.submit_batched`` call so the prefill phase
+        runs at shape (B, L_chunk) instead of serializing per task. Returns one
+        uid per input task, in the same order.
+        """
+        from exo.worker.engines.mlx.trace import T, request_trace
+
+        bundle: list[tuple[
+            TextGenerationTaskParams,
+            str,
+            "object",
+            "object",
+            "object",
+        ]] = []
+
+        for task in tasks:
+            _check_for_debug_prompts(task.task_params)
+
+            with T("batched_start_task.apply_chat_template"):
+                prompt = apply_chat_template(self.tokenizer, task.task_params)
+
+            # Closures bind to ``task`` so each task's prefill-progress
+            # event and cancellation poll target its own task_id.
+            def _make_on_prefill_progress(_task: TextGeneration):
+                def on_prefill_progress(processed: int, total: int) -> None:
+                    if self.device_rank == 0:
+                        self.event_sender.send(
+                            ChunkGenerated(
+                                command_id=_task.command_id,
+                                chunk=PrefillProgressChunk(
+                                    model=self.model_id,
+                                    processed_tokens=processed,
+                                    total_tokens=total,
+                                ),
+                            )
+                        )
+
+                return on_prefill_progress
+
+            def _make_distributed_callback(_task: TextGeneration):
+                def distributed_prompt_progress_callback() -> None:
+                    t0 = time.perf_counter()
+                    # Poll cancellations across both ranks. We DON'T raise
+                    # PrefillCancelled here even if the per-task is
+                    # cancelled — the batched prefill processes all
+                    # streams together and we'd waste the rest of the
+                    # batch's compute. Instead, the cancellation is
+                    # recorded in ``_cancelled_tasks`` and applied after
+                    # prefill completes via ``_apply_cancellations``.
+                    self.agree_on_cancellations_fast()
+                    request_trace.record(
+                        "prefill_batched.distributed_callback", t0
+                    )
+
+                return distributed_prompt_progress_callback
+
+            def _make_on_generation_token(_task: TextGeneration):
+                tokens_since_cancel_check = self.check_for_cancel_every
+
+                def on_generation_token() -> None:
+                    nonlocal tokens_since_cancel_check
+                    tokens_since_cancel_check += 1
+                    if tokens_since_cancel_check >= self.check_for_cancel_every:
+                        tokens_since_cancel_check = 0
+                        t0 = time.perf_counter()
+                        self.agree_on_cancellations()
+                        if self.should_cancel(_task.task_id):
+                            self._cancelled_tasks.add(_task.task_id)
+                        self.agree_on_tasks()
+                        request_trace.record(
+                            "decode.agree_on_cancel_and_tasks", t0
+                        )
+
+                return on_generation_token
+
+            bundle.append((
+                task.task_params,
+                prompt,
+                _make_on_prefill_progress(task),
+                _make_distributed_callback(task),
+                _make_on_generation_token(task),
+            ))
+
+        with T("batched_start_task.mlx_gen_submit_batched"):
+            return self._gen.submit_batched(bundle)  # type: ignore[arg-type]
 
     def close(self) -> None:
         self._gen.close()

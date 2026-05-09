@@ -102,4 +102,11 @@ ENABLE_DISAGGREGATION = os.getenv("ENABLE_DISAGGREGATION", "false").lower() == "
 
 EXO_MAX_CONCURRENT_REQUESTS = int(os.getenv("EXO_MAX_CONCURRENT_REQUESTS", "8"))
 
+# Batch the prefill phase across all queued tasks at submit-time. The legacy
+# path runs prefill SYNCHRONOUSLY per task in ExoBatchGenerator.submit() —
+# at c=2 long context that serialized stream 1 behind stream 0's full prefill
+# (~6 min at 100K), collapsing per-stream throughput to ~7.7 tok/s. Off by
+# default; flip to 1 in start_cluster.sh after Phase 5+6 validation.
+EXO_DSV4_BATCHED_PREFILL = os.getenv("EXO_DSV4_BATCHED_PREFILL", "0") == "1"
+
 EXO_MAX_INSTANCE_RETRIES = 5

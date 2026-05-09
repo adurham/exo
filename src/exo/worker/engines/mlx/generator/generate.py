@@ -482,6 +482,272 @@ def prefill(
     return tokens_per_sec, num_tokens, snapshots[:-1] if snapshots else []
 
 
+def prefill_batched(
+    model: Model,
+    tokenizer: TokenizerWrapper,
+    sampler: Callable[[mx.array], mx.array],
+    prompt_tokens_list: list[mx.array],
+    cache_list: list[KVCacheType],
+    group: mx.distributed.Group | None,
+    on_prefill_progress: Callable[[int, int], None] | None,
+    distributed_prompt_progress_callback: Callable[[], None] | None,
+    prefill_step_size: int | None = None,
+) -> tuple[list[float], list[int], list[KVCacheType], list[list[CacheSnapshot]]]:
+    """TP-aware batched prefill: process N prompts together at shape (B, L_chunk).
+
+    The serial ``prefill()`` path was the proven c=2 long-context bottleneck —
+    one prefilling stream blocked the runner main loop for the full duration
+    while the other sat in the queue, so c=2 100K MTP=0 collapsed to ~7.7
+    tok/s/stream. This primitive merges per-stream caches into a batched cache,
+    runs the model at (B, L_chunk) so DSv4's TP collectives fire normally, and
+    extracts per-stream caches at the end.
+
+    Caller passes ``prompt_tokens[:-1]`` per stream (matching ``prefill()``'s
+    contract); returned caches land at offset ``len(prompt[:-1]) - 1`` so the
+    decode path can pick up from ``prompt_tokens[-2:]`` as it does today.
+
+    Returns ``(per_stream_tps, per_stream_token_count, per_stream_cache,
+    per_stream_snapshots)``. Snapshots are empty for the DSv4 cache shape (no
+    ArraysCache layers); SSM/DeltaNet models go through the serial fallback.
+    """
+    n_streams = len(prompt_tokens_list)
+    assert n_streams == len(cache_list), "prompt and cache list lengths must match"
+    assert n_streams >= 1, "prefill_batched requires at least one stream"
+
+    # SSM/DeltaNet caches need per-rollback snapshot machinery the serial
+    # ``prefill()`` is built around. The batched code path doesn't yet
+    # snapshot per-chunk; if any stream's cache holds a non-KV layer, fall
+    # back to serial prefill so that path keeps working.
+    if any(has_non_kv_caches(c) for c in cache_list):
+        logger.info(
+            "prefill_batched: ArraysCache/SSM detected — falling back to serial prefill"
+        )
+        return _serial_prefill_fallback(
+            model,
+            tokenizer,
+            sampler,
+            prompt_tokens_list,
+            cache_list,
+            group,
+            on_prefill_progress,
+            distributed_prompt_progress_callback,
+            prefill_step_size,
+        )
+
+    lengths = [int(p.shape[0]) for p in prompt_tokens_list]
+    if any(length == 0 for length in lengths):
+        logger.warning(
+            "prefill_batched: empty prompt detected — falling back to serial prefill"
+        )
+        return _serial_prefill_fallback(
+            model,
+            tokenizer,
+            sampler,
+            prompt_tokens_list,
+            cache_list,
+            group,
+            on_prefill_progress,
+            distributed_prompt_progress_callback,
+            prefill_step_size,
+        )
+
+    max_length = max(lengths)
+    padding = [max_length - length for length in lengths]
+    has_padding = any(p > 0 for p in padding)
+
+    # Right-pad prompts to max_length with token=0. The padded positions
+    # are masked out via cache.prepare(right_padding=...) below and rolled
+    # off via cache.finalize() at the end.
+    if has_padding:
+        padded_lists = [
+            p.tolist() + [0] * (max_length - int(p.shape[0]))
+            for p in prompt_tokens_list
+        ]
+        padded_tokens = mx.array(padded_lists)
+    else:
+        padded_tokens = mx.stack(list(prompt_tokens_list), axis=0)
+
+    if prefill_step_size is None:
+        prefill_step_size = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
+
+    from exo.worker.engines.mlx.trace import T
+
+    set_pipeline_prefill(model, is_prefill=True)
+
+    with T("prefill_batched.clear_cache"):
+        mx.clear_cache()
+    with T("prefill_batched.barrier"):
+        mx_barrier(group)
+
+    with T("prefill_batched.mem_checkpoint"):
+        mx.eval(mx.zeros(1))
+        active_gb = mx.metal.get_active_memory() / 1024**3
+        peak_gb = mx.metal.get_peak_memory() / 1024**3
+        cache_gb = mx.metal.get_cache_memory() / 1024**3
+    logger.info(
+        f"[MEM] before batched prefill (B={n_streams} max_L={max_length} "
+        f"lengths={lengths}): active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, "
+        f"cache={cache_gb:.2f} GB"
+    )
+    logger.info(
+        f"Starting batched prefill: B={n_streams} max_L={max_length} "
+        f"step={prefill_step_size}"
+    )
+
+    # mlx-lm's ``_merge_caches`` handles each cache type's merge protocol —
+    # QuantizedKVCache → BatchKVCache (dequant), RotatingKVCache →
+    # BatchRotatingKVCache, CacheList recurses. Per-stream left_padding is
+    # set inside the merge to align differing-length history.
+    from mlx_lm.generate import _merge_caches  # type: ignore
+
+    with T("prefill_batched.merge_caches"):
+        batched_cache = _merge_caches(cache_list)
+
+    # Tell the merged cache about right-padding so the per-chunk attention
+    # mask zeroes out the padded tail and ``finalize()`` can roll those
+    # entries off after prefill.
+    if has_padding:
+        with T("prefill_batched.prepare"):
+            for c in batched_cache:
+                c.prepare(lengths=lengths, right_padding=padding)
+
+    start_time = time.perf_counter()
+
+    if on_prefill_progress is not None:
+        on_prefill_progress(0, max_length)
+
+    try:
+        with mx.stream(generation_stream):
+            offset = 0
+            chunk_idx = 0
+            while offset < max_length:
+                n_to_process = min(prefill_step_size, max_length - offset)
+                _t_fwd = time.perf_counter()
+                model(padded_tokens[:, offset : offset + n_to_process], cache=batched_cache)
+                from exo.worker.engines.mlx.trace import request_trace
+
+                request_trace.record(
+                    f"prefill_batched.chunk{chunk_idx}.forward({n_to_process}tok)",
+                    _t_fwd,
+                )
+
+                # TP-rank synchronization point — same pattern as the
+                # serial ``prefill()`` chunk loop. Guards against rank
+                # drift before the next chunk's all_sum collectives fire.
+                _t_barrier = time.perf_counter()
+                mx_barrier(group)
+                request_trace.record(
+                    f"prefill_batched.chunk{chunk_idx}.barrier", _t_barrier
+                )
+
+                if distributed_prompt_progress_callback is not None:
+                    _t_cb = time.perf_counter()
+                    distributed_prompt_progress_callback()
+                    request_trace.record(
+                        f"prefill_batched.chunk{chunk_idx}.distributed_cb", _t_cb
+                    )
+
+                _t_eval = time.perf_counter()
+                mx.eval([c.state for c in batched_cache])
+                request_trace.record(
+                    f"prefill_batched.chunk{chunk_idx}.eval_cache", _t_eval
+                )
+                mx.clear_cache()
+
+                offset += n_to_process
+                chunk_idx += 1
+                if on_prefill_progress is not None:
+                    on_prefill_progress(offset, max_length)
+
+                if chunk_idx % 5 == 0 or offset >= max_length:
+                    active_gb = mx.metal.get_active_memory() / 1024**3
+                    peak_gb = mx.metal.get_peak_memory() / 1024**3
+                    logger.info(
+                        f"[MEM] batched prefill chunk {chunk_idx} ({offset}/{max_length}): "
+                        f"active={active_gb:.2f} GB, peak={peak_gb:.2f} GB"
+                    )
+
+        if has_padding:
+            with T("prefill_batched.finalize"):
+                for c in batched_cache:
+                    c.finalize()
+                mx.eval([c.state for c in batched_cache])
+                mx.clear_cache()
+    except PrefillCancelled:
+        set_pipeline_prefill(model, is_prefill=False)
+        raise
+
+    set_pipeline_prefill(model, is_prefill=False)
+
+    # Extract per-stream caches and trim 1 token to mirror ``prefill()``'s
+    # contract: caller passed prompt[:-1] expecting the final cache to land
+    # at offset ``len(prompt[:-1]) - 1`` so decode picks up from
+    # ``prompt_tokens[-2:]``.
+    with T("prefill_batched.extract"):
+        per_stream_caches: list[KVCacheType] = []
+        for i in range(n_streams):
+            per_stream = [c.extract(i) for c in batched_cache]
+            for c in per_stream:
+                if c.is_trimmable():
+                    c.trim(1)
+            per_stream_caches.append(per_stream)
+        mx.eval([
+            c.state for stream_cache in per_stream_caches for c in stream_cache  # type: ignore
+        ])
+
+    elapsed = time.perf_counter() - start_time
+    per_stream_tps = [
+        (length / elapsed) if elapsed > 0 else 0.0 for length in lengths
+    ]
+    # Empty SSM snapshots — DSv4 doesn't use ArraysCache. Maintained for
+    # API parity with ``prefill()``'s return signature.
+    per_stream_snapshots: list[list[CacheSnapshot]] = [[] for _ in range(n_streams)]
+
+    logger.info(
+        f"Batched prefill: B={n_streams} max_L={max_length} done in "
+        f"{elapsed:.2f}s ({sum(lengths) / elapsed:.1f} tok/s aggregate)"
+    )
+
+    return per_stream_tps, lengths, per_stream_caches, per_stream_snapshots
+
+
+def _serial_prefill_fallback(
+    model: Model,
+    tokenizer: TokenizerWrapper,
+    sampler: Callable[[mx.array], mx.array],
+    prompt_tokens_list: list[mx.array],
+    cache_list: list[KVCacheType],
+    group: mx.distributed.Group | None,
+    on_prefill_progress: Callable[[int, int], None] | None,
+    distributed_prompt_progress_callback: Callable[[], None] | None,
+    prefill_step_size: int | None,
+) -> tuple[list[float], list[int], list[KVCacheType], list[list[CacheSnapshot]]]:
+    """Fallback when batched prefill can't be applied (SSM caches, empty prompt).
+
+    Runs the original ``prefill()`` per stream in sequence. Caller still gets
+    the same return shape as the batched path.
+    """
+    per_stream_tps: list[float] = []
+    per_stream_tokens: list[int] = []
+    per_stream_snapshots: list[list[CacheSnapshot]] = []
+    for prompt_tokens, cache in zip(prompt_tokens_list, cache_list, strict=True):
+        tps, tokens, snapshots = prefill(
+            model,
+            tokenizer,
+            sampler,
+            prompt_tokens,
+            cache,
+            group,
+            on_prefill_progress,
+            distributed_prompt_progress_callback,
+            prefill_step_size=prefill_step_size,
+        )
+        per_stream_tps.append(tps)
+        per_stream_tokens.append(tokens)
+        per_stream_snapshots.append(snapshots)
+    return per_stream_tps, per_stream_tokens, list(cache_list), per_stream_snapshots
+
+
 def warmup_inference(
     model: Model,
     tokenizer: TokenizerWrapper,

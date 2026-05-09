@@ -48,6 +48,7 @@ from exo.worker.engines.mlx.generator.generate import (
     extract_top_logprobs,
     patch_embed_tokens,
     prefill,
+    prefill_batched,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.patches.opt_batch_gen import (
@@ -1171,6 +1172,272 @@ class ExoBatchGenerator:
         )
 
         return uid
+
+    def submit_batched(  # noqa: C901
+        self,
+        tasks: list[tuple[
+            TextGenerationTaskParams,
+            str,
+            Callable[[int, int], None] | None,
+            Callable[[], None] | None,
+            Callable[[], None] | None,
+        ]],
+    ) -> list[int]:
+        """Submit multiple tasks with a SINGLE batched prefill pass.
+
+        Each tuple is ``(task_params, prompt_str, on_prefill_progress,
+        distributed_prompt_progress_callback, on_generation_token)``. Returns
+        the list of uids in the same order as ``tasks``.
+
+        The serial ``submit()`` path was the proven c=2 long-context bottleneck:
+        stream 0 monopolized the runner main loop for the full prefill duration
+        while stream 1 sat in the queue, so c=2 100K MTP=0 collapsed to ~7.7
+        tok/s/stream. This batched path runs ``prefill_batched`` once across
+        all tasks so they prefill TOGETHER at shape (B, L_chunk).
+
+        Falls back to per-task ``submit()`` for any task that can't be batched
+        (vision, remote-prefill endpoint, MTP-active, PP-spec). When only one
+        task is in the batch list, also falls back to ``submit()`` to avoid
+        the unnecessary merge/extract overhead.
+        """
+        from exo.worker.engines.mlx.trace import T
+
+        # Single-task fast path / wedge guard: degenerates to existing submit()
+        # so c=1 deployments don't pay any new code-path cost.
+        if len(tasks) <= 1:
+            return [self.submit(*t) for t in tasks]
+
+        # PP-spec or MTP path: batched prefill not yet wired through these.
+        # Fall back to per-task submit() to keep them working.
+        if self._pp_spec_active or hasattr(self._mlx_gen, "mtp"):
+            logger.info(
+                "submit_batched: PP-spec or MTP active — falling back to per-task submit()"
+            )
+            return [self.submit(*t) for t in tasks]
+
+        # Heterogeneity guard: any task that needs the per-task path (vision,
+        # remote prefill, prefix-cache hit) goes through ``submit()`` so the
+        # batched fast path stays simple. Phase 4 ships behind opt-in env;
+        # Phase 5+ extends coverage if needed.
+        eligible: list[int] = []
+        ineligible: list[int] = []
+        for i, (task_params, _prompt, _opp, _dppc, _ogt) in enumerate(tasks):
+            is_bench = task_params.bench
+            has_remote = task_params.prefill_endpoint is not None
+            has_vision = bool(task_params.images) or any(
+                getattr(msg, "content", None) is not None
+                and not isinstance(msg.content, str)
+                for msg in task_params.input
+            )
+            if not is_bench or has_remote or has_vision:
+                ineligible.append(i)
+            else:
+                eligible.append(i)
+
+        if len(eligible) < 2:
+            return [self.submit(*t) for t in tasks]
+
+        # Run the eligible tasks through the batched path; the rest go
+        # through the legacy per-task path. Preserve the input ordering
+        # in the returned uids.
+        uids: list[int | None] = [None] * len(tasks)
+
+        with T("submit_batched.batched_path"):
+            batch_uids = self._submit_batched_eligible(
+                [tasks[i] for i in eligible]
+            )
+        for i, uid in zip(eligible, batch_uids, strict=True):
+            uids[i] = uid
+
+        for i in ineligible:
+            uids[i] = self.submit(*tasks[i])
+
+        # All slots filled by construction.
+        return [u for u in uids if u is not None]
+
+    def _submit_batched_eligible(  # noqa: C901
+        self,
+        tasks: list[tuple[
+            TextGenerationTaskParams,
+            str,
+            Callable[[int, int], None] | None,
+            Callable[[], None] | None,
+            Callable[[], None] | None,
+        ]],
+    ) -> list[int]:
+        """Run a SINGLE batched-prefill pass across `tasks` (all eligible).
+
+        Sequence per task: encode prompt → resolve sampling → make logits
+        processors → fresh cache. Then ONE ``prefill_batched`` call across all
+        tasks. Then per-task ``_mlx_gen.insert`` + ``_active_tasks`` registration.
+
+        Caller must ensure all tasks are eligible (bench=True, no vision, no
+        remote prefill, no MTP/PP-spec). See ``submit_batched`` for the gate.
+        """
+        from exo.worker.engines.mlx.trace import T
+
+        n = len(tasks)
+        assert n >= 2, "_submit_batched_eligible requires >= 2 tasks"
+
+        # ---- Per-task preprocessing (cheap, sequential is fine) ----
+        all_prompt_tokens_list: list[mx.array] = []
+        prompt_tokens_list: list[mx.array] = []
+        cache_list: list[Any] = []
+        sampler_list: list[Callable[[mx.array], mx.array]] = []
+        logits_processors_list: list[list[Callable[[mx.array, mx.array], mx.array]]] = []
+        max_tokens_list: list[int] = []
+        prefix_hit_lengths: list[int] = [0] * n
+        matched_indices: list[int | None] = [None] * n
+        is_exact_hits: list[bool] = [False] * n
+
+        for task_params, prompt, _opp, _dppc, _ogt in tasks:
+            with T("submit_batched.encode_prompt"):
+                tokens = encode_prompt(self.tokenizer, prompt)
+                tokens = fix_unmatched_think_end_tokens(tokens, self.tokenizer)
+            all_prompt_tokens_list.append(tokens)
+
+            # Eligibility gate enforced bench=True so kv_prefix_cache is bypassed
+            # (matches the existing submit() behavior at line 946: prefix cache
+            # is skipped when ``is_bench``). Fresh cache per task.
+            with T("submit_batched.make_kv_cache"):
+                cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+            cache_list.append(list(cache))
+            prompt_tokens_list.append(tokens)
+
+            seed = task_params.seed if task_params.seed is not None else 42
+            mx.random.seed(seed)
+
+            _card = card_sampling_values(task_params.model, task_params.enable_thinking)
+            _resolved = resolve_sampling(
+                request_temperature=task_params.temperature,
+                request_top_p=task_params.top_p,
+                request_top_k=task_params.top_k,
+                request_min_p=task_params.min_p,
+                request_presence_penalty=task_params.presence_penalty,
+                request_repetition_penalty=task_params.repetition_penalty,
+                request_frequency_penalty=task_params.frequency_penalty,
+                instance_temperature=self.default_temperature,
+                instance_top_p=self.default_top_p,
+                instance_top_k=self.default_top_k,
+                instance_min_p=self.default_min_p,
+                instance_presence_penalty=self.default_presence_penalty,
+                instance_repetition_penalty=self.default_repetition_penalty,
+                instance_frequency_penalty=self.default_frequency_penalty,
+                card_temperature=_card.temperature if _card else None,
+                card_top_p=_card.top_p if _card else None,
+                card_top_k=_card.top_k if _card else None,
+                card_min_p=_card.min_p if _card else None,
+                card_presence_penalty=_card.presence_penalty if _card else None,
+                card_repetition_penalty=_card.repetition_penalty if _card else None,
+                card_frequency_penalty=_card.frequency_penalty if _card else None,
+            )
+            sampler = make_sampler(
+                temp=_resolved["temp"],
+                top_p=_resolved["top_p"],
+                top_k=_resolved["top_k"],
+                min_p=_resolved["min_p"],
+            )
+            sampler_list.append(sampler)
+
+            _rp = _resolved["repetition_penalty"]
+            if _rp == 1.0:
+                _rp = None
+            lp_list: list[Callable[[mx.array, mx.array], mx.array]] = (
+                make_logits_processors(
+                    repetition_penalty=_rp,
+                    repetition_context_size=task_params.repetition_context_size or 20,
+                    presence_penalty=_resolved["presence_penalty"],
+                    presence_context_size=task_params.presence_context_size or 20,
+                    frequency_penalty=_resolved["frequency_penalty"],
+                )
+            )
+            # bench mode: ban EOS so length is the only stop signal — same as
+            # the existing submit() codepath at line 1097.
+            eos_ids = eos_ids_from_tokenizer(self.tokenizer)
+            lp_list = [ban_token_ids(eos_ids)] + lp_list
+            logits_processors_list.append(lp_list)
+
+            max_tokens_list.append(task_params.max_output_tokens or MAX_TOKENS)
+
+        # ---- Pick a single shared prefill progress callback ----
+        # The serial path uses a per-task closure. For batched prefill we use
+        # the FIRST task's callbacks for cluster-side progress reporting and
+        # cancellation polling (the cancellation callback fires
+        # agree_on_cancellations_fast, which is collective and shared across
+        # tasks anyway). Per-task progress events still come back via the
+        # decode-side step() path.
+        on_prefill_progress = tasks[0][2]
+        distributed_prompt_progress_callback = tasks[0][3]
+
+        # Adapter: the serial prefill expects (prompt_tokens[:-1]) so the
+        # cache lands at len-2. prefill_batched mirrors that contract.
+        prompt_inputs = [p[:-1] for p in prompt_tokens_list]
+
+        with T("submit_batched.prefill"):
+            (
+                per_stream_tps,
+                _per_stream_tokens,
+                per_stream_caches,
+                _per_stream_snapshots,
+            ) = prefill_batched(
+                self.model,
+                self.tokenizer,
+                sampler_list[0],
+                prompt_inputs,
+                cache_list,
+                self.group,
+                on_prefill_progress,
+                distributed_prompt_progress_callback,
+                prefill_step_size=self.prefill_step_size,
+            )
+
+        # ---- Insert each task's last-2 tokens into mlx-lm BatchGenerator ----
+        uids: list[int] = []
+        for i, (task_params, _prompt, _opp, _dppc, on_generation_token) in enumerate(tasks):
+            last_tokens = prompt_tokens_list[i][-2:]
+            with T("submit_batched.insert"):
+                inserted = self._mlx_gen.insert(
+                    prompts=[last_tokens.tolist()],
+                    max_tokens=[max_tokens_list[i]],
+                    caches=[per_stream_caches[i]],
+                    samplers=[sampler_list[i]],
+                    logits_processors=[logits_processors_list[i]],
+                )
+            assert len(inserted) == 1
+            uid = inserted[0]
+            uids.append(uid)
+
+            # Per-request temperature for the speculative decode path
+            # (no-op when not running speculative). Mirrors submit().
+            if hasattr(self._mlx_gen, "_request_temp"):
+                env_temp = os.environ.get("EXO_SPECULATIVE_TEMP")
+                if env_temp is not None:
+                    self._mlx_gen._request_temp[uid] = float(env_temp)
+                else:
+                    self._mlx_gen._request_temp[uid] = resolve_sampling(
+                        request_temperature=task_params.temperature,
+                        instance_temperature=self.default_temperature,
+                    )["temp"]
+
+            self._active_tasks[uid] = _EngineTask(
+                uid=uid,
+                task_params=task_params,
+                all_prompt_tokens=all_prompt_tokens_list[i],
+                prefix_hit_length=prefix_hit_lengths[i],
+                matched_index=matched_indices[i],
+                is_exact_hit=is_exact_hits[i],
+                cache_snapshots=None,  # SSM/snapshots not used at bench-only batched path
+                detokenizer=self.tokenizer.detokenizer,
+                on_generation_token=on_generation_token,
+                generation_start_time=time.perf_counter(),
+                prefill_tps=per_stream_tps[i],
+                # Match submit()'s bookkeeping: capture wall after prefill so
+                # gen_tps reflects decode-only timing, not prefill.
+                generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
+                media_regions=[],
+            )
+
+        return uids
 
     def _submit_pp_spec(
         self,
