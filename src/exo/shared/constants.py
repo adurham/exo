@@ -117,15 +117,21 @@ EXO_DSV4_BATCHED_PREFILL = os.getenv("EXO_DSV4_BATCHED_PREFILL", "1") == "1"
 # requests can never land in the engine's queue at the same step() iteration
 # as the first one — the batched-prefill gate at
 # ``BatchGenerator.step()`` would never see ``len(queue) >= 2``.
-# 100ms is the default. Empirically: 50ms missed the rendezvous on c=2
-# small (per_req fell back to 23.4 = legacy serial baseline) because
-# cross-rank libp2p broadcast adds tens-to-hundreds of ms between m4-1
-# (master, fast local arrival) and m4-2 (remote arrival). 200ms catches
-# both, but adds 200ms to c=1 first-token. 100ms is the smallest window
-# that reliably catches both in production. Set to 0 to disable rendezvous
-# (back to original per-task path even with batched prefill enabled).
+# 200ms is the empirically-validated default. Each rank has its OWN
+# rendezvous deadline starting when it pulls its first task from the work
+# queue. For batched prefill to fire, BOTH ranks must catch BOTH tasks
+# within their own windows — otherwise agree_on_tasks gates to the
+# intersection (1 task), and the batched gate at BatchGenerator.step()
+# (len(queue) >= 2) fails on both ranks collectively.
+# Empirical results 2026-05-09 c=2 small (concurrent_bench, no HTTP barrier):
+#   50ms:  m4-1 rendezvous never fired → per_req=23.4 (legacy serial)
+#   100ms: m4-1 + m4-2 rendezvoused on DIFFERENT iterations → no batch
+#   200ms: both ranks consistently catch both tasks → per_req=26.3 (+12%)
+# c=1 first-token tax is 200ms — under typical interactive HTTP RTT
+# variability. Set to 0 to disable rendezvous (per-task path even with
+# batched prefill enabled).
 EXO_BATCHED_PREFILL_RENDEZVOUS_MS = int(
-    os.getenv("EXO_BATCHED_PREFILL_RENDEZVOUS_MS", "100")
+    os.getenv("EXO_BATCHED_PREFILL_RENDEZVOUS_MS", "200")
 )
 
 EXO_MAX_INSTANCE_RETRIES = 5
