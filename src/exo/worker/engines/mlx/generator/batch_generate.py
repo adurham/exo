@@ -1217,18 +1217,16 @@ class ExoBatchGenerator:
 
         # Heterogeneity guard: any task that needs the per-task path (vision,
         # remote prefill, prefix-cache hit) goes through ``submit()`` so the
-        # batched fast path stays simple. Phase 4 ships behind opt-in env;
-        # Phase 5+ extends coverage if needed.
+        # batched fast path stays simple. Vision is detected via
+        # ``task_params.images`` only — the per-message content is always
+        # ``InputMessageContent`` (never raw str), so an isinstance check on
+        # message content would falsely flag every text request as vision.
         eligible: list[int] = []
         ineligible: list[int] = []
         for i, (task_params, _prompt, _opp, _dppc, _ogt) in enumerate(tasks):
             is_bench = task_params.bench
             has_remote = task_params.prefill_endpoint is not None
-            has_vision = bool(task_params.images) or any(
-                getattr(msg, "content", None) is not None
-                and not isinstance(msg.content, str)
-                for msg in task_params.input
-            )
+            has_vision = bool(task_params.images)
             if not is_bench or has_remote or has_vision:
                 ineligible.append(i)
             else:
