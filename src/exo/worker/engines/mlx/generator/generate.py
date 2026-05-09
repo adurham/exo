@@ -13,7 +13,7 @@ from mlx_lm.generate import (
     maybe_quantize_kv_cache,
     stream_generate,
 )
-from mlx_lm.models.cache import ArraysCache, RotatingKVCache
+from mlx_lm.models.cache import ArraysCache, CacheList, RotatingKVCache
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
@@ -514,11 +514,23 @@ def prefill_batched(
     assert n_streams == len(cache_list), "prompt and cache list lengths must match"
     assert n_streams >= 1, "prefill_batched requires at least one stream"
 
-    # SSM/DeltaNet caches need per-rollback snapshot machinery the serial
-    # ``prefill()`` is built around. The batched code path doesn't yet
-    # snapshot per-chunk; if any stream's cache holds a non-KV layer, fall
-    # back to serial prefill so that path keeps working.
-    if any(has_non_kv_caches(c) for c in cache_list):
+    # ArraysCache (DeltaNet/SSM) needs per-chunk snapshot rollback machinery
+    # that the serial ``prefill()`` is built around. Batched prefill doesn't
+    # snapshot per-chunk; if any stream's cache holds an ArraysCache layer,
+    # fall back to serial. RotatingKVCache + PoolingCache are fine here —
+    # both have merge() / extract() and run cleanly in the batched path
+    # (DSv4 uses CacheList(RotatingKVCache, PoolingCache, PoolingCache)).
+    def _has_arrays_cache(layers: KVCacheType) -> bool:
+        for layer in layers:
+            if isinstance(layer, ArraysCache):
+                return True
+            if isinstance(layer, CacheList):
+                for sub in layer.caches:
+                    if isinstance(sub, ArraysCache):
+                        return True
+        return False
+
+    if any(_has_arrays_cache(c) for c in cache_list):
         logger.info(
             "prefill_batched: ArraysCache/SSM detected — falling back to serial prefill"
         )
@@ -534,10 +546,18 @@ def prefill_batched(
             prefill_step_size,
         )
 
-    lengths = [int(p.shape[0]) for p in prompt_tokens_list]
-    if any(length == 0 for length in lengths):
+    # Caller passes prompt[:-1] (matching ``prefill()``'s contract: cache lands
+    # at len-2 so decode can pick up from prompt[-2:]). We process one fewer
+    # token internally — i.e., effectively prompt[:-2] — so the cache offset
+    # ends at len-2 with NO trim needed. Serial prefill uses snapshot+restore
+    # for RotatingKVCache because trim doesn't roll back rotation state, and
+    # PoolingCache's `trim` only affects its remainder buffer (not the
+    # pooled entries). Skipping the last token avoids needing either, since
+    # the cache simply stops one short.
+    full_lengths = [int(p.shape[0]) for p in prompt_tokens_list]
+    if any(length <= 1 for length in full_lengths):
         logger.warning(
-            "prefill_batched: empty prompt detected — falling back to serial prefill"
+            "prefill_batched: prompt length <= 1 — falling back to serial prefill"
         )
         return _serial_prefill_fallback(
             model,
@@ -551,6 +571,10 @@ def prefill_batched(
             prefill_step_size,
         )
 
+    # Drop the last token of each prompt — the cache will land at
+    # full_lengths[i] - 1 = len(caller's input) - 1 = len(original prompt) - 2.
+    process_tokens_list = [p[:-1] for p in prompt_tokens_list]
+    lengths = [int(p.shape[0]) for p in process_tokens_list]
     max_length = max(lengths)
     padding = [max_length - length for length in lengths]
     has_padding = any(p > 0 for p in padding)
@@ -561,11 +585,11 @@ def prefill_batched(
     if has_padding:
         padded_lists = [
             p.tolist() + [0] * (max_length - int(p.shape[0]))
-            for p in prompt_tokens_list
+            for p in process_tokens_list
         ]
         padded_tokens = mx.array(padded_lists)
     else:
-        padded_tokens = mx.stack(list(prompt_tokens_list), axis=0)
+        padded_tokens = mx.stack(list(process_tokens_list), axis=0)
 
     if prefill_step_size is None:
         prefill_step_size = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
@@ -679,17 +703,13 @@ def prefill_batched(
 
     set_pipeline_prefill(model, is_prefill=False)
 
-    # Extract per-stream caches and trim 1 token to mirror ``prefill()``'s
-    # contract: caller passed prompt[:-1] expecting the final cache to land
-    # at offset ``len(prompt[:-1]) - 1`` so decode picks up from
-    # ``prompt_tokens[-2:]``.
+    # Extract per-stream caches. Cache offset is already at
+    # ``full_lengths[i] - 1`` (= caller's prompt[:-1] length minus 1)
+    # because we processed one fewer token than passed in. No trim needed.
     with T("prefill_batched.extract"):
         per_stream_caches: list[KVCacheType] = []
         for i in range(n_streams):
             per_stream = [c.extract(i) for c in batched_cache]
-            for c in per_stream:
-                if c.is_trimmable():
-                    c.trim(1)
             per_stream_caches.append(per_stream)
         mx.eval([
             c.state for stream_cache in per_stream_caches for c in stream_cache  # type: ignore
