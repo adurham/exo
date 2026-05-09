@@ -41,6 +41,10 @@
 # memory:plan_c2_batched_prefill_2026_05_08.md. Closes the c=2 long-context
 # prefill-serialization tax (7.7 → ~17 tok/s/stream at 100K MTP=0).
 : "${EXO_DSV4_BATCHED_PREFILL:=0}"
+# Rendezvous window: how long the runner waits for additional concurrent
+# tasks after the first one arrives, before kicking off prefill. Adds the
+# same delay to c=1 first-token. Only matters when batched prefill is on.
+: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=100}"
 # Optional mlx-lm profiler hook. Comma-separated variants:
 #   spans         — per-span wall-time accumulator (was EXO_MINIMAX_TRACE)
 #   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;
@@ -595,6 +599,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${MLX_MAX_MB_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_MB_PER_BUFFER=$MLX_MAX_MB_PER_BUFFER"
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
     EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
+    EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
     [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
     [ -n "$EXO_PREFIX_CACHE_TRACE" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_TRACE=$EXO_PREFIX_CACHE_TRACE"
     [ -n "$EXO_RUNNER_COREDUMP" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_COREDUMP=$EXO_RUNNER_COREDUMP"

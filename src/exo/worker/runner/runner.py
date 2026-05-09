@@ -8,7 +8,11 @@ from typing import BinaryIO
 
 from anyio import ClosedResourceError, EndOfStream
 
-from exo.shared.constants import ENABLE_DISAGGREGATION
+from exo.shared.constants import (
+    ENABLE_DISAGGREGATION,
+    EXO_BATCHED_PREFILL_RENDEZVOUS_MS,
+    EXO_DSV4_BATCHED_PREFILL,
+)
 from exo.shared.types.chunks import Chunk
 from exo.shared.types.common import CommandId
 from exo.shared.types.events import (
@@ -338,6 +342,54 @@ class Runner:
         self.seen.add(starting_task.task_id)
 
         self.submit_generation(starting_task)
+
+        # Rendezvous window for batched prefill: when ``EXO_DSV4_BATCHED_PREFILL``
+        # is on, drain the work queue briefly BEFORE the first step() call so
+        # any concurrent c=2+ requests can land in the engine's queue at the
+        # same step() iteration as ``starting_task``. Without this, the first
+        # task's prefill blocks the runner thread before any subsequent task
+        # can even reach the engine, and the batched-prefill gate at
+        # ``BatchGenerator.step()`` never sees ``len(queue) >= 2``.
+        # Latency cost: ``EXO_BATCHED_PREFILL_RENDEZVOUS_MS`` added to c=1
+        # first-token times when batched prefill is on.
+        if EXO_DSV4_BATCHED_PREFILL and EXO_BATCHED_PREFILL_RENDEZVOUS_MS > 0:
+            rendezvous_deadline = (
+                time.monotonic() + EXO_BATCHED_PREFILL_RENDEZVOUS_MS / 1000.0
+            )
+            from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS
+
+            extras_seen = 0
+            while time.monotonic() < rendezvous_deadline and (
+                len(self.active_tasks) < EXO_MAX_CONCURRENT_REQUESTS
+            ):
+                remaining = rendezvous_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    item = self._work_queue.get(timeout=remaining)
+                except queue.Empty:
+                    break
+                # Stash non-generation items (PrefillTask, _TaskStreamClosed,
+                # other commands) back into the queue so the existing main
+                # loop handles them — only batch GenerationTasks at this
+                # rendezvous point.
+                if isinstance(item, GenerationTask):
+                    if item.task_id in self.seen:
+                        continue
+                    self.seen.add(item.task_id)
+                    self.acknowledge_task(item)
+                    self.submit_generation(item)
+                    extras_seen += 1
+                else:
+                    # Re-enqueue and exit rendezvous early so the loop can
+                    # handle this item promptly.
+                    self._work_queue.put(item)
+                    break
+            if extras_seen > 0:
+                logger.info(
+                    f"Rendezvous batched {extras_seen + 1} concurrent tasks "
+                    f"(window={EXO_BATCHED_PREFILL_RENDEZVOUS_MS}ms)"
+                )
 
         # Track A probe: per-cycle attribution (gated MLX_GPU_TIME=1).
         # Helps separate generator.step() wall from send_chunk + queue

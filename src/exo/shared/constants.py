@@ -109,4 +109,17 @@ EXO_MAX_CONCURRENT_REQUESTS = int(os.getenv("EXO_MAX_CONCURRENT_REQUESTS", "8"))
 # default; flip to 1 in start_cluster.sh after Phase 5+6 validation.
 EXO_DSV4_BATCHED_PREFILL = os.getenv("EXO_DSV4_BATCHED_PREFILL", "0") == "1"
 
+# Rendezvous window (ms) for batched prefill: when ``EXO_DSV4_BATCHED_PREFILL``
+# is on, after the runner pulls its first GenerationTask from the work queue
+# we briefly drain the queue for additional concurrent tasks BEFORE entering
+# the engine's step() loop. Without this window, the first arriving task
+# immediately blocks the runner inside its prefill, so subsequent c=2
+# requests can never land in the engine's queue at the same step() iteration
+# as the first one — the batched-prefill gate at
+# ``BatchGenerator.step()`` would never see ``len(queue) >= 2``.
+# Adds the same latency to c=1 first-token times (so it stays modest).
+EXO_BATCHED_PREFILL_RENDEZVOUS_MS = int(
+    os.getenv("EXO_BATCHED_PREFILL_RENDEZVOUS_MS", "100")
+)
+
 EXO_MAX_INSTANCE_RETRIES = 5
