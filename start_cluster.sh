@@ -67,10 +67,18 @@
 : "${EXO_DRAFT_KV_WINDOW:=4096}"
 : "${EXO_TURBOQUANT:=}"
 # KV_CACHE_BITS and TURBOQUANT are mutually exclusive — TurboQuant does its own quantization
+# Default 0 (bf16 KV, no quantization) — chosen 2026-05-09 for QUALITY safety:
+# 4-bit KV introduces quantization noise into cached K/V values; even though
+# SDPA scores are computed in higher precision, cached K/V quant errors
+# compound across attention. Per `feedback_kv_cache_quality_risk.md`, prod
+# deployments must use bf16 KV; the perf delta vs 4-bit is ~4% at c=2 100K
+# DSv4 sparse-attention (4-bit faster on bandwidth pressure but quant
+# noise hurts accuracy). Override to a positive N only for memory-
+# constrained deploys near the 124 GB wired-limit ceiling.
 if [ -n "$EXO_TURBOQUANT" ]; then
     EXO_KV_CACHE_BITS=""
 else
-    : "${EXO_KV_CACHE_BITS:=4}"
+    : "${EXO_KV_CACHE_BITS:=0}"
 fi
 : "${EXO_COMPUTE_DTYPE:=bf16}"
 # 2-pass SDPA block count override (MLX PR #3455). Empirical sweet-spot

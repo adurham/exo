@@ -146,9 +146,39 @@ is set — the sentinel exists specifically for instances like the Huihui
 scouts that coexist on a node with a quantization-hungry tenant but don't
 themselves benefit from 4-bit KV.
 
+### Quality vs perf tradeoff (2026-05-09)
+
+**`EXO_KV_CACHE_BITS=0` (bf16 KV) is the default in start_cluster.sh and
+the recommended config for production.** 4-bit KV introduces quantization
+noise into the cached K/V values — even though SDPA scores are computed in
+higher precision, the cached K/V quant errors compound across attention
+layers and degrade output quality on long-context, sensitive workloads.
+
+Empirically on the 2× M4 Max RDMA cluster, c=2 100K MTP=0 DSv4-Flash
+sparse-attention regime:
+- bf16 KV: 11.4 tok/s/stream (sustained 3/3)
+- 4-bit KV: 11.9 tok/s/stream (sustained 3/3) — ~4% faster but quant noise
+
+The 4-bit perf advantage comes from reduced memory bandwidth pressure
+(4× smaller cache reads). It is NOT compute savings — Apple Silicon SDPA
+is bandwidth-fed, not compute-bound, and the dequant work in 4-bit kernels
+is noise vs the bandwidth reduction. Per
+`feedback_unquant_sdpa_prior_knowledge.md`, on full attention (e.g.
+MiniMax) bf16 wins by 2.5×; on DSv4 sparse attention (top-K reads only)
+the bandwidth advantage shrinks and 4-bit's pressure reduction barely
+edges ahead.
+
+Use 4-bit (or higher quant N) only when memory pressure approaches the
+124 GB per-rank wired-limit ceiling. At 100K c=2 we use ~3 GB of bf16
+KV total (~1.25 GB at 4-bit) — ample headroom for bf16. The ~240K
+context limit memory entry (`context_length_limits.md`) was measured
+with 4-bit KV; bf16 reaches a lower ceiling but still well above 100K.
+
 ### start_cluster.sh knobs
 
 Defaults wired as of commit `65655ced`:
+- `EXO_KV_CACHE_BITS=0` — global default flipped to bf16 (no quant) on
+  2026-05-09 per the quality reasoning above.
 - `MINIMAX_KV_CACHE_BITS=4` — MiniMax-M2.7 runs 4-bit KV so 196K × 2 sessions fits per node.
 - `HUIHUI_KV_CACHE_BITS=0` — Huihui scouts run bf16 KV.
 - `MINIMAX_MAX_PREFIX_SESSIONS=2` — two-turn reuse for the active Hermes conversation.
