@@ -55,6 +55,19 @@ def take_ready_topk(batch: GenerationBatch) -> BatchTopKLogprobs:
 
 
 def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
+    # GPU-utilization probe (optional). Same pattern as the upstream mlx-lm
+    # probe in mlx_lm/generate.py:GenerationBatch._step, copied here because
+    # this monkey-patch replaces _step at import time so the upstream probe
+    # never runs. Env-gated (MLX_GPU_TIME=1) — fast no-op when unset.
+    import os as _os
+    import sys as _sys
+    import time as _time
+    _gpu_probe = bool(_os.environ.get("MLX_GPU_TIME"))
+    if _gpu_probe:
+        _gpu_log_every = int(_os.environ.get("MLX_GPU_TIME_LOG_EVERY", "32"))
+        _wall_start = _time.perf_counter()
+        _gpu_ns_start = mx.metal.gpu_time_ns()
+
     self._current_tokens = self._next_tokens
     self._current_logprobs = self._next_logprobs
     inputs = self._current_tokens
@@ -64,8 +77,12 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     buf.ready = buf.pending
     buf.pending = BatchTopKLogprobs()
 
+    if _gpu_probe:
+        _t_pre_forward = _time.perf_counter()
     logits = self.model(inputs[:, None], cache=self.prompt_cache)
     logits = logits[:, -1, :]
+    if _gpu_probe:
+        _t_post_forward = _time.perf_counter()
 
     if self.logits_processors is not None and any(self.logits_processors):
         processed_logits: list[mx.array] = []
@@ -90,6 +107,8 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     self._next_tokens = sampled
     self._next_logprobs = logprobs
 
+    if _gpu_probe:
+        _t_pre_async_eval = _time.perf_counter()
     if buf.needs_topk:
         batch_size = len(self.uids)
         k = min(_PRECOMPUTE_TOP_K, logprobs.shape[1])
@@ -115,6 +134,9 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     else:
         mx.async_eval(self._next_tokens, self._next_logprobs)
 
+    if _gpu_probe:
+        _t_post_async_eval = _time.perf_counter()
+
     current_lp = self._current_logprobs
     if isinstance(current_lp, mx.array):
         mx.eval(inputs, current_lp)
@@ -122,6 +144,8 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
         mx.eval(inputs, *current_lp)
     else:
         mx.eval(inputs)
+    if _gpu_probe:
+        _t_post_eval = _time.perf_counter()
 
     # NOTE: previous attempts to bound the per-step ArrayDesc leak via
     # mx.detach (single-node + recursive subgraph), mx.synchronize, and
@@ -139,6 +163,48 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
 
     if isinstance(current_lp, mx.array):
         current_lp = list(current_lp)
+
+    if _gpu_probe:
+        _t_step_end = _time.perf_counter()
+        _wall_ns = int((_t_step_end - _wall_start) * 1e9)
+        _gpu_ns_delta = mx.metal.gpu_time_ns() - _gpu_ns_start
+        _ns = lambda a, b: int((b - a) * 1e9)
+        _pre_fwd_ns = _ns(_wall_start, _t_pre_forward)
+        _fwd_build_ns = _ns(_t_pre_forward, _t_post_forward)
+        _sample_build_ns = _ns(_t_post_forward, _t_pre_async_eval)
+        _async_ns = _ns(_t_pre_async_eval, _t_post_async_eval)
+        _eval_block_ns = _ns(_t_post_async_eval, _t_post_eval)
+        _post_eval_ns = _ns(_t_post_eval, _t_step_end)
+
+        cnt = getattr(self, "_gpu_probe_cnt", 0) + 1
+        self._gpu_probe_cnt = cnt
+        self._gpu_probe_sum_wall = getattr(self, "_gpu_probe_sum_wall", 0) + _wall_ns
+        self._gpu_probe_sum_gpu = getattr(self, "_gpu_probe_sum_gpu", 0) + _gpu_ns_delta
+        self._gpu_probe_sum_pre_fwd = getattr(self, "_gpu_probe_sum_pre_fwd", 0) + _pre_fwd_ns
+        self._gpu_probe_sum_fwd_build = getattr(self, "_gpu_probe_sum_fwd_build", 0) + _fwd_build_ns
+        self._gpu_probe_sum_sample = getattr(self, "_gpu_probe_sum_sample", 0) + _sample_build_ns
+        self._gpu_probe_sum_async = getattr(self, "_gpu_probe_sum_async", 0) + _async_ns
+        self._gpu_probe_sum_eval = getattr(self, "_gpu_probe_sum_eval", 0) + _eval_block_ns
+        self._gpu_probe_sum_post = getattr(self, "_gpu_probe_sum_post", 0) + _post_eval_ns
+        if cnt % _gpu_log_every == 0:
+            avg = lambda x: x / cnt / 1e6
+            B = inputs.shape[0] if hasattr(inputs, "shape") else len(inputs)
+            pct = (self._gpu_probe_sum_gpu / self._gpu_probe_sum_wall * 100.0) if self._gpu_probe_sum_wall > 0 else 0.0
+            _sys.stderr.write(
+                f"[GPU_TIME pid={_os.getpid()}] "
+                f"steps={cnt} B={B} "
+                f"wall={avg(self._gpu_probe_sum_wall):.2f} "
+                f"gpu={avg(self._gpu_probe_sum_gpu):.2f} "
+                f"pct={pct:.1f} "
+                f"pre_fwd={avg(self._gpu_probe_sum_pre_fwd):.3f} "
+                f"fwd_build={avg(self._gpu_probe_sum_fwd_build):.2f} "
+                f"sample={avg(self._gpu_probe_sum_sample):.3f} "
+                f"async={avg(self._gpu_probe_sum_async):.3f} "
+                f"eval={avg(self._gpu_probe_sum_eval):.2f} "
+                f"post={avg(self._gpu_probe_sum_post):.2f}\n"
+            )
+            _sys.stderr.flush()
+
     return token_list, current_lp
 
 
