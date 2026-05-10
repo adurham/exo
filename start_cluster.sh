@@ -30,7 +30,7 @@
 # Trade-off: narrower per-position attention vs full lookback range.
 : "${EXO_DSV4_INDEX_TOPK:=192}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
-: "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
+: "${EXO_PP_DRAFT_MODEL=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 # DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
 # dsv4_prefill_chunk_size_curve memory. Smaller chunks also produce
 # more chunk-boundary cache snapshots, which is what the prefix-cache
