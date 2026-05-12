@@ -492,19 +492,40 @@ in as default because optimum is workload-specific.
 
 ### Headline result (canonical MTP-off configuration)
 
-Stacking three changes on top of the original MTP-off control moves
-c=1 100K decode from 15.4 → 17.6 tok/s (+14%), wall 735s → 421s
-(-43%), with quality preserved at each step via 100K
-needle-in-haystack probe at temp=0:
+c=1 100K decode 15.4 → 29.3 tok/s (+90%), wall 735s → 385s (-48%),
+quality preserved at every step via 100K needle-in-haystack probe
+at temp=0. **At the 30 tok/s project target.**
+
+The biggest single win — accounting for ~12 of the 14 tok/s gain —
+was *removing* ``EXO_PROFILER=spans`` from the runtime env. The
+``finalize()`` calls scattered through ``deepseek_v4.py`` are no-ops
+when no profiler hook is registered, but ``EXO_PROFILER=spans``
+registers a hook whose ``finalize`` is ``mx.eval(x); return x`` —
+forcing a GPU sync at every section boundary in V4Attention,
+Compressor, Indexer, MoE, and V4Block. With ~10 finalize sites per
+layer × 43 layers per decode step, that's ~430 forced syncs per
+token, completely defeating mlx's async pipelining.
+
+The May 11-12 tuning sweep ran the entire time with
+``EXO_PROFILER=spans`` set (the canonical bench env did this by
+default). Every "this knob doesn't help" result was measured on a
+sync-saturated cluster. Once the profiler hook is removed, async
+pipelining returns and the GPU runs nearly flat-out:
 
 ```
                                               decode    wall    prefill
-control (no extras)                            15.4 t/s  735s   127 t/s
+control (no extras, EXO_PROFILER=spans)        15.4 t/s  735s   127 t/s
 + EXO_PREFILL_STEP_SIZE=128                    15.5      457    210
 + EXO_DSV4_FENCE_EVERY_N_LAYERS=16             17.3      446    215
 + bf16 _indexer_score (5518f17 in mlx-lm)      17.6      422    224
 + compile _sparse_pooled_attention (ee68e44)   17.6      421    225
++ unset EXO_PROFILER  (← THE win)              29.3      385    244
 ```
+
+The other four changes are still real (the bf16 _indexer_score fix
+and compile boundary refactor make small per-call improvements,
+the env tuning lowers prefill chunk cost), but the dominant lever
+was the profiler hook removal.
 
 The bf16 ``_indexer_score`` change restored the f4dd9e7 fix that
 ``2e099bd`` had silently undone when wrapping that function in
