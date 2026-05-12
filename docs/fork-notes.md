@@ -520,10 +520,28 @@ under MTP-off (within ±0.1 tok/s noise), but kept as durable
 infrastructure for c=2 and longer-context workloads.
 
 Gap to the 30 tok/s c=1 target: 17.6 → 30 needs +70% more decode.
-Remaining work is code-level: V4Indexer kernel rewrite or larger
-@mx.compile boundaries that fuse the un-compiled middle of
-``V4Attention.__call__`` (the build_probe shows ~11.4 ms CPU wall
-per layer vs ~1.87 ms GPU per layer = 6x dispatch overhead).
+
+Phase I (May 12 follow-up, reverted): tried splitting
+``SparseCompressedAttention.__call__`` around two new @mx.compile
+boundaries (pre-SDPA projection chain + post-SDPA o-projection
+chain). Cluster bench showed ~1% decode regression (17.6 → 17.5)
+and no wall change. **Reverted** (commits d1892fe9 in mlx-lm and
+42fa1a0c in exo). Post-mortem: the wrapped chain contains ops that
+are already-compiled primitives (``mx.fast.rope``, ``_q_finalize``,
+``_o_pre_a``, ``_o_pre_b``); stacking ``@mx.compile`` on top adds
+cache-lookup overhead without fusion benefit. The auto_parallel.py
+hook was kept (cheap no-op getattr) in case a better refactor
+arrives. Lesson: build_probe correctly identified CPU dispatch as
+the bottleneck but the un-compiled cost is in
+``Compressor.__call__`` and ``Indexer.__call__`` internals — NOT
+in the projection bookends of V4Attention. Future compile-boundary
+work should target those module bodies, not the surrounding chain.
+
+Remaining real work: V4Indexer kernel rewrite (Compressor.__call__
+projection chain refactor) or a per-attention-class fused-attn
+@mx.compile that wraps the entire SDPA-conditional dispatch as
+three path-specialized graphs (separate compiled functions per
+branch, switched in Python at the call site).
 
 #### MTP-on side note (NOT the canonical config)
 
