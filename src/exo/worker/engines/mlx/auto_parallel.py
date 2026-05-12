@@ -968,6 +968,19 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
                     )
                     if install_block is not None:
                         install_block()
+                    # Phase I (2026-05-12): also install per-attention-class
+                    # compile boundaries inside V4Attention.__call__ when
+                    # the attention class supports it (currently only
+                    # SparseCompressedAttention). Compiles the pre-SDPA
+                    # projection chain (q/kv lora+norm+rope) and post-SDPA
+                    # chain (rope-inverse + o-projection) into two
+                    # @mx.compile boundaries; the cache-mutating and
+                    # SDPA-dispatch parts stay un-compiled.
+                    install_attn = getattr(
+                        layer.attn, "install_compiled_attn", None
+                    )
+                    if install_attn is not None:
+                        install_attn()
 
             mx.eval(layer)
             mx.clear_cache()
