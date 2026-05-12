@@ -531,17 +531,77 @@ are already-compiled primitives (``mx.fast.rope``, ``_q_finalize``,
 ``_o_pre_a``, ``_o_pre_b``); stacking ``@mx.compile`` on top adds
 cache-lookup overhead without fusion benefit. The auto_parallel.py
 hook was kept (cheap no-op getattr) in case a better refactor
-arrives. Lesson: build_probe correctly identified CPU dispatch as
-the bottleneck but the un-compiled cost is in
-``Compressor.__call__`` and ``Indexer.__call__`` internals — NOT
-in the projection bookends of V4Attention. Future compile-boundary
-work should target those module bodies, not the surrounding chain.
+arrives.
 
-Remaining real work: V4Indexer kernel rewrite (Compressor.__call__
-projection chain refactor) or a per-attention-class fused-attn
-@mx.compile that wraps the entire SDPA-conditional dispatch as
-three path-specialized graphs (separate compiled functions per
-branch, switched in Python at the call site).
+Phase II (May 12, small bit-identical cleanup): dropped the
+unsqueeze/squeeze pair around the rope call in
+``Compressor.__call__`` (saves 2 ops × ~21 layers per decode step).
+Cluster bench within noise — kept as free cleanup. Commit
+``1a0aa5c`` in mlx-lm.
+
+### c=2 100K baseline (NEW measurement May 12)
+
+Lifted the c=2 gate now that c=1 100K reached 17.6 t/s with quality
+preserved. With identical env (MTP off, KV bf16, step128, fence16,
+bf16 _indexer_score, sparse_pooled_attention compile):
+
+```
+c=1 100K (1 stream):  wall  421s   17.6 tok/s/stream
+c=2 100K (2 streams): wall  858s   11.3 tok/s/stream  (sum 22.7)
+```
+
+c=2 wall is 2.03× c=1 wall. **Zero batching benefit** — the cluster
+is fully CPU-dispatch-serial at c=2. This matches the build_probe
+finding (CPU wall 11.4 ms/layer vs GPU wall 1.87 ms/layer = 6×
+dispatch overhead): with one stream we're already CPU-bound, so
+two streams just queue up.
+
+This radically reframes the path to 30 tok/s:
+
+The fundamental bottleneck is **mlx eager-mode CPU dispatch**, not
+GPU compute. Any kernel-level Metal optimization (custom kernels,
+gather_qmm tuning, etc.) helps the GPU run faster — but the GPU is
+already idle 60-80% of the time waiting for the CPU to send the next
+op. Closing the 17.6 → 30 gap at c=1 requires reducing per-op CPU
+dispatch overhead in mlx itself.
+
+### Path forward — mlx CPU-dispatch optimization
+
+We own ``adurham/mlx``. Concrete next steps in priority order:
+
+1. **Add per-op-class CPU-time probe in mlx-lm Python**
+   (~30 LOC change in deepseek_v4.py): wrap each callsite of
+   ``mx.fast.rope``, ``mx.quantized_matmul``, ``mx.softmax``,
+   ``RMSNorm``, etc. with a ``time.perf_counter()`` bracket gated by
+   an env flag like ``MLX_OP_PROBE``. After one bench, the dump
+   tells us exactly which op classes eat the dispatch budget.
+
+2. **Examine the eager submit hot path in mlx C++**
+   (``mlx/transforms.cpp:eval_impl``, ``mlx/scheduler.cpp``).
+   The DFS over the op graph + fence + cache lookups happens per
+   ``mx.eval()`` call. Profile this with Instruments to find the
+   top stack frames.
+
+3. **Reduce per-op pybind validation overhead**
+   in ``mlx/python/src/*.cpp``. Each ``mx.fast.rope`` call crosses
+   Python→C++ with arg unpacking and type checks. Inlining or
+   caching for hot-path callsites might shave µs/op × millions
+   of ops/bench.
+
+4. **Build mlx with profiling enabled and run Instruments
+   sampling** during a c=1 100K bench — would show the actual
+   CPU stack frames eating time.
+
+### Out of scope
+
+- **Custom Metal kernels** are NOT the answer here. The GPU is
+  already idle most of the time; making it faster doesn't help
+  when the CPU can't feed it. (User explicitly noted custom Metal
+  has never worked for this fork — this analysis confirms why:
+  the bottleneck was misdiagnosed.)
+- **Algorithmic changes** (smaller index_topk, attention sliding
+  window changes) sacrifice quality and were already characterized
+  in the May 11 env-knob sweep — no free lunches there.
 
 #### MTP-on side note (NOT the canonical config)
 
