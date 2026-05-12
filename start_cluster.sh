@@ -35,7 +35,10 @@
 # dsv4_prefill_chunk_size_curve memory. Smaller chunks also produce
 # more chunk-boundary cache snapshots, which is what the prefix-cache
 # uses to serve mid-prompt partial-prefix hits across requests.
-: "${EXO_PREFILL_STEP_SIZE:=256}"
+# Lowered 256 -> 128 on 2026-05-11: c=1 100K sweep showed -38% wall and
+# +65% prefill tok/s vs 256, decode unchanged, quality (needle-in-haystack)
+# preserved. See docs/fork-notes.md "DSv4 c=1 100K tuning May 11".
+: "${EXO_PREFILL_STEP_SIZE:=128}"
 # Batched prefill across all queued tasks. Default ON 2026-05-08 after Phase 5
 # cluster validation: c=2 100K MTP=0 went from 7.7 → 13.0 tok/s/stream (+69%)
 # with both streams symmetric (no serialization tax remaining). c=1 path falls
@@ -193,6 +196,12 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # Phase H+ (2026-05-08) V4Block-level compile fusions on top of
     # the MoE-body compile gated by COMPILE_FFN. Set =0 to A/B isolate.
     : "${EXO_DSV4_COMPILE_LAYER:=1}"
+    # Cross-rank fence cadence during decode. Default 16 (~3 fences per
+    # 43-layer DSv4 pass) chosen on 2026-05-11 sweep: control (fence=1)
+    # -> 15.4 tok/s; fence=4 -> 16.9; fence=8 -> 17.0; fence=16 -> 17.3;
+    # fence=43 -> 17.4 (asymptote). 16 is the safe sweet spot, quality
+    # preserved at 100K needle test. Set to 1 to revert to per-layer fences.
+    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=16}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
@@ -214,7 +223,8 @@ fi
 # chunk above ~1.2K tokens crashes Metal allocation. Cap at 512 for safety
 # margin until upstream PR #1192 lands the query-grouped sparse-SDPA fix.
 # See dsv4_prefill_blowup memory + docs/upstream-prs.md.
-: "${DSV4_PREFILL_STEP_SIZE:=256}"
+# Lowered 256 -> 128 on 2026-05-11 - see EXO_PREFILL_STEP_SIZE note above.
+: "${DSV4_PREFILL_STEP_SIZE:=128}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage.
