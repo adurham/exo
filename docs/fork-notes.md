@@ -490,26 +490,58 @@ in as default because optimum is workload-specific.
 
 ## DSv4 c=1 100K tuning sweep — May 11-12 2026
 
-### Headline result
+### Headline result (canonical MTP-off configuration)
 
-Stacking three env-knob changes on top of MTP self-spec moves c=1 100K
-decode from 15.4 → 21.6 tok/s (+40%), wall 735s → 444s (-40%), with
-quality preserved at each step via 100K needle-in-haystack probe.
+Stacking three changes on top of the original MTP-off control moves
+c=1 100K decode from 15.4 → 17.6 tok/s (+14%), wall 735s → 421s
+(-43%), with quality preserved at each step via 100K
+needle-in-haystack probe at temp=0:
 
-May 12 follow-up: attempted to also drop the fp32 casts inside
-``_indexer_score`` (commits ``39d2e3d2`` + ``fe5b7158`` on
-adurham/mlx-lm) — restored in mlx-lm but reverted in ``6e8e61f9``.
-The cast removal does make the score kernel ~1.4ms faster per MTP
-cycle (verify 81.7 → 80.3 ms, prefill +4.2% to 224 tok/s end-of-prefill,
-wall 444 → 420 s, -5.4%), but MTP draft/verify agreement drops from
-1.04/2 → 0.95/2 because the 1.5% numerical perturbation in indexer
-scores changes which keys are picked at the argpartition cutoff. Net
-decode: 21.6 → 21.3 tok/s (-1.4%) — wrong direction for the per-stream
-goal. **Lesson:** any indexer-score perturbation, however small,
-reduces MTP acceptance enough to eat the kernel speedup. Future
-optimizations should be bit-identical (graph fusion, dtype-preserving
-Metal kernels) or gated on ``EXO_DSV4_MTP=0`` so the MTP path isn't
-affected.
+```
+                                              decode    wall    prefill
+control (no extras)                            15.4 t/s  735s   127 t/s
++ EXO_PREFILL_STEP_SIZE=128                    15.5      457    210
++ EXO_DSV4_FENCE_EVERY_N_LAYERS=16             17.3      446    215
++ bf16 _indexer_score (5518f17 in mlx-lm)      17.6      422    224
++ compile _sparse_pooled_attention (ee68e44)   17.6      421    225
+```
+
+The bf16 ``_indexer_score`` change restored the f4dd9e7 fix that
+``2e099bd`` had silently undone when wrapping that function in
+``mx.compile``. Microbench: 1.23x at decode shapes (0.7 ms → 0.54
+ms per call). At cluster level: +1.7% decode, +3.7% prefill, -5.4%
+wall under MTP-off.
+
+The ``_sparse_pooled_attention`` rewrite pulls the dynamic-shape
+``take_along_axis`` outside the ``@mx.compile`` boundary and wraps
+the static-shape inner kernel — sidestepping the May 9 shapeless
+broadcast bug that crashed ``97f87c0``. Cluster: wash at c=1 100K
+under MTP-off (within ±0.1 tok/s noise), but kept as durable
+infrastructure for c=2 and longer-context workloads.
+
+Gap to the 30 tok/s c=1 target: 17.6 → 30 needs +70% more decode.
+Remaining work is code-level: V4Indexer kernel rewrite or larger
+@mx.compile boundaries that fuse the un-compiled middle of
+``V4Attention.__call__`` (the build_probe shows ~11.4 ms CPU wall
+per layer vs ~1.87 ms GPU per layer = 6x dispatch overhead).
+
+#### MTP-on side note (NOT the canonical config)
+
+Same stack under ``EXO_DSV4_MTP=1 EXO_SPECULATIVE=1`` reaches
+21.6 tok/s decode at 444s wall (cumulative +40% decode, -40% wall
+vs control). MTP self-spec is bit-identical at temp=0 by rejection-
+sampling guarantee — produces user-visible output identical to
+non-MTP greedy. Documented for any future evaluation under that
+mode, but the user's project constraint is MTP-off as canonical.
+
+The bf16 ``_indexer_score`` change is documented in the mlx-lm source
+to behave DIFFERENTLY under MTP-on: the 1.5% numerical perturbation
+reduces draft/verify acceptance from 1.04/2 → 0.95/2, eating the
+kernel speedup at decode (21.6 → 21.3 t/s under MTP-on). Under
+MTP-off (no draft to disagree with), it is a pure win. **Future
+optimizations of the indexer-score path should be evaluated under
+both modes if MTP-on is ever expected to ship**, since perturbation-
+based wins only work under MTP-off.
 
 ```
                                           wall    decode  prefill  needle
