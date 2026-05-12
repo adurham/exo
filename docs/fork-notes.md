@@ -496,6 +496,21 @@ Stacking three env-knob changes on top of MTP self-spec moves c=1 100K
 decode from 15.4 → 21.6 tok/s (+40%), wall 735s → 444s (-40%), with
 quality preserved at each step via 100K needle-in-haystack probe.
 
+May 12 follow-up: attempted to also drop the fp32 casts inside
+``_indexer_score`` (commits ``39d2e3d2`` + ``fe5b7158`` on
+adurham/mlx-lm) — restored in mlx-lm but reverted in ``6e8e61f9``.
+The cast removal does make the score kernel ~1.4ms faster per MTP
+cycle (verify 81.7 → 80.3 ms, prefill +4.2% to 224 tok/s end-of-prefill,
+wall 444 → 420 s, -5.4%), but MTP draft/verify agreement drops from
+1.04/2 → 0.95/2 because the 1.5% numerical perturbation in indexer
+scores changes which keys are picked at the argpartition cutoff. Net
+decode: 21.6 → 21.3 tok/s (-1.4%) — wrong direction for the per-stream
+goal. **Lesson:** any indexer-score perturbation, however small,
+reduces MTP acceptance enough to eat the kernel speedup. Future
+optimizations should be bit-identical (graph fusion, dtype-preserving
+Metal kernels) or gated on ``EXO_DSV4_MTP=0`` so the MTP path isn't
+affected.
+
 ```
                                           wall    decode  prefill  needle
 control (no extras)                       735s    15.4     127      ✓
