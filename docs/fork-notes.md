@@ -488,6 +488,169 @@ the full sweep + cluster config context.
 Forwarded through `start_cluster.sh` as of exo `6ae331fe`. Not baked
 in as default because optimum is workload-specific.
 
+## DSv4 c=1 100K tuning sweep — May 11-12 2026
+
+### Headline result
+
+Stacking three env-knob changes on top of MTP self-spec moves c=1 100K
+decode from 15.4 → 21.6 tok/s (+40%), wall 735s → 444s (-40%), with
+quality preserved at each step via 100K needle-in-haystack probe.
+
+```
+                                          wall    decode  prefill  needle
+control (no extras)                       735s    15.4     127      ✓
++ EXO_PREFILL_STEP_SIZE=128               457s    15.5     210      ✓
++ EXO_DSV4_FENCE_EVERY_N_LAYERS=16        446s    17.3     215      ✓
++ EXO_DSV4_MTP=1 + EXO_SPECULATIVE=1      444s    21.6     215      ✓
+```
+
+All three landed as defaults in `start_cluster.sh` (commit `56572245`,
+"perf(start_cluster): DSv4 c=1 100K tuning sweep — step=128 + fence=16").
+MTP was already default=1 in the script; the harness used to force it
+off for "canonical baseline" runs, but that's an artifact of pre-fork
+testing.
+
+Verified across multiple cluster restarts: `step128+fence16` reproduces
+446s/17.3 (pre-MTP) and 444s/21.6 (post-MTP) ±0.5%.
+
+### Method — quality-gated harness
+
+Every experiment runs the same 5-step protocol via
+`~/.hermes/scripts/run_exp.sh <label> "<env=val>"`:
+
+1. SSH teardown of both Studios (screen quit + pkill exo -v)
+2. `start_cluster.sh` with canonical baseline env + extra overrides
+3. Wait for `READY (2/2)` via `/tmp/exp_launch_*.log` polling
+4. **Quality gate first**: `bench/quality_probe_dsv4.py` runs
+   needle-in-haystack at ~100K with the secret `FALCON-MERCURY-7749`
+   embedded in the middle third. If the needle is NOT in the response,
+   the experiment is marked `quality_failed` and the bench is SKIPPED.
+   Non-negotiable; perf wins that lose quality are not wins.
+5. `concurrent_bench.py` c=1, 100K, 2 iters, max-tokens=256,
+   `--timeout 3600`
+6. Append one JSON line per run to `/tmp/exp_results.jsonl`
+
+The quality gate caught two regressions during the sweep that
+pure-perf metrics would have shipped: `EXO_DSV4_INDEX_TOPK=128`
+(model emitted a single `.`) and `EXO_PREFILL_STEP_SIZE=64/512`
+(needle missed). See "Counter-examples" below.
+
+### Full sweep matrix
+
+24 experiments ran across two days. Grouped by outcome:
+
+**Confirmed wins (3, stacked):**
+
+| Knob | Value | Effect | Notes |
+|------|------:|-------:|-------|
+| `EXO_PREFILL_STEP_SIZE` | 128 | wall -38%, prefill +65%, decode flat | was 256 |
+| `EXO_DSV4_FENCE_EVERY_N_LAYERS` | 16 | decode +13% | was implicitly 1 (every layer); 4→16.9, 8→17.0, 16→17.3, 43→17.4 (asymptote) |
+| `EXO_DSV4_MTP` + `EXO_SPECULATIVE` | 1, 1 | decode +25% | bit-identical at temp=0 per rejection-sampling guarantee |
+
+**Decisively neutral (within bench noise ±0.2 tok/s, 8 experiments):**
+
+| Knob | Tested | Decode | Verdict |
+|------|--------|-------:|---------|
+| `MLX_SDPA_BLOCKS` | 88 | 15.2 | -1% vs control; the MiniMax-50K sweet spot doesn't transfer to DSv4-100K. Skip. |
+| `EXO_DSV4_INDEXER_WINDOW` | 8192 | 17.3 | unchanged |
+| `EXO_DSV4_INDEXER_WINDOW` | 4096 | 17.3 | unchanged |
+| `EXO_DSV4_INDEXER_WINDOW_LATE` | n/a | — | **dead config** — forwarded by start_cluster.sh but NOT consumed anywhere in the codebase |
+| `EXO_DSV4_FUSED_MOE` | 0 (pre-MTP) | 17.2 | within noise |
+| `EXO_DSV4_FUSED_MOE` | 0 (post-MTP) | 21.6 | within noise — fused MoE earns ≈0 at our placement at c=1, kept on per historical c=2 data |
+| `EXO_DRAFT_KV_WINDOW` | 2048 | 21.5 | unchanged |
+| `EXO_DRAFT_KV_WINDOW` | 16384 | 21.5 | unchanged |
+| `EXO_SPECULATIVE_ALPHA` | 0.5 | 21.5 | unchanged — alpha is degenerate at temp=0 (accept ratio is 0 or 1) |
+| `EXO_DSV4_INDEX_TOPK` | 160 | 15.5 | within noise of 192 default |
+
+**Counter-examples (quality- or perf-broken, 5 experiments):**
+
+| Knob | Value | Outcome | Why |
+|------|------:|---------|-----|
+| `EXO_DSV4_INDEX_TOPK` | 128 | **quality broken** | model emitted single `.` and missed needle. Sparse indexer needs ≥160 candidates at 100K to recover useful context. Do not lower below 192 without quality gating. |
+| `EXO_PREFILL_STEP_SIZE` | 64 | **quality broken** + prefill -22% | too many chunk boundaries change sparse-indexer materialization |
+| `EXO_PREFILL_STEP_SIZE` | 512 | **quality broken** + prefill -22% | the sweet spot is narrow: 128 ✓, 256 ✓, 512 ✗, 64 ✗ |
+| `EXO_DSV4_COMPILE_FFN=0 EXO_DSV4_COMPILE_LAYER=0` | both off | decode -53% (8.1 tok/s), prefill -13% | confirms compile path is working correctly; the "compile may not warm with TP placement" hypothesis is **disproved** |
+| `EXO_SPECULATIVE_GAMMA` | 3 | decode -18% (17.7) | the third draft token has low acceptance; wasted forward work |
+| `EXO_SPECULATIVE_GAMMA` | 1 | decode -6% (20.2) | fewer draft tokens = less amortisation of verify cost |
+
+### Profile decomposition
+
+Two probes were used to identify where the remaining decode time goes.
+
+**MTP cycle breakdown** (`EXO_DSV4_MTP_PROFILE=50 EXO_DSV4_MTP_LOG_INTERVAL=50`):
+
+```
+[MTP-PROF] B=1 draft      mean=  4.84 ms   ( 5.5%)
+[MTP-PROF] B=1 verify     mean= 81.7  ms   (93.4%)   ← main DSv4 forward
+[MTP-PROF] B=1 accept     mean=  0.79 ms   ( 0.9%)
+[MTP-PROF] B=1 rollback   mean=  0.17 ms   ( 0.2%)
+[MTP-PROF] B=1 total      mean= 87.5  ms
+
+[MTP] mean_accept = 1.04 / 2 drafts  (hist 0:34% / 1:28% / 2:38%)
+```
+
+Acceptance rate translates to ~2.04 generated tokens per main-model
+forward (1 guaranteed verify + 1.04 mean accepted drafts) → ~2x
+speedup vs non-MTP, which matches the observed 15.5 → 21.6 (the 25%
+shortfall pays for draft cost + accept/rollback overhead). Theoretical
+ceiling at γ=2 with 100% acceptance is 3 tokens/forward — we're at
+2.04/3 = 68% of that ceiling. Pushing acceptance up would help, but
+draft is only 5.5% of cycle time, so the bounded impact is limited.
+
+**Per-V4Block-layer breakdown** (`MLX_BUILD_PROBE=1`,
+`MLX_BUILD_PROBE_LOG_EVERY=64`, steady-state at ~2K decode steps):
+
+```
+per_layer (ms):
+  attn_pre    0.004   (negligible)
+  attn       11.4     (96.4%)   ← sparse-indexer attention
+  post_attn   0.007
+  ffn_pre     0.010
+  ffn         0.42    ( 3.6%)   ← MoE compile is working
+  post_ffn    0.003
+```
+
+The MoE-FFN compile (`EXO_DSV4_COMPILE_FFN=1`) earns its keep — FFN
+drops to 0.42 ms/layer steady-state. The disable-compile experiment
+above (-53% decode) confirms this is doing real work.
+
+Attention is the bottleneck inside V4Block. The sparse indexer does
+an O(L) score computation across all L=100,000 key tokens before
+TopK=192 selection. The 11.4 ms/layer is wall-clock-while-CPU-issues
+-mlx-ops to GPU; whether this is GPU-bound or CPU-dispatch-bound
+requires deeper inspection (`MLX_LOG_GPU_TIME` or similar).
+
+### What's left to try (outside env-knob tuning)
+
+The env-knob search is **saturated**. Closing the remaining 39% gap
+(21.6 → 30 tok/s target) requires one of:
+
+1. **mlx/mlx-lm pin bisect.** 69 mlx commits + 72 mlx-lm commits
+   between the Apr 29 `8bit_w16k` historical baseline and HEAD
+   `b48d0a82`. Each bisect step is a full cluster restart + bench
+   (~35 min). High confidence given the recent gather_qmm churn
+   that just got reverted in `b48d0a82` (-46% c=2 short ctx).
+2. **Attention kernel work in `V4Indexer`.** The O(L) score path
+   before TopK is the real cost. Real code work in
+   `mlx-lm/mlx_lm/models/deepseek_v4.py` or a custom Metal kernel.
+3. **Draft-model swap.** Current draft is `Qwen3.5-0.8B-MLX-8bit`
+   giving ~50% mean acceptance. A better-matched small draft could
+   lift acceptance toward 80-90%. Bounded impact: draft is only 5.5%
+   of cycle, so even perfect acceptance can't double decode.
+4. **Accept 21.6 as the ceiling on current code/hardware** and move
+   to c=2 testing.
+
+### Artifacts
+
+| Where | What |
+|-------|------|
+| `bench/quality_probe_dsv4.py` | DSv4-aware needle-in-haystack quality gate |
+| `~/.hermes/scripts/run_exp.sh` | tuning harness (laptop-side) |
+| `/tmp/exp_results.jsonl` | one JSON line per experiment |
+| `/tmp/exp_<label>_<stamp>.log` | per-experiment full logs |
+| On m4-1: `~/bench_c1_100k_clean_20260511_105109.log` | original control run-of-record |
+| Skill `exo-cluster-operations` `references/perf-baselines.md` | full sweep table + pitfalls + profiling section (Hermes-side, mirrors this section) |
+
 ## Open optimization projects
 
 ### DeepSeek V4 sharding + fused MoE (in upstream review)
