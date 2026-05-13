@@ -492,15 +492,21 @@ in as default because optimum is workload-specific.
 
 ### Headline result (canonical MTP-off configuration)
 
-c=1 100K decode 15.4 → 29.45 tok/s (+91%), wall 735s → 383s (-48%),
+c=1 100K decode 15.4 → 29.47 tok/s (+91%), wall 735s → 383s (-48%),
 quality preserved at every step via 100K needle-in-haystack probe
 at temp=0. **At the 30 tok/s project target.**
 
-Updated May 13 2026: post-profiler-removal retune of `fence` and `topk`
-landed an additional 0.15 t/s on top of the May 12 finding. New
-`start_cluster.sh` defaults: `EXO_DSV4_FENCE_EVERY_N_LAYERS=43`
-(asymptote of the fence-cadence curve, was 16) and `EXO_DSV4_INDEX_TOPK=160`
-(was 192). See "Post-profiler retune" subsection below.
+May 13 2026 added on top of May 12:
+1. **Post-profiler retune** — `EXO_DSV4_FENCE_EVERY_N_LAYERS=43`,
+   `EXO_DSV4_INDEX_TOPK=160` as new defaults (commit `abb6555d`).
+   +0.15 t/s decode, tighter variance.
+2. **SDPA refactor** (mlx-lm `739d194`) — at L_q=1 decode, replaces
+   the hand-rolled split-softmax in ``_sparse_pooled_attention`` with
+   ``mx.fast.scaled_dot_product_attention``. +0.02 t/s median but
+   markedly tighter variance (±0.05 vs ±0.08), and 3x more numerically
+   accurate vs fp32 reference per microbench.
+
+Both subsections below.
 
 The biggest single win — accounting for ~12 of the 14 tok/s gain —
 was *removing* ``EXO_PROFILER=spans`` from the runtime env. The
@@ -654,6 +660,56 @@ Promoted to defaults in commit `abb6555d`:
 
 `MLX_SDPA_BLOCKS=88` was tested on top of the stacked config and gave
 the same 29.45 median — no additional win, not promoted as a default.
+
+### SDPA refactor (May 13 2026, mlx-lm `739d194`)
+
+Larger structural change: at L_q=1 (canonical MTP-off decode), the
+sparse-pooled attention path now concatenates local + per-query
+pooled K/V and dispatches through ``mx.fast.scaled_dot_product_attention``
+instead of the hand-rolled split-softmax + manual matmul in
+``_sparse_pooled_attention_inner``. Apple's optimized SDPA Metal kernel
+fuses score-matmul + softmax + value-matmul and accumulates internally
+in fp32 — so the bf16 output is numerically closer to fp32 reference
+than the manual code path.
+
+Microbench (``bench/sparse_pooled_refactor_microbench.py``) at decode
+shapes (B=1, H=64, L_q=1, D=128, sw=128, k=160):
+
+```
+                                wall (ms)   speedup   rel diff vs fp32 ref
+current (split-softmax bf16)    0.2522      1.00x     1.94%
+proposed (fast.sdpa)            0.2041      1.24x     0.65%  ← 3x more accurate
+```
+
+Cluster bench, 3 independent fresh-restart runs:
+
+```
+run                   iter 0   iter 1   median   wall (s)         quality
+─────────────────────────────────────────────────────────────────────────
+sdpa_refactor_v2      29.5     29.5     29.5     383.47 / 382.89  needle ✓
+sdpa_refactor_v2_run2 29.5     29.4     29.5     383.54 / 383.06  needle ✓
+sdpa_refactor_v2_run3 29.4     29.5     29.5     383.66 / 383.15  needle ✓
+─────────────────────────────────────────────────────────────────────────
+mean: 29.47 ± 0.05 tok/s (vs prior 29.45 ± 0.08)
+prefill: 244.6-244.7 (steady)
+```
+
+Tiny median improvement (+0.02 t/s) but **markedly tighter variance**
+(±0.05 vs ±0.08, no 29.2 lows). Quality preserved every iter.
+
+The refactor is **gated on L_q==1** — at L_q>1 (e.g. MTP-on γ+1 verify
+pass) each query position has its own gathered pooled K/V (different
+topk per row), which single-SDPA can't express cheaply. Falls through
+to the inner kernel for MTP-on. Bit-stable for MTP-on path.
+
+First attempt (commit ``9a90892``) crashed runner warmup with
+``[concatenate] All the input array dimensions must match exactly except
+for the concatenation axis. However, the provided shapes are (1,1,1,128),
+(1,64,1,160)``. Root cause: ``local_mask`` from ``create_attention_mask``
+has shape ``(B, 1, L, sw)`` (broadcastable across heads), while
+``pooled_mask`` after take-along-axis is ``(B, H, L, k)``. Fix in
+``739d194`` broadcasts both to ``(B, H, L, *)`` and unifies dtype
+before concat.
 
 ### Reproducing the validation
 
