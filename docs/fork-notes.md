@@ -508,6 +508,36 @@ May 13 2026 added on top of May 12:
 
 Both subsections below.
 
+May 13 evening — Critical reframing of where the bottleneck lives.
+Two new microbenches (``bench/gather_qmv_microbench.py`` and
+``bench/full_moe_microbench.py``) show:
+
+```
+SwitchLinear (mxfp4 b4 g32) @ M=1 B=6 K=4096 N=2048 E=256:  0.56 ms
+Full MoE forward (single node):                              0.63 ms
+Cluster BUILD_PROBE per-layer ffn:                           ~9 ms
+                                                             ──────
+Discrepancy:                                                 14x
+```
+
+The 14x cluster-vs-single-node gap CANNOT be in the MoE kernels —
+they're already fast. The cost is in cross-rank ``mx.distributed.all_sum``
+coordination over Thunderbolt 5 RDMA. ~8.4 ms/layer per token is
+spent on collective coordination, not local compute.
+
+**Metal kernel tuning of ``gather_qmm`` was abandoned as a target**
+after this finding. Even a 2x kernel speedup would save 0.6 ms in a
+9 ms budget — sub-noise at the cluster level. The high-EV targets
+are all in the collective-coordination layer:
+  * Overlap ``all_sum`` dispatch with next layer's local compute
+  * Reduce ``all_sum`` payload size (quantized reduction tensor)
+  * Tensor-parallel layout requiring fewer ``all_sums``
+  * Co-locate routed experts (no sharding); memory budget permitting
+
+These are multi-day architectural changes. Not pursued in this session.
+Documented here so future-me doesn't chase another Metal kernel red
+herring.
+
 The biggest single win — accounting for ~12 of the 14 tok/s gain —
 was *removing* ``EXO_PROFILER=spans`` from the runtime env. The
 ``finalize()`` calls scattered through ``deepseek_v4.py`` are no-ops
