@@ -28,7 +28,7 @@
 # config = 512. 192 was validated +29% prefill at 100K (memory
 # dsv4_optimization_results) but quality at topk<512 marked "unvalidated".
 # Trade-off: narrower per-position attention vs full lookback range.
-: "${EXO_DSV4_INDEX_TOPK:=192}"
+: "${EXO_DSV4_INDEX_TOPK:=160}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 # DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
@@ -201,7 +201,7 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # -> 15.4 tok/s; fence=4 -> 16.9; fence=8 -> 17.0; fence=16 -> 17.3;
     # fence=43 -> 17.4 (asymptote). 16 is the safe sweet spot, quality
     # preserved at 100K needle test. Set to 1 to revert to per-layer fences.
-    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=16}"
+    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=43}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
