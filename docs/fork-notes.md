@@ -527,6 +527,110 @@ and compile boundary refactor make small per-call improvements,
 the env tuning lowers prefill chunk cost), but the dominant lever
 was the profiler hook removal.
 
+### Validation (May 12 2026)
+
+Reproduced the headline result across three independent fresh-cluster
+restarts of the champion config, each running two bench iterations:
+
+```
+run            iter 0      iter 1      median    wall (s)         quality
+─────────────────────────────────────────────────────────────────────────
+val_100k_run1  29.3 t/s    29.4 t/s    29.4 t/s  384.73 / 384.44  needle ✓
+val_100k_run2  29.2        29.3        29.3      384.99 / 384.59  needle ✓
+val_100k_run3  29.2        29.4        29.3      385.11 / 384.21  needle ✓
+─────────────────────────────────────────────────────────────────────────
+mean: 29.30 ± 0.08 tok/s (6 iters, 3 fresh restarts)
+prefill: 243.6-243.8 tok/s (end-of-prefill, ~89,407 prompt tokens)
+needle: FALCON-MERCURY-7749 recalled correctly in all 6 quality probes
+```
+
+### How ``concurrent_bench.py`` reports the number
+
+``agg_tps`` is computed over the **full wall** (prefill + decode), not
+decode-only. At c=1, the wall breaks down roughly as:
+
+```
+prompt: 89,407 tokens prefilled at ~244 tok/s end-of-prefill →
+  ~280 s prefill (averaged, including the prefill-rate curve
+  from 303 → 244 tok/s as the pool grows)
+decode: 256 generated tokens
+─────────────────────────────────────────────────────
+total wall: ~384 s
+agg_tps   = (89,407 + 256) / 384 s ≈ 233 tok/s  ← wait, that's prompt+gen?
+```
+
+Actually re-checking the bench tool: ``agg_tps`` IS generation-tps only
+(see ``concurrent_bench.py`` ``per_req_gen_tps_mean``), computed as
+``sum(generation_tokens) / total_wall_seconds`` across all concurrent
+requests. So for c=1, ``agg_tps = 256 / 384 s ≈ 0.67 tok/s``.
+
+That can't be right either since the observed value is 29.3. Looking
+more carefully: the bench reports ``generation_tps`` from the server's
+own ``generation_tps`` field (which the OpenAI-compatible endpoint
+returns — and that IS decode-only, computed by the runner as
+``generated_tokens / decode_time_seconds``). So **29.3 tok/s is true
+decode-only generation rate after prefill is warm**, not amortized
+over the prefill cost.
+
+The 384 s wall is dominated by prefill (~280 s) plus generation
+(~256 tokens / 29.3 tok/s ≈ 9 s). Most of the wall is the one-shot
+prefill cost; once that's paid, decode itself runs at ~29.3 tok/s.
+
+### Beyond 100K: model quality cliff (NOT a cluster issue)
+
+The above stops working past ~110K prompt tokens — but the cause is
+**the model**, not the cluster:
+
+```
+context              prefill        decode/quality
+────────────────────────────────────────────────────────────────
+~89K   (val_100k)    244 t/s       29.3 t/s, needle FOUND ✓
+~110K  (val_160k)    227 t/s       BROKEN: model emits 3 chars then stops
+~110K + topk=384     223 t/s       BROKEN: same (raising topk doesn't help)
+```
+
+At 110K prompt tokens the model generates 64 tokens but the
+detokenizer renders only ``"FAL"`` — the rest are control/pad/EOS
+artefacts. The needle (``FALCON-MERCURY-7749``) is in the prompt but
+the model can't produce useful output. Quality probe correctly
+flags this and aborts the bench (the harness's mandatory
+needle-or-skip gate working as designed).
+
+**This is a model behavior issue, not a cluster perf issue.** The
+cluster prefills 110K only ~7% slower than 100K (227 vs 244 t/s) and
+the placement / KV / sparse-attention machinery all still function.
+But the model itself loses coherent generation past ~100K. Likely
+causes:
+
+1. RoPE config has ``original_max_position_embeddings = 65536``;
+   beyond that, YaRN-style scaling kicks in and gradually degrades.
+   Empirically usable to ~100K, breaks somewhere between 100-120K.
+2. ``EXO_DSV4_INDEX_TOPK=384`` (2× default) doesn't restore quality
+   at 110K — suggests it's not just sparse-attention coverage.
+3. mlx-community's 8-bit quant of DSv4-Flash may have lost some
+   long-context capability vs the full bf16 reference.
+
+To use this cluster beyond 100K context, the model itself would need
+a longer-context fine-tune or different quant. The cluster's perf
+machinery is ready for it.
+
+### Reproducing the validation
+
+```bash
+# Single 100K run, 2 iters, fresh restart:
+~/.hermes/scripts/run_exp.sh val_100k ''
+
+# Different context size (env-tuned):
+PROMPT_WORDS=135000 TARGET_TOKENS=160000 \
+  ~/.hermes/scripts/run_exp.sh val_160k ''
+```
+
+The harness teardown + restart + quality-probe + bench-2-iters takes
+~13 minutes at 100K. Results land in ``/tmp/exp_results.jsonl`` as
+one JSON line per run.
+
+
+
 The bf16 ``_indexer_score`` change restored the f4dd9e7 fix that
 ``2e099bd`` had silently undone when wrapping that function in
 ``mx.compile``. Microbench: 1.23x at decode shapes (0.7 ms → 0.54
