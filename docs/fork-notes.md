@@ -492,9 +492,15 @@ in as default because optimum is workload-specific.
 
 ### Headline result (canonical MTP-off configuration)
 
-c=1 100K decode 15.4 → 29.3 tok/s (+90%), wall 735s → 385s (-48%),
+c=1 100K decode 15.4 → 29.45 tok/s (+91%), wall 735s → 383s (-48%),
 quality preserved at every step via 100K needle-in-haystack probe
 at temp=0. **At the 30 tok/s project target.**
+
+Updated May 13 2026: post-profiler-removal retune of `fence` and `topk`
+landed an additional 0.15 t/s on top of the May 12 finding. New
+`start_cluster.sh` defaults: `EXO_DSV4_FENCE_EVERY_N_LAYERS=43`
+(asymptote of the fence-cadence curve, was 16) and `EXO_DSV4_INDEX_TOPK=160`
+(was 192). See "Post-profiler retune" subsection below.
 
 The biggest single win — accounting for ~12 of the 14 tok/s gain —
 was *removing* ``EXO_PROFILER=spans`` from the runtime env. The
@@ -613,6 +619,41 @@ causes:
 To use this cluster beyond 100K context, the model itself would need
 a longer-context fine-tune or different quant. The cluster's perf
 machinery is ready for it.
+
+### Post-profiler retune (May 13 2026)
+
+With async pipelining restored, retested the May-11 knobs that had been
+"within noise" when measured under `EXO_PROFILER=spans`. The hypothesis:
+some knobs that didn't matter when GPU was sync-saturated might matter
+now that the GPU is the actual bottleneck.
+
+```
+config                          runs  iters  median  prefill  wall
+─────────────────────────────────────────────────────────────────
+baseline (fence=16 / topk=192)  3     6      29.30   243.7    384.7
+fence=43 alone                  1     2      29.40   243.8    384.5
+topk=160 alone                  1     2      29.30   244.3    383.6
+fence=43 + topk=160             2     4      29.45   244.6    383.2
++ MLX_SDPA_BLOCKS=88            1     2      29.45   244.5    383.2
+```
+
+Stacked fence=43 + topk=160 is consistently 29.4-29.5 t/s across 2
+independent fresh restarts, with tighter iter-to-iter variance than
+the baseline (no 29.2 lows). Quality preserved (needle test passes
+every iter). Net win is small (+0.15 t/s decode, +0.9 t/s prefill)
+but reproducible.
+
+Promoted to defaults in commit `abb6555d`:
+- `EXO_DSV4_FENCE_EVERY_N_LAYERS=43` (was 16) — asymptote of the
+  fence-cadence curve. Less frequent cross-rank fences leave more
+  room for mlx async pipelining to overlap GPU work.
+- `EXO_DSV4_INDEX_TOPK=160` (was 192) — saves indexer work per layer
+  per token. Stay above 160 — the May-11 finding that topk=128 broke
+  needle recall at 100K still applies; this is the lower edge of the
+  quality-preserving range.
+
+`MLX_SDPA_BLOCKS=88` was tested on top of the stacked config and gave
+the same 29.45 median — no additional win, not promoted as a default.
 
 ### Reproducing the validation
 
