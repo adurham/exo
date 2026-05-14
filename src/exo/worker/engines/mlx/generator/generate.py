@@ -1256,15 +1256,16 @@ def mlx_generate(
         kv_bits=KV_BITS,
     )
 
-    # EXO_DECODE_PROBE: per-iter wall + GPU time log. Survives across stream_generate
-    # invocations because _decode_gen IS stream_generate's generator. Fires every
-    # token; logs every N tokens (EXO_DECODE_PROBE_EVERY, default 8).
+    # EXO_DECODE_PROBE: aggregate wall + GPU time over windows of N tokens.
+    # gpu_time_ns() is async — populated by Metal completion handlers, so
+    # per-iter deltas read ~0 immediately after enqueue. We instead capture
+    # gpu_time_ns + wall at every Nth token and compute the WINDOW delta,
+    # which gives accurate "GPU% busy" because by token K+N the GPU has
+    # actually completed the cycle-K command buffer.
     _exo_probe = bool(os.environ.get("EXO_DECODE_PROBE"))
-    _exo_probe_every = int(os.environ.get("EXO_DECODE_PROBE_EVERY", "8"))
-    _exo_t_last_wall = time.perf_counter() if _exo_probe else 0.0
-    _exo_t_last_gpu = mx.metal.gpu_time_ns() if _exo_probe else 0
-    _exo_sum_wall_ns = 0
-    _exo_sum_gpu_ns = 0
+    _exo_probe_every = int(os.environ.get("EXO_DECODE_PROBE_EVERY", "16"))
+    _exo_window_t0 = time.perf_counter() if _exo_probe else 0.0
+    _exo_window_g0 = mx.metal.gpu_time_ns() if _exo_probe else 0
     _exo_cnt = 0
 
     for completion_tokens, out in enumerate(
@@ -1272,23 +1273,23 @@ def mlx_generate(
         start=1,
     ):
         if _exo_probe:
-            _now_wall = time.perf_counter()
-            _now_gpu = mx.metal.gpu_time_ns()
-            _exo_sum_wall_ns += int((_now_wall - _exo_t_last_wall) * 1e9)
-            _exo_sum_gpu_ns += (_now_gpu - _exo_t_last_gpu)
-            _exo_t_last_wall = _now_wall
-            _exo_t_last_gpu = _now_gpu
             _exo_cnt += 1
             if _exo_cnt % _exo_probe_every == 0:
-                _avg_wall_ms = _exo_sum_wall_ns / _exo_cnt / 1e6
-                _avg_gpu_ms = _exo_sum_gpu_ns / _exo_cnt / 1e6
-                _gpu_pct = _avg_gpu_ms / _avg_wall_ms * 100 if _avg_wall_ms > 0 else 0.0
+                _t = time.perf_counter()
+                _g = mx.metal.gpu_time_ns()
+                _wall_ms = (_t - _exo_window_t0) * 1000.0
+                _gpu_ms = (_g - _exo_window_g0) / 1e6
+                _per_wall = _wall_ms / _exo_probe_every
+                _per_gpu = _gpu_ms / _exo_probe_every
+                _pct = _per_gpu / _per_wall * 100 if _per_wall > 0 else 0.0
                 import sys as _sys
                 _sys.stderr.write(
                     f"[EXO_DECODE_PROBE pid={os.getpid()}] tokens={_exo_cnt} "
-                    f"wall_ms={_avg_wall_ms:.2f} gpu_ms={_avg_gpu_ms:.2f} gpu_pct={_gpu_pct:.1f}\n"
+                    f"wall_ms={_per_wall:.2f} gpu_ms={_per_gpu:.2f} gpu_pct={_pct:.1f}\n"
                 )
                 _sys.stderr.flush()
+                _exo_window_t0 = _t
+                _exo_window_g0 = _g
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
