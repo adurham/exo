@@ -1256,10 +1256,39 @@ def mlx_generate(
         kv_bits=KV_BITS,
     )
 
+    # EXO_DECODE_PROBE: per-iter wall + GPU time log. Survives across stream_generate
+    # invocations because _decode_gen IS stream_generate's generator. Fires every
+    # token; logs every N tokens (EXO_DECODE_PROBE_EVERY, default 8).
+    _exo_probe = bool(os.environ.get("EXO_DECODE_PROBE"))
+    _exo_probe_every = int(os.environ.get("EXO_DECODE_PROBE_EVERY", "8"))
+    _exo_t_last_wall = time.perf_counter() if _exo_probe else 0.0
+    _exo_t_last_gpu = mx.metal.gpu_time_ns() if _exo_probe else 0
+    _exo_sum_wall_ns = 0
+    _exo_sum_gpu_ns = 0
+    _exo_cnt = 0
+
     for completion_tokens, out in enumerate(
         _decode_gen,
         start=1,
     ):
+        if _exo_probe:
+            _now_wall = time.perf_counter()
+            _now_gpu = mx.metal.gpu_time_ns()
+            _exo_sum_wall_ns += int((_now_wall - _exo_t_last_wall) * 1e9)
+            _exo_sum_gpu_ns += (_now_gpu - _exo_t_last_gpu)
+            _exo_t_last_wall = _now_wall
+            _exo_t_last_gpu = _now_gpu
+            _exo_cnt += 1
+            if _exo_cnt % _exo_probe_every == 0:
+                _avg_wall_ms = _exo_sum_wall_ns / _exo_cnt / 1e6
+                _avg_gpu_ms = _exo_sum_gpu_ns / _exo_cnt / 1e6
+                _gpu_pct = _avg_gpu_ms / _avg_wall_ms * 100 if _avg_wall_ms > 0 else 0.0
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[EXO_DECODE_PROBE pid={os.getpid()}] tokens={_exo_cnt} "
+                    f"wall_ms={_avg_wall_ms:.2f} gpu_ms={_avg_gpu_ms:.2f} gpu_pct={_gpu_pct:.1f}\n"
+                )
+                _sys.stderr.flush()
         generated_text_parts.append(out.text)
         accumulated_text += out.text
 
