@@ -1581,6 +1581,36 @@ class ExoBatchGenerator:
             )]
 
     def step(self) -> list[tuple[int, GenerationResponse]]:
+        # EXO_DECODE_PROBE: measure wall + GPU time per step() call (= per token
+        # in single-stream mode). Aggregates over EXO_DECODE_PROBE_EVERY tokens
+        # then logs to stderr. gpu_time_ns() is async — populated by Metal
+        # completion handlers — so we read it at window boundaries instead of
+        # per-iter where deltas read 0.
+        _exo_probe = getattr(self, "_exo_probe_init", None)
+        if _exo_probe is None:
+            self._exo_probe_init = bool(os.environ.get("EXO_DECODE_PROBE"))
+            self._exo_probe_every = int(os.environ.get("EXO_DECODE_PROBE_EVERY", "16"))
+            self._exo_window_t0 = time.perf_counter()
+            self._exo_window_g0 = mx.metal.gpu_time_ns()
+            self._exo_cnt = 0
+            _exo_probe = self._exo_probe_init
+        if _exo_probe:
+            self._exo_cnt += 1
+            if self._exo_cnt % self._exo_probe_every == 0:
+                _t = time.perf_counter()
+                _g = mx.metal.gpu_time_ns()
+                _per_wall = (_t - self._exo_window_t0) * 1000.0 / self._exo_probe_every
+                _per_gpu = (_g - self._exo_window_g0) / 1e6 / self._exo_probe_every
+                _pct = _per_gpu / _per_wall * 100 if _per_wall > 0 else 0.0
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[BG_DECODE_PROBE pid={os.getpid()}] step={self._exo_cnt} "
+                    f"wall_ms={_per_wall:.2f} gpu_ms={_per_gpu:.2f} gpu_pct={_pct:.1f}\n"
+                )
+                _sys.stderr.flush()
+                self._exo_window_t0 = _t
+                self._exo_window_g0 = _g
+
         # `has_work` is per-rank state. In TP mode the outer gate at
         # batch_generator.step():564 is already collective, but mlx-lm's
         # step here may also be called from non-TP paths — keep this
