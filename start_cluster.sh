@@ -697,6 +697,10 @@ for NODE in "${NODES[@]}"; do
     # PREFILL_DONE / POLL / CQE / DATA_DONE / ack POSTED / ack
     # DRAINED / DONE.
     [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
+    # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
+    # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
+    # poll-stall under MTP load. Default off.
+    [ -n "${MLX_STREAM_QOS:-}" ]        && EXO_ENV="$EXO_ENV MLX_STREAM_QOS=$MLX_STREAM_QOS"
     # Subgroup split init progress trace (logs per-rank to stderr at
     # each QP-exchange step). Use to localize a deadlock during
     # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
