@@ -709,6 +709,11 @@ for NODE in "${NODES[@]}"; do
     [ -n "${MLX_STREAM_RT_COMPUTATION_US:-}" ]   && EXO_ENV="$EXO_ENV MLX_STREAM_RT_COMPUTATION_US=$MLX_STREAM_RT_COMPUTATION_US"
     [ -n "${MLX_STREAM_RT_CONSTRAINT_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_STREAM_RT_CONSTRAINT_US=$MLX_STREAM_RT_CONSTRAINT_US"
     [ -n "${MLX_STREAM_RT_PERIOD_US:-}" ]        && EXO_ENV="$EXO_ENV MLX_STREAM_RT_PERIOD_US=$MLX_STREAM_RT_PERIOD_US"
+    # JACCL_POLL_INSTRUMENT: per-call wall + in-poll diagnostic for
+    # all_reduce stalls (see mesh_impl.h). Emits one stderr line per
+    # call whose total wall time exceeds the threshold (default 100ms).
+    [ -n "${JACCL_POLL_INSTRUMENT:-}" ]               && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
+    [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ]  && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
     # Subgroup split init progress trace (logs per-rank to stderr at
     # each QP-exchange step). Use to localize a deadlock during
     # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
