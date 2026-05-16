@@ -714,6 +714,14 @@ for NODE in "${NODES[@]}"; do
     # call whose total wall time exceeds the threshold (default 100ms).
     [ -n "${JACCL_POLL_INSTRUMENT:-}" ]               && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
     [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ]  && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
+    # MLX_SIGNAL_PROBE: per-Event::signal diagnostic on the GPU stream
+    # (see mlx/backend/metal/event.cpp). Emits two stderr lines per
+    # signal: SIGNAL_PROBE_ENC (ops at encode, t_enc_us) and
+    # SIGNAL_PROBE_DONE (t_done_us, gap_us = SharedEvent completion
+    # latency). Used to verify the γ=2 MTP bistable-stall hypothesis
+    # (decode-time signal lands at the tail of a deep command buffer).
+    # Diagnostic only; ZERO overhead when unset.
+    [ -n "${MLX_SIGNAL_PROBE:-}" ]                    && EXO_ENV="$EXO_ENV MLX_SIGNAL_PROBE=$MLX_SIGNAL_PROBE"
     # Subgroup split init progress trace (logs per-rank to stderr at
     # each QP-exchange step). Use to localize a deadlock during
     # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
