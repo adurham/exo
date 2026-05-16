@@ -701,6 +701,14 @@ for NODE in "${NODES[@]}"; do
     # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
     # poll-stall under MTP load. Default off.
     [ -n "${MLX_STREAM_QOS:-}" ]        && EXO_ENV="$EXO_ENV MLX_STREAM_QOS=$MLX_STREAM_QOS"
+    # MLX_STREAM_RT[+_COMPUTATION_US/_CONSTRAINT_US/_PERIOD_US]: Mach
+    # real-time time-constraint policy on stream worker threads. Hard
+    # contract with the scheduler — kernel will not preempt during the
+    # computation window. Fix for the asymmetric JACCL poll-stall.
+    [ -n "${MLX_STREAM_RT:-}" ]                  && EXO_ENV="$EXO_ENV MLX_STREAM_RT=$MLX_STREAM_RT"
+    [ -n "${MLX_STREAM_RT_COMPUTATION_US:-}" ]   && EXO_ENV="$EXO_ENV MLX_STREAM_RT_COMPUTATION_US=$MLX_STREAM_RT_COMPUTATION_US"
+    [ -n "${MLX_STREAM_RT_CONSTRAINT_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_STREAM_RT_CONSTRAINT_US=$MLX_STREAM_RT_CONSTRAINT_US"
+    [ -n "${MLX_STREAM_RT_PERIOD_US:-}" ]        && EXO_ENV="$EXO_ENV MLX_STREAM_RT_PERIOD_US=$MLX_STREAM_RT_PERIOD_US"
     # Subgroup split init progress trace (logs per-rank to stderr at
     # each QP-exchange step). Use to localize a deadlock during
     # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
