@@ -216,28 +216,52 @@ def _configure_layers(
 # Hidden state capture (for MTP integration)
 # ---------------------------------------------------------------------------
 
+class _CapturingNorm(nn.Module):
+    """Wraps a final RMSNorm to record its input each forward pass.
+
+    Defined at module scope (not nested inside _install_hidden_capture)
+    so the isinstance check in _install_hidden_capture is stable across
+    chat-completions requests — the previous nested-class form created
+    a NEW _CapturingNorm class object per call, defeating the isinstance
+    guard and stacking another wrapper on every request. By iter N,
+    inner_model.norm became N nested CapturingNorms (perf leak that
+    correlates with γ=N decode bistability — captured 2026-05-16).
+    """
+
+    def __init__(self, orig: nn.RMSNorm, captured: dict[str, mx.array]):
+        super().__init__()
+        self._orig = orig
+        self.weight = orig.weight
+        # Shared dict reference, written to on each forward.
+        self._captured = captured
+
+    def __call__(self, x: mx.array) -> mx.array:
+        self._captured['pre_norm'] = x
+        return self._orig(x)
+
+
 def _install_hidden_capture(model: nn.Module) -> dict[str, mx.array]:
     """Wrap model's final norm to capture pre-norm hidden state (rank 1 only).
 
     Returns a dict that will contain {'pre_norm': tensor} after each forward pass.
     The captured tensor is the input to the final RMSNorm — exactly what MTP needs.
+
+    Idempotent: if the model's norm is already a _CapturingNorm (from a
+    prior chat-completions request in this process), reuses the same
+    capture dict and reset its contents — does NOT stack another wrapper.
     """
     inner = getattr(model, "language_model", model)
     inner_model = getattr(inner, "model", inner)
-    original_norm = inner_model.norm
+    current_norm = inner_model.norm
+
+    if isinstance(current_norm, _CapturingNorm):
+        # Already installed — reuse the same dict so the spec loop reads
+        # from a fresh state but the model graph stays single-wrapper.
+        current_norm._captured.clear()
+        return current_norm._captured
+
     captured: dict[str, mx.array] = {}
-
-    class _CapturingNorm(nn.Module):
-        def __init__(self, orig: nn.RMSNorm):
-            super().__init__()
-            self._orig = orig
-            self.weight = orig.weight
-
-        def __call__(self, x: mx.array) -> mx.array:
-            captured['pre_norm'] = x
-            return self._orig(x)
-
-    inner_model.norm = _CapturingNorm(original_norm)
+    inner_model.norm = _CapturingNorm(current_norm, captured)
     return captured
 
 
