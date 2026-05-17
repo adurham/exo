@@ -722,6 +722,12 @@ for NODE in "${NODES[@]}"; do
     # (decode-time signal lands at the tail of a deep command buffer).
     # Diagnostic only; ZERO overhead when unset.
     [ -n "${MLX_SIGNAL_PROBE:-}" ]                    && EXO_ENV="$EXO_ENV MLX_SIGNAL_PROBE=$MLX_SIGNAL_PROBE"
+    # MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE: when set to 1, mlx will
+    # force-commit the producing GPU stream's pending command buffer
+    # before a CPU primitive (e.g. AllReduce) waits on its event.
+    # Targets the bistable peer-CQE-arrival-latency stall under γ=2
+    # MTP-on. mlx commit 4d21baa2 / branch mtp-allreduce-eager-commit.
+    [ -n "${MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE:-}" ] && EXO_ENV="$EXO_ENV MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE=$MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE"
     # Subgroup split init progress trace (logs per-rank to stderr at
     # each QP-exchange step). Use to localize a deadlock during
     # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
