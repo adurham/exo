@@ -609,6 +609,19 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     import os as _os_local
     _disable_broadcast = _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
 
+    # Break the chained-collective dependency between successive MTP
+    # draft steps. Without an explicit fence, gamma chained predicts
+    # queue up gamma lazy `all_sum`s (one per MTP MoE forward) inside
+    # the GPU/comm-stream command buffer; each subsequent all_sum is
+    # gated on the previous one's CQE delivery. Empirically (2026-05-16
+    # diagnostic data, JACCL_POLL_INSTRUMENT + MLX_SIGNAL_PROBE) this
+    # produces a peer-CQE arrival tail (~75-107 ms outliers) that
+    # collapses gamma>=2 decode into the documented bistability. Forcing
+    # `mx.eval(tok_arr)` between iterations drains the buffer one step
+    # at a time, eliminating the chained-collective queue buildup.
+    # Cost at gamma=1: zero (loop never iterates a second time).
+    # Cost at gamma=2: one extra sync per cycle (microseconds).
+    # Benefit: eliminates the iter-1+ stall mechanism on gamma>=2.
     for i in range(gamma):
         logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
                                       draft_mode=fast_lm_head)
@@ -635,5 +648,9 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                 # every draft step.
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(q)
+
+        # Per-step fence — see comment above the loop.
+        if i + 1 < gamma:
+            mx.eval(tok_arr)
 
     return draft_ids, draft_probs
