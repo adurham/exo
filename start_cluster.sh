@@ -707,6 +707,12 @@ for NODE in "${NODES[@]}"; do
     # for finding the first cross-rank divergence in the call sequence;
     # don't leave on permanently (fflush per call slows decode).
     [ -n "${JACCL_TRACE_CALLS:-}" ]    && EXO_ENV="$EXO_ENV JACCL_TRACE_CALLS=$JACCL_TRACE_CALLS"
+    # Skip the cross-rank ack_sync_pre round-trip when the prior
+    # collective on the same MeshGroup was its own ack_sync_post. At
+    # gamma=2 100K decode this saves ~8 ms/forward (172 all_reduces ×
+    # 50 us per skipped pre). Off by default; set to 1 to enable.
+    # Implementation: mlx commit 0b8aca69 (mesh_impl.h fastskip).
+    [ -n "${EXO_JACCL_ACK_PRE_FASTSKIP:-}" ] && EXO_ENV="$EXO_ENV EXO_JACCL_ACK_PRE_FASTSKIP=$EXO_JACCL_ACK_PRE_FASTSKIP"
     # Per-call output-hash diagnostic; orthogonal to JACCL_TRACE_CALLS
     # gating but uses the same trace file. Identifies transport
     # non-bit-exactness as a divergent hash at a specific call_id.
