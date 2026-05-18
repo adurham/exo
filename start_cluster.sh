@@ -24,11 +24,13 @@
 # (200K+ context), the original prompt would fall outside that window.
 # Decode rate without bounding takes a hit; recover via lower index_topk.
 : "${EXO_DSV4_INDEXER_WINDOW:=}"
-# Lower index_topk recovers decode work per indexer step. Default model
-# config = 512. 192 was validated +29% prefill at 100K (memory
-# dsv4_optimization_results) but quality at topk<512 marked "unvalidated".
-# Trade-off: narrower per-position attention vs full lookback range.
-: "${EXO_DSV4_INDEX_TOPK:=160}"
+# index_topk is the sparse top-K width for the DSv4 indexer attention.
+# Model documented default = 512. Earlier tuning ran at 192 (validated)
+# or 160 (unvalidated speed bet, +7% decode). Reverted to model default
+# 2026-05-18 14:20 — user flagged that we'd been comparing perf against
+# a quality-compromised config without realizing.
+# To override: set EXO_DSV4_INDEX_TOPK in the shell env before launch.
+: "${EXO_DSV4_INDEX_TOPK:=512}"
 : "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 # DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
