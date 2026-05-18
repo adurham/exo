@@ -196,12 +196,32 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # Phase H+ (2026-05-08) V4Block-level compile fusions on top of
     # the MoE-body compile gated by COMPILE_FFN. Set =0 to A/B isolate.
     : "${EXO_DSV4_COMPILE_LAYER:=1}"
-    # Cross-rank fence cadence during decode. Default 16 (~3 fences per
-    # 43-layer DSv4 pass) chosen on 2026-05-11 sweep: control (fence=1)
-    # -> 15.4 tok/s; fence=4 -> 16.9; fence=8 -> 17.0; fence=16 -> 17.3;
-    # fence=43 -> 17.4 (asymptote). 16 is the safe sweet spot, quality
-    # preserved at 100K needle test. Set to 1 to revert to per-layer fences.
-    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=43}"
+    # Cross-rank fence cadence during decode.
+    #
+    # 2026-05-17 update — REQUIRED for gamma>=2 MTP stability:
+    #   fence=43 (one fence per forward) on gamma>=2 builds up an 86-deep
+    #   chained-collective dependency in the GPU/comm-stream command buffer
+    #   (43 layers x 2 all_sums per layer). Each chained all_sum is gated
+    #   on the previous one peer CQE; tail-stall probability accumulates per
+    #   cycle and collapses gamma=2 decode into ~30-50% bistability at iter 2+.
+    #   fence=8 (~5 fences per 43-layer forward) breaks the chain into shorter
+    #   independent segments. Verified 2026-05-17 by 5-iter gamma=2 c=1 100K
+    #   bench: mean=31.5 t/s sigma=0.15, bad_rate=0/5. Beats gamma=1 champion
+    #   (30.4 mean) by +1.1 t/s while maintaining stability.
+    #
+    # Throughput vs stability tradeoff sweep (2026-05-11 historical, gamma=1):
+    #   fence=1  -> 15.4 tok/s   fence=4  -> 16.9   fence=8  -> 17.0
+    #   fence=16 -> 17.3         fence=43 -> 17.4 (asymptote)
+    # Note: those numbers predate the current decode champion (30.5).
+    #
+    # gamma=2 stability sweep (2026-05-17):
+    #   fence=1  -> 28.2 stable    (high fence overhead)
+    #   fence=8  -> 31.5 stable    <-- SELECTED: best stable throughput
+    #   fence=43 -> bistable (10.9-31.6 t/s, ~30% stall rate)
+    #
+    # Set to 1 to revert to per-layer fences (slower but maximally stable).
+    # Set to 43 only when running gamma=1 (where the chain depth is harmless).
+    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=8}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
