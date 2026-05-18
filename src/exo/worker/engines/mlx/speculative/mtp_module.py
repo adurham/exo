@@ -610,36 +610,18 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     _disable_broadcast = _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
 
     # Break the chained-collective dependency between successive MTP
-    # draft steps. Without an explicit submission boundary, gamma
-    # chained predicts queue up gamma lazy `all_sum`s (one per MTP MoE
-    # forward) inside the GPU/comm-stream command buffer; each
-    # subsequent all_sum is gated on the previous one's CQE delivery.
-    # Empirically (2026-05-16 diagnostic data, JACCL_POLL_INSTRUMENT +
-    # MLX_SIGNAL_PROBE) this produces a peer-CQE arrival tail (~75-107
-    # ms outliers) that collapses gamma>=2 decode into the documented
-    # bistability.
-    #
-    # 2026-05-17 update: the original fix used `mx.eval(tok_arr)` which
-    # broke the CQE chain but was a HOST-BLOCKING sync -- it forced the
-    # host to wait for predict[i]'s MoE all_sum + broadcast all_gather
-    # to fully drain off RDMA before predict[i+1] could even start
-    # enqueuing ops. At gamma=2 this added one full host<->GPU<->peer
-    # round-trip per cycle on the draft critical path, which is exactly
-    # the parallelism gamma=2 was supposed to capture. Measured leak:
-    # gamma=1->gamma=2 marginal gain was only +1.1 t/s (30.4 -> 31.5)
-    # vs the expected ~+2.5 t/s if pipelining held.
-    #
-    # `mx.async_eval(tok_arr)` performs the same graph compilation +
-    # GPU command-buffer submission (which is what actually breaks the
-    # chained-collective CQE dependency) but returns to the host
-    # immediately. predict[i+1] can enqueue its ops in parallel with
-    # predict[i]'s collectives still in flight. Host syncs naturally
-    # at the downstream verify pre-norm consumer.
+    # draft steps. Without an explicit fence, gamma chained predicts
+    # queue up gamma lazy `all_sum`s (one per MTP MoE forward) inside
+    # the GPU/comm-stream command buffer; each subsequent all_sum is
+    # gated on the previous one's CQE delivery. Empirically (2026-05-16
+    # diagnostic data, JACCL_POLL_INSTRUMENT + MLX_SIGNAL_PROBE) this
+    # produces a peer-CQE arrival tail (~75-107 ms outliers) that
+    # collapses gamma>=2 decode into the documented bistability. Forcing
+    # `mx.eval(tok_arr)` between iterations drains the buffer one step
+    # at a time, eliminating the chained-collective queue buildup.
     # Cost at gamma=1: zero (loop never iterates a second time).
-    # Cost at gamma=2: a graph dispatch (~tens of microseconds) per
-    # cycle instead of a full collective round-trip wait.
-    # Benefit: preserves the gamma>=2 stall fix AND restores draft-step
-    # pipelining that the blocking eval was destroying.
+    # Cost at gamma=2: one extra sync per cycle (microseconds).
+    # Benefit: eliminates the iter-1+ stall mechanism on gamma>=2.
     for i in range(gamma):
         logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
                                       draft_mode=fast_lm_head)
@@ -667,8 +649,8 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(q)
 
-        # Per-step submission flush -- see comment above the loop.
+        # Per-step fence — see comment above the loop.
         if i + 1 < gamma:
-            mx.async_eval(tok_arr)
+            mx.eval(tok_arr)
 
     return draft_ids, draft_probs
