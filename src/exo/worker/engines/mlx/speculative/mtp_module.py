@@ -646,14 +646,24 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
             # Token-tree alpha probe (greedy path only). Capture MTP top-5
             # token IDs at this draft step in SORTED-BY-LOGIT order so
             # rank-1=argmax, rank-2=top-2, etc. _speculative_next pairs this
-            # with the verify-target argmax and writes JSONL. argsort cost
-            # at vocab~129k is small relative to the MoE forward.
+            # with the verify-target argmax and writes JSONL.
+            #
+            # IMPORTANT: we MATERIALISE top5 to Python ints HERE (synchronous
+            # .tolist()) so the queue only holds plain data, never lazy
+            # mx.arrays. Earlier versions of this probe stored mx.arrays in
+            # the queue and called .tolist() later in _speculative_next; that
+            # held lazy refs into the MTP forward graph alive across cycles
+            # and produced all-zero MTP logits during multi-request decode
+            # (verified 2026-05-19: probe-on→gibberish, probe-off→correct).
+            # Cost: one synchronous sync per draft step at vocab~129k argsort
+            # — small relative to the MTP MoE forward.
             if TREE_ALPHA_PROBE:
                 logits_flat = logits.reshape(-1)
                 top5 = mx.argsort(-logits_flat)[:5]
+                top5_ids = top5.tolist()  # synchronous; materialise NOW
                 _TREE_ALPHA_PROBE_STEPS.append({
                     "step": i,
-                    "top5_idx": top5,
+                    "top5_ids": top5_ids,
                 })
         else:
             q = mx.softmax(logits / temp, axis=-1)

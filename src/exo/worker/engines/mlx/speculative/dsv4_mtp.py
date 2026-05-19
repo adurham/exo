@@ -1391,9 +1391,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         step_i = rec["step"]
                         if step_i >= len(tgt_list):
                             continue
-                        top5_list = cast(
-                            list[int], rec["top5_idx"].tolist()
-                        )
+                        # NOTE: as of 2026-05-19 the queue holds pre-
+                        # materialised Python int lists in "top5_ids"
+                        # (see draft_tokens). Earlier "top5_idx" lazy-array
+                        # version corrupted the MTP forward — do NOT revive.
+                        top5_list = cast(list[int], rec["top5_ids"])
                         target_tok = tgt_list[step_i]
                         _tree_alpha_probe_write({
                             "uid": int(uid),
