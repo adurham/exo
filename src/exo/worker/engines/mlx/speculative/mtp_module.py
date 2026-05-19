@@ -25,6 +25,15 @@ import os
 import mlx.core as mx
 import mlx.nn as nn
 
+# Token-tree drafting alpha-distribution probe. Gated by
+# EXO_DSV4_TREE_ALPHA_PROBE=1. When ON, draft_tokens() appends a record per
+# draft step into _TREE_ALPHA_PROBE_STEPS containing the MTP head's top-5
+# argmax IDs (as lazy mx.arrays). _speculative_next then drains the list,
+# joins the target argmax, and writes JSONL. Zero-cost when env is unset
+# (the gate is a single env lookup at module-import time below).
+TREE_ALPHA_PROBE = os.environ.get("EXO_DSV4_TREE_ALPHA_PROBE") == "1"
+_TREE_ALPHA_PROBE_STEPS: list[dict] = []
+
 
 def speculative_forward(model, inputs, cache, speculative=False):
     """Run model forward pass, optionally capturing GDN per-step states for rollback.
@@ -634,6 +643,18 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                 )
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(None)
+            # Token-tree alpha probe (greedy path only). Capture MTP top-5
+            # token IDs at this draft step in SORTED-BY-LOGIT order so
+            # rank-1=argmax, rank-2=top-2, etc. _speculative_next pairs this
+            # with the verify-target argmax and writes JSONL. argsort cost
+            # at vocab~129k is small relative to the MoE forward.
+            if TREE_ALPHA_PROBE:
+                logits_flat = logits.reshape(-1)
+                top5 = mx.argsort(-logits_flat)[:5]
+                _TREE_ALPHA_PROBE_STEPS.append({
+                    "step": i,
+                    "top5_idx": top5,
+                })
         else:
             q = mx.softmax(logits / temp, axis=-1)
             tok_arr = mx.random.categorical(logits * (1.0 / temp)).reshape(1, 1)

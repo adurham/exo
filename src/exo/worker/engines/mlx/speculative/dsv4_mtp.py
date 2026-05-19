@@ -43,8 +43,29 @@ from mlx_lm.models.cache import (
 )
 
 from .mtp_batch_generator import MTPBatchGenerator
+from . import mtp_module as _mtp_module  # for _TREE_ALPHA_PROBE_STEPS drain
 from .mtp_module import broadcast_from_canonical, draft_tokens
 from exo.worker.engines.mlx.utils_mlx import get_coord_group, mx_any
+
+
+# Token-tree alpha probe writer state. Rank-0 only writes the JSONL so we
+# don't fight two ranks for one file. File path is parametric to PID so
+# multiple worker processes on the same host don't collide. Zero-cost when
+# EXO_DSV4_TREE_ALPHA_PROBE is unset.
+_TREE_ALPHA_PROBE_HANDLE: Optional[BinaryIO] = None
+_TREE_ALPHA_PROBE_RECS: int = 0
+
+
+def _tree_alpha_probe_write(record: dict) -> None:
+    """Append one record to the rank-0 probe JSONL file."""
+    global _TREE_ALPHA_PROBE_HANDLE, _TREE_ALPHA_PROBE_RECS
+    if _TREE_ALPHA_PROBE_HANDLE is None:
+        path = f"/tmp/dsv4_tree_alpha_probe_pid{os.getpid()}.jsonl"
+        _TREE_ALPHA_PROBE_HANDLE = open(path, "ab", buffering=0)  # noqa: SIM115
+    import json as _json
+    line = (_json.dumps(record) + "\n").encode("utf-8")
+    _TREE_ALPHA_PROBE_HANDLE.write(line)
+    _TREE_ALPHA_PROBE_RECS += 1
 
 
 def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
@@ -1349,6 +1370,48 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 verify_logits[0], axis=-1, keepdims=True
             )
             mx.async_eval(matches, all_next, logprobs_all, verify_pre_norm)
+
+            # Token-tree alpha probe drain. Rank 0 only. Reads the per-step
+            # MTP top-5 records that draft_tokens populated, joins with the
+            # verify target argmax at the matching position, and writes one
+            # JSONL row per draft step. Both MTP top-5 and target argmax are
+            # evaled here (cheap; both are already in flight via async_eval
+            # above plus argmax dispatch).
+            if _mtp_module.TREE_ALPHA_PROBE:
+                _is_rank0 = sync_group is None or sync_group.rank() == 0
+                steps = _mtp_module._TREE_ALPHA_PROBE_STEPS
+                if _is_rank0 and steps:
+                    # target_tokens shape: (1, gamma) -- argmax of verify
+                    # logits at the gamma draft positions. We materialise
+                    # it (and the top-5 arrays) once, then iterate.
+                    tgt_list = cast(
+                        list[int], target_tokens.reshape(-1).tolist()
+                    )
+                    for rec in steps:
+                        step_i = rec["step"]
+                        if step_i >= len(tgt_list):
+                            continue
+                        top5_list = cast(
+                            list[int], rec["top5_idx"].tolist()
+                        )
+                        target_tok = tgt_list[step_i]
+                        _tree_alpha_probe_write({
+                            "uid": int(uid),
+                            "cycle": int(self._spec_cycles),
+                            "step": int(step_i),
+                            "gamma": int(gamma),
+                            "mtp_top5": top5_list,
+                            "target": int(target_tok),
+                            "match_top1": bool(target_tok == top5_list[0]),
+                            "match_top2": bool(target_tok in top5_list[:2]),
+                            "match_top3": bool(target_tok in top5_list[:3]),
+                            "match_top4": bool(target_tok in top5_list[:4]),
+                            "match_top5": bool(target_tok in top5_list[:5]),
+                        })
+                # Drain unconditionally so a subsequent cycle starts fresh,
+                # even on non-rank-0 ranks (no-op there since draft_tokens
+                # appends on all ranks but only rank 0 writes).
+                steps.clear()
         else:
             for i in range(gamma):
                 p = mx.softmax(verify_logits[0, i] / temp, axis=-1)
