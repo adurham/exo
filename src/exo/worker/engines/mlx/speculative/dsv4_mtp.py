@@ -247,7 +247,9 @@ class _PhaseTimer:
         )
         logger.warning(f"[MTP-PROF] cycles={self.cycles} {bs_summary}")
         for b in sorted(self.samples.keys()):
-            for phase in ("draft", "verify", "accept", "rollback", "total"):
+            for phase in (
+                "draft", "verify", "accept", "commit", "rollback", "total",
+            ):
                 xs = self.samples[b].get(phase)
                 if not xs:
                     continue
@@ -1946,6 +1948,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # bonus_val with the model's KV state stuck at L_kv (no
         # knowledge of the accepted drafts), producing context-blind
         # logits and the "loopy" output we observed pre-fix.
+        if prof is not None:
+            t_before_commit = time.perf_counter()
         commit_tokens = [y_val] + [tree_tokens[nid] for nid in best_path]
         commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
         _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
@@ -1956,6 +1960,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # We don't use _commit_logits -- bonus + pre_norm come from
         # the tree verify, captured pre-rollback. Drop the reference.
         del _commit_logits
+        if prof is not None:
+            t_after_commit = time.perf_counter()
+            prof.record("commit", (t_after_commit - t_before_commit) * 1000.0)
 
         # 6. Update MTP pre_norm seed for the next cycle. Use the verify
         # pre_norm at the bonus node's position (where the next cycle's
@@ -1978,8 +1985,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         if prof is not None:
             t_after_rollback = time.perf_counter()
+            # "rollback" here excludes the commit forward (separately
+            # recorded above as "commit") so the buckets don't double-
+            # count. End-to-end wall is "total".
             prof.record(
-                "rollback", (t_after_rollback - t_after_accept) * 1000.0
+                "rollback", (t_after_rollback - t_after_commit) * 1000.0
             )
             prof.record(
                 "total", (t_after_rollback - t_cycle_start) * 1000.0
