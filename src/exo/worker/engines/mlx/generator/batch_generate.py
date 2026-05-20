@@ -1221,11 +1221,19 @@ class ExoBatchGenerator:
         if len(tasks) <= 1:
             return [self.submit(*t) for t in tasks]
 
-        # PP-spec or MTP path: batched prefill not yet wired through these.
-        # Fall back to per-task submit() to keep them working.
-        if self._pp_spec_active or hasattr(self._mlx_gen, "mtp"):
+        # PP-spec path: batched prefill not yet wired. Keep falling back.
+        # MTP path: 2026-05-20 — was previously falling back to per-task
+        # submit(), which serialized prefill across streams (stream 2
+        # waited for stream 1's ~6min prefill to complete before starting
+        # its own). At c=2 100K MTP-on this collapsed agg t/s to 6 because
+        # per_req timing started at submit-done = post-individual-prefill,
+        # so stream 1's "decode time" included stream 2's prefill. Now
+        # the batched path handles MTP-on too: per-stream MTP cache
+        # prefill happens after the batched main prefill, using slices
+        # of the captured `prompt_pre_norm`.
+        if self._pp_spec_active:
             logger.info(
-                "submit_batched: PP-spec or MTP active — falling back to per-task submit()"
+                "submit_batched: PP-spec active — falling back to per-task submit()"
             )
             return [self.submit(*t) for t in tasks]
 
@@ -1404,6 +1412,21 @@ class ExoBatchGenerator:
             )
 
         # ---- Insert each task's last-2 tokens into mlx-lm BatchGenerator ----
+        # 2026-05-20: batched-prefill path now also handles MTP-on. The
+        # batched prefill above wrote each stream's main-model KV. Now
+        # for each stream, we also need to prefill the per-stream MTP
+        # cache (so MTP draft has the right history). The serial submit()
+        # path captures `prompt_pre_norm` from the FINAL forward of each
+        # stream's prefill (the _CapturingNorm wrapper); the batched
+        # prefill's FINAL forward processed all N streams at once, so
+        # _captured["prompt_pre_norm"] holds shape (N, last_chunk, hidden).
+        # We slice per-stream and prefill each uid's MTP cache.
+        captured_prompt_pre_norm = None
+        if hasattr(self._mlx_gen, "mtp"):
+            captured_prompt_pre_norm = self._mlx_gen._captured.get("prompt_pre_norm")
+            if captured_prompt_pre_norm is not None:
+                mx.eval(captured_prompt_pre_norm)
+
         uids: list[int] = []
         for i, (task_params, _prompt, _opp, _dppc, on_generation_token) in enumerate(tasks):
             last_tokens = prompt_tokens_list[i][-2:]
@@ -1418,6 +1441,36 @@ class ExoBatchGenerator:
             assert len(inserted) == 1
             uid = inserted[0]
             uids.append(uid)
+
+            # MTP per-stream cache prefill. Mirrors submit() line 1135+,
+            # but uses the batched-prefill's captured `prompt_pre_norm`
+            # slice (B=N → 1) instead of the per-task forward's capture.
+            # Each call to mtp.predict() advances the SHARED self._cache,
+            # but snapshot_for_uid stashes it under this uid so
+            # activate_for_uids can reconstruct it later.
+            if hasattr(self._mlx_gen, "mtp") and captured_prompt_pre_norm is not None:
+                # Slice this stream's pre_norm: (N, last_chunk, hidden) → (1, last_chunk, hidden).
+                stream_pre_norm = captured_prompt_pre_norm[i : i + 1]
+                self._mlx_gen.mtp.reset_cache()
+                S_pre = stream_pre_norm.shape[1]
+                if S_pre > 1:
+                    toks_list = all_prompt_tokens_list[i].tolist()
+                    # MTP cache prefill uses tokens[1:S_pre] paired with pre_norm[:, :-1, :]
+                    # — matches the offset semantics of the serial submit() path.
+                    # Take the last S_pre tokens of the prompt since batched
+                    # prefill captures only the final-chunk pre_norm.
+                    n_total = len(toks_list)
+                    mtp_tokens = toks_list[n_total - S_pre + 1 : n_total]
+                    _ = self._mlx_gen.mtp.predict(
+                        stream_pre_norm[:, :-1, :],
+                        mx.array([mtp_tokens]),
+                    )
+                    mx.eval(_)
+                    logger.info(
+                        f"MTP cache prefilled ({S_pre} positions, batched stream {i})"
+                    )
+                if hasattr(self._mlx_gen.mtp, "snapshot_for_uid"):
+                    self._mlx_gen.mtp.snapshot_for_uid(uid)
 
             # Per-request temperature for the speculative decode path
             # (no-op when not running speculative). Mirrors submit().
