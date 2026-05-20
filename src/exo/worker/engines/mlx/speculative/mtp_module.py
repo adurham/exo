@@ -840,4 +840,46 @@ def draft_tokens_topk(
             "configs; deeper trees fail the wall-cost gate)."
         )
 
+    # Reorder BFS -> DFS-prefix so the MOST-LIKELY path (top-1 d1 -> top-1 d2)
+    # lives at contiguous columns [0, 1, 2..gamma]. This lets the
+    # _speculative_next_tree post-accept fast path skip the commit forward
+    # when the most-likely chain is accepted (the common case in spec decoding).
+    #
+    # BFS layout (input):  [root, d1[0], d1[1], d2[0,0], d2[0,1], d2[1,0], d2[1,1]]
+    # DFS-prefix (output): [root, d1[0], d2[0,0], d2[0,1], d1[1], d2[1,0], d2[1,1]]
+    #
+    # The MTP forwards above are independent of column order (they use
+    # `node_hidden[d1_node]` keyed on the BFS-id), so we can permute the
+    # final lists without re-running anything. parent_idx is rewritten in
+    # the new col-id space; depth_arr is unchanged in values but reordered.
+    if gamma == 2 and K >= 1:
+        # Build permutation: BFS col -> DFS col.
+        # BFS cols: 0=root, 1..K=d1[0..K-1], K+1..K+K*K=d2 (siblings of d1[0]
+        # first, then d1[1], etc).
+        # DFS cols: 0=root, then for each d1[k]: d1[k], d2[k,0..K-1].
+        bfs_to_dfs = [0] * len(tree_tokens)
+        dfs_col = 1
+        for k in range(K):
+            d1_bfs = 1 + k
+            bfs_to_dfs[d1_bfs] = dfs_col
+            dfs_col += 1
+            for j in range(K):
+                d2_bfs = 1 + K + k * K + j
+                bfs_to_dfs[d2_bfs] = dfs_col
+                dfs_col += 1
+        # Apply permutation.
+        n = len(tree_tokens)
+        new_tokens = [0] * n
+        new_parent = [0] * n
+        new_depth = [0] * n
+        for bfs_col in range(n):
+            new_col = bfs_to_dfs[bfs_col]
+            new_tokens[new_col] = tree_tokens[bfs_col]
+            new_depth[new_col] = depth_arr[bfs_col]
+            old_parent = parent_idx[bfs_col]
+            new_parent[new_col] = -1 if old_parent < 0 else bfs_to_dfs[old_parent]
+        tree_tokens = new_tokens
+        parent_idx = new_parent
+        depth_arr = new_depth
+
     return tree_tokens, parent_idx, depth_arr
