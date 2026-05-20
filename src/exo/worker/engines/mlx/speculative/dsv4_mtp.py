@@ -308,6 +308,24 @@ class DSv4MTPPredictor:
             )
         self.mtp_module = inner.mtp[mtp_idx]
         self._cache: Optional[Any] = None
+        # Per-uid prefilled MTP cache snapshots. Each value is a single-
+        # stream RotatingKVCache holding the post-prefill MTP K/V for
+        # that uid. Populated by batch_generate.submit() via
+        # snapshot_for_uid(); consumed by activate_for_uids() to rebuild
+        # the active `_cache` as a PerStreamBatchRotatingKVCache (B=N)
+        # at every BS-transition. Dropped via drop_uid() on stream finish.
+        #
+        # This is the c>=2 MTP-on fix from 2026-05-20: the old code did
+        # `mtp.reset_cache()` on every submit, clobbering the SHARED
+        # cache when stream 2 arrived while stream 1 was still running.
+        # Stream 1's drafts then ran with stream 2's prefill state →
+        # 0% acceptance → catastrophic perf regression (5.8 agg t/s vs
+        # 30 t/s c=1). Per-uid snapshots + just-in-time rebuild
+        # preserves per-stream draft state across concurrent requests.
+        self._cache_per_uid: dict[int, Any] = {}
+        # Track which uid set is currently in self._cache (so we can skip
+        # rebuilds when activate_for_uids is called with the same set).
+        self._active_uids: tuple[int, ...] = ()
 
     def reset_cache(self, batch_size: int = 1) -> None:
         """Reset the MTP attention's KV cache. Call when the target
@@ -327,6 +345,108 @@ class DSv4MTPPredictor:
             )
         else:
             self._cache = self.mtp_module.make_cache()
+        self._active_uids = ()
+
+    def snapshot_for_uid(self, uid: int) -> None:
+        """Snapshot the current single-stream ``self._cache`` under ``uid``.
+
+        Called by ``batch_generate.submit()`` AFTER the per-stream MTP
+        prefill forward has populated ``self._cache``. The snapshot is
+        a reference to the single-stream RotatingKVCache that
+        ``reset_cache()`` just built and ``predict()`` just prefilled.
+
+        This is a JOIN-TIME snapshot only — it captures the new stream's
+        prefilled state so the next ``activate_for_uids()`` call can
+        merge it into the multi-stream cache. After activation the live
+        ``_cache`` is the authoritative state; the snapshot is no
+        longer consulted.
+        """
+        if self._cache is None:
+            raise RuntimeError(
+                f"snapshot_for_uid({uid}): _cache is None — call "
+                f"reset_cache() + prefill before snapshot"
+            )
+        self._cache_per_uid[uid] = self._cache
+        # Single uid: snapshot doubles as the active cache (c=1 fast path).
+        self._active_uids = (uid,)
+
+    def activate_for_uids(self, uids: "Sequence[int]") -> None:
+        """Rebuild ``self._cache`` so it covers exactly ``uids`` in order.
+
+        This is called on every BS-transition (uid joining or leaving).
+        It must preserve each remaining uid's MTP K/V state across
+        transitions — extracting from the live cache before reassembling.
+
+        Pseudocode:
+          if uids == active_uids: no-op.
+          if active is None or empty: build from join-time snapshots.
+          if active is single-stream and we're staying single-stream:
+            no-op (same uid).
+          else:
+            # Multi-uid or transition.
+            extract per-uid caches from the current live cache,
+            ADD any uid in `uids` that's not in active (= just joined)
+            using its join-time snapshot,
+            then BatchRotatingKVCache.merge -> reclass as PerStream.
+
+        At c=1 with the same uid (no transition), this is a no-op and
+        preserves the c=1 fast path bit-exactly.
+        """
+        from mlx_lm.models.cache import (
+            BatchRotatingKVCache,
+            PerStreamBatchRotatingKVCache as _PerStream,
+        )
+
+        uids_t = tuple(uids)
+        if uids_t == self._active_uids:
+            return  # Already active for this uid set.
+
+        # Extract each uid's current state. Sources:
+        #   - uid in active_uids: extract from live cache (carries decode-time state).
+        #   - uid NEW (in uids_t but not active): use the join-time snapshot.
+        live = self._cache
+        new_singles: list[Any] = []
+        for u in uids_t:
+            if live is not None and u in self._active_uids:
+                idx = self._active_uids.index(u)
+                if len(self._active_uids) == 1:
+                    # Live is already a single-stream cache for this uid.
+                    new_singles.append(live)
+                else:
+                    # Live is batched. Extract this uid's slice.
+                    extracted = live.extract(idx)
+                    new_singles.append(extracted)
+            else:
+                # Newly joining uid — use the join-time snapshot.
+                snap = self._cache_per_uid.get(u)
+                if snap is None:
+                    raise RuntimeError(
+                        f"activate_for_uids({uids_t}): no MTP snapshot "
+                        f"for uid {u}; submit() must call snapshot_for_uid "
+                        f"after prefill"
+                    )
+                new_singles.append(snap)
+
+        if len(uids_t) == 1:
+            # Single-uid path: skip the merge, just use the single cache.
+            self._cache = new_singles[0]
+        else:
+            batched = BatchRotatingKVCache.merge(new_singles)
+            # Reclass in place so per-stream trim/make_mask logic fires.
+            # (lazy PerStream bootstrap happens on first update_and_fetch.)
+            batched.__class__ = _PerStream
+            self._cache = batched
+        self._active_uids = uids_t
+
+    def drop_uid(self, uid: int) -> None:
+        """Forget this uid's join-time snapshot. Call on stream finish.
+
+        Note: this does NOT modify the live ``_cache``. The next
+        ``activate_for_uids()`` with the new (smaller) uid set will
+        extract the remaining uids and rebuild.
+        """
+        self._cache_per_uid.pop(uid, None)
+        # _active_uids will be reconciled on next activate_for_uids call.
 
     def predict(
         self,
@@ -501,6 +621,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         length). Used to capture asymmetric filter timing across ranks
         at BS-transition. Trace is gated on
         EXO_DSV4_MTP_TRANSITION_TRACE=1.
+
+        Also drops the MTP cache snapshot for the finished uid (2026-05-20
+        c>=2 fix). The active MTP cache is reconciled on the next spec
+        cycle via activate_for_uids().
         """
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             gen_batch = self._generation_batch
@@ -509,6 +633,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 "uids_before": list(gen_batch.uids),
                 "num_tokens": list(gen_batch._num_tokens),
             })
+        if hasattr(self.mtp, "drop_uid"):
+            self.mtp.drop_uid(uid)
         super()._filter_finished_uid(uid)
 
     def _mtp_trace_log(self, event: str, data: dict[str, Any]) -> None:
@@ -890,6 +1016,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             need_first_step = [u for u in uids if u not in self._mtp_prefilled]
             if need_first_step:
                 return self._first_step_and_capture_batch(uids)
+            # 2026-05-20 c>=2 MTP fix: sync the MTP cache layout to the
+            # current uid set. At c=1 with the same uid as last cycle
+            # this is a no-op. At BS-transitions (uid joining or
+            # leaving) this rebuilds the cache by extracting per-uid
+            # state from the live cache + merging in join-time
+            # snapshots for newcomers. Without this the MTP cache stays
+            # at whatever shape the prior submit() left it in, which
+            # for c=2 was a single-stream cache for the LAST submit
+            # only -- catastrophic regression for stream 1.
+            if hasattr(self.mtp, "activate_for_uids"):
+                self.mtp.activate_for_uids(uids)
             if len(uids) == 1:
                 return [], self._speculative_next(uids[0])
             return [], self._speculative_next_batch(uids)

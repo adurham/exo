@@ -254,7 +254,14 @@ fi
 # whose interaction with fork's QuantizedKVCache wrapper hasn't been validated;
 # leaving it bf16 until we confirm the quant path round-trips cleanly through
 # the compressor branches.
-: "${DSV4_KV_CACHE_BITS:=4}"
+#
+# 2026-05-20: This default was accidentally 4 (commit history unclear). Per
+# the skill canonical constraint (`feedback_kv_cache_quality_risk.md`) AND
+# the comment block immediately above, prod is bf16. Reverting to 0 also
+# unlocks the fast SDPA "causal" string path at c>1 (4-bit forces the
+# dequantize+array-mask slow path, which made BS=2 verify 168ms vs 43ms
+# at bf16). Override to a positive int only for memory-pressed deploys.
+: "${DSV4_KV_CACHE_BITS:=0}"
 # Sampling defaults — official DeepSeek V4 Flash card recommends
 # temperature=1.0, top_p=1.0 for local deployment. Other params unset.
 : "${DSV4_TEMPERATURE:=1.0}"

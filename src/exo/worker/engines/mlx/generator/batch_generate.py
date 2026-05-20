@@ -1121,7 +1121,16 @@ class ExoBatchGenerator:
 
         uid = uids[0]
 
-        # MTP prefill: build MTP cache from prompt hidden states
+        # MTP prefill: build MTP cache from prompt hidden states.
+        #
+        # 2026-05-20 c>=2 fix: each new submission gets a FRESH RotatingKVCache
+        # (B=1) via reset_cache(), prefills into it, then snapshots it under
+        # this uid via snapshot_for_uid(uid). The shared `mtp._cache` is now
+        # ONLY ever a single-stream cache between submit() and the next
+        # spec-cycle entry. DSv4MTPBatchGenerator rebuilds the active
+        # multi-stream cache from per-uid snapshots at every BS-transition.
+        # The old code's `mtp.reset_cache()` (no snapshot) clobbered stream
+        # 1's MTP K/V whenever stream 2 arrived → catastrophic c>=2 regression.
         if hasattr(self._mlx_gen, 'mtp'):
             prompt_pre_norm = self._mlx_gen._captured.get('prompt_pre_norm')
             if prompt_pre_norm is not None:
@@ -1137,6 +1146,11 @@ class ExoBatchGenerator:
                     )
                     mx.eval(_)
                     logger.info(f"MTP cache prefilled ({S_pre} positions)")
+                # Snapshot for this uid. Safe even when S_pre==1 (empty cache
+                # is a valid snapshot — subsequent draft will start from
+                # zero MTP history, same as the pre-fix c=1 short-prompt case).
+                if hasattr(self._mlx_gen.mtp, 'snapshot_for_uid'):
+                    self._mlx_gen.mtp.snapshot_for_uid(uid)
 
         # Set per-request temperature for speculative. EXO_SPECULATIVE_TEMP
         # overrides everything; otherwise fall through the same resolution
