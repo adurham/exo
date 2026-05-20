@@ -296,6 +296,37 @@ def test_tree_mask_sliding_window_clamp() -> None:
     print("PASS test_tree_mask_sliding_window_clamp (offset=69321 sw=128)")
 
 
+class _FakeCache4D(_FakeCache):
+    """Emits a 4-D mask like BatchRotatingKVCache.make_mask does."""
+    def make_mask(self, N: int, window_size=None, return_array: bool = False):
+        m = super().make_mask(N, window_size=window_size, return_array=return_array)
+        if m is None:
+            return None
+        # (L_q, kv) -> (1, 1, L_q, kv) to mimic BatchRotatingKVCache.
+        return m[None, None]
+
+
+def test_tree_mask_4d_base_input() -> None:
+    """Reproduces the 2026-05-19 production crash: BatchRotatingKVCache
+    emits a 4-D base mask via mx.expand_dims, _build_tree_mask must
+    squeeze it back to 2-D before splicing in the tree sub-mask.
+    """
+    parent = [-1, 0, 0, 1, 1, 2, 2]
+    depth = [0, 1, 1, 2, 2, 2, 2]
+    cache = _FakeCache4D(offset=69321, max_size=128)
+
+    mask, positions = _build_tree_mask_and_positions(parent, depth, cache)
+
+    # Should land back at 2-D, kv-axis clamped to sliding_window.
+    expected_kv = (cache.max_size - 1) + 7
+    assert mask.shape == (7, expected_kv), (
+        f"4D-input mask shape: expected (7,{expected_kv}) got {mask.shape}"
+    )
+    # Positions still un-clamped.
+    assert positions.tolist() == [69321 + d for d in depth]
+    print("PASS test_tree_mask_4d_base_input (4-D base mask squeezes correctly)")
+
+
 if __name__ == "__main__":
     print("Phase 5.2 mask correctness test")
     print("================================")
@@ -304,4 +335,5 @@ if __name__ == "__main__":
     test_same_depth_siblings_share_rope()
     test_sdpa_with_tree_mask()
     test_tree_mask_sliding_window_clamp()
+    test_tree_mask_4d_base_input()
     print("\nAll Phase 5.2 tests PASSED")

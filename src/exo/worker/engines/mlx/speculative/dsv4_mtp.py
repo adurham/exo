@@ -158,6 +158,19 @@ def _build_tree_mask_and_positions(
         full_w = real_offset + n_nodes
         base = mx.ones((n_nodes, full_w), dtype=mx.bool_)
 
+    # Normalise mask rank: RotatingKVCache.make_mask returns a 2D (L_q, kv)
+    # mask, BUT BatchRotatingKVCache emits a 4D (B, n_heads, L_q, kv)
+    # shape via mx.expand_dims for left_padding handling. Squeeze any
+    # leading singleton axes so we work in a 2D space; we'll re-broadcast
+    # to 4D when the side channel handles the mask in DeepseekV4Model.
+    while base.ndim > 2:
+        if base.shape[0] != 1:
+            raise RuntimeError(
+                f"_build_tree_mask_and_positions: unexpected mask shape "
+                f"{base.shape}; expected leading dims to be 1."
+            )
+        base = base[0]
+
     # Convert boolean -> additive (0 attend, -1e9 mask).
     NEG = -1.0e9
     mask_add = mx.where(
