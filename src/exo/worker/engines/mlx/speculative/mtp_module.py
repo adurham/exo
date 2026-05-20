@@ -739,6 +739,16 @@ def draft_tokens_topk(
     _disable_broadcast = (
         _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
     )
+    # Greedy tree: only expand depth-2 children for the TOP-1 depth-1
+    # sibling, not all K. Cuts tree from 1+K+K^2 to 1+K+K nodes (e.g.,
+    # 7 -> 5 for K=2 gamma=2). The intuition: top-2 d1 is already
+    # unlikely; spending verify budget on its depth-2 children pays
+    # off rarely at long context where MTP correlation decays. The
+    # 5-node tree still preserves the top-1 chain (which dominates
+    # acceptance at greedy temp=0) and the top-2 d1 candidate (which
+    # lifts depth-1 acceptance over linear's single chain). Enable
+    # with EXO_DSV4_TREE_GREEDY=1.
+    _greedy = _os_local.environ.get("EXO_DSV4_TREE_GREEDY") == "1"
 
     # Tree node lists. Node 0 = root = first_token_arr.
     # We materialise first_token_arr to a Python int (sync) so we can put
@@ -797,7 +807,15 @@ def draft_tokens_topk(
     # cache is at offset L_kv + 2 (root step + node-1 step). Before
     # processing depth-1 node 2 we must trim(1) back to L_kv + 1 so the
     # node-2 forward sees the same context as node-1 did.
-    for d1_node in range(1, K + 1):
+    #
+    # Greedy mode (EXO_DSV4_TREE_GREEDY=1): only expand the TOP-1
+    # depth-1 sibling. Top-2+ d1 siblings get no children (verify
+    # budget saved). Caller trims MTP cache by gamma-n_accepted as
+    # usual; the cache will be at L_kv+2 only when d1_node=1 actually
+    # ran a depth-2 forward, which always happens, so the cache trim
+    # math is unchanged.
+    d1_range = (1, 2) if _greedy else (1, K + 1)
+    for d1_node in range(d1_range[0], d1_range[1]):
         tok_id = tree_tokens[d1_node]
         tok_arr_in = mx.array([[tok_id]])
         # The hidden input for this MTP forward is h_root (the output
@@ -824,6 +842,8 @@ def draft_tokens_topk(
         # the same context. Skip the trim after the LAST sibling (we leave
         # the cache at L_kv + 2; the caller trims by 2 at cycle end --
         # see _speculative_next's tree-aware rollback).
+        # In greedy mode we only ever run d1_node=1, so this trim never
+        # fires (the loop only iterates once).
         if d1_node < K:
             cache = getattr(mtp_pred, "_cache", None)
             if cache is not None and hasattr(cache, "trim"):
@@ -845,26 +865,42 @@ def draft_tokens_topk(
     # _speculative_next_tree post-accept fast path skip the commit forward
     # when the most-likely chain is accepted (the common case in spec decoding).
     #
-    # BFS layout (input):  [root, d1[0], d1[1], d2[0,0], d2[0,1], d2[1,0], d2[1,1]]
-    # DFS-prefix (output): [root, d1[0], d2[0,0], d2[0,1], d1[1], d2[1,0], d2[1,1]]
+    # BFS layout (full, K=2 gamma=2):
+    #   [root, d1[0], d1[1], d2[0,0], d2[0,1], d2[1,0], d2[1,1]]   (7 nodes)
+    # DFS-prefix (full):
+    #   [root, d1[0], d2[0,0], d2[0,1], d1[1], d2[1,0], d2[1,1]]
+    #
+    # BFS layout (greedy, K=2 gamma=2): top-1 d1 expands, top-2 d1 has no kids:
+    #   [root, d1[0], d1[1], d2[0,0], d2[0,1]]                     (5 nodes)
+    # DFS-prefix (greedy):
+    #   [root, d1[0], d2[0,0], d2[0,1], d1[1]]
     #
     # The MTP forwards above are independent of column order (they use
     # `node_hidden[d1_node]` keyed on the BFS-id), so we can permute the
     # final lists without re-running anything. parent_idx is rewritten in
     # the new col-id space; depth_arr is unchanged in values but reordered.
     if gamma == 2 and K >= 1:
+        # Number of d2 children PER d1 sibling: K in full mode, K only
+        # under d1[0] in greedy mode (d1[1..K-1] get zero d2 children).
+        # We assign d2_children[k] = K (k=0 always; k>0 only if not greedy).
+        n_d2_children = [K] + [(0 if _greedy else K) for _ in range(K - 1)]
+        # BFS cols of d2 children of d1[k]: contiguous block starting at
+        # offset 1 + K + sum(n_d2_children[:k]).
+        d2_bfs_base = [0] * K
+        running = 1 + K
+        for k in range(K):
+            d2_bfs_base[k] = running
+            running += n_d2_children[k]
+
         # Build permutation: BFS col -> DFS col.
-        # BFS cols: 0=root, 1..K=d1[0..K-1], K+1..K+K*K=d2 (siblings of d1[0]
-        # first, then d1[1], etc).
-        # DFS cols: 0=root, then for each d1[k]: d1[k], d2[k,0..K-1].
         bfs_to_dfs = [0] * len(tree_tokens)
         dfs_col = 1
         for k in range(K):
             d1_bfs = 1 + k
             bfs_to_dfs[d1_bfs] = dfs_col
             dfs_col += 1
-            for j in range(K):
-                d2_bfs = 1 + K + k * K + j
+            for j in range(n_d2_children[k]):
+                d2_bfs = d2_bfs_base[k] + j
                 bfs_to_dfs[d2_bfs] = dfs_col
                 dfs_col += 1
         # Apply permutation.

@@ -711,6 +711,9 @@ for NODE in "${NODES[@]}"; do
     # only; temp>0 falls back to the linear path.
     [ -n "${EXO_DSV4_TREE_DRAFT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DRAFT=$EXO_DSV4_TREE_DRAFT"
     [ -n "${EXO_DSV4_TREE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_K=$EXO_DSV4_TREE_K"
+    # Greedy tree: only top-1 d1 expands d2 children. Cuts L_q=7 -> L_q=5
+    # for K=2 gamma=2. Trades worse-case acceptance for cheaper verify.
+    [ -n "${EXO_DSV4_TREE_GREEDY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_GREEDY=$EXO_DSV4_TREE_GREEDY"
     # One-shot first-cycle diagnostic for the tree-verify side channel.
     # When 1, dsv4_mtp.py logs n_nodes/parent_idx/depth/mask.shape/positions
     # on the first cycle to ~/exo.log. Default off; off-state is bit-exact.
