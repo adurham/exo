@@ -839,12 +839,18 @@ def draft_tokens_topk(
             node_hidden.append(h_d1)  # would seed depth-3 children if gamma>2
 
         # Trim back to offset L_kv + 1 so the NEXT depth-1 sibling sees
-        # the same context. Skip the trim after the LAST sibling (we leave
-        # the cache at L_kv + 2; the caller trims by 2 at cycle end --
-        # see _speculative_next's tree-aware rollback).
-        # In greedy mode we only ever run d1_node=1, so this trim never
-        # fires (the loop only iterates once).
-        if d1_node < K:
+        # the same context. Skip the trim after the LAST sibling we'll
+        # iterate over -- the cache stays at L_kv + 2, and the caller
+        # trims by gamma=2 at cycle end (see _speculative_next's tree
+        # rollback).
+        #
+        # In greedy mode the loop only iterates d1_node=1, so the "last"
+        # check is `d1_node + 1 < d1_range[1]` not `d1_node < K`. The
+        # old `d1_node < K` would trim after the only iteration in
+        # greedy mode -> MTP cache at L_kv + 1 instead of L_kv + 2,
+        # which the caller's trim(gamma) then over-trims to L_kv - 1.
+        # Caught by 2026-05-20 bench bistability (29.5/8.6/22.3 t/s).
+        if d1_node + 1 < d1_range[1]:
             cache = getattr(mtp_pred, "_cache", None)
             if cache is not None and hasattr(cache, "trim"):
                 cache.trim(1)
