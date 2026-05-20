@@ -1903,17 +1903,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # holding the accepted-path KV.
         #
         # Two cases:
-        #   (a) FAST PATH (~75% of cycles in K=2 BFS): accepted path
-        #       is already at contiguous prefix cols [0, 1, ...,
-        #       n_accepted]. True iff `best_path == [1..n_accepted]`.
-        #       Covers: n_accepted=0 (best_path=[]), n_accepted=1 with
-        #       best_path=[1] (top-1 depth-1 accepted). In BFS,
-        #       n_accepted=2 NEVER hits this path (best_path[1] >= 3).
-        #       Just trim the trailing siblings -> no commit forward.
+        #   (a) FAST PATH: accepted path is already at contiguous prefix
+        #       cols [0, 1, ..., n_accepted] in tree-input order. True
+        #       iff `best_path == [1..n_accepted]`. With DFS-prefix
+        #       expansion (draft_tokens_topk reorders BFS -> DFS), the
+        #       top-1 chain at every depth lives at contiguous cols, so
+        #       most cycles hit this path. Just trim the trailing
+        #       siblings from local_cache -> no commit forward needed.
         #
         #   (b) SLOW PATH: accepted path is non-contiguous (e.g.,
-        #       best_path=[1, 3] for n_accepted=2). Trim the full tree
-        #       and re-commit linearly via step 5b.
+        #       best_path=[1, 3] for n_accepted=2 with top-2 d2). Trim
+        #       the full tree and re-commit linearly via step 5b.
         #
         # MTP cache: always trim by `gamma - n_accepted`, mirroring
         # the linear baseline's post-accept semantics. K/V at L_kv+1
@@ -1924,10 +1924,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # output: the verify forward catches any divergence.
         # TODO(v1.1): rebuild MTP cache from accepted path for
         # acceptance >= 90%.
-        contiguous_accept = (
-            n_accepted <= 1
-            and list(best_path) == list(range(1, n_accepted + 1))
-        )
+        contiguous_accept = list(best_path) == list(range(1, n_accepted + 1))
         if contiguous_accept:
             # FAST PATH: trim only the rejected suffix from local_cache;
             # cols 0..n_accepted already hold correct accepted-path KV.
