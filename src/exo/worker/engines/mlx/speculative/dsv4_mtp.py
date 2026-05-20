@@ -1809,6 +1809,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             verify_logits[0], axis=-1, keepdims=True
         )
 
+        # First-cycle diagnostic: dump verify_logits' argmax so we can
+        # tell whether the tree-verify forward gives the right next-token
+        # predictions. Gated by EXO_DSV4_TREE_DEBUG=1; one-shot.
+        if os.environ.get("EXO_DSV4_TREE_DEBUG") == "1" and not getattr(
+            self, "_tree_verify_logged", False
+        ):
+            _next_list = all_next.tolist()
+            logger.warning(
+                f"[TREE-DEBUG] verify_argmax (per-node next): {_next_list}\n"
+                f"             tree_tokens (children to compare): {tree_tokens}\n"
+                f"             parent_idx: {parent_idx}\n"
+                f"             expected acceptance check: for each i with parent p, "
+                f"accept iff all_next[p]==tree_tokens[i]\n"
+                f"             y_val (bonus from prev cycle): {y_val}"
+            )
+            self._tree_verify_logged = True
+
         # Cross-rank broadcast: with TP>1, ranks may produce slightly
         # different argmax at the same position. Broadcast the canonical
         # rank-0 all_next vector so all ranks agree on the accept walk.
