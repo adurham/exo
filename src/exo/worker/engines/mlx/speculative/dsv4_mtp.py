@@ -987,40 +987,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # generation — the source of the broken-English MTP=1
         # regression observed 2026-05-06.
         if len(gen_batch) >= 1:
-            group = self._get_sharding_group()
-            tp_active = group is not None and group.size() > 1
-            # 2026-05-20 c>=2 fix: at TP c>1 we were skipping drain to
-            # avoid asymmetric `_filter_finished_uid` across ranks. The
-            # cost was severe: buffer was assignment-clobbered each
-            # spec cycle (line 1416), losing γ tokens per cycle → c=2
-            # MTP-on agg t/s collapsed from expected ~30 to 5.7 at 100K.
+            # 2026-05-20 c>=2 fix: prior code conditionally skipped drain
+            # at TP c>1 to avoid asymmetric `_filter_finished_uid` across
+            # ranks. The cost was severe: combined with the buffer
+            # assignment-clobber (line 1416), each spec cycle wrote γ
+            # new tokens on top of γ old tokens → c=2 MTP-on agg t/s
+            # collapsed from expected ~30 to 5.7 at 100K.
             #
-            # Drain IS safe at temp=0 TP c>1 because:
-            #   (a) the broadcast at line 1213 makes n_accepted_per +
-            #       bonus_vals bit-identical across ranks.
-            #   (b) yielded tokens are therefore identical, so
-            #       _filter_finished_uid fires symmetrically (stop
-            #       conditions = function of yielded tokens).
-            #   (c) per-stream buffer growth is symmetric, so the
-            #       "all uids have buffered token" check yields the
-            #       same answer on every rank.
-            #
-            # We still skip drain at temp>0 TP c>1 because per-rank
-            # RNG can produce divergent samples there (memory:
-            # jaccl_phase_f_outcome_2026_05_06.md).
-            any_temp_gt0 = any(
-                getattr(self, "_request_temp", {}).get(uid, 0.0) > 0
-                for uid in gen_batch.uids
-            )
-            drain_safe = (
-                not tp_active
-                or len(gen_batch) == 1
-                or not any_temp_gt0
-            )
-            if drain_safe:
-                for uid in gen_batch.uids:
-                    if uid in self._token_buffer and self._token_buffer[uid]:
-                        return [], self._yield_buffered(uid)
+            # Drain IS safe at TP c>1 because the UNCONDITIONAL
+            # broadcast at line 1213 (broadcast_from_canonical of
+            # n_accepted_per + bonus_vals via coord_group) replaces
+            # per-rank values with rank-0's POST-divergence. So even at
+            # temp>0 where draft sampling diverges per rank, the
+            # post-broadcast yielded tokens are bit-identical, so
+            # _filter_finished_uid fires symmetrically (stop conditions
+            # = function of yielded tokens) and per-stream buffer
+            # growth is symmetric. The historical drain-skip was a
+            # pre-broadcast defensive measure; with the broadcast in
+            # place it's now a perf-killer with no safety benefit.
+            for uid in gen_batch.uids:
+                if uid in self._token_buffer and self._token_buffer[uid]:
+                    return [], self._yield_buffered(uid)
 
         spec_eligible = (
             self.gamma > 0
