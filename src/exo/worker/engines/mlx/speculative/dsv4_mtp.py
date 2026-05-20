@@ -1775,6 +1775,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Install the tree-verify side channel for the upcoming model
         # forward. Must clear unconditionally afterwards.
         _dsv4_model_mod._set_tree_verify_ctx(tree_mask, tree_positions)
+        # Once-per-process diagnostic so we know the tree path is firing
+        # in production. EXO_DSV4_TREE_DEBUG=1 enables; default off.
+        if os.environ.get("EXO_DSV4_TREE_DEBUG") == "1" and not getattr(
+            self, "_tree_debug_logged", False
+        ):
+            logger.warning(
+                f"[TREE-DEBUG] first cycle: n_nodes={n_nodes} "
+                f"tree_tokens={tree_tokens} parent_idx={parent_idx} "
+                f"depth={depth_list} mask.shape={tree_mask.shape} "
+                f"positions={tree_positions.tolist()}"
+            )
+            self._tree_debug_logged = True
         try:
             verify_pre_norm, verify_logits = dsv4_speculative_forward(
                 self.model,
