@@ -711,6 +711,10 @@ for NODE in "${NODES[@]}"; do
     # only; temp>0 falls back to the linear path.
     [ -n "${EXO_DSV4_TREE_DRAFT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DRAFT=$EXO_DSV4_TREE_DRAFT"
     [ -n "${EXO_DSV4_TREE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_K=$EXO_DSV4_TREE_K"
+    # One-shot first-cycle diagnostic for the tree-verify side channel.
+    # When 1, dsv4_mtp.py logs n_nodes/parent_idx/depth/mask.shape/positions
+    # on the first cycle to ~/exo.log. Default off; off-state is bit-exact.
+    [ -n "${EXO_DSV4_TREE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DEBUG=$EXO_DSV4_TREE_DEBUG"
     [ -n "${EXO_DSV4_PSCACHE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PSCACHE_DEBUG=$EXO_DSV4_PSCACHE_DEBUG"
     [ -n "$EXO_DSV4_INDEXER_WINDOW" ]  && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
     [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"

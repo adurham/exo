@@ -30,8 +30,12 @@ from exo.worker.engines.mlx.speculative.dsv4_mtp import (
 )
 from mlx_lm.models.deepseek_v4 import (
     _rope_with_positions,
+    _tree_pmask,
+    _dispatch_pmask,
+    _set_tree_verify_ctx,
     DeepseekV4RoPE,
 )
+from mlx_lm.models.cache import PoolingCache
 
 
 class _FakeCache:
@@ -306,6 +310,160 @@ class _FakeCache4D(_FakeCache):
         return m[None, None]
 
 
+def test_tree_pmask_same_depth_siblings_identical() -> None:
+    """Tree-aware pmask: same-depth siblings get IDENTICAL rows.
+
+    The stock PoolingCache.make_mask is row-causal-by-row-index. For tree
+    input that wrongly differentiates siblings sharing a depth. _tree_pmask
+    fixes this by using per-token positions.
+    """
+    # Set up a PoolingCache with ratio=4 ("overlap" layer; same default the
+    # 2026-05-20 bisect implicates) and pre-populate the pool with 8 entries
+    # so make_mask returns non-None.
+    ratio = 4
+    pool_cache = PoolingCache(ratio=ratio)
+    # Pre-populate pool via update_and_fetch. Shape (B=1, P, D=16).
+    fake_pool = mx.zeros((1, 8, 16))
+    pool_cache.update_and_fetch(fake_pool)
+    assert pool_cache.pooled is not None
+    assert pool_cache.pooled.shape[1] == 8
+
+    # Tree positions for K=2 g=2 at offset 27 (matching the 6A.2 diagnostic).
+    # depth=[0,1,1,2,2,2,2] -> positions=[27,28,28,29,29,29,29].
+    positions = mx.array([27, 28, 28, 29, 29, 29, 29], dtype=mx.int32)
+
+    pmask = _tree_pmask(pool_cache, positions)
+    assert pmask is not None
+    assert pmask.shape == (7, 8), f"bad pmask shape {pmask.shape}"
+
+    # Rows 1 and 2 share position 28 -> rows MUST be identical.
+    diff_12 = mx.max(mx.abs(
+        pmask[1].astype(mx.int32) - pmask[2].astype(mx.int32)
+    )).item()
+    assert diff_12 == 0, f"siblings at depth 1 differ in pmask: {pmask[1].tolist()} vs {pmask[2].tolist()}"
+
+    # Rows 3,4,5,6 share position 29 -> all four rows MUST be identical.
+    for i in (4, 5, 6):
+        diff = mx.max(mx.abs(
+            pmask[3].astype(mx.int32) - pmask[i].astype(mx.int32)
+        )).item()
+        assert diff == 0, f"depth-2 sibling row {i} differs from row 3"
+
+    # Sanity: per-row cutoff matches (positions + 1) // ratio.
+    # ratio=4 -> cutoffs [28,29,29,30,30,30,30] // 4 = [7,7,7,7,7,7,7].
+    # So every row should attend to pool indices [0..6] and NOT to 7.
+    expected_attend_count_per_row = 7  # cols 0..6
+    for i in range(7):
+        attended = int(pmask[i].astype(mx.int32).sum().item())
+        assert attended == expected_attend_count_per_row, (
+            f"row {i}: expected {expected_attend_count_per_row} attended, "
+            f"got {attended}; pmask[{i}]={pmask[i].tolist()}"
+        )
+
+    print("PASS test_tree_pmask_same_depth_siblings_identical")
+
+
+def test_tree_pmask_matches_make_mask_for_linear_path() -> None:
+    """For LINEAR positions (no sibling sharing), tree_pmask == make_mask.
+
+    Linear-causal positions for L=4 starting at offset=10 are [10,11,12,13].
+    The tree-aware pmask built from those positions must equal what
+    make_mask(L=4, offset=10) returns (the stock row-causal path).
+    """
+    ratio = 4
+    pool_cache = PoolingCache(ratio=ratio)
+    pool_cache.update_and_fetch(mx.zeros((1, 12, 8)))
+
+    L, offset = 4, 10
+    stock = pool_cache.make_mask(L=L, offset=offset)
+    assert stock is not None, "make_mask returned None unexpectedly"
+
+    linear_positions = mx.array([10, 11, 12, 13], dtype=mx.int32)
+    tree = _tree_pmask(pool_cache, linear_positions)
+    assert tree is not None
+
+    diff = mx.max(mx.abs(
+        stock.astype(mx.int32) - tree.astype(mx.int32)
+    )).item()
+    assert diff == 0, (
+        f"tree_pmask diverges from make_mask on linear input:\n"
+        f"  stock={stock.tolist()}\n  tree ={tree.tolist()}"
+    )
+    print("PASS test_tree_pmask_matches_make_mask_for_linear_path")
+
+
+def test_dispatch_pmask_falls_through_when_ctx_unset() -> None:
+    """_dispatch_pmask must call stock make_mask when the side channel is unset.
+
+    Critical correctness invariant: production cluster restarts WITHOUT the
+    tree side channel must produce bit-exact linear behavior. This guards
+    against regressions where _dispatch_pmask accidentally still routes to
+    _tree_pmask when EXO_DSV4_TREE_DRAFT is off.
+    """
+    ratio = 4
+    pool_cache = PoolingCache(ratio=ratio)
+    pool_cache.update_and_fetch(mx.zeros((1, 12, 8)))
+
+    # Ensure the side channel is cleared (defensive — other tests may have
+    # set it; they should clear at the end but be belt-and-braces here).
+    _set_tree_verify_ctx(None, None)
+    fallthrough = _dispatch_pmask(pool_cache, L=4, offset=10)
+    stock = pool_cache.make_mask(L=4, offset=10)
+    assert fallthrough is not None and stock is not None
+    diff = mx.max(mx.abs(
+        fallthrough.astype(mx.int32) - stock.astype(mx.int32)
+    )).item()
+    assert diff == 0, "dispatch_pmask should equal stock make_mask when ctx is None"
+
+    # Sanity: empty pool_cache returns None from both.
+    empty = PoolingCache(ratio=ratio)
+    assert _dispatch_pmask(empty, L=4, offset=10) is None
+
+    print("PASS test_dispatch_pmask_falls_through_when_ctx_unset")
+
+
+def test_dispatch_pmask_uses_tree_pmask_when_ctx_set() -> None:
+    """_dispatch_pmask must route to _tree_pmask when positions match L_q.
+
+    Verifies the L-vs-positions-length gate: if L doesn't match, we still
+    fall through to make_mask (defensive — wrong-shape positions in the
+    side channel must NOT crash the linear path).
+    """
+    ratio = 4
+    pool_cache = PoolingCache(ratio=ratio)
+    pool_cache.update_and_fetch(mx.zeros((1, 12, 8)))
+
+    positions = mx.array([100, 101, 101, 102, 102, 102, 102], dtype=mx.int32)
+    _set_tree_verify_ctx(mask=mx.zeros((7, 1)), positions=positions)
+
+    try:
+        # Matched length: should return tree-pmask.
+        got_tree = _dispatch_pmask(pool_cache, L=7, offset=99)
+        ref_tree = _tree_pmask(pool_cache, positions)
+        assert got_tree is not None and ref_tree is not None
+        diff = mx.max(mx.abs(
+            got_tree.astype(mx.int32) - ref_tree.astype(mx.int32)
+        )).item()
+        assert diff == 0, "dispatch_pmask did not route to _tree_pmask when L matched"
+
+        # Mismatched length: should fall through to make_mask (so that a
+        # stray prefill / cache-read with the side channel still set won't
+        # crash; not expected in practice — dsv4_mtp clears the channel in
+        # a finally — but cheap insurance).
+        got_fallthrough = _dispatch_pmask(pool_cache, L=4, offset=10)
+        ref_fallthrough = pool_cache.make_mask(L=4, offset=10)
+        assert got_fallthrough is not None and ref_fallthrough is not None
+        diff = mx.max(mx.abs(
+            got_fallthrough.astype(mx.int32) - ref_fallthrough.astype(mx.int32)
+        )).item()
+        assert diff == 0, "dispatch_pmask did not fall through when L != L_q"
+    finally:
+        # Always clear so subsequent tests are unaffected.
+        _set_tree_verify_ctx(None, None)
+
+    print("PASS test_dispatch_pmask_uses_tree_pmask_when_ctx_set")
+
+
 def test_tree_mask_4d_base_input() -> None:
     """Reproduces the 2026-05-19 production crash: BatchRotatingKVCache
     emits a 4-D base mask via mx.expand_dims, _build_tree_mask must
@@ -336,4 +494,8 @@ if __name__ == "__main__":
     test_sdpa_with_tree_mask()
     test_tree_mask_sliding_window_clamp()
     test_tree_mask_4d_base_input()
-    print("\nAll Phase 5.2 tests PASSED")
+    test_tree_pmask_same_depth_siblings_identical()
+    test_tree_pmask_matches_make_mask_for_linear_path()
+    test_dispatch_pmask_falls_through_when_ctx_unset()
+    test_dispatch_pmask_uses_tree_pmask_when_ctx_set()
+    print("\nAll Phase 5.2 + tree-pmask tests PASSED")
