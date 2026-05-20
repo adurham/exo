@@ -989,7 +989,34 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if len(gen_batch) >= 1:
             group = self._get_sharding_group()
             tp_active = group is not None and group.size() > 1
-            drain_safe = not tp_active or len(gen_batch) == 1
+            # 2026-05-20 c>=2 fix: at TP c>1 we were skipping drain to
+            # avoid asymmetric `_filter_finished_uid` across ranks. The
+            # cost was severe: buffer was assignment-clobbered each
+            # spec cycle (line 1416), losing γ tokens per cycle → c=2
+            # MTP-on agg t/s collapsed from expected ~30 to 5.7 at 100K.
+            #
+            # Drain IS safe at temp=0 TP c>1 because:
+            #   (a) the broadcast at line 1213 makes n_accepted_per +
+            #       bonus_vals bit-identical across ranks.
+            #   (b) yielded tokens are therefore identical, so
+            #       _filter_finished_uid fires symmetrically (stop
+            #       conditions = function of yielded tokens).
+            #   (c) per-stream buffer growth is symmetric, so the
+            #       "all uids have buffered token" check yields the
+            #       same answer on every rank.
+            #
+            # We still skip drain at temp>0 TP c>1 because per-rank
+            # RNG can produce divergent samples there (memory:
+            # jaccl_phase_f_outcome_2026_05_06.md).
+            any_temp_gt0 = any(
+                getattr(self, "_request_temp", {}).get(uid, 0.0) > 0
+                for uid in gen_batch.uids
+            )
+            drain_safe = (
+                not tp_active
+                or len(gen_batch) == 1
+                or not any_temp_gt0
+            )
             if drain_safe:
                 for uid in gen_batch.uids:
                     if uid in self._token_buffer and self._token_buffer[uid]:
@@ -1405,6 +1432,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             )
 
         # Yield first response per uid; buffer the rest.
+        #
+        # 2026-05-20 c>=2 fix: prior code did `self._token_buffer[uid]
+        # = deque(rest)` which CLOBBERS the existing buffer on every
+        # spec cycle. At TP c>1 the drain in _next() was disabled, so
+        # the buffer never emptied → each spec cycle wrote γ new tokens
+        # on top of γ old tokens, losing the old ones. Combined with the
+        # drain-skip → only the FIRST token of each spec cycle ever
+        # reached the response stream, dropping the MTP multi-token gain.
+        #
+        # Fix: use setdefault + extend so the buffer accumulates if not
+        # yet drained. Combined with the c=2-temp=0 drain re-enable
+        # above (line 989+), each spec cycle's γ tokens land in the
+        # buffer AND get drained on the next γ _next() calls.
         first_responses: list[Any] = []
         for n, uid in enumerate(uids):
             row = responses_per[n]
@@ -1413,7 +1453,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             first = row[0]
             rest = row[1:]
             if rest:
-                self._token_buffer[uid] = deque(rest)
+                self._token_buffer.setdefault(uid, deque()).extend(rest)
             elif first.finish_reason is not None:
                 self._filter_finished_uid(uid)
                 self._cleanup_uid(uid)
@@ -1830,7 +1870,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         first = responses[0]
         rest = responses[1:]
         if rest:
-            self._token_buffer[uid] = deque(rest)
+            # Use setdefault+extend instead of assign so we don't clobber
+            # any tokens still buffered from a previous cycle. At c=1 the
+            # buffer normally drains to empty before the next spec cycle
+            # so this is bit-equivalent to the prior assign, but the
+            # safer pattern matches the c>=2 fix at line 1456.
+            self._token_buffer.setdefault(uid, deque()).extend(rest)
         elif first.finish_reason is not None:
             self._filter_finished_uid(uid)
             self._cleanup_uid(uid)
@@ -2155,7 +2200,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         first = responses[0]
         rest = responses[1:]
         if rest:
-            self._token_buffer[uid] = deque(rest)
+            # See 2026-05-20 c>=2 fix at line 1456 for rationale.
+            self._token_buffer.setdefault(uid, deque()).extend(rest)
         elif first.finish_reason is not None:
             self._filter_finished_uid(uid)
             self._cleanup_uid(uid)
