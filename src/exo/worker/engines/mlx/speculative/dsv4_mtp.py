@@ -1888,12 +1888,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
 
         # 5. Roll back KV caches to the pre-tree state (L_kv on every
-        # cache). The verify pass wrote n_nodes positions; we discard
-        # ALL of them. Next cycle's verify-input will start from
-        # [bonus_val] + new draft tree, redoing the accepted-path tokens.
-        # This is Plan section 4.3 Option C -- simpler than per-path
-        # cache trimming; the cost is re-attending to the accepted path
-        # on next cycle (small at L_kv=100K).
+        # cache). The verify pass wrote n_nodes tokens at columns
+        # L_kv..L_kv+n_nodes in linear write-order, but the ACCEPTED
+        # path is at non-contiguous columns ([root, depth-1 accepted,
+        # depth-2 accepted, ...] = cols 0, 1, 3 in a K=2 tree -- not
+        # 0,1,2). We can't keep them in place without column compaction,
+        # so we trim the entire tree and re-commit the accepted path in
+        # step 5b below.
         rollback = n_nodes  # always n_nodes; verify wrote all tree nodes
         if rollback > 0:
             for c in gen_batch.prompt_cache:
@@ -1902,15 +1903,59 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(c, "offset"):
                     c.offset -= rollback
 
-            # MTP cache: draft_tokens_topk left it at l_kv + gamma (root
-            # MTP forward + last depth-2 sibling's forward). Trim by
-            # gamma to undo.
+            # MTP cache: draft_tokens_topk left it at L_kv + gamma. We
+            # want it at L_kv + n_accepted for the next cycle, mirroring
+            # the linear baseline's `trim(gamma - n_accepted)` post-accept
+            # semantics. The K/V at L_kv+1 is always the root forward
+            # (shared across siblings); for n_accepted >= 2 the K/V at
+            # L_kv+2 may be from the wrong depth-1 sibling (the LAST one
+            # in BFS order, not necessarily the accepted one). That only
+            # affects the next cycle's MTP draft quality, not user
+            # output: the verify forward will catch any divergence.
+            #
+            # TODO(v1.1): rebuild the MTP cache from the accepted path
+            # to make depth-2+ drafts bit-equivalent to a chain of
+            # linear MTP forwards. Likely needed for acceptance >= 90%.
             mtp_cache = self.mtp._cache
-            if mtp_cache is not None:
+            mtp_rollback = gamma - n_accepted
+            if mtp_cache is not None and mtp_rollback > 0:
                 if hasattr(mtp_cache, "trim"):
-                    mtp_cache.trim(gamma)
+                    mtp_cache.trim(mtp_rollback)
                 elif hasattr(mtp_cache, "offset"):
-                    mtp_cache.offset -= gamma
+                    mtp_cache.offset -= mtp_rollback
+
+        # 5b. Commit forward for the accepted path. The tree verify
+        # populated KV at non-contiguous columns; the cleanest way to
+        # get the accepted path's KV at contiguous columns L_kv..
+        # L_kv+n_accepted is to run a SMALL LINEAR forward over the
+        # accepted path. The side channel was already cleared in step 2's
+        # finally block, so this is a vanilla forward: tree mask off,
+        # standard RoPE, normal Compressor pool updates. Same semantics
+        # as if we had run the baseline (linear) speculative path with
+        # the accepted_drafts as the verify input.
+        #
+        # n_accepted+1 tokens (y + accepted drafts) -> writes KV at
+        # cols L_kv..L_kv+n_accepted, advances local_cache offset to
+        # L_kv + n_accepted + 1. Bonus token (the next cycle's "y") is
+        # staged in step 8 from the TREE verify's all_next list -- not
+        # re-derived from this commit forward (which we could but it
+        # would just re-execute work we already did).
+        #
+        # Cost: ~3-token forward per tree cycle, ~6% of wall budget.
+        # Without it the next cycle's verify-input would start from
+        # bonus_val with the model's KV state stuck at L_kv (no
+        # knowledge of the accepted drafts), producing context-blind
+        # logits and the "loopy" output we observed pre-fix.
+        commit_tokens = [y_val] + [tree_tokens[nid] for nid in best_path]
+        commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
+        _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
+        # Force the forward to actually run; otherwise lazy mlx can leave
+        # local_cache.update_and_fetch dangling and the next cycle reads
+        # stale state.
+        mx.eval(_commit_logits)
+        # We don't use _commit_logits -- bonus + pre_norm come from
+        # the tree verify, captured pre-rollback. Drop the reference.
+        del _commit_logits
 
         # 6. Update MTP pre_norm seed for the next cycle. Use the verify
         # pre_norm at the bonus node's position (where the next cycle's
