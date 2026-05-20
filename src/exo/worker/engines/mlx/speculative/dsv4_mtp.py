@@ -1889,77 +1889,92 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
 
-        # 5. Roll back KV caches to the pre-tree state (L_kv on every
-        # cache). The verify pass wrote n_nodes tokens at columns
-        # L_kv..L_kv+n_nodes in linear write-order, but the ACCEPTED
-        # path is at non-contiguous columns ([root, depth-1 accepted,
-        # depth-2 accepted, ...] = cols 0, 1, 3 in a K=2 tree -- not
-        # 0,1,2). We can't keep them in place without column compaction,
-        # so we trim the entire tree and re-commit the accepted path in
-        # step 5b below.
-        rollback = n_nodes  # always n_nodes; verify wrote all tree nodes
-        if rollback > 0:
+        # 5. Roll back KV caches + (re)write the accepted-path KV.
+        #
+        # The verify forward wrote n_nodes tokens at local_cache cols
+        # L_kv..L_kv+n_nodes in tree (BFS) order: col 0 = root (= y),
+        # cols 1..K = depth-1 siblings, cols K+1..K+K^2 = depth-2
+        # siblings (siblings of node 1 first, then node 2, etc).
+        #
+        # The ACCEPTED path is `[root] + best_path` -> col indices
+        # `[0] + best_path`. For the next cycle's forward to see the
+        # right KV-history, we need local_cache to end at offset
+        # L_kv + n_accepted + 1 with cols [L_kv..L_kv+n_accepted]
+        # holding the accepted-path KV.
+        #
+        # Two cases:
+        #   (a) FAST PATH (~75% of cycles in K=2 BFS): accepted path
+        #       is already at contiguous prefix cols [0, 1, ...,
+        #       n_accepted]. True iff `best_path == [1..n_accepted]`.
+        #       Covers: n_accepted=0 (best_path=[]), n_accepted=1 with
+        #       best_path=[1] (top-1 depth-1 accepted). In BFS,
+        #       n_accepted=2 NEVER hits this path (best_path[1] >= 3).
+        #       Just trim the trailing siblings -> no commit forward.
+        #
+        #   (b) SLOW PATH: accepted path is non-contiguous (e.g.,
+        #       best_path=[1, 3] for n_accepted=2). Trim the full tree
+        #       and re-commit linearly via step 5b.
+        #
+        # MTP cache: always trim by `gamma - n_accepted`, mirroring
+        # the linear baseline's post-accept semantics. K/V at L_kv+1
+        # is always the root forward (shared across siblings); for
+        # n_accepted >= 2 the K/V at L_kv+2 may be from the wrong
+        # depth-1 sibling (the LAST one in BFS order). That only
+        # affects the next cycle's MTP draft quality, not user
+        # output: the verify forward catches any divergence.
+        # TODO(v1.1): rebuild MTP cache from accepted path for
+        # acceptance >= 90%.
+        contiguous_accept = (
+            n_accepted <= 1
+            and list(best_path) == list(range(1, n_accepted + 1))
+        )
+        if contiguous_accept:
+            # FAST PATH: trim only the rejected suffix from local_cache;
+            # cols 0..n_accepted already hold correct accepted-path KV.
+            trim_local = n_nodes - (n_accepted + 1)
+        else:
+            # SLOW PATH: trim the entire tree; step 5b re-writes y +
+            # accepted drafts via a commit forward.
+            trim_local = n_nodes
+
+        if trim_local > 0:
             for c in gen_batch.prompt_cache:
                 if hasattr(c, "trim"):
-                    c.trim(rollback)
+                    c.trim(trim_local)
                 elif hasattr(c, "offset"):
-                    c.offset -= rollback
+                    c.offset -= trim_local
 
-            # MTP cache: draft_tokens_topk left it at L_kv + gamma. We
-            # want it at L_kv + n_accepted for the next cycle, mirroring
-            # the linear baseline's `trim(gamma - n_accepted)` post-accept
-            # semantics. The K/V at L_kv+1 is always the root forward
-            # (shared across siblings); for n_accepted >= 2 the K/V at
-            # L_kv+2 may be from the wrong depth-1 sibling (the LAST one
-            # in BFS order, not necessarily the accepted one). That only
-            # affects the next cycle's MTP draft quality, not user
-            # output: the verify forward will catch any divergence.
-            #
-            # TODO(v1.1): rebuild the MTP cache from the accepted path
-            # to make depth-2+ drafts bit-equivalent to a chain of
-            # linear MTP forwards. Likely needed for acceptance >= 90%.
-            mtp_cache = self.mtp._cache
-            mtp_rollback = gamma - n_accepted
-            if mtp_cache is not None and mtp_rollback > 0:
-                if hasattr(mtp_cache, "trim"):
-                    mtp_cache.trim(mtp_rollback)
-                elif hasattr(mtp_cache, "offset"):
-                    mtp_cache.offset -= mtp_rollback
+        mtp_cache = self.mtp._cache
+        mtp_rollback = gamma - n_accepted
+        if mtp_cache is not None and mtp_rollback > 0:
+            if hasattr(mtp_cache, "trim"):
+                mtp_cache.trim(mtp_rollback)
+            elif hasattr(mtp_cache, "offset"):
+                mtp_cache.offset -= mtp_rollback
 
-        # 5b. Commit forward for the accepted path. The tree verify
-        # populated KV at non-contiguous columns; the cleanest way to
-        # get the accepted path's KV at contiguous columns L_kv..
-        # L_kv+n_accepted is to run a SMALL LINEAR forward over the
-        # accepted path. The side channel was already cleared in step 2's
-        # finally block, so this is a vanilla forward: tree mask off,
-        # standard RoPE, normal Compressor pool updates. Same semantics
-        # as if we had run the baseline (linear) speculative path with
-        # the accepted_drafts as the verify input.
+        # 5b. Commit forward (SLOW PATH only). Run a small linear
+        # forward `[y, *accepted_drafts]` (length n_accepted+1) without
+        # the tree side channel; this writes correct contiguous KV at
+        # local_cache cols L_kv..L_kv+n_accepted. The side channel was
+        # cleared in step 2's finally block, so this is a vanilla
+        # forward (tree mask off, standard RoPE, normal Compressor
+        # pool updates). Without it the model has no KV record of the
+        # accepted tokens it just yielded -> next cycle runs
+        # context-blind (the bug fixed in 2026-05-20 3caffad7).
         #
-        # n_accepted+1 tokens (y + accepted drafts) -> writes KV at
-        # cols L_kv..L_kv+n_accepted, advances local_cache offset to
-        # L_kv + n_accepted + 1. Bonus token (the next cycle's "y") is
-        # staged in step 8 from the TREE verify's all_next list -- not
-        # re-derived from this commit forward (which we could but it
-        # would just re-execute work we already did).
-        #
-        # Cost: ~3-token forward per tree cycle, ~6% of wall budget.
-        # Without it the next cycle's verify-input would start from
-        # bonus_val with the model's KV state stuck at L_kv (no
-        # knowledge of the accepted drafts), producing context-blind
-        # logits and the "loopy" output we observed pre-fix.
+        # Skipped on the fast path because the tree verify already wrote
+        # the correct KV at cols [0..n_accepted] in BFS layout.
         if prof is not None:
             t_before_commit = time.perf_counter()
-        commit_tokens = [y_val] + [tree_tokens[nid] for nid in best_path]
-        commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
-        _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
-        # Force the forward to actually run; otherwise lazy mlx can leave
-        # local_cache.update_and_fetch dangling and the next cycle reads
-        # stale state.
-        mx.eval(_commit_logits)
-        # We don't use _commit_logits -- bonus + pre_norm come from
-        # the tree verify, captured pre-rollback. Drop the reference.
-        del _commit_logits
+        if not contiguous_accept:
+            commit_tokens = [y_val] + [tree_tokens[nid] for nid in best_path]
+            commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
+            _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
+            # Force the forward to actually run; otherwise lazy mlx can
+            # leave local_cache.update_and_fetch dangling and the next
+            # cycle reads stale state.
+            mx.eval(_commit_logits)
+            del _commit_logits
         if prof is not None:
             t_after_commit = time.perf_counter()
             prof.record("commit", (t_after_commit - t_before_commit) * 1000.0)
