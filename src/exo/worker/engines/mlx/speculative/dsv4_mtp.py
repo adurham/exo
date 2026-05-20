@@ -44,7 +44,7 @@ from mlx_lm.models.cache import (
 
 from .mtp_batch_generator import MTPBatchGenerator
 from . import mtp_module as _mtp_module  # for _TREE_ALPHA_PROBE_STEPS drain
-from .mtp_module import broadcast_from_canonical, draft_tokens
+from .mtp_module import broadcast_from_canonical, draft_tokens, draft_tokens_topk
 from exo.worker.engines.mlx.utils_mlx import get_coord_group, mx_any
 
 
@@ -92,6 +92,77 @@ logger = logging.getLogger(__name__)
 # Log acceptance distribution every N spec cycles when EXO_DSV4_MTP_LOG=1.
 # Set to 0 / unset to silence.
 _LOG_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_LOG_INTERVAL", "0"))
+
+
+# Token-tree drafting feature gate. When 1, _speculative_next routes to
+# the K=2 gamma=2 tree path instead of the linear gamma=2 chain.
+# K is set by EXO_DSV4_TREE_K (default 2). gamma comes from the standard
+# EXO_SPECULATIVE_GAMMA (must be <=2; v1 supports gamma in {1,2}).
+TREE_DRAFT = os.environ.get("EXO_DSV4_TREE_DRAFT") == "1"
+TREE_K = int(os.environ.get("EXO_DSV4_TREE_K", "2"))
+
+
+def _build_tree_mask_and_positions(
+    parent_idx: list[int],
+    depth: list[int],
+    l_kv: int,
+    dtype: Any = None,
+) -> tuple[Any, Any]:
+    """Build the per-tree-node attention mask and RoPE positions.
+
+    Args:
+        parent_idx: list[int] length n_nodes. parent_idx[i] is the index
+            of node i's parent (-1 for the root).
+        depth: list[int] length n_nodes. depth[i] is the depth of node i
+            (0 = root, 1 = depth-1, etc).
+        l_kv: int -- the prefill KV cache offset BEFORE the verify forward.
+            Each tree node attends to all l_kv prior KV positions plus its
+            ancestor tree nodes.
+        dtype: mx dtype for the mask additive (-inf, 0). Defaults to bf16
+            to match the model's compute dtype; mlx promotes if needed.
+
+    Returns: (mask, positions)
+        mask: shape (L_q, l_kv + L_q) additive: 0.0 at attend, large
+            negative value at do-not-attend. DeepseekV4Model.__call__
+            broadcasts this to (1, 1, L_q, l_k) for SDPA.
+        positions: shape (L_q,) int32 -- RoPE positions. Node at depth d
+            gets position l_kv + d.
+    """
+    n_nodes = len(parent_idx)
+    if dtype is None:
+        dtype = mx.bfloat16
+
+    # Ancestor sets. For each node, walk parents to root; this set
+    # tells us which OTHER tree nodes that node may attend to.
+    ancestors: list[set[int]] = [set() for _ in range(n_nodes)]
+    for i in range(n_nodes):
+        cur = parent_idx[i]
+        while cur != -1:
+            ancestors[i].add(cur)
+            cur = parent_idx[cur]
+
+    # Build the (L_q, L_q) sub-mask: node i can attend to itself and any
+    # ancestor. Then prepend an all-attend (l_kv,) column for the prefill.
+    # Python-side mask, then convert. n_nodes is small (<= 13 for K=3 g=2)
+    # so the O(n^2) Python loop is irrelevant. Use -1e9 as the "do-not-
+    # attend" additive — large enough to drive softmax to ~0 in bf16,
+    # avoids the mx.finfo(bf16).min numpy-scalar conversion gotcha.
+    NEG = -1.0e9
+    sub_mask = [[NEG] * n_nodes for _ in range(n_nodes)]
+    for i in range(n_nodes):
+        sub_mask[i][i] = 0.0
+        for a in ancestors[i]:
+            sub_mask[i][a] = 0.0
+    sub_arr = mx.array(sub_mask, dtype=dtype)             # (L_q, L_q)
+
+    # Prefix attend-all over the prefill cache.
+    prefix = mx.zeros((n_nodes, l_kv), dtype=dtype)        # (L_q, l_kv)
+    mask = mx.concatenate([prefix, sub_arr], axis=1)       # (L_q, l_kv + L_q)
+
+    positions = mx.array(
+        [l_kv + d for d in depth], dtype=mx.int32
+    )
+    return mask, positions
 
 # Per-cycle phase timing. When EXO_DSV4_MTP_PROFILE > 0, brackets the
 # draft / verify / accept phases with mx.eval + perf_counter, summarising
@@ -1282,7 +1353,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
           * ``cache.trim(rollback)`` on each prompt-cache entry for
             rejected-draft rollback (CacheList recursively trims its
             inner caches)
+
+        Token-tree drafting gate: when EXO_DSV4_TREE_DRAFT=1, route to
+        :meth:`_speculative_next_tree` which uses K-way top-K MTP
+        expansion + tree-attention verify instead of the linear chain.
+        Only temp=0 greedy is supported in tree v1; temp>0 falls back
+        to the linear path.
         """
+        if TREE_DRAFT:
+            temp = self._request_temp.get(uid, self.temp)
+            if temp == 0:
+                return self._speculative_next_tree(uid)
+            # temp>0 fall-through to linear path below.
         gen_batch = self._generation_batch
         idx = gen_batch.uids.index(uid)
         sync_group = self._get_sharding_group()
@@ -1572,4 +1654,234 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             self._filter_finished_uid(uid)
             self._cleanup_uid(uid)
 
+        return [first]
+
+    def _speculative_next_tree(self, uid: int):
+        """K-way tree-drafting verify/accept cycle (DSv4, BS=1, temp=0 only).
+
+        Phase 4 of the token-tree drafting plan
+        (.hermes/plans/2026-05-19_token_tree_drafting.md). Replaces the
+        gamma chained linear-draft with a K^gamma TREE: each MTP forward
+        emits top-K candidates per parent; verify processes ALL n_nodes
+        tree tokens in one batched (1, n_nodes) forward; accept walks the
+        tree to find the deepest matching path.
+
+        Wall budget vs linear:
+          - draft: K + K^2 = 6 MTP forwards (K=2 g=2) vs gamma=2 forwards
+            linear. ~3x draft wall.
+          - verify: L_q = 7 vs L_q = 3. ~+10% verify wall (KV-bandwidth
+            bound at L_kv=100K).
+          - tokens/cycle: ~2.32 vs 2.11 (+10%).
+          - Net t/s: ~33 (vs 30 baseline) at the measured alpha.
+
+        See plan Phase 4 + Phase 1.2 findings.
+        """
+        from mlx_lm.models import deepseek_v4 as _dsv4_model_mod
+
+        gen_batch = self._generation_batch
+        idx = gen_batch.uids.index(uid)
+        sync_group = self._get_sharding_group()
+        coord_group = get_coord_group(sync_group)
+        sync_drafts = sync_group is not None and sync_group.size() > 1
+
+        y = gen_batch._next_tokens
+        if y is None or not gen_batch._next_logprobs:
+            return gen_batch.next()
+
+        pre_norm = self._mtp_pre_norm.get(uid)
+        if pre_norm is None:
+            return gen_batch.next()
+
+        y_val = int(y[0].item())
+        y_logprobs = gen_batch._next_logprobs[0]
+
+        gamma = self.gamma
+        K = TREE_K
+        prof = _phase_timer
+        if prof is not None:
+            t_cycle_start = time.perf_counter()
+
+        # 1. Draft tree. Returns Python int lists for tree_tokens,
+        # parent_idx, depth. Length n_nodes = 1 + K + K^2 (for g=2).
+        next_token_arr = y.reshape(1, 1)
+        tree_tokens, parent_idx, depth_list = draft_tokens_topk(
+            self.mtp, pre_norm, next_token_arr, gamma, K,
+            sync_group=coord_group,
+        )
+        n_nodes = len(tree_tokens)
+
+        if prof is not None:
+            t_after_draft = time.perf_counter()
+            prof.record("draft", (t_after_draft - t_cycle_start) * 1000.0)
+
+        # 2. Build verify input (1, n_nodes) + the tree mask & positions.
+        # The prefill cache offset is captured from any one of the prompt
+        # caches (CacheList.offset returns its first child's offset).
+        first_cache = gen_batch.prompt_cache[0]
+        from mlx_lm.models.cache import CacheList
+        mask_cache = (
+            first_cache[0] if isinstance(first_cache, CacheList)
+            else first_cache
+        )
+        l_kv = int(mask_cache.offset)
+
+        verify_input = mx.array(tree_tokens, dtype=mx.int32).reshape(1, n_nodes)
+        tree_mask, tree_positions = _build_tree_mask_and_positions(
+            parent_idx, depth_list, l_kv,
+        )
+
+        # Install the tree-verify side channel for the upcoming model
+        # forward. Must clear unconditionally afterwards.
+        _dsv4_model_mod._set_tree_verify_ctx(tree_mask, tree_positions)
+        try:
+            verify_pre_norm, verify_logits = dsv4_speculative_forward(
+                self.model,
+                verify_input,
+                gen_batch.prompt_cache,
+                self._captured,
+            )
+        finally:
+            _dsv4_model_mod._set_tree_verify_ctx(None, None)
+
+        if prof is not None:
+            mx.eval(verify_pre_norm, verify_logits)
+            t_after_verify = time.perf_counter()
+            prof.record("verify", (t_after_verify - t_after_draft) * 1000.0)
+
+        # 3. Per-tree-node verify argmax. all_next[i] is what target argmax
+        # says should be the NEXT token after node i.
+        all_next = mx.argmax(verify_logits[0], axis=-1)  # (n_nodes,)
+        logprobs_all = verify_logits[0] - mx.logsumexp(
+            verify_logits[0], axis=-1, keepdims=True
+        )
+
+        # Cross-rank broadcast: with TP>1, ranks may produce slightly
+        # different argmax at the same position. Broadcast the canonical
+        # rank-0 all_next vector so all ranks agree on the accept walk.
+        if sync_drafts:
+            all_next = broadcast_from_canonical(
+                all_next.astype(mx.int32), coord_group,
+            )
+
+        mx.async_eval(all_next, logprobs_all, verify_pre_norm)
+
+        # 4. Tree-accept walk. For each leaf in the tree, walk from root
+        # down to the leaf; accept while target_argmax[parent] matches
+        # the child's tree token. Keep the deepest accepted path.
+        all_next_list = cast(list[int], all_next.tolist())
+
+        # Build children map for fast leaf detection.
+        children: dict[int, list[int]] = {}
+        for i in range(n_nodes):
+            p = parent_idx[i]
+            if p >= 0:
+                children.setdefault(p, []).append(i)
+        leaves = [i for i in range(n_nodes) if i not in children]
+
+        # Find best path. best_path is the list of accepted node ids
+        # (deepest first), best_depth is its length, best_end is the
+        # deepest accepted node.
+        best_depth = 0
+        best_end_node = 0  # root: nothing accepted from drafts, bonus only
+        best_path: list[int] = []
+        for leaf in leaves:
+            # Walk leaf -> root, then reverse to get root-first path.
+            path: list[int] = []
+            cur = leaf
+            while cur != -1:
+                path.append(cur)
+                cur = parent_idx[cur]
+            path.reverse()  # path[0] = root, path[-1] = leaf
+            # Walk: accept while target_argmax[parent] == tree_tokens[child].
+            accepted = 0
+            prev = path[0]  # root
+            for nxt in path[1:]:
+                if all_next_list[prev] == tree_tokens[nxt]:
+                    accepted += 1
+                    prev = nxt
+                else:
+                    break
+            if accepted > best_depth:
+                best_depth = accepted
+                best_end_node = prev
+                best_path = path[1 : 1 + accepted]  # accepted child node ids
+
+        n_accepted = best_depth
+        bonus_val = int(all_next_list[best_end_node])
+        bonus_lp = logprobs_all[best_end_node]
+
+        self._record_acceptance(n_accepted)
+
+        if prof is not None:
+            t_after_accept = time.perf_counter()
+            prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
+
+        # 5. Roll back KV caches to the pre-tree state (L_kv on every
+        # cache). The verify pass wrote n_nodes positions; we discard
+        # ALL of them. Next cycle's verify-input will start from
+        # [bonus_val] + new draft tree, redoing the accepted-path tokens.
+        # This is Plan section 4.3 Option C -- simpler than per-path
+        # cache trimming; the cost is re-attending to the accepted path
+        # on next cycle (small at L_kv=100K).
+        rollback = n_nodes  # always n_nodes; verify wrote all tree nodes
+        if rollback > 0:
+            for c in gen_batch.prompt_cache:
+                if hasattr(c, "trim"):
+                    c.trim(rollback)
+                elif hasattr(c, "offset"):
+                    c.offset -= rollback
+
+            # MTP cache: draft_tokens_topk left it at l_kv + gamma (root
+            # MTP forward + last depth-2 sibling's forward). Trim by
+            # gamma to undo.
+            mtp_cache = self.mtp._cache
+            if mtp_cache is not None:
+                if hasattr(mtp_cache, "trim"):
+                    mtp_cache.trim(gamma)
+                elif hasattr(mtp_cache, "offset"):
+                    mtp_cache.offset -= gamma
+
+        # 6. Update MTP pre_norm seed for the next cycle. Use the verify
+        # pre_norm at the bonus node's position (where the next cycle's
+        # draft will start from).
+        self._mtp_pre_norm[uid] = verify_pre_norm[:, best_end_node : best_end_node + 1, :]
+
+        # 7. Build yielded tokens: [y, accepted-path drafts...].
+        all_tokens: list[tuple[int, mx.array]] = [(y_val, y_logprobs)]
+        for node_id in best_path:
+            tok = tree_tokens[node_id]
+            # Use the parent's logprobs as a proxy for the draft's
+            # logprob. Cheap and only used for response metadata.
+            parent_node = parent_idx[node_id]
+            all_tokens.append((tok, logprobs_all[parent_node]))
+
+        # 8. Stage the bonus for next call.
+        gen_batch._next_tokens = mx.array([bonus_val])
+        gen_batch._next_logprobs = [bonus_lp]
+        mx.async_eval(gen_batch._next_tokens)
+
+        if prof is not None:
+            t_after_rollback = time.perf_counter()
+            prof.record(
+                "rollback", (t_after_rollback - t_after_accept) * 1000.0
+            )
+            prof.record(
+                "total", (t_after_rollback - t_cycle_start) * 1000.0
+            )
+            prof.end_cycle(1)
+
+        # 9. Bookkeeping + state machine.
+        self._gen_tokens_counter += len(all_tokens)
+        self._steps_counter += 1
+        if self._steps_counter % 512 == 0:
+            mx.clear_cache()
+
+        responses = self._build_yielded_responses(uid, idx, all_tokens)
+        first = responses[0]
+        rest = responses[1:]
+        if rest:
+            self._token_buffer[uid] = deque(rest)
+        elif first.finish_reason is not None:
+            self._filter_finished_uid(uid)
+            self._cleanup_uid(uid)
         return [first]

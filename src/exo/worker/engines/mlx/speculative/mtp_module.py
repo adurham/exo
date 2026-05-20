@@ -21,6 +21,7 @@ Usage:
 """
 
 import os
+from typing import Any
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -685,3 +686,158 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
             mx.eval(tok_arr)
 
     return draft_ids, draft_probs
+
+
+def draft_tokens_topk(
+    mtp_pred,
+    hidden,
+    first_token_arr,
+    gamma,
+    K,
+    sync_group=None,
+):
+    """Draft a TREE of K^gamma candidate token paths via top-K MTP expansion.
+
+    Phase 2 of the token-tree drafting plan
+    (.hermes/plans/2026-05-19_token_tree_drafting.md). Linear `draft_tokens`
+    chains gamma sequential argmax MTP forwards; this builds a tree where
+    each depth-d MTP forward expands K children from each depth-(d-1)
+    parent. For K=2 gamma=2: 1 (root) + 2 (depth-1) + 4 (depth-2) = 7 nodes.
+
+    Args:
+        mtp_pred: DSv4MTPPredictor (or Qwen MTPPredictor) — has `predict()`
+            and `_cache` with `.trim(n)`.
+        hidden: pre-norm hidden shape `(1, 1, D)` at the last verify position
+            (= the seed for the root MTP forward).
+        first_token_arr: mx.array `(1, 1)` int — last committed token. This
+            is tree node 0's token (the verify-input prefix).
+        gamma: tree depth (number of draft steps). Production: 2.
+        K: branching factor (top-K per parent). Production: 2.
+        sync_group: optional TP coord subgroup. When >1 rank, broadcast each
+            MTP-emitted top-K token vector from rank 0 to keep all ranks
+            bit-exact on the tree structure (same rationale as
+            `draft_tokens`).
+
+    Returns: (tree_tokens, parent_idx, depth) where each is a Python
+        ``list[int]`` of length ``n_nodes = sum(K**d for d in range(gamma+1))``.
+        BFS order: node 0 is the root, nodes 1..K are depth-1 children of
+        root in MTP-logit-rank order, etc.
+
+    Cache semantics: between depth-1 siblings (and between depth-2 siblings)
+    we call ``mtp_pred._cache.trim(1)`` to roll back the MTP KV cache before
+    re-running from the same parent. After the tree is built, the cache is
+    LEFT at offset = L_kv + 1 (root MTP forward consumed, but no extant
+    branch's depth-2 forward consumed). _speculative_next is responsible
+    for trimming back to L_kv (root) on cycle end so the next cycle starts
+    fresh -- mirrors the linear `trim(rollback)` semantics.
+
+    Greedy only (temp=0) for v1. Stochastic tree drafting requires per-
+    branch q-tracking and is out of scope for the production decode path.
+    """
+    sync_drafts = sync_group is not None and sync_group.size() > 1
+    import os as _os_local
+    _disable_broadcast = (
+        _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
+    )
+
+    # Tree node lists. Node 0 = root = first_token_arr.
+    # We materialise first_token_arr to a Python int (sync) so we can put
+    # it in tree_tokens as a plain int. This is cheap (the token was just
+    # committed, already on host).
+    root_tok = int(first_token_arr.reshape(-1)[0].item())
+    tree_tokens: list[int] = [root_tok]
+    parent_idx: list[int] = [-1]
+    depth_arr: list[int] = [0]
+
+    # node_hidden[i] holds the MTP post-block hidden state to use as the
+    # NEXT MTP forward's input hidden (i.e., the hidden output of the
+    # MTP forward that PRODUCED node i's token). For the root, this is
+    # the seed `hidden` passed in (verify-side pre_norm at last position).
+    # Only used for nodes that will spawn children — depth-(gamma-1) and
+    # shallower. We keep it indexed by node id for clarity.
+    node_hidden: list[Any] = [hidden]  # type: ignore[name-defined]
+
+    # MTP forward at the root: input = (hidden, first_token). Output: top-K
+    # token logits + a new hidden h_root. The h_root becomes the seed for
+    # all K depth-1 MTP forwards.
+    logits_root, h_root = mtp_pred.predict(
+        hidden, first_token_arr, return_hidden=True
+    )
+    # Cache offset is now L_kv + 1 (root MTP forward consumed one step).
+    # Top-K (sorted by logit desc). Materialise to Python ints
+    # IMMEDIATELY — keeping lazy mx.arrays across the rest of this
+    # function would entangle with the MTP cache buffer (see 2026-05-19
+    # probe bug). top_K_arr is shape (K,).
+    top_K_arr = mx.argsort(-logits_root.reshape(-1))[:K]
+    if sync_drafts and not _disable_broadcast:
+        # Broadcast the K-vector of token IDs from rank 0 so all ranks
+        # agree on the same tree shape downstream.
+        top_K_arr = broadcast_from_canonical(
+            top_K_arr.astype(mx.int32), sync_group
+        )
+    depth1_ids = top_K_arr.tolist()  # sync; cheap (K ints)
+
+    for k in range(K):
+        tok_id = int(depth1_ids[k])
+        tree_tokens.append(tok_id)
+        parent_idx.append(0)
+        depth_arr.append(1)
+        node_hidden.append(h_root)
+
+    # If gamma == 1 we're done: tree is depth-1 only.
+    if gamma <= 1:
+        return tree_tokens, parent_idx, depth_arr
+
+    # Depth-2 expansion. For each depth-1 node (indices 1..K), seed the
+    # MTP with (h_root, that node's token) → get a fresh logits and
+    # post-block hidden. Take top-K of those logits → K depth-2 children
+    # of this depth-1 node.
+    #
+    # CRITICAL: cache fanout. After processing depth-1 node 1, the MTP
+    # cache is at offset L_kv + 2 (root step + node-1 step). Before
+    # processing depth-1 node 2 we must trim(1) back to L_kv + 1 so the
+    # node-2 forward sees the same context as node-1 did.
+    for d1_node in range(1, K + 1):
+        tok_id = tree_tokens[d1_node]
+        tok_arr_in = mx.array([[tok_id]])
+        # The hidden input for this MTP forward is h_root (the output
+        # of the root MTP forward), shared across all depth-1 siblings.
+        # Each call re-runs MTP from offset L_kv + 1.
+        logits_d1, h_d1 = mtp_pred.predict(
+            node_hidden[d1_node], tok_arr_in, return_hidden=True
+        )
+        # Cache offset is now L_kv + 2.
+        top_K_d1 = mx.argsort(-logits_d1.reshape(-1))[:K]
+        if sync_drafts and not _disable_broadcast:
+            top_K_d1 = broadcast_from_canonical(
+                top_K_d1.astype(mx.int32), sync_group
+            )
+        d2_ids = top_K_d1.tolist()  # sync; K ints
+
+        for k in range(K):
+            tree_tokens.append(int(d2_ids[k]))
+            parent_idx.append(d1_node)
+            depth_arr.append(2)
+            node_hidden.append(h_d1)  # would seed depth-3 children if gamma>2
+
+        # Trim back to offset L_kv + 1 so the NEXT depth-1 sibling sees
+        # the same context. Skip the trim after the LAST sibling (we leave
+        # the cache at L_kv + 2; the caller trims by 2 at cycle end --
+        # see _speculative_next's tree-aware rollback).
+        if d1_node < K:
+            cache = getattr(mtp_pred, "_cache", None)
+            if cache is not None and hasattr(cache, "trim"):
+                cache.trim(1)
+            elif cache is not None and hasattr(cache, "offset"):
+                cache.offset -= 1
+
+    # NOTE: gamma >= 3 fan-out not implemented in v1. Per plan section 7,
+    # K=2 gamma=2 and K=3 gamma=2 are the realistic operating points.
+    if gamma > 2:
+        raise NotImplementedError(
+            "draft_tokens_topk: gamma > 2 not implemented in v1 (plan "
+            "section 7 lists K=2 gamma=2 and K=3 gamma=2 as the target "
+            "configs; deeper trees fail the wall-cost gate)."
+        )
+
+    return tree_tokens, parent_idx, depth_arr

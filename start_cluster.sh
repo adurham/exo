@@ -704,6 +704,13 @@ for NODE in "${NODES[@]}"; do
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
     # argmax to /tmp/dsv4_tree_alpha_probe_pid<PID>.jsonl on rank 0 only.
     [ -n "${EXO_DSV4_TREE_ALPHA_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_ALPHA_PROBE=$EXO_DSV4_TREE_ALPHA_PROBE"
+    # Token-tree drafting (Phases 2-7 of the May-19 plan). When 1,
+    # _speculative_next routes to _speculative_next_tree which uses K^gamma
+    # top-K MTP expansion + tree-attention verify instead of the linear
+    # gamma chain. K is set by EXO_DSV4_TREE_K (default 2). Greedy temp=0
+    # only; temp>0 falls back to the linear path.
+    [ -n "${EXO_DSV4_TREE_DRAFT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DRAFT=$EXO_DSV4_TREE_DRAFT"
+    [ -n "${EXO_DSV4_TREE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_K=$EXO_DSV4_TREE_K"
     [ -n "${EXO_DSV4_PSCACHE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PSCACHE_DEBUG=$EXO_DSV4_PSCACHE_DEBUG"
     [ -n "$EXO_DSV4_INDEXER_WINDOW" ]  && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
     [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"
