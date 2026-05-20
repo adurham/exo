@@ -105,7 +105,7 @@ TREE_K = int(os.environ.get("EXO_DSV4_TREE_K", "2"))
 def _build_tree_mask_and_positions(
     parent_idx: list[int],
     depth: list[int],
-    l_kv: int,
+    mask_cache: Any,
     dtype: Any = None,
 ) -> tuple[Any, Any]:
     """Build the per-tree-node attention mask and RoPE positions.
@@ -115,25 +115,59 @@ def _build_tree_mask_and_positions(
             of node i's parent (-1 for the root).
         depth: list[int] length n_nodes. depth[i] is the depth of node i
             (0 = root, 1 = depth-1, etc).
-        l_kv: int -- the prefill KV cache offset BEFORE the verify forward.
-            Each tree node attends to all l_kv prior KV positions plus its
-            ancestor tree nodes.
-        dtype: mx dtype for the mask additive (-inf, 0). Defaults to bf16
-            to match the model's compute dtype; mlx promotes if needed.
+        mask_cache: the RotatingKVCache used for mask construction (= the
+            first child of the first layer's prompt_cache CacheList). Has
+            `.offset` and `.max_size` (= sliding_window). We let it build
+            the base causal mask and then OVERWRITE the (L_q, L_q) tail
+            block with our tree-ancestor pattern.
+        dtype: mx dtype for the mask additive (-inf, 0). Defaults to bf16.
 
     Returns: (mask, positions)
-        mask: shape (L_q, l_kv + L_q) additive: 0.0 at attend, large
-            negative value at do-not-attend. DeepseekV4Model.__call__
-            broadcasts this to (1, 1, L_q, l_k) for SDPA.
+        mask: shape (L_q, kv_window + L_q) additive: 0.0 at attend, large
+            negative value at do-not-attend. `kv_window` = whatever the
+            cache's own mask machinery clamped to (typically sliding_window
+            for RotatingKVCache; full offset only for prefill stages).
         positions: shape (L_q,) int32 -- RoPE positions. Node at depth d
-            gets position l_kv + d.
+            gets position offset + d (using the REAL un-clamped offset --
+            RoPE is unaffected by sliding window).
+
+    The kv_window-clamping is critical: the DSv4 SparseCompressedAttention
+    local-attention branch reads only `local_kv.shape[2] = min(offset, sw)
+    + L_q` KV positions. If the mask is wider than that, the SDPA scores
+    @ mask broadcast fails (we crashed 2026-05-19 with
+    Shapes (1,1,7,69328) and (1,64,7,134) cannot be broadcast).
     """
     n_nodes = len(parent_idx)
     if dtype is None:
         dtype = mx.bfloat16
 
-    # Ancestor sets. For each node, walk parents to root; this set
-    # tells us which OTHER tree nodes that node may attend to.
+    # Real (un-clamped) cache offset for RoPE positions.
+    real_offset = int(mask_cache.offset)
+
+    # Let the cache build the base causal mask. It will clamp the kv-axis
+    # to sliding_window when offset > sliding_window. Boolean array of
+    # shape (L_q, kv_window + L_q) where True = attend, False = mask out.
+    base = mask_cache.make_mask(
+        n_nodes,
+        window_size=getattr(mask_cache, "max_size", None),
+        return_array=True,
+    )
+    if base is None:
+        # n_nodes==1 fast path -- shouldn't happen for tree verify, but
+        # cover the edge case by emitting an all-attend mask.
+        full_w = real_offset + n_nodes
+        base = mx.ones((n_nodes, full_w), dtype=mx.bool_)
+
+    # Convert boolean -> additive (0 attend, -1e9 mask).
+    NEG = -1.0e9
+    mask_add = mx.where(
+        base,
+        mx.array(0.0, dtype=dtype),
+        mx.array(NEG, dtype=dtype),
+    )  # (L_q, kv_window + L_q)
+
+    # Overwrite the (L_q, L_q) tail block with our tree-ancestor sub-mask.
+    # Ancestor sets: walk each node's parent chain.
     ancestors: list[set[int]] = [set() for _ in range(n_nodes)]
     for i in range(n_nodes):
         cur = parent_idx[i]
@@ -141,13 +175,6 @@ def _build_tree_mask_and_positions(
             ancestors[i].add(cur)
             cur = parent_idx[cur]
 
-    # Build the (L_q, L_q) sub-mask: node i can attend to itself and any
-    # ancestor. Then prepend an all-attend (l_kv,) column for the prefill.
-    # Python-side mask, then convert. n_nodes is small (<= 13 for K=3 g=2)
-    # so the O(n^2) Python loop is irrelevant. Use -1e9 as the "do-not-
-    # attend" additive — large enough to drive softmax to ~0 in bf16,
-    # avoids the mx.finfo(bf16).min numpy-scalar conversion gotcha.
-    NEG = -1.0e9
     sub_mask = [[NEG] * n_nodes for _ in range(n_nodes)]
     for i in range(n_nodes):
         sub_mask[i][i] = 0.0
@@ -155,12 +182,14 @@ def _build_tree_mask_and_positions(
             sub_mask[i][a] = 0.0
     sub_arr = mx.array(sub_mask, dtype=dtype)             # (L_q, L_q)
 
-    # Prefix attend-all over the prefill cache.
-    prefix = mx.zeros((n_nodes, l_kv), dtype=dtype)        # (L_q, l_kv)
-    mask = mx.concatenate([prefix, sub_arr], axis=1)       # (L_q, l_kv + L_q)
+    # Splice: leftmost kv_window cols from base (the prefill attend pattern),
+    # rightmost L_q cols replaced by tree sub-mask.
+    kv_window = mask_add.shape[1] - n_nodes
+    left = mask_add[:, :kv_window]
+    mask = mx.concatenate([left, sub_arr], axis=1)         # (L_q, kv_window + L_q)
 
     positions = mx.array(
-        [l_kv + d for d in depth], dtype=mx.int32
+        [real_offset + d for d in depth], dtype=mx.int32
     )
     return mask, positions
 
@@ -1715,19 +1744,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             prof.record("draft", (t_after_draft - t_cycle_start) * 1000.0)
 
         # 2. Build verify input (1, n_nodes) + the tree mask & positions.
-        # The prefill cache offset is captured from any one of the prompt
-        # caches (CacheList.offset returns its first child's offset).
+        # The mask must be sized based on the RotatingKVCache's clamped
+        # kv-window (= sliding_window), not the raw offset -- otherwise
+        # DSv4 local-attention SDPA scores can't broadcast against it.
         first_cache = gen_batch.prompt_cache[0]
         from mlx_lm.models.cache import CacheList
         mask_cache = (
             first_cache[0] if isinstance(first_cache, CacheList)
             else first_cache
         )
-        l_kv = int(mask_cache.offset)
 
         verify_input = mx.array(tree_tokens, dtype=mx.int32).reshape(1, n_nodes)
         tree_mask, tree_positions = _build_tree_mask_and_positions(
-            parent_idx, depth_list, l_kv,
+            parent_idx, depth_list, mask_cache,
         )
 
         # Install the tree-verify side channel for the upcoming model

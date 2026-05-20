@@ -34,6 +34,22 @@ from mlx_lm.models.deepseek_v4 import (
 )
 
 
+class _FakeCache:
+    """Stand-in for RotatingKVCache in the standalone microbench. Mirrors
+    the make_mask + offset + max_size surface that
+    _build_tree_mask_and_positions reads."""
+    def __init__(self, offset: int, max_size: int) -> None:
+        self.offset = offset
+        self.max_size = max_size
+
+    def make_mask(self, N: int, window_size=None, return_array: bool = False):
+        # Mirrors RotatingKVCache.make_mask for N>1.
+        from mlx_lm.models.base import create_causal_mask
+        ws = window_size or self.max_size
+        offset = min(self.max_size - 1, self.offset)
+        return create_causal_mask(N, offset, window_size=ws)
+
+
 def test_tree_mask_structure() -> None:
     """K=2 gamma=2 tree:
         0 = root (depth 0)
@@ -43,22 +59,27 @@ def test_tree_mask_structure() -> None:
     """
     parent = [-1, 0, 0, 1, 1, 2, 2]
     depth = [0, 1, 1, 2, 2, 2, 2]
+    # Use a cache whose max_size > offset so kv_window = offset (no clamp).
     l_kv = 100
+    cache = _FakeCache(offset=l_kv, max_size=1024)
 
-    mask, positions = _build_tree_mask_and_positions(parent, depth, l_kv)
+    mask, positions = _build_tree_mask_and_positions(parent, depth, cache)
 
-    # Shape checks
+    # Shape: at offset=100, max_size=1024, kv-axis = offset + L_q = 107.
     assert mask.shape == (7, l_kv + 7), f"bad mask shape {mask.shape}"
     assert positions.shape == (7,), f"bad pos shape {positions.shape}"
 
-    # Positions check: node-depth maps to l_kv + depth.
+    # Positions: depth-d node gets position offset + d (the REAL offset).
     expected_pos = [l_kv + d for d in depth]
     actual_pos = positions.tolist()
     assert actual_pos == expected_pos, (
         f"positions mismatch: {actual_pos} vs {expected_pos}"
     )
 
-    # Mask check: prefix (l_kv columns) is all 0 (attend-all).
+    # Mask check: prefix (l_kv columns) attend (0.0). Same-depth siblings
+    # all see the entire prefill block; create_causal_mask emits True for
+    # rinds < offset+row_depth, which for the lowest row covers cols 0..offset+0,
+    # for higher rows covers cols 0..offset+row -- ALL include 0..offset.
     prefix = mask[:, :l_kv]
     assert mx.all(prefix == 0).item(), "prefix columns must be 0 (attend-all)"
 
@@ -179,10 +200,12 @@ def test_sdpa_with_tree_mask() -> None:
     # Q for each tree node. Shape (1, H, n_nodes, D).
     q_tree = mx.random.normal((1, H, n_nodes, D))
 
-    # Tree mask.
+    # Tree mask. Use a fake cache with offset=L_kv, max_size large so we
+    # get a kv_window = L_kv mask (matching the non-sliding path).
     parent = [-1, 0, 0, 1, 1, 2, 2]
     depth = [0, 1, 1, 2, 2, 2, 2]
-    mask_2d, _positions = _build_tree_mask_and_positions(parent, depth, L_kv)
+    cache = _FakeCache(offset=L_kv, max_size=1024)
+    mask_2d, _positions = _build_tree_mask_and_positions(parent, depth, cache)
     # SDPA expects (B, n_heads, T_q, T_kv) broadcastable.
     mask_tree = mask_2d[None, None, :, :].astype(q_tree.dtype)
 
@@ -221,6 +244,58 @@ def test_sdpa_with_tree_mask() -> None:
     print("PASS test_sdpa_with_tree_mask")
 
 
+def test_tree_mask_sliding_window_clamp() -> None:
+    """Mask must clamp KV-axis to sliding_window when offset > sliding_window.
+
+    Reproduces the 2026-05-19 cluster crash setup: offset=69321 (100K-ish
+    context, well past the 128 sliding window). The tree mask MUST come
+    out (L_q, sliding_window - 1 + L_q) -- NOT (L_q, offset + L_q) --
+    or else the DSv4 SparseCompressedAttention local-attention SDPA will
+    fail to broadcast against the (1, 64, L_q, ~134) scores tensor.
+    """
+    parent = [-1, 0, 0, 1, 1, 2, 2]
+    depth = [0, 1, 1, 2, 2, 2, 2]
+    cache = _FakeCache(offset=69321, max_size=128)  # production sliding window
+
+    mask, positions = _build_tree_mask_and_positions(parent, depth, cache)
+
+    # Expected kv-axis width: (max_size - 1) + L_q = 127 + 7 = 134.
+    # (RotatingKVCache uses `offset = min(max_size - 1, self.offset)` then
+    # create_causal_mask(N, offset, ws) emits shape (N, offset+N) bools.)
+    expected_kv = (cache.max_size - 1) + 7
+    assert mask.shape == (7, expected_kv), (
+        f"sliding-window mask shape: expected (7,{expected_kv}) "
+        f"got {mask.shape}"
+    )
+
+    # Positions are NOT clamped (RoPE is independent of sliding window).
+    expected_pos = [69321 + d for d in depth]
+    assert positions.tolist() == expected_pos, (
+        f"positions clamped? {positions.tolist()} vs {expected_pos}"
+    )
+
+    # Last L_q columns: tree sub-mask.
+    sub = mask[:, -7:].astype(mx.float32)
+    expected_attend = {
+        0: {0},
+        1: {0, 1},
+        2: {0, 2},
+        3: {0, 1, 3},
+        4: {0, 1, 4},
+        5: {0, 2, 5},
+        6: {0, 2, 6},
+    }
+    for i in range(7):
+        for j in range(7):
+            v = float(sub[i, j].item())
+            should_attend = j in expected_attend[i]
+            if should_attend:
+                assert v == 0.0, f"tail sub-mask node {i}->{j}: expected 0, got {v}"
+            else:
+                assert v < -1e8, f"tail sub-mask node {i}->{j}: expected -inf, got {v}"
+    print("PASS test_tree_mask_sliding_window_clamp (offset=69321 sw=128)")
+
+
 if __name__ == "__main__":
     print("Phase 5.2 mask correctness test")
     print("================================")
@@ -228,4 +303,5 @@ if __name__ == "__main__":
     test_rope_per_token_positions()
     test_same_depth_siblings_share_rope()
     test_sdpa_with_tree_mask()
+    test_tree_mask_sliding_window_clamp()
     print("\nAll Phase 5.2 tests PASSED")
