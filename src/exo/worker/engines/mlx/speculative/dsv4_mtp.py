@@ -1418,35 +1418,44 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 self._build_yielded_responses(uid, idx, all_tokens_per[n])
             )
 
-        # Yield first response per uid; buffer the rest.
+        # 2026-05-20 c>=2 fix v2 (drain-elimination):
         #
-        # 2026-05-20 c>=2 fix: prior code did `self._token_buffer[uid]
-        # = deque(rest)` which CLOBBERS the existing buffer on every
-        # spec cycle. At TP c>1 the drain in _next() was disabled, so
-        # the buffer never emptied → each spec cycle wrote γ new tokens
-        # on top of γ old tokens, losing the old ones. Combined with the
-        # drain-skip → only the FIRST token of each spec cycle ever
-        # reached the response stream, dropping the MTP multi-token gain.
+        # Previously this returned only the FIRST response per uid and
+        # buffered the remaining γ tokens for later drain via
+        # _yield_buffered. At TP c>1 each drain cycle invokes the full
+        # _next() framework — including the mx_any(has_work, coord_group)
+        # collective at batch_generate.py:1694 and on_generation_token
+        # callbacks. Per spec cycle that meant γ extra _next() calls at
+        # ~50ms each — drain overhead alone consumed half the c=2 wall.
         #
-        # Fix: use setdefault + extend so the buffer accumulates if not
-        # yet drained. Combined with the c=2-temp=0 drain re-enable
-        # above (line 989+), each spec cycle's γ tokens land in the
-        # buffer AND get drained on the next γ _next() calls.
-        first_responses: list[Any] = []
+        # Fix: return ALL responses from this spec cycle in one call.
+        # mlx-lm's BatchGenerator.next_generated() returns whatever list
+        # we hand back, so multi-response returns are supported.
+        # batch_generate._step() iterates `for response in responses` —
+        # each response gets full processing (detok, stop check,
+        # on_generation_token) regardless of list length.
+        #
+        # _build_yielded_responses already stops at first finish_reason
+        # per uid (line 399-400 in mtp_batch_generator.py), so streams
+        # that finish mid-cycle don't yield their post-finish drafts.
+        # We still need to call _filter_finished_uid + _cleanup_uid for
+        # those uids so the parent generation_batch shrinks correctly.
+        all_responses: list[Any] = []
         for n, uid in enumerate(uids):
             row = responses_per[n]
             if not row:
                 continue
-            first = row[0]
-            rest = row[1:]
-            if rest:
-                self._token_buffer.setdefault(uid, deque()).extend(rest)
-            elif first.finish_reason is not None:
+            all_responses.extend(row)
+            # Filter the uid if its LAST yielded response carries a
+            # finish_reason. Streams that finished mid-cycle have
+            # finish_reason on the last entry in `row` (since
+            # _build_yielded_responses breaks immediately after).
+            last = row[-1]
+            if last.finish_reason is not None:
                 self._filter_finished_uid(uid)
                 self._cleanup_uid(uid)
-            first_responses.append(first)
 
-        return first_responses
+        return all_responses
 
     def _draft_tokens_batched(
         self,
@@ -1852,22 +1861,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             mx.clear_cache()
 
         # 11. State machine + length checks per yielded token.
+        # 2026-05-20 drain-elimination: return ALL responses in one
+        # call instead of buffering γ for later drain. See rationale at
+        # _speculative_next_batch (~line 1418). At c=1 this is also a
+        # win because each drain `_next()` was paying the same per-call
+        # overhead as a spec cycle.
         responses = self._build_yielded_responses(uid, idx, all_tokens)
-
-        first = responses[0]
-        rest = responses[1:]
-        if rest:
-            # Use setdefault+extend instead of assign so we don't clobber
-            # any tokens still buffered from a previous cycle. At c=1 the
-            # buffer normally drains to empty before the next spec cycle
-            # so this is bit-equivalent to the prior assign, but the
-            # safer pattern matches the c>=2 fix at line 1456.
-            self._token_buffer.setdefault(uid, deque()).extend(rest)
-        elif first.finish_reason is not None:
+        if responses and responses[-1].finish_reason is not None:
             self._filter_finished_uid(uid)
             self._cleanup_uid(uid)
-
-        return [first]
+        return responses
 
     def _speculative_next_tree(self, uid: int):
         """K-way tree-drafting verify/accept cycle (DSv4, BS=1, temp=0 only).
@@ -2183,13 +2186,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if self._steps_counter % 512 == 0:
             mx.clear_cache()
 
+        # 2026-05-20 drain-elimination: see _speculative_next_batch comment.
         responses = self._build_yielded_responses(uid, idx, all_tokens)
-        first = responses[0]
-        rest = responses[1:]
-        if rest:
-            # See 2026-05-20 c>=2 fix at line 1456 for rationale.
-            self._token_buffer.setdefault(uid, deque()).extend(rest)
-        elif first.finish_reason is not None:
+        if responses and responses[-1].finish_reason is not None:
             self._filter_finished_uid(uid)
             self._cleanup_uid(uid)
-        return [first]
+        return responses

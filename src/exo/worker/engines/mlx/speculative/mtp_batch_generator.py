@@ -331,18 +331,19 @@ class MTPBatchGenerator(BatchGenerator):
         if self._steps_counter % 512 == 0:
             mx.clear_cache()
 
-        # 11. Apply state machine + length checks per token, build responses
+        # 11. Apply state machine + length checks per token, build responses.
+        # 2026-05-20 drain-elimination: return ALL responses in one call
+        # instead of buffering γ for later drain. mlx-lm next_generated()
+        # returns the list verbatim and batch_generate._step iterates
+        # response-by-response, so multi-response returns are supported.
+        # Eliminates the per-token-drain overhead (mx_any collective +
+        # on_generation_token callback per `_next()` call) that consumed
+        # ~50ms per drain at TP c>1.
         responses = self._build_yielded_responses(uid, idx, all_tokens)
-
-        first = responses[0]
-        rest = responses[1:]
-        if rest:
-            self._token_buffer[uid] = deque(rest)
-        elif first.finish_reason is not None:
+        if responses and responses[-1].finish_reason is not None:
             self._filter_finished_uid(uid)
             self._cleanup_uid(uid)
-
-        return [first]
+        return responses
 
     def _build_yielded_responses(
         self,
