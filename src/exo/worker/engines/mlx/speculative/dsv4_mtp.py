@@ -1507,6 +1507,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         drift_dump = os.environ.get("EXO_MTP_DRIFT_DUMP") == "1"
 
+        # Per-step fence — mirrors mtp_module.draft_tokens (c=1 linear path,
+        # commit ce61e46b). At gamma>=2 the chained MTP predicts queue
+        # gamma lazy `all_sum`s (each predict fires MTP MoE forward
+        # all_sums internally) inside the GPU/comm-stream command buffer
+        # with peer-CQE dependencies between them. Empirically at c=1
+        # (skill exo-cluster-operations pitfall #45/#47) this chain-depth
+        # accumulates a stochastic peer-CQE arrival tail that produces
+        # ~75-107ms outliers and collapses gamma>=2 decode into the
+        # documented bistability (per-cycle wall 165ms → 250+ms).
+        #
+        # The c=2 batched path here was added 2026-05-20 (un-gate batched
+        # prefill for MTP-on) but was missing the per-step fence — the
+        # c=1 wrapper draft_tokens was patched in May 2026 but
+        # _draft_tokens_batched is a parallel implementation that bypasses
+        # the c=1 wrapper entirely. Phase 14 Plan A re-validation showed
+        # iter 3+4 of a 10-iter c=2 100K run dropped to 22 agg t/s with
+        # per_stream symmetric [11.19, 11.19] (so attribution is correct
+        # — Plan A's _active_tasks fix is working) and the cluster log
+        # showed normal mlx_next=171ms but ~134 cycles instead of 90 →
+        # acceptance halved → cycle wall was actually growing.
+        #
+        # Cost at gamma=1: zero (loop never iterates twice → fence never
+        # emitted). Cost at gamma=2: one extra mx.eval per cycle (~µs).
         for i in range(gamma):
             hidden_for_dump = h if drift_dump else None
             logits, h = self.mtp.predict(
@@ -1556,6 +1579,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 draft_probs.append(q)
             # h returned by predict at S=1 has shape (N, 1, hidden) —
             # fed straight into the next predict() call.
+
+            # Per-step fence — see comment above the loop. Drains the
+            # chained-collective queue one MTP step at a time so the next
+            # iteration's predict can dispatch with a clean dependency
+            # graph.
+            if i + 1 < gamma:
+                mx.eval(tok_arr)
 
         return draft_ids, draft_probs
 
