@@ -1438,7 +1438,23 @@ class ExoBatchGenerator:
             if captured_prompt_pre_norm is not None:
                 mx.eval(captured_prompt_pre_norm)
 
+        # ---- Per-stream insert + MTP cache prefill (sequential) ----
+        # Each stream's MTP-cache prefill is wall-time non-trivial (~5-15s at
+        # 100K). We do this sequentially before registering ANY task in
+        # _active_tasks. Once all MTP caches are snapshotted, decode can
+        # actually begin — so we capture a single shared "decode wall starts
+        # here" timestamp AFTER this loop, and assign it to every stream's
+        # generation_time_at_start. Otherwise stream 0's gen_time_delta at
+        # completion would absorb the wall stream 1 spent prefilling its MTP
+        # cache (~15s skew on outlier iters), since decode is batched and
+        # neither stream actually produces tokens until BOTH MTP caches are
+        # ready. See Phase 14 Plan A for the 2026-05-21 forensics.
         uids: list[int] = []
+        per_stream_meta: list[tuple[
+            int,                                # uid
+            TextGenerationTaskParams,           # task_params
+            Callable[[], None] | None,          # on_generation_token
+        ]] = []
         for i, (task_params, _prompt, _opp, _dppc, on_generation_token) in enumerate(tasks):
             last_tokens = prompt_tokens_list[i][-2:]
             with T("submit_batched.insert"):
@@ -1495,6 +1511,15 @@ class ExoBatchGenerator:
                         instance_temperature=self.default_temperature,
                     )["temp"]
 
+            per_stream_meta.append((uid, task_params, on_generation_token))
+
+        # All per-stream MTP caches are now snapshotted. Decode is about to
+        # start for every stream simultaneously, so capture ONE shared
+        # generation-start wall and assign it to every _active_tasks entry.
+        common_generation_start = time.perf_counter()
+        common_generation_time_at_start = _mlx_gen_elapsed_seconds(self._mlx_gen)
+
+        for i, (uid, task_params, on_generation_token) in enumerate(per_stream_meta):
             self._active_tasks[uid] = _EngineTask(
                 uid=uid,
                 task_params=task_params,
@@ -1505,11 +1530,15 @@ class ExoBatchGenerator:
                 cache_snapshots=None,  # SSM/snapshots not used at bench-only batched path
                 detokenizer=self.tokenizer.detokenizer,
                 on_generation_token=on_generation_token,
-                generation_start_time=time.perf_counter(),
+                generation_start_time=common_generation_start,
                 prefill_tps=per_stream_tps[i],
                 # Match submit()'s bookkeeping: capture wall after prefill so
-                # gen_tps reflects decode-only timing, not prefill.
-                generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
+                # gen_tps reflects decode-only timing, not prefill. For batched
+                # prefill we use a SHARED capture across all streams (see the
+                # block above) so per-stream gen_time_delta measures from the
+                # same anchor — eliminates the per-stream skew that produced
+                # the 16.7/22.5 outliers in the 10-iter c=2 validation.
+                generation_time_at_start=common_generation_time_at_start,
                 media_regions=[],
             )
 
