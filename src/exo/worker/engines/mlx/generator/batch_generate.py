@@ -1219,6 +1219,8 @@ class ExoBatchGenerator:
         # Single-task fast path / wedge guard: degenerates to existing submit()
         # so c=1 deployments don't pay any new code-path cost.
         if len(tasks) <= 1:
+            # 2026-05-21 diag: log if we got len 1 despite rendezvous gathering 2.
+            logger.info(f"submit_batched fallback gate-1: len(tasks)={len(tasks)}")
             return [self.submit(*t) for t in tasks]
 
         # PP-spec path: batched prefill not yet wired. Keep falling back.
@@ -1255,6 +1257,15 @@ class ExoBatchGenerator:
                 eligible.append(i)
 
         if len(eligible) < 2:
+            # 2026-05-21 diag: log which condition caused fallback for
+            # diagnosing c=2 batched-prefill rendezvous race.
+            for i, (task_params, _prompt, _opp, _dppc, _ogt) in enumerate(tasks):
+                logger.info(
+                    f"submit_batched fallback gate-3: task[{i}] "
+                    f"bench={task_params.bench} "
+                    f"has_remote={task_params.prefill_endpoint is not None} "
+                    f"has_vision={bool(task_params.images)}"
+                )
             return [self.submit(*t) for t in tasks]
 
         # Run the eligible tasks through the batched path; the rest go
