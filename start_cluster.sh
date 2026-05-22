@@ -752,6 +752,17 @@ for NODE in "${NODES[@]}"; do
     # PREFILL_DONE / POLL / CQE / DATA_DONE / ack POSTED / ack
     # DRAINED / DONE.
     [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
+    # MLX_JACCL_ACK_SYNC_PRE: gate the ce5c64fd pre-lambda ack barrier.
+    # Default OFF. Set to 1 to enable the start-of-lambda cross-rank
+    # ACK round-trip (one extra ACK_SEND/RECV pair on the dedicated
+    # ACK QP per collective). Intended to close the inter-lambda race
+    # where peer SEND beats our recv-post on the data QP and UC
+    # silently drops. Requires the bootstrap barrier in MeshGroup
+    # ctors (mlx commit 3882458d on try/ack-qp-isolated). Off-by-
+    # default preserves the post-Plan-A baseline; bench-time opt-in
+    # via this env. See mlx/mlx/distributed/jaccl/mesh_impl.h
+    # jaccl_ack_sync_pre_enabled() and the long doc block at the top.
+    [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
     # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
     # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
     # poll-stall under MTP load. Default off.
