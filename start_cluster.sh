@@ -218,12 +218,24 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     #
     # gamma=2 stability sweep (2026-05-17):
     #   fence=1  -> 28.2 stable    (high fence overhead)
-    #   fence=8  -> 31.5 stable    <-- SELECTED: best stable throughput
+    #   fence=8  -> 31.5 stable    (c=1 best stable throughput)
     #   fence=43 -> bistable (10.9-31.6 t/s, ~30% stall rate)
     #
+    # gamma=2 c=2 100K stability sweep (2026-05-22):
+    #   fence=2  -> bistable (iter 1: 22.90)        (over-fenced)
+    #   fence=4  -> 34.18 mean sigma=0.05 (4/5 clean)  <-- SELECTED for c=2
+    #   fence=8  -> bistable (2-3/5 iters at 22 agg)
+    # The c=2 stable-decode regime needs SHORTER fence segments than c=1
+    # because B=2 doubles per-collective payload size, raising peer-CQE
+    # tail probability per call. fence=4 keeps the 43-layer chain in
+    # ~11 fence segments (vs ~6 at fence=8), enough to push per-cycle
+    # stall probability below threshold. Cost: ~0.7 t/s on c=1 (29.7 ->
+    # ~29.0) from extra GPU syncs — acceptable to unlock c=2 stability.
+    #
     # Set to 1 to revert to per-layer fences (slower but maximally stable).
+    # Set to 8 to recover c=1 ceiling at the cost of c=2 bistability.
     # Set to 43 only when running gamma=1 (where the chain depth is harmless).
-    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=8}"
+    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=4}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
