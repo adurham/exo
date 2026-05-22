@@ -716,6 +716,15 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
+    # Eagle soft-embedding for chained MTP draft (Phase 14 Plan B.2).
+    # Default OFF (0): mlx-lm's DeepseekV4MTPModule.__call__ uses the
+    # hard-argmax embed_tokens() lookup — bit-exact with prior behavior.
+    # When > 0: at every chained draft step beyond the first, the input
+    # embedding is replaced with a probability-weighted top-K mixture
+    # built from the previous step's logits. Targets step-1 P(top-1)
+    # acceptance lift. Requires mlx-lm@eagle-soft-emb (or merged main)
+    # which adds the _EAGLE_CTX side channel. Recommended K=8.
+    [ -n "${EXO_DSV4_MTP_EAGLE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_K=$EXO_DSV4_MTP_EAGLE_K"
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
     [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
     [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"
