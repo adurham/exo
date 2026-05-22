@@ -326,6 +326,32 @@ class DSv4MTPPredictor:
         # Track which uid set is currently in self._cache (so we can skip
         # rebuilds when activate_for_uids is called with the same set).
         self._active_uids: tuple[int, ...] = ()
+        # Eagle-style soft-embedding for chained MTP draft steps.
+        # EXO_DSV4_MTP_EAGLE_K = 0 (default) disables the path — the
+        # standard hard-argmax embedding feeds every chained predict()
+        # call. K > 0 enables: at every chain step beyond the first,
+        # the input embedding is replaced with a probability-weighted
+        # mixture of the previous step's top-K vocab embeddings. Phase
+        # 14 Plan B.2: targets step-1 P(top-1) lift to raise MTP gamma>=2
+        # acceptance. Read once at predictor construction.
+        self.eagle_k = int(os.environ.get("EXO_DSV4_MTP_EAGLE_K", "0"))
+
+    def set_eagle_soft_emb(self, emb: Optional[mx.array]) -> None:
+        """Install or clear the Eagle soft-embedding side channel on the
+        underlying DSv4 MTP module. ``emb`` must be shape ``(B, S,
+        hidden_size)`` — same as ``embed_tokens(token_ids)`` for the
+        same B/S — and is consumed by the very next ``predict()`` call.
+        Pass ``None`` to clear so subsequent forwards revert to the
+        hard-embed path.
+
+        Routed through the module-level ``_EAGLE_CTX`` side channel in
+        ``mlx_lm.models.deepseek_v4`` (mirror of ``_TREE_VERIFY_CTX``)
+        so we don't have to thread a kwarg through every layer signature.
+        Single-threaded per worker process — same constraint as the
+        tree-verify channel.
+        """
+        from mlx_lm.models.deepseek_v4 import _set_eagle_soft_emb
+        _set_eagle_soft_emb(emb)
 
     def reset_cache(self, batch_size: int = 1) -> None:
         """Reset the MTP attention's KV cache. Call when the target
@@ -1507,11 +1533,36 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         drift_dump = os.environ.get("EXO_MTP_DRIFT_DUMP") == "1"
 
+        # Eagle soft-embedding chain (c=2 batched variant). Mirrors the
+        # c=1 logic in mtp_module.draft_tokens: when EXO_DSV4_MTP_EAGLE_K>0
+        # on the predictor, replace every chained predict() input
+        # embedding (i>=1) with a probability-weighted top-K mixture
+        # built from the previous step's logits. Soft-emb shape here is
+        # (N, 1, hidden) since logits is (N, vocab) squeezed.
+        _eagle_k = int(getattr(self.mtp, "eagle_k", 0) or 0)
+        _eagle_embed = (
+            getattr(self.mtp, "embed_tokens", None) if _eagle_k > 0 else None
+        )
+        _eagle_active = _eagle_k > 0 and _eagle_embed is not None
+        prev_logits: Optional[mx.array] = None
+
         for i in range(gamma):
             hidden_for_dump = h if drift_dump else None
-            logits, h = self.mtp.predict(
-                h, tok_arr, return_hidden=True, draft_mode=False
-            )
+            _eagle_installed = _eagle_active and prev_logits is not None
+            if _eagle_installed:
+                from .mtp_module import _compute_eagle_soft_emb
+                soft_emb = _compute_eagle_soft_emb(
+                    prev_logits, _eagle_embed, _eagle_k
+                )
+                self.mtp.set_eagle_soft_emb(soft_emb)
+            try:
+                logits, h = self.mtp.predict(
+                    h, tok_arr, return_hidden=True, draft_mode=False
+                )
+            finally:
+                if _eagle_installed:
+                    self.mtp.set_eagle_soft_emb(None)
+            prev_logits = logits
             # logits: at S=1, predict() squeezes to (N, vocab).
             if temp == 0:
                 tok_pre_sync = mx.argmax(logits, axis=-1).reshape(-1, 1)

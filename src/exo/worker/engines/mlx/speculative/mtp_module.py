@@ -21,7 +21,7 @@ Usage:
 """
 
 import os
-from typing import Any
+from typing import Any, Optional
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -588,6 +588,40 @@ def broadcast_from_canonical(arr, sync_group):
     return gathered[:n0]
 
 
+def _compute_eagle_soft_emb(
+    logits: mx.array,
+    embed_tokens: nn.Embedding,
+    K: int,
+) -> mx.array:
+    """Probability-weighted top-K soft embedding from a draft logit dist.
+
+    Eagle-style mixture: instead of feeding the hard-argmax token's
+    embedding into the next chained MTP step, feed
+    ``sum_i topk_probs[i] * embed_tokens(topk_ids[i])`` where
+    ``topk_*`` are the top-K entries of ``softmax(logits)``, re-normalized
+    over the top-K so the mixture weights sum to 1.
+
+    Args:
+        logits: ``(B, S, vocab)`` or ``(B, vocab)`` (squeezed S=1) — the
+            previous chain step's logits. Both shapes are accepted to
+            match the squeezed return of :meth:`DSv4MTPPredictor.predict`.
+        embed_tokens: the model's input ``nn.Embedding``.
+        K: top-K width. Caller ensures K > 0; K=0 callers skip this fn.
+    Returns:
+        ``(B, S, hidden)`` soft embedding suitable for the MTP module's
+        ``_EAGLE_CTX["soft_emb"]`` slot — same shape as
+        ``embed_tokens(token_ids)`` for matching B/S.
+    """
+    if logits.ndim == 2:
+        logits = logits[:, None, :]
+    probs = mx.softmax(logits, axis=-1)
+    topk_ids = mx.argsort(-logits, axis=-1)[..., :K]  # (B, S, K) int32
+    topk_probs = mx.take_along_axis(probs, topk_ids, axis=-1)  # (B, S, K)
+    topk_probs = topk_probs / topk_probs.sum(axis=-1, keepdims=True)
+    topk_embs = embed_tokens(topk_ids)  # (B, S, K, hidden)
+    return (topk_embs * topk_probs[..., None]).sum(axis=-2)  # (B, S, hidden)
+
+
 def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None):
     """Draft γ tokens by chaining MTP predictions — fully lazy, no mx.eval.
 
@@ -619,6 +653,19 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     import os as _os_local
     _disable_broadcast = _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
 
+    # Eagle soft-embedding chain — opt-in via EXO_DSV4_MTP_EAGLE_K>0 on
+    # the predictor. When ON, every chained predict() beyond i=0 has its
+    # input embedding replaced by a probability-weighted top-K mixture
+    # built from the PREVIOUS step's logits, captured as ``prev_logits``.
+    # The predictor exposes ``set_eagle_soft_emb()`` which installs into
+    # the model's ``_EAGLE_CTX`` side channel; the channel is cleared in
+    # the ``finally`` block so a non-DSv4 caller (or any predict() raise)
+    # never leaves the channel populated.
+    _eagle_k = int(getattr(mtp_pred, "eagle_k", 0) or 0)
+    _eagle_embed = getattr(mtp_pred, "embed_tokens", None) if _eagle_k > 0 else None
+    _eagle_active = _eagle_k > 0 and _eagle_embed is not None
+    prev_logits: Optional[mx.array] = None
+
     # Break the chained-collective dependency between successive MTP
     # draft steps. Without an explicit fence, gamma chained predicts
     # queue up gamma lazy `all_sum`s (one per MTP MoE forward) inside
@@ -633,8 +680,22 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     # Cost at gamma=2: one extra sync per cycle (microseconds).
     # Benefit: eliminates the iter-1+ stall mechanism on gamma>=2.
     for i in range(gamma):
-        logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
-                                      draft_mode=fast_lm_head)
+        # Eagle: install soft-emb computed from previous step's logits
+        # before the predict() call; clear it after so non-Eagle callers
+        # downstream see a clean channel. ``prev_logits is None`` at i=0
+        # so the first chain step always uses hard-embed (matching the
+        # verify-side input prefix).
+        _eagle_installed = _eagle_active and prev_logits is not None
+        if _eagle_installed:
+            soft_emb = _compute_eagle_soft_emb(prev_logits, _eagle_embed, _eagle_k)
+            mtp_pred.set_eagle_soft_emb(soft_emb)
+        try:
+            logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
+                                          draft_mode=fast_lm_head)
+        finally:
+            if _eagle_installed:
+                mtp_pred.set_eagle_soft_emb(None)
+        prev_logits = logits
 
         if temp == 0:
             tok_arr = mx.argmax(logits, axis=-1).reshape(1, 1)
