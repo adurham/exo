@@ -1831,6 +1831,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # h returned by predict at S=1 has shape (N, 1, hidden) —
             # fed straight into the next predict() call.
 
+            # Per-step fence — direct port of mtp_module.py::draft_tokens:786
+            # into the c=2 batched path. Without this, γ chained predict()
+            # calls queue γ lazy `all_sum`s (one per MTP MoE forward) into
+            # the GPU/comm-stream command buffer; each subsequent all_sum
+            # is gated on the previous one's CQE delivery. At γ=2 c=2 100K
+            # this manifested as the iter-N+1 stream collapse (bistability);
+            # at γ=3 c=2 100K it ALSO produces '<｜begin▁of▁sentence｜>'
+            # token spam from iter 1 onward — a quality regression that
+            # the pre-c=2-aware quality_probe_dsv4.py never caught because
+            # it fired single-request which routes through the c=1
+            # mtp_module.draft_tokens path that already has this fence.
+            # The c=1 path has been stable BECAUSE of this fence since
+            # commit ce61e46b (2026-05-17). The c=2 batched path was
+            # missing it; the γ=2 c=2 mitigation in commit 2e708e19 was
+            # FENCE_EVERY_N_LAYERS=4 (a verify-side knob, orthogonal to
+            # the draft-side jaccl chain). With γ=3 we outran that mask.
+            # Cost: one extra GPU sync per chain step (~µs). When
+            # EXO_DSV4_C2_TRACE=1 the tracer's later mx.eval(tok_arr,
+            # tok_pre_sync) finds tok_arr already evaluated and becomes
+            # essentially free.
+            if i + 1 < gamma:
+                mx.eval(tok_arr)
+
             # C2 trace: post-broadcast / step-end boundary. mx.eval the
             # tok_arr to force the int32 broadcast collective to drain,
             # AND the pre-sync argmax to drain (it would otherwise be
