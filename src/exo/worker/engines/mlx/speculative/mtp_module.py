@@ -687,18 +687,46 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
         # verify-side input prefix).
         _eagle_installed = _eagle_active and prev_logits is not None
         if _eagle_installed:
-            soft_emb = _compute_eagle_soft_emb(prev_logits, _eagle_embed, _eagle_k)
             # Cross-rank determinism: prev_logits is rank-local; under
-            # MLX's documented per-rank drift the rank-local argmax
-            # inside _compute_eagle_soft_emb can flip for tied/near-tied
-            # positions, making soft_emb diverge between ranks. The
-            # tok_arr broadcast below already enforces this guarantee
-            # for the hard-embed path; mirror it for the soft-emb so
-            # every rank's next predict() sees bit-identical input.
-            # Gated by the same EXO_DSV4_MTP_NO_BROADCAST diagnostic
-            # switch that gates the tok_arr broadcast.
-            if sync_drafts and not _disable_broadcast:
-                soft_emb = broadcast_from_canonical(soft_emb, sync_group)
+            # MLX's documented per-rank drift the rank-local argmax can
+            # flip for tied/near-tied positions, so any rank-local
+            # soft-emb diverges between ranks. The tok_arr broadcast
+            # below (line 713-716) ALREADY synchronizes argmax across
+            # ranks at the end of each iter — reuse that broadcast as
+            # the determinism source instead of stacking a second large
+            # bf16 collective on the chain critical path. See commit
+            # 21ba40db post-mortem (.hermes/plans/2026-05-22 reports)
+            # for why broadcasting the soft_emb tensor itself induces a
+            # ~17x slowdown.
+            assert prev_logits is not None  # narrow for type-checker
+            assert _eagle_embed is not None  # _eagle_active gate
+            if _eagle_k == 1:
+                # K=1: soft-emb == embed_tokens(argmax(prev_logits)) and
+                # tok_arr is exactly broadcast(argmax(prev_logits)).
+                soft_emb = _eagle_embed(tok_arr)  # (1, 1, hidden)
+            else:
+                # K>1: broadcast tiny topk_ids + topk_probs and rebuild
+                # the mixture locally on every rank.
+                _logits3d = (
+                    prev_logits
+                    if prev_logits.ndim == 3
+                    else prev_logits[:, None, :]
+                )
+                _probs = mx.softmax(_logits3d, axis=-1)
+                _topk_ids = mx.argsort(-_logits3d, axis=-1)[..., :_eagle_k]
+                _topk_probs = mx.take_along_axis(_probs, _topk_ids, axis=-1)
+                _topk_probs = _topk_probs / _topk_probs.sum(
+                    axis=-1, keepdims=True
+                )
+                if sync_drafts and not _disable_broadcast:
+                    _topk_ids = broadcast_from_canonical(
+                        _topk_ids.astype(mx.int32), sync_group
+                    )
+                    _topk_probs = broadcast_from_canonical(
+                        _topk_probs, sync_group
+                    )
+                _topk_embs = _eagle_embed(_topk_ids)
+                soft_emb = (_topk_embs * _topk_probs[..., None]).sum(axis=-2)
             mtp_pred.set_eagle_soft_emb(soft_emb)
         try:
             logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,

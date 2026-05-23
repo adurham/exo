@@ -1550,25 +1550,66 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             hidden_for_dump = h if drift_dump else None
             _eagle_installed = _eagle_active and prev_logits is not None
             if _eagle_installed:
-                from .mtp_module import _compute_eagle_soft_emb
-                soft_emb = _compute_eagle_soft_emb(
-                    prev_logits, _eagle_embed, _eagle_k
-                )
                 # Cross-rank determinism: prev_logits is rank-local and
                 # MLX's documented per-rank drift (see comment at lines
                 # 1501-1521 above) can flip argmax for tied/near-tied
-                # positions, making the rank-local soft-emb diverge
+                # positions, making any rank-local soft-emb diverge
                 # between ranks. The hard-embed path masks this via the
-                # post-argmax broadcast at line 1570 below; mirror that
-                # guarantee for the soft-emb so every rank's next
-                # predict() sees bit-identical input. Soft-emb shape is
-                # (B, 1, hidden) so axis-0 stride matches the existing
-                # broadcast_from_canonical contract; cost at B=2,
-                # hidden=4096, bf16 is ~16 KB per chain step — trivial
-                # vs the per-step compute.
-                if sync_drafts:
-                    soft_emb = broadcast_from_canonical(
-                        soft_emb, coord_group
+                # post-argmax broadcast at line 1586 below; reuse that
+                # broadcast (tok_arr was already broadcast at the end of
+                # iter i-1) instead of putting another large bf16
+                # collective on the chain critical path.
+                #
+                # Why NOT broadcast_from_canonical(soft_emb, ...): an
+                # all_gather on the bf16 (B, 1, hidden=4096) tensor is
+                # 16 KB and is the *first* dependency of the next MTP
+                # __call__ (it feeds enorm(emb) at deepseek_v4.py:2505).
+                # That comm round-trip has zero overlap potential —
+                # every i>=1 predict() would stall on a 16 KB UC RDMA
+                # round-trip, turning the chain into comm/compute
+                # serialization. Empirically verified to cause ~17x
+                # slowdown (commit 21ba40db forensics:
+                # .hermes/plans/2026-05-22 reports).
+                assert prev_logits is not None  # narrow for type-checker
+                assert _eagle_embed is not None  # _eagle_active gate
+                if _eagle_k == 1:
+                    # K=1: soft-emb collapses algebraically to
+                    # embed_tokens(argmax(prev_logits)). tok_arr is
+                    # exactly broadcast(argmax(prev_logits)) from the
+                    # end of iter i-1, so embed_tokens(tok_arr) IS the
+                    # K=1 soft-emb, cross-rank-deterministic, with NO
+                    # new collective.
+                    soft_emb = _eagle_embed(tok_arr)  # (B, 1, hidden)
+                else:
+                    # K>1: broadcast the tiny topk_ids + topk_probs
+                    # tensors (single-digit bytes at K=2, B=2) and
+                    # reconstruct the mixture locally on every rank
+                    # from identical inputs. Avoids the 16 KB bf16
+                    # critical-path collective; payload is dominated
+                    # by per-call collective overhead, not bytes.
+                    _logits3d = (
+                        prev_logits
+                        if prev_logits.ndim == 3
+                        else prev_logits[:, None, :]
+                    )
+                    _probs = mx.softmax(_logits3d, axis=-1)
+                    _topk_ids = mx.argsort(-_logits3d, axis=-1)[..., :_eagle_k]
+                    _topk_probs = mx.take_along_axis(
+                        _probs, _topk_ids, axis=-1
+                    )
+                    _topk_probs = _topk_probs / _topk_probs.sum(
+                        axis=-1, keepdims=True
+                    )
+                    if sync_drafts:
+                        _topk_ids = broadcast_from_canonical(
+                            _topk_ids.astype(mx.int32), coord_group
+                        )
+                        _topk_probs = broadcast_from_canonical(
+                            _topk_probs, coord_group
+                        )
+                    _topk_embs = _eagle_embed(_topk_ids)
+                    soft_emb = (_topk_embs * _topk_probs[..., None]).sum(
+                        axis=-2
                     )
                 self.mtp.set_eagle_soft_emb(soft_emb)
             try:
