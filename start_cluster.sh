@@ -728,6 +728,12 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
     [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
     [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"
+    # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
+    # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
+    # timestamps + per-stream tokens. NOT a production knob — diagnostic
+    # only. Inserts mx.eval() at every chain-step boundary, which acts
+    # like a per-step fence, so do NOT validate fixes with this on.
+    [ -n "${EXO_DSV4_C2_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_C2_TRACE=$EXO_DSV4_C2_TRACE"
     # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
     # argmax to /tmp/dsv4_tree_alpha_probe_pid<PID>.jsonl on rank 0 only.

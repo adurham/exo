@@ -263,6 +263,114 @@ class _PhaseTimer:
 _phase_timer = _PhaseTimer() if _PROFILE_INTERVAL > 0 else None
 
 
+# ─── C2 bistability tracer ─────────────────────────────────────────────────
+#
+# When EXO_DSV4_C2_TRACE=1, _draft_tokens_batched emits a per-cycle,
+# per-chain-step JSONL trace to /tmp/dsv4_c2_trace_pid${pid}.jsonl. The
+# tracer is built to investigate γ≥2 c=2 bistability where iter-N+1 sees
+# one stream collapse (~3% of normal rate) while the other stays at
+# expected ~20 t/s — a per-stream tail at the verify-side that ISN'T
+# captured by aggregate metrics or PhaseTimer mean/min/max summaries.
+#
+# IMPORTANT: tracer inserts mx.eval() at every chain-step boundary so
+# perf_counter timestamps reflect real GPU/comm latency, not lazy
+# command-buffer fill. The eval() insertions THEMSELVES act like the
+# proposed per-step fence fix, so a trace run does NOT validate the
+# fix. Workflow: (1) trace ON to FIND the mechanism; (2) trace OFF +
+# targeted fence in place to VALIDATE the fix.
+#
+# Per-step record fields:
+#   cycle: spec cycle number (per-rank, monotonic)
+#   step: chain step index (0..γ-1)
+#   B: batch size (number of streams) for this cycle
+#   gamma: full chain depth this cycle
+#   pid, rank: process / rank identifiers
+#   ts_*_ns: monotonic perf_counter_ns at each boundary
+#       step_start, after_eagle_install, after_predict, after_argmax,
+#       after_broadcast, step_end
+#   tok_arr_per_stream: list[int] — the post-broadcast tokens, length B.
+#       Useful for spotting BOS spam / repetition before timing diverges.
+#   prev_logits_argmax_per_stream: list[int] — what tok_arr WOULD be if
+#       broadcast weren't applied. Mismatch with tok_arr indicates which
+#       rank "won" the broadcast.
+#   metal_active_mb, metal_peak_mb: mx.metal memory at step_end. Growing
+#       peak across steps in same cycle = lazy graph not draining.
+#   eagle_installed: bool
+#
+# Per-cycle summary record fields (one per cycle, written after the
+# γ step records):
+#   cycle, pid, rank, B, gamma
+#   ts_cycle_start_ns, ts_cycle_end_ns, cycle_wall_ms
+#   per_step_wall_ms: list[float] length γ
+#   bistability_flag: True if any step's wall > 2× cycle median step
+#
+_C2_TRACE_ENABLED = os.environ.get("EXO_DSV4_C2_TRACE") == "1"
+_C2_TRACE_HANDLE: Optional[BinaryIO] = None
+_C2_TRACE_RECS: int = 0
+
+
+def _c2_trace_rank() -> int:
+    """Best-effort rank lookup. Returns -1 if mx.distributed unavailable.
+
+    Used as a hint only — the tracer keys records by PID + auto-detected
+    rank when possible, otherwise PID alone."""
+    try:
+        return int(mx.distributed.init().rank())
+    except Exception:
+        return -1
+
+
+def _c2_trace_write(record: dict) -> None:
+    """Append one JSONL record to the per-pid trace file.
+
+    Lazy file open + unbuffered append so a crash mid-cycle still leaves
+    a complete prefix of records on disk. Cost when tracer is OFF: zero
+    (this function isn't called unless _C2_TRACE_ENABLED).
+    """
+    global _C2_TRACE_HANDLE, _C2_TRACE_RECS
+    if _C2_TRACE_HANDLE is None:
+        path = f"/tmp/dsv4_c2_trace_pid{os.getpid()}.jsonl"
+        _C2_TRACE_HANDLE = open(path, "ab", buffering=0)  # noqa: SIM115
+        # Write a header record so consumers can identify schema.
+        import json as _json
+        header = {
+            "type": "header",
+            "schema_version": 1,
+            "pid": os.getpid(),
+            "rank": _c2_trace_rank(),
+            "ts_open_ns": time.perf_counter_ns(),
+            "env": {
+                "EXO_SPECULATIVE_GAMMA": os.environ.get(
+                    "EXO_SPECULATIVE_GAMMA", "?"
+                ),
+                "EXO_DSV4_FENCE_EVERY_N_LAYERS": os.environ.get(
+                    "EXO_DSV4_FENCE_EVERY_N_LAYERS", "?"
+                ),
+                "EXO_DSV4_MTP_EAGLE_K": os.environ.get(
+                    "EXO_DSV4_MTP_EAGLE_K", "?"
+                ),
+                "EXO_DSV4_MTP": os.environ.get("EXO_DSV4_MTP", "?"),
+                "EXO_DSV4_INDEX_TOPK": os.environ.get(
+                    "EXO_DSV4_INDEX_TOPK", "?"
+                ),
+            },
+        }
+        _C2_TRACE_HANDLE.write((_json.dumps(header) + "\n").encode("utf-8"))
+    import json as _json
+    _C2_TRACE_HANDLE.write((_json.dumps(record) + "\n").encode("utf-8"))
+    _C2_TRACE_RECS += 1
+
+
+def _c2_trace_metal_mb() -> tuple[float, float]:
+    """Return (active_mb, peak_mb) from mx.metal, or (-1, -1) on error."""
+    try:
+        active = float(mx.metal.get_active_memory()) / (1024.0 * 1024.0)
+        peak = float(mx.metal.get_peak_memory()) / (1024.0 * 1024.0)
+        return active, peak
+    except Exception:
+        return -1.0, -1.0
+
+
 class DSv4MTPPredictor:
     """Thin wrapper around ``model.model.mtp[mtp_idx]`` that exposes the
     ``predict`` API expected by :func:`mtp_module.draft_tokens`.
@@ -1533,6 +1641,30 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         drift_dump = os.environ.get("EXO_MTP_DRIFT_DUMP") == "1"
 
+        # C2 bistability tracer — see module-level docstring above the
+        # _c2_trace_write definition. We capture per-step timestamps,
+        # per-stream post-broadcast tokens, and metal memory deltas to
+        # localize the iter-N+1 stream collapse seen at γ≥2 c=2. Each
+        # mx.eval() inside the tracer adds a chain-step fence; on
+        # purpose, since (a) we need the timestamps to be REAL and not
+        # lazy-graph-fill, (b) we WANT the trace to either confirm or
+        # falsify whether per-step draining alone fixes bistability.
+        _c2_trace = _C2_TRACE_ENABLED and sync_drafts  # cluster-mode only
+        _c2_cycle_start_ns = time.perf_counter_ns() if _c2_trace else 0
+        _c2_step_walls_ms: list[float] = []
+        _c2_per_step_records: list[dict[str, Any]] = []
+        _c2_cycle_n = int(self._spec_cycles) if _c2_trace else 0
+        _c2_b_size = int(next_tokens_arr.shape[0]) if _c2_trace else 0
+        # Pre-init the per-step timestamp scratch slots so static
+        # analysis sees them as always-bound across loop iterations.
+        # Runtime semantics are unchanged: they're only READ inside
+        # the same `if _c2_trace:` branch that WRITES them.
+        _c2_t_step_start_ns: int = 0
+        _c2_t_after_eagle_install_ns: int = 0
+        _c2_t_after_predict_ns: int = 0
+        _c2_metal_active_at_start: float = -1.0
+        _c2_metal_peak_at_start: float = -1.0
+
         # Eagle soft-embedding chain (c=2 batched variant). Mirrors the
         # c=1 logic in mtp_module.draft_tokens: when EXO_DSV4_MTP_EAGLE_K>0
         # on the predictor, replace every chained predict() input
@@ -1547,6 +1679,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         prev_logits: Optional[mx.array] = None
 
         for i in range(gamma):
+            # C2 trace: per-step START timestamp (after any prior-iter
+            # eval() drains). NOT a fence — just records when the step
+            # actually begins on the Python side.
+            if _c2_trace:
+                _c2_t_step_start_ns = time.perf_counter_ns()
+                _c2_metal_active_at_start, _c2_metal_peak_at_start = (
+                    _c2_trace_metal_mb()
+                )
             hidden_for_dump = h if drift_dump else None
             _eagle_installed = _eagle_active and prev_logits is not None
             if _eagle_installed:
@@ -1612,6 +1752,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         axis=-2
                     )
                 self.mtp.set_eagle_soft_emb(soft_emb)
+            # C2 trace: post-eagle-install boundary. We mx.eval the
+            # soft_emb (if installed) so the time spent in the assembly +
+            # any K>1 collective is attributable to the install step
+            # rather than getting folded into the predict() wall.
+            if _c2_trace:
+                if _eagle_installed:
+                    try:
+                        mx.eval(soft_emb)  # type: ignore[has-type]
+                    except Exception:
+                        pass
+                _c2_t_after_eagle_install_ns = time.perf_counter_ns()
             try:
                 logits, h = self.mtp.predict(
                     h, tok_arr, return_hidden=True, draft_mode=False
@@ -1619,6 +1770,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             finally:
                 if _eagle_installed:
                     self.mtp.set_eagle_soft_emb(None)
+            # C2 trace: post-predict boundary. mx.eval(logits, h)
+            # forces the MoE forward to actually complete (including all
+            # TP all_sum collectives) before we record the timestamp.
+            # WITHOUT this eval, the timestamp captures lazy command-
+            # buffer fill time only — useless for diagnosing comm tails.
+            # WITH this eval, we get true GPU/comm wall per step. The
+            # cost (one extra sync per chain step) is the same as the
+            # proposed bistability fence and is acceptable here BECAUSE
+            # we're diagnosing, not validating.
+            if _c2_trace:
+                try:
+                    mx.eval(logits, h)
+                except Exception:
+                    pass
+                _c2_t_after_predict_ns = time.perf_counter_ns()
             prev_logits = logits
             # logits: at S=1, predict() squeezes to (N, vocab).
             if temp == 0:
@@ -1664,6 +1830,112 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 draft_probs.append(q)
             # h returned by predict at S=1 has shape (N, 1, hidden) —
             # fed straight into the next predict() call.
+
+            # C2 trace: post-broadcast / step-end boundary. mx.eval the
+            # tok_arr to force the int32 broadcast collective to drain,
+            # AND the pre-sync argmax to drain (it would otherwise be
+            # left lazy if sync_drafts is True). At this point all comm
+            # work for the step is complete; subsequent steps will start
+            # from a clean queue.
+            if _c2_trace:
+                try:
+                    mx.eval(tok_arr, tok_pre_sync)  # type: ignore[has-type]
+                except Exception:
+                    pass
+                _c2_t_step_end_ns = time.perf_counter_ns()
+                # Materialize per-stream tokens for the record. tok_arr
+                # is shape (N, 1) int32 post-broadcast. tok_pre_sync is
+                # the rank-local arg before broadcast.
+                try:
+                    _c2_tok_post = [
+                        int(x) for x in tok_arr.reshape(-1).tolist()
+                    ]
+                except Exception:
+                    _c2_tok_post = []
+                try:
+                    _c2_tok_pre = [
+                        int(x) for x in tok_pre_sync.reshape(-1).tolist()
+                    ]
+                except Exception:
+                    _c2_tok_pre = []
+                _c2_active_mb_end, _c2_peak_mb_end = _c2_trace_metal_mb()
+                step_wall_ms = (
+                    _c2_t_step_end_ns - _c2_t_step_start_ns
+                ) / 1e6
+                _c2_step_walls_ms.append(step_wall_ms)
+                _c2_per_step_records.append({
+                    "type": "step",
+                    "cycle": _c2_cycle_n,
+                    "step": int(i),
+                    "B": _c2_b_size,
+                    "gamma": int(gamma),
+                    "pid": os.getpid(),
+                    "ts_step_start_ns": _c2_t_step_start_ns,
+                    "ts_after_eagle_install_ns": (
+                        _c2_t_after_eagle_install_ns
+                    ),
+                    "ts_after_predict_ns": _c2_t_after_predict_ns,
+                    "ts_step_end_ns": _c2_t_step_end_ns,
+                    "wall_step_ms": step_wall_ms,
+                    "wall_eagle_install_ms": (
+                        _c2_t_after_eagle_install_ns - _c2_t_step_start_ns
+                    ) / 1e6,
+                    "wall_predict_ms": (
+                        _c2_t_after_predict_ns
+                        - _c2_t_after_eagle_install_ns
+                    ) / 1e6,
+                    "wall_argmax_broadcast_ms": (
+                        _c2_t_step_end_ns - _c2_t_after_predict_ns
+                    ) / 1e6,
+                    "eagle_installed": bool(_eagle_installed),
+                    "temp_zero": bool(temp == 0),
+                    "tok_post_broadcast_per_stream": _c2_tok_post,
+                    "tok_pre_broadcast_per_stream": _c2_tok_pre,
+                    "metal_active_mb_start": (
+                        _c2_metal_active_at_start
+                    ),
+                    "metal_peak_mb_start": _c2_metal_peak_at_start,
+                    "metal_active_mb_end": _c2_active_mb_end,
+                    "metal_peak_mb_end": _c2_peak_mb_end,
+                })
+
+        # C2 trace: per-cycle summary + flush per-step records.
+        if _c2_trace:
+            _c2_cycle_end_ns = time.perf_counter_ns()
+            _c2_cycle_wall_ms = (
+                _c2_cycle_end_ns - _c2_cycle_start_ns
+            ) / 1e6
+            # Bistability heuristic: any step > 2× the median step wall.
+            # At γ=3 a normal cycle should have all 3 steps within ~30%
+            # of each other; a step taking 2×+ the others is the iter-N+1
+            # collapse fingerprint.
+            if _c2_step_walls_ms:
+                _c2_walls_sorted = sorted(_c2_step_walls_ms)
+                _c2_median_ms = _c2_walls_sorted[len(_c2_walls_sorted) // 2]
+                _c2_max_ms = _c2_walls_sorted[-1]
+                _c2_bistability = (
+                    _c2_max_ms > 2.0 * max(_c2_median_ms, 1e-3)
+                )
+            else:
+                _c2_median_ms = 0.0
+                _c2_max_ms = 0.0
+                _c2_bistability = False
+            for rec in _c2_per_step_records:
+                _c2_trace_write(rec)
+            _c2_trace_write({
+                "type": "cycle",
+                "cycle": _c2_cycle_n,
+                "pid": os.getpid(),
+                "B": _c2_b_size,
+                "gamma": int(gamma),
+                "ts_cycle_start_ns": _c2_cycle_start_ns,
+                "ts_cycle_end_ns": _c2_cycle_end_ns,
+                "cycle_wall_ms": _c2_cycle_wall_ms,
+                "per_step_wall_ms": list(_c2_step_walls_ms),
+                "median_step_wall_ms": _c2_median_ms,
+                "max_step_wall_ms": _c2_max_ms,
+                "bistability_flag": bool(_c2_bistability),
+            })
 
         return draft_ids, draft_probs
 
