@@ -1554,6 +1554,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 soft_emb = _compute_eagle_soft_emb(
                     prev_logits, _eagle_embed, _eagle_k
                 )
+                # Cross-rank determinism: prev_logits is rank-local and
+                # MLX's documented per-rank drift (see comment at lines
+                # 1501-1521 above) can flip argmax for tied/near-tied
+                # positions, making the rank-local soft-emb diverge
+                # between ranks. The hard-embed path masks this via the
+                # post-argmax broadcast at line 1570 below; mirror that
+                # guarantee for the soft-emb so every rank's next
+                # predict() sees bit-identical input. Soft-emb shape is
+                # (B, 1, hidden) so axis-0 stride matches the existing
+                # broadcast_from_canonical contract; cost at B=2,
+                # hidden=4096, bf16 is ~16 KB per chain step — trivial
+                # vs the per-step compute.
+                if sync_drafts:
+                    soft_emb = broadcast_from_canonical(
+                        soft_emb, coord_group
+                    )
                 self.mtp.set_eagle_soft_emb(soft_emb)
             try:
                 logits, h = self.mtp.predict(

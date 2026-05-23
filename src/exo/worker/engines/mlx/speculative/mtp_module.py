@@ -688,6 +688,17 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
         _eagle_installed = _eagle_active and prev_logits is not None
         if _eagle_installed:
             soft_emb = _compute_eagle_soft_emb(prev_logits, _eagle_embed, _eagle_k)
+            # Cross-rank determinism: prev_logits is rank-local; under
+            # MLX's documented per-rank drift the rank-local argmax
+            # inside _compute_eagle_soft_emb can flip for tied/near-tied
+            # positions, making soft_emb diverge between ranks. The
+            # tok_arr broadcast below already enforces this guarantee
+            # for the hard-embed path; mirror it for the soft-emb so
+            # every rank's next predict() sees bit-identical input.
+            # Gated by the same EXO_DSV4_MTP_NO_BROADCAST diagnostic
+            # switch that gates the tok_arr broadcast.
+            if sync_drafts and not _disable_broadcast:
+                soft_emb = broadcast_from_canonical(soft_emb, sync_group)
             mtp_pred.set_eagle_soft_emb(soft_emb)
         try:
             logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
