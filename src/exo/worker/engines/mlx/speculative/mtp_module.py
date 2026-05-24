@@ -715,9 +715,20 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                 _probs = mx.softmax(_logits3d, axis=-1)
                 _topk_ids = mx.argsort(-_logits3d, axis=-1)[..., :_eagle_k]
                 _topk_probs = mx.take_along_axis(_probs, _topk_ids, axis=-1)
-                _topk_probs = _topk_probs / _topk_probs.sum(
-                    axis=-1, keepdims=True
-                )
+                # W3 (2026-05-24): do NOT renormalize top-K masses to sum
+                # to 1. Empirical p_1 dump on 2026-05-24 showed slot-2
+                # chained MTP draft has median p_1=0.74 with 47% of steps
+                # having p_1<=0.70 — Eagle K>1 territory. Renormalizing
+                # the top-K subset inflates each weight by ~1/sum(top_K)
+                # and distorts the soft_emb mixture's L2 norm relative
+                # to what the MTP head was trained on (embed(argmax) is
+                # a single-magnitude lookup). Pass raw softmax masses
+                # (sum <= 1) so the head sees a mixture whose total
+                # magnitude tracks top-1 confidence rather than always
+                # being normalized to 1. Falsified at K=8: if acceptance
+                # rises vs the renormalized variant, this is the fix
+                # for K>1 acceptance flatness reported in the 35 t/s
+                # plan §W3. See /tmp/w3_dump_results.md.
                 if sync_drafts and not _disable_broadcast:
                     _topk_ids = broadcast_from_canonical(
                         _topk_ids.astype(mx.int32), sync_group
