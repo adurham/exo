@@ -93,6 +93,13 @@ fi
 # globally; benchmark and override per-model when needed.
 : "${MLX_SDPA_BLOCKS:=}"
 : "${EXO_SPECULATIVE_GAMMA:=2}"
+# Eagle K (MTP top-K soft-emb mixture, K=1 fast-path / K>1 mixture path).
+# Promoted to K=8 default 2026-05-24 after the no-renorm fix at
+# mtp_module.py:715-729 (commit 2d8d5efc) lifted c=1 100K decode from
+# 28.80 ± 0.10 t/s to 29.04 ± 0.07 t/s (+0.83%, Welch t=6.19, p<0.001).
+# Quality preserved (needle ✓, BOS=0, bistability=0). See
+# .hermes/plans/2026-05-24_w3_K8_norenorm_results.md.
+: "${EXO_DSV4_MTP_EAGLE_K:=8}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
