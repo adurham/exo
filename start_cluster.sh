@@ -728,6 +728,11 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
     [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
     [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"
+    # W3 diagnostic: per-draft-step top-8 softmax dump. NOT a production
+    # knob — diagnostic only. Cost when off: zero (single env.get hit).
+    # Cost when on: ~1 sync per draft step (microseconds). See
+    # mtp_module.py:740 dump block and /tmp/w3_eagle_audit.md.
+    [ -n "${EXO_DSV4_MTP_DUMP_TOPK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DUMP_TOPK=$EXO_DSV4_MTP_DUMP_TOPK"
     # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
     # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
     # timestamps + per-stream tokens. NOT a production knob — diagnostic
