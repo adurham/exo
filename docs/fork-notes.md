@@ -1264,3 +1264,117 @@ python3 /tmp/stream_probe.py   # quick TTFT + streaming check (see docs/)
 If MiniMax fails to come up, check the first `RunnerFailed` traceback in
 `~/.exo/exo_log/exo.log` — most API-drift failures manifest there with a
 clear `AttributeError`. Record the delta in this file when resolving.
+
+
+## DSv4 c=1 100K MTP-on spec-knob ceiling + c=2 quality bug — May 23 2026
+
+User target raised from 30 → 35 t/s at c=1 100K. Session result: **spec
+env-knob space is saturated at ~29-30 t/s; the +18% gap requires
+structural work**. While searching for c=2 100K lift the same session
+**uncovered a latent c=2 100K quality bug that had been masked by an
+inadequate quality probe** since at least 2026-05-21.
+
+### TL;DR
+
+- c=1 100K MTP-on at production defaults (γ=2 K=0 FENCE=4 TOPK=512
+  bf16 KV): ~29.7 t/s, quality-clean (validated with v2 probe). Spec
+  env-knob sweep saturated; γ=3, Eagle K=8, tree-draft K=2, and
+  fused-topk Metal kernel all either no-op or net-negative.
+- **c=2 100K MTP-on at production defaults: BOS-spam gibberish at all
+  γ/K tested.** Production "34.16 t/s c=2 100K champion" since
+  2026-05-22 was never quality-validated because the probe was
+  c=1-only.
+- c=2 100K with `EXO_SPECULATIVE=0 EXO_DSV4_MTP=0`: bit-perfect both
+  streams. Confirms bug is in spec-batched code path
+  (`dsv4_mtp._draft_tokens_batched` / `_speculative_next_batch` /
+  `dsv4_speculative_forward` / cache class-swap), NOT in
+  `prefill_batched` / `BatchRotatingKVCache` / `SparseCompressedAttention`.
+
+### Shipped commits
+
+* `a1caaeb3` — c=2 per-step JSONL tracer in
+  `dsv4_mtp.py::_draft_tokens_batched`, gated by `EXO_DSV4_C2_TRACE=1`.
+  Records per-chain-step wall, per-stream tokens (pre/post broadcast),
+  Metal memory deltas, cycle summaries with `bistability_flag`. Inserts
+  `mx.eval()` at every step boundary — use only for diagnostic
+  LOCATION, never to validate fixes (the tracer evals themselves act
+  as fences).
+* `fe837b49` — `bench/quality_probe_dsv4.py` v2. Adds `--concurrency N`
+  (default 1, preserves legacy behavior) and `--iters M` (default 1).
+  At N≥2 exercises the c=2 batched code path. New
+  `detect_quality_issues()` substring-counts the 4 DSv4 special-token
+  patterns. Any positive count = quality fail. Schema bumped to v2.
+* `1de63014` — per-step `mx.eval(tok_arr)` fence in
+  `_draft_tokens_batched`. Direct port of `mtp_module.py:786`. Mirrors
+  c=1 spec path's per-step fence. **Regression-clean** but does NOT
+  fix the c=2 100K quality break — kept as defensive depth.
+
+### Sweep results (all quality-validated, bf16 KV, TOPK=512)
+
+| config | t/s | MTP accept | notes |
+|--------|----:|----------:|-------|
+| γ=2 K=0 (current production champion) | ~29.7 | 1.07/2 | bf16 KV / FENCE=4 / TOPK=512 / MTP=1 / SPEC=1. Documented baseline. |
+| γ=2 K=8 (Eagle K=8) | 29.1 | 1.07/2 | NO LIFT. Identical mean_accept to K=0; the May-22 plan "+1.9%" doesn't materialize. |
+| γ=3 K=0 | 27.25 | n/a | -8%. MTP head per-cycle accept rate drops as γ grows. |
+| γ=3 K=1 | 27.02 | 1.20/3 ≈ 40% | -9%. Confirms γ=3 structurally worse at c=1. |
+| γ=2 tree-draft K=2 | 17.10 | 1.37/2 ≈ 69% | -42%. Higher acceptance, but K^γ tree-verify cost swamps the gain. |
+| γ=2 K=0 + `EXO_DSV4_TOPK_FUSED=1` | 28.77 | 1.07/2 | ~3% latent win sits below 3-iter ±0.7 noise. Quality clean. |
+
+### What 35 t/s requires (none are env knobs)
+
+1. **Verify-forward kernel reduction.** Per-token decode at 100K is
+   ~33ms. May-12 V4Block per-section probe shows attention is 96% of
+   layer wall (sparse-indexer O(L) score pass). 15% reduction of
+   verify wall = 35 t/s. Levers: indexer kernel rewrite, MoE expert
+   dispatch batching, per-layer all_sum elimination.
+2. **Better-tuned MTP draft head.** Acceptance 1.07/2 at γ=2 is the
+   model ceiling for the current MTP module.
+3. **Fix the c=2 spec-batched bug** (see below). Doesn't lift c=1
+   directly but matches the cluster original sizing goal.
+
+### c=2 100K quality bug — discovery & localization
+
+**The pre-c=2-aware probe** fired one streamed request per
+invocation. At concurrency=1 the runner routes through
+`mtp_module.draft_tokens` (c=1 path), which has the per-step fence
+at line 786. The probe was structurally incapable of reaching
+`dsv4_mtp._draft_tokens_batched` (c=2 path). Every "needle probe
+passed at γ=X K=Y" claim across 2026-05-21 → 2026-05-23 morning was
+on the wrong code path.
+
+**Fingerprint at c=2 100K MTP-on (deterministic, both streams
+identical):**
+
+content (3149 chars): regurgitates INSTRUCTION text fragments
+("Do not including the code:</think>", "FALONE LINE", "Respond with
+no other text", "code-NAME-NUMBER-NUMBER") + partial-token drift
+("FAL" prefix) + BOS spam x 127. `finish_reason=length` on garbage.
+reasoning (17 chars): "We need the code:". Model attends to
+instruction text but not the document body. Fingerprint of
+sparse-attention indexer failure or KV-cache corruption localized
+to the c=2 spec-batched path.
+
+**Localization:**
+- c=1 100K spec-on: perfect
+- c=2 100K spec-OFF: bit-perfect both streams (rules out
+  `prefill_batched`, `BatchRotatingKVCache._update_concat`,
+  `SparseCompressedAttention.Indexer`, cross-stream KV)
+- c=2 100K spec-on γ=2 K=0: gibberish + BOS
+- c=2 100K spec-on γ=3 K=1 FENCE=4 (post-fence-patch): same shape
+
+Bug is in ONE of: `_draft_tokens_batched`, `_speculative_next_batch`,
+`dsv4_speculative_forward`, `_upgrade_cache_to_per_stream` swap, or
+`PerStreamBatchRotatingKVCache` state-at-long-context.
+
+Full forensics:
+- `~/repos/exo/.hermes/plans/2026-05-23_c2_100k_quality_bug_discovery.md`
+- `~/repos/exo/.hermes/plans/2026-05-23_instrumentation_session_findings.md`
+
+### Mandatory workflow update
+
+When the bench target is c≥2:
+
+    bench/quality_probe_dsv4.py --concurrency 2 --iters 3 ...
+
+Anything less is structurally incapable of catching c≥2 path bugs.
+Non-negotiable for any "champion" claim at c=2.
