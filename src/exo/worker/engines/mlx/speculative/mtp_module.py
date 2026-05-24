@@ -738,6 +738,20 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
 
         if temp == 0:
             tok_arr = mx.argmax(logits, axis=-1).reshape(1, 1)
+            # W3 diagnostic: dump MTP top-K softmax distribution.
+            # Gated EXO_DSV4_MTP_DUMP_TOPK=1 so production cost is zero.
+            # See plan: ~/repos/exo/.hermes/plans/2026-05-23_35_tps_plan.md
+            # and audit /tmp/w3_eagle_audit.md (renorm deviation question).
+            if os.environ.get("EXO_DSV4_MTP_DUMP_TOPK") == "1":
+                _dbg_probs = mx.softmax(logits.reshape(-1).astype(mx.float32), axis=-1)
+                _dbg_idx = mx.argsort(-_dbg_probs)[:8]
+                _dbg_p = mx.take(_dbg_probs, _dbg_idx).tolist()
+                _dbg_ids = _dbg_idx.tolist()
+                print(
+                    f"[MTP_TOPK] step={i} ids={_dbg_ids} "
+                    f"p={[round(x, 4) for x in _dbg_p]}",
+                    flush=True,
+                )
             if sync_drafts and not _disable_broadcast:
                 tok_arr = broadcast_from_canonical(
                     tok_arr.astype(mx.int32), sync_group
