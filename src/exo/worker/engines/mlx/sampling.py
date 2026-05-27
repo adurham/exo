@@ -136,9 +136,11 @@ def card_sampling_values(
     explicitly enables or disables thinking and the card has that branch;
     otherwise returns the flat card-level defaults.
     """
-    from exo.shared.models.model_cards import get_card
+    # Upstream removed the free `get_card` function in favour of a global
+    # `_CardCache` singleton (`card_cache`). Use that instead.
+    from exo.shared.models.model_cards import card_cache
 
-    card = get_card(model_id)
+    card = card_cache.get(model_id)
     if card is None:
         return None
     flat = card.sampling_defaults
