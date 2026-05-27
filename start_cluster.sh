@@ -535,26 +535,27 @@ done
 
 echo "Cross-subnet routes configured."
 
-# 0. Pre-deploy push check — verify local HEAD is on origin/main
-echo "Verifying local commits are pushed to origin/main..."
+# 0. Pre-deploy push check — verify local HEAD is on origin/$TARGET_BRANCH
+PUSH_CHECK_BRANCH="${EXO_TARGET_BRANCH:-main}"
+echo "Verifying local commits are pushed to origin/$PUSH_CHECK_BRANCH..."
 LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "none")
 git fetch origin --quiet 2>/dev/null || true
-ORIGIN_MAIN=$(git rev-parse origin/main 2>/dev/null || echo "none")
+ORIGIN_TARGET=$(git rev-parse "origin/$PUSH_CHECK_BRANCH" 2>/dev/null || echo "none")
 if [ "$LOCAL_HEAD" = "none" ]; then
     echo "WARNING: Not in a git repo on controller. Skipping push check."
-elif [ "$ORIGIN_MAIN" = "none" ]; then
-    echo "WARNING: Could not fetch origin/main. Skipping push check."
-elif ! git merge-base --is-ancestor "$LOCAL_HEAD" origin/main 2>/dev/null; then
+elif [ "$ORIGIN_TARGET" = "none" ]; then
+    echo "WARNING: Could not fetch origin/$PUSH_CHECK_BRANCH. Skipping push check."
+elif ! git merge-base --is-ancestor "$LOCAL_HEAD" "origin/$PUSH_CHECK_BRANCH" 2>/dev/null; then
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║  WARNING: Local HEAD is NOT on origin/main!                  ║"
+    echo "║  WARNING: Local HEAD is NOT on origin/$PUSH_CHECK_BRANCH!"
     echo "╠═══════════════════════════════════════════════════════════════╣"
-    echo "║  Local HEAD:   $LOCAL_HEAD"
-    echo "║  origin/main:  $(git rev-parse --short origin/main)"
+    echo "║  Local HEAD:               $LOCAL_HEAD"
+    echo "║  origin/$PUSH_CHECK_BRANCH: $(git rev-parse --short origin/$PUSH_CHECK_BRANCH)"
     echo "║                                                              ║"
-    echo "║  Cluster nodes will reset to origin/main, so your local      ║"
+    echo "║  Cluster nodes will reset to origin/$PUSH_CHECK_BRANCH, so your local"
     echo "║  commits will NOT be deployed. Push first:                   ║"
-    echo "║    git push origin main                                      ║"
+    echo "║    git push origin $PUSH_CHECK_BRANCH                       "
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo ""
     read -p "Continue anyway? (y/N) " -n 1 -r
@@ -564,7 +565,7 @@ elif ! git merge-base --is-ancestor "$LOCAL_HEAD" origin/main 2>/dev/null; then
         exit 1
     fi
 else
-    echo "  Local HEAD ($LOCAL_HEAD) is on origin/main ✓"
+    echo "  Local HEAD ($LOCAL_HEAD) is on origin/$PUSH_CHECK_BRANCH ✓"
 fi
 
 # 1. Cleanup, Update, and Build
@@ -596,7 +597,7 @@ for NODE in "${NODES[@]}"; do
     ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
     
     # Update and Build Logic
-    TARGET_BRANCH="main"
+    TARGET_BRANCH="${EXO_TARGET_BRANCH:-main}"
     ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
     
     echo "Ensuring build dependencies on $NODE..."
