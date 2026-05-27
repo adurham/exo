@@ -8,10 +8,9 @@ from typing import Self, cast
 
 import loguru
 
-from exo.shared.types.events import Event, RunnerStatusUpdated
+from exo.shared.types.events import Event
 from exo.shared.types.tasks import Task, TaskId
 from exo.shared.types.worker.instances import BoundInstance
-from exo.shared.types.worker.runners import RunnerFailed
 from exo.utils.channels import ClosedResourceError, MpReceiver, MpSender
 from exo.worker.engines.base import Builder
 
@@ -254,15 +253,10 @@ def entrypoint(
             f"Runner {bound_instance.bound_runner_id} crashed with critical exception {e}\n"
             f"{traceback.format_exc()}"
         )
-        # Notify the supervisor with our RunnerStatusUpdated event AND the
-        # upstream-style RunnerTerminationError. Supervisor handles both
-        # (see exo.worker.runner.supervisor:_send_post_init_failure).
-        event_sender.send(
-            RunnerStatusUpdated(
-                runner_id=bound_instance.bound_runner_id,
-                runner_status=RunnerFailed(error_message=str(e)),
-            )
-        )
+        # Notify the supervisor with the upstream-style RunnerTerminationError.
+        # Supervisor (~/repos/exo/src/exo/worker/runner/supervisor.py) catches
+        # this and constructs the RunnerFailed status itself with the right
+        # diagnostics field (which is now required on RunnerFailed).
         event_sender.send(RunnerTerminationError.from_exception(e))
     finally:
         try:
