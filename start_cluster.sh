@@ -603,9 +603,13 @@ for NODE in "${NODES[@]}"; do
     echo "Ensuring build dependencies on $NODE..."
     ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
 
-    # Sync dependencies (mlx and mlx-lm are pulled from git via uv sources)
+    # Sync dependencies (mlx and mlx-lm are pulled from git via uv sources).
+    # mlx + mlx-lm + mlx-vlm + torch live in the `mlx` extra (upstream's
+    # 2026-05-25 restructure moved them from base deps to optional-dependencies),
+    # so we need `--extra mlx` to actually install them on darwin. Otherwise the
+    # runner crashes at import-time with `ModuleNotFoundError: No module named 'mlx.nn'`.
     echo "Syncing dependencies on $NODE..."
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync'" || { echo "Failed to sync on $NODE"; exit 1; }
+    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx'" || { echo "Failed to sync on $NODE"; exit 1; }
 
     # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
     echo "Rebuilding Rust pyo3 bindings on $NODE..."
