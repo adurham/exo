@@ -10,29 +10,33 @@ Last refresh: 2026-05-27.
 
 ## Status board
 
-### Open PRs (12)
+### Open PRs (11)
 
-| Repo | PR | Title | Status |
+Sorted by most recent activity. Staleness column = days since last update.
+
+| Repo | PR | Title | Stale | Activity |
+|---|---|---|---|---|
+| `ml-explore/mlx` | [#3594](https://github.com/ml-explore/mlx/pull/3594) | feat: enable logsumexp output in fused SDPA dispatch | **0d** (today) | Opened 2026-05-27. **Revival of @Thump604's #3306** (closed 2026-04-04 "narrowing active upstream work to vllm-mlx"). PR body carries @hnshah's M3 Ultra LGTM validation + M4 Max RDMA cluster validation. Precondition for chunked SDPA. Awaiting first review. |
+| `ml-explore/mlx` | [#3595](https://github.com/ml-explore/mlx/pull/3595) | perf(scheduler): MLX_STREAM_QOS env var to pin StreamThread QoS class (Apple-only) | **0d** (today) | Opened 2026-05-27. Off-by-default Apple-gated. Diagnosed via JACCL_TRACE_PROGRESS: 2-node M4 Max sees 1M-17M poll_iters/call when descheduled, USER_INTERACTIVE pin eliminates the asymmetry. Awaiting first review. |
+| `exo-explore/exo` | [#2121](https://github.com/exo-explore/exo/pull/2121) | fix(runner): only rank 0 emits ChunkGenerated under tensor-parallel execution | **0d** (today) | Opened 2026-05-27. **Regression** introduced by PR #2000 (engine abstraction) which removed the pre-existing `if device_rank == 0` guard. On any 2-rank TP topology, every accepted token is emitted twice. Reproducer: `"Repeat exactly: FALCON-MERCURY-7749"` returns `"FALCONFALCON-MERCURY-MERCURY-7749-7749"`. 1-line fix + comment. Awaiting first review. |
+| `ml-explore/mlx-lm` | [#1216](https://github.com/ml-explore/mlx-lm/pull/1216) | fix(utils): skip already-quantized layers in load_model._quantize predicate | 12d | Opened 2026-04-27. **Third-party validation 2026-05-15**: `DevOpsBenjamin` ("Please accept this two line fix that made me lose 3 hours from MLX Studio"). No maintainer engagement yet despite community signal. |
+| `exo-explore/exo` | [#1996](https://github.com/exo-explore/exo/pull/1996) | fix(deepseek_v4): drop full-attention sharding for MoE-only strategy | 29d | Opened 2026-04-27. **Contested.** rltakashige commented 2026-04-28: `mlx-community/DeepSeek-V4-Flash-6bit` is sanitized for Blaizzy's variant, not theirs; claims their implementation is "considerably better in performance and stability." Their only published bench (PR #1195) is 30.1 tok/s single-node, vs our 34.6 tok/s on 2-node M4 Max RDMA TP — claim doesn't survive contact. **Holding ground; no maintainer triage.** Position: PR is scoped to compatibility with the de facto public checkpoint. Revisit if any DSv4 PR merges upstream. |
+| `exo-explore/exo` | [#1999](https://github.com/exo-explore/exo/pull/1999) | perf(deepseek_v4): fuse switch_mlp gate_proj + up_proj into single gather_qmm | 29d | Opened 2026-04-27. Stacks on #1996, +1.2% c=1 / +1.1% c=2 bench-validated. Blocked on #1996 resolution. |
+| `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | 30d | Opened 2026-04-26. **Biggest PR in the queue** (+2023/-74 across 26 files). Zero engagement. |
+| `ml-explore/mlx-lm` | [#1204](https://github.com/ml-explore/mlx-lm/pull/1204) | minimax: validate head_dim against checkpoint, drop unused shared_intermediate_size | 31d | Opened 2026-04-26. Zero engagement, CI not run yet. |
+| `exo-explore/exo` | [#1985](https://github.com/exo-explore/exo/pull/1985) | feat: Prometheus `/metrics` endpoint | 31d | Opened 2026-04-26. Zero engagement. |
+| `exo-explore/exo` | [#1988](https://github.com/exo-explore/exo/pull/1988) | feat: `EXO_KV_CACHE_BITS` env var + step=16384 for QuantizedKVCache | 31d | Opened 2026-04-26. Zero engagement. |
+| `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | 31d | Opened 2026-04-26. Zero engagement. |
+
+**Pattern note.** 6 of the 7 stale PRs (>= 29 days untouched) are `exo-explore/exo`. The 4th-week-of-April-2026 batch (#1985, #1988, #1990, #1992) and the 4th-week-of-April mlx-lm submission (#1204) have all gone untouched. The only exo-explore PRs that drew any maintainer-side reaction are #1996 (DSv4 conflict) and the now-merged #1989, #1991. Assume the exo-explore review pipeline is severely backlogged; don't expect quick triage. mlx-explore PRs do move (see #3455 below — went from APPROVED to merged in ~2 weeks).
+
+### Recently merged (3)
+
+| Repo | PR | Title | Merged |
 |---|---|---|---|
-| `ml-explore/mlx-lm` | [#1204](https://github.com/ml-explore/mlx-lm/pull/1204) | minimax: validate head_dim against checkpoint, drop unused shared_intermediate_size | review required, CI not run yet |
-| `ml-explore/mlx-lm` | [#1216](https://github.com/ml-explore/mlx-lm/pull/1216) | fix(utils): skip already-quantized layers in load_model._quantize predicate | review required, opened 2026-04-27 |
-| `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | **APPROVED** by zcbenz 2026-04-27, awaiting merge |
-| `ml-explore/mlx` | [#3594](https://github.com/ml-explore/mlx/pull/3594) | feat: enable logsumexp output in fused SDPA dispatch | opened 2026-05-27. **Revival of @Thump604's #3306** (closed 2026-04-04 "narrowing active upstream work to vllm-mlx"). Carries @hnshah's M3 Ultra LGTM validation forward, adds M4 Max RDMA cluster validation. Precondition for chunked SDPA. |
-| `ml-explore/mlx` | [#3595](https://github.com/ml-explore/mlx/pull/3595) | perf(scheduler): MLX_STREAM_QOS env var to pin StreamThread QoS class (Apple-only) | opened 2026-05-27. Off-by-default Apple-gated; pins comm-stream worker to a specified QoS class. Diagnosed via JACCL_TRACE_PROGRESS: 2-node M4 Max sees 1M-17M poll_iters/call when descheduled, USER_INTERACTIVE pin eliminates the asymmetry. |
-| `exo-explore/exo` | [#1985](https://github.com/exo-explore/exo/pull/1985) | feat: Prometheus `/metrics` endpoint | review required |
-| `exo-explore/exo` | [#1988](https://github.com/exo-explore/exo/pull/1988) | feat: `EXO_KV_CACHE_BITS` env var + step=16384 for QuantizedKVCache | review required |
-| `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | review required |
-| `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | review required |
-| `exo-explore/exo` | [#1996](https://github.com/exo-explore/exo/pull/1996) | fix(deepseek_v4): drop full-attention sharding for MoE-only strategy | rltakashige commented 2026-04-28 — `mlx-community/DeepSeek-V4-Flash-6bit` is sanitized for Blaizzy's variant, not theirs; claims their implementation is "considerably better in performance and stability." Their only published bench (PR #1195) is 30.1 tok/s single-node, vs our 34.6 tok/s on 2-node M4 Max RDMA TP — claim doesn't survive contact. **Holding ground; no reply yet.** Position: PR is scoped to compatibility with the de facto public checkpoint, not a claim about which implementation is better. Revisit if any DSv4 PR merges upstream. |
-| `exo-explore/exo` | [#1999](https://github.com/exo-explore/exo/pull/1999) | perf(deepseek_v4): fuse switch_mlp gate_proj + up_proj into single gather_qmm | review required, stacks on #1996, +1.2% c=1 / +1.1% c=2 bench-validated |
-| `exo-explore/exo` | [#2121](https://github.com/exo-explore/exo/pull/2121) | fix(runner): only rank 0 emits ChunkGenerated under tensor-parallel execution | opened 2026-05-27. **Regression** introduced by PR #2000 (engine abstraction) which removed the pre-existing `if device_rank == 0` guard. On any 2-rank TP topology (JACCL on 2 Mac Studios), every accepted token is emitted twice. Reproducer: `"Repeat exactly: FALCON-MERCURY-7749"` returns `"FALCONFALCON-MERCURY-MERCURY-7749-7749"`. 1-line fix + comment. |
-
-### Recently merged (2)
-
-| Repo | PR | Title |
-|---|---|---|
-| `exo-explore/exo` | [#1989](https://github.com/exo-explore/exo/pull/1989) | fix: route by in-flight tasks only — completed tasks were skewing load balance |
-| `exo-explore/exo` | [#1991](https://github.com/exo-explore/exo/pull/1991) | fix: map presence_penalty and frequency_penalty from ChatCompletionRequest |
+| `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | **2026-05-11** by angeloskath (was approved by zcbenz 2026-04-27, sat ~2 weeks before merge) |
+| `exo-explore/exo` | [#1989](https://github.com/exo-explore/exo/pull/1989) | fix: route by in-flight tasks only — completed tasks were skewing load balance | (pre-2026-04-28) |
+| `exo-explore/exo` | [#1991](https://github.com/exo-explore/exo/pull/1991) | fix: map presence_penalty and frequency_penalty from ChatCompletionRequest | (pre-2026-04-28) |
 
 ### Recently closed without merge (2)
 
@@ -55,7 +59,7 @@ Last refresh: 2026-05-27.
 
 ### Held / drafted but not yet opened (2)
 
-Branches built + tested clean on M4 Max. Description drafts at `/tmp/pr-drafts/` (local, not committed). Held pending the outcome of related open PRs or further investigation of known limitations.
+Branches built + tested clean on M4 Max. Description drafts at [`./upstream-pr-drafts/`](./upstream-pr-drafts/). Held pending the outcome of related open PRs or further investigation of known limitations.
 
 | Repo | Branch | Title | Reason held |
 |---|---|---|---|
@@ -179,7 +183,7 @@ Champion config validated post-sync: 30.7 t/s c=1 100K MTP+γ=2 (= prior baselin
 ## Recommended next actions
 
 1. **Open mlx PR for `MetalAllocator` cache-bucket coalesce fix** (fork commit `a6afdd82`). Single block of code in `MetalAllocator::malloc` — coalesce sub-`small_size_` allocations to `small_size_` before the buffer-cache lookup so all small requests share one cache bucket → ~100% cache hit rate → no fall-through to `device_->newBuffer` (which currently consumes a fresh vm_page_size VM region per scalar). Verified: matches upstream decode tok/s (no perf cost) AND eliminates ~5× of the long-decode RSS leak. Real upstream regression for any model with many scalar `mx.array` values per step on long workloads. Bring `MLX_LOG_NEW_BUFFER_PATH` cache-miss histogram + `vmmap` region-count diff as evidence. Earlier `heap_size_` and `small_size_` patches (`2c6e86db`/`4d543e19`/etc.) are superseded by this fix. See `fork-notes.md` for the full reproduction. **High-priority new PR; clear win for upstream users.**
-2. **Wait for review feedback** on the 12 open PRs and 3 issues before drafting more. Most are 2026-04-26 vintage; the three opened 2026-05-27 (mlx #3594, mlx #3595, exo #2121) are very fresh. Give a few days.
+2. **Don't expect quick review feedback.** Status snapshot 2026-05-27: 6 of the 7 stale-≥29-days PRs are on `exo-explore/exo` with zero engagement. The one signal: 3rd-party user `DevOpsBenjamin` `+1`'d mlx-lm#1216 ("lost 3 hours from MLX Studio") with no maintainer follow-up. The mlx-explore side does move (mlx#3455 took APPROVED → merged in ~2 weeks), but exo-explore looks heavily backlogged. **Action**: don't open a 13th PR until at least one of the 4 stale exo-explore PRs (#1985, #1988, #1990, #1992) draws a comment or merge. Three new PRs (mlx#3594, mlx#3595, exo#2121) opened today — fresh, no engagement yet.
 3. **If mlx PR #3594 (logsumexp) gets reviewed favorably** → open the held chunked-SDPA PR (`adurham:pr/sdpa-chunked-dispatch`) as a stacked follow-up, with @Thump604 credit chain intact.
 4. **For the held head_dim=192/256 PR** (`adurham:pr/sdpa-head-dim-192-256`) → decide on approach (submit as-is with float32 limitation documented vs. parameterize bq per-dtype first). Worth checking what zcbenz's appetite is for documented limitations after seeing the response to #3594.
 5. **If radix-trie issue #1986 gets a green light** → split into the 3-PR sequence (caps → pin → trie+extend-in-place).
