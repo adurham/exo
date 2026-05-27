@@ -175,8 +175,13 @@ class SequentialGenerator(Engine):
         if not mx_any(len(self._maybe_queue) > 0, coord):
             return
         agreed, different = mx_all_gather_tasks(self._maybe_queue, coord)
-        self._queue.extend(task for task in self._maybe_queue if task in agreed)
-        self._maybe_queue = [task for task in self._maybe_queue if task in different]
+        # Extend from `agreed` (sorted by task_id on all ranks) to guarantee
+        # every rank enqueues tasks in the same order, preventing TP collective
+        # deadlocks (upstream PR #2048). DO NOT filter through self._maybe_queue
+        # — that preserves OUR submission order, which differs across ranks
+        # and produces the c=2 duplicated-token output mode.
+        self._queue.extend(agreed)
+        self._maybe_queue = list(different)
 
     def agree_on_cancellations(self) -> None:
         """Agree between all ranks about which tasks to cancel.
@@ -493,8 +498,10 @@ class BatchGenerator(Engine):
             return
         _t0 = time.perf_counter()
         agreed, different = mx_all_gather_tasks(self._maybe_queue, coord)
-        self._queue.extend(task for task in self._maybe_queue if task in agreed)
-        self._maybe_queue = [task for task in self._maybe_queue if task in different]
+        # Extend from `agreed` (sorted by task_id on all ranks) — upstream
+        # PR #2048 fix. See the other agree_on_tasks above for rationale.
+        self._queue.extend(agreed)
+        self._maybe_queue = list(different)
         _dt = time.perf_counter() - _t0
         if _dt > 0.005 and os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1"):
             logger.info(f"[PROF] agree_on_tasks={_dt*1000:.1f}ms")
