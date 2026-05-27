@@ -4,25 +4,28 @@ Cross-repo tracker for what `adurham/{exo,mlx,mlx-lm}` carries on top of upstrea
 and what's been pushed forward to upstream review. Companion to
 [fork-notes.md](./fork-notes.md), which tracks dependency pins.
 
-Last refresh: 2026-04-28.
+Last refresh: 2026-05-27.
 
 ---
 
 ## Status board
 
-### Open PRs (9)
+### Open PRs (12)
 
 | Repo | PR | Title | Status |
 |---|---|---|---|
 | `ml-explore/mlx-lm` | [#1204](https://github.com/ml-explore/mlx-lm/pull/1204) | minimax: validate head_dim against checkpoint, drop unused shared_intermediate_size | review required, CI not run yet |
 | `ml-explore/mlx-lm` | [#1216](https://github.com/ml-explore/mlx-lm/pull/1216) | fix(utils): skip already-quantized layers in load_model._quantize predicate | review required, opened 2026-04-27 |
 | `ml-explore/mlx` | [#3455](https://github.com/ml-explore/mlx/pull/3455) | Add `MLX_SDPA_BLOCKS` env var for 2-pass vector kernel block-count override | **APPROVED** by zcbenz 2026-04-27, awaiting merge |
+| `ml-explore/mlx` | [#3594](https://github.com/ml-explore/mlx/pull/3594) | feat: enable logsumexp output in fused SDPA dispatch | opened 2026-05-27. **Revival of @Thump604's #3306** (closed 2026-04-04 "narrowing active upstream work to vllm-mlx"). Carries @hnshah's M3 Ultra LGTM validation forward, adds M4 Max RDMA cluster validation. Precondition for chunked SDPA. |
+| `ml-explore/mlx` | [#3595](https://github.com/ml-explore/mlx/pull/3595) | perf(scheduler): MLX_STREAM_QOS env var to pin StreamThread QoS class (Apple-only) | opened 2026-05-27. Off-by-default Apple-gated; pins comm-stream worker to a specified QoS class. Diagnosed via JACCL_TRACE_PROGRESS: 2-node M4 Max sees 1M-17M poll_iters/call when descheduled, USER_INTERACTIVE pin eliminates the asymmetry. |
 | `exo-explore/exo` | [#1985](https://github.com/exo-explore/exo/pull/1985) | feat: Prometheus `/metrics` endpoint | review required |
 | `exo-explore/exo` | [#1988](https://github.com/exo-explore/exo/pull/1988) | feat: `EXO_KV_CACHE_BITS` env var + step=16384 for QuantizedKVCache | review required |
 | `exo-explore/exo` | [#1990](https://github.com/exo-explore/exo/pull/1990) | fix: skip KV cache quantization in single-node BatchGenerator mode | review required |
 | `exo-explore/exo` | [#1992](https://github.com/exo-explore/exo/pull/1992) | feat: peer-to-peer model distribution | review required |
 | `exo-explore/exo` | [#1996](https://github.com/exo-explore/exo/pull/1996) | fix(deepseek_v4): drop full-attention sharding for MoE-only strategy | rltakashige commented 2026-04-28 — `mlx-community/DeepSeek-V4-Flash-6bit` is sanitized for Blaizzy's variant, not theirs; claims their implementation is "considerably better in performance and stability." Their only published bench (PR #1195) is 30.1 tok/s single-node, vs our 34.6 tok/s on 2-node M4 Max RDMA TP — claim doesn't survive contact. **Holding ground; no reply yet.** Position: PR is scoped to compatibility with the de facto public checkpoint, not a claim about which implementation is better. Revisit if any DSv4 PR merges upstream. |
 | `exo-explore/exo` | [#1999](https://github.com/exo-explore/exo/pull/1999) | perf(deepseek_v4): fuse switch_mlp gate_proj + up_proj into single gather_qmm | review required, stacks on #1996, +1.2% c=1 / +1.1% c=2 bench-validated |
+| `exo-explore/exo` | [#2121](https://github.com/exo-explore/exo/pull/2121) | fix(runner): only rank 0 emits ChunkGenerated under tensor-parallel execution | opened 2026-05-27. **Regression** introduced by PR #2000 (engine abstraction) which removed the pre-existing `if device_rank == 0` guard. On any 2-rank TP topology (JACCL on 2 Mac Studios), every accepted token is emitted twice. Reproducer: `"Repeat exactly: FALCON-MERCURY-7749"` returns `"FALCONFALCON-MERCURY-MERCURY-7749-7749"`. 1-line fix + comment. |
 
 ### Recently merged (2)
 
@@ -50,34 +53,44 @@ Last refresh: 2026-04-28.
 
 - `ml-explore/mlx-lm` [#941](https://github.com/ml-explore/mlx-lm/pull/941) — +1 on `QuantizedKVCache.merge()`; offered to drive the `BatchQuantizedKVCache` redesign maintainer asked for.
 
-### Fork sync state (2026-04-28)
+### Held / drafted but not yet opened (2)
+
+Branches built + tested clean on M4 Max. Description drafts at `/tmp/pr-drafts/` (local, not committed). Held pending the outcome of related open PRs or further investigation of known limitations.
+
+| Repo | Branch | Title | Reason held |
+|---|---|---|---|
+| `ml-explore/mlx` | `adurham:pr/sdpa-chunked-dispatch` | feat: chunked SDPA dispatch for long key sequences (>65K) | **Stacked on PR [#3594](https://github.com/ml-explore/mlx/pull/3594)** (logsumexp output). Holding to see how the prerequisite PR lands first — if zcbenz/angeloskath ask for changes to #3594 they'll cascade here. Also: **revival of @Thump604's #3307** ("Closing this because I'm narrowing active upstream work to vllm-mlx") which had positive @hnshah validation; want to keep that authorship credit chain intact. 27/29 chunked-dispatch tests pass on M4 Max, 2 skipped (pre-existing float32+D=256 32KB threadgroup limit, not chunking-related). Cluster end-to-end at 100K context: GPU watchdog timeout (was hard-blocked) → 30.7 t/s clean. |
+| `ml-explore/mlx` | `adurham:pr/sdpa-head-dim-192-256` | feat: head_dim=192 + 256 fused SDPA support (with kL-aware routing) | **bf16/fp16 paths verified clean**, but float32 + bq=32 + bd=192 hits the same 32KB threadgroup memory limit as the existing `head_dim=256 + float32` skip in `test_sdpa_chunked.py`. Need to decide whether to: (a) submit as-is and document the float32 limitation in the PR body (acceptable, matches the existing precedent), or (b) parameterize bq per-dtype to fit float32 first (cleaner story, more work). Also overlaps with @Thump604's [#3293](https://github.com/ml-explore/mlx/pull/3293) ("fix: add head_dim=256 to fused SDPA full attention kernel") — closed unmerged 2026-04-04 with the same vllm-mlx rationale. If we open we should credit them like we did on #3594. |
+
+### Fork sync state (2026-05-27)
 
 | Fork | vs upstream/main | Notes |
 |---|---|---|
-| `adurham/mlx-lm` | 0 behind, 57 ahead | Fully current |
-| `adurham/mlx` | 0 behind, 40 ahead | Fully current |
-| `adurham/exo` | **4 behind**, 359 ahead | **Merge deferred** — see below |
+| `adurham/mlx-lm` | 0 behind, 243 ahead | Fully current; main = cluster's working code after eagle-soft-emb merge |
+| `adurham/mlx` | 0 behind, 132 ahead | Fully current; main = ported lib/jaccl layout (= cluster pin) |
+| `adurham/exo` | 0 behind, 793 ahead | Fully current after sync of upstream's 24 commits (lib/jaccl-refactor-era PRs incl. #2048 agree_on_tasks fix) |
 
-#### Deferred: exo upstream merge (4 commits)
+#### Completed: exo upstream sync (24 commits, 2026-05-26 → 2026-05-27)
 
-Attempted 2026-04-28; aborted due to **7 conflicts** in cluster-critical files. Dominant blocker is `f0d1371d` MLX P/D (#1993, +4000/-84, 53 files) — major prefill/decode disaggregation feature. Secondary: `c80b10c0` engine abstraction (#2000) renames `runner/llm_inference/runner.py → runner/runner.py` and deletes `runner/image_models/runner.py`, both of which our fork has commits on. Two trivial commits (#1997, #1998) merge cleanly.
+Synced cleanly via merge-resolve + 8 follow-up fix commits. The 4-commit deferral from 2026-04-28 above (P/D #1993, engine abstraction #2000) had already been absorbed into the cluster's working branch by the time the sync was attempted, so the structural conflict was much smaller than predicted. The actual conflicts were:
 
-Conflict severity by fork-commit count touching each file:
+- `pyproject.toml` — upstream restructured base deps into `[project.optional-dependencies] mlx` extra. Took upstream's structure wholesale, re-layered our deltas (mlx/mlx-lm sources, prometheus-client).
+- `src/exo/master/main.py` — upstream renamed `_send_event → _send_indexed_event` + inlined what we'd extracted into our `_index_apply_broadcast` helper. Kept our helper, applied the rename to inner call sites.
+- `src/exo/worker/runner/bootstrap.py` — additive merge (kept QoS pinning + mlx-lm profiler hooks, added upstream's `RunnerTerminationError` dataclass).
+- `src/exo/worker/runner/llm_inference/batch_generator.py` — adopted upstream PR #2048 fix (`extend(agreed)` instead of our filter-via-_maybe_queue) while keeping our coord-subgroup fast-path optimization.
+- `uv.lock` — regenerated from merged pyproject.
 
-| File | Fork commits | Caused by |
-|---|---|---|
-| `engines/mlx/generator/generate.py` | 47 | #1993 |
-| `engines/mlx/generator/batch_generate.py` | 44 | #2000 + #1993 |
-| `engines/mlx/cache.py` | 24 | #1993 |
-| `engines/mlx/auto_parallel.py` | 22 | #1993 |
-| `runner/llm_inference/runner.py` (renamed → `runner/runner.py`) | 18 | #2000 |
-| `runner/llm_inference/batch_generator.py` | 12 | #2000 + #1993 |
-| `master/main.py` | 5 | #1993 |
-| `runner/image_models/runner.py` (deleted) | 2 | #2000 |
+8 follow-up fixes needed post-merge:
+1. Restore `RunnerTerminationError` class (lost in conflict resolution)
+2. Use `card_cache.get` instead of removed `get_card` function
+3. Drop our redundant `RunnerStatusUpdated` send (supervisor now uses `RunnerTerminationError` channel)
+4. `uv sync --extra mlx --all-packages` in start_cluster.sh (post-restructure)
+5. EXO_TARGET_BRANCH env var in start_cluster.sh (cherry-pick from port-test)
+6. `exo_tools.client` import in bench scripts (post-restructure)
+7. agree_on_tasks correctly applying #2048 fix
+8. **send_chunk rank-0 guard** (was the c=1 double-emit blocker — submitted as PR [#2121](https://github.com/exo-explore/exo/pull/2121))
 
-Pickup plan + scope estimate (1-2 days) in memory `exo_upstream_merge_2026_04_28_deferred.md`. Phase 1 is a comprehension pass on the new `worker/disaggregated/` module to determine whether it applies to our 2-node TP cluster — that question changes whether conflict resolution is mostly textual or architectural.
-
-**Don't attempt the merge while perf work is in flight** (DSv4 long-context profile session is currently running in another session against `engines/mlx/generator/generate.py`).
+Champion config validated post-sync: 30.7 t/s c=1 100K MTP+γ=2 (= prior baseline within noise), 3/3 quality probe needles, 0 errors. Full procedure documented in skill `exo/exo-upstream-sync` for next time.
 
 ---
 
@@ -148,7 +161,7 @@ Pickup plan + scope estimate (1-2 days) in memory `exo_upstream_merge_2026_04_28
 |---|---|---|
 | **rlt** (Ryuichi Leo Takashige) | DSB barrier (mlx), lightning-indexer batch>1 fix (mlx-lm), DSv4 PR #1195, GDN precision branch where dmcc73's work is sitting | Active upstream contributor; reach out via Discord or directly |
 | **dmcc73** (David Correia) | The actual GDN fp32 precision fixes carried in `rlt/fix/float32-logprobs` | No upstream PRs from them yet; they'd be the natural author |
-| **Thump604** | Chunked SDPA + LogSumExp + head_dim 192/256 + MLX_SDPA_FUSED_THRESHOLD territory in mlx | PRs #3293/#3307 closed unmerged; need to ask if they want to revive |
+| **Thump604** | Chunked SDPA + LogSumExp + head_dim 192/256 + MLX_SDPA_FUSED_THRESHOLD territory in mlx | PRs #3293/#3306/#3307 closed unmerged 2026-04-04 ("narrowing active upstream work to vllm-mlx [...] If I need this again, I'll reintroduce it from a fresh branch"). Author explicitly opened the door for someone else to revive. We revived #3306 → ours [#3594](https://github.com/ml-explore/mlx/pull/3594) with full credit. Chunked-SDPA (#3307) revival held at `adurham:pr/sdpa-chunked-dispatch` pending #3594 review. head_dim=192/256 (#3293) revival held at `adurham:pr/sdpa-head-dim-192-256` pending decision on float32 limitation. |
 | **Blaizzy** | DeepSeek-V4 PR #1192 in mlx-lm | Push our sanitize fixes to their PR, not a new one |
 | **ochafik** (Olivier Chafik) | `QuantizedKVCache.merge()` PR #941 | Stalled; comment posted offering to drive the maintainer-requested redesign |
 | **angeloskath** (Apple) | Authored `b0e1769` "Ensure padding and offset are evaluated" in `rlt/fix/float32-logprobs` | Apple maintainer aware of GDN precision territory |
@@ -166,9 +179,10 @@ Pickup plan + scope estimate (1-2 days) in memory `exo_upstream_merge_2026_04_28
 ## Recommended next actions
 
 1. **Open mlx PR for `MetalAllocator` cache-bucket coalesce fix** (fork commit `a6afdd82`). Single block of code in `MetalAllocator::malloc` — coalesce sub-`small_size_` allocations to `small_size_` before the buffer-cache lookup so all small requests share one cache bucket → ~100% cache hit rate → no fall-through to `device_->newBuffer` (which currently consumes a fresh vm_page_size VM region per scalar). Verified: matches upstream decode tok/s (no perf cost) AND eliminates ~5× of the long-decode RSS leak. Real upstream regression for any model with many scalar `mx.array` values per step on long workloads. Bring `MLX_LOG_NEW_BUFFER_PATH` cache-miss histogram + `vmmap` region-count diff as evidence. Earlier `heap_size_` and `small_size_` patches (`2c6e86db`/`4d543e19`/etc.) are superseded by this fix. See `fork-notes.md` for the full reproduction. **High-priority new PR; clear win for upstream users.**
-2. **Wait for review feedback** on the 9 open PRs and 3 issues before drafting more. All but P2P (#1992) were opened 2026-04-26; #1992 went up the same day after a re-author. Give a few days. (mlx#3454 + mlx#3456 both closed 2026-04-28 — see "Recently closed without merge".)
-2. **If radix-trie issue #1986 gets a green light** → split into the 3-PR sequence (caps → pin → trie+extend-in-place).
-3. **If sampling-tier issue #1987 gets a green light** → defer per-instance + cluster-env per maintainer guidance. (The uncontroversial API mapping fixes have already been submitted as PR #1991).
-4. **DSv4 cluster sharding (exo)** waits on whichever DSv4 PR (Blaizzy #1192 / machiabeli #1189 / rlt #1195) lands.
-5. **If Thump604 returns** → revive #3293/#3307 with their authorship, fold our `MLX_SDPA_FUSED_THRESHOLD` env var into that conversation.
-6. **MTP** port to the new BatchGenerator API landed 2026-04-26. Needs live cluster smoke test (Huihui + Qwen3.5-397B) before flipping `QWEN35_ENABLED=0 → 1` in `start_cluster.sh`.
+2. **Wait for review feedback** on the 12 open PRs and 3 issues before drafting more. Most are 2026-04-26 vintage; the three opened 2026-05-27 (mlx #3594, mlx #3595, exo #2121) are very fresh. Give a few days.
+3. **If mlx PR #3594 (logsumexp) gets reviewed favorably** → open the held chunked-SDPA PR (`adurham:pr/sdpa-chunked-dispatch`) as a stacked follow-up, with @Thump604 credit chain intact.
+4. **For the held head_dim=192/256 PR** (`adurham:pr/sdpa-head-dim-192-256`) → decide on approach (submit as-is with float32 limitation documented vs. parameterize bq per-dtype first). Worth checking what zcbenz's appetite is for documented limitations after seeing the response to #3594.
+5. **If radix-trie issue #1986 gets a green light** → split into the 3-PR sequence (caps → pin → trie+extend-in-place).
+6. **If sampling-tier issue #1987 gets a green light** → defer per-instance + cluster-env per maintainer guidance. (The uncontroversial API mapping fixes have already been submitted as PR #1991).
+7. **DSv4 cluster sharding (exo)** waits on whichever DSv4 PR (Blaizzy #1192 / machiabeli #1189 / rlt #1195) lands.
+8. **MTP** port to the new BatchGenerator API landed 2026-04-26. Needs live cluster smoke test (Huihui + Qwen3.5-397B) before flipping `QWEN35_ENABLED=0 → 1` in `start_cluster.sh`.
