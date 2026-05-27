@@ -1,16 +1,25 @@
-# Upstream PR drafts (held, not yet opened)
+# Upstream PR drafts
 
-Branches in this directory's `.md` files are built + tested clean on M4 Max but held
-from public submission for the reasons documented in
-[`../upstream-prs.md` → "Held / drafted but not yet opened"](../upstream-prs.md).
+Tracked-in-repo copies of PR descriptions, paired with branches at `adurham:pr/*`.
 
-These are the as-prepared PR descriptions, kept here so they don't drift out of sync
-with the branches at `adurham:pr/*` if/when we decide to open them.
+- **Files for PRs that have been opened** kept for reference + diff history.
+- **Files for held PRs (not yet opened)** documented in `../upstream-prs.md`
+  → "Held / drafted but not yet opened" section.
 
-To open one:
+| File | Status | PR / branch |
+|---|---|---|
+| `02-mlx-sdpa-chunked.md` | **HELD** | `adurham:pr/sdpa-chunked-dispatch` (stacked on mlx#3594) |
+| `04-mlx-head-dim-192-256.md` | **HELD** | `adurham:pr/sdpa-head-dim-192-256` (float32 limitation pending) |
+| `06-mlx-allocator-coalesce.md` | **OPENED** | [mlx#3596](https://github.com/ml-explore/mlx/pull/3596) |
+
+(PRs #1, #3, #5 are committed via the PR body itself on GitHub — we kept the
+drafts in `/tmp/pr-drafts/` during the session but only the held ones are
+worth tracking long-term in the repo.)
+
+To open a held PR:
 
 ```bash
-# example: PR #2 (chunked SDPA)
+# example: PR for chunked SDPA, once #3594 lands
 cd ~/repos/mlx
 gh pr create \
   --repo ml-explore/mlx \
