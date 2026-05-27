@@ -486,4 +486,13 @@ class Runner:
         command_id: CommandId,
     ):
         assert isinstance(self.generator, Engine)
+        # CRITICAL: only rank 0 emits ChunkGenerated. Both ranks run the
+        # full TP forward and reach this method on every accepted token; if
+        # both send, the API receives every token twice and the user sees
+        # 'FALCONFALCON-MERCURY-MERCURY-7749-7749' instead of
+        # 'FALCON-MERCURY-7749'. Upstream removed this guard
+        # (origin/main@2026-05-25); we keep it because our TP-on-2-machines
+        # topology requires deduplication at the emission point.
+        if self.device_rank != 0:
+            return
         self.event_sender.send(ChunkGenerated(command_id=command_id, chunk=chunk))
