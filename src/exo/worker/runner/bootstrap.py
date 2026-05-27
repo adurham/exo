@@ -3,6 +3,8 @@ import os
 import resource
 import sys
 import traceback
+from dataclasses import dataclass
+from typing import Self, cast
 
 import loguru
 
@@ -14,6 +16,35 @@ from exo.utils.channels import ClosedResourceError, MpReceiver, MpSender
 from exo.worker.engines.base import Builder
 
 logger: "loguru.Logger" = loguru.logger
+
+
+@dataclass(frozen=True)
+class RunnerTerminationError:
+    """Records the cause of a runner subprocess termination.
+
+    Sent back from the runner to the parent supervisor via the event
+    channel just before the runner exits. The supervisor uses this to
+    decide whether to restart the runner or fail the instance.
+    """
+
+    exception_type: str
+    exception_message: str
+    exception_repr: str
+    traceback: str
+
+    @classmethod
+    def from_exception(cls, e: Exception) -> Self:
+        return cls(
+            exception_type=type(e).__qualname__,
+            exception_message=str(e),
+            exception_repr=repr(e),
+            traceback="".join(
+                traceback.TracebackException.from_exception(e).format(chain=True)
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.exception_type}: {self.exception_message}\n{self.traceback}"
 
 
 # QoS classes from <sys/qos.h>. Apple's documented values for
@@ -132,7 +163,7 @@ def _maybe_register_profiler_hook() -> None:
 
 def entrypoint(
     bound_instance: BoundInstance,
-    event_sender: MpSender[Event],
+    event_sender: MpSender[Event | RunnerTerminationError],
     task_receiver: MpReceiver[Task],
     cancel_receiver: MpReceiver[TaskId],
     _logger: "loguru.Logger",
@@ -174,6 +205,11 @@ def entrypoint(
 
     _maybe_register_profiler_hook()
 
+    # Downcast the union-typed sender to MpSender[Event] for the internal
+    # Builder/Runner machinery that only knows Event. MpSender is variant-
+    # safe in practice; the cast is just to appease the type checker.
+    event_sender_downcast: MpSender[Event] = cast(MpSender[Event], event_sender)
+
     # Import main after setting global logger - this lets us just import logger from this module
     try:
         from exo.worker.runner.runner import Runner
@@ -184,7 +220,7 @@ def entrypoint(
             from exo.worker.engines.image.builder import MfluxBuilder
 
             builder = MfluxBuilder(
-                event_sender, cancel_receiver, bound_instance.bound_shard
+                event_sender_downcast, cancel_receiver, bound_instance.bound_shard
             )
         else:
             from exo.worker.engines.mlx.patches import apply_mlx_patches
@@ -196,11 +232,11 @@ def entrypoint(
             # evil sharing of the event sender
             builder = MlxBuilder(
                 model_id=bound_instance.bound_shard.model_card.model_id,
-                event_sender=event_sender,
+                event_sender=event_sender_downcast,
                 cancel_receiver=cancel_receiver,
             )
 
-        runner = Runner(bound_instance, builder, event_sender, task_receiver)
+        runner = Runner(bound_instance, builder, event_sender_downcast, task_receiver)
         runner.main()
 
     except ClosedResourceError:
@@ -218,12 +254,16 @@ def entrypoint(
             f"Runner {bound_instance.bound_runner_id} crashed with critical exception {e}\n"
             f"{traceback.format_exc()}"
         )
+        # Notify the supervisor with our RunnerStatusUpdated event AND the
+        # upstream-style RunnerTerminationError. Supervisor handles both
+        # (see exo.worker.runner.supervisor:_send_post_init_failure).
         event_sender.send(
             RunnerStatusUpdated(
                 runner_id=bound_instance.bound_runner_id,
                 runner_status=RunnerFailed(error_message=str(e)),
             )
         )
+        event_sender.send(RunnerTerminationError.from_exception(e))
     finally:
         try:
             event_sender.close()
