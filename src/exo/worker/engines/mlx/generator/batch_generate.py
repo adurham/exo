@@ -106,6 +106,18 @@ _MLX_CLEAR_CACHE_INTERVAL = int(
 import gc  # noqa: E402  (placed after env reads for clarity)
 _GC_COLLECT_INTERVAL = int(os.environ.get("EXO_GC_COLLECT_INTERVAL", "0"))
 
+# ── Degeneration (repetition-loop) detection ──
+# Catches decode collapse: the model emitting a short token cycle forever
+# (e.g. "the user is on 1. the user is on 1." or BOS spam). Pure observability
+# — logs ONCE per request when a loop crosses threshold, never alters output.
+# On by default (cheap: a small deque scan per token). Disable with
+# EXO_LOOP_DETECT=0. Tunables: window = how many recent token ids to inspect;
+# min_repeats = how many back-to-back cycle repetitions trigger the warning.
+_LOOP_DETECT_ENABLED = os.environ.get("EXO_LOOP_DETECT", "1") != "0"
+_LOOP_DETECT_WINDOW = int(os.environ.get("EXO_LOOP_DETECT_WINDOW", "64"))
+_LOOP_DETECT_MAX_PERIOD = int(os.environ.get("EXO_LOOP_DETECT_MAX_PERIOD", "8"))
+_LOOP_DETECT_MIN_REPEATS = int(os.environ.get("EXO_LOOP_DETECT_MIN_REPEATS", "6"))
+
 # Periodic macOS malloc_zone_pressure_relief() to force freed-but-cached
 # chunks back to the OS. The MLX C++ side is correctly releasing
 # ArrayDesc shared_ptr instances on eval+detach (verified via the live
@@ -288,6 +300,36 @@ def _stop_sequences(task_params: TextGenerationTaskParams) -> list[str]:
     return task_params.stop
 
 
+def _detect_token_loop(
+    token_ids: list[int],
+    max_period: int = _LOOP_DETECT_MAX_PERIOD,
+    min_repeats: int = _LOOP_DETECT_MIN_REPEATS,
+) -> tuple[int, int] | None:
+    """Detect a repeating token cycle at the TAIL of ``token_ids``.
+
+    Returns ``(period, repeats)`` for the shortest period (1..max_period)
+    whose cycle repeats back-to-back at least ``min_repeats`` times ending
+    at the most recent token, else ``None``. Cheap: O(max_period * window),
+    no allocation beyond slices. Used only for logging — never gates output.
+    """
+    n = len(token_ids)
+    if n < min_repeats:
+        return None
+    for period in range(1, max_period + 1):
+        if n < period * min_repeats:
+            break
+        cycle = token_ids[n - period:]
+        repeats = 1
+        # walk backwards in blocks of `period`, counting identical cycles
+        pos = n - period
+        while pos - period >= 0 and token_ids[pos - period:pos] == cycle:
+            repeats += 1
+            pos -= period
+        if repeats >= min_repeats:
+            return period, repeats
+    return None
+
+
 @dataclass
 class _EngineTask:
     uid: int
@@ -306,6 +348,12 @@ class _EngineTask:
     in_thinking: bool = False
     reasoning_tokens: int = 0
     prefill_tps: float = 0.0
+    # ── degeneration (repetition-loop) detection ──
+    # Rolling window of the most recent generated token ids, used to detect
+    # decode collapse (the model emitting a short cycle forever). Pure
+    # observability: never alters sampling/output. See _detect_token_loop.
+    recent_token_ids: list[int] = field(default_factory=list)
+    degeneration_warned: bool = False
     media_regions: list[MediaRegion] = field(default_factory=list)
     # Whether the radix-trie returned an exact-match (full prompt
     # already cached). Distinguishes "exact" from "partial" hits when
@@ -1798,6 +1846,46 @@ class ExoBatchGenerator:
             state.completion_tokens += 1
             state.generated_text_parts.append(text)
             state.potential_stop_sequence_text += text
+
+            # ── degeneration (repetition-loop) detection ── pure observability
+            if _LOOP_DETECT_ENABLED and response.finish_reason != "stop":
+                ids = state.recent_token_ids
+                ids.append(int(response.token))
+                if len(ids) > _LOOP_DETECT_WINDOW:
+                    del ids[: len(ids) - _LOOP_DETECT_WINDOW]
+                if not state.degeneration_warned:
+                    loop = _detect_token_loop(ids)
+                    if loop is not None:
+                        period, repeats = loop
+                        state.degeneration_warned = True
+                        cycle_ids = ids[len(ids) - period:]
+                        try:
+                            cycle_text = self.tokenizer.decode(cycle_ids)
+                        except Exception:
+                            cycle_text = "<decode-failed>"
+                        tp = state.task_params
+                        logger.warning(
+                            "DEGENERATION DETECTED uid=%s at completion_token=%s: "
+                            "token cycle period=%d repeated>=%dx. "
+                            "cycle_token_ids=%s cycle_text=%r in_thinking=%s | "
+                            "sampling: temp=%s top_p=%s top_k=%s min_p=%s "
+                            "rep_pen=%s prompt_tokens~%s prefix_hit=%s gen_engine=%s",
+                            response.uid,
+                            state.completion_tokens,
+                            period,
+                            repeats,
+                            cycle_ids,
+                            cycle_text,
+                            state.in_thinking,
+                            tp.temperature,
+                            tp.top_p,
+                            tp.top_k,
+                            tp.min_p,
+                            tp.repetition_penalty,
+                            int(state.all_prompt_tokens.size),
+                            state.prefix_hit_length,
+                            type(self._mlx_gen).__name__,
+                        )
 
             think_start = self.tokenizer.think_start
             think_end = self.tokenizer.think_end
