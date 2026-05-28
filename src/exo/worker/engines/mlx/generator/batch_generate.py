@@ -1864,27 +1864,21 @@ class ExoBatchGenerator:
                         except Exception:
                             cycle_text = "<decode-failed>"
                         tp = state.task_params
+                        # Pre-format into one string: the runner's logger is
+                        # loguru ({}-style), so %s args are NOT interpolated.
+                        # f-string keeps this logger-agnostic.
                         logger.warning(
-                            "DEGENERATION DETECTED uid=%s at completion_token=%s: "
-                            "token cycle period=%d repeated>=%dx. "
-                            "cycle_token_ids=%s cycle_text=%r in_thinking=%s | "
-                            "sampling: temp=%s top_p=%s top_k=%s min_p=%s "
-                            "rep_pen=%s prompt_tokens~%s prefix_hit=%s gen_engine=%s",
-                            response.uid,
-                            state.completion_tokens,
-                            period,
-                            repeats,
-                            cycle_ids,
-                            cycle_text,
-                            state.in_thinking,
-                            tp.temperature,
-                            tp.top_p,
-                            tp.top_k,
-                            tp.min_p,
-                            tp.repetition_penalty,
-                            int(state.all_prompt_tokens.size),
-                            state.prefix_hit_length,
-                            type(self._mlx_gen).__name__,
+                            f"DEGENERATION DETECTED uid={response.uid} "
+                            f"at completion_token={state.completion_tokens}: "
+                            f"token cycle period={period} repeated>={repeats}x. "
+                            f"cycle_token_ids={cycle_ids} cycle_text={cycle_text!r} "
+                            f"in_thinking={state.in_thinking} | sampling: "
+                            f"temp={tp.temperature} top_p={tp.top_p} "
+                            f"top_k={tp.top_k} min_p={tp.min_p} "
+                            f"rep_pen={tp.repetition_penalty} "
+                            f"prompt_tokens~{int(state.all_prompt_tokens.size)} "
+                            f"prefix_hit={state.prefix_hit_length} "
+                            f"gen_engine={type(self._mlx_gen).__name__}"
                         )
 
             think_start = self.tokenizer.think_start
