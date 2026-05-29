@@ -40,6 +40,7 @@ from mlx_lm.models.cache import (
     BatchRotatingKVCache,
     CacheList,
     PerStreamBatchRotatingKVCache,
+    PoolingCache,
 )
 
 from .mtp_batch_generator import MTPBatchGenerator
@@ -796,6 +797,26 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         line = (_json.dumps(rec, default=str) + "\n").encode("utf-8")
         self._mtp_trace_handle.write(line)
         self._mtp_drift_step: int = 0
+
+    def _collect_pooling_caches(self, gen_batch: Any) -> list[Any]:
+        """Return every PoolingCache in the prompt cache (recursing into
+        CacheList children).
+
+        These are the caches whose ``trim()`` cannot undo a
+        speculative-verify mutation (it only shrinks the remainder buffer,
+        not the flushed pool). The linear/tree spec paths snapshot + restore
+        them around verify to keep the compressed-attention context
+        consistent with the committed token stream. See PoolingCache.save_meta.
+        """
+        pools: list[Any] = []
+        for c in gen_batch.prompt_cache:
+            if isinstance(c, CacheList):
+                for sub in c.caches:
+                    if isinstance(sub, PoolingCache):
+                        pools.append(sub)
+            elif isinstance(c, PoolingCache):
+                pools.append(c)
+        return pools
 
     def _spec_trace_offsets(self, gen_batch: Any) -> dict[str, Any]:
         """Snapshot every cache's scalar offset (post-rollback) so a
@@ -2174,6 +2195,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         verify_input = mx.concatenate(
             [next_token_arr, draft_concat], axis=1
         )  # (1, γ+1)
+
+        # POOL-CONTAMINATION FIX (2026-05-29): the verify forward processes
+        # [y, draft_0..draft_{γ-1}] in ONE prompt-mode pass, which mutates
+        # each PoolingCache via accumulate_windows — flushing pooled windows
+        # / advancing the remainder using DRAFT tokens that may be rejected.
+        # PoolingCache.trim() (called in the rollback below) only shrinks the
+        # remainder; it CANNOT un-flush a pooled entry built from a rejected
+        # draft. The contaminated pool then desyncs the compressed-attention
+        # context from the real KV cache → output starts correct then
+        # collapses into BOS-spam / loops, with a prefix-length-dependent
+        # trigger (the system-prompt degeneration). The tree path already
+        # guards this by FREEZING the pool during verify (deepseek_v4.py
+        # ~1509); the linear path never did. Snapshot here, restore + re-pool
+        # only committed tokens on any rejection (step 5b below).
+        _pool_caches = self._collect_pooling_caches(gen_batch)
+        _pool_snaps = [pc.save_meta() for pc in _pool_caches]
+
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
             verify_input,
@@ -2343,18 +2381,37 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # 5. Roll back the target's KV caches for the rejected drafts.
         #    DSv4's CacheList implements trim() recursively; raw caches
         #    expose offset for the legacy path.
+        #
+        # POOL-CONTAMINATION FIX (2026-05-29): on ANY rejection we must also
+        # undo the PoolingCache mutations the verify forward made from
+        # rejected drafts (trim() can't — see save_meta). We restore each
+        # pool to its pre-verify snapshot, trim the KV/indexer caches by the
+        # FULL γ (dropping ALL verify-written entries), then run a tiny
+        # commit-forward of [y, *accepted] (no spec side channels) to
+        # rewrite the correct contiguous KV AND re-pool exactly the
+        # committed tokens. Mirrors the tree path's slow-path commit-forward
+        # (deepseek_v4 tree verify ~step 5b). On full-accept (rollback==0)
+        # nothing was wrongly pooled, so we keep the fast path untouched.
+        draft_int_values = [int(v) for v in draft_concat[0].tolist()]
         rollback = gamma - n_accepted
         if rollback > 0:
+            # Restore pools to pre-verify state (un-contaminate).
+            for pc, snap in zip(_pool_caches, _pool_snaps):
+                pc.restore_meta(snap)
+
+            # Drop ALL γ+1 verify-written entries (including y at the first
+            # position) from the rotating KV / indexer caches; the commit-
+            # forward re-adds [y, *accepted]. Trimming γ+1 (not γ) avoids
+            # double-counting y — mirrors the tree slow-path trimming the
+            # full n_nodes (root included) then committing [y_val]+best_path.
             for c in gen_batch.prompt_cache:
                 if hasattr(c, "trim"):
-                    c.trim(rollback)
+                    c.trim(gamma + 1)
                 elif hasattr(c, "offset"):
-                    c.offset -= rollback
+                    c.offset -= gamma + 1
 
-            # Also roll back the MTP module's own cache by the same
-            # amount: each rejected draft cycle advanced the MTP cache
-            # one step too. n_accepted MTP steps land in the next
-            # cycle's pre_norm; the rest are wasted.
+            # MTP cache: roll back by the rejected count (unchanged
+            # semantics — n_accepted MTP steps seed the next pre_norm).
             mtp_cache = self.mtp._cache
             if mtp_cache is not None:
                 if hasattr(mtp_cache, "trim"):
@@ -2362,13 +2419,28 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
 
+            # Commit-forward: rewrite KV + re-pool ONLY committed tokens
+            # [y, accepted_0..accepted_{n-1}]. Vanilla forward (no tree/
+            # eagle side channels active here), so Compressor pools these
+            # the same way a non-spec decode would. mx.eval forces it so
+            # lazy mlx can't leave the cache update dangling for the next
+            # cycle (matches tree slow-path discipline).
+            commit_tokens = [y_val] + draft_int_values[:n_accepted]
+            commit_input = mx.array(
+                commit_tokens, dtype=mx.int32
+            ).reshape(1, -1)
+            _commit_logits = self.model(
+                commit_input, cache=gen_batch.prompt_cache
+            )
+            mx.eval(_commit_logits)
+            del _commit_logits
+
         # 7. Update MTP pre_norm to the verify-pass hidden at the
         #    accepted position, ready for the next cycle.
         pos = gamma if n_accepted == gamma else n_accepted
         self._mtp_pre_norm[uid] = verify_pre_norm[:, pos : pos + 1, :]
 
         # 8. Build all yielded tokens: [y, accepted drafts...].
-        draft_int_values = [int(v) for v in draft_concat[0].tolist()]
         all_tokens: list[tuple[int, mx.array]] = [(y_val, y_logprobs)]
         for i in range(n_accepted):
             all_tokens.append((draft_int_values[i], logprobs_all[i]))
