@@ -2214,7 +2214,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # ~1509); the linear path never did. Snapshot here, restore + re-pool
         # only committed tokens on any rejection (step 5b below).
         _pool_caches = self._collect_pooling_caches(gen_batch)
-        _pool_snaps = [pc.save_meta() for pc in _pool_caches]
+        # Only snapshot pools that WILL flush during the γ+1-token verify
+        # forward. A pool flushes when remainder + (γ+1) >= ratio. Pools
+        # that won't flush → rejected drafts sit in the remainder tail →
+        # trim(rollback) handles them correctly → no snapshot needed.
+        # This avoids 41 × mx.array() sync copies on cycles that don't
+        # need them (the vast majority: ratio=4 → flush every 4th cycle,
+        # ratio=128 → flush every 128th cycle).
+        _verify_len = gamma + 1
+        _pool_snaps: list[Any] = [
+            pc.save_meta()
+            if pc.remainder + _verify_len >= pc.ratio
+            else None
+            for pc in _pool_caches
+        ]
 
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
@@ -2418,8 +2431,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # offset (total unchanged), so comparing _pool_offset alone would
             # false-positive. A real flush this cycle increases the total.
             # snap = (pool_offset, pending_bump, remainder, buf_kv, buf_gate).
+            # Only pools that were snapshotted (snap is not None = flush
+            # predicted) can have actually flushed. Check those.
             pool_flushed = any(
-                (pc._pool_offset + pc._pending_offset_bump) != (snap[0] + snap[1])
+                snap is not None
+                and (pc._pool_offset + pc._pending_offset_bump) != (snap[0] + snap[1])
                 for pc, snap in zip(_pool_caches, _pool_snaps)
             )
 
@@ -2432,10 +2448,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     elif hasattr(c, "offset"):
                         c.offset -= rollback
             else:
-                # (b) Contamination path: restore pools, drop all γ+1
-                # verify-written KV entries, re-pool committed tokens only.
+                # (b) Contamination path: restore snapshotted pools, leave
+                # unsnapshotted ones to trim() (they didn't flush).
                 for pc, snap in zip(_pool_caches, _pool_snaps):
-                    pc.restore_meta(snap)
+                    if snap is not None:
+                        pc.restore_meta(snap)
                 # Trim γ+1 (root y included) so the commit-forward re-adds
                 # [y, *accepted] without double-counting y.
                 for c in gen_batch.prompt_cache:
