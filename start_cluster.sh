@@ -753,6 +753,11 @@ for NODE in "${NODES[@]}"; do
     # only. Inserts mx.eval() at every chain-step boundary, which acts
     # like a per-step fence, so do NOT validate fixes with this on.
     [ -n "${EXO_DSV4_C2_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_C2_TRACE=$EXO_DSV4_C2_TRACE"
+    # Degeneration-hunt per-cycle spec trace (2026-05-29). When 1,
+    # _speculative_next dumps committed tokens + cache offsets + n_accepted
+    # per cycle to /tmp/dsv4_spec_trace_pid<PID>.jsonl on rank 0. Diagnostic
+    # only — pairs with a plain-greedy capture to find first divergence.
+    [ -n "${EXO_DSV4_SPEC_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_TRACE=$EXO_DSV4_SPEC_TRACE"
     # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
     # argmax to /tmp/dsv4_tree_alpha_probe_pid<PID>.jsonl on rank 0 only.

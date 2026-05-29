@@ -749,6 +749,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._mtp_drift_handle: Optional[BinaryIO] = None
         self._mtp_trace_handle: Optional[BinaryIO] = None
         self._mtp_trace_seq: int = 0
+        # EXO_DSV4_SPEC_TRACE=1: per-cycle committed-token + cache-offset
+        # divergence trace for the system-prompt degeneration hunt
+        # (2026-05-29). One JSONL record per spec cycle on rank 0. Cost
+        # when OFF: a single env.get + bool check per cycle.
+        self._spec_trace_enabled: bool = (
+            os.environ.get("EXO_DSV4_SPEC_TRACE") == "1"
+        )
+        self._spec_trace_handle: Optional[BinaryIO] = None
+        self._spec_trace_cycle: int = 0
 
     def _filter_finished_uid(self, uid: int) -> None:
         """Override to log when a uid is filtered (per-rank, EOS or
@@ -787,6 +796,107 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         line = (_json.dumps(rec, default=str) + "\n").encode("utf-8")
         self._mtp_trace_handle.write(line)
         self._mtp_drift_step: int = 0
+
+    def _spec_trace_offsets(self, gen_batch: Any) -> dict[str, Any]:
+        """Snapshot every cache's scalar offset (post-rollback) so a
+        divergence cycle can be correlated with cache-state drift.
+
+        Returns a dict mapping a stable cache label -> offset int. Walks
+        CacheList children recursively. Best-effort: any cache without an
+        ``.offset`` (or a getter) is reported as None. Used only by the
+        EXO_DSV4_SPEC_TRACE path; never on the hot path when OFF.
+        """
+        def _off(c: Any) -> Any:
+            o: Any = getattr(c, "offset", None)
+            if o is not None:
+                try:
+                    return int(o)
+                except Exception:
+                    return str(o)
+            getter: Any = getattr(c, "get_offset", None)
+            if callable(getter):
+                try:
+                    return int(getter())
+                except Exception:
+                    return None
+            return None
+
+        offsets: dict[str, Any] = {}
+        for ci, c in enumerate(gen_batch.prompt_cache):
+            if isinstance(c, CacheList):
+                for si, sub in enumerate(c.caches):
+                    offsets[f"c{ci}.{type(sub).__name__}{si}"] = _off(sub)
+            else:
+                offsets[f"c{ci}.{type(c).__name__}"] = _off(c)
+        mtp_cache: Any = getattr(self.mtp, "_cache", None)
+        if mtp_cache is not None:
+            offsets[f"mtp.{type(mtp_cache).__name__}"] = _off(mtp_cache)
+        return offsets
+
+    def _spec_trace_cycle_dump(
+        self,
+        uids: Sequence[int],
+        gen_batch: Any,
+        gamma: int,
+        verify_input: mx.array,
+        draft_concat: mx.array,
+        target_tokens: mx.array,
+        n_accepted_per: Sequence[int],
+        bonus_vals: Sequence[int],
+        all_tokens_per: Sequence[Sequence[tuple[int, Any]]],
+    ) -> None:
+        """Write one JSONL record per spec cycle (rank 0 only).
+
+        Captures, for the degeneration hunt: the exact tokens COMMITTED
+        this cycle (the ground-truth-comparable stream), the draft vs
+        target argmax that drove acceptance, n_accepted, the staged bonus,
+        the verify-input chunk, and all post-rollback cache offsets. A
+        downstream diff script aligns the committed-token stream against a
+        plain-greedy (MTP-off) capture of the same prompt and reports the
+        first divergence cycle + that cycle's offsets/acceptance.
+
+        Rank-gated to rank 0 (canonical), since all ranks commit the same
+        tokens after the n_accepted broadcast — one stream is enough and
+        avoids interleaved files.
+        """
+        sg = self._get_sharding_group()
+        rank = sg.rank() if sg is not None else 0
+        if rank != 0:
+            return
+        if self._spec_trace_handle is None:
+            path = f"/tmp/dsv4_spec_trace_pid{os.getpid()}.jsonl"
+            self._spec_trace_handle = open(  # noqa: SIM115
+                path, "ab", buffering=0
+            )
+        import json as _json
+        self._spec_trace_cycle += 1
+        try:
+            vi = cast(list[list[int]], verify_input.tolist())
+            dc = cast(list[list[int]], draft_concat.tolist())
+            tt = cast(list[list[int]], target_tokens.tolist())
+        except Exception:
+            vi = dc = tt = []
+        rec = {
+            "cycle": self._spec_trace_cycle,
+            "pid": os.getpid(),
+            "gamma": gamma,
+            "uids": list(uids),
+            # committed[n] = the ordered token ids yielded this cycle for
+            # stream n: [next_token, accepted drafts..., bonus]. This is
+            # the sequence that MUST match plain greedy.
+            "committed": [
+                [int(tid) for (tid, _lp) in row] for row in all_tokens_per
+            ],
+            "n_accepted": list(n_accepted_per),
+            "bonus": [int(b) for b in bonus_vals],
+            "draft": dc,            # (N, gamma) the drafted ids
+            "target_argmax": tt,    # (N, gamma) verify argmax over drafts
+            "verify_input": vi,     # (N, gamma+1)
+            "offsets": self._spec_trace_offsets(gen_batch),
+        }
+        self._spec_trace_handle.write(
+            (_json.dumps(rec, default=str) + "\n").encode("utf-8")
+        )
 
     def _mtp_drift_dump(
         self,
@@ -1526,6 +1636,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gen_batch._next_tokens = mx.array(bonus_vals)
         gen_batch._next_logprobs = bonus_lps
         mx.async_eval(gen_batch._next_tokens)
+
+        # 6b. Degeneration-hunt trace (EXO_DSV4_SPEC_TRACE=1, rank 0).
+        # Post-rollback so cache offsets reflect committed state. target_tokens
+        # exists only on the temp=0 path; pass a zero placeholder at temp>0.
+        if self._spec_trace_enabled:
+            _tt = (
+                target_tokens
+                if self.temp == 0
+                else mx.zeros_like(draft_concat)
+            )
+            self._spec_trace_cycle_dump(
+                uids,
+                gen_batch,
+                gamma,
+                verify_input,
+                draft_concat,
+                _tt,
+                n_accepted_per,
+                bonus_vals,
+                all_tokens_per,
+            )
 
         if prof is not None:
             t_after_rollback = time.perf_counter()
