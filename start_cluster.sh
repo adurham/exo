@@ -739,6 +739,7 @@ for NODE in "${NODES[@]}"; do
     # adurham/mlx-lm@main (cluster's pin since 2026-05-29; formerly the
     # eagle-soft-emb branch, now merged into main). Recommended K=8.
     [ -n "${EXO_DSV4_MTP_EAGLE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_K=$EXO_DSV4_MTP_EAGLE_K"
+    [ -n "${EXO_DSV4_MTP_EAGLE_T:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_T=$EXO_DSV4_MTP_EAGLE_T"
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
     [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
     [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"

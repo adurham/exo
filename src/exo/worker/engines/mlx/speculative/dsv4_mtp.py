@@ -444,6 +444,10 @@ class DSv4MTPPredictor:
         # 14 Plan B.2: targets step-1 P(top-1) lift to raise MTP gamma>=2
         # acceptance. Read once at predictor construction.
         self.eagle_k = int(os.environ.get("EXO_DSV4_MTP_EAGLE_K", "0"))
+        # Soft-emb logit temperature (default 1.0 = raw softmax). T<1.0
+        # sharpens the mixture toward top-1 → better directional match
+        # to the hard embed the MTP head was trained on → acceptance up.
+        self.eagle_t = float(os.environ.get("EXO_DSV4_MTP_EAGLE_T", "1.0"))
 
     def set_eagle_soft_emb(self, emb: Optional[mx.array]) -> None:
         """Install or clear the Eagle soft-embedding side channel on the

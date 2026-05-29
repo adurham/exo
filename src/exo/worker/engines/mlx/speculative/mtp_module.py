@@ -664,6 +664,14 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     _eagle_k = int(getattr(mtp_pred, "eagle_k", 0) or 0)
     _eagle_embed = getattr(mtp_pred, "embed_tokens", None) if _eagle_k > 0 else None
     _eagle_active = _eagle_k > 0 and _eagle_embed is not None
+    # Soft-emb temperature: sharpen logits before top-K softmax to
+    # concentrate the mixture on the most-likely token. T<1.0 makes the
+    # mixture closer to the hard embed the MTP head was trained on
+    # (better directional match → higher acceptance), at the cost of
+    # less distributional info from the tail. T=1.0 = current behavior.
+    # The downstream pre_fc_norm_embedding (RMSNorm) normalizes magnitude,
+    # so the effect is purely directional.
+    _eagle_t = float(getattr(mtp_pred, "eagle_t", 1.0) or 1.0)
     prev_logits: Optional[mx.array] = None
 
     # Break the chained-collective dependency between successive MTP
@@ -712,7 +720,8 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                     if prev_logits.ndim == 3
                     else prev_logits[:, None, :]
                 )
-                _probs = mx.softmax(_logits3d, axis=-1)
+                _scaled = _logits3d / _eagle_t if _eagle_t != 1.0 else _logits3d
+                _probs = mx.softmax(_scaled, axis=-1)
                 _topk_ids = mx.argsort(-_logits3d, axis=-1)[..., :_eagle_k]
                 _topk_probs = mx.take_along_axis(_probs, _topk_ids, axis=-1)
                 # W3 (2026-05-24): do NOT renormalize top-K masses to sum
