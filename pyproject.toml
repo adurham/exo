@@ -82,18 +82,20 @@ members = ["rust/exo_pyo3_bindings", "bench", "tools"]
 [tool.uv.sources]
 exo-pyo3-bindings = { workspace = true }
 mlx = [
-  # darwin: our fork on the upstream-refactored lib/jaccl layout
-  # (= upstream/main as of 2026-05-25 + adurham/main perf work + ack-qp-isolated barrier).
-  # See ~/repos/mlx wip/try-ack-qp-isolated-ported. To switch back to Leo's fork,
-  # replace with: { git = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv.git", branch = "address-rdma-gpu-locks", marker = "sys_platform == 'darwin'" }
-  { git = "https://github.com/adurham/mlx.git", branch = "wip/try-ack-qp-isolated-ported", marker = "sys_platform == 'darwin'" },
+  # darwin: our fork's main (upstream-refactored lib/jaccl layout + adurham perf
+  # work + ack-qp-isolated barrier). main == former wip/try-ack-qp-isolated-ported
+  # (same SHA as of 2026-05-29); pin tracks main now so future fork work flows in
+  # via `git push adurham main`. To switch back to Leo's fork, replace with:
+  # { git = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv.git", branch = "address-rdma-gpu-locks", marker = "sys_platform == 'darwin'" }
+  { git = "https://github.com/adurham/mlx.git", branch = "main", marker = "sys_platform == 'darwin'" },
   { url = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv/releases/download/mlx_cuda/mlx-0.32.0-cp313-cp313-manylinux_2_35_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
   { url = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv/releases/download/mlx_cuda/mlx-0.32.0-cp313-cp313-manylinux_2_35_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine != 'aarch64'" },
 
 ]
-# mlx-lm: our fork (adurham/mlx-lm@eagle-soft-emb, currently synced to upstream).
-# To switch back to Leo's fork: { git = "https://github.com/rltakashige/mlx-lm", branch = "leo/deepseek-v4" }
-mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "eagle-soft-emb" }
+# mlx-lm: our fork's main (= former eagle-soft-emb perf work + upstream sync,
+# incl. Gemma 4 KV-projection fix). Pin tracks main now. To switch back to Leo's
+# fork: { git = "https://github.com/rltakashige/mlx-lm", branch = "leo/deepseek-v4" }
+mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "main" }
 mflux = { git = "https://github.com/evanev7/mflux", branch = "exo2" }
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'linux' and extra == 'mlx-cpu' and extra != 'mlx-cuda13' and extra != 'mlx-cuda12'" },
