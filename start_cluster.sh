@@ -735,8 +735,9 @@ for NODE in "${NODES[@]}"; do
     # When > 0: at every chained draft step beyond the first, the input
     # embedding is replaced with a probability-weighted top-K mixture
     # built from the previous step's logits. Targets step-1 P(top-1)
-    # acceptance lift. Requires mlx-lm@eagle-soft-emb (or merged main)
-    # which adds the _EAGLE_CTX side channel. Recommended K=8.
+    # acceptance lift. Requires the _EAGLE_CTX side channel, which is on
+    # adurham/mlx-lm@main (cluster's pin since 2026-05-29; formerly the
+    # eagle-soft-emb branch, now merged into main). Recommended K=8.
     [ -n "${EXO_DSV4_MTP_EAGLE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_K=$EXO_DSV4_MTP_EAGLE_K"
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
     [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"

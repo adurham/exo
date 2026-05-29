@@ -70,13 +70,33 @@ Branches built + tested clean on M4 Max. Description drafts at [`./upstream-pr-d
 | `ml-explore/mlx` | `adurham:pr/sdpa-chunked-dispatch` | feat: chunked SDPA dispatch for long key sequences (>65K) | **Prerequisite #3594 was CLOSED by zcbenz** (LSE output rejected as standalone — Apple's #3241 covers it via the backward path). So this branch as-built (which stacks its own LSE-output path) is **no longer the right shape**. Rework needed: once Apple's [#3241](https://github.com/ml-explore/mlx/pull/3241) merges, rebuild chunked-dispatch to consume *its* LSE output instead of carrying our own. Until #3241 lands, **do not open** — there's no LSE-output path on upstream main to depend on. Branch kept for the chunk/merge logic + tests, but the LSE plumbing must be re-pointed. Was a revival of @Thump604's #3307. |
 | `ml-explore/mlx` | `adurham:pr/sdpa-head-dim-192-256` | feat: head_dim=192 + 256 fused SDPA support (with kL-aware routing) | **bf16/fp16 paths verified clean**, but float32 + bq=32 + bd=192 hits the same 32KB threadgroup memory limit as the existing `head_dim=256 + float32` skip in `test_sdpa_chunked.py`. Need to decide whether to: (a) submit as-is and document the float32 limitation in the PR body (acceptable, matches the existing precedent), or (b) parameterize bq per-dtype to fit float32 first (cleaner story, more work). Also overlaps with @Thump604's [#3293](https://github.com/ml-explore/mlx/pull/3293) ("fix: add head_dim=256 to fused SDPA full attention kernel") — closed unmerged 2026-04-04 with the same vllm-mlx rationale. If we open we should credit them like we did on #3594. |
 
-### Fork sync state (2026-05-27)
+### Fork sync state (2026-05-29)
+
+All three forks now build the cluster from their `main` branch. exo's
+`pyproject.toml` pins `adurham/mlx@main` and `adurham/mlx-lm@main` directly
+(no more WIP branch names) — see "Cluster pins track main" below.
 
 | Fork | vs upstream/main | Notes |
 |---|---|---|
-| `adurham/mlx-lm` | 0 behind, 243 ahead | Fully current; main = cluster's working code after eagle-soft-emb merge |
-| `adurham/mlx` | 0 behind, 132 ahead | Fully current; main = ported lib/jaccl layout (= cluster pin) |
-| `adurham/exo` | 0 behind, 793 ahead | Fully current after sync of upstream's 24 commits (lib/jaccl-refactor-era PRs incl. #2048 agree_on_tasks fix) |
+| `adurham/mlx-lm` | 0 behind, 243 ahead | Fully current; cluster pins `main` (= former eagle-soft-emb perf work + upstream sync incl. Gemma 4 fix #1240) |
+| `adurham/mlx` | 0 behind, 132 ahead | Fully current; cluster pins `main` (ported lib/jaccl layout; main == former wip/try-ack-qp-isolated-ported, same SHA) |
+| `adurham/exo` | 0 behind, 794 ahead | Fully current after 2026-05-29 sync of upstream `051a64e3` (per-phase energy telemetry) + pin-track-main flip |
+
+#### Cluster pins track main (2026-05-29)
+
+Flipped exo's `[tool.uv.sources]` pins from the WIP branch names to `main`:
+- `mlx`: `wip/try-ack-qp-isolated-ported` → `main` (same SHA `f17b9fd4`, pure relabel — zero rebuild risk)
+- `mlx-lm`: `eagle-soft-emb` → `main` (SHA `1028276a` → `2ec0de96`, adds only the DSv4-irrelevant Gemma 4 KV-projection fix #1240)
+
+Rationale: fork mains already reflected what the cluster ran, so future
+experimentation flows in via `git push adurham main` instead of maintaining
+divergent WIP branch names. Validated end-to-end before merge to exo main
+(commit `723f19a8`): cluster rebuilt clean on both Studios, c=1 100K MTP-off
+bench = 27.3 t/s median (σ≈0.13, 0 errors, tail_ratio 1.00), quality probe =
+3/3 needles found, 0 special-token leaks, 0 bistability at 100K context. The
+27.3 vs ~29.3 historical is pre-existing c=1 drift, not the pin flip (mlx is
+byte-identical; mlx-lm delta cannot touch DSv4). Rollback tags:
+`pre-main-pin-exo-2026-05-29`, `pre-main-pin-mlx-lm-2026-05-29`.
 
 #### Completed: exo upstream sync (24 commits, 2026-05-26 → 2026-05-27)
 
