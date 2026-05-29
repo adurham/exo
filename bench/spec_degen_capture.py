@@ -56,10 +56,34 @@ PROMPTS: list[tuple[str, list[dict[str, str]]]] = [
             {"role": "user", "content": "Count from one to five."},
         ],
     ),
+    # LONG-generation system+user prompts. The degeneration "starts
+    # correct then collapses mid-stream", so short prompts that finish
+    # before the collapse won't show it. These run many spec cycles.
+    (
+        "sys_long_essay",
+        [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Write a detailed 6-paragraph essay about the history of the Roman Empire, from its founding through its fall."},
+        ],
+    ),
+    (
+        "sys_long_steps",
+        [
+            {"role": "system", "content": "You are a helpful coding assistant."},
+            {"role": "user", "content": "Explain step by step how a TCP three-way handshake works, then explain how TLS 1.3 builds on top of it. Be thorough."},
+        ],
+    ),
+    (
+        "sys_long_list",
+        [
+            {"role": "system", "content": "You are a knowledgeable assistant."},
+            {"role": "user", "content": "List and describe 20 programming languages, one paragraph each, covering their history and main use cases."},
+        ],
+    ),
     (
         "control_user_only",  # negative control: single-user, should be clean
         [
-            {"role": "user", "content": "Name three primary colors."},
+            {"role": "user", "content": "Write a detailed 6-paragraph essay about the history of the Roman Empire, from its founding through its fall."},
         ],
     ),
 ]

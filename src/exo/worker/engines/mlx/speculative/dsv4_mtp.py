@@ -2378,6 +2378,28 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gen_batch._next_logprobs = [bonus_lp]
         mx.async_eval(gen_batch._next_tokens)
 
+        # 9b. Degeneration-hunt trace (EXO_DSV4_SPEC_TRACE=1, rank 0).
+        # c=1 single-stream path. Reshape the scalar n_accepted / bonus /
+        # all_tokens into the (N=1) list shapes the dumper expects, and
+        # build target_tokens as (1, gamma) for parity with the batch path.
+        if self._spec_trace_enabled:
+            _tt = (
+                target_tokens
+                if temp == 0
+                else mx.zeros_like(draft_concat)
+            )
+            self._spec_trace_cycle_dump(
+                [uid],
+                gen_batch,
+                gamma,
+                verify_input,
+                draft_concat,
+                _tt,
+                [n_accepted],
+                [bonus_val],
+                [all_tokens],
+            )
+
         if prof is not None:
             t_after_rollback = time.perf_counter()
             prof.record(
