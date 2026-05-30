@@ -2200,28 +2200,41 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             [next_token_arr, draft_concat], axis=1
         )  # (1, γ+1)
 
-        # POOL-FREEZE (2026-05-29): freeze ALL PoolingCaches during the verify
-        # forward. Without this, the verify's prompt-mode pass mutates pools
-        # via accumulate_windows — flushing windows built from draft tokens
-        # that may be rejected (the root cause of the system-prompt
-        # degeneration). Freezing skips the ENTIRE compressor chain (project,
-        # accumulate, compress, norm, rope, pool-update) for every compressed-
-        # attention layer during verify — saves ~7ms per cycle (compressor is
-        # 45% of attention wall). The pool stays one-step stale during verify,
-        # same staleness class as the defer-pool optimization (validated at
-        # 100K quality). Committed tokens advance the pool naturally on the
-        # next decode cycle's non-spec forward.
-        from mlx_lm.models import deepseek_v4 as _dsv4_model_mod
-        _dsv4_model_mod._set_pool_freeze(True)
-        try:
-            verify_pre_norm, verify_logits = dsv4_speculative_forward(
-                self.model,
-                verify_input,
-                gen_batch.prompt_cache,
-                self._captured,
-            )
-        finally:
-            _dsv4_model_mod._set_pool_freeze(False)
+        # POOL-CONTAMINATION FIX (2026-05-29): the verify forward processes
+        # [y, draft_0..draft_{γ-1}] in ONE prompt-mode pass, which mutates
+        # each PoolingCache via accumulate_windows — flushing pooled windows
+        # / advancing the remainder using DRAFT tokens that may be rejected.
+        # PoolingCache.trim() (called in the rollback below) only shrinks the
+        # remainder; it CANNOT un-flush a pooled entry built from a rejected
+        # draft. The contaminated pool then desyncs the compressed-attention
+        # context from the real KV cache → output starts correct then
+        # collapses into BOS-spam / loops, with a prefix-length-dependent
+        # trigger (the system-prompt degeneration). The tree path already
+        # guards this by FREEZING the pool during verify (deepseek_v4.py
+        # ~1509); the linear path never did. Snapshot here, restore + re-pool
+        # only committed tokens on any rejection (step 5b below).
+        _pool_caches = self._collect_pooling_caches(gen_batch)
+        # Only snapshot pools that WILL flush during the γ+1-token verify
+        # forward. A pool flushes when remainder + (γ+1) >= ratio. Pools
+        # that won't flush → rejected drafts sit in the remainder tail →
+        # trim(rollback) handles them correctly → no snapshot needed.
+        # This avoids 41 × mx.array() sync copies on cycles that don't
+        # need them (the vast majority: ratio=4 → flush every 4th cycle,
+        # ratio=128 → flush every 128th cycle).
+        _verify_len = gamma + 1
+        _pool_snaps: list[Any] = [
+            pc.save_meta()
+            if pc.remainder + _verify_len >= pc.ratio
+            else None
+            for pc in _pool_caches
+        ]
+
+        verify_pre_norm, verify_logits = dsv4_speculative_forward(
+            self.model,
+            verify_input,
+            gen_batch.prompt_cache,
+            self._captured,
+        )
 
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
@@ -2386,18 +2399,79 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         #    DSv4's CacheList implements trim() recursively; raw caches
         #    expose offset for the legacy path.
         #
-        # 5. Roll back caches for rejected drafts. Pool freeze (step 2
-        #    above) prevents PoolingCache contamination, so simple trim()
-        #    is correct for all cache types — no snapshot/restore needed.
+        # POOL-CONTAMINATION FIX (2026-05-29). The verify forward processed
+        # [y, draft_0..draft_{γ-1}] in one prompt-mode pass, advancing each
+        # PoolingCache's remainder and — IF the γ+1-token span crossed a
+        # compress_ratio boundary — FLUSHING a pooled window built partly
+        # from draft tokens that may be rejected.
+        #
+        # Two regimes on a rejection (rollback > 0):
+        #   (a) NO pool flushed during verify (the common case — pools flush
+        #       only every `ratio` tokens). The rejected drafts merely sit at
+        #       the TAIL of each pool's remainder buffer, so the original
+        #       `trim(rollback)` removes exactly them and is fully correct.
+        #       Cheap path, no extra forward.
+        #   (b) A pool DID flush. trim() cannot un-flush a pooled entry
+        #       (it only shrinks `remainder`), so a rejected draft would stay
+        #       baked into the compressed long-range summary → compressed-
+        #       attention desyncs from KV → output collapses (the system-
+        #       prompt degeneration). Here we restore each pool to its
+        #       pre-verify snapshot, drop ALL γ+1 verify-written KV entries,
+        #       and re-pool ONLY the committed tokens [y, *accepted] via a
+        #       small commit-forward (vanilla, no spec side channels) — same
+        #       discipline as the tree slow-path. This rare path is the only
+        #       one paying the extra forward.
         draft_int_values = [int(v) for v in draft_concat[0].tolist()]
         rollback = gamma - n_accepted
         if rollback > 0:
-            for c in gen_batch.prompt_cache:
-                if hasattr(c, "trim"):
-                    c.trim(rollback)
-                elif hasattr(c, "offset"):
-                    c.offset -= rollback
+            # Detect whether any pool flushed a NEW entry during verify.
+            # Use the TOTAL (visible offset + staged pending bump): the
+            # deferred path's commit_pending() runs at the top of the verify
+            # forward and moves the PRIOR step's staged bump from pending into
+            # offset (total unchanged), so comparing _pool_offset alone would
+            # false-positive. A real flush this cycle increases the total.
+            # snap = (pool_offset, pending_bump, remainder, buf_kv, buf_gate).
+            # Only pools that were snapshotted (snap is not None = flush
+            # predicted) can have actually flushed. Check those.
+            pool_flushed = any(
+                snap is not None
+                and (pc._pool_offset + pc._pending_offset_bump) != (snap[0] + snap[1])
+                for pc, snap in zip(_pool_caches, _pool_snaps)
+            )
 
+            if not pool_flushed:
+                # (a) Cheap correct path: rejected drafts are the remainder
+                # tail; trim removes them. Identical to pre-fix behavior.
+                for c in gen_batch.prompt_cache:
+                    if hasattr(c, "trim"):
+                        c.trim(rollback)
+                    elif hasattr(c, "offset"):
+                        c.offset -= rollback
+            else:
+                # (b) Contamination path: restore snapshotted pools, leave
+                # unsnapshotted ones to trim() (they didn't flush).
+                for pc, snap in zip(_pool_caches, _pool_snaps):
+                    if snap is not None:
+                        pc.restore_meta(snap)
+                # Trim γ+1 (root y included) so the commit-forward re-adds
+                # [y, *accepted] without double-counting y.
+                for c in gen_batch.prompt_cache:
+                    if hasattr(c, "trim"):
+                        c.trim(gamma + 1)
+                    elif hasattr(c, "offset"):
+                        c.offset -= gamma + 1
+                commit_tokens = [y_val] + draft_int_values[:n_accepted]
+                commit_input = mx.array(
+                    commit_tokens, dtype=mx.int32
+                ).reshape(1, -1)
+                _commit_logits = self.model(
+                    commit_input, cache=gen_batch.prompt_cache
+                )
+                mx.eval(_commit_logits)
+                del _commit_logits
+
+            # MTP cache: roll back by the rejected count (unchanged
+            # semantics — n_accepted MTP steps seed the next pre_norm).
             mtp_cache = self.mtp._cache
             if mtp_cache is not None:
                 if hasattr(mtp_cache, "trim"):
