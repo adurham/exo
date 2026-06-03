@@ -614,7 +614,7 @@ for NODE in "${NODES[@]}"; do
 
     # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
     echo "Rebuilding Rust pyo3 bindings on $NODE..."
-    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install maturin 2>/dev/null && uv run maturin develop --release -m rust/exo_pyo3_bindings/Cargo.toml'" || { echo "Failed to rebuild Rust bindings on $NODE"; exit 1; }
+    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install maturin 2>/dev/null && uv run maturin develop --release -m rust/exo_rs/Cargo.toml'" || { echo "Failed to rebuild Rust bindings on $NODE"; exit 1; }
 
 
     echo "Building dashboard on $NODE..."
@@ -935,7 +935,7 @@ if [ "$CLUSTER_READY" = false ]; then
         echo "This usually happens when 'uv.lock' changes (e.g. from switching git branches) and the virtual environment gets out of sync."
         echo ""
         echo "AUTOMATIC FIX: Run the following command on ALL nodes to repair the bindings:"
-        echo "  zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package exo_pyo3_bindings'"
+        echo "  zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package exo_rs'"
         echo ""
         echo "Exiting."
         exit 1
