@@ -754,6 +754,9 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_REFCHECK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK=$EXO_DSV4_MTP_REFCHECK"
     # MTP refcheck EVERY-CYCLE mode (1 = run ref forward every cycle, log divergences).
     [ -n "${EXO_DSV4_MTP_REFCHECK_ALL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK_ALL=$EXO_DSV4_MTP_REFCHECK_ALL"
+    # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
+    [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
+    [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
     # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
     # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
     # timestamps + per-stream tokens. NOT a production knob — diagnostic

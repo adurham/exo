@@ -2251,6 +2251,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         bonus_token: Optional[mx.array] = None
         matches: Optional[mx.array] = None
         all_next: Optional[mx.array] = None
+        _tie_margins: Optional[mx.array] = None
 
         if temp == 0:
             matches = mx.equal(target_tokens, draft_concat).squeeze(0)
@@ -2258,7 +2259,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             logprobs_all = verify_logits[0] - mx.logsumexp(
                 verify_logits[0], axis=-1, keepdims=True
             )
-            mx.async_eval(matches, all_next, logprobs_all, verify_pre_norm)
+            # TIE-BREAK LOSSLESSNESS FIX (gated by EXO_DSV4_MTP_TIEBREAK_FIX=1).
+            # The batched verify forward differs from a sequential single-token
+            # decode by ~1ulp; at temp 0 that flips TIED tokens, and one flipped
+            # tie early cascades the whole generation onto a different (often
+            # degenerate / repetition) trajectory — the spurious-</think> bug.
+            # Compute the per-position top-2 logit margin so near-tie positions
+            # can be treated as untrustworthy (not accepted from the batched
+            # argmax) and the bonus recomputed via a sequential-equivalent
+            # single-token forward after rollback.
+            if os.environ.get("EXO_DSV4_MTP_TIEBREAK_FIX") == "1":
+                _vl0 = verify_logits[0]  # (gamma+1, vocab)
+                _top2 = mx.topk(_vl0, 2, axis=-1)  # two largest per position
+                _tie_margins = mx.abs(_top2[:, 0] - _top2[:, 1])
+                mx.async_eval(matches, all_next, logprobs_all,
+                              verify_pre_norm, _tie_margins)
+            else:
+                mx.async_eval(matches, all_next, logprobs_all, verify_pre_norm)
 
             # Token-tree alpha probe drain. Rank 0 only. Reads the per-step
             # MTP top-5 records that draft_tokens populated, joins with the
@@ -2332,11 +2349,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             )
 
         # 4. Determine acceptance count.
+        # TIE-BREAK FIX: at a near-tie verify position the batched argmax is
+        # not trustworthy (may disagree with sequential greedy), so we STOP
+        # accepting there and let the bonus be recomputed by a single-token
+        # forward. eps default 3.0 logits covers 100% of observed tie-flips
+        # (refcheck: all 89 divergences had top-2 gap < 3.0).
+        _tie_eps = float(os.environ.get("EXO_DSV4_MTP_TIEBREAK_EPS", "3.0"))
+        _margins_list = _tie_margins.tolist() if _tie_margins is not None else None
         n_accepted = 0
         for i in range(gamma):
             if temp == 0:
                 assert matches is not None
                 if matches[i].item():
+                    if _margins_list is not None and _margins_list[i] <= _tie_eps:
+                        # Near-tie at an otherwise-matching draft: don't trust
+                        # the batched argmax here; stop and recompute the bonus.
+                        break
                     n_accepted += 1
                 else:
                     break
@@ -2346,6 +2374,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     n_accepted += 1
                 else:
                     break
+
+        # Does the bonus position (= n_accepted) need a sequential recompute?
+        _need_recompute = bool(
+            _margins_list is not None
+            and n_accepted < len(_margins_list)
+            and _margins_list[n_accepted] <= _tie_eps
+        )
 
         # Compute local bonus_val using local n_accepted, BEFORE the
         # cross-rank broadcast. This lets us combine n_accepted +
@@ -2380,13 +2415,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # at γ=2 with ~30 cycles/sec/stream this saves one round-trip
         # per cycle = ~3% wall time per stream.
         if sync_drafts:
+            # Include the tie-break recompute decision (3rd int) so EVERY rank
+            # agrees whether to run the extra single-token forward below. The
+            # recompute is a TP collective — if ranks disagreed on running it
+            # the cluster would deadlock. Canonical (rank 0) decision wins.
             combined_arr = broadcast_from_canonical(
-                mx.array([n_accepted, bonus_val], dtype=mx.int32),
+                mx.array(
+                    [n_accepted, bonus_val, 1 if _need_recompute else 0],
+                    dtype=mx.int32,
+                ),
                 coord_group,
             )
             combined = cast(list[int], combined_arr.tolist())
             n_accepted = combined[0]
             bonus_val = combined[1]
+            _need_recompute = bool(combined[2])
         # bonus_lp stays local — only used for response.logprobs
         # (informational, master picks rank 0's response only).
 
@@ -2544,6 +2587,42 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     mtp_cache.trim(rollback)
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
+
+        # ── TIE-BREAK BONUS RECOMPUTE (gated) ────────────────────────────
+        # If the bonus position was a near-tie, the batched-verify argmax we
+        # used for bonus_val may disagree with sequential greedy. The cache is
+        # now at exactly the committed prefix [.., y, *accepted]. Recompute the
+        # bonus with a sequential-equivalent SINGLE-TOKEN forward (trim the last
+        # committed token, re-feed it) — this is bit-identical to non-spec
+        # greedy decode at this position, restoring losslessness. Runs on ALL
+        # ranks (TP collective), then rank-0's value is broadcast so every rank
+        # commits the same bonus. Cheap: only fires on the ~3% near-tie cycles.
+        if _need_recompute and temp == 0:
+            try:
+                _committed_now = [y_val] + draft_int_values[:n_accepted]
+                _last_tok = _committed_now[-1]
+                for _c in gen_batch.prompt_cache:
+                    if hasattr(_c, "trim"):
+                        _c.trim(1)
+                    elif hasattr(_c, "offset"):
+                        _c.offset -= 1
+                _rb_out = self.model(
+                    mx.array([_last_tok], dtype=mx.int32).reshape(1, 1),
+                    cache=gen_batch.prompt_cache,
+                )
+                _rb_argmax = mx.argmax(_rb_out[0, 0])
+                mx.eval(_rb_argmax)
+                _new_bonus = int(_rb_argmax.item())
+                # Broadcast rank-0's recomputed bonus so all ranks agree.
+                if sync_drafts:
+                    _bb = broadcast_from_canonical(
+                        mx.array([_new_bonus], dtype=mx.int32), coord_group,
+                    )
+                    _new_bonus = int(cast(list[int], _bb.tolist())[0])
+                bonus_val = _new_bonus
+            except Exception as _tb_err:
+                # Never break generation; fall back to batched-argmax bonus.
+                logger.warning(f"mtp tie-break recompute failed: {_tb_err}")
 
         # ── REFERENCE-FORWARD REFCHECK (env-gated, temp=0) ───────────────
         # Decisive losslessness test for the spurious-</think> bug. At this
