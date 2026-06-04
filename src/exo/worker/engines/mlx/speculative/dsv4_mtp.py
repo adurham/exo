@@ -2278,7 +2278,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # We do NOT tie-break accepted drafts (those ARE in the cache —
             # rewriting them would desync KV). v1's failure was an extra
             # cache-advancing forward; this version touches no cache.
-            if os.environ.get("EXO_DSV4_MTP_TIEBREAK_FIX") == "1":
+            #
+            # DEFAULT ON (2026-06-03): validated to restore MTP-on correctness
+            # to 100% (matches MTP-off) on the aistupid suite with no leaks /
+            # no repetition. Set EXO_DSV4_MTP_TIEBREAK_FIX=0 to opt out.
+            if os.environ.get("EXO_DSV4_MTP_TIEBREAK_FIX", "1") != "0":
                 _tb_eps = float(
                     os.environ.get("EXO_DSV4_MTP_TIEBREAK_EPS", "0.5")
                 )

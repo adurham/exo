@@ -100,6 +100,12 @@ fi
 # Quality preserved (needle ✓, BOS=0, bistability=0). See
 # .hermes/plans/2026-05-24_w3_K8_norenorm_results.md.
 : "${EXO_DSV4_MTP_EAGLE_K:=8}"
+# MTP tie-break losslessness fix: DEFAULT ON (2026-06-03). Deterministic
+# lowest-id-within-eps tie-break on the bonus token; fixes the spec-decode
+# early-tie-flip cascade (spurious </think> / degeneration on hard prompts).
+# Validated: MTP-on correctness 100% (matches MTP-off). Set =0 to opt out.
+: "${EXO_DSV4_MTP_TIEBREAK_FIX:=1}"
+: "${EXO_DSV4_MTP_TIEBREAK_EPS:=0.5}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
