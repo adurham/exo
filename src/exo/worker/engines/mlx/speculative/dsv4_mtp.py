@@ -2585,7 +2585,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             try:
                 _special = {128822, 128821}  # </think>, <think>
                 _committed = [y_val] + draft_int_values[:n_accepted]
-                _trigger = (
+                # EVERY-CYCLE mode: a losslessness break is, by definition,
+                # verify-argmax != clean-greedy-argmax at ANY position — not
+                # only special-token cycles. When EXO_DSV4_MTP_REFCHECK_ALL=1
+                # we run the reference forward every cycle and log only the
+                # cycles where they DISAGREE (plus a sparse heartbeat). This
+                # catches the FIRST divergence deterministically and tells us
+                # whether the drift is within-request (a single long gen
+                # diverges) or cross-request (only after warmup/batch), without
+                # depending on the flaky special-token trigger.
+                _refcheck_all = os.environ.get("EXO_DSV4_MTP_REFCHECK_ALL") == "1"
+                _trigger = _refcheck_all or (
                     bonus_val in _special
                     or any(d in _special for d in draft_int_values)
                 )
@@ -2623,24 +2633,36 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         _delta_128822 = float(
                             (_verify_row[128822] - _ref_row[128822]).item()
                         )
-                        _rec = {
-                            "cycle": int(self._spec_cycles),
-                            "uid": int(uid),
-                            "gamma": int(gamma),
-                            "n_accepted": int(n_accepted),
-                            "bonus_pos": int(_bpos),
-                            # committed continuation this cycle (tail).
-                            "committed_prefix_tail": _committed[-8:],
-                            "bonus_token": int(bonus_val),
-                            "bonus_argmax_from_verify": _verify_argmax,
-                            "refcheck_argmax": _ref_argmax,
-                            "refcheck_top2_logits": _ref_top2v,
-                            "agree": _agree,
-                            "delta_128822_verify_minus_ref": _delta_128822,
-                            "ref_picks_128822": bool(_ref_argmax == 128822),
-                        }
-                        with open(_refcheck_path, "a") as _f:
-                            _f.write(json.dumps(_rec) + "\n")
+                        # In ALL mode log only DIVERGENCES (the bug) plus a
+                        # sparse heartbeat every 500 cycles so we can confirm
+                        # the instrument is live. In special-token mode log
+                        # every triggered cycle as before.
+                        _heartbeat = (
+                            _refcheck_all and (int(self._spec_cycles) % 500 == 0)
+                        )
+                        _should_log = (
+                            (not _refcheck_all) or (not _agree) or _heartbeat
+                        )
+                        if _should_log:
+                            _rec = {
+                                "cycle": int(self._spec_cycles),
+                                "uid": int(uid),
+                                "gamma": int(gamma),
+                                "n_accepted": int(n_accepted),
+                                "bonus_pos": int(_bpos),
+                                # committed continuation this cycle (tail).
+                                "committed_prefix_tail": _committed[-8:],
+                                "bonus_token": int(bonus_val),
+                                "bonus_argmax_from_verify": _verify_argmax,
+                                "refcheck_argmax": _ref_argmax,
+                                "refcheck_top2_logits": _ref_top2v,
+                                "agree": _agree,
+                                "delta_128822_verify_minus_ref": _delta_128822,
+                                "ref_picks_128822": bool(_ref_argmax == 128822),
+                                "heartbeat": bool(_heartbeat and _agree),
+                            }
+                            with open(_refcheck_path, "a") as _f:
+                                _f.write(json.dumps(_rec) + "\n")
             except Exception as _refcheck_err:  # never break generation
                 logger.warning(f"mtp-refcheck failed: {_refcheck_err}")
 
