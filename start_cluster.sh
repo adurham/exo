@@ -31,7 +31,9 @@
 # a quality-compromised config without realizing.
 # To override: set EXO_DSV4_INDEX_TOPK in the shell env before launch.
 : "${EXO_DSV4_INDEX_TOPK:=512}"
-: "${EXO_LIBP2P_NAMESPACE:=MAC_STUDIO_CLUSTER}"
+# 2026-06-04: libp2p -> zenoh migration (exo #2132) renamed this env var.
+# main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
+: "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
 # DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
 # dsv4_prefill_chunk_size_curve memory. Smaller chunks also produce
@@ -660,7 +662,7 @@ for NODE in "${NODES[@]}"; do
     # routing all allocations through unwired_set_. The DYLD interposer that
     # caught it is no longer needed.
     EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
-    EXO_ENV="$EXO_ENV EXO_LIBP2P_NAMESPACE=$EXO_LIBP2P_NAMESPACE"
+    EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
     EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
