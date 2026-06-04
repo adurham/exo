@@ -2583,6 +2583,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         _refcheck_path = os.environ.get("EXO_DSV4_MTP_REFCHECK")
         if _refcheck_path and temp == 0:
             try:
+                # One-time liveness marker so "empty file" can be distinguished
+                # from "instrument never ran". Rank-0 writes it on first entry.
+                if not getattr(self, "_refcheck_live_logged", False):
+                    self._refcheck_live_logged = True
+                    if sync_group is None or sync_group.rank() == 0:
+                        with open(_refcheck_path, "a") as _f:
+                            _f.write(json.dumps({
+                                "marker": "INSTRUMENT_ACTIVE",
+                                "cycle": int(self._spec_cycles),
+                                "all_mode": os.environ.get(
+                                    "EXO_DSV4_MTP_REFCHECK_ALL") == "1",
+                            }) + "\n")
                 _special = {128822, 128821}  # </think>, <think>
                 _committed = [y_val] + draft_int_values[:n_accepted]
                 # EVERY-CYCLE mode: a losslessness break is, by definition,
