@@ -5,10 +5,19 @@
 tensor-parallel (2 ranks).
 **Model:** `mlx-community/DeepSeek-V4-Flash-8bit` (DSv4-Flash, MoE + sparse-pooled
 attention, served via the fork's `deepseek_v4.py`).
-**Champion config (default via `start_cluster.sh`, fork commit `c840bc2d`):**
+**Champion (default via `start_cluster.sh`) — 2026-06-04 post-upstream-integration:**
+exo `main`=`652d8224` (zenoh networking #2132 + mlx upstream sync), mlx
+`main`=`419cf7efe`, mlx-lm `main`=`f8b277f`. Validated-state tag:
+`validated-upstream-integration-20260604-153609`. (Supersedes the pre-integration
+champion `c840bc2d` / mlx `db757dcb0`; throughput unchanged within noise.)
+**Config:**
 `EXO_SPECULATIVE=1 EXO_DSV4_MTP=1 EXO_SPECULATIVE_GAMMA=2 EXO_DSV4_MTP_EAGLE_K=8`
 `EXO_KV_CACHE_BITS=0 EXO_DSV4_INDEX_TOPK=512 EXO_PREFILL_STEP_SIZE=128`
 `EXO_DSV4_FENCE_EVERY_N_LAYERS=4 EXO_DSV4_MTP_TIEBREAK_FIX=1 EXO_DSV4_MTP_TIEBREAK_EPS=0.5`.
+
+**Latest validated bench (this integrated champion):** c=1 100K γ=2, 10 scored
+iters — mean **30.6 t/s**, median 30.7, min 29.9, max 30.8, 0/10 bad, errors=0.
+Quality: Paris clean, 100K needle 3/3 (0 leak), aistupid hourly correctness 100%.
 
 ---
 
