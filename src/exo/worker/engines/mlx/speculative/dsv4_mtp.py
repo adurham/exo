@@ -2545,6 +2545,105 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
 
+        # ── REFERENCE-FORWARD REFCHECK (env-gated, temp=0) ───────────────
+        # Decisive losslessness test for the spurious-</think> bug. At this
+        # point gen_batch.prompt_cache has been rolled back to EXACTLY the
+        # committed prefix [.., y, *accepted_drafts] (rejected drafts trimmed
+        # in step 5/6; if n_accepted==gamma nothing was trimmed and the cache
+        # already ends at the committed prefix). The verify forward chose the
+        # bonus as argmax(verify_logits[0, bonus_pos]) — a logit it computed
+        # WHILE the in-flight forward also carried the (later, now-trimmed)
+        # rejected-draft positions. Causally the bonus position cannot attend
+        # to those later positions, and trim() is a pure offset decrement, so
+        # a CLEAN single-token forward run over the same committed prefix MUST
+        # reproduce the same next-token distribution iff the cache/mask path
+        # is lossless. We reconstruct that clean distribution cheaply: trim
+        # ONE more token (the last committed token) off every prompt-cache
+        # entry, then re-run JUST that token through the target. The forward's
+        # single-position logits == P(next | committed prefix), computed from
+        # a cache that, at the moment those logits are produced, has NEVER
+        # held a rejected draft past the bonus position. Re-feeding the token
+        # restores the cache offset, so generation is unaffected.
+        #
+        # trim+refeed is the SAME primitive the production pool-flush branch
+        # (step 5b above) already relies on for correctness, so no clone of
+        # the 100K-context cache is needed (a clone via copy_rotating_kv_cache
+        # would cost a per-layer numpy round-trip — far more expensive).
+        #
+        # TP SAFETY: self.model(...) drives the tensor-parallel collective.
+        # ALL ranks MUST run it or the cluster deadlocks. The trigger below is
+        # derived ONLY from cross-rank-canonical values: bonus_val (broadcast
+        # in step 4) and draft_int_values (drafts are synced across ranks via
+        # coord_group in draft_tokens). We deliberately do NOT trigger on the
+        # locally-argmaxed target_tokens/all_next (those carry ~1ulp TP drift
+        # and can disagree across ranks at tied positions, which would make
+        # some ranks run the extra forward and others not → hang). So every
+        # rank takes the same branch and runs the identical trim+forward+eval;
+        # only rank 0 writes the JSONL row.
+        _refcheck_path = os.environ.get("EXO_DSV4_MTP_REFCHECK")
+        if _refcheck_path and temp == 0:
+            try:
+                _special = {128822, 128821}  # </think>, <think>
+                _committed = [y_val] + draft_int_values[:n_accepted]
+                _trigger = (
+                    bonus_val in _special
+                    or any(d in _special for d in draft_int_values)
+                )
+                if _trigger:
+                    _last_committed = _committed[-1]
+                    _bpos = gamma if n_accepted == gamma else n_accepted
+                    # Verify-forward bonus logit row (the suspect).
+                    _verify_row = verify_logits[0, _bpos]
+                    # Roll the committed prefix back by its last token on
+                    # EVERY rank (cache is per-rank-local; keep them in step).
+                    for _c in gen_batch.prompt_cache:
+                        if hasattr(_c, "trim"):
+                            _c.trim(1)
+                        elif hasattr(_c, "offset"):
+                            _c.offset -= 1
+                    # Clean single-token reference forward — ALL ranks. This
+                    # re-adds the last committed token, restoring the cache.
+                    _ref_in = mx.array(
+                        [_last_committed], dtype=mx.int32
+                    ).reshape(1, 1)
+                    _ref_out = self.model(
+                        _ref_in, cache=gen_batch.prompt_cache
+                    )
+                    _ref_row = _ref_out[0, 0]
+                    mx.eval(_ref_row, _verify_row)
+                    # Rank-0-only logging; the forward above already ran on
+                    # all ranks so the collective is balanced.
+                    _is_rank0 = sync_group is None or sync_group.rank() == 0
+                    if _is_rank0:
+                        _ref_argmax = int(mx.argmax(_ref_row).item())
+                        _ref_top2 = mx.topk(_ref_row, 2)
+                        _ref_top2v = [float(x) for x in _ref_top2.tolist()]
+                        _verify_argmax = int(mx.argmax(_verify_row).item())
+                        _agree = bool(_ref_argmax == bonus_val)
+                        _delta_128822 = float(
+                            (_verify_row[128822] - _ref_row[128822]).item()
+                        )
+                        _rec = {
+                            "cycle": int(self._spec_cycles),
+                            "uid": int(uid),
+                            "gamma": int(gamma),
+                            "n_accepted": int(n_accepted),
+                            "bonus_pos": int(_bpos),
+                            # committed continuation this cycle (tail).
+                            "committed_prefix_tail": _committed[-8:],
+                            "bonus_token": int(bonus_val),
+                            "bonus_argmax_from_verify": _verify_argmax,
+                            "refcheck_argmax": _ref_argmax,
+                            "refcheck_top2_logits": _ref_top2v,
+                            "agree": _agree,
+                            "delta_128822_verify_minus_ref": _delta_128822,
+                            "ref_picks_128822": bool(_ref_argmax == 128822),
+                        }
+                        with open(_refcheck_path, "a") as _f:
+                            _f.write(json.dumps(_rec) + "\n")
+            except Exception as _refcheck_err:  # never break generation
+                logger.warning(f"mtp-refcheck failed: {_refcheck_err}")
+
         # 7. Update MTP pre_norm to the verify-pass hidden at the
         #    accepted position, ready for the next cycle.
         pos = gamma if n_accepted == gamma else n_accepted

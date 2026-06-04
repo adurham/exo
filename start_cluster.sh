@@ -750,6 +750,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_DUMP_TOPK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DUMP_TOPK=$EXO_DSV4_MTP_DUMP_TOPK"
     # MTP verify-audit JSONL path (diagnostic: special-token draft/accept dumps).
     [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT=$EXO_DSV4_MTP_VERIFY_AUDIT"
+    # MTP reference-forward refcheck JSONL path (diagnostic: verify vs clean greedy).
+    [ -n "${EXO_DSV4_MTP_REFCHECK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK=$EXO_DSV4_MTP_REFCHECK"
     # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
     # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
     # timestamps + per-stream tokens. NOT a production knob — diagnostic
