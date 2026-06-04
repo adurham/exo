@@ -11,6 +11,7 @@ Tracked-in-repo copies of PR descriptions, paired with branches at `adurham:pr/*
 | `02-mlx-sdpa-chunked.md` | **HELD** | `adurham:pr/sdpa-chunked-dispatch` (stacked on mlx#3594) |
 | `04-mlx-head-dim-192-256.md` | **HELD** | `adurham:pr/sdpa-head-dim-192-256` (float32 limitation pending) |
 | `06-mlx-allocator-coalesce.md` | **OPENED** | [mlx#3596](https://github.com/ml-explore/mlx/pull/3596) |
+| `07-exo-thinking-parser-fused-delimiter.md` | **OPENED** | [exo#2149](https://github.com/exo-explore/exo/pull/2149) |
 
 (PRs #1, #3, #5 are committed via the PR body itself on GitHub — we kept the
 drafts in `/tmp/pr-drafts/` during the session but only the held ones are
