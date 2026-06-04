@@ -2588,42 +2588,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
 
-        # ── TIE-BREAK BONUS RECOMPUTE (gated) ────────────────────────────
-        # If the bonus position was a near-tie, the batched-verify argmax we
-        # used for bonus_val may disagree with sequential greedy. The cache is
-        # now at exactly the committed prefix [.., y, *accepted]. Recompute the
-        # bonus with a sequential-equivalent SINGLE-TOKEN forward (trim the last
-        # committed token, re-feed it) — this is bit-identical to non-spec
-        # greedy decode at this position, restoring losslessness. Runs on ALL
-        # ranks (TP collective), then rank-0's value is broadcast so every rank
-        # commits the same bonus. Cheap: only fires on the ~3% near-tie cycles.
-        if _need_recompute and temp == 0:
-            try:
-                _committed_now = [y_val] + draft_int_values[:n_accepted]
-                _last_tok = _committed_now[-1]
-                for _c in gen_batch.prompt_cache:
-                    if hasattr(_c, "trim"):
-                        _c.trim(1)
-                    elif hasattr(_c, "offset"):
-                        _c.offset -= 1
-                _rb_out = self.model(
-                    mx.array([_last_tok], dtype=mx.int32).reshape(1, 1),
-                    cache=gen_batch.prompt_cache,
-                )
-                _rb_argmax = mx.argmax(_rb_out[0, 0])
-                mx.eval(_rb_argmax)
-                _new_bonus = int(_rb_argmax.item())
-                # Broadcast rank-0's recomputed bonus so all ranks agree.
-                if sync_drafts:
-                    _bb = broadcast_from_canonical(
-                        mx.array([_new_bonus], dtype=mx.int32), coord_group,
-                    )
-                    _new_bonus = int(cast(list[int], _bb.tolist())[0])
-                bonus_val = _new_bonus
-            except Exception as _tb_err:
-                # Never break generation; fall back to batched-argmax bonus.
-                logger.warning(f"mtp tie-break recompute failed: {_tb_err}")
-
         # ── REFERENCE-FORWARD REFCHECK (env-gated, temp=0) ───────────────
         # Decisive losslessness test for the spurious-</think> bug. At this
         # point gen_batch.prompt_cache has been rolled back to EXACTLY the
