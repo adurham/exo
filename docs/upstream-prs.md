@@ -2,7 +2,10 @@
 
 Cross-repo tracker for what `adurham/{exo,mlx,mlx-lm}` carries on top of upstream
 and what's been pushed forward to upstream review. Companion to
-[fork-notes.md](./fork-notes.md), which tracks dependency pins.
+[fork-notes.md](./fork-notes.md), which tracks dependency pins, and to
+[fork-vs-upstream-inventory.md](./fork-vs-upstream-inventory.md) — the complete
+file-by-file audit of every change vs upstream (273 files, 100% of core source
+mapped to a doc or rationale).
 
 Last refresh: 2026-06-04 (fork lineage reconciliation + branch push sweep; see "Fork lineage & push state" below). Prior: 2026-05-27 (PM — after zcbenz reviewed that day's mlx batch).
 
