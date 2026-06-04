@@ -4,7 +4,28 @@ Cross-repo tracker for what `adurham/{exo,mlx,mlx-lm}` carries on top of upstrea
 and what's been pushed forward to upstream review. Companion to
 [fork-notes.md](./fork-notes.md), which tracks dependency pins.
 
-Last refresh: 2026-05-27 (PM — after zcbenz reviewed today's mlx batch).
+Last refresh: 2026-06-04 (fork lineage reconciliation + branch push sweep; see "Fork lineage & push state" below). Prior: 2026-05-27 (PM — after zcbenz reviewed that day's mlx batch).
+
+---
+
+## Fork lineage & push state (2026-06-04)
+
+Triggered by the question "is any mlx/mlx-lm work upstreamable?" — audited divergence against the **canonical** source of truth, not Blaizzy's fork.
+
+**Lineage (confirmed via GitHub API):**
+- `adurham/mlx-lm` parent + source root = **`ml-explore/mlx-lm`** (the canonical repo). `Blaizzy/mlx-lm` is itself just a *sibling* fork of `ml-explore/mlx-lm`, not above us in the chain.
+- Action taken: **dropped the redundant `blaizzy` remote** from the local `mlx-lm` clone. Remotes are now `origin` (adurham), `upstream` (ml-explore), `rlt` (Takashige). The `upstream` remote already pointed at `ml-explore/mlx-lm`.
+- `adurham/mlx` parent = **`ml-explore/mlx`** (`upstream` remote present).
+
+**Upstreamability verdict — nothing clean in mlx or mlx-lm:**
+- **mlx-lm**: 241 commits ahead of `ml-explore/mlx-lm` main, 175 of them adurham's. *All* adurham work is DSv4-specific, and **`deepseek_v4.py` does not exist on `ml-explore/mlx-lm` (nor Blaizzy)** — canonical tops out at deepseek_v3/v32. No upstream target exists for the DSv4 stack, including the cache work that sounds generic (`PoolingCache.save_meta/restore_meta`, deferred-pool update, pool-freeze) — all coupled to the DSv4 sparse-pooled path. (The genuinely-generic DSv4 perf rewrites — `87f4625` matmul, `f4dd9e7`/`2a1dcf6` bf16 — remain "candidate, not yet filed", gated on a DSv4 PR landing upstream; see mlx-lm group table below.)
+- **mlx**: 116 commits ahead of `ml-explore/mlx` main, but only 2 are adurham's and **both are merge commits** (zero original code). The 116 are the exo-team JACCL / RDMA-over-Thunderbolt collective subsystem (Exo Bot 93, rltakashige/Takashige 13, Thump604 10) — exo-cluster-specific, not ours to upstream.
+- **The only thing with a real upstream home remains the thinking-parser fused-delimiter fix → exo#2149** (already filed). Everything else sits on top of either fork-only `deepseek_v4.py` or the exo-only JACCL layer.
+
+**Branch push sweep (origin = adurham forks):**
+- `mlx-lm`: pushed `merge-backup-1776362512`; repo now 0 commits unpushed across all local branches. Champion work (`f8b277f`) already on origin.
+- `mlx`: pushed 4 previously-local-only branches → `feature/nuclear-gpu-fix`, `merge-backup-1776362512`, `pr-3293` (head_dim 192/256 fused SDPA), `pr-3307` (chunked SDPA). Champion JACCL HEAD (`db757dcb0`) already on origin as `fix/jaccl-ack-qp-top-level`.
+- **Not pushed:** `fix-dsb-barrier` local `80c634ac5` is the *same* DSB-barrier change already on origin as `de6102230` (recommit, different SHA). Pushing would require a force-overwrite for zero content gain — left as-is.
 
 ---
 
