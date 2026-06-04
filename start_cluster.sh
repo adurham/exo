@@ -748,6 +748,8 @@ for NODE in "${NODES[@]}"; do
     # Cost when on: ~1 sync per draft step (microseconds). See
     # mtp_module.py:740 dump block and /tmp/w3_eagle_audit.md.
     [ -n "${EXO_DSV4_MTP_DUMP_TOPK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DUMP_TOPK=$EXO_DSV4_MTP_DUMP_TOPK"
+    # MTP verify-audit JSONL path (diagnostic: special-token draft/accept dumps).
+    [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT=$EXO_DSV4_MTP_VERIFY_AUDIT"
     # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
     # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
     # timestamps + per-stream tokens. NOT a production knob — diagnostic
