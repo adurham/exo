@@ -1651,14 +1651,20 @@ def _effective_kv_cache_bits(override: int | None) -> int | None:
     Resolution order:
       1. `override` (per-instance): int ≥ 1 quantizes, 0 explicitly disables,
          None defers to the next step.
-      2. Module-level `KV_CACHE_BITS` (read from `EXO_KV_CACHE_BITS` at import).
+      2. Module-level `KV_CACHE_BITS` (read from `EXO_KV_CACHE_BITS` at import):
+         int ≥ 1 quantizes, 0 explicitly disables, None defers.
       3. None — no quantization.
 
     Returns None when quantization should be skipped, else the bits to use.
     """
     if override is not None:
         return override if override > 0 else None
-    return KV_CACHE_BITS
+    # Module-level path must honor the SAME 0=disabled sentinel as the override
+    # path above and as documented in instances.py (kv_cache_bits field) and
+    # start_cluster.sh. EXO_KV_CACHE_BITS=0 means "bf16, no quantization"; without
+    # this guard a literal 0 builds QuantizedKVCache(bits=0) -> ZeroDivisionError
+    # on the first full-attention layer (e.g. Qwen3.6 hybrid: 10/40 KVCache layers).
+    return KV_CACHE_BITS or None
 
 
 def make_kv_cache(

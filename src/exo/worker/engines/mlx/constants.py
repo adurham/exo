@@ -11,6 +11,8 @@ MAX_KV_SIZE: int | None = 3200
 KEEP_KV_SIZE: int | None = 1600
 QUANTIZE_MODEL_MODE: str | None = "affine"
 CACHE_GROUP_SIZE: int = 64
+# 0 is a documented sentinel meaning "bf16, no quantization" (NOT zero-bit quant);
+# it is mapped to None in cache._effective_kv_cache_bits. See instances.py kv_cache_bits.
 KV_CACHE_BITS: int | None = int(os.environ["EXO_KV_CACHE_BITS"]) if os.environ.get("EXO_KV_CACHE_BITS") else None
 
 # TurboQuant KV cache (rotation-aware quantization + residual correction)
