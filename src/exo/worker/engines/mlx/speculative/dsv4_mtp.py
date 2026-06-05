@@ -1535,6 +1535,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         verify_input = mx.concatenate(
             [next_tokens_arr, draft_concat], axis=1
         )  # (N, γ+1)
+        # Snapshot the compressed POOL state before the verify forward.
+        # The γ+1 verify pushes draft tokens through accumulate_windows +
+        # update_and_fetch on each BatchPoolingCache; on a window flush this
+        # bakes draft-derived summaries into the long-range pool. Rejected
+        # drafts must be rolled back or the sparse indexer retrieves
+        # contaminated blocks → coherent-but-wrong output (needle miss at
+        # 100K) even though the local rotating cache is rolled back. The
+        # local ring fix (mlx-lm 5533423) cleared the gross BOS-spam; this
+        # clears the residual long-range retrieval corruption. Snapshot is
+        # cheap (a few list copies + the small ratio-wide buf tensors).
+        _pool_caches = self._collect_pooling_caches(gen_batch)
+        _pool_snaps = [
+            pc.save_meta() if hasattr(pc, "save_meta") else None
+            for pc in _pool_caches
+        ]
+
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
             verify_input,
@@ -1725,6 +1741,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         rollback_per_stream_py = [gamma - acc for acc in n_accepted_per]
         n_min = min(n_accepted_per)
         n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
+        any_rejection = any(acc < gamma for acc in n_accepted_per)
 
         for c in gen_batch.prompt_cache:
             if isinstance(c, CacheList):
@@ -1745,6 +1762,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 c.trim(n_min_rollback)
             elif hasattr(c, "offset"):
                 c.offset -= n_min_rollback
+
+        # Restore the compressed POOL to its pre-verify state whenever any
+        # stream rejected drafts. The verify forward fed γ+1 tokens (incl.
+        # rejected drafts) through accumulate_windows; restoring undoes any
+        # draft-contaminated window flush. The committed tokens are re-pooled
+        # naturally on subsequent decode cycles (they re-enter via the normal
+        # accumulate_windows path), so no replay is needed — the snapshot
+        # simply rewinds _pool_lengths/remainder/_processed/buf so the next
+        # genuine flush overwrites the rejected slots. When no stream rejected
+        # (full acceptance), the pool already reflects only committed tokens,
+        # so skip the restore.
+        if any_rejection:
+            for pc, snap in zip(_pool_caches, _pool_snaps):
+                if snap is not None:
+                    pc.restore_meta(snap)
 
         # MTP-side cache: also per-stream when possible.
         mtp_cache = self.mtp._cache
