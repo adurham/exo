@@ -327,15 +327,30 @@ class MTPPredictor:
                     return True
                 nn.quantize(self.mlp, group_size=64, bits=4, class_predicate=_q_predicate)
 
-            # Load MTP MoE weights — remap HF expert names to mlx-lm SwitchLinear
+            # Load MTP MoE weights — remap HF expert names to mlx-lm SwitchLinear.
+            # Two HF layouts exist:
+            #   (A) Qwen3.6 fused/stacked: `experts.gate_up_proj` [E, 2*I, H] and
+            #       `experts.down_proj` [E, H, I] — all experts pre-stacked, gate+up
+            #       fused. Split gate_up at the midpoint into gate_proj/up_proj,
+            #       identical to mlx-lm qwen3_5_moe.Model.sanitize. Qwen3.6 also
+            #       carries a shared_expert.* block + shared_expert_gate (loaded via
+            #       direct_keys; strict=False tolerates models without them).
+            #   (B) Legacy per-expert: `experts.N.{gate,up,down}_proj.*`, stacked
+            #       across N here.
+            # Without branch (A), int(parts[1]) parsed 'down_proj' as an expert
+            # index -> ValueError -> MTP init failed and Qwen3.6 silently ran pure
+            # autoregressive (no speculative decoding).
             prefix = 'mtp.layers.0.mlp.'
             direct_keys = {}
-            expert_weights = {}  # {proj_name: {expert_idx: weight}}
+            expert_weights = {}  # {proj_name: {expert_idx: weight}}  (layout B)
+            fused = {}  # {leaf_name: weight}  (layout A)
             for k, v in weights.items():
                 if not k.startswith(prefix):
                     continue
                 name = k[len(prefix):]
-                if name.startswith('experts.'):
+                if name in ('experts.gate_up_proj', 'experts.down_proj'):
+                    fused[name] = v
+                elif name.startswith('experts.') and name.split('.')[1].isdigit():
                     # experts.N.{gate,up,down}_proj.{weight,scales,biases}
                     parts = name.split('.')
                     idx = int(parts[1])
@@ -348,13 +363,30 @@ class MTPPredictor:
                 else:
                     direct_keys[name] = v
 
-            # Stack individual expert weights into SwitchLinear format
             moe_weights = []
-            for proj_key, idx_map in expert_weights.items():
-                n_experts = max(idx_map.keys()) + 1
-                stacked = mx.stack([idx_map[i] for i in range(n_experts)])
-                moe_weights.append((f'switch_mlp.{proj_key}', stacked))
+            if fused:
+                # Layout A: split fused gate_up and rename to switch_mlp.* — same
+                # transform mlx-lm applies in qwen3_5_moe.Model.sanitize.
+                gate_up = fused['experts.gate_up_proj']
+                mid = gate_up.shape[-2] // 2
+                moe_weights.append(
+                    ('switch_mlp.gate_proj.weight', gate_up[..., :mid, :])
+                )
+                moe_weights.append(
+                    ('switch_mlp.up_proj.weight', gate_up[..., mid:, :])
+                )
+                moe_weights.append(
+                    ('switch_mlp.down_proj.weight', fused['experts.down_proj'])
+                )
+            else:
+                # Layout B: stack individual expert weights into SwitchLinear format
+                for proj_key, idx_map in expert_weights.items():
+                    n_experts = max(idx_map.keys()) + 1
+                    stacked = mx.stack([idx_map[i] for i in range(n_experts)])
+                    moe_weights.append((f'switch_mlp.{proj_key}', stacked))
 
+            # Direct (non-expert) keys: gate.weight, shared_expert.*,
+            # shared_expert_gate.weight.
             for name, v in direct_keys.items():
                 moe_weights.append((name, v))
 
