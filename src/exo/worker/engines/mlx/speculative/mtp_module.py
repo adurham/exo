@@ -309,8 +309,18 @@ class MTPPredictor:
             if moe_layer is None:
                 raise RuntimeError("MTP has MoE weights but target model has no MoE layer")
 
-            # Create a fresh MoE block with same class/config as target
-            moe_class = type(moe_layer)
+            # Create a fresh MoE block with same class/config as target.
+            # When the target model is tensor-parallel, layer.mlp is a
+            # CustomMlxLayer wrapper (e.g. ShardedMoE) whose __init__ expects a
+            # layer, not args — instantiating type(wrapper)(args) stores `args`
+            # as original_layer and later crashes with
+            # `'TextModelArgs' object has no attribute '__call__'` at forward.
+            # The MTP module loads FULL (replicated) weights for every other
+            # projection (q/k/v/o via make_linear), so the MoE must likewise be
+            # the raw, unsharded block. Unwrap to the underlying class.
+            original_layer = getattr(moe_layer, 'original_layer', None)
+            raw_moe = original_layer if original_layer is not None else moe_layer
+            moe_class = type(raw_moe)
             args = (getattr(self._text_model, 'args', None)
                     or getattr(getattr(self._text_model, 'model', None), 'args', None)
                     or getattr(self.model, 'args', None))
