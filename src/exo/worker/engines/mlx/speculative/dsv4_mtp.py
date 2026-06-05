@@ -1476,35 +1476,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         verify_input = mx.concatenate(
             [next_tokens_arr, draft_concat], axis=1
         )  # (N, γ+1)
-        # Pool snapshot for per-stream rollback. The γ+1-token verify
-        # processes [y_n, draft_0_n, ..., draft_{gamma-1}_n] per stream;
-        # streams may REJECT different draft prefixes. PoolingCache.trim
-        # cannot un-flush a pooled entry, so a flush during verify leaves
-        # rejected-draft summaries permanently in the pool — desyncing each
-        # stream's pooled/compressed KV from its per-stream-trimmed
-        # RotatingKVCache → SparseCompressedAttention indexes wrong
-        # positions → garbage / BOS-spam at c>=2 long context. The c=1
-        # _speculative_next path already guards this via save_meta/
-        # restore_meta + commit-forward; this is the c>=2 mirror.
-        # Snapshot only pools where ANY stream's verify span (γ+1) could
-        # cross the ratio boundary; pools that won't flush keep rejected
-        # drafts in the per-stream remainder tail where trim() handles them.
-        _pool_caches = self._collect_pooling_caches(gen_batch)
-        _verify_len = gamma + 1
-
-        def _may_flush(pc: Any) -> bool:
-            # BatchPoolingCache.remainder is a per-stream list; scalar
-            # PoolingCache.remainder is an int. Both are handled.
-            rem = pc.remainder
-            if isinstance(rem, list):
-                return any(r + _verify_len >= pc.ratio for r in rem)
-            return rem + _verify_len >= pc.ratio
-
-        _pool_snaps: list[Any] = [
-            pc.save_meta() if hasattr(pc, "save_meta") and _may_flush(pc) else None
-            for pc in _pool_caches
-        ]
-
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
             verify_input,
@@ -1687,202 +1658,36 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
 
-        # 4. Per-stream cache rollback.
-        #
-        # Two regimes (mirrors _speculative_next's c=1 pool-contamination fix):
-        #
-        # (a) NO pool flushed during verify (common at γ << ratio): rejected
-        #     drafts sit in each stream's per-stream remainder tail, so the
-        #     usual per-stream trim is exact. Cheap path, no extra forward.
-        # (b) A pool DID flush, AND at least one stream rejected at least one
-        #     draft: a flushed pooled entry can be built partly from rejected
-        #     drafts → desyncs each stream's pool from its per-stream rotating
-        #     KV → compressed-attention indexer reads wrong positions →
-        #     garbage / BOS-spam. Restore each snapshotted pool, trim ALL
-        #     caches by γ+1 (drops every verify-time write), then re-pool
-        #     each stream's committed prefix [y, *accepted] via a per-stream
-        #     commit-forward (prepare(lengths=[acc+1 per stream]) makes the
-        #     batched pool advance per-stream).
+        # 4. Per-stream cache rollback. Each stream b rolls back by
+        #    γ - n_accepted_per[b]. Pass the Python int list straight
+        #    to trim_per_stream so it does its arithmetic without
+        #    syncing self.offset — at 43+ layers that saves ~6ms per
+        #    spec cycle on cluster.
         rollback_per_stream_py = [gamma - acc for acc in n_accepted_per]
         n_min = min(n_accepted_per)
         n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
-        any_rejection = any(acc < gamma for acc in n_accepted_per)
 
-        # Detect any actual flush since snapshot. For BatchPoolingCache the
-        # canonical "did we flush" probe is whether any per-stream pool
-        # length grew. For scalar PoolingCache it's (_pool_offset +
-        # _pending_offset_bump) movement, as in _speculative_next.
-        def _pool_flushed(pc: Any, snap: Any) -> bool:
-            if snap is None:
-                return False
-            if hasattr(pc, "_pool_lengths"):  # BatchPoolingCache
-                pre_lengths = snap[0]  # see BatchPoolingCache.save_meta
-                return any(
-                    pc._pool_lengths[i] != pre_lengths[i]
-                    for i in range(len(pre_lengths))
-                )
-            # Scalar PoolingCache: snap = (pool_offset, pending_bump, ...)
-            pre_off, pre_bump = snap[0], snap[1]
-            cur_bump = getattr(pc, "_pending_offset_bump", 0)
-            return (pc._pool_offset + cur_bump) != (pre_off + pre_bump)
+        for c in gen_batch.prompt_cache:
+            if isinstance(c, CacheList):
+                # Inside CacheList: rotating KV is per-stream-aware,
+                # pooling/indexer are uniform (advance ≤1 entry per
+                # cycle at γ << compress_ratio so min-strategy is
+                # essentially exact).
+                for sub in c.caches:
+                    if isinstance(sub, PerStreamBatchRotatingKVCache):
+                        sub.trim_per_stream(rollback_per_stream_py)
+                    elif hasattr(sub, "trim"):
+                        sub.trim(n_min_rollback)
+                    elif hasattr(sub, "offset"):
+                        sub.offset -= n_min_rollback
+            elif isinstance(c, PerStreamBatchRotatingKVCache):
+                c.trim_per_stream(rollback_per_stream_py)
+            elif hasattr(c, "trim"):
+                c.trim(n_min_rollback)
+            elif hasattr(c, "offset"):
+                c.offset -= n_min_rollback
 
-        flushed_any = any(
-            _pool_flushed(pc, snap)
-            for pc, snap in zip(_pool_caches, _pool_snaps, strict=True)
-        )
-        contamination = any_rejection and flushed_any
-
-        # Diagnostic counter (EXO_DSV4_BATCH_POOL_DIAG=1, very cheap).
-        # Prints once every 50 cycles so we can confirm the contamination
-        # branch is actually firing under c>=2 100K load.
-        if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
-            self._batch_pool_diag_cycles = (
-                getattr(self, "_batch_pool_diag_cycles", 0) + 1
-            )
-            if any_rejection:
-                self._batch_pool_diag_reject = (
-                    getattr(self, "_batch_pool_diag_reject", 0) + 1
-                )
-            if flushed_any:
-                self._batch_pool_diag_flush = (
-                    getattr(self, "_batch_pool_diag_flush", 0) + 1
-                )
-            if contamination:
-                self._batch_pool_diag_contam = (
-                    getattr(self, "_batch_pool_diag_contam", 0) + 1
-                )
-            if self._batch_pool_diag_cycles % 10 == 0:
-                try:
-                    with open(
-                        f"/tmp/dsv4_dispatch_diag_pid{os.getpid()}.log", "a"
-                    ) as _f:
-                        _f.write(
-                            f"BATCH_POOL cycles={self._batch_pool_diag_cycles} "
-                            f"reject={getattr(self, '_batch_pool_diag_reject', 0)} "
-                            f"flushed={getattr(self, '_batch_pool_diag_flush', 0)} "
-                            f"contam={getattr(self, '_batch_pool_diag_contam', 0)} "
-                            f"pool_caches={len(_pool_caches)} "
-                            f"snapshotted={sum(1 for s in _pool_snaps if s is not None)}\n"
-                        )
-                except Exception:
-                    pass
-
-        if not contamination:
-            # (a) Cheap correct path: per-stream trim of every cache.
-            for c in gen_batch.prompt_cache:
-                if isinstance(c, CacheList):
-                    for sub in c.caches:
-                        if isinstance(sub, PerStreamBatchRotatingKVCache):
-                            sub.trim_per_stream(rollback_per_stream_py)
-                        elif hasattr(sub, "trim"):
-                            sub.trim(n_min_rollback)
-                        elif hasattr(sub, "offset"):
-                            sub.offset -= n_min_rollback
-                elif isinstance(c, PerStreamBatchRotatingKVCache):
-                    c.trim_per_stream(rollback_per_stream_py)
-                elif hasattr(c, "trim"):
-                    c.trim(n_min_rollback)
-                elif hasattr(c, "offset"):
-                    c.offset -= n_min_rollback
-        else:
-            # (b) Contamination path. Restore snapshotted pools, then trim
-            # ALL caches by γ+1 (every verify-time KV write is dropped), and
-            # re-pool committed tokens per stream via a commit-forward.
-            for pc, snap in zip(_pool_caches, _pool_snaps, strict=True):
-                if snap is not None:
-                    pc.restore_meta(snap)
-
-            # Per-stream trim by γ+1 for streams that DID get γ+1 writes
-            # (all streams did — verify is uniform shape (N, γ+1)).
-            full_rollback = [gamma + 1] * N
-            for c in gen_batch.prompt_cache:
-                if isinstance(c, CacheList):
-                    for sub in c.caches:
-                        if isinstance(sub, PerStreamBatchRotatingKVCache):
-                            sub.trim_per_stream(full_rollback)
-                        elif hasattr(sub, "trim"):
-                            sub.trim(gamma + 1)
-                        elif hasattr(sub, "offset"):
-                            sub.offset -= gamma + 1
-                elif isinstance(c, PerStreamBatchRotatingKVCache):
-                    c.trim_per_stream(full_rollback)
-                elif hasattr(c, "trim"):
-                    c.trim(gamma + 1)
-                elif hasattr(c, "offset"):
-                    c.offset -= gamma + 1
-
-            # Per-stream commit-forward of [y_n, *accepted_n] padded to
-            # max_commit so the batched forward has a rectangular input.
-            # BatchPoolingCache.prepare(lengths=[acc+1 per stream]) gates
-            # how many of those L positions each stream actually consumes;
-            # padding positions are ignored by both pool and per-stream
-            # rotating KV. Same discipline as _speculative_next's commit-
-            # forward, just per-stream.
-            # draft_concat is shape (N, γ). Materialize as a Python
-            # nested list for per-stream indexing in the commit-row build.
-            draft_concat_int_local: list[list[int]] = cast(
-                list[list[int]], draft_concat.tolist()
-            )
-            next_tokens_int_local: list[int] = cast(
-                list[int], next_tokens_arr.reshape(N).tolist()
-            )
-            commit_lengths = [acc + 1 for acc in n_accepted_per]
-            max_commit = max(commit_lengths)
-            commit_rows: list[list[int]] = []
-            for n in range(N):
-                commit_row: list[int] = [int(next_tokens_int_local[n])] + [
-                    int(draft_concat_int_local[n][k])
-                    for k in range(n_accepted_per[n])
-                ]
-                # Pad with 0; positions past `commit_lengths[n]` are
-                # ignored by BatchPoolingCache (prepare gates them) and by
-                # PerStreamBatchRotatingKVCache.update_and_fetch only
-                # advances offset[n] by valid_lengths[n].
-                if len(commit_row) < max_commit:
-                    commit_row = commit_row + [0] * (max_commit - len(commit_row))
-                commit_rows.append(commit_row)
-            commit_input = mx.array(commit_rows, dtype=mx.int32)
-
-            # Wire per-stream lengths + right_padding into every cache
-            # that supports prepare(...). BatchPoolingCache uses lengths
-            # to gate accumulate_windows; PerStreamBatchRotatingKVCache
-            # uses lengths+right_padding to per-stream-cap writes during
-            # the commit forward (positions past commit_lengths[n] for
-            # stream n are masked out). CacheList forwards prepare to
-            # children.
-            right_padding = [max_commit - cl for cl in commit_lengths]
-            for c in gen_batch.prompt_cache:
-                if hasattr(c, "prepare"):
-                    try:
-                        c.prepare(
-                            lengths=commit_lengths,
-                            right_padding=right_padding,
-                        )
-                    except TypeError:
-                        # Older prepare() that doesn't accept these args
-                        # — fall back to lengths-only, then bare call.
-                        try:
-                            c.prepare(lengths=commit_lengths)
-                        except TypeError:
-                            pass
-
-            _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
-            mx.eval(_commit_logits)
-            del _commit_logits
-
-            # Restore _lengths back to unconstrained so the NEXT cycle's
-            # verify forward (γ+1 uniform) isn't artificially length-gated.
-            for c in gen_batch.prompt_cache:
-                if hasattr(c, "finalize"):
-                    c.finalize()
-                elif isinstance(c, CacheList):
-                    for sub in c.caches:
-                        if hasattr(sub, "finalize"):
-                            sub.finalize()
-
-        # MTP-side cache: roll back by per-stream rejected count. MTP cache
-        # is not a PoolingCache; trim_per_stream / trim semantics are
-        # unchanged from the prior code.
+        # MTP-side cache: also per-stream when possible.
         mtp_cache = self.mtp._cache
         if mtp_cache is not None:
             if isinstance(mtp_cache, PerStreamBatchRotatingKVCache):
