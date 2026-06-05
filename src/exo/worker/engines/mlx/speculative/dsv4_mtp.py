@@ -87,7 +87,24 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
     if isinstance(cache_obj, BatchRotatingKVCache) and not isinstance(
         cache_obj, PerStreamBatchRotatingKVCache
     ):
+        # Before swapping the class pointer, normalize the base ring buffer
+        # into temporal (un-rotated) order so the per-stream subclass — which
+        # treats the physical buffer as a contiguous ring indexed by logical
+        # offset mod max_size — starts from a known layout. Without this, a
+        # buffer that the base class had rotated (write head wrapped after a
+        # long prefill) is reinterpreted by the per-stream code with the
+        # wrong slot↔position mapping, scrambling 100K of context →
+        # garbage/BOS-spam at c>=2 long context. _temporal_order is a no-op
+        # when the buffer never rotated (short context), so this is safe and
+        # cheap in the common case.
+        if getattr(cache_obj, "rotated", False):
+            cache_obj._temporal_order()
         cache_obj.__class__ = PerStreamBatchRotatingKVCache
+        # Bootstrap the per-stream ring bookkeeping from the base state so
+        # the first update_and_fetch / make_mask after the swap reads
+        # consistent values (rather than the lazy-fallback that mistook the
+        # physical buffer index for the logical offset).
+        cache_obj._bootstrap_per_stream_ring()
 
 logger = logging.getLogger(__name__)
 
