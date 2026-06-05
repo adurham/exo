@@ -1183,6 +1183,19 @@ class ExoBatchGenerator:
             prompt_pre_norm = self._mlx_gen._captured.get('prompt_pre_norm')
             if prompt_pre_norm is not None:
                 mx.eval(prompt_pre_norm)
+                # submit() handles exactly ONE stream, so the MTP cache it
+                # prefills + snapshots MUST be batch-1. The shared `_captured`
+                # dict holds the pre_norm from the most recent prefill forward;
+                # when two independent requests arrive close enough that their
+                # prefills batch, that capture is (N>1, S, hidden). Feeding a
+                # batched pre_norm into predict() builds a batch-N MTP cache,
+                # whose snapshot later fails BatchRotatingKVCache.merge with
+                # `Cannot broadcast (N,1,2,512) into (1,1,2,512)` and crashes
+                # the runner (fatal c>=2 concurrent regression). Take this
+                # stream's own (last) row. No-op at c=1: a (1,S,H) tensor
+                # slices to itself, so the champion path stays bit-exact.
+                if prompt_pre_norm.shape[0] != 1:
+                    prompt_pre_norm = prompt_pre_norm[-1:, :, :]
                 self._mlx_gen.mtp.reset_cache()
                 S_pre = prompt_pre_norm.shape[1]
                 if S_pre > 1:
