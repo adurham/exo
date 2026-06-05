@@ -29,13 +29,19 @@ BS>1 batched-MTP is NOT yet enabled here — that's Phase 5.
 from __future__ import annotations
 
 import json
-import logging
 import os
 import time
 from collections import deque
 from typing import Any, BinaryIO, Optional, Sequence, cast
 
 import mlx.core as mx
+
+# Use the loguru logger that the rest of exo writes to ~/exo.log via.
+# Prior `logging.getLogger(__name__)` went to stdlib logging which is not
+# wired to the exo sink — every logger.info() in this file silently dropped.
+# 2026-06-05: discovered while diagnosing c=2 100K BOS-spam — diag log lines
+# I'd added were going to /dev/null until this fix.
+from exo.worker.runner.bootstrap import logger
 
 from mlx_lm.models.cache import (
     BatchRotatingKVCache,
@@ -88,8 +94,6 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
         cache_obj, PerStreamBatchRotatingKVCache
     ):
         cache_obj.__class__ = PerStreamBatchRotatingKVCache
-
-logger = logging.getLogger(__name__)
 
 # Log acceptance distribution every N spec cycles when EXO_DSV4_MTP_LOG=1.
 # Set to 0 / unset to silence.
