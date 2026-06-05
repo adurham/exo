@@ -1681,10 +1681,40 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             cur_bump = getattr(pc, "_pending_offset_bump", 0)
             return (pc._pool_offset + cur_bump) != (pre_off + pre_bump)
 
-        contamination = any_rejection and any(
+        flushed_any = any(
             _pool_flushed(pc, snap)
             for pc, snap in zip(_pool_caches, _pool_snaps, strict=True)
         )
+        contamination = any_rejection and flushed_any
+
+        # Diagnostic counter (EXO_DSV4_BATCH_POOL_DIAG=1, very cheap).
+        # Prints once every 50 cycles so we can confirm the contamination
+        # branch is actually firing under c>=2 100K load.
+        if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
+            self._batch_pool_diag_cycles = (
+                getattr(self, "_batch_pool_diag_cycles", 0) + 1
+            )
+            if any_rejection:
+                self._batch_pool_diag_reject = (
+                    getattr(self, "_batch_pool_diag_reject", 0) + 1
+                )
+            if flushed_any:
+                self._batch_pool_diag_flush = (
+                    getattr(self, "_batch_pool_diag_flush", 0) + 1
+                )
+            if contamination:
+                self._batch_pool_diag_contam = (
+                    getattr(self, "_batch_pool_diag_contam", 0) + 1
+                )
+            if self._batch_pool_diag_cycles % 50 == 0:
+                logger.info(
+                    f"[BATCH_POOL_DIAG] cycles={self._batch_pool_diag_cycles} "
+                    f"any_rejection={getattr(self, '_batch_pool_diag_reject', 0)} "
+                    f"flushed_any={getattr(self, '_batch_pool_diag_flush', 0)} "
+                    f"contamination={getattr(self, '_batch_pool_diag_contam', 0)} "
+                    f"pool_caches={len(_pool_caches)} "
+                    f"snapshotted={sum(1 for s in _pool_snaps if s is not None)}"
+                )
 
         if not contamination:
             # (a) Cheap correct path: per-stream trim of every cache.
