@@ -1706,7 +1706,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 self._batch_pool_diag_contam = (
                     getattr(self, "_batch_pool_diag_contam", 0) + 1
                 )
-            if self._batch_pool_diag_cycles % 50 == 0:
+            if self._batch_pool_diag_cycles % 10 == 0:
                 logger.info(
                     f"[BATCH_POOL_DIAG] cycles={self._batch_pool_diag_cycles} "
                     f"any_rejection={getattr(self, '_batch_pool_diag_reject', 0)} "
