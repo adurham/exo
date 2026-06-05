@@ -1394,6 +1394,48 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if len(gen_batch) > 1:
             for c in gen_batch.prompt_cache:
                 _upgrade_cache_to_per_stream(c)
+            # Post-swap cache-state dump (EXO_DSV4_BATCH_POOL_DIAG=1).
+            # Confirms whether _upgrade_cache_to_per_stream leaves the
+            # rotating caches in a sane per-stream state after a long-
+            # context batched prefill. Writes once per first-step entry.
+            if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
+                try:
+                    with open(
+                        f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log", "a"
+                    ) as _df:
+
+                        def _dump_cache(_c: Any, _label: str) -> None:
+                            _off = getattr(_c, "offset", None)
+                            _uoff = getattr(_c, "_offset", None)
+                            _idx = getattr(_c, "_idx", None)
+                            _psm = getattr(_c, "_per_stream_max", "<unset>")
+                            _opy = getattr(_c, "_offsets_py", "<unset>")
+                            _ks = getattr(_c, "keys", None)
+                            _kshape = None if _ks is None else tuple(_ks.shape)
+                            _lp = getattr(_c, "left_padding", None)
+                            _df.write(
+                                f"{_label}: type={type(_c).__name__} "
+                                f"offset={_off} _offset={_uoff} _idx={_idx} "
+                                f"_per_stream_max={_psm} _offsets_py={_opy} "
+                                f"keys.shape={_kshape} "
+                                f"left_padding={_lp}\n"
+                            )
+
+                        for _ci, _c in enumerate(gen_batch.prompt_cache):
+                            if isinstance(_c, CacheList):
+                                for _si, _sub in enumerate(_c.caches):
+                                    _dump_cache(_sub, f"c{_ci}.sub{_si}")
+                            else:
+                                _dump_cache(_c, f"c{_ci}")
+                        _df.write("--- end first_step swap dump ---\n")
+                except Exception as _e:
+                    try:
+                        with open(
+                            f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log", "a"
+                        ) as _df2:
+                            _df2.write(f"DUMP_ERROR: {_e}\n")
+                    except Exception:
+                        pass
 
         decode_pre_norm = self._captured.get("pre_norm")
         if decode_pre_norm is not None:
