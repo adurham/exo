@@ -83,3 +83,39 @@ confirming the model emitted real, coherent text.
 
 Hardware: 2× Mac Studio M4 Max 128 GB, RDMA over TB5, KV cache bf16
 (`EXO_KV_CACHE_BITS=0`), γ=2.
+
+## Future model bringup — recurring bug classes
+
+Qwen3.6 was the **first hybrid-attention / fused-MoE model** run on this fork
+(30 DeltaNet/SSM + 10 full-attention layers; fused `experts.gate_up_proj` /
+`experts.down_proj` + a shared expert). That architecture is what exposed all
+four bugs above — DSV4 (pure MQA, MLA caches) never tripped them. When bringing
+up the **next** hybrid or fused-MoE model, expect these classes to recur and
+check them first:
+
+1. **KV-quant sentinel leak.** Any model with plain `KVCache` full-attention
+   layers will hit the `EXO_KV_CACHE_BITS=0` path. The env path must map `0 →
+   None` (bf16), else `QuantizedKVCache(bits=0)` → ZeroDivision on the first
+   such layer. (`cache.py:_effective_kv_cache_bits`)
+
+2. **MTP MoE weight layout.** The MTP loader must handle the model's expert
+   layout. Fused/stacked (`experts.gate_up_proj` [E,2I,H] + `experts.down_proj`)
+   needs a midpoint gate_up split → `switch_mlp.*`, mirroring the main model's
+   `sanitize()`. Legacy per-expert (`experts.N.*`) is the other branch.
+   (`mtp_module.py`)
+
+3. **Tensor-parallel layer wrappers.** Under TP, `layer.mlp` is a
+   `CustomMlxLayer`/`ShardedMoE` wrapper, not the raw block. Any code doing
+   `type(layer.X)(args)` to clone a submodule must unwrap via `.original_layer`
+   first, or it stores `args` as the wrapped layer and crashes at forward
+   (`'TextModelArgs' object has no attribute '__call__'`). (`mtp_module.py`)
+
+4. **Placement plumbing.** Programmatic `/place_instance` requires the master to
+   pass `node_backends` (and `node_rdma_ctl` for RDMA). The dashboard
+   `create_instance` path doesn't exercise this, so a regression here is easy to
+   miss. (`master/main.py`)
+
+Quick verification recipe for a new model: load it, `grep -iE 'MTP speculative
+decoding enabled|Falling back|crashed with critical' ~/exo.log`, then run
+`bench/mtp_longctx_probe.py` to confirm decode-tps + needle recall + zero
+BOS-spam before quoting any throughput.
