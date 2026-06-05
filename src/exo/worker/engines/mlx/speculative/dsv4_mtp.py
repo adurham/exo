@@ -1311,6 +1311,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # only -- catastrophic regression for stream 1.
             if hasattr(self.mtp, "activate_for_uids"):
                 self.mtp.activate_for_uids(uids)
+            # Diagnostic: confirm which spec path runs at each BS.
+            # Once-per-50-cycle counter, cheap; gated by env.
+            if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
+                _bs = len(uids)
+                key = f"_path_count_bs{_bs}"
+                setattr(self, key, getattr(self, key, 0) + 1)
+                total = getattr(self, "_path_count_total", 0) + 1
+                self._path_count_total = total
+                if total % 50 == 0:
+                    counts = {
+                        k.replace("_path_count_", ""): getattr(self, k)
+                        for k in dir(self)
+                        if k.startswith("_path_count_bs")
+                    }
+                    logger.info(
+                        f"[BATCH_POOL_DIAG_DISPATCH] total={total} by_bs={counts}"
+                    )
             if len(uids) == 1:
                 return [], self._speculative_next(uids[0])
             return [], self._speculative_next_batch(uids)
