@@ -29,19 +29,13 @@ BS>1 batched-MTP is NOT yet enabled here — that's Phase 5.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections import deque
 from typing import Any, BinaryIO, Optional, Sequence, cast
 
 import mlx.core as mx
-
-# Use the loguru logger that the rest of exo writes to ~/exo.log via.
-# Prior `logging.getLogger(__name__)` went to stdlib logging which is not
-# wired to the exo sink — every logger.info() in this file silently dropped.
-# 2026-06-05: discovered while diagnosing c=2 100K BOS-spam — diag log lines
-# I'd added were going to /dev/null until this fix.
-from exo.worker.runner.bootstrap import logger
 
 from mlx_lm.models.cache import (
     BatchRotatingKVCache,
@@ -94,6 +88,8 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
         cache_obj, PerStreamBatchRotatingKVCache
     ):
         cache_obj.__class__ = PerStreamBatchRotatingKVCache
+
+logger = logging.getLogger(__name__)
 
 # Log acceptance distribution every N spec cycles when EXO_DSV4_MTP_LOG=1.
 # Set to 0 / unset to silence.
@@ -1297,15 +1293,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 getattr(self, "_dispatch_diag_calls", 0) + 1
             )
             if self._dispatch_diag_calls % 25 == 0:
-                logger.info(
-                    f"[DISPATCH_DIAG] call={self._dispatch_diag_calls} "
-                    f"gamma={self.gamma} "
-                    f"len_gen_batch={len(gen_batch)} "
-                    f"len_prompt_batch={len(self._prompt_batch)} "
-                    f"len_unprocessed={len(self._unprocessed_sequences)} "
-                    f"spec_eligible={spec_eligible} "
-                    f"uids={list(gen_batch.uids)}"
-                )
+                # Direct file write — dsv4_mtp.py uses stdlib logging which
+                # is not wired to the exo loguru sink, so every logger.info
+                # in this file silently drops. Bypass via /tmp file.
+                try:
+                    with open(f"/tmp/dsv4_dispatch_diag_pid{os.getpid()}.log", "a") as _f:
+                        _f.write(
+                            f"call={self._dispatch_diag_calls} "
+                            f"gamma={self.gamma} "
+                            f"len_gen_batch={len(gen_batch)} "
+                            f"len_prompt_batch={len(self._prompt_batch)} "
+                            f"len_unprocessed={len(self._unprocessed_sequences)} "
+                            f"spec_eligible={spec_eligible} "
+                            f"uids={list(gen_batch.uids)}\n"
+                        )
+                except Exception:
+                    pass
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
@@ -1346,9 +1349,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         for k in dir(self)
                         if k.startswith("_path_count_bs")
                     }
-                    logger.info(
-                        f"[BATCH_POOL_DIAG_DISPATCH] total={total} by_bs={counts}"
-                    )
+                    try:
+                        with open(
+                            f"/tmp/dsv4_dispatch_diag_pid{os.getpid()}.log", "a"
+                        ) as _f:
+                            _f.write(f"PATH_DISPATCH total={total} by_bs={counts}\n")
+                    except Exception:
+                        pass
             if len(uids) == 1:
                 return [], self._speculative_next(uids[0])
             return [], self._speculative_next_batch(uids)
@@ -1745,14 +1752,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     getattr(self, "_batch_pool_diag_contam", 0) + 1
                 )
             if self._batch_pool_diag_cycles % 10 == 0:
-                logger.info(
-                    f"[BATCH_POOL_DIAG] cycles={self._batch_pool_diag_cycles} "
-                    f"any_rejection={getattr(self, '_batch_pool_diag_reject', 0)} "
-                    f"flushed_any={getattr(self, '_batch_pool_diag_flush', 0)} "
-                    f"contamination={getattr(self, '_batch_pool_diag_contam', 0)} "
-                    f"pool_caches={len(_pool_caches)} "
-                    f"snapshotted={sum(1 for s in _pool_snaps if s is not None)}"
-                )
+                try:
+                    with open(
+                        f"/tmp/dsv4_dispatch_diag_pid{os.getpid()}.log", "a"
+                    ) as _f:
+                        _f.write(
+                            f"BATCH_POOL cycles={self._batch_pool_diag_cycles} "
+                            f"reject={getattr(self, '_batch_pool_diag_reject', 0)} "
+                            f"flushed={getattr(self, '_batch_pool_diag_flush', 0)} "
+                            f"contam={getattr(self, '_batch_pool_diag_contam', 0)} "
+                            f"pool_caches={len(_pool_caches)} "
+                            f"snapshotted={sum(1 for s in _pool_snaps if s is not None)}\n"
+                        )
+                except Exception:
+                    pass
 
         if not contamination:
             # (a) Cheap correct path: per-stream trim of every cache.
