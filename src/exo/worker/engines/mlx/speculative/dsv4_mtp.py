@@ -1285,6 +1285,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             and len(self._prompt_batch) == 0
             and len(self._unprocessed_sequences) == 0
         )
+        # Diagnostic: log raw inputs to spec_eligible computation at the
+        # start of each _next call, so we can see what's actually
+        # gating dispatch under c>=2 load.
+        if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
+            self._dispatch_diag_calls = (
+                getattr(self, "_dispatch_diag_calls", 0) + 1
+            )
+            if self._dispatch_diag_calls % 25 == 0:
+                logger.info(
+                    f"[DISPATCH_DIAG] call={self._dispatch_diag_calls} "
+                    f"gamma={self.gamma} "
+                    f"len_gen_batch={len(gen_batch)} "
+                    f"len_prompt_batch={len(self._prompt_batch)} "
+                    f"len_unprocessed={len(self._unprocessed_sequences)} "
+                    f"spec_eligible={spec_eligible} "
+                    f"uids={list(gen_batch.uids)}"
+                )
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
