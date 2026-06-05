@@ -1302,30 +1302,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             and len(self._prompt_batch) == 0
             and len(self._unprocessed_sequences) == 0
         )
-        # Diagnostic: log raw inputs to spec_eligible computation at the
-        # start of each _next call, so we can see what's actually
-        # gating dispatch under c>=2 load.
-        if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
-            self._dispatch_diag_calls = (
-                getattr(self, "_dispatch_diag_calls", 0) + 1
-            )
-            if self._dispatch_diag_calls % 25 == 0:
-                # Direct file write — dsv4_mtp.py uses stdlib logging which
-                # is not wired to the exo loguru sink, so every logger.info
-                # in this file silently drops. Bypass via /tmp file.
-                try:
-                    with open(f"/tmp/dsv4_dispatch_diag_pid{os.getpid()}.log", "a") as _f:
-                        _f.write(
-                            f"call={self._dispatch_diag_calls} "
-                            f"gamma={self.gamma} "
-                            f"len_gen_batch={len(gen_batch)} "
-                            f"len_prompt_batch={len(self._prompt_batch)} "
-                            f"len_unprocessed={len(self._unprocessed_sequences)} "
-                            f"spec_eligible={spec_eligible} "
-                            f"uids={list(gen_batch.uids)}\n"
-                        )
-                except Exception:
-                    pass
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
@@ -1352,27 +1328,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # only -- catastrophic regression for stream 1.
             if hasattr(self.mtp, "activate_for_uids"):
                 self.mtp.activate_for_uids(uids)
-            # Diagnostic: confirm which spec path runs at each BS.
-            # Once-per-50-cycle counter, cheap; gated by env.
-            if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
-                _bs = len(uids)
-                key = f"_path_count_bs{_bs}"
-                setattr(self, key, getattr(self, key, 0) + 1)
-                total = getattr(self, "_path_count_total", 0) + 1
-                self._path_count_total = total
-                if total % 50 == 0:
-                    counts = {
-                        k.replace("_path_count_", ""): getattr(self, k)
-                        for k in dir(self)
-                        if k.startswith("_path_count_bs")
-                    }
-                    try:
-                        with open(
-                            f"/tmp/dsv4_dispatch_diag_pid{os.getpid()}.log", "a"
-                        ) as _f:
-                            _f.write(f"PATH_DISPATCH total={total} by_bs={counts}\n")
-                    except Exception:
-                        pass
             if len(uids) == 1:
                 return [], self._speculative_next(uids[0])
             return [], self._speculative_next_batch(uids)
@@ -1411,48 +1366,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if len(gen_batch) > 1:
             for c in gen_batch.prompt_cache:
                 _upgrade_cache_to_per_stream(c)
-            # Post-swap cache-state dump (EXO_DSV4_BATCH_POOL_DIAG=1).
-            # Confirms whether _upgrade_cache_to_per_stream leaves the
-            # rotating caches in a sane per-stream state after a long-
-            # context batched prefill. Writes once per first-step entry.
-            if os.environ.get("EXO_DSV4_BATCH_POOL_DIAG") == "1":
-                try:
-                    with open(
-                        f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log", "a"
-                    ) as _df:
-
-                        def _dump_cache(_c: Any, _label: str) -> None:
-                            _off = getattr(_c, "offset", None)
-                            _uoff = getattr(_c, "_offset", None)
-                            _idx = getattr(_c, "_idx", None)
-                            _psm = getattr(_c, "_per_stream_max", "<unset>")
-                            _opy = getattr(_c, "_offsets_py", "<unset>")
-                            _ks = getattr(_c, "keys", None)
-                            _kshape = None if _ks is None else tuple(_ks.shape)
-                            _lp = getattr(_c, "left_padding", None)
-                            _df.write(
-                                f"{_label}: type={type(_c).__name__} "
-                                f"offset={_off} _offset={_uoff} _idx={_idx} "
-                                f"_per_stream_max={_psm} _offsets_py={_opy} "
-                                f"keys.shape={_kshape} "
-                                f"left_padding={_lp}\n"
-                            )
-
-                        for _ci, _c in enumerate(gen_batch.prompt_cache):
-                            if isinstance(_c, CacheList):
-                                for _si, _sub in enumerate(_c.caches):
-                                    _dump_cache(_sub, f"c{_ci}.sub{_si}")
-                            else:
-                                _dump_cache(_c, f"c{_ci}")
-                        _df.write("--- end first_step swap dump ---\n")
-                except Exception as _e:
-                    try:
-                        with open(
-                            f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log", "a"
-                        ) as _df2:
-                            _df2.write(f"DUMP_ERROR: {_e}\n")
-                    except Exception:
-                        pass
 
         decode_pre_norm = self._captured.get("pre_norm")
         if decode_pre_norm is not None:

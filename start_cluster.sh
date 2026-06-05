@@ -776,11 +776,6 @@ for NODE in "${NODES[@]}"; do
     # per cycle to /tmp/dsv4_spec_trace_pid<PID>.jsonl on rank 0. Diagnostic
     # only — pairs with a plain-greedy capture to find first divergence.
     [ -n "${EXO_DSV4_SPEC_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_TRACE=$EXO_DSV4_SPEC_TRACE"
-    # Cheap once-per-50-cycles counter for the c>=2 _speculative_next_batch
-    # contamination branch. Diagnostic only — gates the BATCH_POOL_DIAG log
-    # lines in dsv4_mtp.py. Used to confirm the pool-contamination branch
-    # is actually firing under c>=2 100K load (May 2026 bug discovery).
-    [ -n "${EXO_DSV4_BATCH_POOL_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_POOL_DIAG=$EXO_DSV4_BATCH_POOL_DIAG"
     # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
     # argmax to /tmp/dsv4_tree_alpha_probe_pid<PID>.jsonl on rank 0 only.
