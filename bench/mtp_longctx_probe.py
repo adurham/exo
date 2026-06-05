@@ -136,9 +136,16 @@ def main():
     ap.add_argument("--iters", type=int, default=3)
     ap.add_argument("--max-tokens", type=int, default=200)
     ap.add_argument("--label", default="run")
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=7749,
+        help="Prompt seed. Vary it to defeat the server-side prefix cache "
+        "and force a genuine COLD prefill each run.",
+    )
     args = ap.parse_args()
 
-    random.seed(7749)
+    random.seed(args.seed)
     prompt, needle = build_prompt(args.target_tokens)
     print(f"[{args.label}] prompt chars={len(prompt)} (~{args.target_tokens} tok target), needle={needle}")
 
