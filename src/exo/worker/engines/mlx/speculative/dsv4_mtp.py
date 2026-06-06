@@ -1304,9 +1304,24 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if uid in self._token_buffer and self._token_buffer[uid]:
                     return [], self._yield_buffered(uid)
 
+        # Speculative decode at c>=2 (BS>1) is correct for SHORT context but
+        # degrades LONG-RANGE retrieval: the BS>1 verify forward (L=gamma+1)
+        # returns subtly wrong logits for sparse-compressed (CompressedAttention)
+        # layers, so a needle far outside the local window is retrieved as a
+        # confident-but-wrong value (e.g. 100K needle "FALCON-MERCURY-7749"
+        # decoded as "FULL"). Exhaustively isolated 2026-06-05: spec-OFF c>=2
+        # 100K recalls the needle 2/2; spec-ON c>=2 misses; independent of
+        # gamma (γ=1 also fails), eagle (EAGLE_K=0 fails), batched-vs-serial
+        # prefill, and pool snapshot/freeze (pool content is provably fine).
+        # The defect is in the BS>1 spec verify forward's compressed-attention
+        # read itself — a deep open item. Until that's root-caused, gate spec
+        # to single-stream (BS==1) so concurrent requests use the correct
+        # non-spec path (only ~15% slower at c=2) and single requests keep
+        # full MTP speed. Override with EXO_DSV4_SPEC_MAX_BATCH (default 1).
+        _spec_max_batch = int(os.environ.get("EXO_DSV4_SPEC_MAX_BATCH", "1"))
         spec_eligible = (
             self.gamma > 0
-            and len(gen_batch) >= 1
+            and 1 <= len(gen_batch) <= _spec_max_batch
             and len(self._prompt_batch) == 0
             and len(self._unprocessed_sequences) == 0
         )
