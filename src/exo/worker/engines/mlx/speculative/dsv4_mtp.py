@@ -38,7 +38,6 @@ from typing import Any, BinaryIO, Optional, Sequence, cast
 import mlx.core as mx
 
 from mlx_lm.models.cache import (
-    BatchPoolingCache,
     BatchRotatingKVCache,
     CacheList,
     PerStreamBatchRotatingKVCache,
@@ -831,20 +830,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         them around verify to keep the compressed-attention context
         consistent with the committed token stream. See PoolingCache.save_meta.
         """
-        # Match BOTH the scalar PoolingCache (c=1 path) and the batched
-        # BatchPoolingCache (c>=2 path). BatchPoolingCache extends _BaseCache,
-        # NOT PoolingCache, so a bare ``isinstance(sub, PoolingCache)`` check
-        # silently returned [] at c=2 — which made the spec-verify pool
-        # snapshot/restore a no-op and left rejected-draft summaries baked
-        # into the compressed pool (c=2 100K long-range needle miss).
-        pool_types = (PoolingCache, BatchPoolingCache)
         pools: list[Any] = []
         for c in gen_batch.prompt_cache:
             if isinstance(c, CacheList):
                 for sub in c.caches:
-                    if isinstance(sub, pool_types):
+                    if isinstance(sub, PoolingCache):
                         pools.append(sub)
-            elif isinstance(c, pool_types):
+            elif isinstance(c, PoolingCache):
                 pools.append(c)
         return pools
 
