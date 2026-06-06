@@ -1434,15 +1434,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if prof is not None:
             t_cycle_start = time.perf_counter()
 
-        # EXPERIMENT (EXO_DSV4_C2_POOL_FREEZE=1): freeze the compressed pool
-        # for the entire draft+verify so speculative forwards NEVER mutate the
-        # long-range pool. Tests whether spec pool mutation is the c=2 100K
-        # needle-miss mechanism (spec-OFF c=2 works; spec-ON misses).
-        _c2_pool_freeze = os.environ.get("EXO_DSV4_C2_POOL_FREEZE") == "1"
-        if _c2_pool_freeze:
-            from mlx_lm.models import deepseek_v4 as _dsv4_mod
-            _dsv4_mod._set_pool_freeze(True)
-
         # 1. Draft γ tokens — chained, batched across uids.
         # Stack pre_norms into (N, 1, hidden_size).
         stacked_pre_norm = mx.concatenate(pre_norms, axis=0)  # (N, 1, hidden)
@@ -1488,11 +1479,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             self._captured,
         )
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
-
-        if _c2_pool_freeze:
-            mx.eval(verify_pre_norm, verify_logits)
-            from mlx_lm.models import deepseek_v4 as _dsv4_mod2
-            _dsv4_mod2._set_pool_freeze(False)
 
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
