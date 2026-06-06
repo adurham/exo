@@ -41,7 +41,7 @@ SPECIAL_TOKEN_MARKERS = [
 ]
 
 
-def build_prompt(target_tokens: int) -> tuple[str, str]:
+def build_prompt(target_tokens: int, needle_frac: float | None = None) -> tuple[str, str]:
     # Qwen3.6 tokenizer ~1.39 tokens/word-ish; empirically ~2.9 chars/token
     target_chars = int(target_tokens * 2.9)
     needle = (
@@ -50,7 +50,13 @@ def build_prompt(target_tokens: int) -> tuple[str, str]:
     )
     chunks: list[str] = []
     char_count = 0
-    needle_at = random.randint(int(target_chars * 0.35), int(target_chars * 0.6))
+    if needle_frac is not None:
+        # Deterministic needle placement at a fixed fraction of the doc.
+        # Used to test LOCAL-window (frac~0.99, last ~100 tok) vs deep-POOL
+        # (frac~0.1) retrieval separately.
+        needle_at = int(target_chars * needle_frac)
+    else:
+        needle_at = random.randint(int(target_chars * 0.35), int(target_chars * 0.6))
     placed = False
     i = 0
     while char_count < target_chars:
@@ -143,10 +149,17 @@ def main():
         help="Prompt seed. Vary it to defeat the server-side prefix cache "
         "and force a genuine COLD prefill each run.",
     )
+    ap.add_argument(
+        "--needle-frac",
+        type=float,
+        default=None,
+        help="Fixed needle position as fraction of doc (e.g. 0.99 = local "
+        "window, 0.1 = deep pool). Omit for random 0.35-0.6.",
+    )
     args = ap.parse_args()
 
     random.seed(args.seed)
-    prompt, needle = build_prompt(args.target_tokens)
+    prompt, needle = build_prompt(args.target_tokens, args.needle_frac)
     print(f"[{args.label}] prompt chars={len(prompt)} (~{args.target_tokens} tok target), needle={needle}")
 
     rates, ttfts = [], []
