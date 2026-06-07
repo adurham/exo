@@ -196,20 +196,30 @@ class MTPPredictor:
         weights = mx.load(mtp_weights_path)
 
         # ---- Sanitize norm weights ----
-        # CRITICAL: Qwen3.5 HuggingFace format stores ALL norm weights as (actual - 1.0).
-        # mlx-lm's TextModel.sanitize() adds +1.0 back for the main model norms, but
-        # MTP weights are stripped before sanitize runs. We must apply the same shift
-        # to ALL 1-D norm weights in the MTP.
+        # Qwen3.5/3.6 HuggingFace FULL-model format stores ALL norm weights as
+        # (actual - 1.0). mlx-lm's TextModel.sanitize() adds +1.0 back for the
+        # main model norms, but MTP weights are stripped before sanitize runs,
+        # so when the MTP head was EXTRACTED from a full repo we apply the same
+        # +1.0 shift to every 1-D (norm) weight here.
         #
-        # Evidence: pre_fc_norm_hidden has mean=-0.17 raw → 0.83 after shift (plausible).
-        # Linear projection weights (2-D) are NOT shifted.
-        shifted = []
-        for k in list(weights.keys()):
-            if weights[k].ndim == 1:
-                weights[k] = weights[k] + 1.0
-                shifted.append(k)
-        if shifted:
-            print(f"  Sanitized {len(shifted)} norm weights (+1.0 shift)")
+        # EXCEPTION: dedicated MLX drafter repos (mlx-community/<base>-MTP-bf16)
+        # ship the norms ALREADY +1-shifted. The extractor drops a sibling
+        # ``<cache>.noshift`` marker for those; when present we must NOT shift
+        # again or we'd double-shift the norms and corrupt the draft.
+        # (Linear projection weights (2-D) are never shifted.)
+        import os as _os
+        _noshift_marker = os.path.splitext(mtp_weights_path)[0] + ".noshift"
+        _already_shifted = _os.path.exists(_noshift_marker)
+        if _already_shifted:
+            print(f"  Dedicated MTP head (pre-shifted norms) — skipping +1.0 shift")
+        else:
+            shifted = []
+            for k in list(weights.keys()):
+                if weights[k].ndim == 1:
+                    weights[k] = weights[k] + 1.0
+                    shifted.append(k)
+            if shifted:
+                print(f"  Sanitized {len(shifted)} norm weights (+1.0 shift)")
 
         # Detect pre-quantized weights (have .scales/.biases companions)
         _is_prequantized = any(k.endswith('.scales') for k in weights)

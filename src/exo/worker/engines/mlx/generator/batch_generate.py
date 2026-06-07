@@ -705,6 +705,18 @@ class ExoBatchGenerator:
             has_mtp = args and getattr(args, 'mtp_num_hidden_layers', 0) > 0
 
             if has_mtp or 'qwen3_5' in model_type:
+                # Prefer a dedicated, MLX-ready MTP drafter repo
+                # (mlx-community/<base>-MTP-bf16) when one is published — its
+                # norm weights are already +1-shifted for MLX and the proj
+                # weights are bit-identical to the upstream full-model MTP, so
+                # using it directly removes the fragile runtime +1 shift
+                # heuristic. Falls back to the upstream Qwen/<base> full repo
+                # (MTP tensors extracted from its shards) when no dedicated
+                # drafter exists.
+                dedicated = self._dedicated_mtp_repo(self.model_id) if self.model_id else ''
+                if dedicated:
+                    logger.info(f"Auto-detected dedicated MTP drafter: {dedicated} (model_type={model_type})")
+                    return dedicated
                 # Map model_id to original HF repo (strip mlx-community prefix + quant suffix)
                 repo = self._model_id_to_hf_repo(self.model_id) if self.model_id else ''
                 if repo:
@@ -740,6 +752,47 @@ class ExoBatchGenerator:
             return f"Qwen/{name}"
 
         return ''
+
+    @staticmethod
+    def _dedicated_mtp_repo(model_id: str) -> str:
+        """Return mlx-community/<base>-MTP-bf16 if it exists on HF, else ''.
+
+        The dedicated drafter repos publish the MTP head standalone, already
+        +1-norm-shifted for MLX. We prefer them over extracting from the
+        upstream full-model repo. An EXO_MTP_NO_DEDICATED=1 escape hatch
+        disables this preference. The HF existence check is cached per repo
+        so we don't hit the network on every detection.
+        """
+        import os as _os
+        if _os.environ.get("EXO_MTP_NO_DEDICATED", "") == "1":
+            return ''
+        # Strip mlx-community/ prefix and a quant suffix to get <base>.
+        name = model_id
+        if name.startswith('mlx-community/'):
+            name = name[len('mlx-community/'):]
+        for suffix in ['-4bit', '-8bit', '-6bit', '-5bit', '-bf16', '-fp16',
+                       '-MLX-4bit', '-MLX-8bit', '-MLX']:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+                break
+        candidate = f"mlx-community/{name}-MTP-bf16"
+        # Cache existence checks on the class to avoid repeat network calls.
+        cache = ExoBatchGenerator.__dict__.get('_dedicated_mtp_cache')
+        if cache is None:
+            cache = {}
+            ExoBatchGenerator._dedicated_mtp_cache = cache  # type: ignore[attr-defined]
+        if candidate in cache:
+            return cache[candidate]
+        exists = ''
+        try:
+            from huggingface_hub import HfApi
+            if HfApi().repo_exists(candidate):
+                exists = candidate
+        except Exception as e:
+            logger.debug(f"Dedicated MTP repo check for {candidate} failed: {e}")
+            exists = ''
+        cache[candidate] = exists
+        return exists
 
     def _extract_mtp_from_local(self, model_dir, cache_dir, cache_key) -> str | None:
         """Check local model directory for MTP weights and extract if found."""
@@ -811,10 +864,20 @@ class ExoBatchGenerator:
             return None
 
     def _extract_mtp_from_hf(self, repo_id: str) -> str:
-        """Download MTP tensors from HF repo and cache as a single safetensors file.
+        """Download MTP tensors from an HF repo and cache as one safetensors file.
 
-        Uses the weight index to only download shards containing MTP weights,
-        avoiding a full model download for large models (e.g. 397B = 220GB).
+        Handles two repo shapes:
+          * FULL model repo (e.g. Qwen/Qwen3.6-35B-A3B): MTP tensors are a
+            subset of the sharded weights, keyed ``model.mtp.*``. We use the
+            weight index to download only the shards that carry them.
+          * DEDICATED drafter repo (mlx-community/<base>-MTP-bf16): a single
+            ``model.safetensors`` whose keys are BARE (``fc.weight``,
+            ``layers.0.*``, ``norm.weight``, ``pre_fc_norm_*``) and whose norm
+            weights are ALREADY +1-shifted for MLX.
+
+        All kept tensors are normalized to the ``mtp.`` prefix the MTP loader
+        expects. For dedicated (pre-shifted) heads we drop a ``.noshift``
+        marker next to the cache so the loader skips its runtime +1 shift.
         """
         import hashlib
         import json
@@ -830,47 +893,82 @@ class ExoBatchGenerator:
 
         logger.info(f"Downloading MTP weights from {repo_id}...")
 
-        # Use weight index to find only the shards containing MTP weights
-        try:
-            idx_path = hf_hub_download(repo_id, "model.safetensors.index.json")
-            with open(idx_path) as f:
-                idx = json.load(f)
-            mtp_shards = {
-                shard for key, shard in idx["weight_map"].items()
-                if key.startswith("model.mtp.") or key.startswith("mtp.")
-            }
-            logger.info(f"MTP weights span {len(mtp_shards)} of {len(set(idx['weight_map'].values()))} shards")
-        except Exception:
-            mtp_shards = None
+        # The dedicated drafter repos are the entire (small) model with bare
+        # keys and already-shifted norms. Detect them by name/model_type so we
+        # take the bare-key + no-shift path.
+        is_dedicated = repo_id.endswith("-MTP-bf16") or repo_id.endswith("-MTP")
+        if not is_dedicated:
+            try:
+                cfg_path = hf_hub_download(repo_id, "config.json")
+                with open(cfg_path) as f:
+                    _cfg = json.load(f)
+                if str(_cfg.get("model_type", "")).endswith("_mtp"):
+                    is_dedicated = True
+            except Exception:
+                pass
 
-        mtp_tensors = {}
+        def _norm_key(k: str) -> str | None:
+            """Map a raw tensor key to the canonical ``mtp.*`` form, or None to drop."""
+            if k.startswith("model.mtp."):
+                return "mtp." + k[len("model.mtp."):]
+            if k.startswith("mtp."):
+                return k
+            if is_dedicated:
+                # Bare drafter keys (fc., layers., norm., pre_fc_norm_*).
+                return "mtp." + k
+            return None
+
+        mtp_tensors: dict = {}
+
+        # Use the weight index (full repos) to fetch only MTP shards.
+        mtp_shards = None
+        if not is_dedicated:
+            try:
+                idx_path = hf_hub_download(repo_id, "model.safetensors.index.json")
+                with open(idx_path) as f:
+                    idx = json.load(f)
+                mtp_shards = {
+                    shard for key, shard in idx["weight_map"].items()
+                    if key.startswith("model.mtp.") or key.startswith("mtp.")
+                }
+                logger.info(f"MTP weights span {len(mtp_shards)} of {len(set(idx['weight_map'].values()))} shards")
+            except Exception:
+                mtp_shards = None
 
         if mtp_shards:
-            # Download only the shards containing MTP weights
             for shard_name in sorted(mtp_shards):
                 shard_path = hf_hub_download(repo_id, shard_name)
-                tensors = load_file(shard_path)
-                for k, v in tensors.items():
-                    if k.startswith("model.mtp."):
-                        mtp_tensors[k.replace("model.mtp.", "")] = v
-                    elif k.startswith("mtp."):
-                        mtp_tensors[k] = v
+                for k, v in load_file(shard_path).items():
+                    nk = _norm_key(k)
+                    if nk is not None:
+                        mtp_tensors[nk] = v
         else:
-            # Fallback: download all safetensors (small models)
+            # Dedicated drafter repo, or a small full repo with no index:
+            # download every safetensors and keep the MTP/bare tensors.
             from huggingface_hub import snapshot_download
             model_dir = snapshot_download(repo_id, allow_patterns=["*.safetensors", "*.json"])
-            model_path = Path(model_dir)
-            for sf_file in sorted(model_path.glob("*.safetensors")):
-                tensors = load_file(str(sf_file))
-                for k, v in tensors.items():
-                    if k.startswith("model.mtp."):
-                        mtp_tensors[k.replace("model.mtp.", "")] = v
+            for sf_file in sorted(Path(model_dir).glob("*.safetensors")):
+                for k, v in load_file(str(sf_file)).items():
+                    nk = _norm_key(k)
+                    if nk is not None:
+                        mtp_tensors[nk] = v
 
         if not mtp_tensors:
             raise ValueError(f"No MTP tensors found in {repo_id}")
 
         save_file(mtp_tensors, str(cached_path))
-        logger.info(f"Cached {len(mtp_tensors)} MTP tensors to {cached_path}")
+        # Marker: dedicated heads ship pre-shifted norms — tell the loader to
+        # skip its +1 shift so we don't double-shift.
+        marker = cached_path.with_suffix(".noshift")
+        if is_dedicated:
+            marker.write_text(repo_id)
+            logger.info(f"Dedicated MTP head — wrote no-shift marker {marker.name}")
+        elif marker.exists():
+            marker.unlink()
+        logger.info(
+            f"Cached {len(mtp_tensors)} MTP tensors to {cached_path} "
+            f"(dedicated={is_dedicated})"
+        )
         return str(cached_path)
 
     def warmup_speculative(self, model, tokenizer) -> None:
