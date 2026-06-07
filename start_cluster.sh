@@ -468,9 +468,55 @@ for node in macstudio-m4-1 macstudio-m4-2; do
     ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
 done
 
-# M4-1 ↔ M4-2 (direct link)
-if ! ssh macstudio-m4-1 "ping -c 1 -W 1 $M4_2_TO_M4_1" &> /dev/null; then echo "ERROR: macstudio-m4-1 cannot directly reach M4-2 ($M4_2_TO_M4_1). Check cable!"; exit 1; fi
-if ! ssh macstudio-m4-2 "ping -c 1 -W 1 $M4_1_TO_M4_2" &> /dev/null; then echo "ERROR: macstudio-m4-2 cannot directly reach M4-1 ($M4_1_TO_M4_2). Check cable!"; exit 1; fi
+# Repair the DIRECT-LINK connected route. Observed 2026-06-07: after some
+# reboots/crashes macOS leaves the TB interface UP with the right /24 IP but
+# WITHOUT a working connected route — m4-2 had no 192.168.204 route at all and
+# m4-1's route carried the `!` (reject) flag. The cable was physically fine
+# (80 Gb/s, ARP resolved) but IP traffic black-holed → the ping below failed
+# with a misleading "Check cable!". A warm reboot does NOT fix it (macOS
+# recreates the same broken route at boot); reinstalling the connected route
+# does. So before pinging, force a clean connected route for each node's
+# direct-link /24 on the interface that owns the link IP.
+#   $1 = node, $2 = the LOCAL link IP on that node (e.g. 192.168.204.1)
+repair_direct_route() {
+    local node="$1" local_ip="$2"
+    [ -z "$local_ip" ] && return 0
+    local subnet="${local_ip%.*}.0/24"
+    ssh "$node" "
+        iface=\$(ifconfig 2>/dev/null | awk -v ip='$local_ip' '/^[a-z0-9]+: /{i=substr(\$1,1,length(\$1)-1)} \$1==\"inet\" && \$2==ip {print i; exit}')
+        [ -z \"\$iface\" ] && exit 0
+        sudo route -n delete -net $subnet 2>/dev/null
+        sudo route -n add -net $subnet -interface \$iface 2>/dev/null
+    " &> /dev/null
+}
+# $M4_*_TO_M4_* are the PEER IPs; the local IP on each node is the other one.
+repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
+repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
+
+# M4-1 ↔ M4-2 (direct link). Retry once after a fresh route repair before
+# declaring a real cable fault, so a transient missing-route doesn't abort boot.
+direct_link_ok() {
+    local from="$1" to_ip="$2"
+    ssh "$from" "ping -c 1 -W 1 $to_ip" &> /dev/null
+}
+if ! direct_link_ok macstudio-m4-1 "$M4_2_TO_M4_1"; then
+    echo "  Direct link m4-1→m4-2 down; repairing route and retrying..."
+    repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
+    repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
+    sleep 1
+    if ! direct_link_ok macstudio-m4-1 "$M4_2_TO_M4_1"; then
+        echo "ERROR: macstudio-m4-1 cannot directly reach M4-2 ($M4_2_TO_M4_1) even after route repair. Check cable!"; exit 1
+    fi
+fi
+if ! direct_link_ok macstudio-m4-2 "$M4_1_TO_M4_2"; then
+    echo "  Direct link m4-2→m4-1 down; repairing route and retrying..."
+    repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
+    repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
+    sleep 1
+    if ! direct_link_ok macstudio-m4-2 "$M4_1_TO_M4_2"; then
+        echo "ERROR: macstudio-m4-2 cannot directly reach M4-1 ($M4_1_TO_M4_2) even after route repair. Check cable!"; exit 1
+    fi
+fi
 
 echo "All direct Thunderbolt links verified ✓"
 
