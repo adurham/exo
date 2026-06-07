@@ -1472,6 +1472,36 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
 
+        # DIAG (EXO_DSV4_STREAMDIV_DIAG=1): when 2 streams have IDENTICAL
+        # verify_input rows, their verify_logits rows MUST be bit-identical.
+        # Any divergence => the batched verify leaks across streams / has a
+        # per-stream asymmetry (the c>=2 early-stop bug). Dumps argmax + max
+        # abs logit diff per (stream pair, position).
+        if os.environ.get("EXO_DSV4_STREAMDIV_DIAG") == "1" and N >= 2:
+            try:
+                vi = verify_input.tolist()
+                if vi[0] == vi[1]:  # identical prompts/drafts
+                    am = mx.argmax(verify_logits, axis=-1).tolist()  # (N, gamma+1)
+                    d01 = mx.abs(
+                        verify_logits[0] - verify_logits[1]
+                    ).max(axis=-1).tolist()  # (gamma+1,)
+                    with open(
+                        f"/tmp/dsv4_streamdiv_pid{os.getpid()}.log", "a"
+                    ) as _sf:
+                        _sf.write(
+                            f"verify_input[0]==[1]:True argmax0={am[0]} "
+                            f"argmax1={am[1]} maxabsdiff_per_pos={d01} "
+                            f"n_acc_will_differ={am[0]!=am[1]}\n"
+                        )
+            except Exception as _se:
+                try:
+                    with open(
+                        f"/tmp/dsv4_streamdiv_pid{os.getpid()}.log", "a"
+                    ) as _sf2:
+                        _sf2.write(f"STREAMDIV_ERR: {_se}\n")
+                except Exception:
+                    pass
+
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
             t_after_verify = time.perf_counter()
