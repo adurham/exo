@@ -468,15 +468,24 @@ for node in macstudio-m4-1 macstudio-m4-2; do
     ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
 done
 
-# Repair the DIRECT-LINK connected route. Observed 2026-06-07: after some
-# reboots/crashes macOS leaves the TB interface UP with the right /24 IP but
-# WITHOUT a working connected route — m4-2 had no 192.168.204 route at all and
-# m4-1's route carried the `!` (reject) flag. The cable was physically fine
-# (80 Gb/s, ARP resolved) but IP traffic black-holed → the ping below failed
-# with a misleading "Check cable!". A warm reboot does NOT fix it (macOS
-# recreates the same broken route at boot); reinstalling the connected route
-# does. So before pinging, force a clean connected route for each node's
-# direct-link /24 on the interface that owns the link IP.
+# Direct-link TB MTU. The TB cable/controller on this pair reliably carries
+# frames only up to ~8200 bytes (verified 2026-06-07: 30-pkt bursts at frame
+# 8228+ = 100% loss, <=8028 = 0% loss) even though the NIC advertises MTU 9000.
+# Frames near 9000 silently drop, which CORRUPTS RDMA weight transfers — DSV4
+# loaded with active=18GB instead of ~74GB and emitted garbage with no error.
+# A3B models aren't TB-bandwidth-bound, so capping MTU at 8000 costs nothing and
+# makes the load reliable. Override with EXO_TB_MTU if a better cable is fitted.
+: "${EXO_TB_MTU:=8000}"
+
+# Repair the DIRECT-LINK connected route + enforce the safe MTU. Observed
+# 2026-06-07: after some reboots/crashes macOS leaves the TB interface UP with
+# the right /24 IP but WITHOUT a working connected route — m4-2 had no
+# 192.168.204 route at all and m4-1's route carried the `!` (reject) flag. The
+# cable was physically fine (ARP resolved) but IP traffic black-holed → the
+# ping below failed with a misleading "Check cable!". A warm reboot does NOT
+# fix it (macOS recreates the same broken route/MTU at boot); reinstalling the
+# connected route + capping MTU does. So before pinging, force a clean
+# connected route and the safe MTU on the interface that owns the link IP.
 #   $1 = node, $2 = the LOCAL link IP on that node (e.g. 192.168.204.1)
 repair_direct_route() {
     local node="$1" local_ip="$2"
@@ -485,6 +494,8 @@ repair_direct_route() {
     ssh "$node" "
         iface=\$(ifconfig 2>/dev/null | awk -v ip='$local_ip' '/^[a-z0-9]+: /{i=substr(\$1,1,length(\$1)-1)} \$1==\"inet\" && \$2==ip {print i; exit}')
         [ -z \"\$iface\" ] && exit 0
+        cur_mtu=\$(ifconfig \$iface | awk '/mtu/{for(i=1;i<=NF;i++)if(\$i==\"mtu\")print \$(i+1)}')
+        [ \"\$cur_mtu\" != \"$EXO_TB_MTU\" ] && sudo ifconfig \$iface mtu $EXO_TB_MTU 2>/dev/null
         sudo route -n delete -net $subnet 2>/dev/null
         sudo route -n add -net $subnet -interface \$iface 2>/dev/null
     " &> /dev/null
