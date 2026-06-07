@@ -777,6 +777,7 @@ for NODE in "${NODES[@]}"; do
     # only — pairs with a plain-greedy capture to find first divergence.
     [ -n "${EXO_DSV4_SPEC_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_TRACE=$EXO_DSV4_SPEC_TRACE"
     [ -n "${EXO_DSV4_STREAMDIV_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_STREAMDIV_DIAG=$EXO_DSV4_STREAMDIV_DIAG"
+    [ -n "${EXO_DSV4_TAILDIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TAILDIAG=$EXO_DSV4_TAILDIAG"
     [ -n "${EXO_DSV4_VERIFY_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_DIAG=$EXO_DSV4_VERIFY_DIAG"
     # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
