@@ -1472,23 +1472,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
 
-        if os.environ.get("EXO_DSV4_TAILDIAG") == "1":
-            try:
-                vi = verify_input.tolist()
-                for n in range(N):
-                    if 30591 in vi[n]:
-                        pos = vi[n].index(30591)
-                        if pos < gamma + 1:
-                            lg = verify_logits[n, pos]
-                            with open(f"/tmp/dsv4_tail_pid{os.getpid()}.log", "a") as _tf:
-                                _tf.write(
-                                    f"after774: l9={float(lg[27]):.3f} "
-                                    f"leos={float(lg[1]):.3f} "
-                                    f"margin={float(lg[27])-float(lg[1]):.3f}\n"
-                                )
-            except Exception:
-                pass
-
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
             t_after_verify = time.perf_counter()
