@@ -257,6 +257,13 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # upstream) AND (b) EXO_DSV4_MTP is non-zero. Set to 0 to fall back
     # to non-MTP decode.
     : "${EXO_DSV4_MTP:=1}"
+    # Use the dedicated mlx-community/DeepSeek-V4-Flash-MTP-bf16 head instead of
+    # the checkpoint-bundled MTP weights. DEFAULT ON (2026-06-07): measured
+    # ~68% single-stream speedup (18.8 → 31.6 t/s) from better draft acceptance
+    # (the dedicated repo's quant/packing suits the draft path). Overlaid onto
+    # mtp[0] before sharding in utils_mlx._overlay_dsv4_dedicated_mtp. Set =0 to
+    # fall back to the native checkpoint-bundled MTP head.
+    : "${EXO_DSV4_MTP_DEDICATED:=1}"
 else
     : "${EXO_SPECULATIVE:=1}"
 fi
