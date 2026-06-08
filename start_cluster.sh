@@ -468,13 +468,16 @@ for node in macstudio-m4-1 macstudio-m4-2; do
     ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
 done
 
-# Direct-link TB MTU. Default 9000 (the TB interface max — these are A3B
-# models, never TB-bandwidth-bound). 2026-06-07 a flaky cable made frames near
-# 9000 drop intermittently (corrupting RDMA weight loads → DSV4 loaded as ~18GB
-# of garbage); an 8000 cap papered over it but the real fault was the physical
-# link dropping out entirely ("No device connected"). Once the cable is solid,
-# 9000 is fine. If a marginal cable resurfaces, set EXO_TB_MTU=8000 to cap it.
-: "${EXO_TB_MTU:=9000}"
+# Direct-link TB MTU. This Thunderbolt/RDMA stack cannot reliably carry frames
+# near the 9000 the NIC advertises: verified 2026-06-07 across TWO different
+# cables and TWO different ports, 30-pkt bursts at frame >=8528 = 100% loss,
+# <=8028 = 0%. The cliff is ~8200 and follows the stack, not the cable/port.
+# Frames near 9000 silently drop, which CORRUPTS RDMA weight transfers — DSV4
+# loaded with active=18GB instead of ~74GB and emitted garbage with NO error.
+# So 8000 is the CORRECT MTU here, not a workaround. A3B models are never
+# TB-bandwidth-bound, so the lower MTU costs nothing. Override with EXO_TB_MTU
+# only if the jumbo-frame limitation is ever resolved (driver/macOS update).
+: "${EXO_TB_MTU:=8000}"
 
 # Repair the DIRECT-LINK connected route + set the desired MTU. Observed
 # 2026-06-07: after some reboots/crashes macOS leaves the TB interface UP with
