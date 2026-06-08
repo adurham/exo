@@ -480,16 +480,20 @@ for node in macstudio-m4-1 macstudio-m4-2; do
     ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
 done
 
-# Direct-link TB MTU is set PERSISTENTLY out-of-band (NOT here), via:
-#   sudo networksetup -setMTU 'Thunderbolt 2' 8000   (en3 on both Studios)
-# so the interface comes up at 8000 natively on every boot. This script must
-# NEVER run `ifconfig <tbiface> mtu N` — doing so forces the Thunderbolt PHY to
-# renegotiate and intermittently kills the link ("No device connected" until
-# reboot). 8000 is REQUIRED: frames near 9000 silently drop on this TB/RDMA
-# stack (cliff ~8200) and CORRUPT RDMA weight transfers (DSV4 loads as ~18GB
-# garbage). A3B models aren't TB-bandwidth-bound so 8000 costs nothing.
-# EXO_TB_MTU is retained only for reference/diagnostics — it is NOT applied.
-: "${EXO_TB_MTU:=8000}"
+# Direct-link TB MTU. The KNOWN-GOOD BASELINE is 9000 — verified 2026-06-08
+# from the macOS network config (preferences.plist on both Studios: en3
+# Ethernet MTU=9000, Manual IP, full-duplex/autoselect). The cluster ran
+# stably across hundreds of restarts at MTU 9000. The "8000 required / 9000
+# corrupts weights" conclusion from 2026-06-07 was a MISDIAGNOSIS: the actual
+# fault was (a) a macOS migration that wiped m4-2's Thunderbolt network
+# services, and (b) forcing en3 to a non-default MTU (8000), which breaks
+# Thunderbolt XDomain link RE-ENUMERATION after an RDMA queue teardown — the
+# link then can't recover without a reboot. MTU is configured out-of-band via
+# networksetup (NOT here); this script must NEVER run `ifconfig <tbiface> mtu`.
+# If you ever need to restore the baseline:
+#   sudo networksetup -setMTU 'Thunderbolt 2' 9000   (en3 on both Studios)
+# EXO_TB_MTU is reference-only — it is NOT applied by this script.
+: "${EXO_TB_MTU:=9000}"
 
 # Repair the DIRECT-LINK connected route + set the desired MTU. Observed
 # 2026-06-07: after some reboots/crashes macOS leaves the TB interface UP with
