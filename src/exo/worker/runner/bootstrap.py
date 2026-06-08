@@ -1,6 +1,7 @@
 import ctypes
 import os
 import resource
+import signal
 import sys
 import traceback
 from dataclasses import dataclass
@@ -169,6 +170,28 @@ def entrypoint(
 ) -> None:
     global logger
     logger = _logger
+
+    # Graceful SIGTERM → clean interpreter exit. Exo runners hold live
+    # RoCE/RDMA queue pairs (jaccl TP). The C++ JACCLGroup/Connection objects
+    # live in a function-static map (mlx distributed.cpp:142) whose destructors
+    # (destroy_qp/dealloc_pd/close_device) only run on a NORMAL process exit.
+    # Python's default SIGTERM disposition terminates the process WITHOUT
+    # running atexit/static destructors → the QPs are leaked on the Thunderbolt
+    # NIC, which accumulates and wedges the Apple TB stack ("No device
+    # connected", needs an OS reboot). By translating SIGTERM into SystemExit
+    # we unwind cleanly: the try/finally below runs, the interpreter exits
+    # normally, and the C++ static destructors free the RDMA resources.
+    # (root cause: warm-mem fact 526; 2026-06-08)
+    def _graceful_sigterm(_signum, _frame):
+        logger.info("Runner received SIGTERM — exiting cleanly to tear down RDMA.")
+        raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _graceful_sigterm)
+    except (ValueError, OSError):
+        # Not on the main thread (shouldn't happen for the runner entrypoint),
+        # or signals unavailable — non-fatal; fall back to default disposition.
+        logger.warning("Could not install SIGTERM handler in runner entrypoint.")
 
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (min(max(soft, 2048), hard), hard))

@@ -672,17 +672,32 @@ for NODE in "${NODES[@]}"; do
     fi
     
     echo "Killing existing Exo processes on $NODE..."
-    for i in {1..5}; do
-        ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
-        ssh "$NODE" "pkill -9 -f 'exo.main' || true"
-        ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
-        
-        if ssh "$NODE" "pgrep -f 'exo.main'" > /dev/null; then
+    # GRACEFUL FIRST. Exo runners hold live RoCE/RDMA queue pairs (jaccl TP).
+    # SIGKILL (-9) skips the C++ static-duration destructors that call
+    # destroy_qp/dealloc_pd/close_device — leaking active QPs on the
+    # Thunderbolt NIC, which accumulates and wedges the Apple TB stack to
+    # "No device connected" (needs an OS reboot). So SIGTERM and WAIT for a
+    # clean exit (static destructors run on normal interpreter exit → QPs
+    # freed), and only escalate to -9 as a last resort. (root cause: warm-mem
+    # fact 526; 2026-06-08)
+    ssh "$NODE" "pkill -TERM -f 'python.*exo' 2>/dev/null || true; pkill -TERM -f 'exo.main' 2>/dev/null || true"
+    # Wait up to ~15s for graceful exit so jaccl tears down RDMA cleanly.
+    _gone=false
+    for i in {1..15}; do
+        if ssh "$NODE" "pgrep -f 'python.*exo'" > /dev/null 2>&1; then
             sleep 1
         else
+            _gone=true
             break
         fi
     done
+    if [ "$_gone" = false ]; then
+        echo "  WARNING: Exo on $NODE did not exit on SIGTERM after 15s — escalating to SIGKILL (may leak RDMA QPs; reboot if TB wedges)."
+        ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
+        ssh "$NODE" "pkill -9 -f 'exo.main' || true"
+        ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
+        sleep 1
+    fi
     
     ssh "$NODE" "screen -wipe || true"
 
