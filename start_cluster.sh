@@ -317,11 +317,11 @@ fi
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
 # of weights/rank, leaving ~32GB under the 124GB wired limit for KV + activations
 # across both models. Served as a 2-node Tensor + MlxJaccl instance (same RDMA
-# path as DSv4). Set QWEN36_ENABLED=1 to co-host it with DSv4. Sampling:
-# Qwen3.6 is thinking-mode by default — upstream thinking recommendation
-# (temp 0.6 / top_p 0.95 / top_k 20 / min_p 0).
+# path as DSv4). Enabled by default (like DSv4); set QWEN36_ENABLED=0 to skip.
+# Sampling: Qwen3.6 is thinking-mode by default — upstream thinking
+# recommendation (temp 0.6 / top_p 0.95 / top_k 20 / min_p 0).
 : "${QWEN36_MODEL_ID:=mlx-community/Qwen3.6-35B-A3B-8bit}"
-: "${QWEN36_ENABLED:=0}"
+: "${QWEN36_ENABLED:=1}"
 : "${QWEN36_TEMPERATURE:=0.6}"
 : "${QWEN36_TOP_P:=0.95}"
 : "${QWEN36_TOP_K:=20}"
@@ -1471,10 +1471,10 @@ fi
 # ── Auto-place Qwen3.6-35B-A3B with RDMA (co-hosted alongside DSv4) ──
 # Single 2-node Tensor + MlxJaccl instance spanning both Studios, same RDMA
 # path as DSv4. Fits alongside DSv4 (see QWEN36_MODEL_ID comment above for the
-# memory math). Set QWEN36_ENABLED=1 to place it. Qwen3.6 ships MTP weights, so
-# self-speculation is auto-enabled per-instance (independent of EXO_SPECULATIVE,
-# which is the DSv4 knob).
-if [ "${QWEN36_ENABLED:-0}" = "1" ]; then
+# memory math). Placed by default (QWEN36_ENABLED defaults to 1; set =0 to
+# skip). Qwen3.6 ships MTP weights, so self-speculation is auto-enabled
+# per-instance (independent of EXO_SPECULATIVE, which is the DSv4 knob).
+if [ "${QWEN36_ENABLED:-1}" = "1" ]; then
     echo ""
     echo "Auto-placing Qwen3.6 ($QWEN36_MODEL_ID) across both Studios via RDMA..."
 
