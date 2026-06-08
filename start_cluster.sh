@@ -812,6 +812,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
+    [ -n "${EXO_DSV4_MTP_DEDICATED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DEDICATED=$EXO_DSV4_MTP_DEDICATED"
     # Eagle soft-embedding for chained MTP draft (Phase 14 Plan B.2).
     # Default OFF (0): mlx-lm's DeepseekV4MTPModule.__call__ uses the
     # hard-argmax embed_tokens() lookup — bit-exact with prior behavior.
