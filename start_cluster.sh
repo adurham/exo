@@ -596,27 +596,18 @@ else
     echo "  All active-link RDMA ports active \u2713"
 fi
 
-# RoCEv2 (RDMA) Protection Domain Allocation Check
-# A degraded Thunderbolt cable will pass `ping` (using USB-C fallback Ethernet), but fail to allocate
-# an RDMA Protection Domain, causing `jaccl` to instantly crash when Exo starts.
-echo "Verifying RoCEv2 (RDMA) support over Thunderbolt..."
-for NODE in macstudio-m4-1 macstudio-m4-2; do
-    echo -n "  Testing RDMA allocation on $NODE... "
-    # We use `timeout 2` because a successful PD allocation will hang waiting for a coordinator.
-    # We run it within the uv environment to ensure mlx is available.
-    # If the Thunderbolt cable is degraded, allocating the Protection Domain crashes immediately.
-    RDMA_CHECK=$(ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && timeout 2 uv run python -c \"import mlx.core as mx; mx.distributed.init(strict=False, backend='\\''jaccl'\\'')\" 2>&1'" || true)
-    
-    if echo "$RDMA_CHECK" | grep -q "Couldn't allocate protection domain"; then
-        echo "FAIL ❌"
-        echo "CRITICAL ERROR: Failed to allocate RDMA Protection Domain on $NODE!"
-        echo "One of your Thunderbolt cables has fallen back to standard USB-C Ethernet."
-        echo "Please re-seat the cables on $NODE."
-        exit 1
-    else
-        echo "OK ✓"
-    fi
-done
+# RoCEv2 (RDMA) support is already verified by the per-device PORT_ACTIVE
+# check above (ibv_devinfo), which queries the RoCE port state WITHOUT
+# allocating anything. The previous "PD allocation" probe here did
+# `timeout 2 ... mx.distributed.init(jaccl)` — but jaccl's Mesh ctor opens the
+# ibv device + allocates a PD + creates/activates QPs (RTR/RTS) BEFORE the
+# bootstrap barrier it then hangs on. `timeout` SIGTERMs the hung process, so
+# Connection::~Connection() (destroy_qp/dealloc_pd/close_device) NEVER runs —
+# leaking an active QP/PD on the Thunderbolt RoCE NIC EVERY boot. Accumulated
+# orphaned RDMA state wedges the Apple TB stack to "No device connected"
+# (needs a full OS reboot to clear). Root-caused 2026-06-07; the leaking probe
+# is removed — PORT_ACTIVE from ibv_devinfo is the non-destructive RDMA-layer
+# health signal. (warm-mem fact 524)
 
 # Enable IP forwarding and add cross-subnet routes
 # Each node has 2 direct links, but needs a route for the 3rd subnet it's not on.
