@@ -468,15 +468,15 @@ for node in macstudio-m4-1 macstudio-m4-2; do
     ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
 done
 
-# Direct-link TB MTU. This Thunderbolt/RDMA stack cannot reliably carry frames
-# near the 9000 the NIC advertises: verified 2026-06-07 across TWO different
-# cables and TWO different ports, 30-pkt bursts at frame >=8528 = 100% loss,
-# <=8028 = 0%. The cliff is ~8200 and follows the stack, not the cable/port.
-# Frames near 9000 silently drop, which CORRUPTS RDMA weight transfers — DSV4
-# loaded with active=18GB instead of ~74GB and emitted garbage with NO error.
-# So 8000 is the CORRECT MTU here, not a workaround. A3B models are never
-# TB-bandwidth-bound, so the lower MTU costs nothing. Override with EXO_TB_MTU
-# only if the jumbo-frame limitation is ever resolved (driver/macOS update).
+# Direct-link TB MTU is set PERSISTENTLY out-of-band (NOT here), via:
+#   sudo networksetup -setMTU 'Thunderbolt 2' 8000   (en3 on both Studios)
+# so the interface comes up at 8000 natively on every boot. This script must
+# NEVER run `ifconfig <tbiface> mtu N` — doing so forces the Thunderbolt PHY to
+# renegotiate and intermittently kills the link ("No device connected" until
+# reboot). 8000 is REQUIRED: frames near 9000 silently drop on this TB/RDMA
+# stack (cliff ~8200) and CORRUPT RDMA weight transfers (DSV4 loads as ~18GB
+# garbage). A3B models aren't TB-bandwidth-bound so 8000 costs nothing.
+# EXO_TB_MTU is retained only for reference/diagnostics — it is NOT applied.
 : "${EXO_TB_MTU:=8000}"
 
 # Repair the DIRECT-LINK connected route + set the desired MTU. Observed
