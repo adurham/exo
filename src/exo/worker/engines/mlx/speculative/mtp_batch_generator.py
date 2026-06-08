@@ -18,6 +18,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any
 
 import mlx.core as mx
+from loguru import logger
 from mlx_lm.generate import BatchGenerator, GenerationBatch, PromptProcessingBatch
 
 from .mtp_module import MTPPredictor, draft_tokens, speculative_forward
@@ -277,6 +278,33 @@ class MTPBatchGenerator(BatchGenerator):
                     n_accepted += 1
                 else:
                     break
+
+        # Acceptance telemetry: accumulate accepted/proposed and periodically
+        # log mean acceptance + tokens-per-cycle. Each cycle proposes `gamma`
+        # draft tokens and yields `n_accepted + 1` tokens (accepted drafts +
+        # the bonus/correction). accept_rate = n_accepted / gamma. This is the
+        # key signal for tuning gamma (deeper chain only helps while the extra
+        # accepted tokens outweigh the added draft+verify cost). (2026-06-08)
+        _acc = getattr(self, "_accept_stats", None)
+        if _acc is None:
+            _acc = self._accept_stats = {"cycles": 0, "accepted": 0,
+                                          "proposed": 0, "yielded": 0,
+                                          "t0": __import__("time").perf_counter()}
+        _acc["cycles"] += 1
+        _acc["accepted"] += n_accepted
+        _acc["proposed"] += gamma
+        _acc["yielded"] += n_accepted + 1
+        if _acc["cycles"] % 64 == 0:
+            import time as _t
+            _dt = _t.perf_counter() - _acc["t0"]
+            _rate = _acc["accepted"] / max(_acc["proposed"], 1)
+            _tps = _acc["yielded"] / _dt if _dt > 0 else 0.0
+            _tpc = _acc["yielded"] / _acc["cycles"]
+            logger.info(
+                f"[MTP ACCEPT] gamma={gamma} cycles={_acc['cycles']} "
+                f"accept_rate={_rate:.3f} tokens/cycle={_tpc:.2f} "
+                f"decode_tok/s={_tps:.1f}"
+            )
 
         # 5. Roll back GDN cache for rejected drafts
         rollback = gamma - n_accepted
