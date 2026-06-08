@@ -493,18 +493,25 @@ repair_direct_route() {
     local node="$1" local_ip="$2"
     [ -z "$local_ip" ] && return 0
     local subnet="${local_ip%.*}.0/24"
+    # NOTE (2026-06-07): do NOT touch the interface MTU here. Running
+    # `ifconfig <tbiface> mtu N` forces the Thunderbolt PHY to renegotiate,
+    # and on this hardware that renegotiation intermittently lands in a
+    # "No device connected" / link-dead state that survives until reboot.
+    # We were the cause of the repeated TB drops this session. Only the
+    # connected ROUTE is repaired here (passive — does not reset the PHY).
+    # If a specific MTU is genuinely required, set it ONCE by hand when the
+    # link is known-healthy; never bounce it on every boot.
     ssh "$node" "
         iface=\$(ifconfig 2>/dev/null | awk -v ip='$local_ip' '/^[a-z0-9]+: /{i=substr(\$1,1,length(\$1)-1)} \$1==\"inet\" && \$2==ip {print i; exit}')
         [ -z \"\$iface\" ] && exit 0
-        cur_mtu=\$(ifconfig \$iface | awk '/mtu/{for(i=1;i<=NF;i++)if(\$i==\"mtu\")print \$(i+1)}')
-        [ \"\$cur_mtu\" != \"$EXO_TB_MTU\" ] && sudo ifconfig \$iface mtu $EXO_TB_MTU 2>/dev/null
         sudo route -n delete -net $subnet 2>/dev/null
         sudo route -n add -net $subnet -interface \$iface 2>/dev/null
     " &> /dev/null
 }
 # $M4_*_TO_M4_* are the PEER IPs; the local IP on each node is the other one.
-repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
-repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
+# Do NOT preemptively repair on every boot — a healthy link must be left
+# untouched (route churn is passive but we keep the boot path minimal). The
+# conditional repair below only fires when a ping actually fails.
 
 # M4-1 ↔ M4-2 (direct link). Retry once after a fresh route repair before
 # declaring a real cable fault, so a transient missing-route doesn't abort boot.
