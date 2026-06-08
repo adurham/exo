@@ -302,6 +302,25 @@ def shard_and_load(
 
     model, _ = load_model(model_path, lazy=True, strict=False)
     logger.debug(model)
+
+    # Optionally overlay the DEDICATED mlx-community DSv4 MTP head onto the
+    # native (checkpoint-bundled) mtp[0], BEFORE tensor sharding. The dedicated
+    # head (mlx-community/DeepSeek-V4-Flash-MTP-bf16) is the same trained MTP
+    # weights re-packaged (fused switch_mlp, decoder.* prefix, affine-8bit).
+    # We overlay here while the module is still unsharded so the subsequent
+    # tensor_auto_parallel shards it identically to the native head. Gated by
+    # EXO_DSV4_MTP_DEDICATED=1 so the proven native path stays the default.
+    if (
+        os.environ.get("EXO_DSV4_MTP", "0") == "1"
+        and os.environ.get("EXO_DSV4_MTP_DEDICATED", "0") == "1"
+    ):
+        try:
+            _overlay_dsv4_dedicated_mtp(model, model_path)
+        except Exception as e:
+            logger.warning(
+                f"DSv4 dedicated MTP overlay failed ({e}); keeping native MTP head."
+            )
+
     if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
         pass
         # TODO: See if we should quantize the model.
@@ -395,6 +414,62 @@ def shard_and_load(
     mx_barrier(group)
 
     return model, tokenizer
+
+
+def _overlay_dsv4_dedicated_mtp(model: Any, model_path: Path) -> None:
+    """Overlay mlx-community/DeepSeek-V4-Flash-MTP-bf16 onto model.model.mtp[0].
+
+    Must run BEFORE tensor sharding (module still has full, unsharded weights).
+    The dedicated head ships the SAME trained MTP weights as the checkpoint-
+    bundled native head, re-packaged with a ``decoder.`` prefix and affine-8bit
+    quantization (fused switch_mlp). We:
+      1. resolve/download the head's single model.safetensors,
+      2. strip the ``decoder.`` prefix,
+      3. quantize mtp[0] to affine-8bit only where the head provides ``.scales``,
+      4. load_weights(strict=False) — the head omits zero affine biases, which
+         is fine.
+    """
+    import json
+
+    import mlx.core as mx
+    import mlx.nn as nn
+    from huggingface_hub import hf_hub_download
+
+    inner = getattr(model, "model", None)
+    mtp_list = getattr(inner, "mtp", None) if inner is not None else None
+    if not mtp_list:
+        raise RuntimeError("model has no model.mtp[] to overlay")
+    mtp0 = mtp_list[0]
+
+    repo = "mlx-community/DeepSeek-V4-Flash-MTP-bf16"
+    sf = hf_hub_download(repo, "model.safetensors")
+    raw = mx.load(sf)
+    # Strip the decoder. prefix → matches DeepseekV4MTPModule's own param tree.
+    remap = {
+        (k[len("decoder."):] if k.startswith("decoder.") else k): v
+        for k, v in raw.items()
+    }
+
+    # Quantize mtp0 (affine 8-bit, group 64) only on submodules the head ships
+    # quantized (i.e. has a matching ``<path>.scales``).
+    cfg = json.loads((model_path / "config.json").read_text())
+    q = cfg.get("quantization", {}) or {}
+    gs = int(q.get("group_size", 64))
+    bits = int(q.get("bits", 8))
+    scale_paths = {k[: -len(".scales")] for k in remap if k.endswith(".scales")}
+
+    def _qpred(path: str, m: Any) -> bool:
+        return hasattr(m, "to_quantized") and path in scale_paths
+
+    nn.quantize(mtp0, group_size=gs, bits=bits, class_predicate=_qpred)
+
+    # strict=False: the head omits all-zero affine biases (.biases) — harmless.
+    mtp0.load_weights(list(remap.items()), strict=False)
+    mx.eval(mtp0.parameters())
+    logger.info(
+        f"Overlaid dedicated DSv4 MTP head from {repo} "
+        f"({len(remap)} tensors) onto mtp[0]."
+    )
 
 
 def _prepare_mtp_weights(model_id: str, model_path: Path) -> None:
