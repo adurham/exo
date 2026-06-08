@@ -95,6 +95,11 @@ fi
 # globally; benchmark and override per-model when needed.
 : "${MLX_SDPA_BLOCKS:=}"
 : "${EXO_SPECULATIVE_GAMMA:=2}"
+# Per-model gamma override for the Qwen3.5-style MTP path (Qwen3.6). Its
+# dedicated head is trained with block_size=3, so it sustains a deeper draft
+# chain than DSv4's depth-1 head — default γ=3, independent of the DSv4
+# EXO_SPECULATIVE_GAMMA above.
+: "${EXO_QWEN_SPECULATIVE_GAMMA:=3}"
 # Eagle K (MTP top-K soft-emb mixture, K=1 fast-path / K>1 mixture path).
 # Promoted to K=8 default 2026-05-24 after the no-renorm fix at
 # mtp_module.py:715-729 (commit 2d8d5efc) lifted c=1 100K decode from
@@ -795,6 +800,7 @@ for NODE in "${NODES[@]}"; do
     fi
     EXO_ENV="$EXO_ENV EXO_SPECULATIVE=$EXO_SPECULATIVE"
     EXO_ENV="$EXO_ENV EXO_SPECULATIVE_GAMMA=$EXO_SPECULATIVE_GAMMA"
+    [ -n "${EXO_QWEN_SPECULATIVE_GAMMA:-}" ] && EXO_ENV="$EXO_ENV EXO_QWEN_SPECULATIVE_GAMMA=$EXO_QWEN_SPECULATIVE_GAMMA"
     EXO_ENV="$EXO_ENV EXO_COMPUTE_DTYPE=$EXO_COMPUTE_DTYPE"
     EXO_ENV="$EXO_ENV EXO_RUNNER_QOS=$EXO_RUNNER_QOS"
     EXO_ENV="$EXO_ENV LOG_LEVEL=$LOG_LEVEL"

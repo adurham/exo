@@ -444,7 +444,13 @@ class ExoBatchGenerator:
                     )
 
                     mtp_weights = self._resolve_mtp_weights()
-                    gamma = int(os.environ.get("EXO_SPECULATIVE_GAMMA", "2"))
+                    # Per-model gamma for the Qwen3.5-style MTP path. Qwen3.6's
+                    # dedicated head is trained with block_size=3, so it
+                    # sustains a deeper draft chain than DSv4's depth-1 head.
+                    # Default γ=3 here, set ONLY by EXO_QWEN_SPECULATIVE_GAMMA
+                    # — independent of the DSv4 EXO_SPECULATIVE_GAMMA so the two
+                    # models can run different chain depths concurrently.
+                    gamma = int(os.environ.get("EXO_QWEN_SPECULATIVE_GAMMA", "3"))
 
                     if mtp_weights:
                         mtp = MTPPredictor(self.model, mtp_weights, quantize=False)
