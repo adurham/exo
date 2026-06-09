@@ -732,6 +732,29 @@ for NODE in "${NODES[@]}"; do
     echo "Syncing dependencies on $NODE..."
     ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages'" || { echo "Failed to sync on $NODE"; exit 1; }
 
+    # Pin mlx-lm to the vendored ./mlx-lm submodule (uv sync installs a stale copy).
+    #
+    # uv sync resolves mlx-lm from uv.lock, which pins an EXACT commit SHA
+    # (the `git = ".../mlx-lm.git?branch=main#<sha>"` entry). When an exo
+    # commit bumps the ./mlx-lm submodule gitlink WITHOUT also running
+    # `uv lock --upgrade-package mlx-lm` + committing the new uv.lock, the
+    # lockfile lags the vendored source. Worse, the package version string
+    # doesn't change between mlx-lm commits, so uv reports "already satisfied"
+    # and never reinstalls — the runner then imports OLD mlx_lm code while the
+    # checked-out submodule has the fix. This bit us with the affine-DSv4
+    # warmup crash: "[quantized_matmul] Scale type must be uint8 but received
+    # type bfloat16" (make_quantization_config forced mode=mxfp8 onto affine
+    # attention weights; the fix that gates the override on on-disk scale dtype
+    # was in the submodule but not in the lock-pinned venv copy).
+    #
+    # The submodule gitlink is the source of truth for which mlx-lm THIS exo
+    # commit was reviewed against, so force the venv to match it exactly. This
+    # is deterministic and offline (no re-resolution against remote branch HEAD,
+    # which line ~721's `git reset --hard` would clobber every run anyway).
+    # Same idiom as the Rust-bindings rebuild below.
+    echo "Pinning mlx-lm to vendored submodule on $NODE..."
+    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx-lm'" || { echo "Failed to pin vendored mlx-lm on $NODE"; exit 1; }
+
     # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
     echo "Rebuilding Rust pyo3 bindings on $NODE..."
     ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install maturin 2>/dev/null && uv run maturin develop --release -m rust/exo_rs/Cargo.toml'" || { echo "Failed to rebuild Rust bindings on $NODE"; exit 1; }

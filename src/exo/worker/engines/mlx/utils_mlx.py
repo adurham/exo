@@ -450,16 +450,80 @@ def _overlay_dsv4_dedicated_mtp(model: Any, model_path: Path) -> None:
         for k, v in raw.items()
     }
 
-    # Quantize mtp0 (affine 8-bit, group 64) only on submodules the head ships
-    # quantized (i.e. has a matching ``<path>.scales``).
+    # Quantize mtp0 only on submodules the head ships quantized (i.e. has a
+    # matching ``<path>.scales``), and quantize EACH layer to match the head's
+    # ACTUAL on-disk packing rather than a single hardcoded scheme.
+    #
+    # The canonical mlx-community/DeepSeek-V4-Flash-MTP-bf16 head is NOT uniform
+    # affine: every quantized layer ships uint8 scales with NO biases (true mxfp
+    # packing), where the routed experts (ffn.switch_mlp.*) are mxfp4 and all
+    # other projections (attn.*, e_proj, h_proj, ffn.shared_experts.*) are
+    # mxfp8 — all group_size=32. Previously this overlay force-quantized mtp0 to
+    # affine group_size=64, which synthesizes bf16 biases and a 64-wide scale
+    # tensor. Loading the head's mxfp8 weights (uint8 scales, 128-wide,
+    # group_size=32, no biases) onto that affine layer then crashed at MTP
+    # predict with "[quantized_matmul] Scales and biases should have the same
+    # shape. Received scales (4096,128) and biases (4096,64)" (e_proj/h_proj).
+    #
+    # Infer the per-layer scheme directly from the on-disk tensors:
+    #   - uint8 scales + no biases  -> mxfp; bits from weight/scale width ratio
+    #       ratio = packed_weight.shape[-1]*(32//bits_guess)... computed below
+    #       as 4 -> mxfp4, 8 -> mxfp8; group_size = in_features / scale_groups.
+    #   - non-uint8 scales (bf16/fp16/fp32) -> affine; group_size from scales.
+    # This mirrors mlx_lm's own DSv4 packing conventions per layer.
+    import mlx.core as _mx
+
+    def _infer_quant_params(path: str) -> dict[str, Any] | None:
+        w = remap.get(f"{path}.weight")
+        s = remap.get(f"{path}.scales")
+        if w is None or s is None:
+            return None
+        b = remap.get(f"{path}.biases")
+        in_packed = int(w.shape[-1])
+        scale_groups = int(s.shape[-1])
+        if s.dtype == _mx.uint8 and b is None:
+            # mxfp: uint32-packed weights hold (32 // bits) values per word.
+            # in_features = in_packed * (32 // bits); group_size =
+            # in_features / scale_groups. mxfp group_size is always 32, so
+            # bits = 32 // (in_packed * 32 / scale_groups / 32)
+            #      = scale_groups * 32 // in_packed ... resolve via the two
+            # supported mxfp widths (4, 8) by matching group_size == 32.
+            for cand_bits in (4, 8):
+                in_features = in_packed * (32 // cand_bits)
+                if in_features % scale_groups:
+                    continue
+                if in_features // scale_groups == 32:
+                    return {
+                        "group_size": 32,
+                        "bits": cand_bits,
+                        "mode": "mxfp4" if cand_bits == 4 else "mxfp8",
+                    }
+            return None
+        # affine: group_size = in_features / scale_groups, bf16/fp16/fp32 scales.
+        # in_features for affine uint32 packing = in_packed * (32 // bits); the
+        # head's affine layers (if any) follow the model config's bits.
+        cfg_bits = int(bits)
+        in_features = in_packed * (32 // cfg_bits)
+        grp = in_features // scale_groups if scale_groups else int(gs)
+        return {"group_size": grp, "bits": cfg_bits, "mode": "affine"}
+
     cfg = json.loads((model_path / "config.json").read_text())
     q = cfg.get("quantization", {}) or {}
     gs = int(q.get("group_size", 64))
     bits = int(q.get("bits", 8))
     scale_paths = {k[: -len(".scales")] for k in remap if k.endswith(".scales")}
+    _qparams: dict[str, dict[str, Any]] = {}
+    for _p in scale_paths:
+        _ip = _infer_quant_params(_p)
+        if _ip is not None:
+            _qparams[_p] = _ip
 
-    def _qpred(path: str, m: Any) -> bool:
-        return hasattr(m, "to_quantized") and path in scale_paths
+    def _qpred(path: str, m: Any) -> Any:
+        if not (hasattr(m, "to_quantized") and path in scale_paths):
+            return False
+        # Return a per-layer params dict so each layer is packed to match the
+        # head's on-disk format (mxfp4 experts / mxfp8 rest / affine fallback).
+        return _qparams.get(path, {"group_size": gs, "bits": bits, "mode": "affine"})
 
     nn.quantize(mtp0, group_size=gs, bits=bits, class_predicate=_qpred)
 
