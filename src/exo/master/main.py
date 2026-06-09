@@ -72,6 +72,7 @@ from exo.shared.types.worker.instances import InstanceId
 from exo.utils.channels import Receiver, Sender
 from exo.utils.disk_event_log import DiskEventLog
 from exo.utils.event_buffer import MultiSourceBuffer
+from exo.utils.log_format import truncate_for_log
 from exo.utils.task_group import TaskGroup
 
 
@@ -199,7 +200,9 @@ class Master:
         with self.command_receiver as commands:
             async for forwarder_command in commands:
                 try:
-                    logger.info(f"Executing command: {forwarder_command.command}")
+                    logger.info(
+                        f"Executing command: {truncate_for_log(forwarder_command.command)}"
+                    )
 
                     generated_events: list[Event] = []
                     command = forwarder_command.command

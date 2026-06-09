@@ -90,6 +90,17 @@ class RunnerDiagnosticCollector:
     def diagnostics(self) -> tuple[RunnerDiagnostic, ...]:
         return tuple(self._diagnostics)
 
+    def stderr_tail(self) -> tuple[str, ...]:
+        """Return the buffered tail of raw runner stderr lines.
+
+        Used by the supervisor to surface the actual crash output (segfault
+        tracebacks, ImportErrors, etc.) into the main process log on a runner
+        failure — even when no line classified into a KnownRunnerDiagnostic.
+        Without this the real cause lives only in runner_log/stderr.log and is
+        easy to miss during an incident.
+        """
+        return tuple(self._stderr_tail)
+
     def _classify_line(
         self, line: str, evidence: tuple[str, ...]
     ) -> KnownRunnerDiagnostic | None:

@@ -47,6 +47,7 @@ from exo.shared.types.worker.shards import ShardMetadata
 from exo.utils.async_process import AsyncProcess
 from exo.utils.channels import MpReceiver, MpSender, Receiver, Sender, mp_channel
 from exo.utils.fs import ensure_parent_directory_exists
+from exo.utils.log_format import truncate_for_log
 from exo.utils.task_group import TaskGroup
 from exo.worker.runner.bootstrap import RunnerTerminationError, entrypoint
 from exo.worker.runner.diagnostics import (
@@ -278,15 +279,15 @@ class RunnerSupervisor:
     async def start_task(self, task: Task):
         if task.task_id in self.pending:
             logger.warning(
-                f"Skipping invalid task {task} as it has already been submitted"
+                f"Skipping invalid task {task.task_id} as it has already been submitted"
             )
             return
         if task.task_id in self.completed:
             logger.warning(
-                f"Skipping invalid task {task} as it has already been completed"
+                f"Skipping invalid task {task.task_id} as it has already been completed"
             )
             return
-        logger.info(f"Starting task {task}")
+        logger.info(f"Starting task {truncate_for_log(task)}")
         event = anyio.Event()
         self.pending[task.task_id] = event
         self.in_progress[task.task_id] = task
@@ -399,6 +400,21 @@ class RunnerSupervisor:
                 logger.error(f"Runner terminated with {cause}")
         else:
             logger.error(f"Runner terminated with {cause}")
+
+        # Surface the raw runner stderr tail into the MAIN process log. The
+        # real crash cause (segfault traceback, ImportError, pydantic error)
+        # otherwise lives only in runner_log/stderr.log and is easy to miss
+        # mid-incident — especially when nothing classified into a known
+        # diagnostic (the failure then looks like a silent clean exit upstream).
+        stderr_tail = self._runner_stdio_handler.diagnostics.stderr_tail()
+        if stderr_tail:
+            logger.error(
+                "Runner stderr tail ({} lines) for {}:\n{}".format(
+                    len(stderr_tail),
+                    self.bound_instance.bound_runner_id,
+                    "\n".join(stderr_tail),
+                )
+            )
 
         diagnostics = [
             d

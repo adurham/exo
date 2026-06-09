@@ -54,6 +54,7 @@ from exo.shared.types.worker.runners import (
     RunnerWarmingUp,
 )
 from exo.utils.channels import MpReceiver, MpSender
+from exo.utils.log_format import truncate_for_log
 from exo.utils.ports import random_ephemeral_port
 from exo.worker.disaggregated.server import (
     PrefillRequest,
@@ -335,7 +336,7 @@ class Runner:
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, Engine)
 
-        logger.info(f"received chat request: {starting_task}")
+        logger.info(f"received chat request: {truncate_for_log(starting_task)}")
         self.update_status(RunnerRunning())
         logger.info("runner running")
         self.acknowledge_task(starting_task)
