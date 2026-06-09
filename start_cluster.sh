@@ -107,11 +107,31 @@ fi
 # Quality preserved (needle ✓, BOS=0, bistability=0). See
 # .hermes/plans/2026-05-24_w3_K8_norenorm_results.md.
 : "${EXO_DSV4_MTP_EAGLE_K:=8}"
-# MTP tie-break losslessness fix: DEFAULT ON (2026-06-03). Deterministic
-# lowest-id-within-eps tie-break on the bonus token; fixes the spec-decode
-# early-tie-flip cascade (spurious </think> / degeneration on hard prompts).
-# Validated: MTP-on correctness 100% (matches MTP-off). Set =0 to opt out.
-: "${EXO_DSV4_MTP_TIEBREAK_FIX:=1}"
+# MTP tie-break losslessness fix: DEFAULT OFF (2026-06-09). This was a BAND-AID
+# for an upstream bug that is now fixed at the root, and on the canonical affine
+# DeepSeek-V4-Flash checkpoint it CORRUPTS output.
+#
+# History: the batched L>1 spec-VERIFY forward used to be numerically inaccurate
+# (hand-rolled bf16 split-softmax), so its argmax flipped vs a sequential decode
+# at tied logits → spurious </think> / degeneration. The tie-break (deterministic
+# lowest-id-within-eps on the bonus token, eps=0.5) papered over that on the OLD
+# bundled-MTP checkpoint, whose logits were sharp enough (top-2 gap > 0.5) that
+# the eps window only ever caught genuine ~1ulp ties.
+#
+# Two things changed: (1) upstream mlx-lm 491f6fe/5b00004 routes the L>1 verify
+# through the accurate fp32 fused sparse SDPA — verify argmax is now bit-faithful
+# to a clean reference forward (confirmed cycle-by-cycle via EXO_DSV4_MTP_REFCHECK:
+# verify_argmax == reference_argmax every cycle). The flip the tie-break existed
+# to fix no longer happens. (2) The canonical affine checkpoint has FLATTER logits
+# (observed top-2 gaps 0.375–0.5), so eps=0.5 now captures the true argmax PLUS
+# lower-id distractor tokens and the "pick lowest id" rule emits the WRONG token
+# every cycle (e.g. true argmax 111467 → emitted 68599), cascading into total
+# garbage ("petabits", Burmese unicode) at 0% draft acceptance.
+#
+# Root-cause fix = trust the now-accurate verify argmax; leave the tie-break off.
+# (If a genuine ~1ulp tie cascade ever resurfaces, re-enable with an eps on the
+# order of a bf16 ulp at logit scale, ~1e-2 — NOT 0.5.)
+: "${EXO_DSV4_MTP_TIEBREAK_FIX:=0}"
 : "${EXO_DSV4_MTP_TIEBREAK_EPS:=0.5}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
