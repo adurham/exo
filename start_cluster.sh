@@ -613,24 +613,32 @@ fi
 # is removed — PORT_ACTIVE from ibv_devinfo is the non-destructive RDMA-layer
 # health signal. (warm-mem fact 524)
 
-# Enable IP forwarding and add cross-subnet routes
-# Each node has 2 direct links, but needs a route for the 3rd subnet it's not on.
-echo "Enabling IP forwarding and configuring cross-subnet routes..."
+# Cross-subnet IP forwarding + routes are only needed for the 3-node mesh
+# (m4-1 + m4-2 + MacBook): there each node has 2 direct links and must relay
+# traffic to the subnet it is NOT directly on, so it has to act as a router.
+# With 2 nodes on a single direct Thunderbolt link (both on the same /24) there
+# is nothing to forward and no 3rd subnet to route to — the direct connected
+# route (see repair_direct_route above) is all that's required. Enabling
+# net.inet.ip.forwarding here would just turn the Macs into routers for traffic
+# that never needs relaying, so it's left off for the 2-node topology.
+echo "Skipping IP forwarding (not needed for 2-node direct Thunderbolt link)..."
 
 SUBNET_M4_1_M4_2=$(echo "$M4_1_TO_M4_2" | awk -F. '{print $1"."$2"."$3".0/24"}')
 # SUBNET_M4_1_MBP=$(echo "$M4_1_TO_MBP" | awk -F. '{print $1"."$2"."$3".0/24"}')
 # SUBNET_M4_2_MBP=$(echo "$M4_2_TO_MBP" | awk -F. '{print $1"."$2"."$3".0/24"}')
 
-for NODE in macstudio-m4-1 macstudio-m4-2; do
-    ssh "$NODE" "sudo sysctl -w net.inet.ip.forwarding=1" &> /dev/null
-done
+# 3-node mesh only — enable IP forwarding so each node can relay to the subnet
+# it isn't on. Disabled for the 2-node direct-link topology (nothing to relay).
+# for NODE in macstudio-m4-1 macstudio-m4-2; do
+#     ssh "$NODE" "sudo sysctl -w net.inet.ip.forwarding=1" &> /dev/null
+# done
 
 # Cross-subnet routes only needed for 3-node mesh (MacBook disconnected)
 # ssh macstudio-m4-1 "sudo route delete -net $SUBNET_M4_2_MBP 2>/dev/null; sudo route add -net $SUBNET_M4_2_MBP $M4_2_TO_M4_1" &> /dev/null
 # ssh macstudio-m4-2 "sudo route delete -net $SUBNET_M4_1_MBP 2>/dev/null; sudo route add -net $SUBNET_M4_1_MBP $M4_1_TO_M4_2" &> /dev/null
 # ssh macbook-m4 "sudo route delete -net $SUBNET_M4_1_M4_2 2>/dev/null; sudo route add -net $SUBNET_M4_1_M4_2 $M4_1_TO_MBP" &> /dev/null
 
-echo "Cross-subnet routes configured."
+echo "Cross-subnet routes skipped (2-node direct link)."
 
 # 0. Pre-deploy push check — verify local HEAD is on origin/$TARGET_BRANCH
 PUSH_CHECK_BRANCH="${EXO_TARGET_BRANCH:-main}"
