@@ -32,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from mtp_longctx_probe import build_prompt, run_once, SPECIAL_TOKEN_MARKERS
 
 QWEN = "mlx-community/Qwen3.6-35B-A3B-8bit"
-DSV4 = "mlx-community/DeepSeek-V4-Flash-8bit"
+DSV4 = "mlx-community/DeepSeek-V4-Flash"
 
 
 def main() -> None:
