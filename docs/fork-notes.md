@@ -1378,3 +1378,34 @@ When the bench target is c≥2:
 
 Anything less is structurally incapable of catching c≥2 path bugs.
 Non-negotiable for any "champion" claim at c=2.
+
+---
+
+## DSv4 garbage-output FIXED — Hyper-Connection key mismatch (2026-06-10)
+
+**Root cause:** canonical `mlx-community/DeepSeek-V4-Flash` names per-layer
+Hyper-Connection modules `hc_attn`/`hc_ffn`; the model code defines them
+`attn_hc`/`ffn_hc`. `load_model(strict=False)` silently dropped the mismatched
+keys, leaving all 43 layers' HC `fn`/`base` at `mx.zeros` init. A zero mHC mix
+matrix gives uniform `sigmoid(0)=0.5` gates instead of learned routing ->
+numerically healthy activations but a semantically scrambled residual stream ->
+confident garbage output ("capital of France" -> "hall"), identical under
+tensor AND pipeline parallelism.
+
+**Fix:** rename incoming keys in `DeepseekV4Model.sanitize()`:
+`.hc_attn.` -> `.attn_hc.`, `.hc_ffn.` -> `.ffn_hc.` (mlx-lm `90a799b`,
+exo `4f40222e`). Also corrected indexer scoring to match #1189 (sigmoid head
+weights, no ReLU). Found via per-layer activation-RMS probe
+(`EXO_DSV4_ACT_PROBE=1`): healthy RMS + confident-wrong logits +
+Tensor==Pipeline garbage -> lazy single-node load showed HC weights at 0.0.
+
+**Dual-model co-host @ 100K, both MTP on** (DSv4 + Qwen3.6-35B-A3B-8bit):
+- c=1 (2 streams): AGG 78.5 tok/s; Qwen ~51.2/stream, DSv4 ~27.3/stream.
+- c=2 (4 streams): AGG 73.0 tok/s; Qwen ~28.2/stream, DSv4 ~8.3/stream.
+- Cluster is GPU-saturated at 100K: total aggregate flat c=1 -> c=2. DSv4
+  per-stream halves under c=2 contention (Qwen-A3B wins GPU scheduling).
+  c=1 is the better balanced operating point. Quality clean (0 BOS-spam,
+  0 degenerate, needle recall good).
+
+Full writeup:
+`.hermes/plans/2026-06-10_dsv4_hyperconnection_fix_and_cohost_bench.md`
