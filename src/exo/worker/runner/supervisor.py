@@ -375,8 +375,25 @@ class RunnerSupervisor:
         rc = self.runner_process.exitcode
         logger.info(f"Runner exited with exit code {rc}")
 
-        # If exit code is 0 then the transient errors were recoverable, meaning we don't need runner diagnostics
-        if rc == 0:
+        # A clean (rc==0) exit normally means any transient errors were
+        # recoverable and no diagnostics are needed.
+        #
+        # BUT rc==0 is also what we observe when *we* SIGTERM a runner that is
+        # still mid-generation (e.g. the runner aborted a forward pass and the
+        # event channel closed, so _forward_events called _check_runner while
+        # generation tasks were still in flight). In that case the exit code is
+        # 0 only because the process was stopped cleanly on the way down — the
+        # task was abandoned. Returning here leaves the instance marked healthy:
+        # the master keeps it "ready" in the UI and hot-loops re-dispatching to
+        # a dead runner ("Skipping invalid task ... already submitted") until
+        # someone manually deletes the instance. Fall through to surface a
+        # RunnerFailed so the master tears the instance down instead.
+        abandoned_generation = [
+            t
+            for t in self.in_progress.values()
+            if isinstance(t, (TextGeneration, ImageGeneration, ImageEdits))
+        ]
+        if rc == 0 and not abandoned_generation:
             return
 
         if isinstance(rc, int) and rc < 0:
