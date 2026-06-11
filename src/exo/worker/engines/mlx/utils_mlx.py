@@ -982,9 +982,23 @@ def apply_chat_template(
     task_params: TextGenerationTaskParams,
 ) -> str:
     messages: list[dict[str, ChatTemplateValue]] = []
+    
+    def _flatten_content(content: Any) -> Any:
+        if isinstance(content, list):
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text_parts.append(str(part.get("text", "")))
+            return "\n\n".join(text_parts) if text_parts else ""
+        return content
+
     if task_params.chat_template_messages is not None:
         # Use pre-formatted messages that preserve tool_calls, thinking, etc.
-        messages = task_params.chat_template_messages
+        for msg in task_params.chat_template_messages:
+            flattened_msg = msg.copy()
+            if "content" in flattened_msg and isinstance(flattened_msg["content"], list):
+                flattened_msg["content"] = _flatten_content(flattened_msg["content"])
+            messages.append(flattened_msg)
     else:
         # Add system message (instructions) if present
         if task_params.instructions:
@@ -995,7 +1009,7 @@ def apply_chat_template(
             if not msg.content:
                 logger.warning("Received message with empty content, skipping")
                 continue
-            messages.append({"role": msg.role, "content": msg.content})
+            messages.append({"role": msg.role, "content": _flatten_content(msg.content)})
 
     prompt = render_chat_template(tokenizer, messages, task_params)
     logger.debug(prompt)
