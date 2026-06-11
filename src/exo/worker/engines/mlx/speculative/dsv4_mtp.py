@@ -1375,6 +1375,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if b_idx >= B:
                     break
                 self._mtp_pre_norm[uid] = decode_pre_norm[b_idx : b_idx + 1, -1:, :]
+                mx.eval(self._mtp_pre_norm[uid])
                 self._mtp_prefilled.add(uid)
         return prompt_responses, generation_responses
 
@@ -1706,6 +1707,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         for n, uid in enumerate(uids):
             acc = n_accepted_per[n]
             self._mtp_pre_norm[uid] = verify_pre_norm[n : n + 1, acc : acc + 1, :]
+            mx.eval(self._mtp_pre_norm[uid])
 
         # 6. Stage bonus tokens for next call.
         gen_batch._next_tokens = mx.array(bonus_vals)
@@ -2777,6 +2779,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         #    accepted position, ready for the next cycle.
         pos = gamma if n_accepted == gamma else n_accepted
         self._mtp_pre_norm[uid] = verify_pre_norm[:, pos : pos + 1, :]
+        mx.eval(self._mtp_pre_norm[uid])
 
         # 8. Build all yielded tokens: [y, accepted drafts...].
         all_tokens: list[tuple[int, mx.array]] = [(y_val, y_logprobs)]
@@ -3118,6 +3121,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # pre_norm at the bonus node's position (where the next cycle's
         # draft will start from).
         self._mtp_pre_norm[uid] = verify_pre_norm[:, best_end_node : best_end_node + 1, :]
+        mx.eval(self._mtp_pre_norm[uid])
 
         # 7. Build yielded tokens: [y, accepted-path drafts...].
         all_tokens: list[tuple[int, mx.array]] = [(y_val, y_logprobs)]

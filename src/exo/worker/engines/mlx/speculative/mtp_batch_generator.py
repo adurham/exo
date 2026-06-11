@@ -148,6 +148,7 @@ class MTPBatchGenerator(BatchGenerator):
         if decode_pre_norm is not None and decode_pre_norm.shape[0] == 1:
             mx.eval(decode_pre_norm)
             self._mtp_pre_norm[uid] = decode_pre_norm[:, -1:, :]
+            mx.eval(self._mtp_pre_norm[uid])
             self._mtp_prefilled.add(uid)
         return prompt_responses, generation_responses
 
@@ -341,6 +342,7 @@ class MTPBatchGenerator(BatchGenerator):
         # 7. Update MTP pre_norm for next cycle
         pos = gamma if n_accepted == gamma else n_accepted
         self._mtp_pre_norm[uid] = verify_pre_norm[:, pos : pos + 1, :]
+        mx.eval(self._mtp_pre_norm[uid])
 
         # 8. Build all_tokens = [y, draft_0, ..., draft_{n_accepted-1}]
         draft_int_values = [int(v) for v in draft_concat[0].tolist()]
