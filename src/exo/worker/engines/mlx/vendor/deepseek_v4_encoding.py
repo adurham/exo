@@ -484,19 +484,29 @@ def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     }
                 )
         elif role == "user":
-            text_block = {"type": "text", "text": msg.get("content", "")}
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                text_blocks = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_blocks.append({"type": "text", "text": part.get("text", "")})
+                if not text_blocks:
+                    text_blocks = [{"type": "text", "text": ""}]
+            else:
+                text_blocks = [{"type": "text", "text": content}]
+
             if (
                 merged
                 and merged[-1].get("role") == "user"
                 and "content_blocks" in merged[-1]
                 and merged[-1].get("task") is None
             ):
-                merged[-1]["content_blocks"].append(text_block)
+                merged[-1]["content_blocks"].extend(text_blocks)
             else:
                 new_msg = {
                     "role": "user",
-                    "content": msg.get("content", ""),
-                    "content_blocks": [text_block],
+                    "content": content,
+                    "content_blocks": text_blocks,
                 }
                 # Preserve extra fields (task, wo_eos, mask, etc.)
                 for key in ("task", "wo_eos", "mask"):
