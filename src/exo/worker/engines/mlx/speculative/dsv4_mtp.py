@@ -220,6 +220,15 @@ def _build_tree_mask_and_positions(
     left = mask_add[:, :kv_window]
     mask = mx.concatenate([left, sub_arr], axis=1)         # (L_q, kv_window + L_q)
 
+    # mlx-lm RotatingKVCache.make_mask can return a sequence dimension > max_size
+    # when offset < max_size but offset + L_q > max_size. Force clamp the
+    # sequence length (axis 1) so it matches the physical KV cache size
+    # yielded by update_and_fetch, preventing SDPA broadcast crashes.
+    max_s = getattr(mask_cache, "max_size", None)
+    if max_s is not None and mask.shape[1] > max_s:
+        mask = mask[:, -max_s:]
+
+
     positions = mx.array(
         [real_offset + d for d in depth], dtype=mx.int32
     )
@@ -672,6 +681,9 @@ class DSv4MTPPredictor:
             mtp_mask = self._cache.make_mask(
                 S, window_size=self.mtp_module.config.sliding_window, return_array=True
             )
+            max_s = self.mtp_module.config.sliding_window
+            if max_s is not None and mtp_mask is not None and mtp_mask.shape[-1] > max_s:
+                mtp_mask = mtp_mask[..., -max_s:]
 
         out = self.mtp_module(
             prev_hidden=hidden_state,
