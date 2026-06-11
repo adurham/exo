@@ -952,12 +952,92 @@ class API:
         await self._send(command)
         return command
 
+    async def _delegate_vision_tasks(
+        self, payload: ChatCompletionRequest
+    ) -> ChatCompletionRequest:
+        from exo.api.types.api import ChatCompletionMessageText, ChatCompletionMessageImageUrl
+        import json
+        from exo.api.adapters.chat_completions import collect_chat_response
+
+        vision_model = "mlx-community/Qwen2.5-VL-7B-Instruct"
+
+        new_messages = []
+        for msg in payload.messages:
+            if isinstance(msg.content, list):
+                has_images = any(isinstance(p, ChatCompletionMessageImageUrl) for p in msg.content)
+                if has_images:
+                    logger.info(f"Delegating vision task to {vision_model}")
+                    vision_content = [
+                        ChatCompletionMessageText(
+                            type="text",
+                            text="Please provide a highly detailed description of this image so that another AI can understand what is in it."
+                        )
+                    ]
+                    for part in msg.content:
+                        if isinstance(part, ChatCompletionMessageImageUrl):
+                            vision_content.append(part)
+
+                    vision_request = payload.model_copy(update={
+                        "model": vision_model,
+                        "messages": [
+                            msg.model_copy(update={"role": "user", "content": vision_content})
+                        ],
+                        "stream": False,
+                        "max_tokens": min(payload.max_tokens or 1000, 1000),
+                    })
+
+                    vision_task_params = await chat_request_to_text_generation(vision_request)
+                    vision_validated_model = await self._validate_model_has_instance(vision_task_params.model)
+                    vision_task_params = vision_task_params.model_copy(update={"model": vision_validated_model})
+                    
+                    command = await self._send_text_generation_with_images(vision_task_params)
+                    
+                    response_str = ""
+                    async for chunk in collect_chat_response(command.command_id, self._token_chunk_stream(command.command_id)):
+                        response_str += chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                    
+                    try:
+                        response_json = json.loads(response_str)
+                        description = response_json["choices"][0]["message"]["content"]
+                    except Exception as e:
+                        logger.error(f"Vision delegation failed: {e}")
+                        description = "[Image description failed]"
+
+                    new_content = []
+                    for part in msg.content:
+                        if isinstance(part, ChatCompletionMessageText):
+                            new_content.append(part)
+                        elif isinstance(part, ChatCompletionMessageImageUrl):
+                            new_content.append(
+                                ChatCompletionMessageText(
+                                    type="text",
+                                    text=f"[[Image description from vision model: {description}]]"
+                                )
+                            )
+
+                    new_messages.append(msg.model_copy(update={"content": new_content}))
+                else:
+                    new_messages.append(msg)
+            else:
+                new_messages.append(msg)
+
+        return payload.model_copy(update={"messages": new_messages})
+
     async def chat_completions(
         self, payload: ChatCompletionRequest
     ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI Chat Completions API - adapter."""
         task_params = await chat_request_to_text_generation(payload)
         validated_model = await self._validate_model_has_instance(task_params.model)
+        
+        from exo.shared.models import model_cards
+        card = model_cards.card_cache.get(validated_model)
+        if card is not None and card.vision is None and task_params.images:
+            # Delegate to a vision model to describe images
+            payload = await self._delegate_vision_tasks(payload)
+            task_params = await chat_request_to_text_generation(payload)
+            validated_model = await self._validate_model_has_instance(task_params.model)
+            
         task_params = task_params.model_copy(update={"model": validated_model})
 
         command = await self._send_text_generation_with_images(task_params)
