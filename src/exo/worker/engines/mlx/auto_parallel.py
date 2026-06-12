@@ -129,6 +129,12 @@ _DSV4_COMPILE_LAYER: bool = (
     == "1"
 )
 
+# OPT-3: sequence-split attention. When set, the DSv4 sharding strategy also
+# assigns layer.attn.sharding_group so SparseCompressedAttention.__call__ takes
+# the prefill query-row-split + all_gather path. Off by default (attention
+# stays replicated). The model-side gate (EXO_DSV4_SEQ_SPLIT) must match.
+_DSV4_SEQ_SPLIT: bool = os.environ.get("EXO_DSV4_SEQ_SPLIT", "0") == "1"
+
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
 _nn_silu_any: Any = _nn_silu
@@ -901,6 +907,13 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             mx.eval(layer.parameters())
 
             layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
+            # OPT-3: enable prefill sequence-split in attention. Setting attn's
+            # sharding_group activates the query-row-split + all_gather path in
+            # SparseCompressedAttention.__call__ (prefill L>1 only; decode L==1
+            # is length-gated out). Only set when EXO_DSV4_SEQ_SPLIT=1 so the
+            # default keeps attention fully replicated.
+            if _DSV4_SEQ_SPLIT:
+                layer.attn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
             self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
             self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.up_proj)
