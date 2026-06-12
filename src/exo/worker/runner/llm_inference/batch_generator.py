@@ -43,6 +43,7 @@ from exo.worker.engines.mlx.utils_mlx import (
     get_coord_group,
     mx_all_gather_tasks,
     mx_any,
+    mx_min_int,
     prewarm_coord_group,
 )
 from exo.worker.engines.mlx.vision import VisionProcessor
@@ -661,10 +662,31 @@ class BatchGenerator(Engine):
         # See ``ExoBatchGenerator.submit_batched`` for the heterogeneity
         # gating (bench-only, no vision, no remote prefill, no MTP/PP-spec).
         if EXO_DSV4_BATCHED_PREFILL:
-            available_slots = EXO_MAX_CONCURRENT_REQUESTS - len(self._active_tasks)
-            if available_slots > 1 and len(self._queue) >= 2:
+            # COLLECTIVE GATE. The batched-prefill branch issues a single TP
+            # forward across the popped tasks (``_batched_start_task`` ->
+            # ``submit_batched`` -> model all_reduce). Both ranks MUST enter
+            # the branch together AND pop the SAME number of tasks, or the TP
+            # collective sees mismatched batch shapes and JACCL barrier-hangs
+            # the cluster forever (the 2026-06-11 concurrent-request wedge).
+            #
+            # ``available_slots`` (from ``len(self._active_tasks)``) and
+            # ``len(self._queue)`` are per-rank: after ``agree_on_tasks`` the
+            # queue *contents* match, but cancellations / finishes can leave
+            # ``_active_tasks`` transiently asymmetric, so the raw local
+            # decision is not safe to branch on. Reduce both to their MIN
+            # across ranks first so every rank computes an identical
+            # ``batch_count`` and takes the identical path. Mirrors the
+            # collective gates at step()'s ``has_work`` check and
+            # batch_generate.py:1900. Coord subgroup so this control-plane
+            # reduce never shares the model TP ``next_call_id_`` counter.
+            coord = get_coord_group(self.group)
+            local_slots = EXO_MAX_CONCURRENT_REQUESTS - len(self._active_tasks)
+            agreed_slots = mx_min_int(local_slots, coord)
+            agreed_queue_len = mx_min_int(len(self._queue), coord)
+            if agreed_slots > 1 and agreed_queue_len >= 2:
+                batch_count = min(agreed_slots, agreed_queue_len)
                 tasks_batch: list[TextGeneration] = []
-                for _ in range(min(available_slots, len(self._queue))):
+                for _ in range(batch_count):
                     tasks_batch.append(self._queue.popleft())
 
                 try:

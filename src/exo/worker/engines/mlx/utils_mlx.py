@@ -1182,6 +1182,31 @@ def mx_any(bool_: bool, group: mx.distributed.Group | None) -> bool:
     return num_true.item() > 0
 
 
+def mx_min_int(value: int, group: mx.distributed.Group | None) -> int:
+    """Return the minimum of ``value`` across all ranks in ``group``.
+
+    Used to make per-rank branch decisions collective: when a control-flow
+    gate depends on a local integer (e.g. ``len(self._queue)``) that can
+    legally differ across ranks for a window, branching on the raw local
+    value lets ranks take divergent paths — the rank that enters a batched
+    collective issues a TP all_reduce the other rank never matches, and the
+    cluster wedges on JACCL forever. Agreeing on the MIN first guarantees
+    every rank makes the identical branch decision.
+
+    Routes through the CPU stream and uses ``mx.eval`` exactly like
+    ``mx_any`` so the small control-plane reduce never aliases a bf16 decode
+    buffer on the GPU stream. Call on the coord subgroup (``get_coord_group``)
+    so it doesn't share the model TP group's ``next_call_id_`` counter.
+    """
+    if group is None:
+        return value
+    reduced = mx.distributed.all_min(
+        mx.array(value), group=group, stream=mx.default_stream(mx.Device(mx.cpu))
+    )
+    mx.eval(reduced)
+    return int(reduced.item())
+
+
 # Per-process cache of coordination subgroups. Split off the model TP
 # group exactly once per parent so all non-model-forward collectives
 # (agree_on_tasks, agree_on_cancellations, has_work gate, upstream uid
