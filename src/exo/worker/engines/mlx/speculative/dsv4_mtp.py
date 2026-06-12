@@ -678,12 +678,22 @@ class DSv4MTPPredictor:
         # the mask once here and thread it through the MTP block.
         mtp_mask: Optional[mx.array] = None
         if isinstance(self._cache, PerStreamBatchRotatingKVCache):
-            mtp_mask = self._cache.make_mask(
+            _ps_cache = self._cache
+            mtp_mask = _ps_cache.make_mask(
                 S, window_size=self.mtp_module.config.sliding_window, return_array=True
             )
-            max_s = self.mtp_module.config.sliding_window
-            if max_s is not None and mtp_mask is not None and mtp_mask.shape[-1] > max_s:
-                mtp_mask = mtp_mask[..., -max_s:]
+            # Clamp the mask's KV axis to the cache's ACTUAL fetched width, not
+            # the bare sliding_window. PerStreamBatchRotatingKVCache stores K/V
+            # in a WIDE ring of ``max_size + _RING_SLACK`` (e.g. 128 + 8 = 136)
+            # and update_and_fetch returns that full ring width, so SDPA sees
+            # (B, H, S, ring_width). Clamping to sliding_window (128) made the
+            # mask NARROWER than the KV → "[broadcast_shapes] (2,1,1,128) and
+            # (2,64,1,136) cannot be broadcast" crash during MTP batched draft.
+            # The ring width is the correct ceiling; the window itself is still
+            # enforced by the mask's boolean content from make_mask.
+            ring_width = _ps_cache.max_size + _ps_cache._RING_SLACK
+            if mtp_mask is not None and mtp_mask.shape[-1] > ring_width:
+                mtp_mask = mtp_mask[..., -ring_width:]
 
         out = self.mtp_module(
             prev_hidden=hidden_state,
