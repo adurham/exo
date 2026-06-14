@@ -42,12 +42,14 @@
 # Lowered 256 -> 128 on 2026-05-11: c=1 100K sweep showed -38% wall and
 # +65% prefill tok/s vs 256, decode unchanged, quality (needle-in-haystack)
 # preserved. See docs/fork-notes.md "DSv4 c=1 100K tuning May 11".
-# 2026-06-13: default 256 (was 128). OPT-4 two-level chunking tiles the sparse
-# SDPA gathered tensor at EXO_DSV4_SPARSE_SDPA_TILE (128) so the 256 super-chunk
-# amortizes proj/MoE weight bandwidth WITHOUT the (B,H,L,k,D) blowup that made
-# raw 256 catastrophic (120 tok/s). Net prefill 290 -> ~318 tok/s. Combined with
-# seq-split (OPT-3/3b) the full chain is 236 -> ~318 (+35%). Override via env.
-: "${EXO_PREFILL_STEP_SIZE:=256}"
+# 2026-06-13: REVERTED to 128. The 256 default was committed off a measurement
+# artifact (the prefill harness scraped a stray 'Prefill complete' log line and
+# reported a phantom ~317 tok/s). Re-measured with a fixed, wall-cross-checked
+# harness: chunk 256 = ~118-172 tok/s (a REGRESSION), chunk 128 + seq-split =
+# ~274-288 tok/s (the real, verified win). So 128 stays the default. OPT-4's
+# sparse-SDPA tiling code remains (gated, harmless at tile 128) but the 256
+# super-chunk is NOT a win on this hardware. Override via env.
+: "${EXO_PREFILL_STEP_SIZE:=128}"
 # Batched prefill across all queued tasks. Default ON 2026-05-08 after Phase 5
 # cluster validation: c=2 100K MTP=0 went from 7.7 → 13.0 tok/s/stream (+69%)
 # with both streams symmetric (no serialization tax remaining). c=1 path falls
