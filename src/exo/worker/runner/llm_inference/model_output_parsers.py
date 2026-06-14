@@ -270,6 +270,18 @@ def _parse_dsml_stream(
     pending_buffer: list[GenerationResponse] = []
     # Text accumulated during a tool call block
     tool_call_text = ""
+    # A parsed ToolCallResponse held back until the terminal (is_done) response
+    # so usage/stats can be attached. Usage is only populated on the is_done
+    # response (see generator.generate's ``if is_done:`` gate), but the DSML
+    # close marker ``</｜DSML｜tool_calls>`` typically arrives a token or two
+    # BEFORE finish_reason/EOS. Emitting the ToolCallResponse the instant the
+    # block closes therefore loses the token usage (usage=None) -- the downstream
+    # chat-completions adapter then returns on the tool-call chunk before the
+    # usage-bearing response is ever consumed, so the client sees a tool call
+    # with no usage. Holding the tool call until the terminal response keeps the
+    # usage attached. (When the close marker and finish_reason land on the SAME
+    # response, the finish-branch below already has usage -- no deferral needed.)
+    pending_tool_call: ToolCallResponse | None = None
 
     def _try_parse_tool_call(
         text: str, response: GenerationResponse
@@ -291,9 +303,27 @@ def _parse_dsml_stream(
             yield None
             continue
 
+        # Safety: if a tool call is held but the next response is NOT the
+        # terminal one (some model emitted trailing content after the block),
+        # flush the held call first to preserve ordering. Usage stays None in
+        # that rare case -- correctness of order beats the token count.
+        if pending_tool_call is not None and response.finish_reason is None:
+            yield pending_tool_call
+            pending_tool_call = None
+
         if response.finish_reason is not None:
             yield from pending_buffer
             pending_buffer.clear()
+            if pending_tool_call is not None:
+                # Terminal response carries usage/stats (built only on is_done).
+                # Attach them to the tool call we held back when its DSML block
+                # closed a token or two earlier, then emit. This is what makes
+                # the client see token usage on a tool-calling turn.
+                yield pending_tool_call.model_copy(
+                    update={"usage": response.usage, "stats": response.stats}
+                )
+                pending_tool_call = None
+                break
             if in_tool_call:
                 tool_call_text += response.text
                 yield (
@@ -319,9 +349,16 @@ def _parse_dsml_stream(
         if in_tool_call:
             tool_call_text += response.text
             if tool_calls_end in tool_call_text:
-                yield _try_parse_tool_call(tool_call_text, response)
+                result = _try_parse_tool_call(tool_call_text, response)
                 in_tool_call = False
                 tool_call_text = ""
+                if isinstance(result, ToolCallResponse):
+                    # Hold until the terminal response so usage can be attached
+                    # (this mid-stream response has usage=None).
+                    pending_tool_call = result
+                else:
+                    # Parse failed -> content residue; no usage to wait for.
+                    yield result
             continue
 
         accumulated += response.text
@@ -346,8 +383,13 @@ def _parse_dsml_stream(
             accumulated = ""
 
             if tool_calls_end in tool_call_text:
-                yield _try_parse_tool_call(tool_call_text, response)
+                result = _try_parse_tool_call(tool_call_text, response)
                 tool_call_text = ""
+                if isinstance(result, ToolCallResponse):
+                    # Hold until the terminal response so usage can be attached.
+                    pending_tool_call = result
+                else:
+                    yield result
             else:
                 in_tool_call = True
             continue
@@ -364,6 +406,11 @@ def _parse_dsml_stream(
 
     # Flush any remaining pending buffer at generator end
     yield from pending_buffer
+    # If the stream ended without a terminal (finish_reason) response while a
+    # tool call was held, emit it now so the call is never dropped. Usage stays
+    # None in this degenerate case (no is_done response ever arrived).
+    if pending_tool_call is not None:
+        yield pending_tool_call
 
 
 def _could_be_marker_prefix(text: str, marker: str) -> bool:

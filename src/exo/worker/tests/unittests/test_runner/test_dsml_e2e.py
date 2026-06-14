@@ -1115,6 +1115,96 @@ class TestE2EDeepseekV4ToolCallParsing:
         args = cast(dict[str, str], json.loads(tool_calls[0].arguments))
         assert args == {"filePath": "/Users/l2/PycharmProjects/exo"}
 
+    def test_v4_tool_call_carries_usage_from_terminal_response(self):
+        """Usage must ride out on the ToolCallResponse even though the DSML
+        close marker arrives a token or two BEFORE finish_reason/usage.
+
+        The mlx generator only builds usage on the is_done (finish_reason)
+        response. For a tool call, the close marker closes the block on an
+        earlier token whose usage is None. If the parser emits the
+        ToolCallResponse the instant the block closes, the token usage is lost
+        (usage=None) and the client's context counter never advances on a
+        tool-calling turn. The parser must hold the tool call until the terminal
+        response and attach its usage.
+        """
+        from exo.api.types import Usage
+        from exo.api.types.api import (
+            CompletionTokensDetails,
+            PromptTokensDetails,
+        )
+
+        usage = Usage(
+            prompt_tokens=265,
+            completion_tokens=12,
+            total_tokens=277,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=263),
+            completion_tokens_details=CompletionTokensDetails(reasoning_tokens=4),
+        )
+
+        text_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
+            DSML_TOKEN, "parameter", ' name="filePath" string="true"', ">",
+            "/tmp/x", "</", DSML_TOKEN, "parameter", ">\n</",
+            DSML_TOKEN, "invoke", ">\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+
+        def _tokens() -> Generator[GenerationResponse]:
+            for i, t in enumerate(text_tokens):
+                yield GenerationResponse(
+                    text=t, token=i, finish_reason=None, usage=None
+                )
+            yield GenerationResponse(
+                text="", token=len(text_tokens),
+                finish_reason="tool_calls", usage=usage,
+            )
+
+        results = list(parse_deepseek_v4(_tokens()))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+
+        assert len(tool_results) == 1, f"expected one tool call, got {results!r}"
+        tc = tool_results[0]
+        assert tc.tool_calls[0].name == "read"
+        assert tc.usage is not None, "ToolCallResponse.usage was dropped"
+        assert tc.usage.prompt_tokens == 265
+
+    def test_v4_tool_call_usage_when_marker_and_finish_same_response(self):
+        """When the full DSML block AND finish_reason land on the SAME response,
+        usage is already present and must be attached without deferral."""
+        from exo.api.types import Usage
+        from exo.api.types.api import (
+            CompletionTokensDetails,
+            PromptTokensDetails,
+        )
+
+        usage = Usage(
+            prompt_tokens=99,
+            completion_tokens=5,
+            total_tokens=104,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=0),
+            completion_tokens_details=CompletionTokensDetails(reasoning_tokens=0),
+        )
+        v4_start = f"<{DSML_TOKEN}tool_calls>"
+        v4_end = f"</{DSML_TOKEN}tool_calls>"
+        block = (
+            f"{v4_start}"
+            f'<{DSML_TOKEN}invoke name="read">'
+            f'<{DSML_TOKEN}parameter name="filePath" string="true">/x</{DSML_TOKEN}parameter>'
+            f"</{DSML_TOKEN}invoke>"
+            f"{v4_end}"
+        )
+
+        def _one() -> Generator[GenerationResponse]:
+            yield GenerationResponse(
+                text=block, token=0, finish_reason="tool_calls", usage=usage
+            )
+
+        results = list(parse_deepseek_v4(_one()))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        assert len(tool_results) == 1
+        assert tool_results[0].usage is not None
+        assert tool_results[0].usage.prompt_tokens == 99
+
     def test_v4_malformed_block_does_not_leak_dsml_tokens(self):
         """A malformed tool-call block (wrapper opened, but the body is not a
         valid invoke) must not leak raw ``<｜DSML｜...>`` control tokens into
