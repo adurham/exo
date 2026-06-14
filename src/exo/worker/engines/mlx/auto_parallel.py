@@ -915,7 +915,13 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             # which would WRONGLY all_sum their REPLICATED output (doubling it).
             # So gate strictly on the sparse class. Prefill L>1 only; decode is
             # length-gated inside the attention. Default off (EXO_DSV4_SEQ_SPLIT).
-            if _DSV4_SEQ_SPLIT and type(layer.attn).__name__ == "SparseCompressedAttention":
+            # OPT-3 (Sparse) + OPT-3b (Compressed): both classes implement the
+            # query-split + all_gather path. LocalAttention (ratio 0) does NOT —
+            # it keeps the legacy all_sum branch, so never set its sharding_group.
+            if _DSV4_SEQ_SPLIT and type(layer.attn).__name__ in (
+                "SparseCompressedAttention",
+                "CompressedAttention",
+            ):
                 layer.attn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
             self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
