@@ -908,11 +908,14 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
 
             layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             # OPT-3: enable prefill sequence-split in attention. Setting attn's
-            # sharding_group activates the query-row-split + all_gather path in
-            # SparseCompressedAttention.__call__ (prefill L>1 only; decode L==1
-            # is length-gated out). Only set when EXO_DSV4_SEQ_SPLIT=1 so the
-            # default keeps attention fully replicated.
-            if _DSV4_SEQ_SPLIT:
+            # sharding_group activates the query-row-split + all_gather path —
+            # but ONLY SparseCompressedAttention implements that path. The other
+            # two attention classes (LocalAttention ratio==0, CompressedAttention
+            # ratio==128) still have the legacy all_sum-on-sharding_group branch,
+            # which would WRONGLY all_sum their REPLICATED output (doubling it).
+            # So gate strictly on the sparse class. Prefill L>1 only; decode is
+            # length-gated inside the attention. Default off (EXO_DSV4_SEQ_SPLIT).
+            if _DSV4_SEQ_SPLIT and type(layer.attn).__name__ == "SparseCompressedAttention":
                 layer.attn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             self.all_to_sharded_linear_in_place(layer.ffn.shared_experts.gate_proj)
             self.sharded_to_all_linear_in_place(layer.ffn.shared_experts.down_proj)
