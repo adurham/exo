@@ -1956,7 +1956,31 @@ class ExoBatchGenerator:
             # ── detokenization ──
             _t0 = time.perf_counter()
             if response.finish_reason != "stop":
-                state.detokenizer.add_token(response.token)
+                # Guard against out-of-range token ids before handing them to the
+                # streaming detokenizer. DSv4-Flash's lm_head emits vocab_size
+                # (129280) logits but the tokenizer's BPE tokenmap only covers
+                # len(vocab) (128000) ids; a sampled special/reserved id in the
+                # gap — or a negative sentinel that can leak from the MTP accept
+                # path under temp>0 sampling — indexes the tokenmap out of range
+                # and crashes the runner (tokenizer_utils.py:208,
+                # IndexError: list index out of range). A token with no tokenmap
+                # entry has no text to stream, so skip detok for it rather than
+                # die; the token id is still recorded in completion_tokens below.
+                _tok = response.token
+                _tokmap = getattr(state.detokenizer, "tokenmap", None)
+                _tok_ok = (
+                    isinstance(_tok, int)
+                    and _tok >= 0
+                    and (_tokmap is None or _tok < len(_tokmap))
+                )
+                if _tok_ok:
+                    state.detokenizer.add_token(response.token)
+                else:
+                    logger.warning(
+                        f"skipping detok of out-of-range token id {_tok!r} "
+                        f"(tokenmap len={len(_tokmap) if _tokmap is not None else 'n/a'}) "
+                        f"for uid {response.uid}"
+                    )
             if response.finish_reason is not None:
                 state.detokenizer.finalize()
             text = state.detokenizer.last_segment
