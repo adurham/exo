@@ -243,21 +243,16 @@ def parse_deepseek_v32(
 def parse_deepseek_v4(
     responses: Generator[GenerationResponse | None],
 ) -> Generator[GenerationResponse | ToolCallResponse | None]:
-    # DSv4 emits the same DSML tool-call format as V3.2: the block is wrapped in
-    # <｜DSML｜function_calls> ... </｜DSML｜function_calls> with inner
-    # <｜DSML｜invoke name="..."> / <｜DSML｜parameter ...> tags (see
-    # dsml_encoding.py). The previous hardcoded "tool_calls" wrapper marker NEVER
-    # matched what the model produces, so every tool call fell through as raw text
-    # (the leaked "<｜DSML｜invoke>/<｜DSML｜parameter>" fragments in chat output).
-    # Use the authoritative function_calls constants, like parse_deepseek_v32.
-    from exo.worker.engines.mlx.vendor.dsml_encoding import (
-        TOOL_CALLS_END,
-        TOOL_CALLS_START,
-    )
-
-    return _parse_dsml_stream(
-        responses, TOOL_CALLS_START, TOOL_CALLS_END, parse_dsml_output
-    )
+    # DSv4-Flash wraps its tool calls in <｜DSML｜tool_calls> ... </｜DSML｜tool_calls>
+    # (verified empirically from raw model output — distinct from V3.2 which uses
+    # the function_calls wrapper). The inner body uses <｜DSML｜invoke name="..."> /
+    # <｜DSML｜parameter ...> tags, which parse_dsml_output already handles. Only the
+    # wrapper marker differs, so define it explicitly here rather than importing the
+    # V3.2 function_calls constants.
+    dsml_token = "｜DSML｜"
+    start = f"<{dsml_token}tool_calls>"
+    end = f"</{dsml_token}tool_calls>"
+    return _parse_dsml_stream(responses, start, end, parse_dsml_output)
 
 
 def _parse_dsml_stream(
