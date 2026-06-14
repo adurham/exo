@@ -70,6 +70,41 @@ _PARAM_PATTERN = re.compile(
 )
 
 
+# Matches a well-formed DSML control tag: <｜DSML｜name ...> or </｜DSML｜name>.
+# The tag name must be word-like (\w+) and the only thing before the closing
+# '>' is optional whitespace-led attributes. This deliberately does NOT match
+# a stray ``<｜DSML｜`` glued to arbitrary prose (e.g. the model parroting
+# ``<｜DSML｜_cli.py | 6 files changed…``) — that residue is readable text and
+# is preserved; only its leaked sentinel is removed by _DSML_ORPHAN_PATTERN.
+_DSML_TAG_PATTERN = re.compile(
+    rf"</?{re.escape(DSML_TOKEN)}\w+(?:\s+[^>]*)?>"
+)
+# Matches an orphaned DSML sentinel left behind when a malformed block emitted
+# ``｜DSML｜`` without forming a valid tag. The leading ``<`` / ``</`` is
+# optional so a bare sentinel (no angle bracket) is stripped too — the
+# invariant is that the ``｜DSML｜`` special token never survives.
+_DSML_ORPHAN_PATTERN = re.compile(rf"(?:<\s*/?\s*)?{re.escape(DSML_TOKEN)}")
+
+
+def strip_dsml_markers(text: str) -> str:
+    """Strip DSML control-token markup from text.
+
+    Safety net for the case where a tool-call block fails to parse (a
+    generation-quality hiccup: the model opens a ``tool_calls`` wrapper but
+    emits something other than a valid ``invoke`` body). Without this, the raw
+    ``<｜DSML｜...>`` special tokens leak verbatim into user-visible content via
+    the chat-completions ``content`` field.
+
+    Removes well-formed ``<｜DSML｜name ...>`` tags first, then any
+    orphaned/unclosed ``｜DSML｜`` sentinels. The invariant is that the
+    ``｜DSML｜`` special token never survives into displayed text; residual
+    prose around a malformed block is preserved rather than silently dropped.
+    """
+    text = _DSML_TAG_PATTERN.sub("", text)
+    text = _DSML_ORPHAN_PATTERN.sub("", text)
+    return text
+
+
 def parse_dsml_output(text: str) -> list[ToolCallItem] | None:
     """Parse DSML function_calls block from model output text.
 

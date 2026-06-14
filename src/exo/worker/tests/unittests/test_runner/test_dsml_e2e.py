@@ -1115,6 +1115,51 @@ class TestE2EDeepseekV4ToolCallParsing:
         args = cast(dict[str, str], json.loads(tool_calls[0].arguments))
         assert args == {"filePath": "/Users/l2/PycharmProjects/exo"}
 
+    def test_v4_malformed_block_does_not_leak_dsml_tokens(self):
+        """A malformed tool-call block (wrapper opened, but the body is not a
+        valid invoke) must not leak raw ``<｜DSML｜...>`` control tokens into
+        displayed content.
+
+        Reproduces an observed generation hiccup: the model opens a
+        ``tool_calls`` wrapper and then, instead of an ``invoke`` block,
+        regurgitates a prior tool RESULT. ``parse_dsml_output`` returns None,
+        and the stream parser falls back to yielding the residue as text — that
+        residue must have the DSML special tokens stripped.
+        """
+        # Wrapper opens, body is a parroted git-diff result (no invoke), closes.
+        model_tokens = [
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n<",
+            DSML_TOKEN,
+            "_cli.py | 6 ++++++",
+            ' 6 files changed", "exit_code": 0, "error": null}',
+            "</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+        ]
+
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        full_text = "".join(r.text for r in text_results)
+
+        # No spurious tool call should be emitted from the malformed block.
+        assert len(tool_results) == 0
+        # The DSML special token must never survive into displayed text.
+        assert DSML_TOKEN not in full_text
+        assert "<\uff5cDSML" not in full_text
+        # But the human-readable residue is preserved (not silently dropped).
+        assert "6 files changed" in full_text
+
     def test_v4_tool_call_after_thinking_block(self):
         """V4 reasoning models start in `<think>` and emit DSML tool calls
         after `</think>`. The thinking parser must hand a complete tool-call

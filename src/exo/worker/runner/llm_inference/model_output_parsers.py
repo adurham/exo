@@ -27,7 +27,10 @@ from exo.worker.engines.mlx.types import Model
 from exo.worker.engines.mlx.utils_mlx import (
     detect_thinking_prompt_suffix,
 )
-from exo.worker.engines.mlx.vendor.dsml_encoding import parse_dsml_output
+from exo.worker.engines.mlx.vendor.dsml_encoding import (
+    parse_dsml_output,
+    strip_dsml_markers,
+)
 from exo.worker.runner.bootstrap import logger
 from exo.worker.runner.llm_inference.tool_parsers import ToolParser
 
@@ -277,7 +280,11 @@ def _parse_dsml_stream(
                 tool_calls=parsed, usage=response.usage, stats=response.stats
             )
         logger.warning(f"DSML tool call parsing failed for: {text}")
-        return response.model_copy(update={"text": text})
+        # Parsing failed (malformed block — e.g. the model opened a tool_calls
+        # wrapper but emitted no valid invoke body). Strip the DSML control
+        # tokens before yielding the residue as content; otherwise the raw
+        # ``<｜DSML｜...>`` special tokens leak verbatim to the user.
+        return response.model_copy(update={"text": strip_dsml_markers(text)})
 
     for response in responses:
         if response is None:
@@ -292,7 +299,12 @@ def _parse_dsml_stream(
                 yield (
                     _try_parse_tool_call(tool_call_text, response)
                     if tool_calls_end in tool_call_text
-                    else response.model_copy(update={"text": tool_call_text})
+                    # Stream ended mid-block (no closing marker). Strip the DSML
+                    # control tokens so the unterminated wrapper doesn't leak
+                    # raw ``<｜DSML｜...>`` tokens into displayed content.
+                    else response.model_copy(
+                        update={"text": strip_dsml_markers(tool_call_text)}
+                    )
                 )
             elif tool_calls_start in response.text and tool_calls_end in response.text:
                 dsml_start = response.text.index(tool_calls_start)
