@@ -133,7 +133,7 @@ _DSV4_COMPILE_LAYER: bool = (
 # assigns layer.attn.sharding_group so SparseCompressedAttention.__call__ takes
 # the prefill query-row-split + all_gather path. Off by default (attention
 # stays replicated). The model-side gate (EXO_DSV4_SEQ_SPLIT) must match.
-_DSV4_SEQ_SPLIT: bool = os.environ.get("EXO_DSV4_SEQ_SPLIT", "0") == "1"
+_DSV4_SEQ_SPLIT: bool = os.environ.get("EXO_DSV4_SEQ_SPLIT", "1") == "1"
 
 # mlx-lm's switch_layers helpers are private and untyped; aliased here so
 # FusedSwitchGLU can use them without pyright complaining per use site.
