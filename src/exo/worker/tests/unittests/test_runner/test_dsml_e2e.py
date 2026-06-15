@@ -1526,3 +1526,72 @@ class TestE2EDeepseekV4GarbledInvokeFailsCleanly:
         full_text = "".join(r.text for r in text_results)
         # Raw DSML sentinel must still never leak in legacy mode either.
         assert DSML_TOKEN not in full_text
+
+
+class TestE2EDeepseekV4UnterminatedToolCallFailsCleanly:
+    """A CONFIRMED-real tool-call block whose stream ENDS before the closing
+    tags (unterminated invoke) must fail cleanly with finish_reason='error',
+    never leak the bare command (+ trailing param value) as content.
+
+    Reproduces the 2026-06-15 production leak (recurring, several times across
+    sessions): after a failure-spiral / hung prior tool call, DSv4 begins a real
+    terminal tool call — ``<command>`` then a ``<timeout>`` value — and STOPS
+    (finish_reason=stop) before writing </parameter></invoke></tool_calls>. The
+    old unterminated-block path stripped the markers and yielded the residue as
+    content, surfacing e.g. ``pwd && ... head -10\\n10`` to the user (the bare
+    command plus the stripped timeout value '10') AND dropping the call. The fix
+    routes confirmed-real unterminated blocks through the same clean-fail+retry
+    path as malformed complete blocks."""
+
+    def test_unterminated_confirmed_block_emits_error_not_content(self):
+        # Confirmed-real wrapper + invoke + command param + timeout value, then
+        # the stream ENDS (no closing tags). finish_reason=stop on last chunk.
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">", "\n<",
+            DSML_TOKEN, 'invoke name="terminal">', "\n<",
+            DSML_TOKEN, 'parameter name="command" string="true">',
+            'pwd && echo "---" && ps aux | grep -i "exo" | grep -v grep | head -10',
+            "</", DSML_TOKEN, "parameter>", "\n<",
+            DSML_TOKEN, 'parameter name="timeout" string="false">', "10",
+            # stream ends — no </parameter></invoke></tool_calls>
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens_with_special(
+                    model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID
+                ),
+                frozenset({_DSML_SPECIAL_ID}),
+            )
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+
+        assert len(tool_results) == 0, f"unterminated block wrongly parsed: {results!r}"
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        assert len(error_responses) >= 1, f"expected an error response, got {results!r}"
+        # CRITICAL: the bare command + stripped timeout value must NEVER leak.
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert DSML_TOKEN not in non_error_text
+        assert "pwd &&" not in non_error_text
+        assert "ps aux" not in non_error_text
+
+    def test_unterminated_in_legacy_mode_still_strips(self):
+        """Without resolved special-token ids (legacy fallback), an unterminated
+        block keeps the original safe strip-to-content behavior — no error, and
+        no raw DSML sentinel leak."""
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">", "\n<",
+            DSML_TOKEN, 'invoke name="terminal">', "\n<",
+            DSML_TOKEN, 'parameter name="command" string="true">',
+            "git log -20", "</", DSML_TOKEN, "parameter>", "\n<",
+            DSML_TOKEN, 'parameter name="timeout" string="false">', "10",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert len(tool_results) == 0
+        assert all(r.finish_reason != "error" for r in text_results)
+        full_text = "".join(r.text for r in text_results)
+        assert DSML_TOKEN not in full_text

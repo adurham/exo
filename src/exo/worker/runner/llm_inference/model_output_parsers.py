@@ -358,6 +358,18 @@ def _parse_dsml_stream(
     # response, the finish-branch below already has usage — no deferral needed.)
     pending_tool_call: ToolCallResponse | None = None
 
+    def _tool_call_error(
+        response: GenerationResponse, reason: str
+    ) -> GenerationResponse:
+        # Fail the generation cleanly with finish_reason="error" (->
+        # ErrorChunk -> 500 on the OpenAI stream). The hermes client classifies
+        # that as a retryable upstream error and re-runs the turn, giving the
+        # model another draw. Nothing tool-call-shaped is ever shown to the user
+        # as content, and the (broken) call is not silently dropped.
+        return response.model_copy(
+            update={"text": reason, "finish_reason": "error"}
+        )
+
     def _try_parse_tool_call(
         text: str, response: GenerationResponse, *, confirmed_real: bool
     ) -> ToolCallResponse | GenerationResponse:
@@ -377,21 +389,14 @@ def _parse_dsml_stream(
             # generation hiccup). The old behavior — strip the markers and yield
             # the residue as CONTENT — surfaced raw tool-call innards to the user
             # as a garbled message AND silently dropped the tool call. Instead,
-            # fail the generation cleanly with finish_reason="error" (->
-            # ErrorChunk -> 500 on the OpenAI stream). The hermes client
-            # classifies that as a retryable upstream error and re-runs the turn,
-            # giving the model another draw — which, being rare, almost always
-            # succeeds. Nothing garbled is ever shown to the user.
-            return response.model_copy(
-                update={
-                    "text": (
-                        "DSv4 emitted a malformed tool-call block that could not "
-                        "be parsed (the tool_calls wrapper was present but its "
-                        "invoke body was corrupt). Failing the turn so it can be "
-                        "retried."
-                    ),
-                    "finish_reason": "error",
-                }
+            # fail the generation cleanly so the turn is retried (see
+            # _tool_call_error).
+            return _tool_call_error(
+                response,
+                "DSv4 emitted a malformed tool-call block that could not "
+                "be parsed (the tool_calls wrapper was present but its "
+                "invoke body was corrupt). Failing the turn so it can be "
+                "retried.",
             )
         # Legacy fallback (no special-token id resolved, so real-vs-quoted can't
         # be told apart): preserve the original safe behavior — strip the DSML
@@ -443,18 +448,34 @@ def _parse_dsml_stream(
                 break
             if in_tool_call:
                 tool_call_text += response.text
-                yield (
-                    _try_parse_tool_call(
+                if tool_calls_end in tool_call_text:
+                    yield _try_parse_tool_call(
                         tool_call_text, response, confirmed_real=dsml_confirmed_real
                     )
-                    if tool_calls_end in tool_call_text
-                    # Stream ended mid-block (no closing marker). Strip the DSML
-                    # control tokens so the unterminated wrapper doesn't leak
+                elif dsml_confirmed_real:
+                    # Stream ended mid-tool-call with NO closing marker, on a
+                    # CONFIRMED-real block (special token seen). The model began
+                    # a genuine tool call then stopped before closing it
+                    # (observed 2026-06-15, finish_reason=stop: DSv4 emitted
+                    # ``<command>\n<timeout>`` with the closing tags never
+                    # written, after a failure-spiral / hung prior tool call).
+                    # Stripping markers here LEAKS the bare command (+ trailing
+                    # param value) as content AND drops the call — the exact
+                    # symptom. Fail cleanly so the turn is retried instead.
+                    yield _tool_call_error(
+                        response,
+                        "DSv4 began a tool-call block but the stream ended "
+                        "before it was closed (unterminated invoke). Failing "
+                        "the turn so it can be retried.",
+                    )
+                else:
+                    # Legacy fallback (no special-token id): can't be sure it was
+                    # a real call, so preserve the original behavior — strip the
+                    # DSML control tokens so an unterminated wrapper doesn't leak
                     # raw ``<｜DSML｜...>`` tokens into displayed content.
-                    else response.model_copy(
+                    yield response.model_copy(
                         update={"text": strip_dsml_markers(tool_call_text)}
                     )
-                )
             elif (
                 tool_calls_start in response.text
                 and tool_calls_end in response.text
