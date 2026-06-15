@@ -235,9 +235,12 @@ else
 fi
 # Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
-# 4 sessions = a Hermes orchestrator (parent + up to 3 delegated children)
-# or a few concurrent tabs without paying for unshared copies.
-: "${DSV4_MAX_PREFIX_SESSIONS:=8}"
+# DSv4 only serves real multi-turn conversations (aux/background tasks route to
+# Qwen3.6, not here), so the realistic working set is ~2 live conversations;
+# 4 doubles that for headroom (e.g. a couple concurrent tabs / a delegated
+# child) without paying for unshared copies. Was 8 — dropped 2026-06-15 after
+# confirming the cluster never needs that many DSv4 sessions hot.
+: "${DSV4_MAX_PREFIX_SESSIONS:=4}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
 # DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
