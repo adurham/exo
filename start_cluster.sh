@@ -148,75 +148,9 @@ fi
 : "${EXO_RUNNER_QOS:=off}"
 : "${LOG_LEVEL:=DEBUG}"
 
-# Model placed automatically at startup; 1 instance per Studio (2 total) for prediction-bot.
-: "${HUIHUI_MODEL_ID:=mlx-community/Huihui-Qwen3.5-35B-A3B-abliterated-mxfp4}"
-: "${HUIHUI_INSTANCES_PER_STUDIO:=0}"
-# Scout instances only ever serve a single request type — cap KV memory so they
-# can't accumulate prefix history that crowds out MiniMax on the same node.
-: "${HUIHUI_MAX_KV_TOKENS:=36864}"
-: "${HUIHUI_MAX_PREFIX_SESSIONS:=1}"
-# Hard byte cap for the prefix cache (across all leaves, after radix-trie
-# dedup). Empty = no byte cap (fall back to session-count cap alone).
-: "${HUIHUI_MAX_PREFIX_BYTES:=}"
-# Per-instance prefill chunk size. Empty = fall through to EXO_PREFILL_STEP_SIZE.
-: "${HUIHUI_PREFILL_STEP_SIZE:=}"
-# KV cache quantization (bits). Huihui's working set is small (~18 GB weights
-# + 36k-token rotating KV), so bf16 fits fine and skipping quant avoids the
-# per-step dequantize cost that _merge_caches pays for QuantizedKVCache.
-# 0 = explicitly disable (overrides EXO_KV_CACHE_BITS env); positive N = bits.
-: "${HUIHUI_KV_CACHE_BITS:=0}"
-# Qwen3.5-35B-A3B "General Thinking" sampling profile (per upstream model card).
-# Huihui inherits the base Qwen3.5-35B-A3B recommendations unchanged.
-: "${HUIHUI_TEMPERATURE:=1.0}"
-: "${HUIHUI_TOP_P:=0.95}"
-: "${HUIHUI_TOP_K:=20}"
-: "${HUIHUI_MIN_P:=0.0}"
-: "${HUIHUI_PRESENCE_PENALTY:=1.5}"
-: "${HUIHUI_REPETITION_PENALTY:=1.0}"
-
-# Pipeline-model selection — at most ONE of these should be enabled at a time.
-# Both fit on the cluster individually but together they exhaust RAM (Huihui
-# scouts also need ~18GB per node). Toggle via the *_ENABLED env vars.
-
-# MiniMax-M2.7 (5bit): ~157 GB, ~80 GB/rank under TP=2, leaves headroom
-# under the 124 GB wired_limit for Huihui scouts (~18 GB/node) to co-reside.
-# No MTP weights upstream, so no spec-decode speedup. Default = on.
-: "${MINIMAX_MODEL_ID:=mlx-community/MiniMax-M2.7-5bit}"
-: "${MINIMAX_ENABLED:=0}"
-# Prefix caching: the radix trie dedupes shared prefixes across leaves, so 4
-# sessions is enough for a Hermes orchestrator (parent + up to 3 children) or
-# a few concurrent channels without paying for unshared copies. Tighter than
-# the session cap is MINIMAX_MAX_PREFIX_BYTES below — the real budget.
-: "${MINIMAX_MAX_PREFIX_SESSIONS:=4}"
-: "${MINIMAX_MAX_KV_TOKENS:=}"
-# Hard byte cap across all prefix-cache leaves (after trie dedup). At 8-bit KV
-# with MiniMax's 62 layers / 4 KV-heads-per-rank / 128 head_dim, ~62 KiB per
-# token per rank — so 5 GiB ≈ 80K unique cached tokens per rank, which covers
-# one ~48K Hermes session + a couple of delegated children after sharing the
-# system prompt. Leaves real headroom under the 124 GB wired_limit alongside
-# Huihui's ~20 GB resident footprint per node.
-: "${MINIMAX_MAX_PREFIX_BYTES:=5368709120}"
-# Per-instance prefill chunk size. Empty = fall through to EXO_PREFILL_STEP_SIZE.
-: "${MINIMAX_PREFILL_STEP_SIZE:=}"
-# KV cache quantization (bits). 4-bit trades quality for footprint and at 48K+
-# contexts produces verbatim-recall drift (usernames / paths / exact strings
-# come back fuzzy — MLX's attention path dequantizes to bf16 anyway, so 4-bit
-# only saves steady-state storage, not attention-time peak). 8-bit halves the
-# quant error and fits under the per-node ceiling with Huihui co-resident.
-# 0 to disable entirely, empty to defer to EXO_KV_CACHE_BITS env.
-: "${MINIMAX_KV_CACHE_BITS:=8}"
-# MiniMax sampling defaults (per HF model card recommendation).
-: "${MINIMAX_TEMPERATURE:=1.0}"
-: "${MINIMAX_TOP_P:=0.95}"
-: "${MINIMAX_TOP_K:=40}"
-: "${MINIMAX_MIN_P:=}"
-: "${MINIMAX_PRESENCE_PENALTY:=}"
-: "${MINIMAX_REPETITION_PENALTY:=}"
-
 # DeepSeek V4 Flash (~100 GB/rank at 6-bit): 158B total / 13B activated, hybrid
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
-# YARN. Larger than MiniMax — won't coexist with Huihui scouts. Set
-# DSV4_ENABLED=0 to skip; MiniMax + scouts must stay off while it's enabled.
+# YARN. The cluster's primary model. Set DSV4_ENABLED=0 to skip.
 : "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash}"
 : "${DSV4_ENABLED:=1}"
 # Speculative decoding uses EXO_PP_DRAFT_MODEL (Qwen3.5 0.8B) as the draft;
@@ -337,21 +271,6 @@ fi
 : "${DSV4_PRESENCE_PENALTY:=}"
 : "${DSV4_REPETITION_PENALTY:=}"
 
-# Qwen3.5-397B-A17B (~105GB/rank): ships trained MTP weights for ~2-3× decode
-# speedup, but pushes both nodes to ~85-90% RAM by itself — won't coexist with
-# Huihui scouts. Set QWEN35_ENABLED=1 to use, and disable MiniMax + scouts.
-: "${QWEN35_MODEL_ID:=mlx-community/Qwen3.5-397B-A17B-4bit}"
-: "${QWEN35_ENABLED:=0}"
-# Sampling defaults — Qwen3.5 thinking-mode recommendation from upstream
-# model card (the model is thinking-mode by default). min_p=0.0 explicitly
-# disables min_p filtering per Qwen's guidance.
-: "${QWEN35_TEMPERATURE:=0.6}"
-: "${QWEN35_TOP_P:=0.95}"
-: "${QWEN35_TOP_K:=20}"
-: "${QWEN35_MIN_P:=0.0}"
-: "${QWEN35_PRESENCE_PENALTY:=0.0}"
-: "${QWEN35_REPETITION_PENALTY:=1.0}"
-
 # Qwen3.6-35B-A3B (MoE, ~17.5GB/rank at 8-bit across a 2-node TP shard). Small
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
 # of weights/rank, leaving ~32GB under the 124GB wired limit for KV + activations
@@ -384,9 +303,8 @@ fi
 #     beyond that is unreusable. (0 would disable prefix reuse entirely.)
 #   - 1 GiB byte ceiling: belt-and-suspenders so it can never balloon.
 #   - 8-bit KV quant: halves Qwen's active KV vs bf16. Aux/image output quality
-#     is non-critical, and MiniMax (same aux bucket) already runs KV_CACHE_BITS=8
-#     in production — safe, proven precedent. (DSv4 stays at 0/bf16: it's the
-#     quality-critical main model.)
+#     is non-critical, so trading a little precision for footprint is the right
+#     call here. (DSv4 stays at 0/bf16: it's the quality-critical main model.)
 : "${QWEN36_MAX_PREFIX_SESSIONS:=1}"
 : "${QWEN36_MAX_PREFIX_BYTES:=1073741824}"
 : "${QWEN36_KV_CACHE_BITS:=8}"
@@ -912,14 +830,6 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_DEFAULT_TOP_K" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_K=$EXO_DEFAULT_TOP_K"
     [ -n "$EXO_DEFAULT_MIN_P" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_MIN_P=$EXO_DEFAULT_MIN_P"
 
-    # MiniMax decode diagnostic gates (default off; forwarded to runners when set).
-    # The MiniMax-specific tracer was generalised into EXO_PROFILER=spans above.
-    [ -n "$EXO_MINIMAX_NOOP_ALLSUM" ]  && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ALLSUM=$EXO_MINIMAX_NOOP_ALLSUM"
-    [ -n "$EXO_MINIMAX_NOOP_ATTN" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_ATTN=$EXO_MINIMAX_NOOP_ATTN"
-    [ -n "$EXO_MINIMAX_NOOP_MOE" ]     && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_MOE=$EXO_MINIMAX_NOOP_MOE"
-    [ -n "$EXO_MINIMAX_NOOP_SDPA" ]    && EXO_ENV="$EXO_ENV EXO_MINIMAX_NOOP_SDPA=$EXO_MINIMAX_NOOP_SDPA"
-    # Phase 3 fused-QKV projection (merges q_proj/k_proj/v_proj into one matmul).
-    [ -n "$EXO_MINIMAX_FUSED_ATTN" ]   && EXO_ENV="$EXO_ENV EXO_MINIMAX_FUSED_ATTN=$EXO_MINIMAX_FUSED_ATTN"
     # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
     # while we validate decode quality vs unfused.
     [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
@@ -1166,7 +1076,7 @@ if [ "$CLUSTER_READY" = false ]; then
 fi
 
 
-# 5. Create MiniMax instance on the Mac Studios
+# 5. Create model instances on the Mac Studios
 
 # Look up Mac Studio node IDs from cluster state (these differ from libp2p peer IDs).
 echo "Looking up node IDs from cluster state..."
@@ -1307,244 +1217,12 @@ create_instance_with_retry() {
 
 EXPECTED_RUNNERS=0
 
-# ── Auto-place Huihui instances ──
-# 3 single-node Pipeline instances per Mac Studio (6 total) of the Huihui
-# MoE model. Used for prediction-bot scout fan-out. Override with
-# HUIHUI_MODEL_ID / HUIHUI_INSTANCES_PER_STUDIO=0 to skip.
-create_single_node_instance() {
-    # Create one single-node Pipeline / MlxRing instance pinned to a
-    # specific node by passing node_ids to /instance/previews, then
-    # POSTing the matching preview to /instance.
-    local node_id="$1"
-    local model_id="$2"
-    local node_label="$3"
-    local instance_index="$4"
-    local max_kv_tokens="${5:-}"
-    local max_prefix_sessions="${6:-}"
-    local def_temp="${7:-}"
-    local def_top_p="${8:-}"
-    local def_top_k="${9:-}"
-    local def_min_p="${10:-}"
-    local def_presence="${11:-}"
-    local def_repetition="${12:-}"
-    local kv_cache_bits="${13:-}"
-    local max_prefix_bytes="${14:-}"
-    local prefill_step="${15:-}"
-    local max_attempts=20
-
-    for attempt in $(seq 1 $max_attempts); do
-        # Step 1: previews filtered to the target node.
-        local previews_response previews_code
-        previews_response=$(curl -s -w '\n%{http_code}' -G "$API/instance/previews" \
-            --data-urlencode "model_id=$model_id" \
-            --data-urlencode "node_ids=$node_id")
-        previews_code=$(echo "$previews_response" | tail -1)
-        previews_response=$(echo "$previews_response" | sed '$d')
-
-        if [ -z "$previews_code" ] || [ "$previews_code" -lt 200 ] 2>/dev/null || [ "$previews_code" -ge 300 ] 2>/dev/null; then
-            echo "  ${node_label} #${instance_index}: previews HTTP $previews_code, retrying in 5s..."
-            sleep 5
-            continue
-        fi
-
-        # Step 2: pick a Pipeline + MlxRing single-node preview that has
-        # an instance attached and isn't an error.
-        local instance_payload
-        # When the filtered array is empty (model still hydrating on the node),
-        # .[0] yields null — emit JSON null so the "$instance_payload" = "null"
-        # check below triggers the retry instead of POSTing {"instance": null}.
-        # Per-instance KV caps + sampling defaults are injected into the inner
-        # tagged object (TaggedModel wraps it as {"MlxRingInstance": {...}}).
-        instance_payload=$(echo "$previews_response" | jq -c \
-            --argjson kv "${max_kv_tokens:-null}" \
-            --argjson sessions "${max_prefix_sessions:-null}" \
-            --argjson temp "${def_temp:-null}" \
-            --argjson top_p "${def_top_p:-null}" \
-            --argjson top_k "${def_top_k:-null}" \
-            --argjson min_p "${def_min_p:-null}" \
-            --argjson presence "${def_presence:-null}" \
-            --argjson repetition "${def_repetition:-null}" \
-            --argjson kv_bits "${kv_cache_bits:-null}" \
-            --argjson bytes "${max_prefix_bytes:-null}" \
-            --argjson prefill_step "${prefill_step:-null}" \
-            '
-            .previews
-            | map(select(.sharding == "Pipeline"
-                         and .instance_meta == "MlxRing"
-                         and .instance != null
-                         and .error == null))
-            | .[0]
-            | if . == null then null
-              else
-                .instance as $i
-                | ($i | keys[0]) as $tag
-                | {instance: ($i | .[$tag] |= (
-                    (if $kv         != null then .maxKvTokens             = $kv         else . end)
-                    | (if $sessions != null then .maxPrefixSessions       = $sessions   else . end)
-                    | (if $temp     != null then .defaultTemperature      = $temp       else . end)
-                    | (if $top_p    != null then .defaultTopP             = $top_p      else . end)
-                    | (if $top_k    != null then .defaultTopK             = $top_k      else . end)
-                    | (if $min_p    != null then .defaultMinP             = $min_p      else . end)
-                    | (if $presence != null then .defaultPresencePenalty  = $presence   else . end)
-                    | (if $repetition != null then .defaultRepetitionPenalty = $repetition else . end)
-                    | (if $kv_bits  != null then .kvCacheBits             = $kv_bits    else . end)
-                    | (if $bytes    != null then .maxPrefixBytes          = $bytes      else . end)
-                    | (if $prefill_step != null then .prefillStepSize     = $prefill_step else . end)
-                  ) | {($tag): .[$tag]})}
-              end
-        ')
-
-        if [ "$instance_payload" = "null" ] || [ -z "$instance_payload" ]; then
-            local err
-            err=$(echo "$previews_response" | jq -r '.previews[0].error // "no matching preview"')
-            if [ "$attempt" -lt "$max_attempts" ]; then
-                echo "  ${node_label} #${instance_index}: $err, retrying in 5s..."
-                sleep 5
-                continue
-            else
-                echo "  ${node_label} #${instance_index}: ERROR: $err"
-                return 1
-            fi
-        fi
-
-        # Step 3: POST /instance to actually create it.
-        local create_response create_code
-        create_response=$(curl -s -w '\n%{http_code}' -X POST "$API/instance" \
-            -H "Content-Type: application/json" \
-            -d "$instance_payload")
-        create_code=$(echo "$create_response" | tail -1)
-        create_response=$(echo "$create_response" | sed '$d')
-
-        if [ -n "$create_code" ] && [ "$create_code" -ge 200 ] 2>/dev/null && [ "$create_code" -lt 300 ] 2>/dev/null; then
-            echo "  ${node_label} #${instance_index}: created ✓"
-            return 0
-        else
-            local err_msg
-            err_msg=$(echo "$create_response" | jq -r '.detail // .error.message // empty' 2>/dev/null)
-            echo "  ${node_label} #${instance_index}: create HTTP $create_code: $err_msg"
-            return 1
-        fi
-    done
-    return 1
-}
-
-if [ "${HUIHUI_INSTANCES_PER_STUDIO:-0}" -gt 0 ]; then
-    echo ""
-    echo "Auto-placing $HUIHUI_INSTANCES_PER_STUDIO instance(s) of $HUIHUI_MODEL_ID per Studio..."
-
-    EXPECTED_HUIHUI_TOTAL=$((HUIHUI_INSTANCES_PER_STUDIO * 2))
-
-    # Skip if the requested number is already running.
-    EXISTING_HUIHUI=$(curl -s "$API/state" | jq -r --arg m "$HUIHUI_MODEL_ID" \
-        '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-    if [ -z "$EXISTING_HUIHUI" ] || [ "$EXISTING_HUIHUI" = "null" ]; then
-        EXISTING_HUIHUI=0
-    fi
-
-    if [ "$EXISTING_HUIHUI" -ge "$EXPECTED_HUIHUI_TOTAL" ]; then
-        echo "  $EXISTING_HUIHUI Huihui instance(s) already running (target $EXPECTED_HUIHUI_TOTAL). Skipping."
-    else
-        for i in $(seq 1 $HUIHUI_INSTANCES_PER_STUDIO); do
-            create_single_node_instance "$M4_1_NODE_ID" "$HUIHUI_MODEL_ID" "M4-1" "$i" \
-                "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
-                "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
-                "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
-                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" \
-                "$HUIHUI_PREFILL_STEP_SIZE" || true
-            create_single_node_instance "$M4_2_NODE_ID" "$HUIHUI_MODEL_ID" "M4-2" "$i" \
-                "$HUIHUI_MAX_KV_TOKENS" "$HUIHUI_MAX_PREFIX_SESSIONS" \
-                "$HUIHUI_TEMPERATURE" "$HUIHUI_TOP_P" "$HUIHUI_TOP_K" "$HUIHUI_MIN_P" \
-                "$HUIHUI_PRESENCE_PENALTY" "$HUIHUI_REPETITION_PENALTY" \
-                "$HUIHUI_KV_CACHE_BITS" "$HUIHUI_MAX_PREFIX_BYTES" \
-                "$HUIHUI_PREFILL_STEP_SIZE" || true
-        done
-
-        # Wait until all expected instances have a Ready runner.
-        echo -n "Waiting for $EXPECTED_HUIHUI_TOTAL Huihui runner(s) to become Ready..."
-        READY=false
-        READY_COUNT=0
-        for i in {1..180}; do
-            READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$HUIHUI_MODEL_ID" '
-                . as $root
-                | [ $root.instances | to_entries[]
-                    | select(.value.MlxRingInstance.shardAssignments.modelId == $m)
-                    | .value.MlxRingInstance.shardAssignments.runnerToShard | keys[] ] as $rids
-                | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
-            ' 2>/dev/null)
-            if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
-            if [ "$READY_COUNT" -ge "$EXPECTED_HUIHUI_TOTAL" ]; then
-                echo " READY ($READY_COUNT/$EXPECTED_HUIHUI_TOTAL)"
-                READY=true
-                break
-            fi
-            echo -n "."
-            sleep 2
-        done
-        if [ "$READY" = false ]; then
-            echo ""
-            echo "  WARNING: only $READY_COUNT/$EXPECTED_HUIHUI_TOTAL runners reached Ready."
-            echo "  Check ~/exo.log on the Studios."
-        fi
-    fi
-fi
-
-# ── Auto-place MiniMax M2.7 with RDMA ──
-# Single 2-node Pipeline + MlxJaccl instance spanning both Studios. Smaller
-# than Qwen3.5-397B so it fits alongside Huihui scouts. No MTP weights upstream.
-if [ "${MINIMAX_ENABLED:-0}" = "1" ]; then
-    echo ""
-    echo "Auto-placing MiniMax ($MINIMAX_MODEL_ID) across both Studios via RDMA..."
-
-    EXISTING_MINIMAX=$(curl -s "$API/state" | jq -r --arg m "$MINIMAX_MODEL_ID" \
-        '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-    if [ -z "$EXISTING_MINIMAX" ] || [ "$EXISTING_MINIMAX" = "null" ]; then
-        EXISTING_MINIMAX=0
-    fi
-
-    if [ "$EXISTING_MINIMAX" -ge 1 ]; then
-        echo "  MiniMax instance already running. Skipping."
-    else
-        create_instance_with_retry "MiniMax M2.7" "$MINIMAX_MODEL_ID" "Tensor" "MlxJaccl" 2 \
-            "$MINIMAX_TEMPERATURE" "$MINIMAX_TOP_P" "$MINIMAX_TOP_K" "$MINIMAX_MIN_P" \
-            "$MINIMAX_PRESENCE_PENALTY" "$MINIMAX_REPETITION_PENALTY" \
-            "$MINIMAX_MAX_KV_TOKENS" "$MINIMAX_MAX_PREFIX_SESSIONS" \
-            "$MINIMAX_KV_CACHE_BITS" "$MINIMAX_MAX_PREFIX_BYTES" \
-            "$MINIMAX_PREFILL_STEP_SIZE" || true
-
-        echo -n "Waiting for 2 MiniMax runner(s) to become Ready..."
-        READY=false
-        READY_COUNT=0
-        for i in {1..180}; do
-            READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$MINIMAX_MODEL_ID" '
-                . as $root
-                | [ $root.instances | to_entries[]
-                    | select(.value.MlxJacclInstance.shardAssignments.modelId == $m)
-                    | .value.MlxJacclInstance.shardAssignments.runnerToShard | keys[] ] as $rids
-                | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
-            ' 2>/dev/null)
-            if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
-            if [ "$READY_COUNT" -ge 2 ]; then
-                echo " READY ($READY_COUNT/2)"
-                READY=true
-                break
-            fi
-            echo -n "."
-            sleep 2
-        done
-        if [ "$READY" = false ]; then
-            echo ""
-            echo "  WARNING: MiniMax only $READY_COUNT/2 runners reached Ready."
-            echo "  Check ~/exo.log on the Studios."
-        fi
-    fi
-fi
-
 # ── Auto-place DeepSeek V4 Flash with RDMA ──
-# Single 2-node Tensor + MlxJaccl instance spanning both Studios. Replaces
-# MiniMax for the prediction-bot orchestrator slot. ~100 GB/rank at 6-bit
-# leaves ~24 GB headroom for KV cache + activations on each 128 GB node
-# (under the 124 GB iogpu.wired_limit_mb).
-# DSv4 + MiniMax + Huihui cannot coexist — disable the others first.
+# Single 2-node Tensor + MlxJaccl instance spanning both Studios — the cluster's
+# primary model. ~100 GB/rank at 6-bit leaves ~24 GB headroom for KV cache +
+# activations on each 128 GB node (under the 124 GB iogpu.wired_limit_mb).
+# Co-hosts with the much smaller Qwen3.6 aux model (see its block below); DSv4's
+# footprint is why Qwen3.6's prefix/KV cache is hard-capped.
 if [ "${DSV4_ENABLED:-0}" = "1" ]; then
     echo ""
     echo "Auto-placing DeepSeek V4 Flash ($DSV4_MODEL_ID) across both Studios via RDMA..."
@@ -1642,57 +1320,6 @@ if [ "${QWEN36_ENABLED:-1}" = "1" ]; then
         if [ "$READY" = false ]; then
             echo ""
             echo "  WARNING: Qwen3.6 only $READY_COUNT/2 runners reached Ready."
-            echo "  Check ~/exo.log on the Studios."
-        fi
-    fi
-fi
-
-# ── Auto-place Qwen3.5-397B-A17B with RDMA ──
-# Single 2-node Pipeline + MlxJaccl instance spanning both Studios. Set
-# QWEN35_ENABLED=0 to skip, or override QWEN35_MODEL_ID for a different build.
-# MTP weights are auto-resolved on rank 0 via _prepare_mtp_weights (downloads
-# from upstream Qwen repo if not cached, q4-quantizes, then loads).
-if [ "${QWEN35_ENABLED:-0}" = "1" ]; then
-    echo ""
-    echo "Auto-placing Qwen3.5 ($QWEN35_MODEL_ID) across both Studios via RDMA..."
-
-    EXISTING_QWEN35=$(curl -s "$API/state" | jq -r --arg m "$QWEN35_MODEL_ID" \
-        '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-    if [ -z "$EXISTING_QWEN35" ] || [ "$EXISTING_QWEN35" = "null" ]; then
-        EXISTING_QWEN35=0
-    fi
-
-    if [ "$EXISTING_QWEN35" -ge 1 ]; then
-        echo "  Qwen3.5 instance already running. Skipping."
-    else
-        create_instance_with_retry "Qwen3.5 397B-A17B" "$QWEN35_MODEL_ID" "Pipeline" "MlxJaccl" 2 \
-            "$QWEN35_TEMPERATURE" "$QWEN35_TOP_P" "$QWEN35_TOP_K" "$QWEN35_MIN_P" \
-            "$QWEN35_PRESENCE_PENALTY" "$QWEN35_REPETITION_PENALTY" || true
-
-        # Wait for both shard runners to reach Ready.
-        echo -n "Waiting for 2 Qwen3.5 runner(s) to become Ready..."
-        READY=false
-        READY_COUNT=0
-        for i in {1..180}; do
-            READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$QWEN35_MODEL_ID" '
-                . as $root
-                | [ $root.instances | to_entries[]
-                    | select(.value.MlxJacclInstance.shardAssignments.modelId == $m)
-                    | .value.MlxJacclInstance.shardAssignments.runnerToShard | keys[] ] as $rids
-                | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
-            ' 2>/dev/null)
-            if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
-            if [ "$READY_COUNT" -ge 2 ]; then
-                echo " READY ($READY_COUNT/2)"
-                READY=true
-                break
-            fi
-            echo -n "."
-            sleep 2
-        done
-        if [ "$READY" = false ]; then
-            echo ""
-            echo "  WARNING: Qwen3.5 only $READY_COUNT/2 runners reached Ready."
             echo "  Check ~/exo.log on the Studios."
         fi
     fi
