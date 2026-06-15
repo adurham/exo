@@ -1120,10 +1120,10 @@ class TestE2EDeepseekV4ToolCallParsing:
         close marker arrives a token or two BEFORE finish_reason/usage.
 
         The mlx generator only builds usage on the is_done (finish_reason)
-        response. For a tool call, the close marker closes the block on an
-        earlier token whose usage is None. If the parser emits the
-        ToolCallResponse the instant the block closes, the token usage is lost
-        (usage=None) and the client's context counter never advances on a
+        response. For a tool call, the ``</｜DSML｜tool_calls>`` marker closes
+        the block on an earlier token whose usage is None. If the parser emits
+        the ToolCallResponse the instant the block closes, the token usage is
+        lost (usage=None) and the client's context counter never advances on a
         tool-calling turn. The parser must hold the tool call until the terminal
         response and attach its usage.
         """
@@ -1141,6 +1141,9 @@ class TestE2EDeepseekV4ToolCallParsing:
             completion_tokens_details=CompletionTokensDetails(reasoning_tokens=4),
         )
 
+        # Block closes on the ">" token (usage=None); a SEPARATE terminal
+        # response carries finish_reason + usage, mirroring exo's real SSE
+        # ordering for a tool call.
         text_tokens = [
             "<", DSML_TOKEN, "tool", "_c", "alls", ">",
             "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
@@ -1154,6 +1157,7 @@ class TestE2EDeepseekV4ToolCallParsing:
                 yield GenerationResponse(
                     text=t, token=i, finish_reason=None, usage=None
                 )
+            # Terminal response: no text, carries finish_reason + usage.
             yield GenerationResponse(
                 text="", token=len(text_tokens),
                 finish_reason="tool_calls", usage=usage,
@@ -1165,6 +1169,7 @@ class TestE2EDeepseekV4ToolCallParsing:
         assert len(tool_results) == 1, f"expected one tool call, got {results!r}"
         tc = tool_results[0]
         assert tc.tool_calls[0].name == "read"
+        # The whole point: usage survived onto the tool call.
         assert tc.usage is not None, "ToolCallResponse.usage was dropped"
         assert tc.usage.prompt_tokens == 265
 
@@ -1184,6 +1189,9 @@ class TestE2EDeepseekV4ToolCallParsing:
             prompt_tokens_details=PromptTokensDetails(cached_tokens=0),
             completion_tokens_details=CompletionTokensDetails(reasoning_tokens=0),
         )
+        # NOTE: V4 wraps tool calls in ``<｜DSML｜tool_calls>`` — NOT the V3.2
+        # ``function_calls`` markers (TOOL_CALLS_START/END). Build the V4
+        # wrapper explicitly here.
         v4_start = f"<{DSML_TOKEN}tool_calls>"
         v4_end = f"</{DSML_TOKEN}tool_calls>"
         block = (
@@ -1315,3 +1323,126 @@ class TestE2EDeepseekV4ToolCallParsing:
         assert tool_calls[0].name == "read"
         args = cast(dict[str, str], json.loads(tool_calls[0].arguments))
         assert args == {"filePath": "/Users/l2/PycharmProjects/exo"}
+
+
+# Token-ID-based real-vs-quoted DSML detection.
+#
+# A REAL tool call emits the ``｜DSML｜`` sentinel as a dedicated special vocab
+# token. When the model QUOTES the marker in reasoning/content prose (e.g.
+# explaining ``<｜DSML｜tool_calls>`` in an answer), the same characters are
+# produced as ordinary BPE text tokens. The parser must distinguish the two by
+# the special-token *id*, not the decoded string — otherwise a quoted marker
+# triggers a false tool-call parse that strips the markers and leaks the rest of
+# the turn into ``content`` (observed 2026-06-15: a turn whose reasoning
+# discussed the DSML syntax had its tail fused onto the answer).
+_DSML_SPECIAL_ID = 999999  # stand-in for the ｜DSML｜ special vocab id
+
+
+def _simulate_tokens_with_special(
+    texts: list[str],
+    special_text: str,
+    special_id: int,
+    finish_on_last: bool = True,
+) -> Generator[GenerationResponse]:
+    """Like ``_simulate_tokens`` but assigns ``special_id`` to any chunk whose
+    text equals ``special_text`` (mirroring a real special vocab token), and a
+    plain sequential id to everything else (ordinary BPE text)."""
+    for i, text in enumerate(texts):
+        is_last = i == len(texts) - 1
+        yield GenerationResponse(
+            text=text,
+            token=special_id if text == special_text else i,
+            finish_reason="stop" if (is_last and finish_on_last) else None,
+            usage=None,
+        )
+
+
+class TestE2EDeepseekV4QuotedMarkerDetection:
+    """The model quoting DSML markers in prose must not be parsed as a tool
+    call (token-id-based real-vs-quoted detection)."""
+
+    def test_quoted_marker_in_prose_does_not_trigger_tool_call(self):
+        """Reproduces the 2026-06-15 leak: the model's answer DISCUSSES the
+        DSML tool-call syntax, emitting the literal ``<｜DSML｜tool_calls>`` /
+        ``</｜DSML｜tool_calls>`` text as ordinary tokens. With the special-token
+        id supplied, the parser must treat this as plain content — no tool call,
+        no marker stripping, full prose preserved verbatim."""
+        prose_tokens = [
+            "The parser opens a `<",
+            DSML_TOKEN,
+            "tool_calls>` wrapper but parrots a prior result instead of a valid `<",
+            DSML_TOKEN,
+            "invoke>` body, so we strip it. </",
+            DSML_TOKEN,
+            "tool_calls>` That is the whole bug.",
+        ]
+
+        # All chunks get plain sequential ids — the ｜DSML｜ never arrives as the
+        # special token, so it's quoted prose, not a real call.
+        def _tokens() -> Generator[GenerationResponse]:
+            for i, t in enumerate(prose_tokens):
+                yield GenerationResponse(
+                    text=t,
+                    token=i,  # never _DSML_SPECIAL_ID -> quoted
+                    finish_reason="stop" if i == len(prose_tokens) - 1 else None,
+                    usage=None,
+                )
+
+        results = list(
+            parse_deepseek_v4(_tokens(), frozenset({_DSML_SPECIAL_ID}))
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        full_text = "".join(r.text for r in text_results)
+
+        # No false tool call.
+        assert len(tool_results) == 0, f"quoted marker wrongly parsed: {results!r}"
+        # The prose is preserved verbatim — including the quoted marker text,
+        # which is the model's own readable output, NOT a leaked control token.
+        assert "That is the whole bug." in full_text
+        assert "wrapper but parrots a prior result" in full_text
+        assert full_text.count("tool_calls>") >= 1
+
+    def test_real_tool_call_with_special_token_still_parses(self):
+        """The genuine path: when the ｜DSML｜ sentinel arrives as its special
+        vocab token, the block parses to a ToolCallResponse as before."""
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
+            DSML_TOKEN, "parameter", ' name="filePath" string="true"', ">",
+            "/tmp/x", "</", DSML_TOKEN, "parameter", ">\n</",
+            DSML_TOKEN, "invoke", ">\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens_with_special(
+                    model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID
+                ),
+                frozenset({_DSML_SPECIAL_ID}),
+            )
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        assert len(tool_results) == 1, f"real tool call not parsed: {results!r}"
+        assert tool_results[0].tool_calls[0].name == "read"
+        args = cast(
+            dict[str, str], json.loads(tool_results[0].tool_calls[0].arguments)
+        )
+        assert args == {"filePath": "/tmp/x"}
+
+    def test_legacy_fallback_without_ids_unchanged(self):
+        """With no special-token ids supplied (e.g. a tokenizer that can't
+        resolve them), the parser falls back to the legacy text-only behavior —
+        a clean DSML block still parses to a tool call."""
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
+            DSML_TOKEN, "parameter", ' name="filePath" string="true"', ">",
+            "/tmp/x", "</", DSML_TOKEN, "parameter", ">\n</",
+            DSML_TOKEN, "invoke", ">\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+        # No ids -> legacy text-only path (today's behavior).
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        assert len(tool_results) == 1
+        assert tool_results[0].tool_calls[0].name == "read"

@@ -98,7 +98,9 @@ def apply_all_parsers(
                 tokenizer.think_end,
                 starts_in_thinking=detect_thinking_prompt_suffix(prompt, tokenizer),
             )
-        generator = parse_deepseek_v4(generator)
+        generator = parse_deepseek_v4(
+            generator, _resolve_dsml_special_token_ids(tokenizer)
+        )
     else:
         if tokenizer.has_thinking:
             generator = parse_thinking_models(
@@ -243,8 +245,62 @@ def parse_deepseek_v32(
     )
 
 
+@cache
+def _resolve_dsml_special_token_ids(tokenizer: TokenizerWrapper) -> frozenset[int]:
+    """Resolve the vocab ids of DSv4's DSML control tokens.
+
+    A REAL tool call emits the ``｜DSML｜`` sentinel as a dedicated special
+    vocab token. When the model merely QUOTES the marker inside reasoning /
+    content prose (e.g. explaining ``<｜DSML｜tool_calls>`` in an answer), those
+    same characters are produced as ordinary BPE text tokens whose ids differ
+    from the special-token id. Matching on the special-token *id* — not the
+    decoded string — is therefore the only reliable way to tell a genuine
+    tool-call block from prose that happens to contain the marker text. (This
+    is the same lesson as the fused-think-delimiter fix: detect by token, not
+    by substring.)
+
+    Returns the set of valid single-token ids among the candidate DSML
+    markers. Empty set when the tokenizer can't resolve any (older/stub
+    tokenizers) — callers fall back to text-only detection so behavior never
+    regresses below today's.
+    """
+    dsml_token = "｜DSML｜"
+    candidates = (
+        dsml_token,
+        f"<{dsml_token}tool_calls>",
+        f"</{dsml_token}tool_calls>",
+        f"<{dsml_token}tool_call>",
+    )
+    ids: set[int] = set()
+    hf = getattr(tokenizer, "_tokenizer", tokenizer)
+    vocab: dict[str, int] = {}
+    try:
+        vocab = hf.get_vocab()
+    except Exception:  # pragma: no cover - defensive
+        vocab = {}
+    for cand in candidates:
+        tid: int | None = None
+        # Only accept a candidate that is a SINGLE dedicated vocab token —
+        # i.e. present in the vocab as one entry. A multi-token BPE split of
+        # the literal characters (what prose produces) must NOT qualify.
+        if cand in vocab:
+            tid = vocab[cand]
+        else:
+            try:
+                resolved = hf.convert_tokens_to_ids(cand)
+            except Exception:  # pragma: no cover - defensive
+                resolved = None
+            unk = getattr(hf, "unk_token_id", None)
+            if isinstance(resolved, int) and resolved >= 0 and resolved != unk:
+                tid = resolved
+        if tid is not None:
+            ids.add(tid)
+    return frozenset(ids)
+
+
 def parse_deepseek_v4(
     responses: Generator[GenerationResponse | None],
+    dsml_special_token_ids: frozenset[int] = frozenset(),
 ) -> Generator[GenerationResponse | ToolCallResponse | None]:
     # DSv4-Flash wraps its tool calls in <｜DSML｜tool_calls> ... </｜DSML｜tool_calls>
     # (verified empirically from raw model output — distinct from V3.2 which uses
@@ -252,10 +308,18 @@ def parse_deepseek_v4(
     # <｜DSML｜parameter ...> tags, which parse_dsml_output already handles. Only the
     # wrapper marker differs, so define it explicitly here rather than importing the
     # V3.2 function_calls constants.
+    #
+    # ``dsml_special_token_ids`` gates real-vs-quoted detection: a tool-call
+    # block is only recognized when the DSML sentinel arrives as its special
+    # vocab token, so the model quoting the marker in prose no longer triggers
+    # a false tool-call parse (which stripped markers and leaked the rest of
+    # the reasoning into content). Empty set → text-only fallback (legacy).
     dsml_token = "｜DSML｜"
     start = f"<{dsml_token}tool_calls>"
     end = f"</{dsml_token}tool_calls>"
-    return _parse_dsml_stream(responses, start, end, parse_dsml_output)
+    return _parse_dsml_stream(
+        responses, start, end, parse_dsml_output, dsml_special_token_ids
+    )
 
 
 def _parse_dsml_stream(
@@ -263,9 +327,20 @@ def _parse_dsml_stream(
     tool_calls_start: str,
     tool_calls_end: str,
     parse_body: Callable[[str], list[ToolCallItem] | None],
+    dsml_special_token_ids: frozenset[int] = frozenset(),
 ) -> Generator[GenerationResponse | ToolCallResponse | None]:
     accumulated = ""
     in_tool_call = False
+    # Whether the DSML sentinel arrived as its special vocab token in the
+    # CURRENT detection window. A real tool call emits ``｜DSML｜`` as a
+    # dedicated token id; the model quoting the marker in prose emits ordinary
+    # text tokens. We only commit to tool-call parsing when this is True, so a
+    # quoted marker in reasoning/content no longer triggers a false parse that
+    # stripped the markers and leaked the rest of the turn into ``content``.
+    # When ``dsml_special_token_ids`` is empty (tokenizer couldn't resolve the
+    # ids, e.g. a stub) we fall back to the legacy text-only behavior so the
+    # change never regresses below today's. Reset whenever the window resets.
+    dsml_special_seen = False
     # Tokens buffered while we detect the start of a DSML block
     pending_buffer: list[GenerationResponse] = []
     # Text accumulated during a tool call block
@@ -275,12 +350,12 @@ def _parse_dsml_stream(
     # response (see generator.generate's ``if is_done:`` gate), but the DSML
     # close marker ``</｜DSML｜tool_calls>`` typically arrives a token or two
     # BEFORE finish_reason/EOS. Emitting the ToolCallResponse the instant the
-    # block closes therefore loses the token usage (usage=None) -- the downstream
+    # block closes therefore loses the token usage (usage=None) — the downstream
     # chat-completions adapter then returns on the tool-call chunk before the
     # usage-bearing response is ever consumed, so the client sees a tool call
     # with no usage. Holding the tool call until the terminal response keeps the
     # usage attached. (When the close marker and finish_reason land on the SAME
-    # response, the finish-branch below already has usage -- no deferral needed.)
+    # response, the finish-branch below already has usage — no deferral needed.)
     pending_tool_call: ToolCallResponse | None = None
 
     def _try_parse_tool_call(
@@ -303,10 +378,21 @@ def _parse_dsml_stream(
             yield None
             continue
 
+        # Token-level real-vs-quoted detection. The DSML sentinel is a special
+        # vocab token only when the model actually invokes a tool; quoting the
+        # marker text in prose produces ordinary BPE tokens. Track whether the
+        # special token appeared in the current window.
+        if dsml_special_token_ids and response.token in dsml_special_token_ids:
+            dsml_special_seen = True
+        # Legacy fallback: with no resolved ids, trust the text marker (today's
+        # behavior). Otherwise a marker is only "real" once the special token
+        # has been seen.
+        dsml_is_real = (not dsml_special_token_ids) or dsml_special_seen
+
         # Safety: if a tool call is held but the next response is NOT the
         # terminal one (some model emitted trailing content after the block),
         # flush the held call first to preserve ordering. Usage stays None in
-        # that rare case -- correctness of order beats the token count.
+        # that rare case — correctness of order beats the token count.
         if pending_tool_call is not None and response.finish_reason is None:
             yield pending_tool_call
             pending_tool_call = None
@@ -336,13 +422,21 @@ def _parse_dsml_stream(
                         update={"text": strip_dsml_markers(tool_call_text)}
                     )
                 )
-            elif tool_calls_start in response.text and tool_calls_end in response.text:
+            elif (
+                tool_calls_start in response.text
+                and tool_calls_end in response.text
+                and dsml_is_real
+            ):
                 dsml_start = response.text.index(tool_calls_start)
                 before = response.text[:dsml_start]
                 if before:
                     yield response.model_copy(update={"text": before})
                 yield _try_parse_tool_call(response.text[dsml_start:], response)
             else:
+                # No real tool-call block (or the marker is quoted prose):
+                # emit verbatim as content. Quoted ``<｜DSML｜…>`` text is left
+                # intact — it is the model's own readable output, not a leaked
+                # control token, so it must NOT be stripped.
                 yield response
             break
 
@@ -357,13 +451,24 @@ def _parse_dsml_stream(
                     # (this mid-stream response has usage=None).
                     pending_tool_call = result
                 else:
-                    # Parse failed -> content residue; no usage to wait for.
+                    # Parse failed → content residue; no usage to wait for.
                     yield result
             continue
 
         accumulated += response.text
 
         if tool_calls_start in accumulated:
+            # The marker TEXT has assembled. Commit to tool-call parsing only
+            # when it's a REAL block (special token seen, or legacy fallback).
+            # If it's quoted prose (special token never arrived), emit the
+            # buffered text + this response verbatim as content — do NOT strip
+            # or reroute the model's own readable output.
+            if not dsml_is_real:
+                yield from pending_buffer
+                pending_buffer.clear()
+                accumulated = ""
+                yield response
+                continue
             start_idx = accumulated.index(tool_calls_start)
             pre_text = accumulated[:start_idx]
             # Flush pending buffer tokens that contributed text before the marker
@@ -385,6 +490,7 @@ def _parse_dsml_stream(
             if tool_calls_end in tool_call_text:
                 result = _try_parse_tool_call(tool_call_text, response)
                 tool_call_text = ""
+                dsml_special_seen = False
                 if isinstance(result, ToolCallResponse):
                     # Hold until the terminal response so usage can be attached.
                     pending_tool_call = result
@@ -394,6 +500,12 @@ def _parse_dsml_stream(
                 in_tool_call = True
             continue
 
+        # Buffer on a partial marker match. This is intentionally NOT gated on
+        # dsml_is_real: the special-token id and the marker's leading ``<`` can
+        # arrive on the SAME or ADJACENT chunks, so we must keep accumulating
+        # the candidate marker across chunks regardless. The real-vs-quoted
+        # decision is made above, once the full marker text has assembled. A
+        # quoted marker that never becomes "real" is flushed verbatim there.
         if _could_be_marker_prefix(accumulated, tool_calls_start):
             pending_buffer.append(response)
             continue
