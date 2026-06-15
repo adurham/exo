@@ -1446,3 +1446,83 @@ class TestE2EDeepseekV4QuotedMarkerDetection:
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
         assert len(tool_results) == 1
         assert tool_results[0].tool_calls[0].name == "read"
+
+
+class TestE2EDeepseekV4GarbledInvokeFailsCleanly:
+    """A CONFIRMED-real tool-call block (DSML sentinel seen as its special
+    token) whose invoke body is garbled must fail the turn cleanly with
+    finish_reason='error' — never leak the stripped innards as content.
+
+    Reproduces the 2026-06-15 production symptom: DSv4 occasionally emits
+    ``feather_rpc_<tool>>`` in place of ``<｜DSML｜invoke name="<tool>">`` (a rare
+    stochastic hiccup at the model's recommended temperature=1.0). The wrapper
+    and parameters are well-formed, so token-id detection correctly recognizes
+    a real tool-call block, but ``parse_dsml_output`` can't match the garbled
+    invoke tag. The old behavior stripped the markers and dumped the residue as
+    a garbled user-visible message; the fix fails cleanly so hermes retries."""
+
+    def test_garbled_invoke_in_confirmed_block_emits_error_not_content(self):
+        # The exact production shape: correct wrapper (special token), garbled
+        # invoke open tag as ordinary text, valid parameters, correct closers.
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "\n ",
+            # GARBLED invoke open tag (model emitted this instead of
+            # <｜DSML｜invoke name="session_search">):
+            "feather_rpc_session_search>",
+            "\n",
+            DSML_TOKEN, 'parameter name="session_id" string="true">',
+            "20260615_123445_c2b91c", "</", DSML_TOKEN, "parameter>",
+            "\n", DSML_TOKEN, 'parameter name="window" string="false">', "20",
+            "</", DSML_TOKEN, "parameter>",
+            "\n</", DSML_TOKEN, "invoke>",
+            "\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens_with_special(
+                    model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID
+                ),
+                frozenset({_DSML_SPECIAL_ID}),
+            )
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+
+        # No tool call parsed from the garbled block.
+        assert len(tool_results) == 0, f"garbled block wrongly parsed: {results!r}"
+        # A clean error response was emitted (-> ErrorChunk -> 500 -> hermes retry).
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        assert len(error_responses) >= 1, f"expected an error response, got {results!r}"
+        # CRITICAL: the garbled tool-call innards must NEVER reach the user as
+        # content. No DSML sentinel, no 'feather_rpc', no parameter values leak.
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert DSML_TOKEN not in non_error_text
+        assert "feather_rpc" not in non_error_text
+        assert "session_id" not in non_error_text
+        assert "20260615_123445_c2b91c" not in non_error_text
+
+    def test_garbled_invoke_in_legacy_mode_still_strips(self):
+        """Without resolved special-token ids (legacy fallback), the same
+        garbled block keeps the original safe strip-to-content behavior — we
+        can't confirm it's a real call, so we don't fail the turn; we just
+        ensure no raw DSML tokens leak."""
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "\n ", "feather_rpc_session_search>", "\n",
+            DSML_TOKEN, 'parameter name="session_id" string="true">',
+            "20260615_123445_c2b91c", "</", DSML_TOKEN, "parameter>",
+            "\n</", DSML_TOKEN, "invoke>",
+            "\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+        # No ids -> legacy path -> strip, do NOT emit error.
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert len(tool_results) == 0
+        assert all(r.finish_reason != "error" for r in text_results)
+        full_text = "".join(r.text for r in text_results)
+        # Raw DSML sentinel must still never leak in legacy mode either.
+        assert DSML_TOKEN not in full_text

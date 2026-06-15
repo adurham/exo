@@ -359,7 +359,7 @@ def _parse_dsml_stream(
     pending_tool_call: ToolCallResponse | None = None
 
     def _try_parse_tool_call(
-        text: str, response: GenerationResponse
+        text: str, response: GenerationResponse, *, confirmed_real: bool
     ) -> ToolCallResponse | GenerationResponse:
         parsed = parse_body(text)
         if parsed is not None:
@@ -367,10 +367,37 @@ def _parse_dsml_stream(
                 tool_calls=parsed, usage=response.usage, stats=response.stats
             )
         logger.warning(f"DSML tool call parsing failed for: {text}")
-        # Parsing failed (malformed block — e.g. the model opened a tool_calls
-        # wrapper but emitted no valid invoke body). Strip the DSML control
-        # tokens before yielding the residue as content; otherwise the raw
-        # ``<｜DSML｜...>`` special tokens leak verbatim to the user.
+        if confirmed_real:
+            # A COMPLETE tool-call block whose DSML sentinel was CONFIRMED as
+            # its special vocab token (token-id detection) but that still fails
+            # to parse means the model garbled the block's interior — most often
+            # the ``<｜DSML｜invoke name="...">`` opening tag (observed 2026-06-15:
+            # DSv4 emitted ``feather_rpc_<tool>>`` in place of the invoke tag at
+            # the model's recommended temperature=1.0, a rare stochastic
+            # generation hiccup). The old behavior — strip the markers and yield
+            # the residue as CONTENT — surfaced raw tool-call innards to the user
+            # as a garbled message AND silently dropped the tool call. Instead,
+            # fail the generation cleanly with finish_reason="error" (->
+            # ErrorChunk -> 500 on the OpenAI stream). The hermes client
+            # classifies that as a retryable upstream error and re-runs the turn,
+            # giving the model another draw — which, being rare, almost always
+            # succeeds. Nothing garbled is ever shown to the user.
+            return response.model_copy(
+                update={
+                    "text": (
+                        "DSv4 emitted a malformed tool-call block that could not "
+                        "be parsed (the tool_calls wrapper was present but its "
+                        "invoke body was corrupt). Failing the turn so it can be "
+                        "retried."
+                    ),
+                    "finish_reason": "error",
+                }
+            )
+        # Legacy fallback (no special-token id resolved, so real-vs-quoted can't
+        # be told apart): preserve the original safe behavior — strip the DSML
+        # control tokens and yield the readable residue as content, so a quoted
+        # mention never becomes a spurious turn failure and raw ``｜DSML｜`` tokens
+        # never leak to the user.
         return response.model_copy(update={"text": strip_dsml_markers(text)})
 
     for response in responses:
@@ -388,6 +415,10 @@ def _parse_dsml_stream(
         # behavior). Otherwise a marker is only "real" once the special token
         # has been seen.
         dsml_is_real = (not dsml_special_token_ids) or dsml_special_seen
+        # CONFIRMED real means we positively saw the special token (not the
+        # legacy text-only fallback). Only then do we fail a malformed block as
+        # an error; in legacy mode we keep the safe strip-to-content behavior.
+        dsml_confirmed_real = bool(dsml_special_token_ids) and dsml_special_seen
 
         # Safety: if a tool call is held but the next response is NOT the
         # terminal one (some model emitted trailing content after the block),
@@ -413,7 +444,9 @@ def _parse_dsml_stream(
             if in_tool_call:
                 tool_call_text += response.text
                 yield (
-                    _try_parse_tool_call(tool_call_text, response)
+                    _try_parse_tool_call(
+                        tool_call_text, response, confirmed_real=dsml_confirmed_real
+                    )
                     if tool_calls_end in tool_call_text
                     # Stream ended mid-block (no closing marker). Strip the DSML
                     # control tokens so the unterminated wrapper doesn't leak
@@ -431,7 +464,10 @@ def _parse_dsml_stream(
                 before = response.text[:dsml_start]
                 if before:
                     yield response.model_copy(update={"text": before})
-                yield _try_parse_tool_call(response.text[dsml_start:], response)
+                yield _try_parse_tool_call(
+                    response.text[dsml_start:], response,
+                    confirmed_real=dsml_confirmed_real,
+                )
             else:
                 # No real tool-call block (or the marker is quoted prose):
                 # emit verbatim as content. Quoted ``<｜DSML｜…>`` text is left
@@ -443,7 +479,9 @@ def _parse_dsml_stream(
         if in_tool_call:
             tool_call_text += response.text
             if tool_calls_end in tool_call_text:
-                result = _try_parse_tool_call(tool_call_text, response)
+                result = _try_parse_tool_call(
+                    tool_call_text, response, confirmed_real=dsml_confirmed_real
+                )
                 in_tool_call = False
                 tool_call_text = ""
                 if isinstance(result, ToolCallResponse):
@@ -488,7 +526,9 @@ def _parse_dsml_stream(
             accumulated = ""
 
             if tool_calls_end in tool_call_text:
-                result = _try_parse_tool_call(tool_call_text, response)
+                result = _try_parse_tool_call(
+                    tool_call_text, response, confirmed_real=dsml_confirmed_real
+                )
                 tool_call_text = ""
                 dsml_special_seen = False
                 if isinstance(result, ToolCallResponse):
