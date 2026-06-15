@@ -355,8 +355,12 @@ fi
 # Qwen3.6-35B-A3B (MoE, ~17.5GB/rank at 8-bit across a 2-node TP shard). Small
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
 # of weights/rank, leaving ~32GB under the 124GB wired limit for KV + activations
-# across both models. Served as a 2-node Tensor + MlxJaccl instance (same RDMA
-# path as DSv4). Enabled by default (like DSv4); set QWEN36_ENABLED=0 to skip.
+# across both models. That headroom is TIGHT, so Qwen3.6's prefix/KV cache is
+# hard-capped (see QWEN36_MAX_PREFIX_SESSIONS / _BYTES / KV_CACHE_BITS below) —
+# without those caps its prefix cache grew unbounded and ate into the shared
+# budget, pushing the box into swap. Served as a 2-node Tensor + MlxJaccl
+# instance (same RDMA path as DSv4). Enabled by default (like DSv4); set
+# QWEN36_ENABLED=0 to skip.
 # Sampling: Qwen3.6 is thinking-mode by default — upstream thinking
 # recommendation (temp 0.6 / top_p 0.95 / top_k 20 / min_p 0).
 : "${QWEN36_MODEL_ID:=mlx-community/Qwen3.6-35B-A3B-8bit}"
@@ -367,6 +371,29 @@ fi
 : "${QWEN36_MIN_P:=0.0}"
 : "${QWEN36_PRESENCE_PENALTY:=0.0}"
 : "${QWEN36_REPETITION_PENALTY:=1.0}"
+# KV / prefix-cache caps. Qwen3.6 is the AUX + image model: it only serves
+# one-shot, independent calls (title-gen, skill review, lightweight background
+# tasks, image gen) — never long multi-turn DSv4-style conversations. Those
+# calls share no prompt prefix with each other, so a persistent prefix cache
+# earns nothing and previously grew UNBOUNDED (maxPrefixSessions defaulted to
+# None = no eviction; confirmed live 2026-06-15 holding sessions that never
+# freed). That floor is pure waste under the tight ~32GB headroom we have
+# co-hosting alongside DSv4. Cap it hard:
+#   - 1 prefix session: aux calls share the SAME system-prompt prefix, so one
+#     retained session still gives a prefill hit on the common prefix; anything
+#     beyond that is unreusable. (0 would disable prefix reuse entirely.)
+#   - 1 GiB byte ceiling: belt-and-suspenders so it can never balloon.
+#   - 8-bit KV quant: halves Qwen's active KV vs bf16. Aux/image output quality
+#     is non-critical, and MiniMax (same aux bucket) already runs KV_CACHE_BITS=8
+#     in production — safe, proven precedent. (DSv4 stays at 0/bf16: it's the
+#     quality-critical main model.)
+: "${QWEN36_MAX_PREFIX_SESSIONS:=1}"
+: "${QWEN36_MAX_PREFIX_BYTES:=1073741824}"
+: "${QWEN36_KV_CACHE_BITS:=8}"
+# Per-stream KV-token cap and prefill step left at instance defaults (empty);
+# set these if a single aux/image call ever needs bounding.
+: "${QWEN36_MAX_KV_TOKENS:=}"
+: "${QWEN36_PREFILL_STEP_SIZE:=}"
 
 # Cluster-wide sampling defaults (apply when neither request nor instance specifies).
 # Unset by default — instance and hardcoded fallbacks take over.
@@ -1587,7 +1614,10 @@ if [ "${QWEN36_ENABLED:-1}" = "1" ]; then
     else
         create_instance_with_retry "Qwen3.6 35B-A3B" "$QWEN36_MODEL_ID" "Tensor" "MlxJaccl" 2 \
             "$QWEN36_TEMPERATURE" "$QWEN36_TOP_P" "$QWEN36_TOP_K" "$QWEN36_MIN_P" \
-            "$QWEN36_PRESENCE_PENALTY" "$QWEN36_REPETITION_PENALTY" || true
+            "$QWEN36_PRESENCE_PENALTY" "$QWEN36_REPETITION_PENALTY" \
+            "$QWEN36_MAX_KV_TOKENS" "$QWEN36_MAX_PREFIX_SESSIONS" \
+            "$QWEN36_KV_CACHE_BITS" "$QWEN36_MAX_PREFIX_BYTES" \
+            "$QWEN36_PREFILL_STEP_SIZE" || true
 
         echo -n "Waiting for 2 Qwen3.6 runner(s) to become Ready..."
         READY=false
