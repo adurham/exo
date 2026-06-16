@@ -1499,6 +1499,65 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if len(gen_batch) > 1:
             for c in gen_batch.prompt_cache:
                 _upgrade_cache_to_per_stream(c)
+            # ── DEGEN PROBE (main prompt_cache): the MTP-cache probe in
+            # activate_for_uids measures the DRAFT cache, whose scramble is
+            # harmless (target-verified). THIS measures the SHARED prompt_cache
+            # the TARGET verify-forward reads — the only cache whose
+            # per-stream-layout corruption could actually poison output and
+            # cause degeneration. For each batch entry, extract its single and
+            # compare phys_rows vs size() (the scramble tell). Logged per
+            # BS>1 step so we can correlate an inconsistent MAIN cache with a
+            # degeneration on the same uid/time. Zero cost when probe OFF.
+            if _DEGEN_PROBE_ENABLED:
+                try:
+                    _mc_meta: list[dict[str, Any]] = []
+                    _uids_now = list(gen_batch.uids)
+                    for _bi, _u in enumerate(_uids_now):
+                        # Inspect the first cache layer's per-stream view for
+                        # this batch index (representative of the layout;
+                        # all layers share offset/_idx bookkeeping).
+                        _layer0: Any = gen_batch.prompt_cache[0]
+                        _sub: Any = (
+                            _layer0.caches[0]
+                            if hasattr(_layer0, "caches") else _layer0
+                        )
+                        _off_arr = getattr(_sub, "offset", None)
+                        try:
+                            _off = (
+                                int(_off_arr[_bi].item())
+                                if _off_arr is not None else -1
+                            )
+                        except Exception:
+                            _off = -1
+                        _maxsz = int(getattr(_sub, "max_size", -1))
+                        _valid = (
+                            min(_off, _maxsz)
+                            if _off >= 0 and _maxsz > 0 else -1
+                        )
+                        _keys = getattr(_sub, "keys", None)
+                        _phys = (
+                            int(_keys.shape[2]) if _keys is not None else 0
+                        )
+                        _mc_meta.append({
+                            "uid": int(_u),
+                            "batch_idx": _bi,
+                            "offset": _off,
+                            "valid_expected": _valid,
+                            "ring_phys": _phys,
+                            "rotated": bool(getattr(_sub, "rotated", False)),
+                            "perstream_idx": int(getattr(_sub, "_idx", -1)),
+                        })
+                    _degen_probe_write({
+                        "event": "main_cache_bs_transition",
+                        "wall_ns": time.perf_counter_ns(),
+                        "uids": _uids_now,
+                        "main_cache": _mc_meta,
+                    })
+                except Exception as _mc_err:
+                    _degen_probe_write({
+                        "event": "main_cache_probe_err",
+                        "err": str(_mc_err),
+                    })
 
         decode_pre_norm = self._captured.get("pre_norm")
         if decode_pre_norm is not None:
