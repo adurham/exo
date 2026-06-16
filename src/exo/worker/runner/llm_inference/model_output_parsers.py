@@ -331,23 +331,44 @@ def parse_deepseek_v4(
 # DSv4 occasionally does this instead of the real ``<｜DSML｜invoke …>`` form
 # (observed live 2026-06-15: a memory() call leaked as raw tags into content).
 # The DSML parser only recognizes sentinel-bearing tags, so this slips through
-# and the raw tags leak as content. We require BOTH an ``<invoke name="…">`` and
-# a ``<parameter name="…" string="…">`` to confirm — that pairing does not occur
-# in natural prose (verified against the session corpus: 0 false positives), so
-# it is a safe signature for "the model meant a tool call but used no sentinel".
-_SENTINELLESS_INVOKE = re.compile(r"<invoke\s+name=\"[^\"]+\"\s*>")
+# and the raw tags leak as content.
+#
+# The DISTINCTIVE, prose-unlikely signature is the parameter tag
+# ``<parameter name="…" string="true|false">`` — that exact attribute pairing
+# does not occur in natural prose (verified against the session corpus: 0 false
+# positives). The model wraps it in one of several openers, and which opener it
+# emits VARIES (it's degenerate output):
+#   * ``<invoke name="…">``                 (2026-06-15, msg 70581)
+#   * ``<tool_calls>`` / ``<tool_call>`` wrapper with NO invoke tag
+#     (2026-06-16, msg 70765 — the model skipped the invoke line entirely;
+#      the original both-tags-required gate MISSED this and it leaked)
+#   * ``<tool_called>`` wrapper
+# So we trigger on the parameter signature PLUS any recognized sentinel-less
+# opener. The parameter tag alone is the false-positive guard; the opener set
+# is permissive because the opener is exactly what the model garbles.
 _SENTINELLESS_PARAM = re.compile(
     r"<parameter\s+name=\"[^\"]+\"\s+string=\"(?:true|false)\"\s*>"
+)
+# Any sentinel-less tool-call OPENER: an invoke tag, or a bare tool-call
+# wrapper (``<tool_call>``, ``<tool_calls>``, ``<tool_called>``) — with or
+# without a closing ``>`` (the model sometimes omits it, as in msg 70765).
+_SENTINELLESS_OPENER = re.compile(
+    r"<(?:invoke\s+name=\"[^\"]+\"\s*>|tool_calls?\b|tool_called\b)"
 )
 
 
 def _is_sentinelless_tool_call(text: str) -> bool:
-    """True when text contains a sentinel-less tool-call block (invoke + param,
-    no ｜DSML｜ sentinel). Requires both tags to avoid flagging prose."""
+    """True when text contains a sentinel-less tool-call block (a tool-call
+    opener + a ``<parameter … string=…>`` tag, no ｜DSML｜ sentinel).
+
+    The parameter tag is the false-positive guard (prose never emits it); the
+    opener may be ``<invoke>``, ``<tool_call(s)>``, or ``<tool_called>`` because
+    DSv4 garbles which opener it uses. Both observed leak shapes — invoke-form
+    (msg 70581) and tool_calls-wrapper-without-invoke (msg 70765) — match."""
     if "｜DSML｜" in text:
         return False  # real/quoted DSML is handled elsewhere
-    return bool(_SENTINELLESS_INVOKE.search(text)) and bool(
-        _SENTINELLESS_PARAM.search(text)
+    return bool(_SENTINELLESS_PARAM.search(text)) and bool(
+        _SENTINELLESS_OPENER.search(text)
     )
 
 

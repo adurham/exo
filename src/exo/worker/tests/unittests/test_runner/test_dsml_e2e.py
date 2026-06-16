@@ -1692,10 +1692,35 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         assert "<parameter name=" not in non_error_text
         assert "<tool_call" not in non_error_text
 
+    def test_sentinelless_tool_calls_wrapper_without_invoke_fails_cleanly(self):
+        """The opener the model emits VARIES. Observed live 2026-06-16 (msg
+        70765): DSv4 emitted a <tool_calls> wrapper directly around a
+        <parameter name="path" string="true"> tag and SKIPPED the <invoke> line
+        entirely (the opening tag wasn't even closed). The original
+        both-tags-required gate (invoke AND parameter) missed this shape and it
+        leaked the raw markup into content. The detector now triggers on the
+        parameter signature + ANY sentinel-less opener, so this fails cleanly."""
+        model_tokens = [
+            "<tool_calls\n",
+            '<parameter name="path" string="true">/Users/x/repo/file.py',
+            '", "error": "File not found"}</parameter>',
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(tool_results) == 0
+        assert len(error_responses) >= 1, f"expected error, got {results!r}"
+        assert "<tool_call" not in non_error_text
+        assert "<parameter name=" not in non_error_text
+
     def test_prose_mentioning_invoke_tag_does_not_error(self):
         """Prose that mentions an <invoke name="..."> tag WITHOUT a paired
         <parameter ... string="..."> tag is not a tool call — must pass through
-        verbatim, no error (the both-tags requirement guards against this)."""
+        verbatim, no error (the parameter-tag requirement guards against this)."""
         model_tokens = [
             "To call a tool you write ",
             '<invoke name="foo">',
@@ -1706,3 +1731,15 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         assert all(r.finish_reason != "error" for r in text_results)
         full_text = "".join(r.text for r in text_results)
         assert '<invoke name="foo">' in full_text
+
+    def test_prose_mentioning_tool_calls_word_does_not_error(self):
+        """Prose that mentions 'tool_calls' (e.g. discussing commits) WITHOUT a
+        <parameter ... string="..."> tag must pass through verbatim. Guards the
+        widened opener set against false-positiving on ordinary text."""
+        model_tokens = [
+            "Here's the picture from the last 20 commits, including the ",
+            "tool_calls wrapper and the <tool_call> handling changes.",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert all(r.finish_reason != "error" for r in text_results)
