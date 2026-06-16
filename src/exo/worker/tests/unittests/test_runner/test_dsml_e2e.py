@@ -1651,3 +1651,58 @@ class TestE2EDeepseekV4OrphanCloseTagsStripped:
         full_text = "".join(r.text for r in text_results)
         assert DSML_TOKEN not in full_text
         assert "Recovered text." in full_text
+
+
+class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
+    """A tool call emitted in the WRONG dialect — correct invoke/parameter
+    structure but with the ｜DSML｜ sentinel dropped from every tag — must fail
+    cleanly, never leak the raw tags as content.
+
+    Observed live 2026-06-15: after a clean think block, DSv4 emitted a memory()
+    call as bare <tool_called>/<invoke name="memory">/<parameter name="action"
+    string="true">…</parameter> tags with NO ｜DSML｜ prefix. The DSML parser
+    gates on the special-token sentinel (the 73f56f58 quoted-marker fix), so it
+    correctly did not recognize these — but they then leaked verbatim into
+    displayed content AND the tool call was lost. _fail_on_sentinelless_tool_call
+    detects the unambiguous invoke+parameter signature and fails the turn
+    (finish_reason='error' -> retry), consistent with the malformed/garbled/
+    unterminated DSML handling. Requires BOTH tags so it never flags prose."""
+
+    def test_sentinelless_tool_call_emits_error_not_leak(self):
+        # Bare tool-call tags (no ｜DSML｜ sentinel) as content.
+        model_tokens = [
+            "<tool_called>\n",
+            '<invoke name="memory">\n',
+            '<parameter name="action" string="true">add</parameter>\n',
+            '<parameter name="content" string="true">never pre-load context</parameter>\n',
+            "</invoke>\n</tool_calls>",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+
+        assert len(tool_results) == 0
+        assert len(error_responses) >= 1, f"expected error, got {results!r}"
+        # The raw tags must NOT leak into displayed content.
+        assert "<invoke name=" not in non_error_text
+        assert "<parameter name=" not in non_error_text
+        assert "<tool_call" not in non_error_text
+
+    def test_prose_mentioning_invoke_tag_does_not_error(self):
+        """Prose that mentions an <invoke name="..."> tag WITHOUT a paired
+        <parameter ... string="..."> tag is not a tool call — must pass through
+        verbatim, no error (the both-tags requirement guards against this)."""
+        model_tokens = [
+            "To call a tool you write ",
+            '<invoke name="foo">',
+            " and then fill in the body. That's the format.",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert all(r.finish_reason != "error" for r in text_results)
+        full_text = "".join(r.text for r in text_results)
+        assert '<invoke name="foo">' in full_text

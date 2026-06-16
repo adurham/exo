@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable, Generator, Iterator
 from functools import cache
 from typing import Any
@@ -320,7 +321,98 @@ def parse_deepseek_v4(
     stream = _parse_dsml_stream(
         responses, start, end, parse_dsml_output, dsml_special_token_ids
     )
-    return _strip_orphan_dsml_from_content(stream)
+    stream = _strip_orphan_dsml_from_content(stream)
+    return _fail_on_sentinelless_tool_call(stream)
+
+
+# A tool-call block emitted in the WRONG dialect: the correct invoke/parameter
+# STRUCTURE but with the ``｜DSML｜`` sentinel dropped from every tag, e.g.
+# ``<tool_called><invoke name="memory"><parameter name="action" string="true">``.
+# DSv4 occasionally does this instead of the real ``<｜DSML｜invoke …>`` form
+# (observed live 2026-06-15: a memory() call leaked as raw tags into content).
+# The DSML parser only recognizes sentinel-bearing tags, so this slips through
+# and the raw tags leak as content. We require BOTH an ``<invoke name="…">`` and
+# a ``<parameter name="…" string="…">`` to confirm — that pairing does not occur
+# in natural prose (verified against the session corpus: 0 false positives), so
+# it is a safe signature for "the model meant a tool call but used no sentinel".
+_SENTINELLESS_INVOKE = re.compile(r"<invoke\s+name=\"[^\"]+\"\s*>")
+_SENTINELLESS_PARAM = re.compile(
+    r"<parameter\s+name=\"[^\"]+\"\s+string=\"(?:true|false)\"\s*>"
+)
+
+
+def _is_sentinelless_tool_call(text: str) -> bool:
+    """True when text contains a sentinel-less tool-call block (invoke + param,
+    no ｜DSML｜ sentinel). Requires both tags to avoid flagging prose."""
+    if "｜DSML｜" in text:
+        return False  # real/quoted DSML is handled elsewhere
+    return bool(_SENTINELLESS_INVOKE.search(text)) and bool(
+        _SENTINELLESS_PARAM.search(text)
+    )
+
+
+def _fail_on_sentinelless_tool_call(
+    stream: Generator[GenerationResponse | ToolCallResponse | None],
+) -> Generator[GenerationResponse | ToolCallResponse | None]:
+    """Clean-fail a tool call the model emitted WITHOUT the ｜DSML｜ sentinel.
+
+    DSv4 sometimes emits the right tool-call structure in the wrong dialect —
+    ``<tool_called>/<invoke name=…>/<parameter name=… string=…>`` with no
+    ``｜DSML｜`` prefix on any tag. The DSML parser can't recognize these (by
+    design — it gates on the special-token sentinel), so they otherwise leak as
+    raw tags into displayed content AND the tool call is lost.
+
+    Consistent with the malformed/garbled/unterminated DSML cases, we fail the
+    turn cleanly (finish_reason="error" -> ErrorChunk -> 500 -> hermes retries)
+    rather than leak the tags or guess-parse the call. We only buffer
+    NON-thinking content (reasoning passes straight through); once the buffered
+    content confirms the sentinel-less signature we emit one error at the
+    terminal response. If it never confirms, the buffered content is flushed
+    verbatim so legitimate prose is never held back or dropped.
+    """
+    buffer: list[GenerationResponse] = []
+    buffered_text = ""
+    triggered = False
+
+    for item in stream:
+        # Reasoning tokens and non-text items are never tool calls — pass through,
+        # but first flush any pending content buffer to preserve ordering.
+        if not isinstance(item, GenerationResponse) or item.is_thinking or not item.text:
+            if buffer and not triggered:
+                yield from buffer
+                buffer = []
+                buffered_text = ""
+            yield item
+            continue
+
+        buffer.append(item)
+        buffered_text += item.text
+        if not triggered and _is_sentinelless_tool_call(buffered_text):
+            triggered = True
+
+        # On the terminal response, decide: error (confirmed) or flush (not).
+        if item.finish_reason is not None:
+            if triggered:
+                yield item.model_copy(
+                    update={
+                        "text": (
+                            "DSv4 emitted a tool call without the ｜DSML｜ tool-call "
+                            "markers (wrong dialect: bare <invoke>/<parameter> tags). "
+                            "Failing the turn so it can be retried."
+                        ),
+                        "finish_reason": "error",
+                    }
+                )
+            else:
+                yield from buffer
+            buffer = []
+            buffered_text = ""
+            triggered = False
+            continue
+
+    # Stream ended with no terminal response while buffering.
+    if buffer and not triggered:
+        yield from buffer
 
 
 def _strip_orphan_dsml_from_content(
