@@ -286,26 +286,49 @@ class MTPBatchGenerator(BatchGenerator):
         # the bonus/correction). accept_rate = n_accepted / gamma. This is the
         # key signal for tuning gamma (deeper chain only helps while the extra
         # accepted tokens outweigh the added draft+verify cost). (2026-06-08)
+        import time as _t
         _acc = getattr(self, "_accept_stats", None)
         if _acc is None:
+            _now0 = _t.perf_counter()
             _acc = self._accept_stats = {"cycles": 0, "accepted": 0,
                                           "proposed": 0, "yielded": 0,
-                                          "t0": __import__("time").perf_counter()}
+                                          "t0": _now0,
+                                          # Per-window markers: token count and
+                                          # wall-clock at the last log point, so
+                                          # decode_tok/s is the rate over the
+                                          # LAST 64 cycles, not a lifetime
+                                          # average diluted by idle gaps between
+                                          # requests (the old `yielded / (now -
+                                          # t0)` read ~1 tok/s on a mostly-idle
+                                          # runner and was useless for spotting
+                                          # a real-time slowdown).
+                                          "win_yielded": 0, "win_t0": _now0}
         _acc["cycles"] += 1
         _acc["accepted"] += n_accepted
         _acc["proposed"] += gamma
         _acc["yielded"] += n_accepted + 1
         if _acc["cycles"] % 64 == 0:
-            import time as _t
-            _dt = _t.perf_counter() - _acc["t0"]
+            _now = _t.perf_counter()
+            # Windowed (instantaneous-ish) decode rate over the last 64 cycles.
+            _win_dt = _now - _acc["win_t0"]
+            _win_tok = _acc["yielded"] - _acc["win_yielded"]
+            _tps = _win_tok / _win_dt if _win_dt > 0 else 0.0
+            # Cumulative acceptance is still a meaningful lifetime tuning
+            # signal (gamma sizing), so keep it cumulative.
             _rate = _acc["accepted"] / max(_acc["proposed"], 1)
-            _tps = _acc["yielded"] / _dt if _dt > 0 else 0.0
             _tpc = _acc["yielded"] / _acc["cycles"]
+            # Lifetime average kept for reference but clearly labelled.
+            _life_dt = _now - _acc["t0"]
+            _life_tps = _acc["yielded"] / _life_dt if _life_dt > 0 else 0.0
             logger.info(
                 f"[MTP ACCEPT] gamma={gamma} cycles={_acc['cycles']} "
                 f"accept_rate={_rate:.3f} tokens/cycle={_tpc:.2f} "
-                f"decode_tok/s={_tps:.1f}"
+                f"decode_tok/s={_tps:.1f} (window=64cyc) "
+                f"lifetime_tok/s={_life_tps:.1f}"
             )
+            # Reset window markers for the next 64-cycle interval.
+            _acc["win_yielded"] = _acc["yielded"]
+            _acc["win_t0"] = _now
 
         # 5. Roll back GDN cache for rejected drafts
         rollback = gamma - n_accepted
