@@ -414,6 +414,49 @@ def _fail_on_sentinelless_tool_call(
         # On the terminal response, decide: error (confirmed) or flush (not).
         if item.finish_reason is not None:
             if triggered:
+                # ── DEGEN PROBE: a sentinel-less / garbled tool-call leak is a
+                # DEGENERATION SHAPE (the model garbling its own structure —
+                # observed 2026-06-16 msg 70765: char-corruption `adad.durham`
+                # + a hallucinated tool-result fused into a <parameter> value),
+                # distinct from the repeat-token-loop the kill-switch sees and
+                # INVISIBLE to it. Emit a probe record so the next run captures
+                # BOTH failure shapes and we can test whether malformed-structure
+                # failures cluster with the same conditions (BS>1 cache swap,
+                # long context) as repeat-loops — i.e. share one root cause.
+                # Lazy import + only on the (rare) trigger path = zero hot cost.
+                try:
+                    from exo.worker.engines.mlx.speculative.dsv4_mtp import (
+                        _DEGEN_LAST_TRANSITION,
+                        _DEGEN_PROBE_ENABLED,
+                        _degen_probe_write,
+                    )
+                    if _DEGEN_PROBE_ENABLED:
+                        import time as _t
+                        # Most-recent swap across any active uid (parser layer
+                        # has no uid; timestamp-correlate against bs_transition).
+                        _swaps: list[dict[str, Any]] = [
+                            s for s in _DEGEN_LAST_TRANSITION.values()
+                            if "wall_ns" in s
+                        ]
+                        _last_swap: dict[str, Any] | None = (
+                            max(_swaps, key=lambda s: int(s["wall_ns"]))
+                            if _swaps else None
+                        )
+                        _ms = (
+                            (_t.perf_counter_ns() - int(_last_swap["wall_ns"]))
+                            / 1e6
+                            if _last_swap else None
+                        )
+                        _degen_probe_write({
+                            "event": "malformed_toolcall_cleanfail",
+                            "shape": "sentinelless_toolcall",
+                            "buffered_tail": buffered_text[-200:],
+                            "ms_since_any_swap": _ms,
+                            "last_swap": _last_swap,
+                            "wall_ns": _t.perf_counter_ns(),
+                        })
+                except Exception:
+                    pass
                 yield item.model_copy(
                     update={
                         "text": (
