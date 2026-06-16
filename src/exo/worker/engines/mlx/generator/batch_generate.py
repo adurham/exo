@@ -117,6 +117,17 @@ _LOOP_DETECT_ENABLED = os.environ.get("EXO_LOOP_DETECT", "1") != "0"
 _LOOP_DETECT_WINDOW = int(os.environ.get("EXO_LOOP_DETECT_WINDOW", "64"))
 _LOOP_DETECT_MAX_PERIOD = int(os.environ.get("EXO_LOOP_DETECT_MAX_PERIOD", "8"))
 _LOOP_DETECT_MIN_REPEATS = int(os.environ.get("EXO_LOOP_DETECT_MIN_REPEATS", "6"))
+# What to DO when a repetition loop is detected:
+#   "stop" (default) — force finish_reason="stop" to terminate the runaway
+#     generation gracefully (the partial output ends, the turn completes, hermes
+#     moves on). This is the hard guarantee an infinite loop needs — sampling
+#     penalties only lower the PROBABILITY of looping, they can't guarantee it
+#     ends. A loop of period<=8 repeated >=6x is unambiguous degeneration, never
+#     legitimate content, so stopping it is safe.
+#   "warn" — legacy behavior: log once, never alter output (no termination).
+# Set EXO_LOOP_DETECT_MIN_REPEATS higher if you want a longer leash before the
+# stop fires (default 6 cycles = caught fast, ~well before it wastes minutes).
+_LOOP_DETECT_ACTION = os.environ.get("EXO_LOOP_DETECT_ACTION", "stop")
 
 # Periodic macOS malloc_zone_pressure_relief() to force freed-but-cached
 # chunks back to the OS. The MLX C++ side is correctly releasing
@@ -1988,39 +1999,47 @@ class ExoBatchGenerator:
             state.generated_text_parts.append(text)
             state.potential_stop_sequence_text += text
 
-            # ── degeneration (repetition-loop) detection ── pure observability
+            # ── degeneration (repetition-loop) detection ──
+            # Detects decode collapse (a short token cycle repeating forever).
+            # With EXO_LOOP_DETECT_ACTION="stop" (default) we TERMINATE the
+            # runaway generation; "warn" keeps the legacy log-only behavior.
+            degeneration_stop = False
             if _LOOP_DETECT_ENABLED and response.finish_reason != "stop":
                 ids = state.recent_token_ids
                 ids.append(int(response.token))
                 if len(ids) > _LOOP_DETECT_WINDOW:
                     del ids[: len(ids) - _LOOP_DETECT_WINDOW]
-                if not state.degeneration_warned:
-                    loop = _detect_token_loop(ids)
-                    if loop is not None:
-                        period, repeats = loop
-                        state.degeneration_warned = True
-                        cycle_ids = ids[len(ids) - period:]
-                        try:
-                            cycle_text = self.tokenizer.decode(cycle_ids)
-                        except Exception:
-                            cycle_text = "<decode-failed>"
-                        tp = state.task_params
-                        # Pre-format into one string: the runner's logger is
-                        # loguru ({}-style), so %s args are NOT interpolated.
-                        # f-string keeps this logger-agnostic.
-                        logger.warning(
-                            f"DEGENERATION DETECTED uid={response.uid} "
-                            f"at completion_token={state.completion_tokens}: "
-                            f"token cycle period={period} repeated>={repeats}x. "
-                            f"cycle_token_ids={cycle_ids} cycle_text={cycle_text!r} "
-                            f"in_thinking={state.in_thinking} | sampling: "
-                            f"temp={tp.temperature} top_p={tp.top_p} "
-                            f"top_k={tp.top_k} min_p={tp.min_p} "
-                            f"rep_pen={tp.repetition_penalty} "
-                            f"prompt_tokens~{int(state.all_prompt_tokens.size)} "
-                            f"prefix_hit={state.prefix_hit_length} "
-                            f"gen_engine={type(self._mlx_gen).__name__}"
-                        )
+                # Once we've decided to stop, no need to keep scanning.
+                # Otherwise scan every token (not just until first warn) so the
+                # stop fires the instant the cycle crosses threshold.
+                loop = _detect_token_loop(ids) if not state.degeneration_warned else None
+                if loop is not None:
+                    period, repeats = loop
+                    state.degeneration_warned = True
+                    degeneration_stop = _LOOP_DETECT_ACTION == "stop"
+                    cycle_ids = ids[len(ids) - period:]
+                    try:
+                        cycle_text = self.tokenizer.decode(cycle_ids)
+                    except Exception:
+                        cycle_text = "<decode-failed>"
+                    tp = state.task_params
+                    # Pre-format into one string: the runner's logger is
+                    # loguru ({}-style), so %s args are NOT interpolated.
+                    # f-string keeps this logger-agnostic.
+                    logger.warning(
+                        f"DEGENERATION DETECTED uid={response.uid} "
+                        f"at completion_token={state.completion_tokens}: "
+                        f"token cycle period={period} repeated>={repeats}x. "
+                        f"action={_LOOP_DETECT_ACTION} "
+                        f"cycle_token_ids={cycle_ids} cycle_text={cycle_text!r} "
+                        f"in_thinking={state.in_thinking} | sampling: "
+                        f"temp={tp.temperature} top_p={tp.top_p} "
+                        f"top_k={tp.top_k} min_p={tp.min_p} "
+                        f"rep_pen={tp.repetition_penalty} "
+                        f"prompt_tokens~{int(state.all_prompt_tokens.size)} "
+                        f"prefix_hit={state.prefix_hit_length} "
+                        f"gen_engine={type(self._mlx_gen).__name__}"
+                    )
 
             think_start = self.tokenizer.think_start
             think_end = self.tokenizer.think_end
@@ -2054,6 +2073,14 @@ class ExoBatchGenerator:
                         text = text_before_stop[chunk_start:]
                         finish_reason = "stop"
                         break
+            # Degeneration kill-switch: a detected repetition loop terminates the
+            # generation gracefully here, exactly like a stop sequence. This is
+            # the deterministic guarantee against an infinite/runaway loop that a
+            # sampling penalty alone cannot provide. The current token's text is
+            # still emitted (the cycle tail is harmless / already on screen) and
+            # the turn closes with finish_reason="stop".
+            if degeneration_stop:
+                finish_reason = "stop"
             _t_stop_total += time.perf_counter() - _t0
 
             is_done = finish_reason is not None

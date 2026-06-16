@@ -272,18 +272,24 @@ fi
 : "${DSV4_TOP_K:=}"
 : "${DSV4_MIN_P:=}"
 : "${DSV4_PRESENCE_PENALTY:=}"
-# Gentle repetition guard (deviation from the bare spec). DSv4 at spec
-# (temp=1.0/top_p=1.0, no top_k/min_p/penalty) occasionally degenerates into
-# repetition loops on structured/repetitive content — observed 2026-06-15:
-# "8-bit-8-bit-8-bit…" in a markdown table, "Do NOT reach. Do NOT reach…", and a
-# vision-summary loop that then dribbled orphan DSML close tags into reasoning.
-# The loops are stochastic (don't reproduce on demand) so we can't A/B a cure,
-# but 1.05 is the textbook low-risk fix: mlx-lm divides already-seen tokens'
-# logits by the penalty over a 20-token lookback (sample_utils.py:306), which
-# breaks tight repeat cycles while barely touching legitimate long-range
-# repetition. 1.0 would be a no-op (collapsed to None). Raise toward 1.1 only if
-# loops persist; higher risks penalizing legit repeated tokens (code, names).
-: "${DSV4_REPETITION_PENALTY:=1.05}"
+# DSv4 at spec (temp=1.0/top_p=1.0, no top_k/min_p/penalty) occasionally
+# degenerates into repetition loops on structured/repetitive content — observed
+# 2026-06-15: "8-bit-8-bit-8-bit…" in a markdown table, "Do NOT reach…", and an
+# "exo → exo → … → hermes → hermes …" infinite loop that ran for minutes.
+# repetition_penalty=1.05 was tried and EMPIRICALLY FAILED (the exo→hermes loop
+# happened after it deployed, confirmed live): mlx-lm's repetition_penalty is
+# PRESENCE-based (penalizes a repeated token's logit ONCE regardless of how many
+# times it repeats — `logits[:, tokens] = …` overwrites, doesn't accumulate), so
+# in a tight loop the whole window is the same few tokens each getting only a
+# trivial ÷1.05 nudge. Reverted to no penalty (1.0 = no-op anyway). The real
+# guarantee is the DEGENERATION KILL-SWITCH in batch_generate.py
+# (EXO_LOOP_DETECT_ACTION="stop", default on): a detected token cycle
+# (period<=8, repeated>=6x) force-terminates the generation with
+# finish_reason="stop" — a hard stop a sampling penalty can't provide. If loops
+# still happen often enough to annoy (kill-switch makes them non-fatal but
+# truncates the turn), add a COUNT-based frequency_penalty next (it accumulates
+# over repeats, unlike repetition_penalty) — not wired into this script yet.
+: "${DSV4_REPETITION_PENALTY:=}"
 
 # Qwen3.6-35B-A3B (MoE, ~17.5GB/rank at 8-bit across a 2-node TP shard). Small
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
