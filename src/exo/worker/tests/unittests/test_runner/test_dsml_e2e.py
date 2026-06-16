@@ -1595,3 +1595,59 @@ class TestE2EDeepseekV4UnterminatedToolCallFailsCleanly:
         assert all(r.finish_reason != "error" for r in text_results)
         full_text = "".join(r.text for r in text_results)
         assert DSML_TOKEN not in full_text
+
+
+class TestE2EDeepseekV4OrphanCloseTagsStripped:
+    """Stray DSML CLOSING tags with no matching open block must not leak the
+    ｜DSML｜ sentinel into displayed (reasoning/content) text.
+
+    Observed live 2026-06-15: after a vision-summary turn, DSv4 fell into a
+    repetition loop inside its <think> block and emitted orphan close tags
+    (</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>) to bail out. With no
+    opening <｜DSML｜tool_calls> wrapper, the stream parser never routes them
+    through tool-call handling, so they passed through verbatim and the raw
+    ｜DSML｜ sentinel rendered in the reasoning display. The
+    _strip_orphan_dsml_from_content final stage strips them, enforcing the
+    invariant that ｜DSML｜ never survives into displayed text — without affecting
+    tool-call detection (no open wrapper here) or legitimate prose."""
+
+    def test_orphan_close_tags_no_sentinel_leak(self):
+        # Reasoning text then orphan close tags (no opening wrapper), as DSv4
+        # emits to escape a repetition loop. Token-id mode (confirmed-real).
+        model_tokens = [
+            "Some reasoning about the dashboard. ",
+            "</", DSML_TOKEN, "parameter>", "\n</", DSML_TOKEN, "invoke>",
+            "\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens_with_special(
+                    model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID
+                ),
+                frozenset({_DSML_SPECIAL_ID}),
+            )
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        full_text = "".join(r.text for r in text_results)
+
+        # No spurious tool call from orphan close tags.
+        assert len(tool_results) == 0
+        # CRITICAL: the ｜DSML｜ sentinel must never survive into displayed text.
+        assert DSML_TOKEN not in full_text
+        # The legitimate reasoning prose is preserved.
+        assert "Some reasoning about the dashboard." in full_text
+
+    def test_orphan_close_tags_legacy_mode_also_stripped(self):
+        """Even without resolved special-token ids, orphan close tags must not
+        leak the sentinel (strip is unconditional in the final stage)."""
+        model_tokens = [
+            "Recovered text. ",
+            "</", DSML_TOKEN, "parameter>", "\n</", DSML_TOKEN, "tool", "_c",
+            "alls", ">",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        full_text = "".join(r.text for r in text_results)
+        assert DSML_TOKEN not in full_text
+        assert "Recovered text." in full_text

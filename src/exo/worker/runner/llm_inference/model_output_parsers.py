@@ -317,9 +317,46 @@ def parse_deepseek_v4(
     dsml_token = "｜DSML｜"
     start = f"<{dsml_token}tool_calls>"
     end = f"</{dsml_token}tool_calls>"
-    return _parse_dsml_stream(
+    stream = _parse_dsml_stream(
         responses, start, end, parse_dsml_output, dsml_special_token_ids
     )
+    return _strip_orphan_dsml_from_content(stream)
+
+
+def _strip_orphan_dsml_from_content(
+    stream: Generator[GenerationResponse | ToolCallResponse | None],
+) -> Generator[GenerationResponse | ToolCallResponse | None]:
+    """Final safety net: strip ORPHAN DSML control tokens from emitted content.
+
+    The stream parser only routes text through a tool-call block when it sees a
+    real ``<｜DSML｜tool_calls>`` opening wrapper. But DSv4 sometimes emits STRAY
+    DSML *closing* tags with no matching open — most often when it falls into a
+    repetition loop inside a ``<think>`` block and emits
+    ``</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>`` to bail out (observed
+    live 2026-06-15: a vision-summary turn looped, then dribbled orphan close
+    tags into the reasoning display). Those orphans never form a parseable block,
+    so they pass through verbatim and the raw ``｜DSML｜`` sentinel leaks into the
+    user-visible reasoning/content stream.
+
+    This stage enforces the parser's standing invariant — the ``｜DSML｜`` special
+    token must NEVER survive into displayed text — by stripping orphan markers
+    from any GenerationResponse whose text still contains the sentinel after
+    tool-call parsing. It runs on already-classified output, so it cannot affect
+    tool-call detection. ToolCallResponses pass through untouched. Tokens that
+    are wholly the sentinel collapse to empty text and are dropped to avoid
+    emitting blank chunks.
+    """
+    dsml_token = "｜DSML｜"
+    for item in stream:
+        if isinstance(item, GenerationResponse) and item.text and dsml_token in item.text:
+            cleaned = strip_dsml_markers(item.text)
+            if cleaned == item.text:
+                yield item
+            elif cleaned:
+                yield item.model_copy(update={"text": cleaned})
+            # else: text was entirely orphan markers — drop the empty chunk
+        else:
+            yield item
 
 
 def _parse_dsml_stream(
