@@ -266,13 +266,24 @@ fi
 # at bf16). Override to a positive int only for memory-pressed deploys.
 : "${DSV4_KV_CACHE_BITS:=0}"
 # Sampling defaults — official DeepSeek V4 Flash card recommends
-# temperature=1.0, top_p=1.0 for local deployment. Other params unset.
+# temperature=1.0, top_p=1.0 for local deployment.
 : "${DSV4_TEMPERATURE:=1.0}"
 : "${DSV4_TOP_P:=1.0}"
 : "${DSV4_TOP_K:=}"
 : "${DSV4_MIN_P:=}"
 : "${DSV4_PRESENCE_PENALTY:=}"
-: "${DSV4_REPETITION_PENALTY:=}"
+# Gentle repetition guard (deviation from the bare spec). DSv4 at spec
+# (temp=1.0/top_p=1.0, no top_k/min_p/penalty) occasionally degenerates into
+# repetition loops on structured/repetitive content — observed 2026-06-15:
+# "8-bit-8-bit-8-bit…" in a markdown table, "Do NOT reach. Do NOT reach…", and a
+# vision-summary loop that then dribbled orphan DSML close tags into reasoning.
+# The loops are stochastic (don't reproduce on demand) so we can't A/B a cure,
+# but 1.05 is the textbook low-risk fix: mlx-lm divides already-seen tokens'
+# logits by the penalty over a 20-token lookback (sample_utils.py:306), which
+# breaks tight repeat cycles while barely touching legitimate long-range
+# repetition. 1.0 would be a no-op (collapsed to None). Raise toward 1.1 only if
+# loops persist; higher risks penalizing legit repeated tokens (code, names).
+: "${DSV4_REPETITION_PENALTY:=1.05}"
 
 # Qwen3.6-35B-A3B (MoE, ~17.5GB/rank at 8-bit across a 2-node TP shard). Small
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
