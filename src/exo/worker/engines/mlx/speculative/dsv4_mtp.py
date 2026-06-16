@@ -336,6 +336,62 @@ _C2_TRACE_ENABLED = os.environ.get("EXO_DSV4_C2_TRACE") == "1"
 _C2_TRACE_HANDLE: Optional[BinaryIO] = None
 _C2_TRACE_RECS: int = 0
 
+# ── Degeneration ⇄ per-stream-cache-swap correlation probe ──────────────
+# Decisive test for the hypothesis: DSv4 degeneration (repeating-token
+# collapse, ~7% of requests 2026-06-16) is caused by the BS>1 per-stream
+# cache swap (`activate_for_uids` extract+merge → `_bootstrap_per_stream_ring`
+# modular-ring remap) corrupting the SHARED prompt_cache that the TARGET
+# verify-forward reads — i.e. the loss is NOT in the draft (which is
+# target-verified) but in the target's own context after a swap.
+#
+# The existing EXO_DSV4_MTP_REFCHECK can't test this: it is gated temp==0
+# (production verify runs temp=1.0) AND both its forwards share the same
+# (possibly-scrambled) cache, so a scramble makes them AGREE.
+#
+# This probe is orthogonal: it stamps every BS-transition (uid set change in
+# activate_for_uids) with the current spec-cycle + logs the extracted
+# phys_rows-vs-size() consistency of each single (the exact scramble tell from
+# the 2026-06-15 extract/merge bug). The batch_generate degeneration detector
+# reads the stamp and records `cycles_since_last_transition` for the
+# degenerating uid. If degeneration onset clusters tightly after a transition
+# (small cycles_since), the swap is causal; if it's uniformly distributed,
+# it's not. Works at temp=1.0 (the failing config). Cost when OFF: zero.
+_DEGEN_PROBE_ENABLED = os.environ.get("EXO_DSV4_DEGEN_PROBE") == "1"
+_DEGEN_PROBE_HANDLE: Optional[BinaryIO] = None
+# Per-uid (spec_cycle, wall_ns) of the most recent BS-transition swap that
+# touched that uid. Read cross-module by batch_generate's degeneration
+# detector to compute cycles_since_last_transition at the moment of collapse.
+# Module-level (not instance) so the detector can reach it without a handle
+# to the generator. Bounded: one entry per active uid, pruned on dropout.
+_DEGEN_LAST_TRANSITION: dict[int, dict[str, Any]] = {}
+
+
+def _degen_probe_write(record: dict[str, Any]) -> None:
+    """Append one JSONL record to the per-pid degeneration-probe file.
+
+    Lazy unbuffered append so a crash leaves a complete record prefix.
+    Only called when _DEGEN_PROBE_ENABLED (zero cost otherwise).
+    """
+    global _DEGEN_PROBE_HANDLE
+    if _DEGEN_PROBE_HANDLE is None:
+        path = f"/tmp/dsv4_degen_probe_pid{os.getpid()}.jsonl"
+        _DEGEN_PROBE_HANDLE = open(path, "ab", buffering=0)  # noqa: SIM115
+        header = {
+            "type": "header",
+            "schema_version": 1,
+            "pid": os.getpid(),
+            "ts_open_ns": time.perf_counter_ns(),
+            "env": {
+                "EXO_SPECULATIVE_GAMMA": os.environ.get(
+                    "EXO_SPECULATIVE_GAMMA", "?"
+                ),
+                "EXO_DSV4_MTP": os.environ.get("EXO_DSV4_MTP", "?"),
+                "EXO_SPECULATIVE": os.environ.get("EXO_SPECULATIVE", "?"),
+            },
+        }
+        _DEGEN_PROBE_HANDLE.write((json.dumps(header) + "\n").encode("utf-8"))
+    _DEGEN_PROBE_HANDLE.write((json.dumps(record) + "\n").encode("utf-8"))
+
 
 def _c2_trace_rank() -> int:
     """Best-effort rank lookup. Returns -1 if mx.distributed unavailable.
@@ -602,6 +658,61 @@ class DSv4MTPPredictor:
             # (lazy PerStream bootstrap happens on first update_and_fetch.)
             batched.__class__ = _PerStream
             self._cache = batched
+
+        # ── DEGEN PROBE: stamp this BS-transition per uid + log the
+        # extract phys-vs-size consistency tell (zero cost when OFF). ──
+        if _DEGEN_PROBE_ENABLED:
+            _now_ns = time.perf_counter_ns()
+            _prev = tuple(self._active_uids or ())
+            _is_bs_gt1 = len(uids_t) > 1
+            # phys_rows-vs-size() per extracted single: the exact scramble
+            # tell. extract() that returns fewer physical rows than size()
+            # claims is the 2026-06-15 ragged bug; a non-crashing version
+            # (right row count, wrong temporal mapping) would show
+            # phys==size yet still be scrambled — so we log BOTH the count
+            # consistency AND each single's (offset, _idx, rotated) so a
+            # mismatch in the modular-ring remap is visible post-hoc.
+            _singles_meta: list[dict[str, Any]] = []
+            for _s_any in new_singles:
+                _s: Any = _s_any
+                try:
+                    _phys = (
+                        int(_s.keys.shape[2]) if getattr(_s, "keys", None)
+                        is not None else 0
+                    )
+                    _sz = int(_s.size()) if hasattr(_s, "size") else -1
+                    _singles_meta.append({
+                        "phys_rows": _phys,
+                        "size": _sz,
+                        "consistent": bool(_phys == _sz),
+                        "idx": int(getattr(_s, "_idx", -1)),
+                        "rotated": bool(getattr(_s, "rotated", False)),
+                    })
+                except Exception:
+                    _singles_meta.append({"meta_err": True})
+            for _u in uids_t:
+                _DEGEN_LAST_TRANSITION[int(_u)] = {
+                    "wall_ns": _now_ns,
+                    "to_uids": list(uids_t),
+                    "from_uids": list(_prev),
+                    "bs_gt1": _is_bs_gt1,
+                }
+            # Prune stamps for uids no longer active (bounded dict).
+            for _stale in list(_DEGEN_LAST_TRANSITION.keys()):
+                if _stale not in uids_t:
+                    _DEGEN_LAST_TRANSITION.pop(_stale, None)
+            _degen_probe_write({
+                "event": "bs_transition",
+                "wall_ns": _now_ns,
+                "from_uids": list(_prev),
+                "to_uids": list(uids_t),
+                "bs_gt1": _is_bs_gt1,
+                "extracted_singles": _singles_meta,
+                "any_inconsistent": any(
+                    not m.get("consistent", True) for m in _singles_meta
+                ),
+            })
+
         self._active_uids = uids_t
 
     def drop_uid(self, uid: int) -> None:

@@ -118,16 +118,35 @@ _LOOP_DETECT_WINDOW = int(os.environ.get("EXO_LOOP_DETECT_WINDOW", "64"))
 _LOOP_DETECT_MAX_PERIOD = int(os.environ.get("EXO_LOOP_DETECT_MAX_PERIOD", "8"))
 _LOOP_DETECT_MIN_REPEATS = int(os.environ.get("EXO_LOOP_DETECT_MIN_REPEATS", "6"))
 # What to DO when a repetition loop is detected:
-#   "stop" (default) — force finish_reason="stop" to terminate the runaway
-#     generation gracefully (the partial output ends, the turn completes, hermes
-#     moves on). This is the hard guarantee an infinite loop needs — sampling
-#     penalties only lower the PROBABILITY of looping, they can't guarantee it
-#     ends. A loop of period<=8 repeated >=6x is unambiguous degeneration, never
-#     legitimate content, so stopping it is safe.
+#   "error" (default) — fail the turn cleanly with finish_reason="error"
+#     (-> ErrorChunk -> 500 -> hermes classifies it retryable and retries).
+#     This is the RIGHT default because by the time a loop is confirmed the
+#     output is already degenerate: the tokens leading INTO the cycle are
+#     garbage too (observed 2026-06-16: DSv4 regurgitated session_search result
+#     JSON into its reasoning, then looped on the `}"]` tail — the surfaced
+#     "answer" was a 2-char `"]`). Surfacing that remnant (what "stop" does)
+#     hands the user broken output; failing cleanly lets the turn be retried.
+#     The degenerate partial text is REPLACED with a diagnostic message so the
+#     ErrorChunk carries a useful reason and the garbage never reaches display.
+#   "stop" — force finish_reason="stop": terminate the runaway but SURFACE the
+#     partial output already produced. Use only when you'd rather keep a
+#     possibly-coherent prefix than retry. Note: this leaks the pre-collapse
+#     wander (see the 2026-06-16 case), so it is no longer the default.
 #   "warn" — legacy behavior: log once, never alter output (no termination).
+# Either terminating mode is a hard guarantee an infinite loop needs — sampling
+# penalties only lower the PROBABILITY of looping, they can't guarantee it ends.
+# A loop of period<=8 repeated >=6x is unambiguous degeneration, never
+# legitimate content, so terminating it is safe.
 # Set EXO_LOOP_DETECT_MIN_REPEATS higher if you want a longer leash before the
 # stop fires (default 6 cycles = caught fast, ~well before it wastes minutes).
-_LOOP_DETECT_ACTION = os.environ.get("EXO_LOOP_DETECT_ACTION", "stop")
+_LOOP_DETECT_ACTION = os.environ.get("EXO_LOOP_DETECT_ACTION", "error")
+# Diagnostic text that REPLACES the degenerate partial output when the action
+# is "error". Kept short and specific so it is useful in logs / retries.
+_DEGENERATION_ERROR_TEXT = (
+    "Generation terminated: repetition-loop degeneration detected "
+    "(the model collapsed into a repeating token cycle). Failing the turn "
+    "cleanly so it can be retried."
+)
 
 # Periodic macOS malloc_zone_pressure_relief() to force freed-but-cached
 # chunks back to the OS. The MLX C++ side is correctly releasing
@@ -143,6 +162,7 @@ _LOOP_DETECT_ACTION = os.environ.get("EXO_LOOP_DETECT_ACTION", "stop")
 # free list (microseconds typically; can be milliseconds under heavy
 # fragmentation).
 import ctypes  # noqa: E402
+
 _MALLOC_RELIEF_INTERVAL = int(os.environ.get("EXO_MALLOC_RELIEF_INTERVAL", "0"))
 _libsystem_malloc: Any = None
 _malloc_zone_pressure_relief: Any = None
@@ -2001,28 +2021,78 @@ class ExoBatchGenerator:
 
             # ── degeneration (repetition-loop) detection ──
             # Detects decode collapse (a short token cycle repeating forever).
-            # With EXO_LOOP_DETECT_ACTION="stop" (default) we TERMINATE the
-            # runaway generation; "warn" keeps the legacy log-only behavior.
-            degeneration_stop = False
+            # With EXO_LOOP_DETECT_ACTION="error" (default) we FAIL the turn
+            # cleanly (retryable); "stop" terminates but surfaces the partial;
+            # "warn" keeps the legacy log-only behavior.
+            degeneration_terminate = False
             if _LOOP_DETECT_ENABLED and response.finish_reason != "stop":
                 ids = state.recent_token_ids
                 ids.append(int(response.token))
                 if len(ids) > _LOOP_DETECT_WINDOW:
                     del ids[: len(ids) - _LOOP_DETECT_WINDOW]
-                # Once we've decided to stop, no need to keep scanning.
+                # Once we've decided to terminate, no need to keep scanning.
                 # Otherwise scan every token (not just until first warn) so the
-                # stop fires the instant the cycle crosses threshold.
+                # termination fires the instant the cycle crosses threshold.
                 loop = _detect_token_loop(ids) if not state.degeneration_warned else None
                 if loop is not None:
                     period, repeats = loop
                     state.degeneration_warned = True
-                    degeneration_stop = _LOOP_DETECT_ACTION == "stop"
+                    degeneration_terminate = _LOOP_DETECT_ACTION in ("stop", "error")
                     cycle_ids = ids[len(ids) - period:]
                     try:
                         cycle_text = self.tokenizer.decode(cycle_ids)
                     except Exception:
                         cycle_text = "<decode-failed>"
                     tp = state.task_params
+                    # ── DEGEN PROBE: correlate this collapse with the most
+                    # recent MTP BS-transition cache swap for THIS uid. The
+                    # hypothesis under test: degeneration onset clusters
+                    # tightly AFTER a per-stream cache swap (small
+                    # ms_since_transition) ⇒ the swap corrupts the shared
+                    # cache the target verify-forward reads. Lazy import +
+                    # only on the (rare) degeneration path = zero hot cost.
+                    _degen_transition = "probe-off"
+                    try:
+                        from exo.worker.engines.mlx.speculative.dsv4_mtp import (
+                            _DEGEN_LAST_TRANSITION,
+                            _DEGEN_PROBE_ENABLED,
+                            _degen_probe_write,
+                        )
+                        if _DEGEN_PROBE_ENABLED:
+                            import time as _t
+                            _stamp = _DEGEN_LAST_TRANSITION.get(
+                                int(response.uid)
+                            )
+                            if _stamp is not None:
+                                _ms = (
+                                    _t.perf_counter_ns() - _stamp["wall_ns"]
+                                ) / 1e6
+                                _degen_transition = (
+                                    f"ms_since_swap={_ms:.1f} "
+                                    f"last_swap_bs_gt1={_stamp['bs_gt1']} "
+                                    f"swap_uids={_stamp['to_uids']}"
+                                )
+                            else:
+                                _degen_transition = "no_swap_seen_this_uid"
+                            _degen_probe_write({
+                                "event": "degeneration",
+                                "uid": int(response.uid),
+                                "completion_token": int(
+                                    state.completion_tokens
+                                ),
+                                "period": int(period),
+                                "repeats": int(repeats),
+                                "cycle_text": cycle_text,
+                                "in_thinking": bool(state.in_thinking),
+                                "prompt_tokens": int(
+                                    state.all_prompt_tokens.size
+                                ),
+                                "prefix_hit": int(state.prefix_hit_length),
+                                "last_transition": _stamp,
+                                "wall_ns": _t.perf_counter_ns(),
+                            })
+                    except Exception:
+                        _degen_transition = "probe-err"
                     # Pre-format into one string: the runner's logger is
                     # loguru ({}-style), so %s args are NOT interpolated.
                     # f-string keeps this logger-agnostic.
@@ -2038,7 +2108,8 @@ class ExoBatchGenerator:
                         f"rep_pen={tp.repetition_penalty} "
                         f"prompt_tokens~{int(state.all_prompt_tokens.size)} "
                         f"prefix_hit={state.prefix_hit_length} "
-                        f"gen_engine={type(self._mlx_gen).__name__}"
+                        f"gen_engine={type(self._mlx_gen).__name__} "
+                        f"| degen_probe: {_degen_transition}"
                     )
 
             think_start = self.tokenizer.think_start
@@ -2074,13 +2145,20 @@ class ExoBatchGenerator:
                         finish_reason = "stop"
                         break
             # Degeneration kill-switch: a detected repetition loop terminates the
-            # generation gracefully here, exactly like a stop sequence. This is
-            # the deterministic guarantee against an infinite/runaway loop that a
-            # sampling penalty alone cannot provide. The current token's text is
-            # still emitted (the cycle tail is harmless / already on screen) and
-            # the turn closes with finish_reason="stop".
-            if degeneration_stop:
-                finish_reason = "stop"
+            # generation here. This is the deterministic guarantee against an
+            # infinite/runaway loop that a sampling penalty alone cannot provide.
+            #   action="error" (default): fail the turn cleanly — the degenerate
+            #     partial text is REPLACED with a diagnostic message and
+            #     finish_reason="error" (-> ErrorChunk -> 500 -> hermes retries),
+            #     so the pre-collapse garbage never reaches display.
+            #   action="stop": terminate but surface the partial (legacy) — the
+            #     current token's text is emitted and finish_reason="stop".
+            if degeneration_terminate:
+                if _LOOP_DETECT_ACTION == "error":
+                    text = _DEGENERATION_ERROR_TEXT
+                    finish_reason = "error"
+                else:
+                    finish_reason = "stop"
             _t_stop_total += time.perf_counter() - _t0
 
             is_done = finish_reason is not None
