@@ -1961,6 +1961,17 @@ class ExoBatchGenerator:
             request_trace.record("decode.step.mlx_next", _step_tic)
 
         results: list[tuple[int, GenerationResponse]] = []
+        # uids the degeneration kill-switch terminated this step. mlx-lm's
+        # BatchGenerator only drops a sequence when ITS OWN logic sets a
+        # finish_reason (EOS / length); a finish_reason we INJECT (kill-switch
+        # stop/error) is invisible to it, so it keeps emitting that uid every
+        # step forever while we've already removed it from _active_tasks → the
+        # "response uid N was not found - should be active" spam (observed
+        # 48k+ times across a 2h run; present since the kill-switch shipped,
+        # for BOTH stop and error actions). We must explicitly evict these
+        # uids from the generator AFTER the response loop (can't mutate the
+        # generator while iterating its responses).
+        _killswitch_evict_uids: list[int] = []
 
         # per-token profiling accumulators
         _t_callback_total = 0.0
@@ -2159,6 +2170,9 @@ class ExoBatchGenerator:
                     finish_reason = "error"
                 else:
                     finish_reason = "stop"
+                # Evict from the MLX generator after the loop — our injected
+                # finish_reason won't make mlx-lm drop the sequence on its own.
+                _killswitch_evict_uids.append(response.uid)
             _t_stop_total += time.perf_counter() - _t0
 
             is_done = finish_reason is not None
@@ -2372,6 +2386,20 @@ class ExoBatchGenerator:
                     )
             except Exception:
                 pass
+
+        # Evict any kill-switch-terminated sequences from the MLX generator so
+        # it stops emitting them next step (the injected finish_reason alone
+        # does not). Done here, after iterating this step's responses, to avoid
+        # mutating the generator mid-iteration. Best-effort: removal failure
+        # must not break the decode loop.
+        if _killswitch_evict_uids:
+            try:
+                self._mlx_gen.remove(_killswitch_evict_uids)
+            except Exception as _evict_err:
+                logger.warning(
+                    f"kill-switch generator-evict failed for "
+                    f"{_killswitch_evict_uids}: {_evict_err}"
+                )
 
         return results
 
