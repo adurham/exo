@@ -2595,13 +2595,52 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 q_di = q[0, draft_ids[i].squeeze()]
                 ratio = p_di / mx.maximum(q_di, 1e-10)
                 accept_ratios.append(mx.minimum(ratio**alpha, 1.0))
+            # MTP MIN_P FIX (2026-06-16). The MTP speculative path never honored
+            # the configured min_p/top_p — draft/accept/correction/bonus all
+            # sampled from the RAW untruncated distribution, unlike the main
+            # make_sampler (which clips the tail). At temp=1.0 the correction
+            # categorical(log(residual)) and bonus categorical then occasionally
+            # commit an extreme-tail token (audit-proven: p_bonus down to 0.0036
+            # while argmax p≈1.0), which on rigid structured output (DSML tags)
+            # cascades into a malformed close (</file>/bare </parameter>) ->
+            # unterminated invoke -> dead turn. This is why MTP-off is clean (main
+            # sampler clips the tail) and why min_p/top_p on the card only PARTLY
+            # helped (the accept-test p shifts, but the correction/bonus draws
+            # ignored the floor entirely). FIX: apply the same min_p tail-clip to
+            # the correction residual and the bonus logits so MTP draws from the
+            # same truncated distribution as the main sampler — MTP-on now matches
+            # MTP-off distributionally. Default 0.05 (the DSv4 card value); set
+            # EXO_DSV4_MTP_MIN_P=0 to disable (A/B). top_p is intentionally NOT
+            # applied here — min_p alone removes the absolute-garbage tail that
+            # seeds the cascade; adding top_p would further narrow but min_p is
+            # the targeted, distribution-confidence-adaptive clip.
+            _mtp_min_p = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
             uniforms = mx.random.uniform(shape=(gamma,))
             for i in range(gamma):
                 p = mx.softmax(verify_logits[0, i] / temp, axis=-1)
                 q = draft_probs[i][0]
                 residual = mx.maximum(p - q, 0.0)
+                if _mtp_min_p > 0.0:
+                    # Keep only residual mass on tokens within min_p of the
+                    # residual's own peak; zero the rest so categorical cannot
+                    # draw a sub-threshold tail token. (Renormalization is
+                    # implicit: categorical(log(...)) normalizes internally.)
+                    _rmax = mx.max(residual)
+                    residual = mx.where(
+                        residual >= _mtp_min_p * _rmax, residual, 0.0
+                    )
                 corrections.append(mx.random.categorical(mx.log(residual + 1e-10)))
-            bonus_token = mx.random.categorical(verify_logits[0, gamma] * (1.0 / temp))
+            _bonus_logits = verify_logits[0, gamma] * (1.0 / temp)
+            if _mtp_min_p > 0.0:
+                # min_p in logit space: p_i >= min_p * p_max  <=>
+                # L_i - L_max >= log(min_p). Mask sub-threshold logits to -inf
+                # so the bonus categorical samples only from the kept set.
+                _lmax = mx.max(_bonus_logits)
+                _thresh = _lmax + float(mx.log(mx.array(_mtp_min_p)).item())
+                _bonus_logits = mx.where(
+                    _bonus_logits >= _thresh, _bonus_logits, -float("inf")
+                )
+            bonus_token = mx.random.categorical(_bonus_logits)
             logprobs_all = verify_logits[0] - mx.logsumexp(
                 verify_logits[0], axis=-1, keepdims=True
             )

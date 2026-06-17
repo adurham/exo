@@ -897,6 +897,10 @@ for NODE in "${NODES[@]}"; do
     # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
     [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
     [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
+    # min_p tail-clip for the temp>0 MTP correction/bonus sampling (default 0.05
+    # in code = the DSv4 card value; set 0 to disable for A/B). Stops MTP
+    # committing extreme-tail tokens that seed structured-output degeneration.
+    [ -n "${EXO_DSV4_MTP_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MIN_P=$EXO_DSV4_MTP_MIN_P"
     # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
     # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
     # timestamps + per-stream tokens. NOT a production knob — diagnostic
