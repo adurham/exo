@@ -1807,12 +1807,46 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             draft_concat_int = draft_concat.tolist()
             for n in range(N):
                 k = k_local[n]
-                _bl = verify_logits[n, k] * (1.0 / self.temp)
-                if _mtp_min_p > 0.0:
-                    _lmax = mx.max(_bl)
-                    _thresh = _lmax + float(mx.log(mx.array(_mtp_min_p)).item())
-                    _bl = mx.where(_bl >= _thresh, _bl, -float("inf"))
-                bonus_local.append(int(mx.random.categorical(_bl).item()))
+                if k == gamma:
+                    # FULL ACCEPTANCE — the replacement is the genuine BONUS
+                    # token sampled from the target p at the post-draft
+                    # position. Raw target logits are correct here (no draft
+                    # was rejected). min_p tail-clip as before.
+                    _bl = verify_logits[n, k] * (1.0 / self.temp)
+                    if _mtp_min_p > 0.0:
+                        _lmax = mx.max(_bl)
+                        _thresh = _lmax + float(
+                            mx.log(mx.array(_mtp_min_p)).item()
+                        )
+                        _bl = mx.where(_bl >= _thresh, _bl, -float("inf"))
+                    bonus_local.append(int(mx.random.categorical(_bl).item()))
+                else:
+                    # REJECTION at position k — the replacement MUST be drawn
+                    # from the RESIDUAL distribution max(p - q, 0), NOT raw p.
+                    # This is the Leviathan/Chen distribution-preserving
+                    # speculative-sampling correction the single-uid path does
+                    # (~2630-2643). Sampling raw p here re-weights toward the
+                    # tokens the MTP draft q over-proposes (q is sharply peaked
+                    # on high-freq continuations), biasing toward repetition →
+                    # the deterministic BS>1 period-6 degeneration loop. q is
+                    # the per-stream draft proposal at step k: draft_probs_list
+                    # is per-draft-step, each entry shape (N, vocab) at temp>0.
+                    p = mx.softmax(verify_logits[n, k] / self.temp, axis=-1)
+                    q = draft_probs_list[k][n]
+                    residual = mx.maximum(p - q, 0.0)
+                    if _mtp_min_p > 0.0:
+                        # min_p clip on the residual's own peak (matches the
+                        # single-uid correction clip), so the categorical can't
+                        # draw a sub-threshold tail token.
+                        _rmax = mx.max(residual)
+                        residual = mx.where(
+                            residual >= _mtp_min_p * _rmax, residual, 0.0
+                        )
+                    bonus_local.append(
+                        int(mx.random.categorical(
+                            mx.log(residual + 1e-10)
+                        ).item())
+                    )
                 bonus_lps.append(logprobs_all[n, k])
 
             if sync_drafts:
