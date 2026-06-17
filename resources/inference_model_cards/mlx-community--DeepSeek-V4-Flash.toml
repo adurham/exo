@@ -24,8 +24,13 @@ in_bytes = 155095760030
 # DSML invoke unterminated -> parser reject -> retry loop -> dead turn). min_p is
 # adaptive to model confidence: it clips the junk tail hardest exactly when the
 # model is confident (mid-code/JSON), while leaving low-confidence prose/reasoning
-# free. 0.05 is a gentle floor that preserves the recommended temp/top_p.
+# free. 0.05 is a gentle floor. top_p lowered 1.0 -> 0.95 (a small departure from
+# DeepSeek's bare temp=1.0/top_p=1.0 rec) after min_p=0.05 alone did not stop the
+# model corrupting its DSML closing tags partway through LONG tool-call content
+# (write_file bodies closing with bare </parameter></file></think> instead of the
+# sentinel-bearing close -> unterminated invoke -> clean-fail -> retry loop). 0.95
+# trims the extreme tail more aggressively to reduce that degeneration frequency.
 [sampling_defaults]
 temperature = 1.0
-top_p = 1.0
+top_p = 0.95
 min_p = 0.05
