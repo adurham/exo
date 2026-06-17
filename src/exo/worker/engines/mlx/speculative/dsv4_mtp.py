@@ -1595,6 +1595,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         coord_group = get_coord_group(sync_group)
         sync_drafts = sync_group is not None and sync_group.size() > 1
 
+        # PER-REQUEST TEMP RESOLUTION (2026-06-17 root-cause fix).
+        # The batch path historically read bare `self.temp` for its branch
+        # decision and all sampling. But self.temp == EXO_SPECULATIVE_TEMP,
+        # which DEFAULTS TO 0.0 and is not set in the cluster env — so the
+        # batch path always took the temp==0 GREEDY-argmax acceptance branch
+        # regardless of the request's real temperature, deterministically
+        # collapsing temp>0 concurrent decode into a repetition loop (the BS=2
+        # degeneration). The single-uid path correctly resolves per-uid temp
+        # from _request_temp; mirror that here. Concurrent requests in practice
+        # share the model-card temp, so we resolve per-uid then use a single
+        # batch temp. If uids ever carry mixed temps (not produced by the
+        # current API path), fall back to the MAX so we never silently run
+        # greedy on a sampling request; a future change can vectorize per-stream
+        # temp through the accept test if mixed-temp batches become real.
+        _req_temps = [self._request_temp.get(u, self.temp) for u in uids]
+        batch_temp = max(_req_temps) if _req_temps else self.temp
+        if len(set(_req_temps)) > 1:
+            logger.warning(
+                "DSv4 MTP batch: mixed per-stream temps %s; using max=%s for "
+                "the shared verify accept (per-stream temp not yet vectorized)",
+                _req_temps, batch_temp,
+            )
+
         # Verify each uid has the prerequisites.
         ys: list[mx.array] = []
         y_logprobs_list: list[Any] = []
@@ -1623,7 +1646,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Stack pre_norms into (N, 1, hidden_size).
         stacked_pre_norm = mx.concatenate(pre_norms, axis=0)  # (N, 1, hidden)
         draft_ids_list, draft_probs_list = self._draft_tokens_batched(
-            stacked_pre_norm, next_tokens_arr, gamma, self.temp
+            stacked_pre_norm, next_tokens_arr, gamma, batch_temp
         )
         # draft_ids_list[i] is mx.array shape (N,) — uid b's i-th draft.
         # draft_probs_list[i] is mx.array shape (N, vocab) at temp>0, else None.
@@ -1675,7 +1698,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             verify_logits[:, :gamma, :], axis=-1
         )  # (N, γ)
 
-        if self.temp == 0:
+        if batch_temp == 0:
             matches = mx.equal(target_tokens, draft_concat)  # (N, γ)
             all_next = mx.argmax(verify_logits, axis=-1)  # (N, γ+1)
             logprobs_all = verify_logits - mx.logsumexp(
@@ -1772,7 +1795,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             for n, uid in enumerate(uids):
                 accept_ratios: list[mx.array] = []
                 for i in range(gamma):
-                    p = mx.softmax(verify_logits[n, i] / self.temp, axis=-1)
+                    p = mx.softmax(verify_logits[n, i] / batch_temp, axis=-1)
                     q = draft_probs_list[i]
                     p_di = p[draft_concat[n, i]]
                     q_di = q[n, draft_concat[n, i]]
@@ -1812,7 +1835,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # token sampled from the target p at the post-draft
                     # position. Raw target logits are correct here (no draft
                     # was rejected). min_p tail-clip as before.
-                    _bl = verify_logits[n, k] * (1.0 / self.temp)
+                    _bl = verify_logits[n, k] * (1.0 / batch_temp)
                     if _mtp_min_p > 0.0:
                         _lmax = mx.max(_bl)
                         _thresh = _lmax + float(
@@ -1839,7 +1862,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # branch is off the degeneration path. Root cause is elsewhere
                     # (suspected per-stream verify mask/offset in the L>1 batched
                     # forward); investigation ongoing.
-                    p = mx.softmax(verify_logits[n, k] / self.temp, axis=-1)
+                    p = mx.softmax(verify_logits[n, k] / batch_temp, axis=-1)
                     q = draft_probs_list[k][n]
                     residual = mx.maximum(p - q, 0.0)
                     if _mtp_min_p > 0.0:
@@ -1965,7 +1988,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if self._spec_trace_enabled:
             _tt = (
                 target_tokens
-                if self.temp == 0
+                if batch_temp == 0
                 else mx.zeros_like(draft_concat)
             )
             self._spec_trace_cycle_dump(
