@@ -2746,6 +2746,75 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 except Exception as _audit_err:  # never break generation
                     logger.warning(f"verify-audit failed: {_audit_err}")
 
+        # ── VERIFY AUDIT (temp>0 path) ───────────────────────────────────
+        # The temp==0 audit above cannot run at temp>0 (all_next is None; the
+        # bonus/corrections come from stochastic sampling). But our production
+        # DSv4 runs at temp=1.0, and that is exactly where the long-tool-call
+        # degeneration (spurious </think>/</file> cascade) was observed live
+        # (2026-06-16). Capture the SAME discriminator at temp>0 so we can tell
+        # the two candidate mechanisms apart:
+        #   * pool contamination  -> the special token wins by a HEALTHY margin
+        #     (verify context is genuinely corrupted; argmax really is </think>)
+        #   * numerical / no temp>0 tiebreak -> wins by a HAIR (near-tied flip)
+        # We log whenever a special token appears in the drafts, the batched
+        # verify target argmax, or the chosen bonus. Rank-0 only, env-gated,
+        # wrapped so it can never break generation. NOTE: at temp>0 the emitted
+        # bonus is sampled (bonus_token / corrections), but the verify-logit
+        # ARGMAX + margin at the bonus position is still the right corruption
+        # signal — a corrupted context shifts the argmax mass, visible here.
+        if _audit_path and temp != 0:
+            _is_rank0 = sync_group is None or sync_group.rank() == 0
+            if _is_rank0:
+                try:
+                    _special = {128822, 128821}  # </think>, <think>
+                    _draft_list = [int(v) for v in draft_concat[0].tolist()]
+                    _tgt_list = [int(v) for v in target_tokens[0].tolist()]
+                    _bonus_special = int(bonus_val) in _special
+                    _draft_special = any(d in _special for d in _draft_list)
+                    _tgt_special = any(t in _special for t in _tgt_list)
+                    if _bonus_special or _draft_special or _tgt_special:
+                        _bpos = gamma if n_accepted == gamma else n_accepted
+                        _vl = verify_logits[0, _bpos]
+                        _top2 = mx.topk(_vl, 2)
+                        _top2v = [float(x) for x in _top2.tolist()]
+                        _argmax_bonus = int(mx.argmax(_vl).item())
+                        _margin = (
+                            abs(_top2v[-1] - _top2v[-2])
+                            if len(_top2v) >= 2 else None
+                        )
+                        _pools = []
+                        for _pc, _snap in zip(_pool_caches, _pool_snaps):
+                            _pools.append({
+                                "off": int(getattr(_pc, "_pool_offset", -1)),
+                                "rem": int(getattr(_pc, "remainder", -1)),
+                                "pend": int(getattr(_pc, "_pending_offset_bump", 0)),
+                                "ratio": int(getattr(_pc, "ratio", -1)),
+                                "snap": _snap is not None,
+                            })
+                        _rec = {
+                            "temp_gt0": True,
+                            "temp": float(temp),
+                            "cycle": int(self._spec_cycles),
+                            "uid": int(uid),
+                            "gamma": int(gamma),
+                            "n_accepted": int(n_accepted),
+                            "draft": _draft_list,
+                            "target_argmax": _tgt_list,
+                            "bonus": int(bonus_val),
+                            "bonus_pos": int(_bpos),
+                            "bonus_argmax": _argmax_bonus,
+                            "bonus_top2_logits": _top2v,
+                            "bonus_margin": _margin,
+                            "bonus_special": bool(_bonus_special),
+                            "draft_special": bool(_draft_special),
+                            "tgt_special": bool(_tgt_special),
+                            "pools": _pools,
+                        }
+                        with open(_audit_path, "a") as _f:
+                            _f.write(json.dumps(_rec) + "\n")
+                except Exception as _audit_err:  # never break generation
+                    logger.warning(f"verify-audit(temp>0) failed: {_audit_err}")
+
         if prof is not None:
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
