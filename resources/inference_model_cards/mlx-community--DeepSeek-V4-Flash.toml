@@ -16,6 +16,16 @@ backends = ["MlxMetal", "MlxCuda", "MlxCpu"]
 in_bytes = 155095760030
 
 # Source: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash
+# temperature/top_p are DeepSeek's official recommendation (temp=1.0, top_p=1.0,
+# all modes). min_p is a guardrail DeepSeek does not specify: with top_p=1.0 the
+# sampling tail is fully open, and DSv4 was observed degenerating into incoherent
+# garbage partway through long structured tool-call bodies (e.g. a large
+# write_file `content` arg dissolving into stray quotes/TODO prose, leaving the
+# DSML invoke unterminated -> parser reject -> retry loop -> dead turn). min_p is
+# adaptive to model confidence: it clips the junk tail hardest exactly when the
+# model is confident (mid-code/JSON), while leaving low-confidence prose/reasoning
+# free. 0.05 is a gentle floor that preserves the recommended temp/top_p.
 [sampling_defaults]
 temperature = 1.0
 top_p = 1.0
+min_p = 0.05
