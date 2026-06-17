@@ -2762,56 +2762,73 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # bonus is sampled (bonus_token / corrections), but the verify-logit
         # ARGMAX + margin at the bonus position is still the right corruption
         # signal — a corrupted context shifts the argmax mass, visible here.
+        # The original gate (special-token only: </think>/<think>) MISSED the
+        # real degeneration: live captures show the corruption is in ORDINARY
+        # text tokens — the model generates the literal text `</file>` and bare
+        # `</parameter>` (BPE tokens, NOT special ids), so a special-token-only
+        # audit logs nothing. Token-id map (resolved from DSv4 tokenizer.json):
+        # </think>=128822 <think>=128821 ｜DSML｜=128825; the DSML tag bodies and
+        # </file> are plain text. New hypothesis being tested: at temp>0 a
+        # REJECTION samples the correction token from the residual (p-q) dist
+        # via mx.random.categorical over per-rank-drifted verify logits; with
+        # the open tail (temp=1.0) that can draw a LOW-PROBABILITY garbage token
+        # that seeds the cascade. (Corroborated: min_p/top_p — which clip that
+        # residual tail — reduced degen freq 4->2.) So capture EVERY rejection
+        # past a cycle threshold: the chosen bonus/correction token AND its
+        # probability mass under the verify dist, to see if corrections draw
+        # low-prob tail tokens on long generations. Rank-0 only, env-gated,
+        # wrapped so it can never break generation.
         if _audit_path and temp != 0:
             _is_rank0 = sync_group is None or sync_group.rank() == 0
-            if _is_rank0:
+            _rejected = n_accepted < gamma
+            _cyc = int(self._spec_cycles)
+            # Capture all rejections after cycle 20 (degeneration is a
+            # long-generation phenomenon), plus any special-token involvement.
+            _special = {128822, 128821, 128825}  # </think>, <think>, ｜DSML｜
+            _draft_list = [int(v) for v in draft_concat[0].tolist()]
+            _tgt_list = [int(v) for v in target_tokens[0].tolist()]
+            _bonus_special = int(bonus_val) in _special
+            _special_seen = (
+                _bonus_special
+                or any(d in _special for d in _draft_list)
+                or any(t in _special for t in _tgt_list)
+            )
+            if _is_rank0 and ((_rejected and _cyc >= 20) or _special_seen):
                 try:
-                    _special = {128822, 128821}  # </think>, <think>
-                    _draft_list = [int(v) for v in draft_concat[0].tolist()]
-                    _tgt_list = [int(v) for v in target_tokens[0].tolist()]
-                    _bonus_special = int(bonus_val) in _special
-                    _draft_special = any(d in _special for d in _draft_list)
-                    _tgt_special = any(t in _special for t in _tgt_list)
-                    if _bonus_special or _draft_special or _tgt_special:
-                        _bpos = gamma if n_accepted == gamma else n_accepted
-                        _vl = verify_logits[0, _bpos]
-                        _top2 = mx.topk(_vl, 2)
-                        _top2v = [float(x) for x in _top2.tolist()]
-                        _argmax_bonus = int(mx.argmax(_vl).item())
-                        _margin = (
-                            abs(_top2v[-1] - _top2v[-2])
-                            if len(_top2v) >= 2 else None
-                        )
-                        _pools = []
-                        for _pc, _snap in zip(_pool_caches, _pool_snaps):
-                            _pools.append({
-                                "off": int(getattr(_pc, "_pool_offset", -1)),
-                                "rem": int(getattr(_pc, "remainder", -1)),
-                                "pend": int(getattr(_pc, "_pending_offset_bump", 0)),
-                                "ratio": int(getattr(_pc, "ratio", -1)),
-                                "snap": _snap is not None,
-                            })
-                        _rec = {
-                            "temp_gt0": True,
-                            "temp": float(temp),
-                            "cycle": int(self._spec_cycles),
-                            "uid": int(uid),
-                            "gamma": int(gamma),
-                            "n_accepted": int(n_accepted),
-                            "draft": _draft_list,
-                            "target_argmax": _tgt_list,
-                            "bonus": int(bonus_val),
-                            "bonus_pos": int(_bpos),
-                            "bonus_argmax": _argmax_bonus,
-                            "bonus_top2_logits": _top2v,
-                            "bonus_margin": _margin,
-                            "bonus_special": bool(_bonus_special),
-                            "draft_special": bool(_draft_special),
-                            "tgt_special": bool(_tgt_special),
-                            "pools": _pools,
-                        }
-                        with open(_audit_path, "a") as _f:
-                            _f.write(json.dumps(_rec) + "\n")
+                    _bpos = gamma if n_accepted == gamma else n_accepted
+                    _vl = verify_logits[0, _bpos]
+                    # Verify-dist probability of the COMMITTED bonus token —
+                    # the smoking gun for "correction sampled garbage": a tiny
+                    # p_bonus on a rejection means we committed a tail token.
+                    _vl_lse = float(mx.logsumexp(_vl).item())
+                    _bonus_logit = float(_vl[int(bonus_val)].item())
+                    _p_bonus = float(mx.exp(mx.array(_bonus_logit - _vl_lse)).item())
+                    _argmax_bonus = int(mx.argmax(_vl).item())
+                    _p_argmax = float(
+                        mx.exp(mx.array(float(_vl[_argmax_bonus].item()) - _vl_lse)).item()
+                    )
+                    _rec = {
+                        "temp_gt0": True,
+                        "temp": float(temp),
+                        "cycle": _cyc,
+                        "uid": int(uid),
+                        "gamma": int(gamma),
+                        "n_accepted": int(n_accepted),
+                        "rejected": bool(_rejected),
+                        "draft": _draft_list,
+                        "target_argmax": _tgt_list,
+                        "bonus": int(bonus_val),
+                        "bonus_pos": int(_bpos),
+                        "bonus_argmax": _argmax_bonus,
+                        # p of committed bonus vs p of argmax under verify dist:
+                        # p_bonus << p_argmax on a rejection = garbage correction.
+                        "p_bonus": _p_bonus,
+                        "p_argmax": _p_argmax,
+                        "bonus_special": bool(_bonus_special),
+                        "special_seen": bool(_special_seen),
+                    }
+                    with open(_audit_path, "a") as _f:
+                        _f.write(json.dumps(_rec) + "\n")
                 except Exception as _audit_err:  # never break generation
                     logger.warning(f"verify-audit(temp>0) failed: {_audit_err}")
 
