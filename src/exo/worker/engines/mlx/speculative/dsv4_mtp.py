@@ -1789,19 +1789,30 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # n_accepted_per + bonus_vals into ONE broadcast — saves
             # one ACK barrier round-trip per cycle vs the prior two
             # separate broadcasts.
+            # MTP MIN_P FIX — BATCH PATH (2026-06-16). This is the path that runs
+            # under real concurrent load (Hermes aux tasks + main turn → rendezvous
+            # batched → BS>1 → _speculative_next_batch). Like the single-uid path,
+            # the per-stream bonus is sampled from RAW verify_logits with no min_p
+            # floor, so it can commit an extreme-tail token that seeds the
+            # structured-output degeneration cascade. Apply the same min_p tail-
+            # clip (default 0.05 = DSv4 card; EXO_DSV4_MTP_MIN_P override) so the
+            # bonus draws from the same truncated distribution as the main sampler.
+            # Mask logits below log(min_p)+max_logit to -inf. Per-rank determinism
+            # preserved: the clip is deterministic on identical logits, and only
+            # rank-0's broadcast bonus_vals commit (combined broadcast below).
+            _mtp_min_p = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
             bonus_lps = []
             bonus_local: list[int] = []
             next_tokens_int_t = next_tokens_arr.reshape(N).tolist()
             draft_concat_int = draft_concat.tolist()
             for n in range(N):
                 k = k_local[n]
-                bonus_local.append(
-                    int(
-                        mx.random.categorical(
-                            verify_logits[n, k] * (1.0 / self.temp)
-                        ).item()
-                    )
-                )
+                _bl = verify_logits[n, k] * (1.0 / self.temp)
+                if _mtp_min_p > 0.0:
+                    _lmax = mx.max(_bl)
+                    _thresh = _lmax + float(mx.log(mx.array(_mtp_min_p)).item())
+                    _bl = mx.where(_bl >= _thresh, _bl, -float("inf"))
+                bonus_local.append(int(mx.random.categorical(_bl).item()))
                 bonus_lps.append(logprobs_all[n, k])
 
             if sync_drafts:
