@@ -3014,8 +3014,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # some ranks run the extra forward and others not → hang). So every
         # rank takes the same branch and runs the identical trim+forward+eval;
         # only rank 0 writes the JSONL row.
+        # NOTE: extended to temp>0 (2026-06-16). The clean-ref-vs-verify-forward
+        # ARGMAX comparison is temp-INDEPENDENT (argmax of logits doesn't depend
+        # on the sampling temp), so this decisively answers the open question for
+        # our temp=1.0 production path: does the verify forward DIVERGE from a
+        # clean single-token forward over the same committed prefix (→ verify
+        # computation / cache-rollback bug) or AGREE (→ the context fed into the
+        # verify forward was already corrupted upstream). At temp>0 we compare
+        # ref_argmax vs verify_argmax (NOT the sampled bonus_val, which is
+        # stochastic). Use EXO_DSV4_MTP_REFCHECK_ALL=1 to check every cycle.
         _refcheck_path = os.environ.get("EXO_DSV4_MTP_REFCHECK")
-        if _refcheck_path and temp == 0:
+        if _refcheck_path:
             try:
                 # One-time liveness marker so "empty file" can be distinguished
                 # from "instrument never ran". Rank-0 writes it on first entry.
@@ -3075,7 +3084,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         _ref_top2 = mx.topk(_ref_row, 2)
                         _ref_top2v = [float(x) for x in _ref_top2.tolist()]
                         _verify_argmax = int(mx.argmax(_verify_row).item())
-                        _agree = bool(_ref_argmax == bonus_val)
+                        # Temp-independent divergence test: clean reference
+                        # forward argmax vs verify forward argmax. At temp==0
+                        # bonus_val IS the verify argmax so this also reproduces
+                        # the original test; at temp>0 we MUST compare argmax-to-
+                        # argmax (bonus_val is sampled, not argmax). DISAGREE here
+                        # = the verify forward computes a different distribution
+                        # than a clean forward over the same committed prefix
+                        # (verify/cache bug). AGREE but ref_argmax is garbage
+                        # (e.g. 128825/128822) = upstream context already corrupt.
+                        _agree = bool(_ref_argmax == _verify_argmax)
                         _delta_128822 = float(
                             (_verify_row[128822] - _ref_row[128822]).item()
                         )
