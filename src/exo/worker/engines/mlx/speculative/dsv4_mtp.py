@@ -1825,12 +1825,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # from the RESIDUAL distribution max(p - q, 0), NOT raw p.
                     # This is the Leviathan/Chen distribution-preserving
                     # speculative-sampling correction the single-uid path does
-                    # (~2630-2643). Sampling raw p here re-weights toward the
-                    # tokens the MTP draft q over-proposes (q is sharply peaked
-                    # on high-freq continuations), biasing toward repetition →
-                    # the deterministic BS>1 period-6 degeneration loop. q is
-                    # the per-stream draft proposal at step k: draft_probs_list
-                    # is per-draft-step, each entry shape (N, vocab) at temp>0.
+                    # (~2630-2643); the batch path previously sampled raw p
+                    # here, which is a genuine correctness defect (the corrected
+                    # sample was biased toward the draft proposal q). q is the
+                    # per-stream draft proposal at step k: draft_probs_list is
+                    # per-draft-step, each entry shape (N, vocab) at temp>0.
+                    #
+                    # NOTE (2026-06-17): this is a real correctness hardening but
+                    # it does NOT fix the deterministic BS=2 period-6 degeneration
+                    # loop. Trace analysis (cycles 1177-1185) shows that loop runs
+                    # at FULL acceptance (k==gamma) with draft==target_argmax — the
+                    # target verify_logits argmax IS the loop — so this rejection
+                    # branch is off the degeneration path. Root cause is elsewhere
+                    # (suspected per-stream verify mask/offset in the L>1 batched
+                    # forward); investigation ongoing.
                     p = mx.softmax(verify_logits[n, k] / self.temp, axis=-1)
                     q = draft_probs_list[k][n]
                     residual = mx.maximum(p - q, 0.0)
