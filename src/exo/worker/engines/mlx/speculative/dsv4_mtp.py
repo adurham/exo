@@ -2807,6 +2807,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _p_argmax = float(
                         mx.exp(mx.array(float(_vl[_argmax_bonus].item()) - _vl_lse)).item()
                     )
+                    # MECHANISM CONFIRMATION: on a rejection the correction is
+                    # sampled from residual = max(p - q, 0) via categorical(
+                    # log(residual + 1e-10)). Hypothesis: when draft q and target
+                    # p agree strongly, residual collapses to ~0 everywhere, the
+                    # +1e-10 floor makes log() ~uniform over 128k vocab, and the
+                    # categorical draws a near-uniform GARBAGE token. Predicts
+                    # residual_sum ~= 0 on the garbage corrections. Recompute the
+                    # residual at the rejection position to capture its mass.
+                    _resid_sum = None
+                    _resid_max = None
+                    if _rejected and _bpos < gamma and draft_probs[_bpos] is not None:
+                        _p = mx.softmax(verify_logits[0, _bpos] / temp, axis=-1)
+                        _q = draft_probs[_bpos][0]
+                        _resid = mx.maximum(_p - _q, 0.0)
+                        _resid_sum = float(mx.sum(_resid).item())
+                        _resid_max = float(mx.max(_resid).item())
                     _rec = {
                         "temp_gt0": True,
                         "temp": float(temp),
@@ -2819,6 +2835,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         "target_argmax": _tgt_list,
                         "bonus": int(bonus_val),
                         "bonus_pos": int(_bpos),
+                        # residual mass at rejection: ~0 => collapsed residual =>
+                        # +1e-10 floor => uniform garbage correction (the bug).
+                        "residual_sum": _resid_sum,
+                        "residual_max": _resid_max,
                         "bonus_argmax": _argmax_bonus,
                         # p of committed bonus vs p of argmax under verify dist:
                         # p_bonus << p_argmax on a rejection = garbage correction.
