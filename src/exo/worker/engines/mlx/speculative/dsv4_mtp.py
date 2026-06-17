@@ -1792,6 +1792,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 verify_logits, axis=-1, keepdims=True
             )
             k_local: list[int] = []
+            _accept_probe = self._spec_trace_enabled
+            _probe_rows: list[dict[str, Any]] = []
             for n, uid in enumerate(uids):
                 accept_ratios: list[mx.array] = []
                 for i in range(gamma):
@@ -1806,6 +1808,47 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 while k < gamma and uniforms[k].item() < accept_ratios[k].item():
                     k += 1
                 k_local.append(k)
+                # ACCEPT PROBE (EXO_DSV4_SPEC_TRACE=1): per-stream per-draft
+                # p_di / q_di / accept_ratio / uniform / drafted-token. Lets a
+                # downstream diff see whether the residual BS>1 temp>0 repetition
+                # comes from inflated accept ratios (p/q mismatch) on the
+                # prompt-echo tokens. Rank-0 only; trace-gated, zero hot-path cost.
+                if _accept_probe:
+                    _sg = self._get_sharding_group()
+                    if _sg is None or _sg.rank() == 0:
+                        for i in range(gamma):
+                            _di = int(draft_concat[n, i].item())
+                            _probe_rows.append({
+                                "uid": int(uid),
+                                "n": n,
+                                "i": i,
+                                "draft_tok": _di,
+                                "p_di": float(
+                                    mx.softmax(
+                                        verify_logits[n, i] / batch_temp,
+                                        axis=-1,
+                                    )[draft_concat[n, i]].item()
+                                ),
+                                "q_di": float(
+                                    draft_probs_list[i][n, draft_concat[n, i]].item()
+                                ),
+                                "accept_ratio": float(accept_ratios[i].item()),
+                                "uniform": float(uniforms[i].item()),
+                                "accepted": i < k,
+                            })
+            if _accept_probe and _probe_rows:
+                try:
+                    import json as _json
+                    _ap_path = f"/tmp/dsv4_accept_probe_pid{os.getpid()}.jsonl"
+                    with open(_ap_path, "ab") as _apf:
+                        _apf.write(
+                            (_json.dumps({
+                                "cycle": int(self._spec_cycles),
+                                "rows": _probe_rows,
+                            }) + "\n").encode("utf-8")
+                        )
+                except Exception:
+                    pass
 
             # Compute LOCAL bonus_local using LOCAL k_local (per-rank
             # random sample at per-rank acceptance index), then combine
