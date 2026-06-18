@@ -920,16 +920,25 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # temp=1.0 with no top_p / no rep-penalty, long & concurrent generations
         # drift into single-token loops + structured-output (DSML/tool-call)
         # corruption → dead turns under real hermes load. Close the gap: apply
-        # top_p (nucleus) and a repetition penalty to the verify-logit sampling
-        # so MTP-on draws from the same truncated, repetition-damped distribution
-        # as the main sampler. Defaults: top_p=0.95 (DSv4 card), rep_pen=1.1
-        # (gentle), ctx=64. Override via EXO_DSV4_MTP_TOP_P / _REP_PEN / _REP_CTX;
-        # set to 1.0 / 0 to disable a component for A/B.
+        # top_p (nucleus), a repetition penalty, AND a frequency penalty on the
+        # verify-logit sampling so MTP-on draws from the same truncated,
+        # repetition-damped distribution as the main sampler. Defaults:
+        # top_p=0.95 (DSv4 card), rep_pen=1.3, freq_pen=0.5, ctx=64. The
+        # frequency penalty (additive, COUNT-SCALED over the recent ring) is the
+        # tool that actually kills period-1 single-character loops — the fixed
+        # multiplicative rep_pen alone (applied once per distinct token) is too
+        # weak to dislodge a token the model is very confident about at long
+        # context (observed: ' `'/'‑' loops at 30K ctx with rep_pen=1.1).
+        # Override via EXO_DSV4_MTP_TOP_P / _REP_PEN / _FREQ_PEN / _REP_CTX;
+        # set 1.0 / 0 to disable a component for A/B.
         self._mtp_top_p: float = float(
             os.environ.get("EXO_DSV4_MTP_TOP_P", "0.95")
         )
         self._mtp_rep_pen: float = float(
-            os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.1")
+            os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.3")
+        )
+        self._mtp_freq_pen: float = float(
+            os.environ.get("EXO_DSV4_MTP_FREQ_PEN", "0.5")
         )
         self._mtp_rep_ctx: int = int(
             os.environ.get("EXO_DSV4_MTP_REP_CTX", "64")
@@ -940,35 +949,40 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._recent_tokens: dict[int, deque[int]] = {}
 
     def _mtp_filter_logits(self, logits1d: mx.array, uid: int) -> mx.array:
-        """Apply repetition_penalty → top_p → min_p to a 1-D logit vector.
+        """Apply repetition+frequency penalty → top_p → min_p to a 1-D logit vec.
 
         Brings the MTP verify-logit sampling to parity with the main
         make_sampler/make_logits_processors path. Order mirrors mlx-lm:
-        repetition penalty (on raw logits using the uid's recent committed
-        tokens) first, then nucleus (top_p), then min_p tail-clip. Pure on
-        identical (logits, history) inputs, so per-rank deterministic — only
-        rank-0's broadcast token commits anyway. ``logits1d`` is expected to
-        be already temperature-scaled (logits/temp).
+        repetition penalty (multiplicative, per distinct recent token) +
+        frequency penalty (additive, scaled by how many times each recent token
+        occurred — this is what actually kills period-1 single-char loops),
+        then nucleus (top_p), then min_p tail-clip. Pure on identical
+        (logits, history) inputs, so per-rank deterministic — only rank-0's
+        broadcast token commits. ``logits1d`` is already temperature-scaled.
         """
         lg = logits1d
+        recent = self._recent_tokens.get(uid)
         # 1. Repetition penalty (sign-aware multiplicative, mlx-lm semantics:
-        # logits[tokens] = where(<0, *penalty, /penalty)). Use ASSIGNMENT, not
-        # additive scatter — dedup the recent-token ids first, because mlx
-        # ``.at[idx].add`` SUMS duplicate indices (token repeated k times would
-        # otherwise get penalized k times). The penalty is a fixed divide/multiply
-        # regardless of repeat count, matching mlx-lm's make_repetition_penalty.
+        # logits[tokens] = where(<0, *penalty, /penalty)) applied once per
+        # DISTINCT recent token, PLUS a frequency penalty (additive, COUNT-
+        # scaled): logits[t] -= freq_pen * count[t]. The frequency term grows
+        # with repeat count, so a token stuck in a period-1 loop is driven down
+        # hard — the fixed multiplicative rep_pen alone is too weak for that.
         rp = self._mtp_rep_pen
-        if rp and rp != 1.0:
-            recent = self._recent_tokens.get(uid)
-            if recent:
-                # Dedup ids: the penalty is a fixed divide/multiply per distinct
-                # token (mlx-lm assignment semantics), NOT additive per repeat.
-                # With unique idx, the functional .at[idx].add(delta) scatter is
-                # exact and does not mutate the source slice.
-                idx = mx.array(sorted(set(recent)), dtype=mx.int32)
-                sel = lg[idx]
+        fp = self._mtp_freq_pen
+        if recent and ((rp and rp != 1.0) or (fp and fp != 0.0)):
+            from collections import Counter as _Counter
+            counts = _Counter(recent)
+            uniq = sorted(counts)
+            idx = mx.array(uniq, dtype=mx.int32)
+            sel = lg[idx]
+            if rp and rp != 1.0:
                 sel = mx.where(sel < 0, sel * rp, sel / rp)
-                lg = lg.at[idx].add(sel - lg[idx])
+            if fp and fp != 0.0:
+                cnt = mx.array([counts[t] for t in uniq], dtype=lg.dtype)
+                sel = sel - fp * cnt
+            # Functional scatter (unique idx → exact; no source mutation).
+            lg = lg.at[idx].add(sel - lg[idx])
         # 2. top_p (nucleus): keep the smallest set of top tokens whose
         #    softmax mass >= top_p; mask the rest to -inf.
         tp = self._mtp_top_p
@@ -991,9 +1005,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             lg = mx.where(lg >= thresh, lg, -float("inf"))
         return lg
 
+    @property
+    def _mtp_penalties_active(self) -> bool:
+        """True if any repetition/frequency penalty needs the token ring."""
+        return self._mtp_rep_ctx > 0 and (
+            self._mtp_rep_pen != 1.0 or self._mtp_freq_pen != 0.0
+        )
+
     def _mtp_record_tokens(self, uid: int, token_ids: "Sequence[int]") -> None:
         """Append committed token ids to the uid's recent-token ring."""
-        if self._mtp_rep_pen == 1.0 or self._mtp_rep_ctx <= 0:
+        if not self._mtp_penalties_active:
             return
         ring = self._recent_tokens.get(uid)
         if ring is None:
@@ -2033,7 +2054,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Update each uid's recent-token ring with the tokens committed THIS
         # cycle (post-broadcast, canonical → identical across ranks) so the
         # repetition penalty in _mtp_filter_logits sees real generation history.
-        if self._mtp_rep_pen != 1.0 and self._mtp_rep_ctx > 0:
+        if self._mtp_penalties_active:
             for n, uid in enumerate(uids):
                 self._mtp_record_tokens(
                     uid, [int(tid) for (tid, _lp) in all_tokens_per[n]]
@@ -3363,7 +3384,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         # Update the uid's recent-token ring for the repetition penalty
         # (the staged bonus becomes y_val next cycle and is recorded then).
-        if self._mtp_rep_pen != 1.0 and self._mtp_rep_ctx > 0:
+        if self._mtp_penalties_active:
             self._mtp_record_tokens(uid, [int(tid) for (tid, _lp) in all_tokens])
 
         # 9. Stage the bonus for the next call.
