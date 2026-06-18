@@ -1727,28 +1727,26 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         coord_group = get_coord_group(sync_group)
         sync_drafts = sync_group is not None and sync_group.size() > 1
 
-        # PER-REQUEST TEMP RESOLUTION (2026-06-17 root-cause fix).
-        # The batch path historically read bare `self.temp` for its branch
-        # decision and all sampling. But self.temp == EXO_SPECULATIVE_TEMP,
-        # which DEFAULTS TO 0.0 and is not set in the cluster env — so the
-        # batch path always took the temp==0 GREEDY-argmax acceptance branch
-        # regardless of the request's real temperature, deterministically
-        # collapsing temp>0 concurrent decode into a repetition loop (the BS=2
-        # degeneration). The single-uid path correctly resolves per-uid temp
-        # from _request_temp; mirror that here. Concurrent requests in practice
-        # share the model-card temp, so we resolve per-uid then use a single
-        # batch temp. If uids ever carry mixed temps (not produced by the
-        # current API path), fall back to the MAX so we never silently run
-        # greedy on a sampling request; a future change can vectorize per-stream
-        # temp through the accept test if mixed-temp batches become real.
-        _req_temps = [self._request_temp.get(u, self.temp) for u in uids]
-        batch_temp = max(_req_temps) if _req_temps else self.temp
-        if len(set(_req_temps)) > 1:
-            logger.warning(
-                "DSv4 MTP batch: mixed per-stream temps %s; using max=%s for "
-                "the shared verify accept (per-stream temp not yet vectorized)",
-                _req_temps, batch_temp,
-            )
+        # PER-STREAM TEMP (2026-06-18 root-cause fix for mixed-temp degeneration).
+        # Hermes runs the main turn and its aux tasks at DIFFERENT temps (e.g.
+        # main=1.0, title/utility=0.3); they rendezvous-batch together (BS>1).
+        # The earlier fix collapsed the batch to a single scalar temp = MAX of
+        # the streams — so a 0.3 stream got its drafts sampled AND its verify
+        # accept-test run at 1.0, accepting tokens the 0.3 distribution would
+        # never pick → incoherent (non-cyclic) output that the repetition
+        # kill-switch does not catch. Fix: carry the per-stream temp through the
+        # draft, the accept ratio (p and q MUST use the same per-stream temp for
+        # the rejection-sampling guarantee), and the bonus/correction sample.
+        # stream_temps[n] is uid n's own temp; _tvec is the (N,1) broadcast form
+        # used for the batched draft sampling (clamped to >0 there).
+        stream_temps = [self._request_temp.get(u, self.temp) for u in uids]
+        # The pure-greedy fast path is taken only when EVERY stream is temp==0.
+        # Any positive temp → sampling branch, where each stream uses its OWN
+        # temp (a temp==0 stream inside a mixed batch is handled per-stream).
+        all_greedy = all(t == 0 for t in stream_temps)
+        _tvec = mx.array(
+            [[max(t, 1e-6)] for t in stream_temps], dtype=mx.float32
+        )  # (N,1) for per-stream draft scaling; clamp avoids div-by-zero
 
         # Verify each uid has the prerequisites.
         ys: list[mx.array] = []
@@ -1778,7 +1776,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Stack pre_norms into (N, 1, hidden_size).
         stacked_pre_norm = mx.concatenate(pre_norms, axis=0)  # (N, 1, hidden)
         draft_ids_list, draft_probs_list = self._draft_tokens_batched(
-            stacked_pre_norm, next_tokens_arr, gamma, batch_temp
+            stacked_pre_norm, next_tokens_arr, gamma, _tvec, all_greedy
         )
         # draft_ids_list[i] is mx.array shape (N,) — uid b's i-th draft.
         # draft_probs_list[i] is mx.array shape (N, vocab) at temp>0, else None.
@@ -1830,7 +1828,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             verify_logits[:, :gamma, :], axis=-1
         )  # (N, γ)
 
-        if batch_temp == 0:
+        if all_greedy:
             matches = mx.equal(target_tokens, draft_concat)  # (N, γ)
             all_next = mx.argmax(verify_logits, axis=-1)  # (N, γ+1)
             logprobs_all = verify_logits - mx.logsumexp(
@@ -1927,9 +1925,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             _accept_probe = self._spec_trace_enabled
             _probe_rows: list[dict[str, Any]] = []
             for n, uid in enumerate(uids):
+                # Per-stream temp: this uid's verify distribution MUST be scaled
+                # by ITS OWN temp (same as its draft q) or the accept ratio is
+                # garbage and the rejection-sampling guarantee breaks.
+                _tn = max(stream_temps[n], 1e-6)
                 accept_ratios: list[mx.array] = []
                 for i in range(gamma):
-                    p = mx.softmax(verify_logits[n, i] / batch_temp, axis=-1)
+                    p = mx.softmax(verify_logits[n, i] / _tn, axis=-1)
                     q = draft_probs_list[i]
                     p_di = p[draft_concat[n, i]]
                     q_di = q[n, draft_concat[n, i]]
@@ -1957,7 +1959,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                                 "draft_tok": _di,
                                 "p_di": float(
                                     mx.softmax(
-                                        verify_logits[n, i] / batch_temp,
+                                        verify_logits[n, i] / _tn,
                                         axis=-1,
                                     )[draft_concat[n, i]].item()
                                 ),
@@ -1999,6 +2001,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             draft_concat_int = draft_concat.tolist()
             for n in range(N):
                 uid_n = uids[n]
+                _tn = max(stream_temps[n], 1e-6)  # this stream's own temp
                 k = k_local[n]
                 if k == gamma:
                     # FULL ACCEPTANCE — the replacement is the genuine BONUS
@@ -2006,7 +2009,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # position. Raw target logits are correct here (no draft
                     # was rejected). Apply full sampling parity (rep_pen →
                     # top_p → min_p) so MTP matches the main sampler.
-                    _bl = verify_logits[n, k] * (1.0 / batch_temp)
+                    _bl = verify_logits[n, k] * (1.0 / _tn)
                     _bl = self._mtp_filter_logits(_bl, uid_n)
                     bonus_local.append(int(mx.random.categorical(_bl).item()))
                 else:
@@ -2028,7 +2031,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # branch is off the degeneration path. Root cause is elsewhere
                     # (suspected per-stream verify mask/offset in the L>1 batched
                     # forward); investigation ongoing.
-                    p = mx.softmax(verify_logits[n, k] / batch_temp, axis=-1)
+                    p = mx.softmax(verify_logits[n, k] / _tn, axis=-1)
                     q = draft_probs_list[k][n]
                     residual = mx.maximum(p - q, 0.0)
                     # Sample from the residual in LOG space, routed through the
@@ -2160,7 +2163,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if self._spec_trace_enabled:
             _tt = (
                 target_tokens
-                if batch_temp == 0
+                if all_greedy
                 else mx.zeros_like(draft_concat)
             )
             self._spec_trace_cycle_dump(
@@ -2244,7 +2247,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         stacked_pre_norm: mx.array,
         next_tokens_arr: mx.array,
         gamma: int,
-        temp: float,
+        tvec: mx.array,
+        all_greedy: bool,
     ) -> tuple[list[mx.array], list[Any]]:
         """γ chained MTP forwards at batch_size=N.
 
@@ -2435,7 +2439,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _c2_t_after_predict_ns = time.perf_counter_ns()
             prev_logits = logits
             # logits: at S=1, predict() squeezes to (N, vocab).
-            if temp == 0:
+            if all_greedy:
                 tok_pre_sync = mx.argmax(logits, axis=-1).reshape(-1, 1)
                 if sync_drafts:
                     tok_arr = broadcast_from_canonical(
@@ -2455,9 +2459,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 draft_ids.append(tok_arr.reshape(-1))
                 draft_probs.append(None)
             else:
-                q = mx.softmax(logits / temp, axis=-1)  # (N, vocab)
+                # PER-STREAM temp: tvec is (N,1); logits/tvec scales each row by
+                # ITS OWN temp so q (and the categorical draw) match the stream's
+                # real temperature. A near-zero-temp stream (clamped 1e-6) gets a
+                # near-one-hot q → effectively greedy, while a 1.0 stream samples
+                # normally — within the same batched draw. q is returned per
+                # stream and reused in the accept ratio (same temp → valid).
+                q = mx.softmax(logits / tvec, axis=-1)  # (N, vocab)
                 tok_pre_sync = mx.random.categorical(
-                    logits * (1.0 / temp)
+                    logits / tvec
                 ).reshape(-1, 1)  # (N, 1)
                 if sync_drafts:
                     tok_arr = broadcast_from_canonical(
@@ -2559,7 +2569,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         _c2_t_step_end_ns - _c2_t_after_predict_ns
                     ) / 1e6,
                     "eagle_installed": bool(_eagle_installed),
-                    "temp_zero": bool(temp == 0),
+                    "temp_zero": bool(all_greedy),
                     "tok_post_broadcast_per_stream": _c2_tok_post,
                     "tok_pre_broadcast_per_stream": _c2_tok_pre,
                     "metal_active_mb_start": (
