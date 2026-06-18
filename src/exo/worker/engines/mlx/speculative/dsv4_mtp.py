@@ -2707,6 +2707,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # appends on all ranks but only rank 0 writes).
                 steps.clear()
         else:
+            _su_probe_rows: list[dict[str, Any]] = []
             for i in range(gamma):
                 p = mx.softmax(verify_logits[0, i] / temp, axis=-1)
                 q = draft_probs[i]
@@ -2714,6 +2715,35 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 q_di = q[0, draft_ids[i].squeeze()]
                 ratio = p_di / mx.maximum(q_di, 1e-10)
                 accept_ratios.append(mx.minimum(ratio**alpha, 1.0))
+                # SINGLE-UID ACCEPT PROBE (EXO_DSV4_SPEC_TRACE=1): BS=1 baseline
+                # for the BS>1 probe in _speculative_next_batch. Lets a B=1-vs-B=2
+                # diff confirm whether the batched verify forward over-weights the
+                # prompt-echo tokens (per-stream verify-logit bias). Rank-0 only.
+                if self._spec_trace_enabled:
+                    _sg2 = self._get_sharding_group()
+                    if _sg2 is None or _sg2.rank() == 0:
+                        _su_probe_rows.append({
+                            "uid": int(uid),
+                            "i": i,
+                            "draft_tok": int(draft_ids[i].squeeze().item()),
+                            "p_di": float(p_di.item()),
+                            "q_di": float(q_di.item()),
+                            "accept_ratio": float(accept_ratios[i].item()),
+                        })
+            if self._spec_trace_enabled and _su_probe_rows:
+                try:
+                    import json as _json
+                    with open(
+                        f"/tmp/dsv4_accept_probe_b1_pid{os.getpid()}.jsonl", "ab"
+                    ) as _apf:
+                        _apf.write(
+                            (_json.dumps({
+                                "cycle": int(self._spec_cycles),
+                                "rows": _su_probe_rows,
+                            }) + "\n").encode("utf-8")
+                        )
+                except Exception:
+                    pass
             # MTP MIN_P FIX (2026-06-16). The MTP speculative path never honored
             # the configured min_p/top_p — draft/accept/correction/bonus all
             # sampled from the RAW untruncated distribution, unlike the main
