@@ -914,6 +914,93 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )
         self._spec_trace_handle: Optional[BinaryIO] = None
         self._spec_trace_cycle: int = 0
+        # MTP SAMPLING-PARITY (2026-06-18): the MTP speculative path historically
+        # honored only temp + min_p — NOT top_p and NOT repetition_penalty —
+        # while the main (non-spec) sampler applies all four. Under MTP-on at
+        # temp=1.0 with no top_p / no rep-penalty, long & concurrent generations
+        # drift into single-token loops + structured-output (DSML/tool-call)
+        # corruption → dead turns under real hermes load. Close the gap: apply
+        # top_p (nucleus) and a repetition penalty to the verify-logit sampling
+        # so MTP-on draws from the same truncated, repetition-damped distribution
+        # as the main sampler. Defaults: top_p=0.95 (DSv4 card), rep_pen=1.1
+        # (gentle), ctx=64. Override via EXO_DSV4_MTP_TOP_P / _REP_PEN / _REP_CTX;
+        # set to 1.0 / 0 to disable a component for A/B.
+        self._mtp_top_p: float = float(
+            os.environ.get("EXO_DSV4_MTP_TOP_P", "0.95")
+        )
+        self._mtp_rep_pen: float = float(
+            os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.1")
+        )
+        self._mtp_rep_ctx: int = int(
+            os.environ.get("EXO_DSV4_MTP_REP_CTX", "64")
+        )
+        # Per-uid recent committed-token ring for the repetition penalty.
+        # Updated at each cycle end from the committed (broadcast-synced)
+        # token ids, so it is identical across TP ranks.
+        self._recent_tokens: dict[int, deque[int]] = {}
+
+    def _mtp_filter_logits(self, logits1d: mx.array, uid: int) -> mx.array:
+        """Apply repetition_penalty → top_p → min_p to a 1-D logit vector.
+
+        Brings the MTP verify-logit sampling to parity with the main
+        make_sampler/make_logits_processors path. Order mirrors mlx-lm:
+        repetition penalty (on raw logits using the uid's recent committed
+        tokens) first, then nucleus (top_p), then min_p tail-clip. Pure on
+        identical (logits, history) inputs, so per-rank deterministic — only
+        rank-0's broadcast token commits anyway. ``logits1d`` is expected to
+        be already temperature-scaled (logits/temp).
+        """
+        lg = logits1d
+        # 1. Repetition penalty (sign-aware multiplicative, mlx-lm semantics:
+        # logits[tokens] = where(<0, *penalty, /penalty)). Use ASSIGNMENT, not
+        # additive scatter — dedup the recent-token ids first, because mlx
+        # ``.at[idx].add`` SUMS duplicate indices (token repeated k times would
+        # otherwise get penalized k times). The penalty is a fixed divide/multiply
+        # regardless of repeat count, matching mlx-lm's make_repetition_penalty.
+        rp = self._mtp_rep_pen
+        if rp and rp != 1.0:
+            recent = self._recent_tokens.get(uid)
+            if recent:
+                # Dedup ids: the penalty is a fixed divide/multiply per distinct
+                # token (mlx-lm assignment semantics), NOT additive per repeat.
+                # With unique idx, the functional .at[idx].add(delta) scatter is
+                # exact and does not mutate the source slice.
+                idx = mx.array(sorted(set(recent)), dtype=mx.int32)
+                sel = lg[idx]
+                sel = mx.where(sel < 0, sel * rp, sel / rp)
+                lg = lg.at[idx].add(sel - lg[idx])
+        # 2. top_p (nucleus): keep the smallest set of top tokens whose
+        #    softmax mass >= top_p; mask the rest to -inf.
+        tp = self._mtp_top_p
+        if 0.0 < tp < 1.0:
+            probs = mx.softmax(lg, axis=-1)
+            order = mx.argsort(-probs)
+            sorted_p = probs[order]
+            cum = mx.cumsum(sorted_p, axis=-1)
+            # keep ranks where the PREVIOUS cumulative mass < tp (so the token
+            # that crosses tp is included); always keep the top-1.
+            keep_sorted = cum - sorted_p < tp
+            keep = mx.zeros_like(keep_sorted)
+            keep = keep.at[order].add(keep_sorted.astype(keep.dtype))
+            lg = mx.where(keep > 0, lg, -float("inf"))
+        # 3. min_p tail-clip (relative to the post-top_p peak).
+        mp = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
+        if mp > 0.0:
+            lmax = mx.max(lg)
+            thresh = lmax + float(mx.log(mx.array(mp)).item())
+            lg = mx.where(lg >= thresh, lg, -float("inf"))
+        return lg
+
+    def _mtp_record_tokens(self, uid: int, token_ids: "Sequence[int]") -> None:
+        """Append committed token ids to the uid's recent-token ring."""
+        if self._mtp_rep_pen == 1.0 or self._mtp_rep_ctx <= 0:
+            return
+        ring = self._recent_tokens.get(uid)
+        if ring is None:
+            ring = cast("deque[int]", deque(maxlen=self._mtp_rep_ctx))
+            self._recent_tokens[uid] = ring
+        for t in token_ids:
+            ring.append(int(t))
 
     def _filter_finished_uid(self, uid: int) -> None:
         """Override to log when a uid is filtered (per-rank, EOS or
@@ -934,6 +1021,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             })
         if hasattr(self.mtp, "drop_uid"):
             self.mtp.drop_uid(uid)
+        self._recent_tokens.pop(uid, None)
         super()._filter_finished_uid(uid)
 
     def _mtp_trace_log(self, event: str, data: dict[str, Any]) -> None:
@@ -1855,36 +1943,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # n_accepted_per + bonus_vals into ONE broadcast — saves
             # one ACK barrier round-trip per cycle vs the prior two
             # separate broadcasts.
-            # MTP MIN_P FIX — BATCH PATH (2026-06-16). This is the path that runs
-            # under real concurrent load (Hermes aux tasks + main turn → rendezvous
-            # batched → BS>1 → _speculative_next_batch). Like the single-uid path,
-            # the per-stream bonus is sampled from RAW verify_logits with no min_p
-            # floor, so it can commit an extreme-tail token that seeds the
-            # structured-output degeneration cascade. Apply the same min_p tail-
-            # clip (default 0.05 = DSv4 card; EXO_DSV4_MTP_MIN_P override) so the
-            # bonus draws from the same truncated distribution as the main sampler.
-            # Mask logits below log(min_p)+max_logit to -inf. Per-rank determinism
-            # preserved: the clip is deterministic on identical logits, and only
+            # MTP SAMPLING PARITY — BATCH PATH. The per-stream bonus/correction
+            # is routed through _mtp_filter_logits (rep_pen → top_p → min_p) so
+            # it draws from the same truncated, repetition-damped distribution
+            # as the main sampler. Per-rank determinism preserved: the filter is
+            # deterministic on identical (logits, recent-token) inputs and only
             # rank-0's broadcast bonus_vals commit (combined broadcast below).
-            _mtp_min_p = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
             bonus_lps = []
             bonus_local: list[int] = []
             next_tokens_int_t = next_tokens_arr.reshape(N).tolist()
             draft_concat_int = draft_concat.tolist()
             for n in range(N):
+                uid_n = uids[n]
                 k = k_local[n]
                 if k == gamma:
                     # FULL ACCEPTANCE — the replacement is the genuine BONUS
                     # token sampled from the target p at the post-draft
                     # position. Raw target logits are correct here (no draft
-                    # was rejected). min_p tail-clip as before.
+                    # was rejected). Apply full sampling parity (rep_pen →
+                    # top_p → min_p) so MTP matches the main sampler.
                     _bl = verify_logits[n, k] * (1.0 / batch_temp)
-                    if _mtp_min_p > 0.0:
-                        _lmax = mx.max(_bl)
-                        _thresh = _lmax + float(
-                            mx.log(mx.array(_mtp_min_p)).item()
-                        )
-                        _bl = mx.where(_bl >= _thresh, _bl, -float("inf"))
+                    _bl = self._mtp_filter_logits(_bl, uid_n)
                     bonus_local.append(int(mx.random.categorical(_bl).item()))
                 else:
                     # REJECTION at position k — the replacement MUST be drawn
@@ -1908,18 +1987,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     p = mx.softmax(verify_logits[n, k] / batch_temp, axis=-1)
                     q = draft_probs_list[k][n]
                     residual = mx.maximum(p - q, 0.0)
-                    if _mtp_min_p > 0.0:
-                        # min_p clip on the residual's own peak (matches the
-                        # single-uid correction clip), so the categorical can't
-                        # draw a sub-threshold tail token.
-                        _rmax = mx.max(residual)
-                        residual = mx.where(
-                            residual >= _mtp_min_p * _rmax, residual, 0.0
-                        )
+                    # Sample from the residual in LOG space, routed through the
+                    # same parity filter (rep_pen → top_p → min_p) as the main
+                    # sampler so the correction token is also repetition-damped
+                    # and tail-clipped. log(residual) keeps the residual's
+                    # distribution shape; the filter only re-weights/masks.
+                    _rl = mx.log(residual + 1e-10)
+                    _rl = self._mtp_filter_logits(_rl, uid_n)
                     bonus_local.append(
-                        int(mx.random.categorical(
-                            mx.log(residual + 1e-10)
-                        ).item())
+                        int(mx.random.categorical(_rl).item())
                     )
                 bonus_lps.append(logprobs_all[n, k])
 
@@ -1953,6 +2029,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # acceptance count, and totals reflect cycle×stream samples.
         for _n_acc in n_accepted_per:
             self._record_acceptance(_n_acc)
+
+        # Update each uid's recent-token ring with the tokens committed THIS
+        # cycle (post-broadcast, canonical → identical across ranks) so the
+        # repetition penalty in _mtp_filter_logits sees real generation history.
+        if self._mtp_rep_pen != 1.0 and self._mtp_rep_ctx > 0:
+            for n, uid in enumerate(uids):
+                self._mtp_record_tokens(
+                    uid, [int(tid) for (tid, _lp) in all_tokens_per[n]]
+                )
 
         if prof is not None:
             t_after_accept = time.perf_counter()
@@ -2763,32 +2848,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # applied here — min_p alone removes the absolute-garbage tail that
             # seeds the cascade; adding top_p would further narrow but min_p is
             # the targeted, distribution-confidence-adaptive clip.
-            _mtp_min_p = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
+            # MTP SAMPLING PARITY — single-uid path. Route both the rejection
+            # correction (residual) and the bonus through _mtp_filter_logits
+            # (rep_pen → top_p → min_p) so MTP-on matches the main sampler.
             uniforms = mx.random.uniform(shape=(gamma,))
             for i in range(gamma):
                 p = mx.softmax(verify_logits[0, i] / temp, axis=-1)
                 q = draft_probs[i][0]
                 residual = mx.maximum(p - q, 0.0)
-                if _mtp_min_p > 0.0:
-                    # Keep only residual mass on tokens within min_p of the
-                    # residual's own peak; zero the rest so categorical cannot
-                    # draw a sub-threshold tail token. (Renormalization is
-                    # implicit: categorical(log(...)) normalizes internally.)
-                    _rmax = mx.max(residual)
-                    residual = mx.where(
-                        residual >= _mtp_min_p * _rmax, residual, 0.0
-                    )
-                corrections.append(mx.random.categorical(mx.log(residual + 1e-10)))
+                _rl = self._mtp_filter_logits(mx.log(residual + 1e-10), uid)
+                corrections.append(mx.random.categorical(_rl))
             _bonus_logits = verify_logits[0, gamma] * (1.0 / temp)
-            if _mtp_min_p > 0.0:
-                # min_p in logit space: p_i >= min_p * p_max  <=>
-                # L_i - L_max >= log(min_p). Mask sub-threshold logits to -inf
-                # so the bonus categorical samples only from the kept set.
-                _lmax = mx.max(_bonus_logits)
-                _thresh = _lmax + float(mx.log(mx.array(_mtp_min_p)).item())
-                _bonus_logits = mx.where(
-                    _bonus_logits >= _thresh, _bonus_logits, -float("inf")
-                )
+            _bonus_logits = self._mtp_filter_logits(_bonus_logits, uid)
             bonus_token = mx.random.categorical(_bonus_logits)
             logprobs_all = verify_logits[0] - mx.logsumexp(
                 verify_logits[0], axis=-1, keepdims=True
@@ -3289,6 +3360,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         all_tokens: list[tuple[int, mx.array]] = [(y_val, y_logprobs)]
         for i in range(n_accepted):
             all_tokens.append((draft_int_values[i], logprobs_all[i]))
+
+        # Update the uid's recent-token ring for the repetition penalty
+        # (the staged bonus becomes y_val next cycle and is recorded then).
+        if self._mtp_rep_pen != 1.0 and self._mtp_rep_ctx > 0:
+            self._mtp_record_tokens(uid, [int(tid) for (tid, _lp) in all_tokens])
 
         # 9. Stage the bonus for the next call.
         gen_batch._next_tokens = mx.array([bonus_val])
