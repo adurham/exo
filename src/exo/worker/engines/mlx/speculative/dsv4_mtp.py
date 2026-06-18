@@ -938,7 +938,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.3")
         )
         self._mtp_freq_pen: float = float(
-            os.environ.get("EXO_DSV4_MTP_FREQ_PEN", "0.5")
+            os.environ.get("EXO_DSV4_MTP_FREQ_PEN", "1.0")
         )
         self._mtp_rep_ctx: int = int(
             os.environ.get("EXO_DSV4_MTP_REP_CTX", "64")
