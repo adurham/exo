@@ -104,30 +104,17 @@ _MINIMAX_NOOP_SDPA: bool = os.environ.get("EXO_MINIMAX_NOOP_SDPA", "0") == "1"
 # aren't supported by the bf16-only Week-1 path and would silently skip.
 _MINIMAX_FUSED_ATTN: bool = os.environ.get("EXO_MINIMAX_FUSED_ATTN", "0") == "1"
 
-# Fuse DSv4 MoE switch_mlp gate_proj + up_proj into a single gather_qmm
-# dispatch. Saves one Metal dispatch per layer per decode token (43 per
-# DSv4 forward pass at ~100-200 µs each). Off by default while we
-# validate decode quality vs unfused. See `_install_dsv4_fused_gate_up`
-# below.
-_DSV4_FUSED_MOE: bool = os.environ.get("EXO_DSV4_FUSED_MOE", "0") == "1"
-
-# Phase H: install mx.compile traces for DSv4 layer body. Targets the
-# ~5 ms/step Python lazy-graph-build overhead identified by the GPU%
-# probe — at decode the GPU sits idle for ~5 ms at the start of every
-# step waiting for Python to traverse 60 layers × ~25 mx.array ops.
-# Pre-tracing the FFN (and later attention) body collapses that into
-# a handful of compile-cache lookups. Off by default while we validate.
-_DSV4_COMPILE_FFN: bool = os.environ.get("EXO_DSV4_COMPILE_FFN", "0") == "1"
-
-# Phase H+ (2026-05-08): also pre-trace the V4Block plumbing chunks
-# (HC + norm pre-attn / post-attn / full FFN section). Independent gate
-# from COMPILE_FFN so we can A/B isolate the layer-level fusion gain.
-# Default = follow COMPILE_FFN; set EXO_DSV4_COMPILE_LAYER=0 to disable
-# explicitly while keeping the MoE-body compile.
-_DSV4_COMPILE_LAYER: bool = (
-    os.environ.get("EXO_DSV4_COMPILE_LAYER", "1" if _DSV4_COMPILE_FFN else "0")
-    == "1"
-)
+# DSv4 MoE/layer FUSION + mx.compile paths — REMOVED 2026-06-18.
+# EXO_DSV4_FUSED_MOE / EXO_DSV4_COMPILE_FFN / EXO_DSV4_COMPILE_LAYER all
+# batch-mis-specialized at batch_size>1: any of them ON made a concurrent
+# (BS>1) MTP verify forward produce repetition-biased logits, collapsing a
+# stream into a deterministic period-6 prompt-echo loop (degeneration
+# kill-switch → HTTP 500 on concurrent requests). Combined they bought only
+# ~3-4% throughput, so the wiring is removed entirely (not just defaulted off)
+# to guarantee fusion can never install. The fused/compiled method bodies in
+# mlx-lm deepseek_v4.py are likewise removed; redo batch-correctly later.
+# Full diagnosis: skills/.../references/dsv4-mtp-batch-degeneration-and-
+# diagnosis-2026-06-17.md (UPDATE9).
 
 # OPT-3: sequence-split attention. When set, the DSv4 sharding strategy also
 # assigns layer.attn.sharding_group so SparseCompressedAttention.__call__ takes
@@ -930,79 +917,8 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             self.sharded_to_all_linear_in_place(layer.ffn.switch_mlp.down_proj)
             self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.up_proj)
 
-            # Fuse gate + up into a single gather_qmm dispatch (43 fewer
-            # Metal dispatches per decode token). Off by default while we
-            # validate decode quality.
-            if _DSV4_FUSED_MOE:
-                _install_dsv4_fused_gate_up(layer.ffn.switch_mlp)
-                # Phase H follow-up: same fusion for shared_experts MLP.
-                # gate_proj + up_proj are mxfp8 quantized regular Linears
-                # (not SwitchLinear), so this fuses via a single
-                # mx.quantized_matmul instead of gather_qmm. Saves one
-                # additional dispatch per layer per decode token.
-                fuse_fn = getattr(layer.ffn.shared_experts, "fuse_gate_up_weights", None)
-                if fuse_fn is not None:
-                    fuse_fn()
-                # Compressor wkv + wgate fusion. Compressors are NOT
-                # sharded — both projections live entirely on each rank,
-                # same group/bits/mode. Concatenating along the output
-                # axis collapses two quantized_matmul dispatches into one
-                # per compressor per decode token. Both
-                # CompressedAttention.compressor and
-                # SparseCompressedAttention.compressor (plus the indexer's
-                # internal Compressor) share the same shape.
-                attn_obj = getattr(layer, "attn", None)
-                if attn_obj is not None:
-                    # wq_a + wkv fusion: same input x, different output dims
-                    # (q_lora_rank vs head_dim). Neither projection is sharded
-                    # so the concat lives entirely on each rank. Saves one
-                    # quantized_matmul dispatch per attention block per
-                    # decode token (60 dispatches/cycle on DSv4-Flash).
-                    qa_fuse = getattr(attn_obj, "fuse_qa_kv_weights", None)
-                    if qa_fuse is not None:
-                        qa_fuse()
-                    comp = getattr(attn_obj, "compressor", None)
-                    if comp is not None:
-                        comp_fuse = getattr(comp, "fuse_kv_gate_weights", None)
-                        if comp_fuse is not None:
-                            comp_fuse()
-                    indexer = getattr(attn_obj, "indexer", None)
-                    if indexer is not None:
-                        idx_comp = getattr(indexer, "compressor", None)
-                        if idx_comp is not None:
-                            idx_comp_fuse = getattr(idx_comp, "fuse_kv_gate_weights", None)
-                            if idx_comp_fuse is not None:
-                                idx_comp_fuse()
-            # Phase H mx.compile: pre-trace the FFN body so 60 layers'
-            # worth of Python lazy-graph build per decode step collapses
-            # to ~60 compile-cache lookups. Independent of FUSED_MOE so
-            # it can be enabled/disabled separately for A/B.
-            if _DSV4_COMPILE_FFN:
-                install_compiled = getattr(layer.ffn, "install_compiled_forward", None)
-                if install_compiled is not None:
-                    install_compiled()
-                # Phase H+ (2026-05-08): also pre-trace the V4Block
-                # plumbing chunks (HC + norm pre-attn / post-attn / full
-                # FFN section). Gated by COMPILE_LAYER so we can A/B.
-                if _DSV4_COMPILE_LAYER:
-                    install_block = getattr(
-                        layer, "install_compiled_forward", None
-                    )
-                    if install_block is not None:
-                        install_block()
-                    # Phase I (2026-05-12): also install per-attention-class
-                    # compile boundaries inside V4Attention.__call__ when
-                    # the attention class supports it (currently only
-                    # SparseCompressedAttention). Compiles the pre-SDPA
-                    # projection chain (q/kv lora+norm+rope) and post-SDPA
-                    # chain (rope-inverse + o-projection) into two
-                    # @mx.compile boundaries; the cache-mutating and
-                    # SDPA-dispatch parts stay un-compiled.
-                    install_attn = getattr(
-                        layer.attn, "install_compiled_attn", None
-                    )
-                    if install_attn is not None:
-                        install_attn()
+            # DSv4 MoE/layer fusion + mx.compile install REMOVED 2026-06-18
+            # (batch-mis-specialization → BS>1 degeneration; see module header).
 
             mx.eval(layer)
             mx.clear_cache()
@@ -1024,21 +940,8 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             self.sharded_to_all_linear_in_place(mtp.ffn.switch_mlp.down_proj)
             self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.up_proj)
 
-            if _DSV4_FUSED_MOE:
-                _install_dsv4_fused_gate_up(mtp.ffn.switch_mlp)
-                fuse_fn = getattr(mtp.ffn.shared_experts, "fuse_gate_up_weights", None)
-                if fuse_fn is not None:
-                    fuse_fn()
-                # MTP attention is a LocalAttention — fuse wq_a + wkv too.
-                attn_obj = getattr(mtp, "attn", None)
-                if attn_obj is not None:
-                    qa_fuse = getattr(attn_obj, "fuse_qa_kv_weights", None)
-                    if qa_fuse is not None:
-                        qa_fuse()
-            if _DSV4_COMPILE_FFN:
-                install_compiled = getattr(mtp.ffn, "install_compiled_forward", None)
-                if install_compiled is not None:
-                    install_compiled()
+            # DSv4 MoE fusion + mx.compile install REMOVED 2026-06-18
+            # (batch-mis-specialization → BS>1 degeneration; see module header).
 
             mx.eval(mtp)
             mx.clear_cache()
@@ -1263,124 +1166,9 @@ def _install_fused_gate_up(switch_mlp: nn.Module) -> None:
     switch_mlp.__class__ = FusedSwitchGLU
 
 
-class FusedDeepseekV4SwitchGLU(nn.Module):
-    """Drop-in ``SwitchGLU`` replacement for DSv4-Flash MoE that fuses
-    gate_proj + up_proj into a single ``mx.gather_qmm`` dispatch.
-
-    Mirrors upstream ``SwitchGLU.__call__``'s 2-arg ``(x, indices)``
-    signature post-PR-#1192: scores multiplication and per-token expert
-    sum now happen outside in ``DeepseekV4MoE.__call__``, so this fused
-    version returns the same per-expert shape as the unfused version
-    (``(..., topk, hidden)``).
-
-    Saves one Metal dispatch per decoder layer per decode token (43 per
-    DSv4 forward at ~100-200 µs each on the M4 Max cluster). Concat
-    order in the fused weight is ``[up, gate]`` matching the order in
-    upstream ``SwitchGLU.__call__`` (up_proj computed first, gate_proj
-    second).
-    """
-
-    sort_threshold: int = 8
-
-    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:  # type: ignore[override]
-        self_any: Any = self
-        route_shape = indices.shape
-        x = mx.expand_dims(x, (-2, -3))
-
-        do_sort = indices.size >= self.sort_threshold
-        inv_order: Any = None
-        if do_sort:
-            flat_indices = indices.flatten()
-            order = mx.argsort(flat_indices)
-            inv_order = mx.argsort(order)
-            x = x.flatten(0, -3)[order // route_shape[-1]]
-            indices = flat_indices[order]
-
-        gu: Any = mx.gather_qmm(
-            x,
-            self_any._fused_w_gu,
-            self_any._fused_s_gu,
-            self_any._fused_b_gu,
-            rhs_indices=indices,
-            transpose=True,
-            group_size=self_any._fused_group_size,
-            bits=self_any._fused_bits,
-            mode=self_any._fused_mode,
-            sorted_indices=do_sort,
-        )
-        n: int = self_any._fused_n_inter
-        x_up = gu[..., :n]
-        x_gate = gu[..., n:]
-
-        x = self_any.activation(x_up, x_gate)
-        x = self_any.down_proj(x, indices, sorted_indices=do_sort)
-
-        if do_sort:
-            x = _switch_scatter_unsort_any(x, inv_order, route_shape)
-
-        return x.squeeze(-2)
-
-
-def _install_dsv4_fused_gate_up(switch_mlp: nn.Module) -> None:
-    """Pre-concatenate up_proj + gate_proj weights on a DSv4 ``switch_mlp``
-    for a single ``gather_qmm`` at forward time. Rebinds the instance to
-    :class:`FusedDeepseekV4SwitchGLU` so its ``__call__`` uses the fused
-    path.
-
-    Must be called after tensor-parallel sharding of gate_proj/up_proj —
-    output-dim axis is already ``moe_intermediate_size / N`` per rank.
-    Concat is along that (local) output axis. Concat order is
-    ``[up, gate]`` to match DSv4's call order.
-    """
-    sm: Any = switch_mlp
-    gp: Any = sm.gate_proj
-    up: Any = sm.up_proj
-    gp_bits = getattr(gp, "bits", None)
-    up_bits = getattr(up, "bits", None)
-    gp_group = getattr(gp, "group_size", None)
-    up_group = getattr(up, "group_size", None)
-    assert gp_bits is not None and gp_bits == up_bits, \
-        f"gate/up bits mismatch: {gp_bits} vs {up_bits}"
-    assert gp_group is not None and gp_group == up_group, \
-        f"gate/up group_size mismatch: {gp_group} vs {up_group}"
-    gp_mode = getattr(gp, "mode", "affine")
-    up_mode = getattr(up, "mode", "affine")
-    assert gp_mode == up_mode, f"gate/up mode mismatch: {gp_mode} vs {up_mode}"
-
-    gp_w: mx.array = gp["weight"]
-    gp_s: mx.array = gp["scales"]
-    up_w: mx.array = up["weight"]
-    up_s: mx.array = up["scales"]
-    gp_b = gp.get("biases") if hasattr(gp, "get") else getattr(gp, "biases", None)
-    up_b = up.get("biases") if hasattr(up, "get") else getattr(up, "biases", None)
-
-    fused_w: mx.array = mx.concatenate([up_w, gp_w], axis=1)
-    fused_s: mx.array = mx.concatenate([up_s, gp_s], axis=1)
-    fused_b: mx.array | None = (
-        mx.concatenate([up_b, gp_b], axis=1)
-        if gp_b is not None and up_b is not None
-        else None
-    )
-    mx.eval(fused_w, fused_s)
-    if fused_b is not None:
-        mx.eval(fused_b)
-
-    sm._fused_w_gu = fused_w
-    sm._fused_s_gu = fused_s
-    sm._fused_b_gu = fused_b
-    sm._fused_n_inter = int(up_w.shape[1])
-    sm._fused_group_size = int(gp_group)
-    sm._fused_bits = int(gp_bits)
-    sm._fused_mode = gp_mode
-
-    # Free the now-redundant originals — gate_proj + up_proj + fused
-    # together would triple the MoE weight footprint per layer. After
-    # the __class__ rebind FusedDeepseekV4SwitchGLU only references
-    # self.down_proj.
-    sm.gate_proj = nn.Module()
-    sm.up_proj = nn.Module()
-
-    switch_mlp.__class__ = FusedDeepseekV4SwitchGLU
+# FusedDeepseekV4SwitchGLU + _install_dsv4_fused_gate_up REMOVED 2026-06-18:
+# DSv4 MoE gate+up fusion batch-mis-specialized at BS>1 (degeneration).
+# Redo batch-correctly later; see module header + diagnosis doc UPDATE9.
 
 
 class WrappedMiniMaxAttention(CustomMlxLayer):

@@ -164,21 +164,23 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # cluster, with bit-identical outputs at temp=0 (rejection-sampling
     # guarantee). See dsv4_mtp_session_2026_05_03_v2 memory.
     : "${EXO_SPECULATIVE:=1}"
-    # Fused MoE gate+up dispatch — +1.2% c=1 / +1.1% c=2 on
-    # mlx-community/DeepSeek-V4-Flash (any quant; experts are FP4 across
-    # 4/6/8/bf16 variants). See dsv4_fused_moe memory.
-    # Re-enabled after auto_parallel.py:FusedDeepseekV4SwitchGLU was rewritten
-    # for PR #1192's 2-arg switch_mlp(x, inds) signature. Scores multiplication
-    # and per-token expert sum now happen outside in DeepseekV4MoE.__call__.
-    : "${EXO_DSV4_FUSED_MOE:=1}"
-    # Phase H mx.compile of the FFN body (gate → switch_mlp → shared_experts
-    # → post_combine → all_sum). +1.3% c=2 100K with MoE only; new
-    # V4Block-level pre/post fusions (2026-05-08) extend this further.
-    # Default-on so the cluster always picks up the compile-cache wins.
-    : "${EXO_DSV4_COMPILE_FFN:=1}"
-    # Phase H+ (2026-05-08) V4Block-level compile fusions on top of
-    # the MoE-body compile gated by COMPILE_FFN. Set =0 to A/B isolate.
-    : "${EXO_DSV4_COMPILE_LAYER:=1}"
+    # DSv4 FUSION/COMPILE PATHS — DISABLED 2026-06-18 (correctness > ~3-4% perf).
+    # All three batch-mis-specialize at batch_size>1: with any of them ON, a
+    # concurrent (BS>1) MTP verify forward produces repetition-biased logits,
+    # collapsing one stream into a deterministic period-6 prompt-echo loop that
+    # trips the degeneration kill-switch (HTTP 500 on every concurrent request).
+    # Proven: with all three =0, BS=2 MTP-on is CLEAN (0 errors, 0 degeneration);
+    # with them ON, BS=2 degenerates every iteration. Combined perf they buy is
+    # only ~3-4% (FUSED_MOE +1.2%/+1.1%, COMPILE_FFN +1.3% c=2, COMPILE_LAYER
+    # incremental) — not worth breaking concurrent serving. Implementation is
+    # left intact (env-gated, dormant) pending a batch-correct rework; set any
+    # of these =1 to re-enable for single-stream-only experiments.
+    # Full diagnosis: skills/.../references/dsv4-mtp-batch-degeneration-and-
+    # diagnosis-2026-06-17.md (UPDATE9). Also fixed two real sampling bugs this
+    # session (per-request temp 1b443098, residual correction 6cd30df9).
+    : "${EXO_DSV4_FUSED_MOE:=0}"
+    : "${EXO_DSV4_COMPILE_FFN:=0}"
+    : "${EXO_DSV4_COMPILE_LAYER:=0}"
     # Cross-rank fence cadence during decode.
     #
     # 2026-05-17 update — REQUIRED for gamma>=2 MTP stability:
