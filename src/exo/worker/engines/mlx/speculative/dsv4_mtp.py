@@ -931,8 +931,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # context (observed: ' `'/'‑' loops at 30K ctx with rep_pen=1.1).
         # Override via EXO_DSV4_MTP_TOP_P / _REP_PEN / _FREQ_PEN / _REP_CTX;
         # set 1.0 / 0 to disable a component for A/B.
+        # top_p default OFF (1.0) in the MTP hot path: the per-token nucleus
+        # needs a full-vocab sort/partition (~0.5ms/call on top of the ~0.39ms
+        # penalty+min_p, ×(gamma+1) calls/cycle) which measurably eats the
+        # decode budget, while min_p already provides a confidence-adaptive tail
+        # clip and the rep/freq penalties handle loops. Set EXO_DSV4_MTP_TOP_P<1
+        # to re-enable for quality A/B.
         self._mtp_top_p: float = float(
-            os.environ.get("EXO_DSV4_MTP_TOP_P", "0.95")
+            os.environ.get("EXO_DSV4_MTP_TOP_P", "1.0")
         )
         self._mtp_rep_pen: float = float(
             os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.3")
@@ -942,6 +948,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )
         self._mtp_rep_ctx: int = int(
             os.environ.get("EXO_DSV4_MTP_REP_CTX", "64")
+        )
+        # min_p precomputed (value + its log) so the per-token filter avoids an
+        # os.environ.get + mx.log every call.
+        self._mtp_min_p: float = float(
+            os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05")
+        )
+        import math as _math
+        self._mtp_log_min_p: float = (
+            _math.log(self._mtp_min_p) if self._mtp_min_p > 0.0 else 0.0
         )
         # Per-uid recent committed-token ring for the repetition penalty.
         # Updated at each cycle end from the committed (broadcast-synced)
@@ -983,26 +998,34 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 sel = sel - fp * cnt
             # Functional scatter (unique idx → exact; no source mutation).
             lg = lg.at[idx].add(sel - lg[idx])
-        # 2. top_p (nucleus): keep the smallest set of top tokens whose
-        #    softmax mass >= top_p; mask the rest to -inf.
-        tp = self._mtp_top_p
-        if 0.0 < tp < 1.0:
-            probs = mx.softmax(lg, axis=-1)
-            order = mx.argsort(-probs)
-            sorted_p = probs[order]
-            cum = mx.cumsum(sorted_p, axis=-1)
-            # keep ranks where the PREVIOUS cumulative mass < tp (so the token
-            # that crosses tp is included); always keep the top-1.
-            keep_sorted = cum - sorted_p < tp
-            keep = mx.zeros_like(keep_sorted)
-            keep = keep.at[order].add(keep_sorted.astype(keep.dtype))
-            lg = mx.where(keep > 0, lg, -float("inf"))
-        # 3. min_p tail-clip (relative to the post-top_p peak).
-        mp = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
+        # 2. min_p tail-clip FIRST (cheap O(V): one max + compare, no sort).
+        #    Doing this before top_p removes the bulk of the ~129K vocab so the
+        #    nucleus step works on a far smaller candidate set. Relative to the
+        #    (penalized) peak. _mtp_log_min_p is precomputed in __init__ to keep
+        #    this off the per-token hot path.
+        mp = self._mtp_min_p
         if mp > 0.0:
             lmax = mx.max(lg)
-            thresh = lmax + float(mx.log(mx.array(mp)).item())
-            lg = mx.where(lg >= thresh, lg, -float("inf"))
+            lg = mx.where(lg >= lmax + self._mtp_log_min_p, lg, -float("inf"))
+        # 3. top_p (nucleus): keep the smallest set of top tokens whose softmax
+        #    mass >= top_p. Use a bounded top_k instead of a full-vocab argsort
+        #    (the old O(V log V) sort over 129K tokens was ~0.8ms/call and the
+        #    decode hot path calls this gamma+1 times/cycle). The nucleus for
+        #    sane top_p never needs more than a few hundred tokens, so top_k=512
+        #    is a safe superset; we sort only those and scatter the keep-mask.
+        tp = self._mtp_top_p
+        if 0.0 < tp < 1.0:
+            k = min(512, lg.shape[-1])
+            top_idx = mx.argpartition(-lg, k - 1)[:k]
+            top_lg = lg[top_idx]
+            order = mx.argsort(-top_lg)
+            ord_idx = top_idx[order]
+            sorted_p = mx.softmax(lg, axis=-1)[ord_idx]
+            cum = mx.cumsum(sorted_p, axis=-1)
+            keep_sorted = cum - sorted_p < tp  # include the crossing token
+            mask = mx.full(lg.shape, False)
+            mask = mask.at[ord_idx].add(keep_sorted.astype(mx.bool_))  # type: ignore[attr-defined]
+            lg = mx.where(mask, lg, -float("inf"))
         return lg
 
     @property
