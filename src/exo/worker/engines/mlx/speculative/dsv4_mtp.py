@@ -949,6 +949,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._mtp_rep_ctx: int = int(
             os.environ.get("EXO_DSV4_MTP_REP_CTX", "64")
         )
+        # Confidence-gated greedy commit for the MTP bonus/correction. When the
+        # TARGET distribution's max prob >= this, commit argmax instead of
+        # sampling — protects rigid structured output (DSML tool-call tags,
+        # where p≈1.0) from a single corrupting tail draw that fails the whole
+        # turn. 0 disables (pure sampling). See _mtp_confident_argmax.
+        self._mtp_greedy_p: float = float(
+            os.environ.get("EXO_DSV4_MTP_GREEDY_P", "0.85")
+        )
         # min_p precomputed (value + its log) so the per-token filter avoids an
         # os.environ.get + mx.log every call.
         self._mtp_min_p: float = float(
@@ -1027,6 +1035,37 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             mask = mask.at[ord_idx].add(keep_sorted.astype(mx.bool_))  # type: ignore[attr-defined]
             lg = mx.where(mask, lg, -float("inf"))
         return lg
+
+    def _mtp_confident_argmax(
+        self, target_logits1d: mx.array
+    ) -> Optional[int]:
+        """Return the argmax token id IFF the target distribution is highly
+        confident (max softmax prob >= EXO_DSV4_MTP_GREEDY_P, default 0.85),
+        else None.
+
+        Why: DSv4 emits rigid structured output (DSML tool-call invoke /
+        parameter tags). At those positions the target is ~deterministic
+        (argmax p≈1.0). The MTP bonus/correction still SAMPLES there, and a
+        single low-probability tail draw inside an <invoke>/<parameter> block
+        corrupts the syntax → "unterminated/malformed invoke" → the parser
+        fails the whole turn (the dead-turn symptom under interactive tool use,
+        even after min_p/top_p/rep_pen — those narrow the tail but don't
+        guarantee the structural token). When the model is this confident,
+        sampling buys nothing and only risks corruption, so commit the argmax.
+        Genuinely uncertain positions (prose, p below threshold) fall through
+        to normal sampling and keep their diversity. Deterministic on identical
+        logits → per-rank consistent (only rank-0's broadcast commits anyway).
+        """
+        gp = self._mtp_greedy_p
+        if gp <= 0.0:
+            return None
+        # max prob = softmax(lg).max(); compute via logsumexp for stability.
+        lmax = mx.max(target_logits1d)
+        lse = mx.logsumexp(target_logits1d)
+        max_prob = float(mx.exp(lmax - lse).item())
+        if max_prob >= gp:
+            return int(mx.argmax(target_logits1d).item())
+        return None
 
     @property
     def _mtp_penalties_active(self) -> bool:
@@ -2006,12 +2045,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if k == gamma:
                     # FULL ACCEPTANCE — the replacement is the genuine BONUS
                     # token sampled from the target p at the post-draft
-                    # position. Raw target logits are correct here (no draft
-                    # was rejected). Apply full sampling parity (rep_pen →
-                    # top_p → min_p) so MTP matches the main sampler.
-                    _bl = verify_logits[n, k] * (1.0 / _tn)
-                    _bl = self._mtp_filter_logits(_bl, uid_n)
-                    bonus_local.append(int(mx.random.categorical(_bl).item()))
+                    # position. Structured-output guard first: if the target is
+                    # highly confident (DSML tag etc.), commit argmax so a tail
+                    # draw can't corrupt the block. Else full sampling parity.
+                    _cb = self._mtp_confident_argmax(verify_logits[n, k])
+                    if _cb is not None:
+                        bonus_local.append(_cb)
+                    else:
+                        _bl = verify_logits[n, k] * (1.0 / _tn)
+                        _bl = self._mtp_filter_logits(_bl, uid_n)
+                        bonus_local.append(int(mx.random.categorical(_bl).item()))
                 else:
                     # REJECTION at position k — the replacement MUST be drawn
                     # from the RESIDUAL distribution max(p - q, 0), NOT raw p.
@@ -2031,19 +2074,24 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # branch is off the degeneration path. Root cause is elsewhere
                     # (suspected per-stream verify mask/offset in the L>1 batched
                     # forward); investigation ongoing.
-                    p = mx.softmax(verify_logits[n, k] / _tn, axis=-1)
-                    q = draft_probs_list[k][n]
-                    residual = mx.maximum(p - q, 0.0)
-                    # Sample from the residual in LOG space, routed through the
-                    # same parity filter (rep_pen → top_p → min_p) as the main
-                    # sampler so the correction token is also repetition-damped
-                    # and tail-clipped. log(residual) keeps the residual's
-                    # distribution shape; the filter only re-weights/masks.
-                    _rl = mx.log(residual + 1e-10)
-                    _rl = self._mtp_filter_logits(_rl, uid_n)
-                    bonus_local.append(
-                        int(mx.random.categorical(_rl).item())
-                    )
+                    # Structured-output guard: confident target → commit argmax.
+                    _cr = self._mtp_confident_argmax(verify_logits[n, k])
+                    if _cr is not None:
+                        bonus_local.append(_cr)
+                    else:
+                        p = mx.softmax(verify_logits[n, k] / _tn, axis=-1)
+                        q = draft_probs_list[k][n]
+                        residual = mx.maximum(p - q, 0.0)
+                        # Sample from the residual in LOG space, routed through
+                        # the same parity filter (rep_pen → top_p → min_p) as
+                        # the main sampler so the correction token is also
+                        # repetition-damped and tail-clipped. log(residual)
+                        # keeps the residual's shape; the filter re-weights/masks.
+                        _rl = mx.log(residual + 1e-10)
+                        _rl = self._mtp_filter_logits(_rl, uid_n)
+                        bonus_local.append(
+                            int(mx.random.categorical(_rl).item())
+                        )
                 bonus_lps.append(logprobs_all[n, k])
 
             if sync_drafts:
@@ -2907,14 +2955,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # (rep_pen → top_p → min_p) so MTP-on matches the main sampler.
             uniforms = mx.random.uniform(shape=(gamma,))
             for i in range(gamma):
+                # Structured-output guard: if the target is highly confident at
+                # this position (DSML tag etc.), commit its argmax — never let a
+                # tail draw corrupt the rigid block. Else do the normal residual
+                # correction sample.
+                _ca = self._mtp_confident_argmax(verify_logits[0, i])
+                if _ca is not None:
+                    corrections.append(mx.array(_ca, dtype=mx.uint32))
+                    continue
                 p = mx.softmax(verify_logits[0, i] / temp, axis=-1)
                 q = draft_probs[i][0]
                 residual = mx.maximum(p - q, 0.0)
                 _rl = self._mtp_filter_logits(mx.log(residual + 1e-10), uid)
                 corrections.append(mx.random.categorical(_rl))
-            _bonus_logits = verify_logits[0, gamma] * (1.0 / temp)
-            _bonus_logits = self._mtp_filter_logits(_bonus_logits, uid)
-            bonus_token = mx.random.categorical(_bonus_logits)
+            # Bonus token (post-draft position): same confidence guard first.
+            _cb = self._mtp_confident_argmax(verify_logits[0, gamma])
+            if _cb is not None:
+                bonus_token = mx.array(_cb, dtype=mx.uint32)
+            else:
+                _bonus_logits = verify_logits[0, gamma] * (1.0 / temp)
+                _bonus_logits = self._mtp_filter_logits(_bonus_logits, uid)
+                bonus_token = mx.random.categorical(_bonus_logits)
             logprobs_all = verify_logits[0] - mx.logsumexp(
                 verify_logits[0], axis=-1, keepdims=True
             )
