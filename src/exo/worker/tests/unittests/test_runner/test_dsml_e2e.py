@@ -1743,3 +1743,150 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         assert all(r.finish_reason != "error" for r in text_results)
+
+
+# ── Test: DSML structural-tag garble repair (invinvoke etc.) ──────────────────
+
+
+class TestE2EDeepseekV4StructuralTagGarbleRepair:
+    """Parser-side repair of known DSML structural-tag token-garbles.
+
+    Reproduces the 2026-06-18 production bug: DSv4 emitted
+    ``</｜DSML｜invinvoke>`` (token ``inv`` split into ``in`` + ``v``) instead
+    of ``</｜DSML｜invoke>`` on the closing tag. The block was otherwise
+    structurally complete and the tool call fully recoverable, but the
+    strict ``_INVOKE_PATTERN`` regex required exactly ``invoke`` to close,
+    so ``parse_dsml_output`` returned None and the whole turn failed.
+
+    Root cause is the model emitting a known-garbled structural tag at
+    temp=1.0 (NOT MTP-specific — reproduces under the plain main sampler).
+    Fix is parser-side: ``_repair_dsml_tag_garbles`` recognizes the garble
+    shape (closing tag whose name ends with a known structural name but
+    isn't itself one) and normalizes it before the strict regex runs.
+    """
+
+    def test_invinvoke_closing_tag_repairs_and_parses(self):
+        """The exact 2026-06-18 production garble: ``</｜DSML｜invinvoke>``
+        must repair to ``</｜DSML｜invoke>`` and the block must parse to a
+        valid tool call."""
+        garbled_block = (
+            f"{TOOL_CALLS_START}\n"
+            f'<{DSML_TOKEN}invoke name="terminal">\n'
+            f'<{DSML_TOKEN}parameter name="command" string="true">'
+            f'curl -s "https://wttr.in/Paris,France?F&lang=en"'
+            f"</{DSML_TOKEN}parameter>\n"
+            f'<{DSML_TOKEN}parameter name="timeout" string="false">15'
+            f"</{DSML_TOKEN}parameter>\n"
+            f"</{DSML_TOKEN}invinvoke>\n"
+            f"{TOOL_CALLS_END}"
+        )
+        parsed = parse_dsml_output(garbled_block)
+        assert parsed is not None, "invinvoke garble should repair and parse"
+        assert len(parsed) == 1
+        assert parsed[0].name == "terminal"
+        args = json.loads(parsed[0].arguments)  # pyright: ignore[reportAny]
+        assert args["command"] == 'curl -s "https://wttr.in/Paris,France?F&lang=en"'
+        assert args["timeout"] == 15
+
+    def test_well_formed_block_is_not_modified(self):
+        """A correct block must pass through ``_repair_dsml_tag_garbles``
+        unchanged (no over-repair)."""
+        from exo.worker.engines.mlx.vendor.dsml_encoding import (
+            _repair_dsml_tag_garbles,
+        )
+
+        correct = (
+            f"{TOOL_CALLS_START}\n"
+            f'<{DSML_TOKEN}invoke name="x">\n'
+            f'<{DSML_TOKEN}parameter name="p" string="true">v</{DSML_TOKEN}parameter>\n'
+            f"</{DSML_TOKEN}invoke>\n"
+            f"{TOOL_CALLS_END}"
+        )
+        assert _repair_dsml_tag_garbles(correct) == correct
+
+    def test_garbled_closing_parameter_tag_repairs(self):
+        """A doubled ``</｜DSML｜parameter>`` like ``</｜DSML｜parameterparameter>``
+        (ends with ``parameter``) must repair and parse."""
+        garbled = (
+            f"{TOOL_CALLS_START}\n"
+            f'<{DSML_TOKEN}invoke name="f">\n'
+            f'<{DSML_TOKEN}parameter name="x" string="true">42</{DSML_TOKEN}parameterparameter>\n'
+            f"</{DSML_TOKEN}invoke>\n"
+            f"{TOOL_CALLS_END}"
+        )
+        parsed = parse_dsml_output(garbled)
+        assert parsed is not None
+        assert parsed[0].name == "f"
+        assert json.loads(parsed[0].arguments) == {"x": "42"}  # pyright: ignore[reportAny]
+
+    def test_non_function_calls_wrapper_name_not_repaired(self):
+        """The repair only fires for KNOWN structural names (``invoke``,
+        ``parameter``, ``function_calls``). A wrapper named ``tool_calls``
+        (not ``function_calls``) is not a known structural name, so it is
+        left as-is. Note: ``_INVOKE_PATTERN`` only matches the inner
+        ``invoke``/``parameter`` tags, not the wrapper, so a well-formed
+        inner block inside a ``tool_calls`` wrapper still parses — this
+        documents that the wrapper name is not repair-gated."""
+        from exo.worker.engines.mlx.vendor.dsml_encoding import (
+            _repair_dsml_tag_garbles,
+        )
+
+        # 'tool_calls' is not in _DSML_STRUCTURAL_NAMES and doesn't end with
+        # any of them — repair is a no-op.
+        wrapper = f"</{DSML_TOKEN}tool_calls>"
+        assert _repair_dsml_tag_garbles(wrapper) == wrapper
+
+    def test_non_dsml_tag_not_repaired(self):
+        """A ``<｜DSML｜randomword>`` that doesn't end with a known structural
+        name must NOT be repaired — left as-is so the strict regex fails loudly
+        (preserving the existing fail-the-turn behavior for unknown garbles)."""
+        from exo.worker.engines.mlx.vendor.dsml_encoding import (
+            _repair_dsml_tag_garbles,
+        )
+
+        unknown = f"<{DSML_TOKEN}completelygarbled>"
+        assert _repair_dsml_tag_garbles(unknown) == unknown
+        unknown_close = f"</{DSML_TOKEN}xyz123>"
+        assert _repair_dsml_tag_garbles(unknown_close) == unknown_close
+
+    def test_garbled_opening_invoke_with_name_attr_not_repaired(self):
+        """An opening ``<｜DSML｜invoke-ish name="foo">`` — the repair only
+        fires on suffix-match; ``invoke-ish`` does NOT end with ``invoke``
+        (it has ``-ish`` after), so it is not repaired. This documents the
+        conservative scope: only suffix-garbles repair, not infix/prefix."""
+        from exo.worker.engines.mlx.vendor.dsml_encoding import (
+            _repair_dsml_tag_garbles,
+        )
+
+        # 'invoke-ish' does not end with 'invoke' (ends with 'ish')
+        garbled_open = f'<{DSML_TOKEN}invoke-ish name="foo">'
+        assert _repair_dsml_tag_garbles(garbled_open) == garbled_open
+
+    def test_e2e_garbled_block_via_parse_deepseek_v4_recovers(self):
+        """End-to-end: the garbled block fed through ``parse_deepseek_v4``
+        with a confirmed-real DSML special token must yield a parsed
+        ToolCallResponse (not an error). This is the full production path."""
+        # The exact 22:43 production shape, as token chunks.
+        model_tokens = [
+            "<", DSML_TOKEN, "tool", "_c", "alls", ">", "\n",
+            "<", DSML_TOKEN, 'invoke name="terminal">', "\n",
+            "<", DSML_TOKEN, 'parameter name="command" string="true">',
+            'curl -s "https://wttr.in/Paris"',
+            "</", DSML_TOKEN, "parameter>", "\n",
+            "<", DSML_TOKEN, 'parameter name="timeout" string="false">', "15",
+            "</", DSML_TOKEN, "parameter>", "\n",
+            "</", DSML_TOKEN, "invinvoke>", "\n",
+            "</", DSML_TOKEN, "tool", "_c", "alls", ">",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens_with_special(model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID),
+                frozenset({_DSML_SPECIAL_ID}),
+            )
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        assert len(tool_results) == 1, f"expected 1 tool call, got {results!r}"
+        assert tool_results[0].tool_calls[0].name == "terminal"
+        args = json.loads(tool_results[0].tool_calls[0].arguments)  # pyright: ignore[reportAny]
+        assert args["command"] == 'curl -s "https://wttr.in/Paris"'
+        assert args["timeout"] == 15

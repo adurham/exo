@@ -70,6 +70,72 @@ _PARAM_PATTERN = re.compile(
 )
 
 
+# ── DSML structural-tag garble repair ────────────────────────────────────────
+#
+# DSv4 occasionally emits a token-id divergence on a rigid DSML structural tag
+# at temp=1.0 — the model samples a neighbor token where the target is
+# ~deterministic, producing a doubled/typo'd tag name. Observed 2026-06-18:
+# the closing ``</｜DSML｜invoke>`` tag was emitted as ``</｜DSML｜invinvoke>``
+# (token ``inv`` split into ``in`` + ``v``, yielding ``invinvoke``). The block
+# is otherwise structurally complete and the tool call is fully recoverable,
+# but the strict ``_INVOKE_PATTERN`` regex requires exactly ``invoke`` to
+# close, so it returns None and the whole turn fails.
+#
+# This is NOT MTP-specific — it reproduces under the plain main sampler
+# (MTP-off). The root cause is the model emitting a known-garbled structural
+# tag; the fix is parser-side: recognize the known garble shapes and repair
+# them to the canonical tag before the strict regex runs.
+#
+# The repair is deliberately conservative: a garbled tag is only repaired when
+# the canonical name is unambiguously recoverable. For closing tags
+# (``</｜DSML｜<name>>``) we repair when ``<name>`` is NOT already a known
+# structural name but ENDS with one — e.g. ``invinvoke`` ends with ``invoke``
+# and is not itself a known name, so it repairs to ``invoke``. This can't
+# misfire on prose because the ``｜DSML｜`` sentinel only appears in real
+# tool-call blocks (the parser only runs on blocks whose sentinel was
+# confirmed-real via special-token id).
+
+_DSML_STRUCTURAL_NAMES = ("function_calls", "invoke", "parameter")
+
+
+def _repair_dsml_tag_garbles(text: str) -> str:
+    """Repair known DSML structural-tag token-garble shapes.
+
+    Scans for malformed ``<｜DSML｜...>`` / ``</｜DSML｜...>`` tags whose name is
+    a doubled/typo'd version of a known structural tag name (``invoke``,
+    ``parameter``, ``function_calls``) and normalizes them to the canonical
+    tag. Only repairs when the canonical name is recoverable as a suffix of
+    the garbled name (and the garbled name is not itself a valid structural
+    name) — this prevents misfiring on legitimate content.
+
+    Returns the text with repaired tags. Tags that don't match a known garble
+    shape are left untouched (the strict regex will then fail on them as
+    before, preserving the existing fail-the-turn behavior for truly broken
+    blocks).
+    """
+    # Match any DSML tag (open or close) with a word-like name. Group 1 is the
+    # leading ``</?`` and group 2 is the tag name (everything between the
+    # sentinel and the closing ``>`` or the first attribute).
+    tag_pattern = re.compile(
+        rf"(</?){re.escape(DSML_TOKEN)}(\w+)([^>]*>)"
+    )
+
+    def _repair_one(match: re.Match[str]) -> str:
+        slash = match.group(1)
+        name = match.group(2)
+        rest = match.group(3)
+        if name in _DSML_STRUCTURAL_NAMES:
+            return match.group(0)
+        # Try suffix-recovery: does the garbled name END with a known name?
+        for canonical in _DSML_STRUCTURAL_NAMES:
+            if name.endswith(canonical) and len(name) > len(canonical):
+                return f"{slash}{DSML_TOKEN}{canonical}{rest}"
+        # No known garble shape — leave it so the strict regex fails loudly.
+        return match.group(0)
+
+    return tag_pattern.sub(_repair_one, text)
+
+
 # Matches a well-formed DSML control tag: <｜DSML｜name ...> or </｜DSML｜name>.
 # The tag name must be word-like (\w+) and the only thing before the closing
 # '>' is optional whitespace-led attributes. This deliberately does NOT match
@@ -115,6 +181,11 @@ def parse_dsml_output(text: str) -> list[ToolCallItem] | None:
     Returns:
         List of ToolCallItem, or None if parsing fails.
     """
+    # Repair known DSML structural-tag token-garbles (e.g. ``</｜DSML｜invinvoke>``
+    # → ``</｜DSML｜invoke>``) before the strict regex runs. See
+    # ``_repair_dsml_tag_garbles`` for the root cause and observed shapes.
+    text = _repair_dsml_tag_garbles(text)
+
     tool_calls: list[ToolCallItem] = []
 
     for invoke_match in _INVOKE_PATTERN.finditer(text):
