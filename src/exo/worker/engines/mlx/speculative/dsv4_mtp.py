@@ -1977,9 +1977,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     ratio = p_di / mx.maximum(q_di, 1e-10)
                     accept_ratios.append(mx.minimum(ratio**self.alpha, 1.0))
                 uniforms = mx.random.uniform(shape=(gamma,))
+                # Structured-output accept gate (see single-uid path): at a
+                # confident target position accept the draft ONLY if it is the
+                # target argmax, else stop — prevents a stochastically-accepted
+                # non-argmax token from corrupting a rigid DSML block.
                 k = 0
-                while k < gamma and uniforms[k].item() < accept_ratios[k].item():
-                    k += 1
+                while k < gamma:
+                    _confk = self._mtp_confident_argmax(verify_logits[n, k])
+                    if _confk is not None:
+                        if int(draft_concat[n, k].item()) == _confk:
+                            k += 1
+                            continue
+                        break
+                    if uniforms[k].item() < accept_ratios[k].item():
+                        k += 1
+                        continue
+                    break
                 k_local.append(k)
                 # ACCEPT PROBE (EXO_DSV4_SPEC_TRACE=1): per-stream per-draft
                 # p_di / q_di / accept_ratio / uniform / drafted-token. Lets a
@@ -2995,6 +3008,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # is UNCHANGED — accepted drafts are already in the KV cache, so they
         # must not be altered. Draft acceptance still uses exact-equality vs
         # the (untouched) batched target argmax.
+        # Structured-output accept gate: at a position where the TARGET is
+        # highly confident (DSML tool-call tag etc., max prob >= GREEDY_P), the
+        # rejection-sampling test could still STOCHASTICALLY accept a drafted
+        # token that ISN'T the target argmax (accept_ratio>0 for any token the
+        # target gives nonzero mass). That commits a wrong structural token the
+        # bonus/correction greedy-gate never sees → corrupt <invoke> block →
+        # dead turn. So at confident positions, accept the draft ONLY if it IS
+        # the target argmax; otherwise stop (the greedy-gated correction then
+        # commits the right token). Non-confident positions: unchanged sampling.
+        _draft_ids_flat = cast(list[int], draft_concat.reshape(-1).tolist())
         n_accepted = 0
         for i in range(gamma):
             if temp == 0:
@@ -3005,7 +3028,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     break
             else:
                 assert uniforms is not None
-                if uniforms[i].item() < accept_ratios[i].item():
+                _conf = self._mtp_confident_argmax(verify_logits[0, i])
+                if _conf is not None:
+                    # Confident target: only the argmax draft may be accepted.
+                    if _draft_ids_flat[i] == _conf:
+                        n_accepted += 1
+                    else:
+                        break
+                elif uniforms[i].item() < accept_ratios[i].item():
                     n_accepted += 1
                 else:
                     break
