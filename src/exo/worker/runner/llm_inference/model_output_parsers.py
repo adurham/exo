@@ -15,7 +15,7 @@ from openai_harmony import (  # pyright: ignore[reportMissingTypeStubs]
     load_harmony_encoding,
 )
 
-from exo.api.types import ToolCallItem
+from exo.api.types import ToolCallItem, ToolCallParseFailureKind
 from exo.shared.types.chunks import (
     ErrorChunk,
     GenerationChunk,
@@ -130,6 +130,9 @@ def map_responses_to_chunks(
                 return ErrorChunk(
                     error_message=response.text,
                     model=model_id,
+                    tool_call_parse_failure_kind=(
+                        response.tool_call_parse_failure_kind
+                    ),
                 )
             else:
                 finish_reason = response.finish_reason
@@ -465,6 +468,7 @@ def _fail_on_sentinelless_tool_call(
                             "Failing the turn so it can be retried."
                         ),
                         "finish_reason": "error",
+                        "tool_call_parse_failure_kind": "sentinelless",
                     }
                 )
             else:
@@ -552,15 +556,24 @@ def _parse_dsml_stream(
     pending_tool_call: ToolCallResponse | None = None
 
     def _tool_call_error(
-        response: GenerationResponse, reason: str
+        response: GenerationResponse,
+        reason: str,
+        *,
+        failure_kind: ToolCallParseFailureKind,
     ) -> GenerationResponse:
         # Fail the generation cleanly with finish_reason="error" (->
         # ErrorChunk -> 500 on the OpenAI stream). The hermes client classifies
         # that as a retryable upstream error and re-runs the turn, giving the
         # model another draw. Nothing tool-call-shaped is ever shown to the user
         # as content, and the (broken) call is not silently dropped.
+        # ``failure_kind`` is carried to the master so the failure is counted by
+        # kind in exo_tool_call_parse_failures_total.
         return response.model_copy(
-            update={"text": reason, "finish_reason": "error"}
+            update={
+                "text": reason,
+                "finish_reason": "error",
+                "tool_call_parse_failure_kind": failure_kind,
+            }
         )
 
     def _try_parse_tool_call(
@@ -590,6 +603,7 @@ def _parse_dsml_stream(
                 "be parsed (the tool_calls wrapper was present but its "
                 "invoke body was corrupt). Failing the turn so it can be "
                 "retried.",
+                failure_kind="malformed",
             )
         # Legacy fallback (no special-token id resolved, so real-vs-quoted can't
         # be told apart): preserve the original safe behavior — strip the DSML
@@ -660,6 +674,7 @@ def _parse_dsml_stream(
                         "DSv4 began a tool-call block but the stream ended "
                         "before it was closed (unterminated invoke). Failing "
                         "the turn so it can be retried.",
+                        failure_kind="unterminated",
                     )
                 else:
                     # Legacy fallback (no special-token id): can't be sure it was
@@ -947,7 +962,12 @@ def parse_tool_calls(
             if parsed is None:
                 logger.warning(f"tool call parsing failed for text {combined}")
                 yield response.model_copy(
-                    update={"text": combined, "token": 0, "finish_reason": "error"}
+                    update={
+                        "text": combined,
+                        "token": 0,
+                        "finish_reason": "error",
+                        "tool_call_parse_failure_kind": "malformed",
+                    }
                 )
                 break
 
@@ -972,6 +992,7 @@ def parse_tool_calls(
                     "text": "".join(tool_call_text_parts),
                     "token": 0,
                     "finish_reason": "error",
+                    "tool_call_parse_failure_kind": "unterminated",
                 }
             )
             yield response

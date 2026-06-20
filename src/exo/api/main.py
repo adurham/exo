@@ -134,6 +134,7 @@ from exo.metrics import (
     record_chunk_generated,
     record_generation_complete,
     record_node_gathered_info,
+    record_tool_call_parse_failure,
     refresh_cluster_gauges,
     set_is_master,
 )
@@ -2044,6 +2045,21 @@ class API:
     def _record_chunk_metrics(self, event: ChunkGenerated) -> None:
         chunk = event.chunk
         record_chunk_generated(chunk)
+        # Tool-call parse failures arrive as ErrorChunks (no GenerationStats),
+        # so they never reach record_generation_complete below. Count them here
+        # by kind — this is the only place the parse-failure rate is observable.
+        if (
+            isinstance(chunk, ErrorChunk)
+            and chunk.tool_call_parse_failure_kind is not None
+        ):
+            instance_id = self._find_instance_for_command(event.command_id)
+            if instance_id is not None:
+                record_tool_call_parse_failure(
+                    instance_id=instance_id,
+                    model_id=str(chunk.model),
+                    failure_kind=chunk.tool_call_parse_failure_kind,
+                )
+            return
         if not isinstance(chunk, (TokenChunk, ToolCallChunk)):
             return
         if chunk.stats is None or chunk.finish_reason is None:

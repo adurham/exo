@@ -98,15 +98,94 @@ _PARAM_PATTERN = re.compile(
 _DSML_STRUCTURAL_NAMES = ("function_calls", "invoke", "parameter")
 
 
+def _within_edit_distance_one(a: str, b: str) -> bool:
+    """True iff ``a`` is reachable from ``b`` by at most one single-character
+    edit (substitution, insertion, or deletion).
+
+    Used to recover a canonical DSML structural tag name from a garble where
+    the model sampled ONE neighbor token in the rigid tag region — e.g.
+    ``invode`` (substitution k→d of ``invoke``) or ``paramter`` (deletion of
+    ``parameter``). Bounded/early-exit; never builds the full Levenshtein
+    matrix. Equal strings are distance 0 (also "within one").
+    """
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        # Same length → only a substitution can connect them; count mismatches.
+        mismatches = sum(1 for ca, cb in zip(a, b, strict=True) if ca != cb)
+        return mismatches == 1
+    # Lengths differ by exactly one → check single insertion/deletion. Walk the
+    # shorter against the longer, allowing exactly one skip in the longer.
+    shorter, longer = (a, b) if la < lb else (b, a)
+    i = j = 0
+    skipped = False
+    while i < len(shorter) and j < len(longer):
+        if shorter[i] == longer[j]:
+            i += 1
+            j += 1
+            continue
+        if skipped:
+            return False
+        skipped = True
+        j += 1  # skip one char in the longer string
+    return True
+
+
+def _recover_structural_name(name: str) -> str | None:
+    """Recover the canonical DSML structural tag name from a garbled ``name``.
+
+    Returns the canonical name (``invoke`` / ``parameter`` / ``function_calls``)
+    when ``name`` is an unambiguous garble of exactly one of them, else None.
+    Recovery shapes, in priority order:
+
+      1. Suffix recovery — ``name`` is longer than a canonical and ENDS with it
+         (e.g. ``invinvoke`` → ``invoke``: the ``inv`` token split into
+         ``in`` + ``v``, doubling the prefix). Observed 2026-06-18.
+      2. Single-edit recovery — ``name`` is within one character edit of a
+         canonical (substitution/insertion/deletion), e.g. ``invode`` →
+         ``invoke`` (the model sampled a neighbor token at temp=1.0 in the
+         rigid tag region). Observed 2026-06-20 (MTP-off, both nodes).
+
+    This mirrors what the upstream DeepSeek stacks do (vLLM / sglang /
+    HF ``encoding_v32`` all normalize known tool-call tag garbles before the
+    strict parse) rather than failing the whole turn on a one-token slip. It is
+    safe because the ``｜DSML｜`` sentinel is a dedicated special vocab token that
+    only appears inside genuine tool-call blocks — a garbled name carrying the
+    sentinel is known-structural-intent, so recovery cannot misfire on prose.
+    Returns None when no canonical is unambiguously recoverable, preserving the
+    fail-the-turn behavior for truly broken blocks.
+    """
+    if name in _DSML_STRUCTURAL_NAMES:
+        return None  # not garbled
+    # 1. Suffix recovery (handles doubled-prefix garbles like ``invinvoke``).
+    for canonical in _DSML_STRUCTURAL_NAMES:
+        if name.endswith(canonical) and len(name) > len(canonical):
+            return canonical
+    # 2. Single-edit recovery (substitution / insertion / deletion). Require a
+    # UNIQUE canonical match so an ambiguous garble is never silently
+    # mis-repaired (the structural names are far apart, so this is the common
+    # case, but guard against it regardless).
+    edit_matches = [
+        canonical
+        for canonical in _DSML_STRUCTURAL_NAMES
+        if _within_edit_distance_one(name, canonical)
+    ]
+    if len(edit_matches) == 1:
+        return edit_matches[0]
+    return None
+
+
 def _repair_dsml_tag_garbles(text: str) -> str:
     """Repair known DSML structural-tag token-garble shapes.
 
-    Scans for malformed ``<｜DSML｜...>`` / ``</｜DSML｜...>`` tags whose name is
-    a doubled/typo'd version of a known structural tag name (``invoke``,
+    Scans for malformed ``<｜DSML｜...>`` / ``</｜DSML｜...>`` tags whose name is a
+    recoverable garble of a known structural tag name (``invoke``,
     ``parameter``, ``function_calls``) and normalizes them to the canonical
-    tag. Only repairs when the canonical name is recoverable as a suffix of
-    the garbled name (and the garbled name is not itself a valid structural
-    name) — this prevents misfiring on legitimate content.
+    tag. See ``_recover_structural_name`` for the recovery shapes (suffix
+    doubling + single-character edit) and the safety argument.
 
     Returns the text with repaired tags. Tags that don't match a known garble
     shape are left untouched (the strict regex will then fail on them as
@@ -124,14 +203,12 @@ def _repair_dsml_tag_garbles(text: str) -> str:
         slash = match.group(1)
         name = match.group(2)
         rest = match.group(3)
-        if name in _DSML_STRUCTURAL_NAMES:
+        canonical = _recover_structural_name(name)
+        if canonical is None:
+            # Not a recoverable garble — leave it so the strict regex fails
+            # loudly (preserves fail-the-turn for truly broken blocks).
             return match.group(0)
-        # Try suffix-recovery: does the garbled name END with a known name?
-        for canonical in _DSML_STRUCTURAL_NAMES:
-            if name.endswith(canonical) and len(name) > len(canonical):
-                return f"{slash}{DSML_TOKEN}{canonical}{rest}"
-        # No known garble shape — leave it so the strict regex fails loudly.
-        return match.group(0)
+        return f"{slash}{DSML_TOKEN}{canonical}{rest}"
 
     return tag_pattern.sub(_repair_one, text)
 

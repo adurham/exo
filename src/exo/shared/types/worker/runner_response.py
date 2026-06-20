@@ -6,6 +6,7 @@ from exo.api.types import (
     GenerationStats,
     ImageGenerationStats,
     ToolCallItem,
+    ToolCallParseFailureKind,
     TopLogprobItem,
     Usage,
 )
@@ -25,6 +26,10 @@ class GenerationResponse(BaseRunnerResponse):
     stats: GenerationStats | None = None
     usage: Usage | None
     is_thinking: bool = False
+    # Set only when finish_reason == "error" AND the error is a tool-call parse
+    # failure; carried to the master so the failure is counted by kind. None for
+    # any other error (runner crash, generation error).
+    tool_call_parse_failure_kind: ToolCallParseFailureKind | None = None
 
 
 class ImageGenerationResponse(BaseRunnerResponse):

@@ -6,6 +6,7 @@ from exo.api.types import (
     GenerationStats,
     ImageGenerationStats,
     ToolCallItem,
+    ToolCallParseFailureKind,
     TopLogprobItem,
     Usage,
 )
@@ -34,6 +35,10 @@ class TokenChunk(BaseChunk):
 class ErrorChunk(BaseChunk):
     error_message: str
     finish_reason: Literal["error"] = "error"
+
+    # Set when this error is a tool-call parse failure, so the master can count
+    # it by kind (exo_tool_call_parse_failures_total). None for other errors.
+    tool_call_parse_failure_kind: ToolCallParseFailureKind | None = None
 
     # NOTE: this is a bad place to put this, creates semantic overlap/confusion;
     #       at some point someone put this somewhere else, thanks :)

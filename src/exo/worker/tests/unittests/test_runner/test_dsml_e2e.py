@@ -1850,17 +1850,79 @@ class TestE2EDeepseekV4StructuralTagGarbleRepair:
         assert _repair_dsml_tag_garbles(unknown_close) == unknown_close
 
     def test_garbled_opening_invoke_with_name_attr_not_repaired(self):
-        """An opening ``<｜DSML｜invoke-ish name="foo">`` — the repair only
-        fires on suffix-match; ``invoke-ish`` does NOT end with ``invoke``
-        (it has ``-ish`` after), so it is not repaired. This documents the
-        conservative scope: only suffix-garbles repair, not infix/prefix."""
+        """An opening ``<｜DSML｜invoke-ish name="foo">`` is too far from any
+        structural name to repair: ``invoke-ish`` neither ends with ``invoke``
+        (suffix recovery) nor is within one character edit of it (single-edit
+        recovery — it is 4 edits away). So it is left untouched. This documents
+        the conservative scope: recovery only fires for unambiguous garbles
+        (suffix-doubling or a single-character slip), never arbitrary infixes."""
         from exo.worker.engines.mlx.vendor.dsml_encoding import (
             _repair_dsml_tag_garbles,
         )
 
-        # 'invoke-ish' does not end with 'invoke' (ends with 'ish')
+        # 'invoke-ish' is 4 edits from 'invoke' — neither suffix nor single-edit.
         garbled_open = f'<{DSML_TOKEN}invoke-ish name="foo">'
         assert _repair_dsml_tag_garbles(garbled_open) == garbled_open
+
+    def test_substitution_garble_opening_invoke_repairs(self):
+        """The exact 2026-06-20 production garble (MTP-off, both nodes): the
+        OPENING tag ``<｜DSML｜invode name="...">`` — a single-character
+        substitution (k→d) of ``invoke``. Suffix recovery can't catch a
+        substitution (``invode`` does not end with ``invoke``); single-edit
+        recovery must repair it so the block parses instead of failing the
+        turn."""
+        garbled_block = (
+            f"<{DSML_TOKEN}tool_calls>\n"
+            f'<{DSML_TOKEN}invode name="terminal">\n'
+            f'<{DSML_TOKEN}parameter name="command" string="true">echo hi'
+            f"</{DSML_TOKEN}parameter>\n"
+            f"</{DSML_TOKEN}invoke>\n"
+            f"</{DSML_TOKEN}tool_calls>"
+        )
+        parsed = parse_dsml_output(garbled_block)
+        assert parsed is not None, "invode substitution garble should repair and parse"
+        assert parsed[0].name == "terminal"
+        args = json.loads(parsed[0].arguments)  # pyright: ignore[reportAny]
+        assert args["command"] == "echo hi"
+
+    def test_substitution_garble_both_opener_and_closer_repairs(self):
+        """The full 2026-06-20 second shape: opener garbled ``invode`` AND
+        closer garbled ``invinvoke`` in the same block. Both recovery paths
+        (single-edit on the opener, suffix on the closer) must fire so the
+        block parses."""
+        garbled_block = (
+            f"<{DSML_TOKEN}tool_calls>\n"
+            f'<{DSML_TOKEN}invode name="terminal">\n'
+            f'<{DSML_TOKEN}parameter name="command" string="true">echo hi'
+            f"</{DSML_TOKEN}parameter>\n"
+            f"</{DSML_TOKEN}invinvoke>\n"
+            f"</{DSML_TOKEN}tool_calls>"
+        )
+        parsed = parse_dsml_output(garbled_block)
+        assert parsed is not None, "invode+invinvoke garble should repair and parse"
+        assert parsed[0].name == "terminal"
+
+    def test_single_edit_recovery_unit(self):
+        """``_recover_structural_name`` recovers a canonical name from each
+        single-edit shape (substitution / insertion / deletion) and refuses
+        junk + already-valid names."""
+        from exo.worker.engines.mlx.vendor.dsml_encoding import (
+            _recover_structural_name,
+        )
+
+        assert _recover_structural_name("invode") == "invoke"  # substitution
+        assert _recover_structural_name("invok") == "invoke"  # deletion
+        assert _recover_structural_name("invokee") == "invoke"  # insertion
+        assert _recover_structural_name("invinvoke") == "invoke"  # suffix double
+        assert _recover_structural_name("paramter") == "parameter"  # deletion
+        # Already-valid names are not "garbled" → no repair.
+        assert _recover_structural_name("invoke") is None
+        assert _recover_structural_name("parameter") is None
+        # Unrelated words must not repair (would corrupt real param values /
+        # prose if the sentinel ever co-occurred).
+        assert _recover_structural_name("command") is None
+        assert _recover_structural_name("timeout") is None
+        assert _recover_structural_name("xyz") is None
 
     def test_e2e_garbled_block_via_parse_deepseek_v4_recovers(self):
         """End-to-end: the garbled block fed through ``parse_deepseek_v4``

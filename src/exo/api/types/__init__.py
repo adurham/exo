@@ -55,6 +55,7 @@ from .api import StartDownloadResponse as StartDownloadResponse
 from .api import StreamingChoiceResponse as StreamingChoiceResponse
 from .api import ToolCall as ToolCall
 from .api import ToolCallItem as ToolCallItem
+from .api import ToolCallParseFailureKind as ToolCallParseFailureKind
 from .api import TopLogprobItem as TopLogprobItem
 from .api import TraceCategoryStats as TraceCategoryStats
 from .api import TraceEventResponse as TraceEventResponse

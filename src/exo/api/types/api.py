@@ -17,6 +17,20 @@ FinishReason = Literal[
     "stop", "length", "tool_calls", "content_filter", "function_call", "error"
 ]
 
+# Classifies WHY a tool-call generation failed to parse, so the failure is
+# observable in metrics (exo_tool_call_parse_failures_total) instead of being
+# silently folded into a generic "error" finish. Set at the parser error sites
+# in model_output_parsers.py and carried through GenerationResponse -> ErrorChunk
+# to the master, which records it. ``None`` on a non-tool-call error (a runner
+# crash / generation error that isn't a parse failure).
+#   * malformed     — wrapper present + sentinel confirmed, but invoke body
+#                     could not be parsed even after garble repair.
+#   * unterminated  — a confirmed-real block opened but the stream ended before
+#                     its closing marker arrived.
+#   * sentinelless  — right tool-call STRUCTURE in the wrong dialect (no ｜DSML｜
+#                     sentinel on the tags).
+ToolCallParseFailureKind = Literal["malformed", "unterminated", "sentinelless"]
+
 
 class ErrorInfo(BaseModel):
     message: str

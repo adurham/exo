@@ -23,7 +23,7 @@ from prometheus_client import (
 )
 from prometheus_client.exposition import CONTENT_TYPE_LATEST as _PROM_CONTENT_TYPE
 
-from exo.api.types import GenerationStats
+from exo.api.types import GenerationStats, ToolCallParseFailureKind
 from exo.shared.types.chunks import GenerationChunk
 from exo.shared.types.common import NodeId
 from exo.shared.types.profiling import MemoryUsage
@@ -167,6 +167,16 @@ _chunk_events: Final[Counter] = Counter(
     registry=_registry,
 )
 
+_tool_call_parse_failures: Final[Counter] = Counter(
+    "exo_tool_call_parse_failures_total",
+    "Tool-call generations that failed to parse (cleanly failed the turn for "
+    "retry), bucketed by failure kind. Divide by the tool_calls + this to get "
+    "the tool-call parse-failure rate. ``failure_kind`` is one of malformed / "
+    "unterminated / sentinelless.",
+    ["instance_id", "model_id", "failure_kind"],
+    registry=_registry,
+)
+
 # --- System (per node) ---
 
 _gpu_usage: Final[Gauge] = Gauge(
@@ -270,6 +280,25 @@ def set_is_master(node_id: NodeId, is_master: bool) -> None:
 def record_chunk_generated(chunk: GenerationChunk) -> None:
     """Cheap counter on every ChunkGenerated. Call only from master."""
     _chunk_events.labels(kind=type(chunk).__name__).inc()
+
+
+def record_tool_call_parse_failure(
+    instance_id: InstanceId,
+    model_id: str,
+    failure_kind: ToolCallParseFailureKind,
+) -> None:
+    """Record a tool-call generation that failed to parse and cleanly failed
+    the turn (for hermes-side retry). Call only from master.
+
+    These failures do NOT show up in ``exo_generation_requests_total`` (an
+    ErrorChunk carries no GenerationStats, so ``record_generation_complete`` is
+    never reached for them) — this counter is the only place they are observable.
+    """
+    _tool_call_parse_failures.labels(
+        instance_id=str(instance_id),
+        model_id=model_id,
+        failure_kind=failure_kind,
+    ).inc()
 
 
 def record_generation_complete(
