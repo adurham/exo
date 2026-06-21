@@ -1,3 +1,5 @@
+import gc
+import os
 import queue
 import sys
 import threading
@@ -65,6 +67,19 @@ from exo.worker.runner.bootstrap import logger
 
 PREFILL_PICKUP_TIMEOUT_SECONDS = 3
 PREFILL_FINISH_TIMEOUT_SECONDS = 300
+
+# Reclaim MLX's caching allocator pool back to the OS when the runner goes idle
+# (all generation tasks complete). MLX's allocator otherwise holds freed GPU
+# buffers indefinitely for reuse; macOS keeps those pages resident (counted as
+# "used" by the exo /metrics gauge and dashboard), so an idle runner reports far
+# more memory than its actual model footprint — the freed prefill/decode working
+# set never returns to the OS until something forces it. Measured 2026-06-20:
+# idle DSv4-Flash reported ~110GB/node where the model itself is only ~78GB; the
+# ~30GB delta was unreclaimed inactive/compressed standby. One clear_cache at the
+# idle transition (NOT in the hot decode loop — so zero steady-state tok/s cost)
+# makes the reported number reflect reality and returns the pages for the next
+# session's prefill. On by default; set EXO_RECLAIM_ON_IDLE=0 to disable.
+_RECLAIM_ON_IDLE = os.environ.get("EXO_RECLAIM_ON_IDLE", "1") != "0"
 
 
 @dataclass
@@ -475,6 +490,23 @@ class Runner:
                     raise ValueError(
                         f"Received {item.__class__.__name__} outside of state machine in {self.current_status=}"
                     )
+
+        # All active tasks drained → runner is going idle. Reclaim the MLX
+        # caching allocator pool now so the freed prefill/decode working set
+        # returns to the OS instead of sitting as resident standby that inflates
+        # the reported memory (see _RECLAIM_ON_IDLE). This runs ONLY on the
+        # idle transition, never inside the per-token decode loop, so there is
+        # no steady-state throughput cost. gc.collect() first breaks the MLX
+        # array-graph ref cycles so clear_cache can actually release the buffers.
+        if _RECLAIM_ON_IDLE:
+            try:
+                import mlx.core as mx
+
+                gc.collect()
+                mx.clear_cache()
+                logger.info("runner idle: reclaimed MLX allocator pool")
+            except Exception:
+                logger.debug("idle reclaim failed", exc_info=True)
 
         self.update_status(RunnerReady(prefill_server_port=self._prefill_server_port))
         logger.info("runner ready")
