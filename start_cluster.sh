@@ -1300,12 +1300,15 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
 fi
 
 # ── Auto-place Qwen3.6-35B-A3B with RDMA (co-hosted alongside DSv4) ──
-# Single 2-node Tensor + MlxJaccl instance spanning both Studios, same RDMA
-# path as DSv4. Fits alongside DSv4 (see QWEN36_MODEL_ID comment above for the
-# memory math). Placed by default (QWEN36_ENABLED defaults to 1; set =0 to
-# skip). Qwen3.6 ships MTP weights, so self-speculation is auto-enabled
-# per-instance (independent of EXO_SPECULATIVE, which is the DSv4 knob).
-if [ "${QWEN36_ENABLED:-1}" = "1" ]; then
+# DISABLED BY DEFAULT (2026-06-20). Co-hosting Qwen3.6 (~17.5GB/node) alongside
+# DSv4-Flash (~78GB/node) left only ~21GB/node headroom, which pushed the box
+# into sustained memory-compression and made every memory reading look alarming.
+# DSv4 now runs SOLO by default so it has the full box for context + working set.
+# Load Qwen on-demand instead (via the exo UI / API) when you actually need the
+# aux model. Set QWEN36_ENABLED=1 to restore co-hosting at launch.
+# Qwen3.6 ships MTP weights, so self-speculation is auto-enabled per-instance
+# (independent of EXO_SPECULATIVE, which is the DSv4 knob).
+if [ "${QWEN36_ENABLED:-0}" = "1" ]; then
     echo ""
     echo "Auto-placing Qwen3.6 ($QWEN36_MODEL_ID) across both Studios via RDMA..."
 
