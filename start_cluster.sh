@@ -300,12 +300,14 @@ fi
 # hard-capped (see QWEN36_MAX_PREFIX_SESSIONS / _BYTES / KV_CACHE_BITS below) —
 # without those caps its prefix cache grew unbounded and ate into the shared
 # budget, pushing the box into swap. Served as a 2-node Tensor + MlxJaccl
-# instance (same RDMA path as DSv4). Enabled by default (like DSv4); set
-# QWEN36_ENABLED=0 to skip.
+# instance (same RDMA path as DSv4). DISABLED by default (2026-06-20): co-hosting
+# alongside DSv4 left only ~21GB/node headroom and pushed the box into sustained
+# memory compression. DSv4 runs solo by default; load Qwen on-demand via UI/API,
+# or set QWEN36_ENABLED=1 to co-host at launch.
 # Sampling: Qwen3.6 is thinking-mode by default — upstream thinking
 # recommendation (temp 0.6 / top_p 0.95 / top_k 20 / min_p 0).
 : "${QWEN36_MODEL_ID:=mlx-community/Qwen3.6-35B-A3B-8bit}"
-: "${QWEN36_ENABLED:=1}"
+: "${QWEN36_ENABLED:=0}"
 : "${QWEN36_TEMPERATURE:=0.6}"
 : "${QWEN36_TOP_P:=0.95}"
 : "${QWEN36_TOP_K:=20}"
