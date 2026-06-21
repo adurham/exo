@@ -6,7 +6,7 @@ import sys
 import time
 import uuid
 from copy import deepcopy
-from typing import Callable, Generator, Literal, cast, get_args
+from typing import Any, Callable, Generator, Literal, cast, get_args
 
 import mlx.core as mx
 from mlx_lm.generate import (
@@ -365,6 +365,20 @@ def prefill(
 
     _rt.reset()
 
+    # Reset the model-side span profiler (EXO_PROFILER=spans) at prefill start so
+    # its per-span totals (attn.indexer, attn.sdpa, attn.compressor, moe.*,
+    # attn.all_sum) are scoped to THIS prefill — dumped at the end below. This
+    # replaces the fragile SIGUSR1-based dump (signaling a live MLX/RDMA process
+    # can crash it). No-op when no profiler hook is registered.
+    try:
+        from mlx_lm import profiler as _prof
+
+        _ph: Any = _prof.get()
+        if _ph is not None and hasattr(_ph, "dump"):
+            _ph.dump(reset=True)  # discard warmup/prior; start clean
+    except Exception:
+        _ph = None
+
     logger.debug(f"Prefilling {num_tokens} tokens...")
     start_time = time.perf_counter()
     has_ssm = has_non_kv_caches(cache)
@@ -495,6 +509,14 @@ def prefill(
     # / indexer / contiguous) consumes wall time per chunk — the diagnostic for
     # the high-context prefill stall.
     _rt.dump()
+    # Dump the model-side span breakdown for THIS prefill (attn.indexer,
+    # attn.sdpa, attn.compressor, moe.*, attn.all_sum). Signal-free — avoids the
+    # SIGUSR1-to-a-live-MLX-process crash. No-op when EXO_PROFILER!=spans.
+    if _ph is not None:
+        try:
+            _ph.dump(reset=True)
+        except Exception:
+            pass
     # Exclude the last snapshot
     return tokens_per_sec, num_tokens, snapshots[:-1] if snapshots else []
 
