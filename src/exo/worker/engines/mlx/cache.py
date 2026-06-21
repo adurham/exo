@@ -419,6 +419,18 @@ class KVPrefixCache:
         self._max_sessions = max_sessions
         self._max_bytes = max_bytes
         self._max_kv_tokens = max_kv_tokens
+        # Leaf id of the session currently being served (set on a get_kv_cache
+        # hit, cleared when its add/update completes). Eviction NEVER drops this
+        # leaf — evicting the in-flight session is always counterproductive: it
+        # guarantees a full re-prefill of that exact context on the very next
+        # turn, and (with MTP) can pull KV out from under the draft proposer
+        # mid-cycle. This mirrors vLLM/sglang, which "touch" a request's
+        # computed blocks (bump ref_count, pull them off the free queue) so the
+        # active sequence's KV is structurally un-evictable. See the
+        # re-prefill-loop forensics: a 142,384-token leaf was evicted under a
+        # transient memory peak, then re-prefilled next turn — 270:1
+        # prefill:decode.
+        self._active_leaf_id: int | None = None
         # Per-instance KV quantization override; see BaseInstance.kv_cache_bits.
         # Forwarded to `make_kv_cache` on every cache-miss path so an instance
         # can opt in (positive int), opt out (0), or defer to the global env
@@ -465,6 +477,7 @@ class KVPrefixCache:
         self._root.children.clear()
         self._root.ref_count = 0
         self._next_leaf_id = 0
+        self._active_leaf_id = None
 
     def add_kv_cache(
         self,
@@ -755,6 +768,13 @@ class KVPrefixCache:
         max_length = int(prompt_tokens.shape[0])
         query_regions = media_regions or []
 
+        # New turn's lookup: drop any stale active marker from the previous
+        # turn. It is re-set below on a hit, and re-pointed by the subsequent
+        # add/update. Between a turn's add and the next get, the marker still
+        # points at the (valuable) continuing session, so clearing only here is
+        # safe — the protected leaf is never the wrong one.
+        self._active_leaf_id = None
+
         match_node, match_length = self._longest_prefix_match(
             prompt_tokens, query_regions
         )
@@ -817,6 +837,10 @@ class KVPrefixCache:
 
         self._access_counter += 1
         donor_leaf.last_used = self._access_counter
+        # Mark this leaf as the in-flight session so eviction can't drop it
+        # while we're prefilling/decoding against it this turn. Cleared by the
+        # subsequent add/update for this turn (or by clear()).
+        self._active_leaf_id = donor_leaf.leaf_id
         remaining = prompt_tokens[restore_pos:]
         self._trace(
             f"get_kv_cache HIT leaves={len(self._leaves)} "
@@ -1225,8 +1249,18 @@ class KVPrefixCache:
         return total
 
     def _evict_lru_once(self, reason: str) -> bool:
-        candidates = [leaf for leaf in self._leaves.values() if not leaf.pinned]
+        candidates = [
+            leaf
+            for leaf in self._leaves.values()
+            if not leaf.pinned and leaf.leaf_id != self._active_leaf_id
+        ]
         if not candidates:
+            # Nothing evictable. Either the cache is empty, every leaf is
+            # pinned, or the ONLY remaining leaf is the in-flight session —
+            # which we never evict (doing so guarantees a re-prefill of the
+            # exact context we're serving). The caller's pressure loop breaks
+            # cleanly; a genuinely over-budget single active session is handled
+            # by graceful degradation, not by self-eviction.
             return False
         lru = min(candidates, key=lambda leaf: leaf.last_used)
         evicted_tokens = int(lru.full_tokens.shape[0])
@@ -1253,6 +1287,16 @@ class KVPrefixCache:
         if not self._leaves:
             return
         evicted_any = False
+        # Memory-pressure eviction must reflect RESIDENT memory (model weights +
+        # cached KV), not the transient prefill working set. This method runs at
+        # the start of add_kv_cache, right after a prefill completed — so MLX's
+        # buffer pool is still holding that prefill's scratch (attention scores,
+        # index/topk buffers, MTP draft tensors) which is about to be freed.
+        # Measuring psutil total memory at that peak made us evict a leaf that
+        # fits fine once the scratch releases — the re-prefill loop. Reclaim the
+        # pool FIRST so get_memory_used_percentage() sees true resident pressure.
+        # (Previously this clear ran only AFTER eviction, i.e. too late.)
+        mx.clear_cache()
         while self._leaves and self.get_memory_used_percentage() > _MEMORY_THRESHOLD:
             if not self._evict_lru_once("memory pressure"):
                 break

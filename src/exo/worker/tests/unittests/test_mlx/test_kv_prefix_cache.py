@@ -215,6 +215,93 @@ class TestRadixTrieStorage:
         # Pinned A survives; the cap is "soft" under pinning.
         assert id_a in cache.prompts
 
+    def test_active_leaf_survives_memory_pressure_eviction(self, monkeypatch):
+        """The in-flight session (marked active by get_kv_cache) must NOT be
+        evicted under memory pressure — evicting it guarantees a full re-prefill
+        of the exact context being served next turn (the re-prefill loop).
+
+        Repro of the production bug: one large session, memory pegged above the
+        eviction threshold. Before the fix, _evict_lru_once picked the only leaf
+        (the active one) and dropped it. After the fix, the active leaf is
+        excluded and eviction is a clean no-op.
+        """
+        import exo.worker.engines.mlx.cache as cache_mod
+
+        cache = KVPrefixCache(None)
+        # The "big continuing session".
+        tokens = mx.array(list(range(1, 51)), dtype=mx.int32)
+        leaf_id = cache.add_kv_cache(
+            tokens, _fake_kv_cache(num_layers=2, num_tokens=50)
+        )
+        # Simulate the next turn's lookup hitting this leaf → marks it active.
+        cache._active_leaf_id = leaf_id  # pyright: ignore[reportPrivateUsage]
+
+        # Peg memory above threshold so the pressure loop wants to evict.
+        monkeypatch.setattr(
+            cache_mod, "get_memory_used_percentage", lambda: 0.99
+        )
+        # Also stub mx.clear_cache (no-op) so the test doesn't depend on real
+        # Metal buffer reclamation changing the patched pressure value.
+        monkeypatch.setattr(cache_mod.mx, "clear_cache", lambda: None)
+
+        cache._evict_if_needed(reserve_slot=False)  # pyright: ignore[reportPrivateUsage]
+
+        # Active leaf must still be present — never self-evicted.
+        assert leaf_id in cache.prompts, "active session was wrongly evicted"
+
+    def test_active_leaf_excluded_but_idle_leaf_evicted(self, monkeypatch):
+        """Under pressure with multiple sessions, eviction drops the idle LRU
+        leaf and spares the active one (graceful order: idle-first, never the
+        in-flight session)."""
+        import exo.worker.engines.mlx.cache as cache_mod
+
+        cache = KVPrefixCache(None)
+        idle = cache.add_kv_cache(
+            mx.array([1, 2, 3, 4, 5], dtype=mx.int32),
+            _fake_kv_cache(num_layers=2, num_tokens=5),
+        )
+        active = cache.add_kv_cache(
+            mx.array([6, 7, 8, 9, 10], dtype=mx.int32),
+            _fake_kv_cache(num_layers=2, num_tokens=5),
+        )
+        # Make the IDLE leaf the LRU, and mark the other active.
+        cache._leaves[idle].last_used = 0  # pyright: ignore[reportPrivateUsage]
+        cache._leaves[active].last_used = 100  # pyright: ignore[reportPrivateUsage]
+        cache._active_leaf_id = active  # pyright: ignore[reportPrivateUsage]
+
+        # Pressure stays high so the loop evicts until only the protected
+        # active leaf remains, then stops (can't evict the active one).
+        monkeypatch.setattr(
+            cache_mod, "get_memory_used_percentage", lambda: 0.99
+        )
+        monkeypatch.setattr(cache_mod.mx, "clear_cache", lambda: None)
+
+        cache._evict_if_needed(reserve_slot=False)  # pyright: ignore[reportPrivateUsage]
+
+        assert idle not in cache.prompts, "idle LRU leaf should be evicted"
+        assert active in cache.prompts, "active leaf must survive"
+
+    def test_get_kv_cache_hit_marks_active_leaf(self):
+        """A get_kv_cache hit sets _active_leaf_id to the matched leaf so the
+        subsequent same-turn add/update can't evict it; a fresh lookup clears
+        the stale marker first."""
+        cache = KVPrefixCache(None)
+        tokens = mx.array([1, 2, 3, 4, 5, 6], dtype=mx.int32)
+        leaf_id = cache.add_kv_cache(
+            tokens, _fake_kv_cache(num_layers=2, num_tokens=6)
+        )
+        # add does not mark active.
+        assert cache._active_leaf_id is None  # pyright: ignore[reportPrivateUsage]
+        # A continuing-turn lookup that shares the prefix marks it active.
+        # An exact hit materializes from the trie and never touches `model`,
+        # so passing None is safe here.
+        _cache, _remaining, matched, _exact = cache.get_kv_cache(
+            None,  # pyright: ignore[reportArgumentType]
+            tokens,
+        )
+        assert matched == leaf_id
+        assert cache._active_leaf_id == leaf_id  # pyright: ignore[reportPrivateUsage]
+
     def test_update_extends_existing_leaf(self):
         cache = KVPrefixCache(None)
         tokens_short = mx.array([1, 2, 3], dtype=mx.int32)
