@@ -938,6 +938,10 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_PSCACHE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PSCACHE_DEBUG=$EXO_DSV4_PSCACHE_DEBUG"
     [ -n "$EXO_DSV4_INDEXER_WINDOW" ]  && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
     [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"
+    # Tiled-P indexer score block size (mlx-lm deepseek_v4 _indexer_score_tiled).
+    # >0 caps the (B,64,L,P) indexer transient by processing pooled-P in blocks —
+    # bounds the high-context prefill alloc spikes. Default OFF in the model.
+    [ -n "${EXO_DSV4_INDEXER_PBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_PBLOCK=$EXO_DSV4_INDEXER_PBLOCK"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
     [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
     # JACCL per-call trace (Phase 0 c=2 corruption diagnostic). When set
