@@ -353,6 +353,18 @@ def prefill(
     if num_tokens == 0:
         return 0.0, 0, []
 
+    # Start a fresh trace for this prefill so the per-chunk spans (forward,
+    # eval_cache, flush_sends, all_sum, indexer, contiguous) are scoped to this
+    # request. Without reset() the span list accumulates across all requests
+    # forever; without the matching dump() at the end the spans are recorded
+    # but never logged. Gated on EXO_TRACING_ENABLED (no-op when off), so this
+    # is free in production and gives a full per-chunk timeline when tracing on
+    # — used to diagnose the high-context prefill stall (~12s per 128-tok chunk
+    # at 460K ctx). See exo.worker.engines.mlx.trace.
+    from exo.worker.engines.mlx.trace import request_trace as _rt
+
+    _rt.reset()
+
     logger.debug(f"Prefilling {num_tokens} tokens...")
     start_time = time.perf_counter()
     has_ssm = has_non_kv_caches(cache)
@@ -478,6 +490,11 @@ def prefill(
         f"Prefill complete: {num_tokens} tokens in {elapsed:.2f}s "
         f"({tokens_per_sec:.1f} tok/s)"
     )
+    # Emit the per-chunk span timeline (no-op unless EXO_TRACING_ENABLED). This
+    # names exactly which sub-step (forward / eval_cache / flush_sends / all_sum
+    # / indexer / contiguous) consumes wall time per chunk — the diagnostic for
+    # the high-context prefill stall.
+    _rt.dump()
     # Exclude the last snapshot
     return tokens_per_sec, num_tokens, snapshots[:-1] if snapshots else []
 
