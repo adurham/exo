@@ -50,6 +50,16 @@
 # sparse-SDPA tiling code remains (gated, harmless at tile 128) but the 256
 # super-chunk is NOT a win on this hardware. Override via env.
 : "${EXO_PREFILL_STEP_SIZE:=128}"
+# Context-adaptive prefill chunk sizing (2026-06-21). At LOW context, larger
+# chunks (256) amortize the ~390ms per-chunk fixed overhead (43 layers x kernel
+# launches x RDMA all_sum x eval x clear_cache) — +39% throughput at 100K. But
+# at HIGH context the indexer scores transient (B, H=64, L, P) scales with both
+# chunk size L and pooled P, so 256-chunk is -30% at 380K vs 128. The adaptive
+# logic in mlx_lm stream_generate starts at EXO_PREFILL_STEP_SIZE (low ctx) and
+# shrinks to EXO_PREFILL_STEP_SIZE_HIGH_CTX past EXO_PREFILL_STEP_SIZE_CROSSOVER.
+# Defaults: high-ctx unset => fixed step (unchanged behavior). Set both to enable.
+: "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:=}"
+: "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=}"
 # Batched prefill across all queued tasks. Default ON 2026-05-08 after Phase 5
 # cluster validation: c=2 100K MTP=0 went from 7.7 → 13.0 tok/s/stream (+69%)
 # with both streams symmetric (no serialization tax remaining). c=1 path falls
@@ -819,6 +829,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "${MLX_MAX_OPS_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_OPS_PER_BUFFER=$MLX_MAX_OPS_PER_BUFFER"
     [ -n "${MLX_MAX_MB_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_MB_PER_BUFFER=$MLX_MAX_MB_PER_BUFFER"
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
+    [ -n "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_HIGH_CTX=$EXO_PREFILL_STEP_SIZE_HIGH_CTX"
+    [ -n "${EXO_PREFILL_STEP_SIZE_CROSSOVER:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_CROSSOVER=$EXO_PREFILL_STEP_SIZE_CROSSOVER"
     EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
     EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
     [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
