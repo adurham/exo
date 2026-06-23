@@ -1618,9 +1618,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # was confirmed; 100K c=2 MTP-on passes clean). Override via
         # EXO_DSV4_MTP_C2_MAX_CTX (0 = never disable spec for c≥2).
         # DEBUG: always log n_uids to see if c=2 ever reaches this gate
-        import os as _os_dbg0
+        import os as _os_dbg0, sys as _sys_dbg
         if _os_dbg0.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
-            print(f"[C2GATE-ENTRY] n_uids={len(gen_batch)} spec_eligible={spec_eligible}", flush=True)
+            print(f"[C2GATE-ENTRY] n_uids={len(gen_batch)} spec_eligible={spec_eligible}", file=_sys_dbg.stderr, flush=True)
         if spec_eligible and len(gen_batch) >= 2:
             _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
             if _c2_max > 0:
@@ -1640,9 +1640,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if _max_ctx > _c2_max:
                     spec_eligible = False
                 # DEBUG: log what the gate sees
-                import os as _os_dbg
+                import os as _os_dbg, sys as _sys_dbg2
                 if _os_dbg.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
-                    print(f"[C2GATE] n_uids={len(gen_batch)} max_ctx={_max_ctx} threshold={_c2_max} spec_eligible={spec_eligible}", flush=True)
+                    print(f"[C2GATE] n_uids={len(gen_batch)} max_ctx={_max_ctx} threshold={_c2_max} spec_eligible={spec_eligible}", file=_sys_dbg2.stderr, flush=True)
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
