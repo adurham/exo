@@ -1636,7 +1636,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _subs = _c.caches if hasattr(_c, "caches") else [_c]
                     for _sub in _subs:
                         try:
-                            _off = int(_sub.offset)
+                            _off = _sub.offset
+                            # Batch caches return a per-stream tensor; scalar
+                            # caches return an int. Take the max across streams.
+                            if hasattr(_off, "shape"):
+                                _off = int(mx.max(_off))
+                            else:
+                                _off = int(_off)
                             if _off > _max_ctx:
                                 _max_ctx = _off
                         except Exception:
