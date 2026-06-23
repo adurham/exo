@@ -1617,6 +1617,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # The threshold defaults to 150K (below the 200K where degeneration
         # was confirmed; 100K c=2 MTP-on passes clean). Override via
         # EXO_DSV4_MTP_C2_MAX_CTX (0 = never disable spec for c≥2).
+        # DEBUG: always log n_uids to see if c=2 ever reaches this gate
+        import os as _os_dbg0
+        if _os_dbg0.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
+            print(f"[C2GATE-ENTRY] n_uids={len(gen_batch)} spec_eligible={spec_eligible}", flush=True)
         if spec_eligible and len(gen_batch) >= 2:
             _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
             if _c2_max > 0:
