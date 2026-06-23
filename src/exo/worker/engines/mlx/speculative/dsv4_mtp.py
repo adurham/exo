@@ -1622,12 +1622,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             if _c2_max > 0:
                 _max_ctx = 0
                 for _c in gen_batch.prompt_cache:
-                    try:
-                        _off = int(_c.offset)
-                        if _off > _max_ctx:
-                            _max_ctx = _off
-                    except Exception:
-                        pass
+                    # prompt_cache entries may be CacheList (wrap multiple
+                    # sub-caches) or bare caches. Walk into CacheList to find
+                    # the RotatingKVCache / PoolingCache offset.
+                    _subs = _c.caches if hasattr(_c, "caches") else [_c]
+                    for _sub in _subs:
+                        try:
+                            _off = int(_sub.offset)
+                            if _off > _max_ctx:
+                                _max_ctx = _off
+                        except Exception:
+                            pass
                 if _max_ctx > _c2_max:
                     spec_eligible = False
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
