@@ -1431,6 +1431,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         keeps the parent's behavior; BS>1 takes the new batched
         path.
         """
+        import sys as _sys_t, os as _os_t
+        if _os_t.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
+            _sys_t.stderr.write(f"[C2GATE-TOP] _next called\n"); _sys_t.stderr.flush()
         gen_batch = self._generation_batch
 
         # BS-transition diagnostic. Dumps per-cycle state to
