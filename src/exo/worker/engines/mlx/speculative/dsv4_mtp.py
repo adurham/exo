@@ -1628,6 +1628,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
             if _c2_max > 0:
                 _max_ctx = 0
+                import sys as _sys_g
                 for _c in gen_batch.prompt_cache:
                     # prompt_cache entries may be CacheList (wrap multiple
                     # sub-caches) or bare caches. Walk into CacheList to find
@@ -1640,6 +1641,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                                 _max_ctx = _off
                         except Exception:
                             pass
+                    # DEBUG: dump the types to see what prompt_cache holds
+                    if os.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
+                        _types = [type(_s).__name__ for _s in (_c.caches if hasattr(_c, "caches") else [_c])]
+                        _sys_g.stderr.write(f"[C2GATE-TYPES] cache={type(_c).__name__} subs={_types}\n"); _sys_g.stderr.flush()
                 if _max_ctx > _c2_max:
                     spec_eligible = False
                 # DEBUG: log what the gate sees
