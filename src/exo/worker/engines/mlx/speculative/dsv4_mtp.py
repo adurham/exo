@@ -1606,6 +1606,30 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             and len(self._prompt_batch) == 0
             and len(self._unprocessed_sequences) == 0
         )
+        # C≥2 high-context MTP degeneration gate (2026-06-23). The MTP verify
+        # path (L=γ+1, B≥2) degenerates into repetition loops at high context
+        # (200K+): period-1 single-token cycles (" the" looping) that the
+        # freq/rep penalties cannot dislodge at temp=0. The non-spec decode
+        # path (L=1, B≥2) is correct at all context lengths. MTP is a
+        # throughput optimization (decode only, ~10% at 100K); it does NOT
+        # affect prefill throughput. Disabling spec at c≥2 high context
+        # preserves the 200 t/s PREFILL floor while fixing decode quality.
+        # The threshold defaults to 150K (below the 200K where degeneration
+        # was confirmed; 100K c=2 MTP-on passes clean). Override via
+        # EXO_DSV4_MTP_C2_MAX_CTX (0 = never disable spec for c≥2).
+        if spec_eligible and len(gen_batch) >= 2:
+            _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
+            if _c2_max > 0:
+                _max_ctx = 0
+                for _c in gen_batch.prompt_cache:
+                    try:
+                        _off = int(_c.offset)
+                        if _off > _max_ctx:
+                            _max_ctx = _off
+                    except Exception:
+                        pass
+                if _max_ctx > _c2_max:
+                    spec_eligible = False
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
