@@ -1635,6 +1635,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                             pass
                 if _max_ctx > _c2_max:
                     spec_eligible = False
+                # DEBUG: log what the gate sees
+                import os as _os_dbg
+                if _os_dbg.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
+                    print(f"[C2GATE] n_uids={len(gen_batch)} max_ctx={_max_ctx} threshold={_c2_max} spec_eligible={spec_eligible}", flush=True)
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
