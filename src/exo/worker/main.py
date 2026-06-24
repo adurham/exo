@@ -368,7 +368,17 @@ class Worker:
 
                     await self._start_runner_task(task)
                 case task:
-                    await self._start_runner_task(task)
+                    # Dispatch generation tasks non-blocking so concurrent
+                    # requests (c≥2) can reach the runner's work_queue within
+                    # the batched-prefill rendezvous window. The runner's
+                    # handle_generation_tasks drains its queue for
+                    # EXO_BATCHED_PREFILL_RENDEZVOUS_MS (default 200ms) to
+                    # batch arriving tasks into one prefill_batched call.
+                    # Blocking here (await) serialized c=2+ prefill: the 2nd
+                    # task couldn't be sent until the 1st completed, so the
+                    # rendezvous never saw it. Non-blocking dispatch + the
+                    # in_progress guard in plan() prevents re-dispatch.
+                    self._tg.start_soon(self._start_runner_task, task)
 
     async def shutdown(self):
         self._tg.cancel_tasks()
