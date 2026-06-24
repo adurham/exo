@@ -229,6 +229,14 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # Set to 8 to recover c=1 ceiling at the cost of c=2 bistability.
     # Set to 43 only when running gamma=1 (where the chain depth is harmless).
     : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=4}"
+    # Metal command buffer size limit. M4 Max defaults to 50MB, but the
+    # DSv4 43-layer B=2 batched prefill forward produces >50MB of intermediate
+    # results. The 50MB limit causes mid-forward command buffer flushes that
+    # create bimodal stalls (fast chunks 0.77s, slow chunks 2.3s, 3x ratio).
+    # Setting 200MB lets the full B=2 forward fit in one command buffer,
+    # eliminating the stalls. Measured: B=2 aggregate 317 t/s (was 144 t/s).
+    : "${MLX_MAX_MB_PER_BUFFER:=200}"
+    : "${MLX_MAX_OPS_PER_BUFFER:=200}"
     # MTP self-spec gate. ON by default — activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
