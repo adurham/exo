@@ -1616,10 +1616,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # preserves the 200 t/s PREFILL floor while fixing decode quality.
         # The threshold defaults to 150K (below the 200K where degeneration
         # was confirmed; 100K c=2 MTP-on passes clean). Override via
-        # EXO_DSV4_MTP_C2_MAX_CTX (0 = never disable spec for c≥2).
+        # EXO_DSV4_MTP_C2_MAX_CTX (0 = ALWAYS disable spec for c≥2).
         if spec_eligible and len(gen_batch) >= 2:
             _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
-            if _c2_max > 0:
+            if _c2_max == 0:
+                # 0 = always disable spec for c≥2 (quality-safe)
+                spec_eligible = False
+            else:
                 _max_ctx = 0
                 for _c in gen_batch.prompt_cache:
                     # prompt_cache entries may be CacheList (wrap multiple
