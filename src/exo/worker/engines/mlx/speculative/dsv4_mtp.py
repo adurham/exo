@@ -1431,9 +1431,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         keeps the parent's behavior; BS>1 takes the new batched
         path.
         """
-        import sys as _sys_t, os as _os_t
-        if _os_t.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
-            _sys_t.stderr.write(f"[C2GATE-TOP] _next called\n"); _sys_t.stderr.flush()
         gen_batch = self._generation_batch
 
         # BS-transition diagnostic. Dumps per-cycle state to
@@ -1620,15 +1617,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # The threshold defaults to 150K (below the 200K where degeneration
         # was confirmed; 100K c=2 MTP-on passes clean). Override via
         # EXO_DSV4_MTP_C2_MAX_CTX (0 = never disable spec for c≥2).
-        # DEBUG: always log n_uids to see if c=2 ever reaches this gate
-        import os as _os_dbg0, sys as _sys_dbg
-        if _os_dbg0.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
-            print(f"[C2GATE-ENTRY] n_uids={len(gen_batch)} spec_eligible={spec_eligible}", file=_sys_dbg.stderr, flush=True)
         if spec_eligible and len(gen_batch) >= 2:
             _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
             if _c2_max > 0:
                 _max_ctx = 0
-                import sys as _sys_g
                 for _c in gen_batch.prompt_cache:
                     # prompt_cache entries may be CacheList (wrap multiple
                     # sub-caches) or bare caches. Walk into CacheList to find
@@ -1647,16 +1639,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                                 _max_ctx = _off
                         except Exception:
                             pass
-                    # DEBUG: dump the types to see what prompt_cache holds
-                    if os.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
-                        _types = [type(_s).__name__ for _s in (_c.caches if hasattr(_c, "caches") else [_c])]
-                        _sys_g.stderr.write(f"[C2GATE-TYPES] cache={type(_c).__name__} subs={_types}\n"); _sys_g.stderr.flush()
                 if _max_ctx > _c2_max:
                     spec_eligible = False
-                # DEBUG: log what the gate sees
-                import os as _os_dbg, sys as _sys_dbg2
-                if _os_dbg.environ.get("EXO_DSV4_MTP_C2_GATE_DEBUG") == "1":
-                    print(f"[C2GATE] n_uids={len(gen_batch)} max_ctx={_max_ctx} threshold={_c2_max} spec_eligible={spec_eligible}", file=_sys_dbg2.stderr, flush=True)
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
