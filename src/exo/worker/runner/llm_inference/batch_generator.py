@@ -683,10 +683,6 @@ class BatchGenerator(Engine):
             local_slots = EXO_MAX_CONCURRENT_REQUESTS - len(self._active_tasks)
             agreed_slots = mx_min_int(local_slots, coord)
             agreed_queue_len = mx_min_int(len(self._queue), coord)
-            # DEBUG: log the batched gate decision
-            import os as _os_bg, sys as _sys_bg
-            if _os_bg.environ.get("EXO_DSV4_BATCHED_PREFILL_DEBUG") == "1":
-                _sys_bg.stderr.write(f"[BGATE] local_slots={local_slots} agreed_slots={agreed_slots} local_queue={len(self._queue)} agreed_queue={agreed_queue_len} active={len(self._active_tasks)}\n"); _sys_bg.stderr.flush()
             if agreed_slots > 1 and agreed_queue_len >= 2:
                 batch_count = min(agreed_slots, agreed_queue_len)
                 tasks_batch: list[TextGeneration] = []
