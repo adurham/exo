@@ -1447,7 +1447,14 @@ class ExoBatchGenerator:
             is_bench = task_params.bench
             has_remote = task_params.prefill_endpoint is not None
             has_vision = bool(task_params.images)
-            if not is_bench or has_remote or has_vision:
+            # OPT-11 (2026-06-24): removed is_bench gate. Batched prefill
+            # now works for regular /v1/chat/completions requests, not just
+            # /bench. The is_bench gate was a validation guard from the
+            # original batched-prefill rollout. The batched path is now
+            # proven stable at B=2 with the OPT-10 SDPA fix and
+            # MLX_MAX_MB_PER_BUFFER=200. Only exclude remote-prefill and
+            # vision tasks (heterogeneous paths not yet wired).
+            if has_remote or has_vision:
                 ineligible.append(i)
             else:
                 eligible.append(i)
