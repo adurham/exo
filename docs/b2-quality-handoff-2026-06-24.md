@@ -31,12 +31,52 @@
 
 - **c=1 Paris probe:** clean ✅
 - **c=1 200K/500K needle:** FALCON-MERCURY-7749 found ✅
-- **c=2 100K needle (quality probe --concurrency 2):** Stream 1 FOUND needle ✅, Stream 0 stale cache ❌
+- **c=2 100K needle (quality probe --concurrency 2):** Stream 1 FOUND needle ✅, Stream 0 garbage ' CAP' ❌
 - **c=2 330K needle (custom script /v1):** Both streams garbled (' or', ' something') ❌ — this was BEFORE the OPT-12 merge offset fix
 
-### What Needs Verification
+### CLEAN REPRO — 2026-06-24 ~16:40 (rules out stale-cache theory)
 
-A clean B=2 needle test (no stale prefix cache) to confirm both streams find the needle through batched prefill with the OPT-12 fixes. The last partial test showed stream 1 finding the needle — the fix is working, but stream 0 used a stale cache from a previous broken test.
+Fresh cluster restart (cluster was actually DOWN — prior exodeploy tmux pane showing "READY 2/2 / EXIT=0" was a stale launch that had died at 16:04 via SIGTERM; relaunch confirmed HEALTHY, 2/2 READY, EXIT=0, EXO_DSV4_MTP_C2_MAX_CTX=0 set). Ran:
+
+```
+.venv/bin/python bench/quality_probe_dsv4.py \
+  --base-url http://adams-mac-studio-m4-1.local:52415 \
+  --model mlx-community/DeepSeek-V4-Flash \
+  --target-tokens 100000 --iters 1 --concurrency 2 --label b2_100k_clean
+```
+
+Result: `wall=425.2s all_needles=False bistab=True`
+- stream 0: needle_found=False, text=' CAP' ← GARBAGE
+- stream 1: needle_found=True, text='FALCON-MERCURY-7749...' ← CORRECT
+
+This is a clean cluster with no stale prefix cache, so the prior "stream 0 = stale cache" attribution is **wrong**. The bug is real and deterministic (always stream 0). `bistab=True` also returned — the bimodal stall the handoff claimed `MLX_MAX_MB_PER_BUFFER=200` killed is NOT gone.
+
+### Likely Root Cause (clean repro, 2026-06-24)
+
+`BatchRotatingKVCache.extract()` (mlx-lm cache.py:2510-2526):
+```python
+cache.keys   = mx.contiguous(cache.keys[:, :, padding : cache._idx])   # 2522
+cache._idx   = cache.keys.shape[2]                                     # 2525  ← post-slice width
+```
+`self._idx` (the batch's logical write cursor) is used as the slice *end*, then `_idx` is recomputed from the *post-slice width*. For non-full buffers (`_idx < max_size`) or unequal-length streams, `_idx` no longer tracks the ring write pointer that `RotatingKVCache.make_mask` / `_update_in_place` rely on. `merge()` (2529) right-pads via `padding = [max_length - l for l in lengths]`, which is only consistent with `extract` when `_idx == max_size` (full buffer). The per-stream `offset` was fixed by OPT-12 but `_idx` was NOT handled symmetrically — that's the remaining hole.
+
+### Proposed Patch (NOT YET APPLIED — needs commit+push+redeploy)
+
+In `extract`, after slicing, restore `_idx` to reflect the ring write position consistently with what decode expects:
+```python
+cache.keys = mx.contiguous(cache.keys[:, :, padding : cache._idx])
+cache.values = mx.contiguous(cache.values[:, :, padding : cache._idx])
+cache.offset = offset
+cache._idx = cache.keys.shape[2]              # physical rows after de-pad
+# NEW: ensure decode's ring semantics match — _idx must point at end of
+# valid data in the (now non-rotated, contiguous) buffer. Already correct
+# IF buffer was full (_idx==max_size) before extract. For partial buffers
+# the slice already trimmed to logical length, so _idx=slice_width is right.
+# Verify: the bug may instead be that merge right-pads unequal streams
+# but extract assumes left_padding maps 1:1 — audit the padding bookkeeping
+# across merge->prefill->extract->decode before changing anything.
+```
+**Do NOT ship blind.** Audit padding/offset/_idx round-trip on a 2-stream unequal-length unit test first.
 
 ---
 
