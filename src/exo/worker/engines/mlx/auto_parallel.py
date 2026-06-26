@@ -837,7 +837,7 @@ class ShardedMoE(CustomMlxLayer):
         super().__init__(layer)
         self.sharding_group: mx.distributed.Group | None = None
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: mx.array, *args, **kwargs) -> mx.array:
         if self.sharding_group is not None:
             x = sum_gradients(self.sharding_group)(x)
         if _MINIMAX_NOOP_MOE:
@@ -847,7 +847,7 @@ class ShardedMoE(CustomMlxLayer):
             # MoE section's contribution to per-token decode time.
             y = mx.zeros(x.shape, dtype=x.dtype)
         else:
-            y = self.original_layer.__call__(x)
+            y = self.original_layer.__call__(x, *args, **kwargs)
         if self.sharding_group is not None:
             with _minimax_span("moe.all_sum"):
                 if _MINIMAX_NOOP_ALLSUM:
