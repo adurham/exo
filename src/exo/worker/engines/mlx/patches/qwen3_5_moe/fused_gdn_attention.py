@@ -103,8 +103,18 @@ def _fused_gdn_call(
     """
     B, S, _ = inputs.shape
 
-    # Vanilla fallback: fused kernels are decode-only (S=1, B<=8)
+    # Vanilla fallback: fused kernels are decode-only (S=1, B<=8).
     if S > 1 or B > 8:
+        return _vanilla_gdn_call(self, inputs, mask, cache)
+
+    # Vanilla fallback if the fused weight-prep didn't run. _merged_proj_w
+    # is set by _patch_gdn_proj_weights (qwen3_5_moe/common.py:243) on
+    # layer.is_linear GDN modules. On models tagged qwen3_5_moe whose
+    # layers don't set is_linear the same way (e.g. Qwen3.6), the prep
+    # never runs and _merged_proj_w is absent -> the fused call would
+    # crash with "'GatedDeltaNet' object has no attribute '_merged_proj_w'".
+    # Fall back to vanilla instead of crashing.
+    if not hasattr(self, "_merged_proj_w"):
         return _vanilla_gdn_call(self, inputs, mask, cache)
 
     from mlx_lm.models.gated_delta import gated_delta_kernel

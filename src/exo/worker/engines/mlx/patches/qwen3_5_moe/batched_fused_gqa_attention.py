@@ -62,6 +62,38 @@ def _batched_fused_gqa_call(
         output = output.transpose(0, 2, 1, 3).reshape(B, S, -1)
         return self.o_proj(output * mx.sigmoid(gate))
 
+    # Vanilla fallback if the fused weight-prep didn't run (same guard as
+    # fused_gdn_attention.py: _merged_proj_w is set by _patch_gqa_proj_weights
+    # on Qwen3.5 layers; absent on Qwen3.6-tagged models where the prep path
+    # doesn't fire. Fall back instead of crashing on _merged_proj_w access.)
+    if not hasattr(self, "_merged_proj_w"):
+        q_proj_output = self.q_proj(x)
+        queries, gate = mx.split(
+            q_proj_output.reshape(B, S, self.num_attention_heads, -1), 2, axis=-1
+        )
+        gate = gate.reshape(B, S, -1)
+        keys, values = self.k_proj(x), self.v_proj(x)
+        queries = self.q_norm(queries).transpose(0, 2, 1, 3)
+        keys = self.k_norm(
+            keys.reshape(B, S, self.num_key_value_heads, -1)
+        ).transpose(0, 2, 1, 3)
+        values = values.reshape(B, S, self.num_key_value_heads, -1).transpose(
+            0, 2, 1, 3
+        )
+        if cache is not None:
+            queries = self.rope(queries, offset=cache.offset)
+            keys = self.rope(keys, offset=cache.offset)
+            keys, values = cache.update_and_fetch(keys, values)
+        else:
+            queries = self.rope(queries)
+            keys = self.rope(keys)
+        from mlx_lm.models.qwen3_next import scaled_dot_product_attention
+        output = scaled_dot_product_attention(
+            queries, keys, values, cache=cache, scale=self.scale, mask=mask
+        )
+        output = output.transpose(0, 2, 1, 3).reshape(B, S, -1)
+        return self.o_proj(output * mx.sigmoid(gate))
+
     H_q = self.num_attention_heads
     H_kv = self.num_key_value_heads
     D = self.head_dim
