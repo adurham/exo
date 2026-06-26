@@ -86,12 +86,6 @@ def maybe_apply_patches(model: nn.Module, model_path: Path) -> None:
         logger.info("Detected Qwen3.5 MoE model, applying batched fused kernel patches")
         apply_qwen35_batched_fused_patches(model)
 
-    elif model_type == "deepseek_v4":
-        from .deepseek_v4_moe import apply_dsv4_moe_patches
-
-        logger.info("Detected DeepSeek V4 model, applying MoE switch_mlp fusion patch")
-        apply_dsv4_moe_patches(model)
-
     elif model_type == "qwen3_5":
         from .qwen3_5.lpb_patch import apply_lpb_patches
 

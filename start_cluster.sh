@@ -880,6 +880,7 @@ for NODE in "${NODES[@]}"; do
     # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
     # while we validate decode quality vs unfused.
     [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
+    [ -n "${EXO_DSV4_MOE_FUSED_GATE_UP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_FUSED_GATE_UP=$EXO_DSV4_MOE_FUSED_GATE_UP"
     [ -n "${EXO_DSV4_COMPILE_FFN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_FFN=$EXO_DSV4_COMPILE_FFN"
     [ -n "${EXO_DSV4_COMPILE_LAYER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_LAYER=$EXO_DSV4_COMPILE_LAYER"
     [ -n "${EXO_DSV4_FENCE_EVERY_N_LAYERS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_EVERY_N_LAYERS=$EXO_DSV4_FENCE_EVERY_N_LAYERS"

@@ -917,6 +917,23 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             self.sharded_to_all_linear_in_place(layer.ffn.switch_mlp.down_proj)
             self.all_to_sharded_linear_in_place(layer.ffn.switch_mlp.up_proj)
 
+            # DSv4 MoE gate+up fusion (env-gated EXO_DSV4_MOE_FUSED_GATE_UP=1).
+            # Concatenate the (post-shard) gate_proj + up_proj weights so the
+            # routed-expert path uses one gather_qmm instead of two. Sharding-
+            # aware via _install_fused_gate_up (accesses gp['weight'] on the
+            # sharded wrapper). Bit-equivalent math. NOTE: a prior DSv4-specific
+            # fusion (FusedDeepseekV4SwitchGLU) was removed 2026-06-18 for B>1
+            # batch-mis-specialization degeneration; this uses the generic
+            # FusedSwitchGLU (Qwen's path) and is A/B-tested at B>1 before trust.
+            if os.environ.get("EXO_DSV4_MOE_FUSED_GATE_UP", "0") == "1":
+                try:
+                    _install_fused_gate_up(layer.ffn.switch_mlp)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"DSv4 MoE gate+up fusion failed on layer {i}: {e}; "
+                        f"keeping vanilla 3-dispatch switch_mlp."
+                    )
+
             # DSv4 MoE/layer fusion + mx.compile install REMOVED 2026-06-18
             # (batch-mis-specialization → BS>1 degeneration; see module header).
 
@@ -939,6 +956,15 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.gate_proj)
             self.sharded_to_all_linear_in_place(mtp.ffn.switch_mlp.down_proj)
             self.all_to_sharded_linear_in_place(mtp.ffn.switch_mlp.up_proj)
+
+            if os.environ.get("EXO_DSV4_MOE_FUSED_GATE_UP", "0") == "1":
+                try:
+                    _install_fused_gate_up(mtp.ffn.switch_mlp)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"DSv4 MoE gate+up fusion failed on MTP block {j}: {e}; "
+                        f"keeping vanilla 3-dispatch switch_mlp."
+                    )
 
             # DSv4 MoE fusion + mx.compile install REMOVED 2026-06-18
             # (batch-mis-specialization → BS>1 degeneration; see module header).
