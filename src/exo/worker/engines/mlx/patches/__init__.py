@@ -51,34 +51,6 @@ def _qwen35_moe_patches_supported(model: nn.Module) -> tuple[bool, str]:
             return False, "shared expert is not quantized"
         if bits != 8:
             return False, f"shared expert is {bits}-bit (patches require 8-bit)"
-
-        # Also probe the attention architecture. The fused-GDN patch
-        # (_patch_gdn_proj_weights, qwen3_5_moe/common.py:243) merges 4
-        # separate GDN projections (in_proj_qkv / in_proj_z / in_proj_b /
-        # in_proj_a) into _merged_proj_w. Qwen3.6's config reports
-        # model_type='qwen3_5_moe' (same tag) but its GatedDeltaNet uses a
-        # different projection layout — the 4 in_proj_* attributes are
-        # absent, _patch_gdn_proj_weights silently leaves _merged_proj_w
-        # unset, and the fused-GDN decode call crashes with
-        # "'GatedDeltaNet' object has no attribute '_merged_proj_w'".
-        # Guard: require a linear-attn layer whose GDN exposes all 4.
-        gdn_ok = False
-        for la in layers:
-            if not getattr(la, "is_linear", False):
-                continue
-            gdn = getattr(la, "linear_attn", None)
-            if gdn is None:
-                continue
-            if all(hasattr(gdn, a) for a in
-                   ("in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a")):
-                gdn_ok = True
-                break
-        if not gdn_ok:
-            return (False,
-                    "no linear-attn GDN with the 4 in_proj_{qkv,z,b,a} "
-                    "projections the fused-GDN patch expects (model is "
-                    "tagged qwen3_5_moe but the GDN architecture differs — "
-                    "e.g. Qwen3.6). Skipping fused patches; vanilla MLX path.")
         return True, ""
 
     return False, "no MoE layers found in model"
@@ -101,6 +73,27 @@ def maybe_apply_patches(model: nn.Module, model_path: Path) -> None:
     model_type = config.get("model_type", "")
 
     if model_type == "qwen3_5_moe":
+        # Qwen3.6 guard: Qwen3.6's config is tagged model_type='qwen3_5_moe'
+        # (same top-level tag as Qwen3.5) but its text_config.model_type is
+        # 'qwen3_5_moe_text' and its layer structure differs (num_experts=256,
+        # mixed linear/full layer_types). The Qwen3.5 fused patches (GDN
+        # attention + GQA + batched-oproj MoE) were built for Qwen3.5's
+        # specific structure — on Qwen3.6 the weight-prep silently doesn't
+        # set the attributes the patched __call__s expect, crashing at
+        # warmup with missing _merged_proj_w / _oproj_M / etc. The per-attr
+        # call-site fallbacks are whack-a-mole (4+ sites). Skip the whole
+        # branch for Qwen3.6 -> vanilla MLX path. Qwen3.6 needs its own
+        # patch set (future work).
+        text_cfg = config.get("text_config") or {}
+        text_model_type = text_cfg.get("model_type", "")
+        if text_model_type == "qwen3_5_moe_text":
+            logger.info(
+                "Detected Qwen3.6 (text_config.model_type=qwen3_5_moe_text) — "
+                "skipping Qwen3.5 fused patches (incompatible architecture). "
+                "Vanilla MLX path."
+            )
+            return
+
         supported, reason = _qwen35_moe_patches_supported(model)
         if not supported:
             logger.warning(
