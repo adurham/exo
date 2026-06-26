@@ -36,7 +36,6 @@ from collections import deque
 from typing import Any, BinaryIO, Optional, Sequence, cast
 
 import mlx.core as mx
-import numpy as np
 
 from mlx_lm.models.cache import (
     BatchRotatingKVCache,
@@ -88,36 +87,6 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
     if isinstance(cache_obj, BatchRotatingKVCache) and not isinstance(
         cache_obj, PerStreamBatchRotatingKVCache
     ):
-        # Diagnostic: dump the base ring buffer state BEFORE the swap so we can
-        # see which positions it actually holds (newest at tail? oldest at head?
-        # what width?). Gated by EXO_DSV4_SWAP_DIAG=1. Writes one line per
-        # upgraded cache to /tmp/dsv4_swap_diag_pid<PID>.log.
-        if os.environ.get("EXO_DSV4_SWAP_DIAG") == "1":
-            try:
-                import hashlib as _hl, time as _t
-                _diag_path = f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log"
-                with open(_diag_path, "a") as _f:
-                    _f.write(f"=== {_t.strftime('%H:%M:%S')} swap diag ===\n")
-                    _f.write(f"  rotated={getattr(cache_obj, 'rotated', None)}\n")
-                    _f.write(f"  _offset={getattr(cache_obj, '_offset', None)}\n")
-                    _f.write(f"  _idx={getattr(cache_obj, '_idx', None)}\n")
-                    _f.write(f"  max_size={cache_obj.max_size}\n")
-                    _f.write(f"  offset={cache_obj.offset}\n")
-                    _k = getattr(cache_obj, "keys", None)
-                    if _k is not None:
-                        mx.eval(_k)
-                        _f.write(f"  keys.shape={_k.shape}\n")
-                        _f.write(f"  keys.dtype={_k.dtype}\n")
-                        # hash first 4 and last 4 rows of batch 0 head 0
-                        _np = np.asarray(_k[0, 0])
-                        _h_first = _hl.md5(_np[:4].tobytes()).hexdigest()[:12]
-                        _h_last = _hl.md5(_np[-4:].tobytes()).hexdigest()[:12]
-                        _f.write(f"  keys[0,0] head4 hash={_h_first} tail4 hash={_h_last}\n")
-                        _f.write(f"  keys[0,0] head4 sum={float(_np[:4].sum()):.3f} tail4 sum={float(_np[-4:].sum()):.3f}\n")
-                    else:
-                        _f.write("  keys=None\n")
-            except Exception as _e:  # noqa: BLE001
-                pass
         # Before swapping the class pointer, normalize the base ring buffer
         # into temporal (un-rotated) order so the per-stream subclass — which
         # treats the physical buffer as a contiguous ring indexed by logical
@@ -136,29 +105,6 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
         # consistent values (rather than the lazy-fallback that mistook the
         # physical buffer index for the logical offset).
         cache_obj._bootstrap_per_stream_ring()
-        # Diagnostic: dump the per-stream ring state AFTER bootstrap.
-        if os.environ.get("EXO_DSV4_SWAP_DIAG") == "1":
-            try:
-                import hashlib as _hl, time as _t
-                _diag_path = f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log"
-                with open(_diag_path, "a") as _f:
-                    _f.write(f"  --- after bootstrap ---\n")
-                    _f.write(f"  offset={cache_obj.offset}\n")
-                    _f.write(f"  _idx={cache_obj._idx}\n")
-                    _f.write(f"  _offset={cache_obj._offset}\n")
-                    _f.write(f"  rotated={cache_obj.rotated}\n")
-                    _k = cache_obj.keys
-                    if _k is not None:
-                        mx.eval(_k)
-                        _f.write(f"  keys.shape={_k.shape}\n")
-                        _np = np.asarray(_k[0, 0])
-                        _h0 = _hl.md5(_np[:4].tobytes()).hexdigest()[:12]
-                        _hL = _hl.md5(_np[-4:].tobytes()).hexdigest()[:12]
-                        _f.write(f"  ring head4 hash={_h0} tail4 hash={_hL}\n")
-                        _f.write(f"  ring head4 sum={float(_np[:4].sum()):.3f} tail4 sum={float(_np[-4:].sum()):.3f}\n")
-                    _f.write("\n")
-            except Exception:
-                pass
 
 logger = logging.getLogger(__name__)
 
@@ -1245,7 +1191,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         n_accepted_per: Sequence[int],
         bonus_vals: Sequence[int],
         all_tokens_per: Sequence[Sequence[tuple[int, Any]]],
-        verify_logits: Optional[mx.array] = None,
     ) -> None:
         """Write one JSONL record per spec cycle (rank 0 only).
 
@@ -1296,40 +1241,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             "verify_input": vi,     # (N, gamma+1)
             "offsets": self._spec_trace_offsets(gen_batch),
         }
-        # Verify-logit diagnostics (EXO_DSV4_SPEC_LOGIT_DUMP=1). Forces eval
-        # of the full (N, gamma+1, vocab) tensor — opt-in, off by default.
-        # Captures per-stream per-position: argmax, top-5 (id, logit), max,
-        # min, mean, has_nan, has_inf, and the logit at the bonus position.
-        # Distinguishes numerical-collapse (NaN/Inf or all-equal logits) from
-        # mask/state-collapse (clean confident wrong argmax) at high context.
-        if os.environ.get("EXO_DSV4_SPEC_LOGIT_DUMP") == "1" and verify_logits is not None:
-            try:
-                vl = mx.array(verify_logits)  # (N, gamma+1, vocab)
-                N = vl.shape[0]
-                L = vl.shape[1]
-                mx.eval(vl)
-                vl_np = np.asarray(vl)  # may be bf16->float
-                logit_dump: list[list[dict[str, Any]]] = []
-                for n in range(N):
-                    row: list[dict[str, Any]] = []
-                    for i in range(L):
-                        v = vl_np[n, i]
-                        am = int(np.argmax(v))
-                        top5_idx = np.argsort(v)[-5:][::-1]
-                        row.append({
-                            "argmax": am,
-                            "argmax_logit": float(v[am]),
-                            "top5": [[int(t), float(v[t])] for t in top5_idx],
-                            "max": float(v.max()),
-                            "min": float(v.min()),
-                            "mean": float(v.mean()),
-                            "has_nan": bool(np.isnan(v).any()),
-                            "has_inf": bool(np.isinf(v).any()),
-                        })
-                    logit_dump.append(row)
-                rec["verify_logits"] = logit_dump
-            except Exception as e:  # noqa: BLE001
-                rec["verify_logits_error"] = str(e)
         self._spec_trace_handle.write(
             (_json.dumps(rec, default=str) + "\n").encode("utf-8")
         )
@@ -1695,34 +1606,31 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             and len(self._prompt_batch) == 0
             and len(self._unprocessed_sequences) == 0
         )
-        # C≥2 high-context MTP degeneration gate (2026-06-23). The MTP verify
-        # path (L=γ+1, B≥2) degenerates into repetition loops at high context
-        # (200K+): period-1 single-token cycles (" the" looping) that the
-        # freq/rep penalties cannot dislodge at temp=0. The non-spec decode
-        # path (L=1, B≥2) is correct at all context lengths. MTP is a
-        # throughput optimization (decode only, ~10% at 100K); it does NOT
-        # affect prefill throughput. Disabling spec at c≥2 high context
-        # preserves the 200 t/s PREFILL floor while fixing decode quality.
-        # The threshold defaults to 150K (below the 200K where degeneration
-        # was confirmed; 100K c=2 MTP-on passes clean). Override via
-        # EXO_DSV4_MTP_C2_MAX_CTX (0 = ALWAYS disable spec for c≥2).
+        # C≥2 high-context MTP degeneration gate REMOVED (2026-06-24). The
+        # degeneration root cause — _bootstrap_per_stream_ring rebasing the
+        # absolute position via self._offset (ring cursor) instead of
+        # self.offset (logical position) — is fixed (mlx-lm 48a4a3c). MTP-on
+        # at c≥2 high context now produces clean quality through 500K
+        # (verified: b2 200K/300K/500K all_needles=True). The gate that
+        # disabled spec at c≥2 high context (EXO_DSV4_MTP_C2_MAX_CTX) is no
+        # longer needed; removing it so MTP-on is the default at c≥2. The
+        # env var is still read for backward-compat safety but no longer has
+        # a default-threshold effect (set to 0 to re-disable if a regression
+        # ever surfaces).
         if spec_eligible and len(gen_batch) >= 2:
-            _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "150000"))
+            _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "0"))
             if _c2_max == 0:
-                # 0 = always disable spec for c≥2 (quality-safe)
-                spec_eligible = False
+                # 0 = no gate (default now that the root cause is fixed).
+                # Kept as an explicit opt-in so a future regression can be
+                # bandaged by setting a real threshold without a code change.
+                pass
             else:
                 _max_ctx = 0
                 for _c in gen_batch.prompt_cache:
-                    # prompt_cache entries may be CacheList (wrap multiple
-                    # sub-caches) or bare caches. Walk into CacheList to find
-                    # the RotatingKVCache / PoolingCache offset.
                     _subs = _c.caches if hasattr(_c, "caches") else [_c]
                     for _sub in _subs:
                         try:
                             _off = _sub.offset
-                            # Batch caches return a per-stream tensor; scalar
-                            # caches return an int. Take the max across streams.
                             if hasattr(_off, "shape"):
                                 _off = int(mx.max(_off))
                             else:
@@ -2364,7 +2272,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 n_accepted_per,
                 bonus_vals,
                 all_tokens_per,
-                verify_logits,
             )
 
         if prof is not None:
