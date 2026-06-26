@@ -59,19 +59,24 @@ def apply_dsv4_moe_patches(model) -> None:
     Walks both the main decoder blocks (layers[i].ffn.switch_mlp) and the
     MTP module's body blocks (mtp.layers[j].ffn.switch_mlp) so the fused
     path is used consistently in decode and in the MTP draft/verify path.
+
+    Robust to the model being either the full wrapper (has
+    ``.language_model.model.layers``) or the inner model (has ``.layers``)
+    — the distributed shard_and_load path returns the inner model after
+    tensor_auto_parallel, while the single-device load path passes the
+    full wrapper.
     """
-    try:
-        lm = model.language_model  # type: ignore[attr-defined]
-    except AttributeError:
-        logger.warning("DSv4 MoE patch: model has no language_model; skipping")
-        return
-    body = getattr(lm, "model", None)
-    if body is None:
-        logger.warning("DSv4 MoE patch: language_model has no .model; skipping")
-        return
-    layers = getattr(body, "layers", None)
+    layers = None
+    lm = getattr(model, "language_model", None)
+    if lm is not None:
+        body = getattr(lm, "model", None)
+        if body is not None:
+            layers = getattr(body, "layers", None)
     if layers is None:
-        logger.warning("DSv4 MoE patch: model.layers not found; skipping")
+        # Inner-model form (post-shard): model.layers directly.
+        layers = getattr(model, "layers", None)
+    if layers is None:
+        logger.warning("DSv4 MoE patch: no .layers found; skipping")
         return
 
     promoted = 0
@@ -85,8 +90,13 @@ def apply_dsv4_moe_patches(model) -> None:
         else:
             skipped += 1
 
-    # MTP module body blocks (same DeepseekV4MoE structure).
-    mtp = getattr(lm, "mtp", None) or getattr(body, "mtp", None)
+    # MTP module body blocks (same DeepseekV4MoE structure). The MTP
+    # module hangs off the inner model (body.mtp) or the language model.
+    mtp = None
+    if lm is not None:
+        mtp = getattr(lm, "mtp", None) or getattr(getattr(lm, "model", None), "mtp", None)
+    if mtp is None:
+        mtp = getattr(model, "mtp", None)
     if mtp is not None:
         mtp_layers = getattr(mtp, "layers", None)
         if mtp_layers is not None:

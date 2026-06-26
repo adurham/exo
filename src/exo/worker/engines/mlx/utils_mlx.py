@@ -361,6 +361,22 @@ def shard_and_load(
     # TODO: Do we need this?
     mx.eval(model)
 
+    # Apply model-type kernel-fusion patches (MoE switch_mlp gate+up fusion
+    # for DSv4, batched fused kernels for Qwen3.5 MoE, etc.) AFTER sharding
+    # so any fused-weight buffers the patches build (e.g. BatchedSwitchGLU's
+    # concatenated gate+up) are constructed from the sharded weights. The
+    # single-device load path calls maybe_apply_patches in load_mlx_items;
+    # the distributed path previously did NOT, so no patches applied on TP
+    # clusters (a pre-existing gap). Apply to the inner model form returned
+    # by tensor_auto_parallel — maybe_apply_patches / apply_dsv4_moe_patches
+    # handle both wrapper and inner-model layouts.
+    try:
+        from exo.worker.engines.mlx.patches import maybe_apply_patches
+
+        maybe_apply_patches(model, model_path)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"maybe_apply_patches failed on distributed path: {e}")
+
     # Convert bf16 → fp16 for Qwen3.5 MoE if COMPUTE_DTYPE is fp16
     config_path = model_path / "config.json"
     if config_path.exists():
