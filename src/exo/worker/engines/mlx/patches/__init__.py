@@ -51,6 +51,34 @@ def _qwen35_moe_patches_supported(model: nn.Module) -> tuple[bool, str]:
             return False, "shared expert is not quantized"
         if bits != 8:
             return False, f"shared expert is {bits}-bit (patches require 8-bit)"
+
+        # Also probe the attention architecture. The fused-GDN patch
+        # (_patch_gdn_proj_weights, qwen3_5_moe/common.py:243) merges 4
+        # separate GDN projections (in_proj_qkv / in_proj_z / in_proj_b /
+        # in_proj_a) into _merged_proj_w. Qwen3.6's config reports
+        # model_type='qwen3_5_moe' (same tag) but its GatedDeltaNet uses a
+        # different projection layout — the 4 in_proj_* attributes are
+        # absent, _patch_gdn_proj_weights silently leaves _merged_proj_w
+        # unset, and the fused-GDN decode call crashes with
+        # "'GatedDeltaNet' object has no attribute '_merged_proj_w'".
+        # Guard: require a linear-attn layer whose GDN exposes all 4.
+        gdn_ok = False
+        for la in layers:
+            if not getattr(la, "is_linear", False):
+                continue
+            gdn = getattr(la, "linear_attn", None)
+            if gdn is None:
+                continue
+            if all(hasattr(gdn, a) for a in
+                   ("in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a")):
+                gdn_ok = True
+                break
+        if not gdn_ok:
+            return (False,
+                    "no linear-attn GDN with the 4 in_proj_{qkv,z,b,a} "
+                    "projections the fused-GDN patch expects (model is "
+                    "tagged qwen3_5_moe but the GDN architecture differs — "
+                    "e.g. Qwen3.6). Skipping fused patches; vanilla MLX path.")
         return True, ""
 
     return False, "no MoE layers found in model"
