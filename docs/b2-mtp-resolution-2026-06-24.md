@@ -157,3 +157,51 @@ is a **measurement artifact** of `decode_tps = generation_tokens /
 (total_s - ttft)` with `--max-tokens 256` over a huge prefill TTFT —
 not a real compute stall. Don't quote those decode t/s numbers as real
 throughput.
+
+---
+
+## Post-seq-split tuning sweep (2026-06-26)
+
+After the seq-split fix, swept the two no-quality-loss prefill knobs
+(`EXO_PREFILL_STEP_SIZE`, `MLX_MAX_MB_PER_BUFFER`) at B=2 100K to check
+whether seq-split shifted their optima. Method: small empirical probes,
+not a full 9-cell matrix — one probe per axis, runner-log prefill
+aggregate as the source of truth (the probe's `agg` field double-counts;
+trust the `Batched prefill: B=2 max_L=X done in Ys (Z tok/s aggregate)`
+log line).
+
+| step | max_mb | prefill t/s | vs baseline |
+|------|--------|-------------|-------------|
+| 128  | 200    | 367.1       | baseline    |
+| 128  | 400    | 371.8       | +1.3%       |
+| 256  | 200    | 302.2       | **−18%**    |
+
+**`MLX_MAX_MB_PER_BUFFER`: settled at 200.** Raising to 400 gives +1.3%
+(within noise). 200 is the **load-bearing** value — it's where the
+GPU-scheduler bimodal/stutter was fixed (breakthrough doc §"max_mb_per_buffer",
+50→200 eliminated a 3-MoE-gather_qmm timing race). Cranking to 400 moves
+the flush cadence back toward the big-stall regime and trades steady-state
+throughput against TTFT and transient peak memory for ~1% — not worth
+perturbing a known-good scheduler fix.
+
+**`EXO_PREFILL_STEP_SIZE`: settled at 128.** 256 is 18% slower — bigger
+chunks cost more per-chunk compute than they save in overhead; the
+bottleneck is per-chunk compute, not chunk-count overhead, so "fewer
+bigger chunks" is the wrong direction. Agrees with prior findings
+(fork-notes.md: the old default 256 → 128 was wall −38%; the sweet spot
+is narrow — 128 ✓, 256 ✓ but slower, 512/64 ✗ **quality broken**).
+128 is both the speed and quality optimum.
+
+**Conclusion:** the verified config (step=128, max_mb=200) is already
+optimal post-seq-split. seq-split parallelizes the query GEMM regardless
+of step size, so it doesn't shift the step-size optimum. No changes, no
+commits. Sweep done in 2 probes.
+
+### Note: the m4-1 silent-crash episode
+
+During the sweep attempt, m4-1 started silently dying mid-prefill (no
+traceback, no crash report, no OOM) on configs that had passed earlier
+the same day — including the pre-cleanup commit `3fdb6ac0` that passed
+the 500K needle test. Definitively **not a code regression** (same code
+passed before and after a reboot). Cleared by a reboot. Recorded as
+environmental on m4-1, not a code issue.
