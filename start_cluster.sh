@@ -60,6 +60,11 @@
 # Defaults: high-ctx unset => fixed step (unchanged behavior). Set both to enable.
 : "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:=}"
 : "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=}"
+# DSv4-Flash seq-split (all_gather batch-safe fix, mlx-lm 8a9cdee).
+# Default ON — verified clean quality + throughput at B=2 100K-500K
+# (docs/b2-mtp-resolution-2026-06-24.md). Without it, B>1 concurrent
+# prefill scrambles streams via the rank-major all_gather reshape.
+: "${EXO_DSV4_SEQ_SPLIT:=1}"
 # Batched prefill across all queued tasks. Default ON 2026-05-08 after Phase 5
 # cluster validation: c=2 100K MTP=0 went from 7.7 → 13.0 tok/s/stream (+69%)
 # with both streams symmetric (no serialization tax remaining). c=1 path falls
@@ -1331,15 +1336,16 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
 fi
 
 # ── Auto-place Qwen3.6-35B-A3B with RDMA (co-hosted alongside DSv4) ──
-# DISABLED BY DEFAULT (2026-06-20). Co-hosting Qwen3.6 (~17.5GB/node) alongside
-# DSv4-Flash (~78GB/node) left only ~21GB/node headroom, which pushed the box
-# into sustained memory-compression and made every memory reading look alarming.
-# DSv4 now runs SOLO by default so it has the full box for context + working set.
-# Load Qwen on-demand instead (via the exo UI / API) when you actually need the
-# aux model. Set QWEN36_ENABLED=1 to restore co-hosting at launch.
+# DEFAULT ON (2026-06-26). Co-hosts Qwen3.6 (~17.5GB/node) alongside
+# DSv4-Flash (~78GB/node) — leaves ~21GB/node headroom (tight but workable
+# for the aux/image-model workload Qwen3.6 serves). The fused-GDN guard
+# (patches/__init__.py:86dad09f) now auto-skips the Qwen3.5 fused patches
+# on Qwen3.6 (tagged qwen3_5_moe but architecturally different GDN) instead
+# of crashing at warmup, so co-hosting loads clean on the vanilla MLX path.
+# Set QWEN36_ENABLED=0 to keep DSv4 solo (full box for context/working set).
 # Qwen3.6 ships MTP weights, so self-speculation is auto-enabled per-instance
 # (independent of EXO_SPECULATIVE, which is the DSv4 knob).
-if [ "${QWEN36_ENABLED:-0}" = "1" ]; then
+if [ "${QWEN36_ENABLED:-1}" = "1" ]; then
     echo ""
     echo "Auto-placing Qwen3.6 ($QWEN36_MODEL_ID) across both Studios via RDMA..."
 
