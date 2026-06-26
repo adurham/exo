@@ -36,6 +36,7 @@ from collections import deque
 from typing import Any, BinaryIO, Optional, Sequence, cast
 
 import mlx.core as mx
+import numpy as np
 
 from mlx_lm.models.cache import (
     BatchRotatingKVCache,
@@ -1191,6 +1192,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         n_accepted_per: Sequence[int],
         bonus_vals: Sequence[int],
         all_tokens_per: Sequence[Sequence[tuple[int, Any]]],
+        verify_logits: Optional[mx.array] = None,
     ) -> None:
         """Write one JSONL record per spec cycle (rank 0 only).
 
@@ -1241,6 +1243,40 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             "verify_input": vi,     # (N, gamma+1)
             "offsets": self._spec_trace_offsets(gen_batch),
         }
+        # Verify-logit diagnostics (EXO_DSV4_SPEC_LOGIT_DUMP=1). Forces eval
+        # of the full (N, gamma+1, vocab) tensor — opt-in, off by default.
+        # Captures per-stream per-position: argmax, top-5 (id, logit), max,
+        # min, mean, has_nan, has_inf, and the logit at the bonus position.
+        # Distinguishes numerical-collapse (NaN/Inf or all-equal logits) from
+        # mask/state-collapse (clean confident wrong argmax) at high context.
+        if os.environ.get("EXO_DSV4_SPEC_LOGIT_DUMP") == "1" and verify_logits is not None:
+            try:
+                vl = mx.array(verify_logits)  # (N, gamma+1, vocab)
+                N = vl.shape[0]
+                L = vl.shape[1]
+                mx.eval(vl)
+                vl_np = np.asarray(vl)  # may be bf16->float
+                logit_dump: list[list[dict[str, Any]]] = []
+                for n in range(N):
+                    row: list[dict[str, Any]] = []
+                    for i in range(L):
+                        v = vl_np[n, i]
+                        am = int(np.argmax(v))
+                        top5_idx = np.argsort(v)[-5:][::-1]
+                        row.append({
+                            "argmax": am,
+                            "argmax_logit": float(v[am]),
+                            "top5": [[int(t), float(v[t])] for t in top5_idx],
+                            "max": float(v.max()),
+                            "min": float(v.min()),
+                            "mean": float(v.mean()),
+                            "has_nan": bool(np.isnan(v).any()),
+                            "has_inf": bool(np.isinf(v).any()),
+                        })
+                    logit_dump.append(row)
+                rec["verify_logits"] = logit_dump
+            except Exception as e:  # noqa: BLE001
+                rec["verify_logits_error"] = str(e)
         self._spec_trace_handle.write(
             (_json.dumps(rec, default=str) + "\n").encode("utf-8")
         )
@@ -2275,6 +2311,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 n_accepted_per,
                 bonus_vals,
                 all_tokens_per,
+                verify_logits,
             )
 
         if prof is not None:
