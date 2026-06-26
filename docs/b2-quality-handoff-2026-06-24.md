@@ -1,5 +1,15 @@
 # B=2 Concurrent Prefill Quality Fix — Handoff
 
+> **RESOLVED 2026-06-24.** The B=2 quality bug described below was fixed.
+> The root cause was NOT the OPT-12 cache merge/extract theory this doc
+> originally pursued — it was **seq-split all_gather batch-unsafe
+> reconstruction** (mlx-lm `8a9cdee`) AND a separate **MTP bootstrap
+> offset rebase** bug (mlx-lm `48a4a3c`). See
+> `docs/b2-mtp-resolution-2026-06-24.md` for the full resolution, the
+> verified B=2 100K→500K sweep, and the commit map. The content below is
+> kept as historical record of the investigation that ruled out the
+> cache-merge/extract path.
+
 **Date:** 2026-06-24
 **Context:** Continuing from the prefill throughput breakthrough session. All throughput fixes are deployed and working. The remaining issue is B=2 decode quality after batched prefill.
 

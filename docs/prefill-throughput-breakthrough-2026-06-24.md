@@ -1,5 +1,16 @@
 # DSv4-Flash Prefill Throughput Breakthrough — 200 t/s Floor at c=1 AND c=2
 
+> **Update 2026-06-24:** The c=2 B=2 throughput numbers in this doc were
+> measured with seq-split ON but **before the seq-split all_gather
+> batch-unsafe bug was found and fixed** (mlx-lm `8a9cdee`). That bug
+> corrupted one stream's quality at B≥2 (see
+> `docs/b2-mtp-resolution-2026-06-24.md`). After the fix, B=2 prefill is
+> both clean-quality AND faster (367/353/340/318 t/s aggregate at
+> 100K/200K/300K/500K, beating the 317 measured here). The optimizations
+> below remain correct and deployed; this note just flags that the c=2
+> throughput was previously accompanied by a silent quality regression
+> that's now fixed.
+
 **Date:** 2026-06-23/24
 **Cluster:** 2× Mac Studio M4 Max (128 GB each), RDMA over Thunderbolt 5, exo tensor-parallel
 **Model:** mlx-community/DeepSeek-V4-Flash (MoE + sparse-pooled attention)
