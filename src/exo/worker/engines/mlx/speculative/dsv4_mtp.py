@@ -88,6 +88,36 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
     if isinstance(cache_obj, BatchRotatingKVCache) and not isinstance(
         cache_obj, PerStreamBatchRotatingKVCache
     ):
+        # Diagnostic: dump the base ring buffer state BEFORE the swap so we can
+        # see which positions it actually holds (newest at tail? oldest at head?
+        # what width?). Gated by EXO_DSV4_SWAP_DIAG=1. Writes one line per
+        # upgraded cache to /tmp/dsv4_swap_diag_pid<PID>.log.
+        if os.environ.get("EXO_DSV4_SWAP_DIAG") == "1":
+            try:
+                import hashlib as _hl, time as _t
+                _diag_path = f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log"
+                with open(_diag_path, "a") as _f:
+                    _f.write(f"=== {_t.strftime('%H:%M:%S')} swap diag ===\n")
+                    _f.write(f"  rotated={getattr(cache_obj, 'rotated', None)}\n")
+                    _f.write(f"  _offset={getattr(cache_obj, '_offset', None)}\n")
+                    _f.write(f"  _idx={getattr(cache_obj, '_idx', None)}\n")
+                    _f.write(f"  max_size={cache_obj.max_size}\n")
+                    _f.write(f"  offset={cache_obj.offset}\n")
+                    _k = getattr(cache_obj, "keys", None)
+                    if _k is not None:
+                        mx.eval(_k)
+                        _f.write(f"  keys.shape={_k.shape}\n")
+                        _f.write(f"  keys.dtype={_k.dtype}\n")
+                        # hash first 4 and last 4 rows of batch 0 head 0
+                        _np = np.asarray(_k[0, 0])
+                        _h_first = _hl.md5(_np[:4].tobytes()).hexdigest()[:12]
+                        _h_last = _hl.md5(_np[-4:].tobytes()).hexdigest()[:12]
+                        _f.write(f"  keys[0,0] head4 hash={_h_first} tail4 hash={_h_last}\n")
+                        _f.write(f"  keys[0,0] head4 sum={float(_np[:4].sum()):.3f} tail4 sum={float(_np[-4:].sum()):.3f}\n")
+                    else:
+                        _f.write("  keys=None\n")
+            except Exception as _e:  # noqa: BLE001
+                pass
         # Before swapping the class pointer, normalize the base ring buffer
         # into temporal (un-rotated) order so the per-stream subclass — which
         # treats the physical buffer as a contiguous ring indexed by logical
@@ -106,6 +136,29 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
         # consistent values (rather than the lazy-fallback that mistook the
         # physical buffer index for the logical offset).
         cache_obj._bootstrap_per_stream_ring()
+        # Diagnostic: dump the per-stream ring state AFTER bootstrap.
+        if os.environ.get("EXO_DSV4_SWAP_DIAG") == "1":
+            try:
+                import hashlib as _hl, time as _t
+                _diag_path = f"/tmp/dsv4_swap_diag_pid{os.getpid()}.log"
+                with open(_diag_path, "a") as _f:
+                    _f.write(f"  --- after bootstrap ---\n")
+                    _f.write(f"  offset={cache_obj.offset}\n")
+                    _f.write(f"  _idx={cache_obj._idx}\n")
+                    _f.write(f"  _offset={cache_obj._offset}\n")
+                    _f.write(f"  rotated={cache_obj.rotated}\n")
+                    _k = cache_obj.keys
+                    if _k is not None:
+                        mx.eval(_k)
+                        _f.write(f"  keys.shape={_k.shape}\n")
+                        _np = np.asarray(_k[0, 0])
+                        _h0 = _hl.md5(_np[:4].tobytes()).hexdigest()[:12]
+                        _hL = _hl.md5(_np[-4:].tobytes()).hexdigest()[:12]
+                        _f.write(f"  ring head4 hash={_h0} tail4 hash={_hL}\n")
+                        _f.write(f"  ring head4 sum={float(_np[:4].sum()):.3f} tail4 sum={float(_np[-4:].sum()):.3f}\n")
+                    _f.write("\n")
+            except Exception:
+                pass
 
 logger = logging.getLogger(__name__)
 
