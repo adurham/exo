@@ -272,9 +272,27 @@ def entrypoint(
         # While the runner hangs in the formatter, the peer rank busy-polls
         # the RDMA collective forever — wedging the entire cluster on what
         # should have been a clean runner-restart cycle.
+        #
+        # ExceptionGroup unwrap: traceback.format_exc() collapses
+        # BaseExceptionGroup sub-exception tracebacks (shows only the group
+        # wrapper, hiding the real generation frame). Recurse into the group
+        # and format each leaf sub-exception's traceback so the actual source
+        # line surfaces. Critical for diagnosing TaskGroup-wrapped generation
+        # crashes (e.g. Qwen3.6 vanilla-path 'dictionary changed size').
+        def _format_with_subexc(exc: BaseException) -> str:
+            tb = "".join(
+                traceback.TracebackException.from_exception(
+                    exc, capture_locals=False
+                ).format(chain=True)
+            )
+            if isinstance(exc, BaseExceptionGroup):
+                for sub in exc.exceptions:
+                    tb += "\n--- sub-exception ---\n" + _format_with_subexc(sub)
+            return tb
+
         logger.warning(
             f"Runner {bound_instance.bound_runner_id} crashed with critical exception {e}\n"
-            f"{traceback.format_exc()}"
+            f"{_format_with_subexc(e)}"
         )
         # Notify the supervisor with the upstream-style RunnerTerminationError.
         # Supervisor (~/repos/exo/src/exo/worker/runner/supervisor.py) catches
