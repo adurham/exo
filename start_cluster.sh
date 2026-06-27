@@ -330,7 +330,7 @@ fi
 # Sampling: Qwen3.6 is thinking-mode by default — upstream thinking
 # recommendation (temp 0.6 / top_p 0.95 / top_k 20 / min_p 0).
 : "${QWEN36_MODEL_ID:=mlx-community/Qwen3.6-35B-A3B-8bit}"
-: "${QWEN36_ENABLED:=0}"
+: "${QWEN36_ENABLED:=1}"
 : "${QWEN36_TEMPERATURE:=0.6}"
 : "${QWEN36_TOP_P:=0.95}"
 : "${QWEN36_TOP_K:=20}"
