@@ -666,9 +666,14 @@ class KVPrefixCache:
             leaf.full_tokens = prompt_tokens
             leaf.prefill_tps = prefill_tps
             leaf.leaf_snapshots = ssm_snapshots
-            leaf.leaf_layer_caches = _extract_non_sliceable_layers(
-                cache, sliceable_mask
-            )
+            # NOTE: do NOT re-deepcopy leaf_layer_caches here. Nothing grew
+            # (new_length == old_depth), so the non-sliceable layer caches
+            # are unchanged — re-extracting them would deepcopy all 44 DSv4
+            # RotatingKVCache layers on EVERY update_kv_cache call, and the
+            # old deepcopies accumulate as Metal-allocator garbage, climbing
+            # to ~128 GB on long multi-turn sessions (the per-turn deepcopy
+            # path the 500K single-prefill test never hit). Keep the existing
+            # leaf_layer_caches; it's the same cache, nothing changed.
             return
 
         old_node = leaf.node
