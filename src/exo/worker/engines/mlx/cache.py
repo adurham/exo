@@ -716,9 +716,17 @@ class KVPrefixCache:
         leaf.full_tokens = prompt_tokens
         leaf.prefill_tps = prefill_tps
         leaf.leaf_snapshots = ssm_snapshots
-        leaf.leaf_layer_caches = _extract_non_sliceable_layers(
-            cache, sliceable_mask
-        )
+        # NOTE: do NOT re-deepcopy leaf_layer_caches on the growth path either.
+        # The suffix went into the trie edge (sliceable layers) / the live cache
+        # object (non-sliceable). The active leaf's leaf_layer_caches is never
+        # read back as a donor while it's the in-flight session (donors are
+        # *other* parked leaves). Re-deepcopying all 44 DSv4 RotatingKVCache
+        # layers here on EVERY growing turn is the second leak site (the first
+        # was the metadata-refresh path at line 669, fixed d5f6c421) — a real
+        # Hermes session grows every turn, so it hits this path and climbs to
+        # ~108GB at 128K tokens. Keep the existing leaf_layer_caches; the
+        # creation-time deepcopy (line 509) and _rebuild_leaf_in_place (748)
+        # cover parked/donor correctness.
         self._access_counter += 1
         leaf.last_used = self._access_counter
 
