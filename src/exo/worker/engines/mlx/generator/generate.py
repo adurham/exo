@@ -754,6 +754,18 @@ def prefill_batched(
             c.state for stream_cache in per_stream_caches for c in stream_cache  # type: ignore
         ])
 
+    # Release the merged batched cache + Metal allocator pool. batched_cache
+    # holds the FULL merged KV (B streams × full_length × hidden) — after
+    # extract() copies per-stream slices into per_stream_caches, the merged
+    # buffer is dead. Without explicit del + clear_cache, it lingers until
+    # function return (Python GC) AND its Metal buffers stay in the
+    # allocator cache pool. Over many successive prefills on a growing leaf
+    # (the Hermes reasoning pattern), this accumulates: +1-2 GB per prefill,
+    # climbing 13->19 GB excess over ~5 min (fact 778). Force-free here.
+    del batched_cache
+    with T("prefill_batched.clear_cache_post_extract"):
+        mx.clear_cache()
+
     elapsed = time.perf_counter() - start_time
     per_stream_tps = [
         (length / elapsed) if elapsed > 0 else 0.0 for length in lengths

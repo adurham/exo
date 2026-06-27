@@ -1716,6 +1716,17 @@ class ExoBatchGenerator:
 
             per_stream_meta.append((uid, task_params, on_generation_token))
 
+        # Release the captured prompt_pre_norm + the _captured dict. The
+        # batched-prefill's final forward captured (N, last_chunk, hidden)
+        # activations for MTP cache prefill above. With all MTP caches now
+        # snapshotted, the capture is dead. Without del + clear, it lingers
+        # in self._mlx_gen._captured across turns — a retained intermediate
+        # that contributes to the prefill working-set accumulation (fact 778).
+        del captured_prompt_pre_norm
+        if hasattr(self._mlx_gen, "_captured"):
+            self._mlx_gen._captured.clear()
+        mx.clear_cache()
+
         # All per-stream MTP caches are now snapshotted. Decode is about to
         # start for every stream simultaneously, so capture ONE shared
         # generation-start wall and assign it to every _active_tasks entry.
