@@ -265,7 +265,7 @@ fi
 # 4 doubles that for headroom (e.g. a couple concurrent tabs / a delegated
 # child) without paying for unshared copies. Was 8 — dropped 2026-06-15 after
 # confirming the cluster never needs that many DSv4 sessions hot.
-: "${DSV4_MAX_PREFIX_SESSIONS:=4}"
+: "${DSV4_MAX_PREFIX_SESSIONS:=1}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
 # DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
