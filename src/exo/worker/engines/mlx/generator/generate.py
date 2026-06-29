@@ -78,6 +78,57 @@ from exo.worker.runner.bootstrap import logger
 REMOTE_PREFILL_MIN_TOKENS = 1000
 
 
+def _heap_census_mx_arrays(top_n: int = 15) -> str:
+    """Live mx.array census via gc: find the largest live arrays and, for each,
+    name a referrer chain so we can identify WHICH Python object holds them.
+    This is the instrument for the DSv4 'active memory pinned at idle, not in
+    any cache' leak. Gated by EXO_DSV4_HEAPCENSUS=1 (off by default — gc.walk
+    is expensive). Read-only; never mutates; never raises.
+    """
+    import gc
+    try:
+        arrays = []
+        total = 0
+        for obj in gc.get_objects():
+            try:
+                if isinstance(obj, mx.array):
+                    nb = obj.nbytes
+                    total += nb
+                    if nb >= 16 * 1024 * 1024:  # only arrays >=16MB matter here
+                        arrays.append((nb, obj))
+            except Exception:
+                continue
+        arrays.sort(key=lambda t: -t[0])
+        lines = [f"live mx.arrays: total={total/1024**3:.2f}GB, big(>=16MB)={len(arrays)}"]
+        for nb, a in arrays[:top_n]:
+            try:
+                shp = getattr(a, "shape", "?")
+                dt = str(getattr(a, "dtype", "?"))
+            except Exception:
+                shp, dt = "?", "?"
+            # name the holders: types of objects that reference this array
+            holders = []
+            try:
+                for r in gc.get_referrers(a):
+                    rt = type(r).__name__
+                    if rt in ("list", "tuple", "dict"):
+                        # one more hop: who holds the container?
+                        for rr in gc.get_referrers(r):
+                            holders.append(f"{type(rr).__name__}.{rt}")
+                            if len(holders) >= 3:
+                                break
+                    else:
+                        holders.append(rt)
+                    if len(holders) >= 3:
+                        break
+            except Exception:
+                pass
+            lines.append(f"  {nb/1024**2:.0f}MB shape={shp} {dt} <- {holders[:3]}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"heap census failed: {e}"
+
+
 def _profile_cache_bytes(cache_list: Any) -> dict[str, float]:
     """Sum live mx.array bytes in a per-layer cache list, grouped by the
     cache class that owns them. Read-only memory attribution for the DSv4
@@ -576,6 +627,8 @@ def prefill(
         _a = mx.metal.get_active_memory() / 1024**3
         logger.info(f"[MEM] after prefill ({num_tokens} tok): active={_a:.2f} GB")
         _log_cache_profile(f"after prefill ({num_tokens} tok)", cache)
+        if os.environ.get("EXO_DSV4_HEAPCENSUS") == "1":
+            logger.info(f"[HEAPCENSUS] after prefill ({num_tokens} tok):\n{_heap_census_mx_arrays()}")
     except Exception:
         pass
     # Emit the per-chunk span timeline (no-op unless EXO_TRACING_ENABLED). This
