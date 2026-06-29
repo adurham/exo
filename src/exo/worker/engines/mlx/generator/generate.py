@@ -631,7 +631,19 @@ def prefill(
                 )
         else:
             with T("prefill.stream_generate"):
-                for _ in stream_generate(
+                # THE LEAK FIX: stream_generate is a GENERATOR. The old
+                # `for _ in stream_generate(...): break` pulled one item then
+                # broke WITHOUT closing it, leaving the generator's frame
+                # suspended and alive every turn. That frame pins its internal
+                # iteration over the per-layer prompt_cache (a list_iterator
+                # over the DSv4 sparse layers), so one set of pooled
+                # (1, P, 512)/(1, P, 128) bf16 tensors leaked PER SPARSE LAYER
+                # PER TURN (+21/turn, ~0.2-0.4 GB/turn; ~29GB over a long
+                # session). Verified via gc heap census: holder was
+                # PoolingCache-in-a-list reached via list_iterator. Wrapping in
+                # contextlib.closing() guarantees .close() runs on break, which
+                # unwinds the suspended frame and releases those references.
+                _sg = stream_generate(
                     model=model,
                     tokenizer=tokenizer,
                     prompt=prompt_tokens,
@@ -642,8 +654,10 @@ def prefill(
                     kv_group_size=KV_GROUP_SIZE,
                     kv_bits=KV_BITS,
                     prompt_progress_callback=combined_progress_callback,
-                ):
-                    break
+                )
+                with contextlib.closing(_sg):
+                    for _ in _sg:
+                        break
     except PrefillCancelled:
         set_pipeline_queue_sends(model, queue_sends=False)
         set_pipeline_prefill(model, is_prefill=False)
