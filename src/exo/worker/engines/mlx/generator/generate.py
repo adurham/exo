@@ -114,12 +114,24 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
         for (shp, dt), (cnt, b) in top_groups:
             lines.append(f"    {cnt:>5d} x {shp} {dt} = {b/1024**3:.2f}GB")
         # Name holders of the SUSPECT accumulating class: (1, 7936/var, 512|128) bf16.
-        # These grow ~21/turn and are the leak. Trace their referrer chain.
-        lines.append("  holder trace for suspect bf16 (1,*,512)/(1,*,128) arrays:")
-        suspects_traced = 0
-        seen_holder_sigs: dict = {}
+        # Walk the referrer chain UP TO ROOT (until we hit a frame, module, or a
+        # named object) so we identify the EXACT owner, not just the immediate
+        # list. Stops at the first frame (names the function) or repeats.
+        lines.append("  holder trace-to-root for ONE suspect bf16 (1,*,512/128) array:")
+        import types as _types
+        def _describe(o):
+            t = type(o).__name__
+            if isinstance(o, _types.FrameType):
+                return f"FRAME[{o.f_code.co_name}@{o.f_code.co_filename.split('/')[-1]}:{o.f_lineno}]"
+            if isinstance(o, _types.ModuleType):
+                return f"MODULE[{getattr(o,'__name__','?')}]"
+            if t not in ("list", "tuple", "dict", "cell"):
+                mod = getattr(type(o), "__module__", "")
+                return f"{mod}.{t}" if mod else t
+            return t
+        traced = 0
         for obj in gc.get_objects():
-            if suspects_traced >= 8:
+            if traced >= 3:
                 break
             try:
                 if not isinstance(obj, mx.array):
@@ -128,29 +140,35 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
                 if not (len(shp) == 3 and shp[0] == 1 and shp[2] in (512, 128)
                         and str(obj.dtype) == "mlx.core.bfloat16"):
                     continue
+                # BFS up the referrer graph to the first frame/module/named obj.
                 chain = []
-                for r in gc.get_referrers(obj):
-                    rt = type(r).__name__
-                    if rt in ("list", "tuple", "dict"):
-                        for rr in gc.get_referrers(r):
-                            rrt = type(rr).__name__
-                            # name the attribute if it's an object attr dict
-                            extra = ""
-                            if rrt not in ("list", "tuple", "dict", "frame", "function"):
-                                extra = f":{rrt}"
-                            chain.append(f"{rt}<-{rrt}{extra}")
-                            break
-                    else:
-                        chain.append(rt)
-                    if len(chain) >= 4:
+                cur = obj
+                visited = set()
+                for _hop in range(10):
+                    refs = [r for r in gc.get_referrers(cur)
+                            if id(r) not in visited and r is not chain]
+                    visited.update(id(r) for r in refs)
+                    # prefer a frame/module/named owner; else follow the first container
+                    pick = None
+                    for r in refs:
+                        if isinstance(r, (_types.FrameType, _types.ModuleType)):
+                            pick = r; break
+                        if type(r).__name__ not in ("list", "tuple", "dict", "cell", "list_iterator"):
+                            pick = r; break
+                    if pick is None:
+                        pick = refs[0] if refs else None
+                    if pick is None:
+                        chain.append("(no referrer / root)")
                         break
-                sig = "|".join(chain[:4])
-                if sig not in seen_holder_sigs:
-                    seen_holder_sigs[sig] = 0
-                    lines.append(f"    {shp} <- {chain[:4]}")
-                    suspects_traced += 1
-            except Exception:
-                continue
+                    chain.append(_describe(pick))
+                    if isinstance(pick, (_types.FrameType, _types.ModuleType)):
+                        break
+                    cur = pick
+                lines.append(f"    {shp} -> " + " -> ".join(chain))
+                traced += 1
+            except Exception as e:
+                lines.append(f"    trace error: {e}")
+                break
         for nb, a in arrays[:top_n]:
             try:
                 shp = getattr(a, "shape", "?")
