@@ -10,6 +10,7 @@ from mlx_lm.models.cache import (
     ArraysCache,
     CacheList,
     KVCache,
+    PoolingCache,
     QuantizedKVCache,
     RotatingKVCache,
 )
@@ -132,6 +133,32 @@ def _copy_arrays_cache(ac: ArraysCache) -> ArraysCache:
     return copy
 
 
+def _copy_pooling_cache(pc: "PoolingCache") -> "PoolingCache":
+    """Detached copy of a PoolingCache without ``deepcopy``.
+
+    THE LEAK FIX: ``_copy_cache_list`` previously fell through to
+    ``deepcopy(inner)`` for PoolingCache layers (the DSv4 sparse-attention
+    pooled KV). ``deepcopy`` of an object holding ``mx.array``s builds copies
+    via a memo dict that, combined with the arrays' live compute-graph refs,
+    are not promptly collected when the owning leaf snapshot is replaced each
+    turn — so the (1, P, 512)/(1, P, 128) bf16 pool tensors accumulated ~one
+    set per sparse layer per turn (verified via gc heap census: holder =
+    PoolingCache in a list, count climbing monotonically; ~0.2-0.4 GB/turn).
+
+    Mirror the RotatingKVCache / ArraysCache copy helpers: build a fresh
+    PoolingCache and COW-alias (``_detached_copy``) its arrays. No deepcopy,
+    no memo graph, so the old copy is freed when its last real reference drops.
+    """
+    copy = PoolingCache(pc.ratio)
+    copy.remainder = pc.remainder
+    copy._pool_offset = pc._pool_offset
+    copy._pending_offset_bump = getattr(pc, "_pending_offset_bump", 0)
+    copy._pool_storage = _detached_copy(pc._pool_storage) if pc._pool_storage is not None else None
+    copy.buf_kv = _detached_copy(pc.buf_kv) if pc.buf_kv is not None else None
+    copy.buf_gate = _detached_copy(pc.buf_gate) if pc.buf_gate is not None else None
+    return copy
+
+
 def _copy_cache_list(cl: CacheList) -> CacheList:
     inners: list[object] = list(cl)  # type: ignore[reportUnknownArgumentType]
     copied: list[object] = []
@@ -141,6 +168,8 @@ def _copy_cache_list(cl: CacheList) -> CacheList:
             copied.append(snap if snap is not None else deepcopy(inner))
         elif isinstance(inner, ArraysCache):
             copied.append(_copy_arrays_cache(inner))
+        elif isinstance(inner, PoolingCache):
+            copied.append(_copy_pooling_cache(inner))
         else:
             copied.append(deepcopy(inner))
     return CacheList(*copied)
