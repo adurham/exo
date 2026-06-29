@@ -205,6 +205,78 @@ class TestRadixTrieStorage:
         # A's unique branch (first token 10) is gone; B and C's branches remain.
         assert set(first.children.keys()) == {20, 30}
 
+    def test_low_priority_leaf_evicted_before_interactive(self):
+        """A background (low_priority) leaf is dropped before an interactive
+        one, even when the interactive leaf is older (LRU would pick it).
+
+        Mirrors the production scenario: a long-lived conversation (interactive)
+        plus a one-shot background aux call (e.g. compression, tagged via a
+        non-default service_tier) sharing a capped DSv4 instance. Plain LRU
+        would evict the older interactive session; priority-aware eviction must
+        drop the background leaf instead.
+        """
+        cache = KVPrefixCache(None, max_sessions=2)
+        # Interactive session added FIRST → it is the LRU by last_used.
+        interactive = mx.array([1, 2, 3, 4, 5, 10, 11], dtype=mx.int32)
+        background = mx.array([90, 91, 92, 93, 94, 95, 96], dtype=mx.int32)
+        third = mx.array([50, 51, 52, 53, 54, 55, 56], dtype=mx.int32)
+
+        id_interactive = cache.add_kv_cache(
+            interactive, _fake_kv_cache(num_layers=2, num_tokens=7),
+            low_priority=False,
+        )
+        id_background = cache.add_kv_cache(
+            background, _fake_kv_cache(num_layers=2, num_tokens=7),
+            low_priority=True,
+        )
+        # Adding a third leaf forces ONE eviction (cap=2). LRU alone would pick
+        # the interactive leaf (oldest); priority must pick the background leaf.
+        cache.add_kv_cache(
+            third, _fake_kv_cache(num_layers=2, num_tokens=7),
+            low_priority=False,
+        )
+
+        assert id_interactive in cache.prompts, (
+            "interactive session was wrongly evicted before the background leaf"
+        )
+        assert id_background not in cache.prompts, (
+            "background (low_priority) leaf should have been evicted first"
+        )
+
+    def test_interactive_leaf_evicted_when_no_low_priority_remains(self):
+        """When no low_priority leaf exists, eviction falls back to plain LRU
+        over interactive leaves (no starvation / no-op)."""
+        cache = KVPrefixCache(None, max_sessions=2)
+        a = mx.array([1, 2, 3, 4, 5, 10, 11], dtype=mx.int32)
+        b = mx.array([1, 2, 3, 4, 5, 20, 21], dtype=mx.int32)
+        c = mx.array([1, 2, 3, 4, 5, 30, 31], dtype=mx.int32)
+
+        id_a = cache.add_kv_cache(a, _fake_kv_cache(num_layers=2, num_tokens=7))
+        cache.add_kv_cache(b, _fake_kv_cache(num_layers=2, num_tokens=7))
+        cache.add_kv_cache(c, _fake_kv_cache(num_layers=2, num_tokens=7))
+
+        # No low_priority leaves → LRU (oldest = A) is evicted.
+        assert id_a not in cache.prompts
+
+    def test_update_kv_cache_refreshes_priority(self):
+        """A leaf's priority class follows the latest request: a leaf created
+        interactive that is later updated as low_priority becomes evict-first
+        (and vice-versa)."""
+        cache = KVPrefixCache(None, max_sessions=2)
+        conv = mx.array([1, 2, 3, 4, 5, 10, 11], dtype=mx.int32)
+        leaf_id = cache.add_kv_cache(
+            conv, _fake_kv_cache(num_layers=2, num_tokens=7), low_priority=False
+        )
+        assert cache._leaves[leaf_id].low_priority is False  # pyright: ignore[reportPrivateUsage]
+
+        # Continue the same conversation but tagged low_priority this turn.
+        conv2 = mx.array([1, 2, 3, 4, 5, 10, 11, 12, 13], dtype=mx.int32)
+        cache.update_kv_cache(
+            leaf_id, conv2, _fake_kv_cache(num_layers=2, num_tokens=9),
+            snapshots=None, restore_pos=7, low_priority=True,
+        )
+        assert cache._leaves[leaf_id].low_priority is True  # pyright: ignore[reportPrivateUsage]
+
     def test_pin_prevents_eviction(self):
         cache = KVPrefixCache(None, max_sessions=1)
         tokens_a = mx.array([1, 2, 3, 4, 5], dtype=mx.int32)

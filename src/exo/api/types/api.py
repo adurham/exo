@@ -267,6 +267,13 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = None
     parallel_tool_calls: bool | None = None
     user: str | None = None
+    # OpenAI-standard service-quality hint. We honor it as a prefix-cache
+    # eviction-priority signal: a non-default tier ("flex"/"scale"/"batch")
+    # marks the request as best-effort background work, so its KV-cache leaf is
+    # evicted BEFORE interactive ("default"/"priority"/unset) sessions when the
+    # prefix cache is over its session cap. Used by Hermes to tag background aux
+    # calls (e.g. context compression) so they never evict a live conversation.
+    service_tier: str | None = None
 
 
 class BenchChatCompletionRequest(ChatCompletionRequest):

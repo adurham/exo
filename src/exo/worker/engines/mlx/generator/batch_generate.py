@@ -1257,6 +1257,7 @@ class ExoBatchGenerator:
                     matched_index,
                     min_prefix_hit_length,
                     media_regions,
+                    task_params.low_priority,
                 )
 
         last_tokens = prompt_tokens[-2:]
@@ -2439,6 +2440,7 @@ class ExoBatchGenerator:
         matched_index: int | None,
         min_prefix_hit_length: int = 1000,
         media_regions: list[MediaRegion] | None = None,
+        low_priority: bool = False,
     ) -> None:
         if self.kv_prefix_cache is None:
             return
@@ -2460,6 +2462,7 @@ class ExoBatchGenerator:
                     cache_snapshots,
                     restore_pos=prefix_hit_length,
                     media_regions=media_regions,
+                    low_priority=low_priority,
                 )
             else:
                 self.kv_prefix_cache.add_kv_cache(
@@ -2467,6 +2470,7 @@ class ExoBatchGenerator:
                     cache,
                     cache_snapshots,
                     media_regions=media_regions,
+                    low_priority=low_priority,
                 )
         except Exception:
             logger.warning("Failed to save prefix cache", exc_info=True)

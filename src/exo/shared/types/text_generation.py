@@ -99,6 +99,14 @@ type ChatTemplateValue = Annotated[
 ]
 
 
+# OpenAI ``service_tier`` values that mark a request as best-effort background
+# work (cheaper / slower / lower scheduling priority). We map any of these to
+# ``TextGenerationTaskParams.low_priority`` so the prefix cache evicts such a
+# request's leaf before interactive sessions. ``auto``/``default``/``priority``
+# and unset are treated as interactive (normal priority).
+LOW_PRIORITY_SERVICE_TIERS: frozenset[str] = frozenset({"flex", "scale", "batch"})
+
+
 class TextGenerationTaskParams(BaseModel, frozen=True):
     """Canonical internal task params for text generation.
 
@@ -116,6 +124,12 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     tools: list[dict[str, Any]] | None = None
     bench: bool = False
     use_prefix_cache: bool = False
+    # Best-effort background request: its prefix-cache leaf is evicted before
+    # interactive sessions when the cache is over its session cap. Set by the
+    # chat-completions adapter from a non-default OpenAI ``service_tier``
+    # (flex/scale/batch). Keeps a live conversation's KV from being evicted by
+    # background aux work (e.g. context compression) that shares the instance.
+    low_priority: bool = False
     top_k: int | None = None
     stop: str | list[str] | None = None
     seed: int | None = None
