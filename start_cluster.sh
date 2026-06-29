@@ -263,9 +263,20 @@ fi
 # DSv4 only serves real multi-turn conversations (aux/background tasks route to
 # Qwen3.6, not here), so the realistic working set is ~2 live conversations;
 # 4 doubles that for headroom (e.g. a couple concurrent tabs / a delegated
-# child) without paying for unshared copies. Was 8 — dropped 2026-06-15 after
-# confirming the cluster never needs that many DSv4 sessions hot.
-: "${DSV4_MAX_PREFIX_SESSIONS:=1}"
+# child) without paying for unshared copies.
+#
+# History: was 8, dropped to 1 on 2026-06-15 to fight memory pressure while the
+# DSv4 multi-turn snapshot leak was still unfixed (each retained session crept
+# +0.2-0.4 GB/turn forever, so holding several was dangerous). But 1 means ANY
+# second DSv4 caller (a new tab, a delegated child, a concurrent conversation)
+# evicts the live session — forcing a full multi-10K-token re-prefill on its
+# very next turn (observed 2026-06-29: a 76,551-tok live session evicted under
+# "session cap 1", then re-prefilled at 78,137 tok from scratch). The leak is
+# now fixed (947d7e50: leaf_snapshots bounded, node snapshots dropped), so each
+# retained session is memory-bounded again. Restore to 4 — the comment's
+# intended headroom. KV cost ~2-3 GB/session at ~100K ctx; 4 sessions ~= +8-12
+# GB worst case, well under the 124 GB wired limit with the model floor at ~77.
+: "${DSV4_MAX_PREFIX_SESSIONS:=4}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
 # DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
