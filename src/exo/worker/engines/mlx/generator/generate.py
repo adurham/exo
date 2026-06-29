@@ -77,6 +77,74 @@ from exo.worker.runner.bootstrap import logger
 
 REMOTE_PREFILL_MIN_TOKENS = 1000
 
+
+def _profile_cache_bytes(cache_list: Any) -> dict[str, float]:
+    """Sum live mx.array bytes in a per-layer cache list, grouped by the
+    cache class that owns them. Read-only memory attribution for the DSv4
+    'where do the GB go' investigation. Walks CacheList nesting and the
+    known array-bearing attrs of each cache type (RotatingKVCache keys/values,
+    PoolingCache _pool_storage/buf_kv/buf_gate, ArraysCache state). Returns
+    {class_name: MB}. Defensive: any unexpected shape is skipped, never raises.
+    """
+    acc: dict[str, float] = {}
+
+    def _arr_bytes(a: Any) -> int:
+        try:
+            if isinstance(a, mx.array):
+                return a.nbytes
+        except Exception:
+            pass
+        return 0
+
+    def _add(cls: str, b: int) -> None:
+        if b:
+            acc[cls] = acc.get(cls, 0.0) + b / 1024**2
+
+    def _walk(obj: Any) -> None:
+        if obj is None:
+            return
+        sub = getattr(obj, "caches", None)
+        if sub is not None:
+            for c in sub:
+                _walk(c)
+            return
+        cls = type(obj).__name__
+        for attr in (
+            "keys", "values",
+            "_pool_storage", "buf_kv", "buf_gate",
+        ):
+            _add(cls, _arr_bytes(getattr(obj, attr, None)))
+        st = getattr(obj, "state", None)
+        if isinstance(st, (list, tuple)):
+            for s in st:
+                _add(cls, _arr_bytes(s))
+
+    try:
+        if isinstance(cache_list, (list, tuple)):
+            for c in cache_list:
+                _walk(c)
+        else:
+            _walk(cache_list)
+    except Exception:
+        pass
+    return acc
+
+
+def _log_cache_profile(tag: str, cache_list: Any) -> None:
+    """Emit a one-line [MEMPROF] breakdown of cache bytes by owning class."""
+    try:
+        prof = _profile_cache_bytes(cache_list)
+        if not prof:
+            logger.info(f"[MEMPROF] {tag}: (no cache arrays found)")
+            return
+        total = sum(prof.values())
+        parts = ", ".join(
+            f"{k}={v/1024:.2f}GB" for k, v in sorted(prof.items(), key=lambda kv: -kv[1])
+        )
+        logger.info(f"[MEMPROF] {tag}: total_cache={total/1024:.2f}GB | {parts}")
+    except Exception as e:
+        logger.info(f"[MEMPROF] {tag}: profile failed: {e}")
+
 generation_stream = mx.new_stream(mx.default_device())
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
@@ -742,6 +810,13 @@ def prefill_batched(
 
     set_pipeline_prefill(model, is_prefill=False)
 
+    try:
+        _log_cache_profile(
+            f"after batched prefill (B={n_streams} L={max_length})", batched_cache
+        )
+    except Exception:
+        pass
+
     # Extract per-stream caches. Cache offset is already at
     # ``full_lengths[i] - 1`` (= caller's prompt[:-1] length minus 1)
     # because we processed one fewer token than passed in. No trim needed.
@@ -1189,6 +1264,10 @@ def mlx_generate(
     peak_gb = mx.metal.get_peak_memory() / 1024**3
     cache_gb = mx.metal.get_cache_memory() / 1024**3
     logger.info(f"[MEM] after prefill, before decode: active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB")
+    try:
+        _log_cache_profile("after prefill (serial cache)", caches)
+    except Exception:
+        pass
     logger.info("Starting decode")
     mx_barrier(group)
 
