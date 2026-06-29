@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import mlx.core as mx
 import pytest
-from mlx_lm.models.cache import KVCache
+from mlx_lm.models.cache import CacheList, KVCache, PoolingCache, RotatingKVCache
 from mlx_lm.sample_utils import make_sampler
 
 from exo.shared.types.common import ModelId
@@ -888,3 +888,108 @@ class TestKVPrefixCacheWithModel:
         assert len(kv_prefix_cache.prompts) == 1
         # The surviving entry should be the newly added one
         assert get_prefix_length(kv_prefix_cache.prompts[0], tokens) == len(tokens)
+
+
+class TestMultiTurnSnapshotLeak:
+    """Regression guard for the DSv4-Flash multi-turn memory leak.
+
+    A continuing conversation on DSv4-Flash (non-trimmable
+    ``CacheList(RotatingKVCache, PoolingCache, ...)`` layers) accumulated one
+    full per-sparse-layer snapshot set in the leaf EVERY turn. Two sites leaked:
+
+      1. ``update_kv_cache`` merged the leaf's old snapshots with the new turn's
+         filtered by ``token_count <= restore_pos``. Since ``restore_pos`` climbs
+         monotonically across turns, the filter never dropped anything → the
+         leaf's ``leaf_snapshots`` grew unbounded (+1 set/turn).
+      2. ``_build_edge_node`` stored a per-layer snapshot on every new suffix
+         edge — write-only state (the restore path never reads node snapshots),
+         pinning a full PoolingCache set per edge, never pruned while the leaf
+         lived.
+
+    On DSv4 each snapshot holds a ``PoolingCache`` per compress_ratio=128 layer,
+    so the leak was ~+21 ``(1,P,512)``/``(1,P,128)`` bf16 tensors per turn
+    (~0.2-0.4 GB/turn, ~29 GB over a long Hermes session; survived idle AND
+    session-end because the leaf lives in the persistent trie).
+
+    These tests use lightweight stand-ins (no model) that reproduce the
+    non-trimmable cache shape and assert both the leaf snapshot count and the
+    live ``PoolingCache`` object count reach a flat steady state across turns.
+    """
+
+    @staticmethod
+    def _pooling_cache(p_len: int, ratio: int = 128) -> PoolingCache:
+        # Set pooled storage so is_trimmable() -> False (the DSv4 steady state
+        # that routes the CacheList through the snapshot path).
+        pc = PoolingCache(ratio)
+        pc._pool_storage = mx.zeros((1, p_len, 512), dtype=mx.bfloat16)
+        pc._pool_offset = p_len
+        pc.buf_kv = mx.zeros((1, ratio, 512), dtype=mx.bfloat16)
+        pc.buf_gate = mx.zeros((1, ratio, 128), dtype=mx.bfloat16)
+        return pc
+
+    @staticmethod
+    def _rotating(num_tokens: int) -> RotatingKVCache:
+        r = RotatingKVCache(max_size=4096)
+        r.keys = mx.zeros((1, 2, num_tokens, 4), dtype=mx.bfloat16)
+        r.values = mx.zeros((1, 2, num_tokens, 4), dtype=mx.bfloat16)
+        r.offset = num_tokens
+        r._idx = num_tokens
+        return r
+
+    @classmethod
+    def _dsv4_like_cache(cls, num_tokens: int, n_sparse_layers: int = 21):
+        p_len = max(1, num_tokens // 128)
+        return [
+            CacheList(cls._rotating(num_tokens), cls._pooling_cache(p_len))
+            for _ in range(n_sparse_layers)
+        ]
+
+    @staticmethod
+    def _count_live_pooling() -> int:
+        import gc
+
+        gc.collect()
+        return sum(1 for o in gc.get_objects() if isinstance(o, PoolingCache))
+
+    def test_continuing_conversation_does_not_accumulate_snapshots(self):
+        from exo.worker.engines.mlx.cache import (
+            _LEAF_SNAPSHOT_RETENTION,
+            snapshot_ssm_states,
+        )
+
+        cache = KVPrefixCache(None)
+        base = list(range(1, 201))
+        c0 = self._dsv4_like_cache(len(base))
+        leaf_id = cache.add_kv_cache(
+            mx.array(base, dtype=mx.int32),
+            c0,
+            ssm_snapshots=[snapshot_ssm_states(c0)],
+        )
+
+        pooling_trace: list[int] = []
+        prompt = list(base)
+        for turn in range(1, 8):
+            restore_pos = len(prompt)
+            prompt = prompt + list(range(1000 + turn * 100, 1000 + turn * 100 + 80))
+            new_cache = self._dsv4_like_cache(len(prompt))
+            cache.update_kv_cache(
+                leaf_id,
+                mx.array(prompt, dtype=mx.int32),
+                new_cache,
+                [snapshot_ssm_states(new_cache)],
+                restore_pos=restore_pos,
+            )
+            pooling_trace.append(self._count_live_pooling())
+
+        leaf = cache._leaves[leaf_id]  # pyright: ignore[reportPrivateUsage]
+        n_snaps = len(leaf.leaf_snapshots or [])
+
+        # Snapshot list bounded by retention (was unbounded: +1/turn).
+        assert n_snaps <= _LEAF_SNAPSHOT_RETENTION, (
+            f"leaf_snapshots unbounded: {n_snaps} > {_LEAF_SNAPSHOT_RETENTION}"
+        )
+        # Live PoolingCache count reaches a flat steady state — no +21/turn.
+        tail = pooling_trace[-3:]
+        assert len(set(tail)) == 1, (
+            f"PoolingCache still leaking across turns: {pooling_trace}"
+        )

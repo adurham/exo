@@ -55,6 +55,29 @@ _MEMORY_THRESHOLD = float(
 # Default off — pure observability, no behavior change.
 _PREFIX_CACHE_TRACE = bool(int(os.environ.get("EXO_PREFIX_CACHE_TRACE", "0")))
 
+# Max non-sliceable-layer snapshots retained PER LEAF after a multi-turn merge.
+#
+# THE MULTI-TURN LEAK FIX. ``update_kv_cache`` merges the leaf's existing
+# snapshots (those with ``token_count <= restore_pos``) with the new turn's
+# snapshots. In a continuing conversation ``restore_pos`` climbs monotonically,
+# so the ``<= restore_pos`` filter never drops anything — the leaf accumulated
+# one full per-layer snapshot set EVERY turn, forever. On DSv4-Flash each
+# snapshot holds a PoolingCache per sparse (compress_ratio=128) layer, so the
+# leak was exactly +21 (1,P,512)/(1,P,128) bf16 pool tensors per turn
+# (~0.2-0.4 GB/turn, ~29 GB over a long Hermes session; survives idle AND
+# session-end because the leaf lives in the persistent trie). Verified via gc
+# heap census + a standalone repro (leaf_snapshots and live PoolingCache count
+# both grew monotonically with turns).
+#
+# Bound it to the most-recent (deepest token_count) snapshots, mirroring the
+# producer-side ``_SNAPSHOT_RETENTION`` cap in generator/generate.py. The
+# continuation case (next turn's prefix hit lands at ~the prior full length)
+# always finds the deepest retained snapshot; only partial hits SHORTER than
+# the shallowest retained snapshot degrade to a full re-prefill (correctness-
+# safe, just slower for that rare case). 4 covers the current turn's tail plus
+# the immediately-preceding turn's, with O(1) memory.
+_LEAF_SNAPSHOT_RETENTION = int(os.environ.get("EXO_LEAF_SNAPSHOT_RETENTION", "4"))
+
 
 class CacheSnapshot:
     """Snapshot of states at a known token position."""
@@ -619,6 +642,18 @@ class KVPrefixCache:
             merged = [s for s in leaf.leaf_snapshots if s.token_count <= restore_pos]
         if snapshots:
             merged.extend(snapshots)
+        # Bound the per-leaf snapshot set. Without this the merge above grows by
+        # one full per-layer snapshot set every turn of a continuing
+        # conversation (``restore_pos`` climbs monotonically, so the
+        # ``<= restore_pos`` filter never drops a prior snapshot) — the DSv4
+        # multi-turn PoolingCache leak (~0.2-0.4 GB/turn). Keep the deepest
+        # ``_LEAF_SNAPSHOT_RETENTION`` by token_count: the next turn's
+        # continuation hit always lands at/near the leaf's full length and
+        # resolves to one of these; only a partial hit shallower than all
+        # retained snapshots degrades to a full re-prefill (correctness-safe).
+        if len(merged) > _LEAF_SNAPSHOT_RETENTION:
+            merged.sort(key=lambda s: s.token_count)
+            merged = merged[-_LEAF_SNAPSHOT_RETENTION:]
 
         old_depth = leaf.node.depth
         new_length = int(prompt_tokens.shape[0])
@@ -1014,7 +1049,17 @@ class KVPrefixCache:
         edge_keys, edge_values = _slice_sliceable_layers(
             cache, sliceable_mask, start, end
         )
-        snapshot = _snapshot_at(ssm_snapshots, end) if ssm_snapshots else None
+        # Do NOT store the per-layer snapshot on the trie node. It is the SECOND
+        # multi-turn DSv4 leak site: every continuing turn attaches a new suffix
+        # edge, and storing a snapshot here pinned a full per-sparse-layer
+        # PoolingCache set (+21 (1,P,512)/(1,P,128) bf16 tensors) on each edge,
+        # never pruned while the leaf lives (only cleared on ref_count->0
+        # eviction). These node snapshots are write-only: the restore path
+        # (_resolve_restore_position -> _materialize_cache_to_depth) reads ONLY
+        # `donor_leaf.leaf_snapshots` + `leaf_layer_caches`, never a node's
+        # `.snapshot`. The single remaining reader was the `edge_nbytes()`
+        # byte-accounting diagnostic. Keeping it None breaks the accumulation
+        # with zero effect on cache correctness.
         regions = _media_regions_in_range(media_regions or [], start, end)
         return _TrieNode(
             parent=parent,
@@ -1022,7 +1067,7 @@ class KVPrefixCache:
             depth=end,
             edge_keys=edge_keys,
             edge_values=edge_values,
-            snapshot=snapshot,
+            snapshot=None,
             media_regions=regions,
         )
 
@@ -1053,10 +1098,8 @@ class KVPrefixCache:
         )
 
         split_depth = child.depth - child.edge_length + split_offset
-        new_snapshot = (
-            _snapshot_at(ssm_snapshots, split_depth) if ssm_snapshots else None
-        )
-
+        # See _build_edge_node: node snapshots are write-only dead weight and a
+        # per-turn PoolingCache leak site. Never store one on a split node.
         head_regions = [r for r in child.media_regions if r.end_pos <= split_depth]
         tail_regions = [r for r in child.media_regions if r.start_pos >= split_depth]
 
@@ -1066,7 +1109,7 @@ class KVPrefixCache:
             depth=split_depth,
             edge_keys=head_keys,
             edge_values=head_values,
-            snapshot=new_snapshot,
+            snapshot=None,
             media_regions=head_regions,
         )
         new_internal.ref_count = child.ref_count
@@ -1573,18 +1616,6 @@ def _extract_non_sliceable_layers(
         else:
             out.append(deepcopy(c))
     return out
-
-
-def _snapshot_at(
-    snapshots: list[CacheSnapshot] | None, depth: int
-) -> CacheSnapshot | None:
-    """Return the snapshot whose token_count == depth, if any."""
-    if not snapshots:
-        return None
-    for s in snapshots:
-        if s.token_count == depth:
-            return s
-    return None
 
 
 def _media_regions_in_range(
