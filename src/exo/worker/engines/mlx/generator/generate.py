@@ -572,6 +572,12 @@ def prefill(
         f"Prefill complete: {num_tokens} tokens in {elapsed:.2f}s "
         f"({tokens_per_sec:.1f} tok/s)"
     )
+    try:
+        _a = mx.metal.get_active_memory() / 1024**3
+        logger.info(f"[MEM] after prefill ({num_tokens} tok): active={_a:.2f} GB")
+        _log_cache_profile(f"after prefill ({num_tokens} tok)", cache)
+    except Exception:
+        pass
     # Emit the per-chunk span timeline (no-op unless EXO_TRACING_ENABLED). This
     # names exactly which sub-step (forward / eval_cache / flush_sends / all_sum
     # / indexer / contiguous) consumes wall time per chunk — the diagnostic for
