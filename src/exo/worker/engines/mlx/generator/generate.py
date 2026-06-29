@@ -113,6 +113,44 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
         lines.append("  top shape-groups by total bytes (count x shape dtype = GB):")
         for (shp, dt), (cnt, b) in top_groups:
             lines.append(f"    {cnt:>5d} x {shp} {dt} = {b/1024**3:.2f}GB")
+        # Name holders of the SUSPECT accumulating class: (1, 7936/var, 512|128) bf16.
+        # These grow ~21/turn and are the leak. Trace their referrer chain.
+        lines.append("  holder trace for suspect bf16 (1,*,512)/(1,*,128) arrays:")
+        suspects_traced = 0
+        seen_holder_sigs: dict = {}
+        for obj in gc.get_objects():
+            if suspects_traced >= 8:
+                break
+            try:
+                if not isinstance(obj, mx.array):
+                    continue
+                shp = tuple(obj.shape)
+                if not (len(shp) == 3 and shp[0] == 1 and shp[2] in (512, 128)
+                        and str(obj.dtype) == "mlx.core.bfloat16"):
+                    continue
+                chain = []
+                for r in gc.get_referrers(obj):
+                    rt = type(r).__name__
+                    if rt in ("list", "tuple", "dict"):
+                        for rr in gc.get_referrers(r):
+                            rrt = type(rr).__name__
+                            # name the attribute if it's an object attr dict
+                            extra = ""
+                            if rrt not in ("list", "tuple", "dict", "frame", "function"):
+                                extra = f":{rrt}"
+                            chain.append(f"{rt}<-{rrt}{extra}")
+                            break
+                    else:
+                        chain.append(rt)
+                    if len(chain) >= 4:
+                        break
+                sig = "|".join(chain[:4])
+                if sig not in seen_holder_sigs:
+                    seen_holder_sigs[sig] = 0
+                    lines.append(f"    {shp} <- {chain[:4]}")
+                    suspects_traced += 1
+            except Exception:
+                continue
         for nb, a in arrays[:top_n]:
             try:
                 shp = getattr(a, "shape", "?")
