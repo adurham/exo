@@ -261,9 +261,7 @@ fi
 # Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
 # DSv4 only serves real multi-turn conversations (aux/background tasks route to
-# Qwen3.6, not here), so the realistic working set is ~2 live conversations;
-# 4 doubles that for headroom (e.g. a couple concurrent tabs / a delegated
-# child) without paying for unshared copies.
+# Qwen3.6, not here), so the realistic working set is ~2 live conversations.
 #
 # History: was 8, dropped to 1 on 2026-06-15 to fight memory pressure while the
 # DSv4 multi-turn snapshot leak was still unfixed (each retained session crept
@@ -273,10 +271,16 @@ fi
 # very next turn (observed 2026-06-29: a 76,551-tok live session evicted under
 # "session cap 1", then re-prefilled at 78,137 tok from scratch). The leak is
 # now fixed (947d7e50: leaf_snapshots bounded, node snapshots dropped), so each
-# retained session is memory-bounded again. Restore to 4 — the comment's
-# intended headroom. KV cost ~2-3 GB/session at ~100K ctx; 4 sessions ~= +8-12
-# GB worst case, well under the 124 GB wired limit with the model floor at ~77.
-: "${DSV4_MAX_PREFIX_SESSIONS:=4}"
+# retained session is memory-bounded again.
+#
+# Sized to 2 (NOT 4): this box CO-HOSTS Qwen3.6 (~20 GB), which the naive
+# DSv4-only headroom math ignored. Full budget: DSv4 weights ~77 + Qwen ~20 +
+# OS overhead leaves ~25-30 GB for DSv4 KV under the 124 GB wired limit. At
+# ~2-3 GB/session (100K ctx), 4 sessions (~12 GB) plus a couple concurrent
+# in-flight prefills got uncomfortably tight (free dropped toward the floor
+# 2026-06-29). 2 keeps the live session safe from a single concurrent caller —
+# the actual bug — while worst-casing at only ~6 GB of retained KV.
+: "${DSV4_MAX_PREFIX_SESSIONS:=2}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
 # DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
