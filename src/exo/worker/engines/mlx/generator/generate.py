@@ -86,20 +86,33 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
     is expensive). Read-only; never mutates; never raises.
     """
     import gc
+    from collections import defaultdict
     try:
         arrays = []
         total = 0
+        count = 0
+        # Group ALL arrays by (shape,dtype) to find accumulating small ones.
+        by_shape: dict = defaultdict(lambda: [0, 0])  # key -> [count, bytes]
         for obj in gc.get_objects():
             try:
                 if isinstance(obj, mx.array):
                     nb = obj.nbytes
                     total += nb
-                    if nb >= 16 * 1024 * 1024:  # only arrays >=16MB matter here
+                    count += 1
+                    key = (tuple(obj.shape), str(obj.dtype))
+                    by_shape[key][0] += 1
+                    by_shape[key][1] += nb
+                    if nb >= 16 * 1024 * 1024:
                         arrays.append((nb, obj))
             except Exception:
                 continue
         arrays.sort(key=lambda t: -t[0])
-        lines = [f"live mx.arrays: total={total/1024**3:.2f}GB, big(>=16MB)={len(arrays)}"]
+        # Top shape-groups by TOTAL bytes (these reveal accumulating small arrays).
+        top_groups = sorted(by_shape.items(), key=lambda kv: -kv[1][1])[:12]
+        lines = [f"live mx.arrays: total={total/1024**3:.2f}GB, count={count}, big(>=16MB)={len(arrays)}"]
+        lines.append("  top shape-groups by total bytes (count x shape dtype = GB):")
+        for (shp, dt), (cnt, b) in top_groups:
+            lines.append(f"    {cnt:>5d} x {shp} {dt} = {b/1024**3:.2f}GB")
         for nb, a in arrays[:top_n]:
             try:
                 shp = getattr(a, "shape", "?")
