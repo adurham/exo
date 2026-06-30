@@ -30,6 +30,7 @@ from exo.worker.engines.mlx.utils_mlx import (
 )
 from exo.worker.engines.mlx.vendor.dsml_encoding import (
     parse_dsml_output,
+    parse_sentinelless_tool_call,
     strip_dsml_markers,
 )
 from exo.worker.runner.bootstrap import logger
@@ -325,7 +326,7 @@ def parse_deepseek_v4(
         responses, start, end, parse_dsml_output, dsml_special_token_ids
     )
     stream = _strip_orphan_dsml_from_content(stream)
-    return _fail_on_sentinelless_tool_call(stream)
+    return _recover_or_fail_sentinelless_tool_call(stream)
 
 
 # A tool-call block emitted in the WRONG dialect: the correct invoke/parameter
@@ -352,6 +353,20 @@ def parse_deepseek_v4(
 _SENTINELLESS_PARAM = re.compile(
     r"<parameter\s+name=\"[^\"]+\"\s+string=\"(?:true|false)\"\s*>"
 )
+# The pure Claude/minimax dialect omits the ``string=`` annotation entirely:
+# ``<parameter name="x">value</parameter>``. On its own this attribute-less tag
+# is too prose-likely to be a safe trigger, so it is NEVER the false-positive
+# guard by itself — it only counts when it appears INSIDE a confirmed
+# ``<invoke name="…">…</invoke>`` block (see _is_sentinelless_tool_call). That
+# invoke wrapper is the prose-unlikely signature for this shape.
+_SENTINELLESS_PARAM_PLAIN = re.compile(
+    r"<parameter\s+name=\"[^\"]+\"\s*>.*?</parameter>",
+    re.DOTALL,
+)
+_SENTINELLESS_INVOKE_BLOCK = re.compile(
+    r"<invoke\s+name=\"[^\"]+\">.*?</invoke>",
+    re.DOTALL,
+)
 # Any sentinel-less tool-call OPENER: an invoke tag, or a bare tool-call
 # wrapper (``<tool_call>``, ``<tool_calls>``, ``<tool_called>``) — with or
 # without a closing ``>`` (the model sometimes omits it, as in msg 70765).
@@ -362,37 +377,51 @@ _SENTINELLESS_OPENER = re.compile(
 
 def _is_sentinelless_tool_call(text: str) -> bool:
     """True when text contains a sentinel-less tool-call block (a tool-call
-    opener + a ``<parameter … string=…>`` tag, no ｜DSML｜ sentinel).
+    opener + a ``<parameter …>`` tag, no ｜DSML｜ sentinel).
 
-    The parameter tag is the false-positive guard (prose never emits it); the
-    opener may be ``<invoke>``, ``<tool_call(s)>``, or ``<tool_called>`` because
-    DSv4 garbles which opener it uses. Both observed leak shapes — invoke-form
-    (msg 70581) and tool_calls-wrapper-without-invoke (msg 70765) — match."""
+    Two shapes are recognized, both with the ｜DSML｜ sentinel ABSENT:
+      1. Any opener (``<invoke>``, ``<tool_call(s)>``, ``<tool_called>``) plus a
+         typed ``<parameter … string="true|false">`` tag. The typed parameter is
+         the prose-unlikely false-positive guard (msg 70581 / 70765).
+      2. A complete ``<invoke name="…">…</invoke>`` block containing a plain
+         attribute-less ``<parameter name="…">…</parameter>`` — the pure
+         Claude/minimax dialect (msg 95278, 2026-06-29). Here the invoke wrapper
+         is the prose-unlikely guard, so the plain parameter never triggers on
+         its own in free text.
+    """
     if "｜DSML｜" in text:
         return False  # real/quoted DSML is handled elsewhere
-    return bool(_SENTINELLESS_PARAM.search(text)) and bool(
-        _SENTINELLESS_OPENER.search(text)
-    )
+    # Shape 1: typed-param signature + any opener.
+    if _SENTINELLESS_PARAM.search(text) and _SENTINELLESS_OPENER.search(text):
+        return True
+    # Shape 2: a full invoke block that itself contains a plain parameter tag.
+    for invoke_match in _SENTINELLESS_INVOKE_BLOCK.finditer(text):
+        if _SENTINELLESS_PARAM_PLAIN.search(invoke_match.group(0)):
+            return True
+    return False
 
 
-def _fail_on_sentinelless_tool_call(
+def _recover_or_fail_sentinelless_tool_call(
     stream: Generator[GenerationResponse | ToolCallResponse | None],
 ) -> Generator[GenerationResponse | ToolCallResponse | None]:
-    """Clean-fail a tool call the model emitted WITHOUT the ｜DSML｜ sentinel.
+    """Recover a tool call the model emitted WITHOUT the ｜DSML｜ sentinel; fail
+    cleanly only if it can't be parsed.
 
     DSv4 sometimes emits the right tool-call structure in the wrong dialect —
-    ``<tool_called>/<invoke name=…>/<parameter name=… string=…>`` with no
+    ``<tool_called>/<invoke name=…>/<parameter name=… [string=…]>`` with no
     ``｜DSML｜`` prefix on any tag. The DSML parser can't recognize these (by
     design — it gates on the special-token sentinel), so they otherwise leak as
     raw tags into displayed content AND the tool call is lost.
 
-    Consistent with the malformed/garbled/unterminated DSML cases, we fail the
-    turn cleanly (finish_reason="error" -> ErrorChunk -> 500 -> hermes retries)
-    rather than leak the tags or guess-parse the call. We only buffer
-    NON-thinking content (reasoning passes straight through); once the buffered
-    content confirms the sentinel-less signature we emit one error at the
-    terminal response. If it never confirms, the buffered content is flushed
-    verbatim so legitimate prose is never held back or dropped.
+    We buffer NON-thinking content (reasoning passes straight through); once the
+    buffered content confirms the sentinel-less signature we, at the terminal
+    response, attempt ``parse_sentinelless_tool_call``:
+      * parseable  -> emit a real ``ToolCallResponse`` so the tool runs (the raw
+        tags are dropped, never shown as content);
+      * unparseable -> clean-fail the turn (finish_reason="error" -> 500 ->
+        hermes retries), the pre-recovery behavior for a truly corrupt block.
+    If the signature never confirms, the buffered content is flushed verbatim so
+    legitimate prose is never held back or dropped.
     """
     buffer: list[GenerationResponse] = []
     buffered_text = ""
@@ -414,7 +443,9 @@ def _fail_on_sentinelless_tool_call(
         if not triggered and _is_sentinelless_tool_call(buffered_text):
             triggered = True
 
-        # On the terminal response, decide: error (confirmed) or flush (not).
+        # On the terminal response, decide: recover (parseable) -> emit a real
+        # tool call; else clean-fail (confirmed signature but unparseable); else
+        # flush (signature never confirmed).
         if item.finish_reason is not None:
             if triggered:
                 # ── DEGEN PROBE: a sentinel-less / garbled tool-call leak is a
@@ -460,17 +491,41 @@ def _fail_on_sentinelless_tool_call(
                         })
                 except Exception:
                     pass
-                yield item.model_copy(
-                    update={
-                        "text": (
-                            "DSv4 emitted a tool call without the ｜DSML｜ tool-call "
-                            "markers (wrong dialect: bare <invoke>/<parameter> tags). "
-                            "Failing the turn so it can be retried."
-                        ),
-                        "finish_reason": "error",
-                        "tool_call_parse_failure_kind": "sentinelless",
-                    }
-                )
+                # ── RECOVER-FIRST ───────────────────────────────────────────
+                # DSv4 emitted the right tool-call STRUCTURE in the wrong
+                # (sentinel-less) dialect. Rather than burn a turn on a retry
+                # that just re-rolls the same degenerate draw, parse the bare
+                # <invoke>/<parameter> block into a real tool call so the tool
+                # actually runs. The raw tags are NEVER shown as content either
+                # way (buffer is dropped). Only if the block can't be parsed do
+                # we clean-fail (retryable 500) as before — preserving the old
+                # behavior for a truly corrupt block.
+                recovered = parse_sentinelless_tool_call(buffered_text)
+                if recovered is not None:
+                    logger.info(
+                        "Recovered sentinel-less tool call "
+                        "(%d call(s)) from wrong-dialect output: %s",
+                        len(recovered),
+                        [tc.name for tc in recovered],
+                    )
+                    yield ToolCallResponse(
+                        tool_calls=recovered,
+                        usage=item.usage,
+                        stats=item.stats,
+                    )
+                else:
+                    yield item.model_copy(
+                        update={
+                            "text": (
+                                "DSv4 emitted a tool call without the ｜DSML｜ tool-call "
+                                "markers (wrong dialect: bare <invoke>/<parameter> tags) "
+                                "and the block could not be parsed for recovery. "
+                                "Failing the turn so it can be retried."
+                            ),
+                            "finish_reason": "error",
+                            "tool_call_parse_failure_kind": "sentinelless",
+                        }
+                    )
             else:
                 yield from buffer
             buffer = []

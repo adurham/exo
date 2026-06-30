@@ -1655,21 +1655,23 @@ class TestE2EDeepseekV4OrphanCloseTagsStripped:
 
 class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
     """A tool call emitted in the WRONG dialect — correct invoke/parameter
-    structure but with the ｜DSML｜ sentinel dropped from every tag — must fail
-    cleanly, never leak the raw tags as content.
+    structure but with the ｜DSML｜ sentinel dropped from every tag — must be
+    RECOVERED into a real tool call when parseable, and clean-failed (never
+    leaked as raw tags) when not.
 
-    Observed live 2026-06-15: after a clean think block, DSv4 emitted a memory()
-    call as bare <tool_called>/<invoke name="memory">/<parameter name="action"
-    string="true">…</parameter> tags with NO ｜DSML｜ prefix. The DSML parser
-    gates on the special-token sentinel (the 73f56f58 quoted-marker fix), so it
-    correctly did not recognize these — but they then leaked verbatim into
-    displayed content AND the tool call was lost. _fail_on_sentinelless_tool_call
-    detects the unambiguous invoke+parameter signature and fails the turn
-    (finish_reason='error' -> retry), consistent with the malformed/garbled/
-    unterminated DSML handling. Requires BOTH tags so it never flags prose."""
+    Observed live 2026-06-15 / 2026-06-29: after a clean think block, DSv4
+    emitted a memory()/read_file() call as bare <tool_called>/<invoke
+    name="…">/<parameter name="…" string="true">…</parameter> tags with NO
+    ｜DSML｜ prefix. The DSML parser gates on the special-token sentinel, so it
+    correctly did not recognize these. Originally we clean-failed the turn;
+    now ``_recover_or_fail_sentinelless_tool_call`` parses the bare block into a
+    real ToolCallResponse so the tool actually RUNS (no wasted retry), falling
+    back to clean-fail only when the block can't be parsed. Either way the raw
+    tags never leak into content."""
 
-    def test_sentinelless_tool_call_emits_error_not_leak(self):
-        # Bare tool-call tags (no ｜DSML｜ sentinel) as content.
+    def test_sentinelless_tool_call_is_recovered_not_leaked(self):
+        # Bare tool-call tags (no ｜DSML｜ sentinel) as content — a COMPLETE,
+        # parseable invoke block. New contract: recover into a real tool call.
         model_tokens = [
             "<tool_called>\n",
             '<invoke name="memory">\n',
@@ -1680,13 +1682,19 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
-        error_responses = [r for r in text_results if r.finish_reason == "error"]
         non_error_text = "".join(
             r.text for r in text_results if r.finish_reason != "error"
         )
 
-        assert len(tool_results) == 0
-        assert len(error_responses) >= 1, f"expected error, got {results!r}"
+        # Recovered into exactly one real tool call with the right args.
+        assert len(tool_results) == 1
+        call = tool_results[0].tool_calls[0]
+        assert call.name == "memory"
+        import json as _json
+        assert _json.loads(call.arguments) == {
+            "action": "add",
+            "content": "never pre-load context",
+        }
         # The raw tags must NOT leak into displayed content.
         assert "<invoke name=" not in non_error_text
         assert "<parameter name=" not in non_error_text
@@ -1696,10 +1704,9 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         """The opener the model emits VARIES. Observed live 2026-06-16 (msg
         70765): DSv4 emitted a <tool_calls> wrapper directly around a
         <parameter name="path" string="true"> tag and SKIPPED the <invoke> line
-        entirely (the opening tag wasn't even closed). The original
-        both-tags-required gate (invoke AND parameter) missed this shape and it
-        leaked the raw markup into content. The detector now triggers on the
-        parameter signature + ANY sentinel-less opener, so this fails cleanly."""
+        entirely (the opening tag wasn't even closed). This has NO parseable
+        invoke block, so recovery returns None and we clean-fail the turn —
+        never leaking the raw markup into content."""
         model_tokens = [
             "<tool_calls\n",
             '<parameter name="path" string="true">/Users/x/repo/file.py',
@@ -1712,6 +1719,7 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         non_error_text = "".join(
             r.text for r in text_results if r.finish_reason != "error"
         )
+        # No parseable invoke -> no recovered call, clean-fail instead.
         assert len(tool_results) == 0
         assert len(error_responses) >= 1, f"expected error, got {results!r}"
         assert "<tool_call" not in non_error_text

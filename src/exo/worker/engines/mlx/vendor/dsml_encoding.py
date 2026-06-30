@@ -291,3 +291,100 @@ def parse_dsml_output(text: str) -> list[ToolCallItem] | None:
         )
 
     return tool_calls if tool_calls else None
+
+
+# ── Sentinel-less (wrong-dialect) tool-call recovery ─────────────────────────
+#
+# DSv4 occasionally emits the CORRECT invoke/parameter STRUCTURE but drops the
+# ``｜DSML｜`` sentinel from every tag — the bare Claude/minimax dialect, e.g.
+# (observed live 2026-06-29, msg 95278; the read_file call dropped + leaked):
+#
+#     <tool_call>
+#     <invoke name="read_file">
+#     <parameter name="limit" string="false">15</parameter>
+#     <parameter name="path" string="true">~/.hermes/config.yaml</parameter>
+#     </invoke>
+#
+# The strict DSML parser only matches sentinel-bearing tags, so this slips
+# through: the tags leak into ``content`` AND the tool call is lost. Two
+# parameter shapes occur — DSv4's own ``string="true|false"`` annotation, and
+# the pure Claude/minimax form ``<parameter name="x">value</parameter>`` with
+# NO attribute (test corpus: mlx-lm minimax_m2). We recover both.
+#
+# Safety: this parser is only invoked from the recovery stage AFTER the
+# sentinel-less SIGNATURE (a tool-call opener + a ``<parameter name=…>`` tag,
+# with no ``｜DSML｜`` anywhere) has already been confirmed — see
+# ``_is_sentinelless_tool_call`` in model_output_parsers.py. It is never run on
+# free prose, so the permissive tag matching here cannot misfire on ordinary
+# text. Returns None when nothing parses, so the caller can clean-fail (the
+# pre-recovery behavior) for a truly corrupt block.
+
+_BARE_INVOKE_PATTERN = re.compile(
+    r"<invoke\s+name=\"([^\"]+)\">(.*?)</invoke>",
+    re.DOTALL,
+)
+# Parameter with DSv4's explicit ``string="true|false"`` type annotation.
+_BARE_PARAM_TYPED_PATTERN = re.compile(
+    r"<parameter\s+name=\"([^\"]+)\"\s+string=\"(true|false)\"\s*>(.*?)</parameter>",
+    re.DOTALL,
+)
+# Parameter in the pure Claude/minimax dialect: no type attribute at all.
+_BARE_PARAM_PLAIN_PATTERN = re.compile(
+    r"<parameter\s+name=\"([^\"]+)\"\s*>(.*?)</parameter>",
+    re.DOTALL,
+)
+
+
+def parse_sentinelless_tool_call(text: str) -> list[ToolCallItem] | None:
+    """Recover a tool call emitted in the wrong (sentinel-less) dialect.
+
+    Parses bare ``<invoke name="…">`` / ``<parameter name="…" [string="…"]>``
+    structure that carries no ``｜DSML｜`` sentinel. Handles both the
+    ``string="true|false"``-annotated form DSv4 emits and the attribute-less
+    Claude/minimax form. ``string="true"`` keeps the verbatim text; otherwise
+    the value is ``json.loads``-decoded (so ``15`` → int) with a raw-string
+    fallback for non-JSON values like file paths — mirroring the typed-path
+    logic in ``parse_dsml_output``. Returns the recovered tool calls, or None
+    when the block does not yield a parseable invoke (caller then clean-fails).
+
+    See the module-level note above for the safety argument (only called on a
+    pre-confirmed sentinel-less signature, never on free prose).
+    """
+    if DSML_TOKEN in text:
+        # A real/quoted DSML block — not our job; the sentinel parser owns it.
+        return None
+
+    tool_calls: list[ToolCallItem] = []
+    for invoke_match in _BARE_INVOKE_PATTERN.finditer(text):
+        func_name = invoke_match.group(1)
+        invoke_body = invoke_match.group(2)
+
+        args: dict[str, Any] = {}
+        # Typed params first (consume the explicit-annotation shape), then any
+        # remaining plain params. A typed match also matches the plain regex,
+        # so track spans to avoid double-counting the same tag.
+        typed_spans: list[tuple[int, int]] = []
+        for pm in _BARE_PARAM_TYPED_PATTERN.finditer(invoke_body):
+            typed_spans.append(pm.span())
+            if pm.group(2) == "true":
+                args[pm.group(1)] = pm.group(3)
+            else:
+                try:
+                    args[pm.group(1)] = json.loads(pm.group(3))
+                except (json.JSONDecodeError, ValueError):
+                    args[pm.group(1)] = pm.group(3)
+        for pm in _BARE_PARAM_PLAIN_PATTERN.finditer(invoke_body):
+            if any(s <= pm.start() < e for s, e in typed_spans):
+                continue  # already captured as a typed param
+            if pm.group(1) in args:
+                continue
+            try:
+                args[pm.group(1)] = json.loads(pm.group(2))
+            except (json.JSONDecodeError, ValueError):
+                args[pm.group(1)] = pm.group(2)
+
+        tool_calls.append(
+            ToolCallItem(name=func_name, arguments=json.dumps(args))
+        )
+
+    return tool_calls if tool_calls else None
