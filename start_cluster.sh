@@ -714,7 +714,21 @@ for NODE in "${NODES[@]}"; do
     if [[ "$NODE" == *"macbook"* ]]; then
         ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=32000"
     else
-        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=124000"
+        # 115000 (was 124000), lowered 2026-06-29 to PREVENT the Metal-allocator
+        # wedge root-caused this session. Mechanism: under a memory-pressure event
+        # (compressed memory spiking — observed 16 GB) the MLX Metal allocator
+        # falls off its fast pooled-reuse path into a stuck wired-malloc state;
+        # prefill then drops ~5x (256→58 tok/s, GPU ~9W/idle, CPU pegged in
+        # mlx::core::Fence::wait + MetalAllocator::malloc) and does NOT recover
+        # without a full reboot (wired memory is pinned; relaunch can't reclaim
+        # it). Trigger condition: 124000 on a 137 GB node co-hosting DSv4 (~79 GB
+        # wired steady) + Qwen3.6 left only ~13 GB for OS + transient prefill
+        # scratch, so a deep-context prefill's scratch spike pushed the system
+        # into compression pressure. 115000 gives ~22 GB non-wired headroom —
+        # DSv4+Qwen+worst-case retained KV still fit, but a transient spike can no
+        # longer drive the OS into the pressure state that degrades the allocator.
+        # Override via DSV4_WIRED_LIMIT_MB if a future footprint needs more.
+        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=${DSV4_WIRED_LIMIT_MB:-115000}"
     fi
     
     echo "Killing existing Exo processes on $NODE..."
