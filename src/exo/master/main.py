@@ -10,7 +10,12 @@ from exo.master.placement import (
     get_transition_events,
     place_instance,
 )
-from exo.master.placement_utils import find_ip_prioritised
+from exo.master.placement_utils import (
+    find_ip_prioritised,
+    jit_enabled,
+    jit_idle_unload_seconds,
+    jit_instances_to_reap,
+)
 from exo.shared.apply import apply
 from exo.shared.constants import EXO_EVENT_LOG_DIR, EXO_TRACING_ENABLED
 from exo.shared.types.commands import (
@@ -141,6 +146,10 @@ class Master:
         self._event_log = DiskEventLog(EXO_EVENT_LOG_DIR / "master")
         self._pending_traces: dict[TaskId, dict[int, list[TraceEventData]]] = {}
         self._expected_ranks: dict[TaskId, set[int]] = {}
+        # JIT idle reaper: per-instance last-use wall-clock (anyio.current_time).
+        # Bumped on every generation dispatch to that instance; the reaper unloads
+        # JIT-placed instances idle beyond EXO_JIT_IDLE_UNLOAD_SECONDS.
+        self._jit_instance_last_use: dict[InstanceId, float] = {}
         # Serializes event indexing/state mutation between command_processor
         # and event_processor. Without this, the command processor's routing
         # decisions would race against state updates and concurrent requests
@@ -155,6 +164,7 @@ class Master:
                 tg.start_soon(self._event_processor)
                 tg.start_soon(self._command_processor)
                 tg.start_soon(self._plan)
+                tg.start_soon(self._jit_idle_reaper)
         finally:
             self._event_log.close()
             self.global_event_sender.close()
@@ -244,6 +254,9 @@ class Master:
                             )
 
                             decode_instance_id = available_instance_ids[0]
+                            self._jit_instance_last_use[decode_instance_id] = (
+                                anyio.current_time()
+                            )
                             task_id = TaskId()
                             params = command.task_params.model_copy(
                                 update={
@@ -505,6 +518,103 @@ class Master:
                     await self._index_apply_broadcast(NodeTimedOut(node_id=node_id))
 
             await anyio.sleep(10)
+
+    async def _jit_idle_reaper(self) -> None:
+        """Unload JIT-placed instances idle beyond EXO_JIT_IDLE_UNLOAD_SECONDS.
+
+        Safety invariants (see JIT handoff doc, Step 3):
+        - Only ``instance.jit`` instances are ever unloaded; the interactive /
+          explicitly-placed model (jit=False) is immune ("pinned").
+        - Never unloads an instance with in-flight work: it skips any instance
+          with a Pending/Running task, which closes the check→delete race (a
+          request arriving between the idle check and the delete creates a
+          Pending task that this guard sees on the next pass, and the delete is
+          only issued when both the timer AND the in-flight count agree).
+        - Dormant unless EXO_JIT_ENABLED (the feature kill-switch).
+        """
+        in_flight = {TaskStatus.Pending, TaskStatus.Running}
+        while True:
+            await anyio.sleep(5)
+            if not jit_enabled():
+                continue
+
+            idle_window = jit_idle_unload_seconds()
+            now = anyio.current_time()
+
+            # In-flight task count per instance (event-sourced, authoritative).
+            inflight_by_instance: dict[InstanceId, int] = {}
+            for task in self.state.tasks.values():
+                if task.task_status in in_flight:
+                    inflight_by_instance[task.instance_id] = (
+                        inflight_by_instance.get(task.instance_id, 0) + 1
+                    )
+
+            live_instance_ids = set(self.state.instances.keys())
+            # Drop bookkeeping for instances that no longer exist.
+            for stale_id in set(self._jit_instance_last_use) - live_instance_ids:
+                del self._jit_instance_last_use[stale_id]
+
+            # Seed a last-use clock for any JIT instance we haven't observed yet
+            # (placed but never used) and bump it for ones with active work, so
+            # the idle window is measured from first observation / last activity.
+            for instance_id, instance in self.state.instances.items():
+                if not instance.jit:
+                    continue
+                if (
+                    inflight_by_instance.get(instance_id, 0) > 0
+                    or instance_id not in self._jit_instance_last_use
+                ):
+                    self._jit_instance_last_use[instance_id] = now
+
+            to_reap = jit_instances_to_reap(
+                self.state.instances,
+                inflight_by_instance,
+                self._jit_instance_last_use,
+                now,
+                idle_window,
+            )
+            for instance_id in to_reap:
+                instance = self.state.instances.get(instance_id)
+                if instance is None:
+                    continue
+                # Re-check in-flight immediately before deleting. A request can
+                # arrive between the reap decision above and here (the loop body
+                # awaits), creating a Pending task — skip the unload if so. The
+                # delete is computed + broadcast with NO await in between, so no
+                # request can slip in after this guard. This plus the per-pass
+                # decision is the in-flight race guard.
+                if any(
+                    task.instance_id == instance_id
+                    and task.task_status in in_flight
+                    for task in self.state.tasks.values()
+                ):
+                    self._jit_instance_last_use[instance_id] = now
+                    continue
+                model_id = instance.shard_assignments.model_id
+                last_use = self._jit_instance_last_use.get(instance_id, now)
+                logger.info(
+                    f"JIT idle reaper unloading instance {instance_id} "
+                    f"(model {model_id}, idle {now - last_use:.0f}s "
+                    f">= {idle_window:.0f}s)"
+                )
+                placement = delete_instance(
+                    DeleteInstance(instance_id=instance_id), self.state.instances
+                )
+                transition_events = get_transition_events(
+                    self.state.instances, placement, self.state.tasks
+                )
+                download_cancels = cancel_unnecessary_downloads(
+                    placement, self.state.downloads
+                )
+                for event in transition_events:
+                    await self._index_apply_broadcast(event)
+                for cmd in download_cancels:
+                    await self.download_command_sender.send(
+                        ForwarderDownloadCommand(
+                            origin=self._system_id, command=cmd
+                        )
+                    )
+                self._jit_instance_last_use.pop(instance_id, None)
 
     async def _event_processor(self) -> None:
         with self.local_event_receiver as local_events:

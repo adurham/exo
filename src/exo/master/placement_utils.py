@@ -9,6 +9,7 @@ from exo.shared.types.common import Host, NodeId
 from exo.shared.types.memory import Memory
 from exo.shared.types.profiling import MemoryUsage, NodeNetworkInfo
 from exo.shared.types.topology import Cycle, RDMAConnection, SocketConnection
+from exo.shared.types.worker.instances import Instance, InstanceId
 from exo.shared.types.worker.runners import RunnerId, ShardAssignments
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
@@ -17,6 +18,199 @@ from exo.shared.types.worker.shards import (
     ShardMetadata,
     TensorShardMetadata,
 )
+
+# Headroom (in GB, per node) that a JIT/auto-placed instance must leave FREE on
+# every node it lands on, on top of its own weight share. This protects an
+# already-resident interactive model (e.g. DeepSeek-V4-Flash) whose KV cache and
+# transient prefill working-set GROW with context: `MemoryUsage.ram_available`
+# at admission time reflects the resident model's WEIGHTS but NOT its future
+# growth, so a naive weights-fit check can admit a second model that then OOMs
+# the box on the next deep prefill. Empirically DSv4-Flash active climbs to
+# ~85 GB/node at ~140K ctx with ~10 GB transient prefill peaks on top of its
+# ~77.5 GB weights — i.e. ~18 GB/node of growth headroom must stay free. Tunable
+# via EXO_JIT_MEMORY_RESERVE_GB; 0 disables the reserve (pre-JIT behavior).
+_JIT_MEMORY_RESERVE_GB_DEFAULT = 18.0
+_JIT_LOAD_TIMEOUT_SECONDS_DEFAULT = 120.0
+_JIT_IDLE_UNLOAD_SECONDS_DEFAULT = 300.0
+
+
+def jit_memory_reserve() -> Memory:
+    """Per-node free-memory reserve required to admit a JIT/auto-placed model.
+
+    Read from EXO_JIT_MEMORY_RESERVE_GB (float GB); falls back to
+    ``_JIT_MEMORY_RESERVE_GB_DEFAULT``. A malformed value logs and uses the
+    default rather than raising — admission must never crash the master loop.
+    """
+    raw = os.environ.get("EXO_JIT_MEMORY_RESERVE_GB", "")
+    if raw.strip():
+        try:
+            return Memory.from_gb(float(raw))
+        except ValueError:
+            logger.warning(
+                "Invalid EXO_JIT_MEMORY_RESERVE_GB=%r; using default %.1f GB",
+                raw,
+                _JIT_MEMORY_RESERVE_GB_DEFAULT,
+            )
+    return Memory.from_gb(_JIT_MEMORY_RESERVE_GB_DEFAULT)
+
+
+def jit_enabled() -> bool:
+    """Master kill-switch for the JIT model lifecycle feature.
+
+    Read from EXO_JIT_ENABLED (truthy: ``1``/``true``/``yes``/``on``). Default
+    OFF — auto-place and the idle reaper stay dormant and behavior is identical
+    to pre-JIT exo until explicitly enabled at launch.
+    """
+    return os.environ.get("EXO_JIT_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _jit_float_env(name: str, default: float) -> float:
+    """Read a non-negative float JIT knob; malformed → warn + default."""
+    raw = os.environ.get(name, "")
+    if raw.strip():
+        try:
+            value = float(raw)
+            if value >= 0:
+                return value
+            logger.warning("Negative %s=%r; using default %.1f", name, raw, default)
+        except ValueError:
+            logger.warning("Invalid %s=%r; using default %.1f", name, raw, default)
+    return default
+
+
+def jit_load_timeout_seconds() -> float:
+    """Bound on how long an auto-placed model may take to reach RunnerReady.
+
+    Read from EXO_JIT_LOAD_TIMEOUT_SECONDS; on timeout the request gets a clean
+    503 rather than hanging. Malformed → default.
+    """
+    return _jit_float_env(
+        "EXO_JIT_LOAD_TIMEOUT_SECONDS", _JIT_LOAD_TIMEOUT_SECONDS_DEFAULT
+    )
+
+
+def jit_idle_unload_seconds() -> float:
+    """Idle window after which a JIT-placed instance is auto-unloaded.
+
+    Read from EXO_JIT_IDLE_UNLOAD_SECONDS. Only JIT-placed instances with zero
+    in-flight requests are reaped; the interactive (non-JIT) model is immune.
+    Malformed → default.
+    """
+    return _jit_float_env(
+        "EXO_JIT_IDLE_UNLOAD_SECONDS", _JIT_IDLE_UNLOAD_SECONDS_DEFAULT
+    )
+
+
+def weight_share_per_node(
+    model_card: ModelCard,
+    cycle: Cycle,
+    node_memory: Mapping[NodeId, MemoryUsage],
+    sharding: Sharding,
+) -> dict[NodeId, Memory]:
+    """Per-node weight footprint (weights only, sharded) for a candidate cycle.
+
+    This is the ``weight_share_per_node`` input that ``cycle_admits_with_reserve``
+    needs. It mirrors how ``get_shard_assignments`` lays weights out:
+
+    - **Tensor**: weights split ~evenly across ranks → ``storage / world_size``.
+    - **Pipeline**: weights split by layer allocation, which is proportional to
+      each node's available memory (same largest-remainder split as
+      ``_allocate_and_validate_layers``) → ``storage * layers[node] / n_layers``.
+
+    A single-node cycle holds the whole model regardless of sharding.
+    """
+    node_ids = cycle.node_ids
+    world_size = len(node_ids)
+    total_storage = model_card.storage_size
+
+    if world_size <= 1:
+        return {node_ids[0]: total_storage} if node_ids else {}
+
+    if sharding == Sharding.Tensor:
+        return {node_id: total_storage / world_size for node_id in node_ids}
+
+    # Pipeline: proportional to per-node layer allocation.
+    total_memory = sum(
+        (node_memory[node_id].ram_available for node_id in node_ids),
+        start=Memory(),
+    )
+    if total_memory.in_bytes == 0:
+        # Degenerate; fall back to an even split so admission stays conservative.
+        return {node_id: total_storage / world_size for node_id in node_ids}
+
+    layer_allocations = allocate_layers_proportionally(
+        total_layers=model_card.n_layers,
+        memory_fractions=[
+            node_memory[node_id].ram_available / total_memory for node_id in node_ids
+        ],
+    )
+    return {
+        node_id: (total_storage * layer_allocations[i]) // model_card.n_layers
+        for i, node_id in enumerate(node_ids)
+    }
+
+
+def cycle_admits_with_reserve(
+    cycle: Cycle,
+    node_memory: Mapping[NodeId, MemoryUsage],
+    weight_share_per_node: Mapping[NodeId, Memory],
+    reserve: Memory,
+) -> bool:
+    """True iff placing an instance leaves >= ``reserve`` free on EVERY node.
+
+    Unlike the bare ``total_mem >= required`` cycle check, this is evaluated
+    PER NODE (a cycle can have lopsided free memory) and accounts for a growth
+    reserve for whatever is already resident. ``weight_share_per_node`` is the
+    incoming instance's weight footprint on each node (sharded), so the test is:
+    ``ram_available[node] - weight_share[node] >= reserve`` for all nodes.
+    """
+    for node_id in cycle.node_ids:
+        if node_id not in node_memory:
+            return False
+        available = node_memory[node_id].ram_available
+        share = weight_share_per_node.get(node_id, Memory())
+        if available - share < reserve:
+            return False
+    return True
+
+
+def jit_instances_to_reap(
+    instances: Mapping[InstanceId, Instance],
+    inflight_by_instance: Mapping[InstanceId, int],
+    last_use: Mapping[InstanceId, float],
+    now: float,
+    idle_window: float,
+) -> list[InstanceId]:
+    """Pure policy: which JIT instances are eligible for idle-unload right now.
+
+    An instance is reaped iff ALL of:
+      - it is JIT-placed (``instance.jit``) — the interactive/explicitly-placed
+        model (jit=False) is never auto-unloaded;
+      - it has zero in-flight (Pending/Running) tasks — closes the
+        check→delete race;
+      - it has a recorded last-use timestamp AND ``now - last_use >= idle_window``.
+
+    Instances with no last-use record yet (placed but never observed) are NOT
+    reaped on this pass — the caller seeds the clock so the window is measured
+    from first observation rather than from epoch 0.
+    """
+    reap: list[InstanceId] = []
+    for instance_id, instance in instances.items():
+        if not instance.jit:
+            continue
+        if inflight_by_instance.get(instance_id, 0) > 0:
+            continue
+        last = last_use.get(instance_id)
+        if last is None:
+            continue
+        if now - last >= idle_window:
+            reap.append(instance_id)
+    return reap
 
 
 def filter_cycles_by_memory(

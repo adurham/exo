@@ -127,6 +127,10 @@ from exo.api.types.openai_responses import (
 )
 from exo.master.image_store import ImageStore
 from exo.master.placement import place_instance as get_instance_placements
+from exo.master.placement_utils import (
+    jit_enabled,
+    jit_load_timeout_seconds,
+)
 from exo.metrics import (
     CONTENT_TYPE_LATEST as _METRICS_CONTENT_TYPE,
 )
@@ -218,6 +222,7 @@ from exo.shared.types.text_generation import (
 )
 from exo.shared.types.worker.downloads import DownloadCompleted
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
+from exo.shared.types.worker.runners import RunnerFailed, RunnerReady
 from exo.shared.types.worker.shards import Sharding
 from exo.utils.banner import print_startup_banner
 from exo.utils.channels import Receiver, Sender, channel
@@ -317,6 +322,13 @@ class API:
         self._image_store = ImageStore(EXO_IMAGE_CACHE_DIR)
         self._tg: TaskGroup = TaskGroup()
 
+        # --- JIT model lifecycle (only active when EXO_JIT_ENABLED) ---
+        # Single-flight: concurrent first-requests for the same model trigger
+        # ONE placement; all callers await the same event. Keyed by model_id.
+        # (Idle-unload bookkeeping/refcounting lives in the master, which owns
+        # instance teardown and sees every dispatch via event-sourced tasks.)
+        self._jit_inflight_loads: dict[ModelId, anyio.Event] = {}
+
     def reset(self, result_clock: int, event_receiver: Receiver[IndexedEvent]):
         logger.info("Resetting API State")
         self._event_log.close()
@@ -330,6 +342,11 @@ class API:
         self.event_receiver = event_receiver
         self._tg.start_soon(self._apply_state)
         self._sent_image_hashes = set()
+        # A JIT load coalesces on the API server that received the request;
+        # after an election/reset the old waiters are gone, so clear the map.
+        for ev in self._jit_inflight_loads.values():
+            ev.set()
+        self._jit_inflight_loads = {}
 
     def unpause(self, result_clock: int):
         logger.info("Unpausing API")
@@ -1026,29 +1043,202 @@ class API:
 
     async def _validate_model_has_instance(self, model_id: ModelId) -> ModelId:
         """Validate a model has an active instance.
-        If the model isn't even downloaded, triggers notification to user to download model.
 
+        If JIT is enabled (EXO_JIT_ENABLED) and the model is downloaded but not
+        resident, this auto-places it and blocks until its runners reach
+        RunnerReady (single-flight, bounded by EXO_JIT_LOAD_TIMEOUT_SECONDS).
 
-        Raises HTTPException 404 if no instance is found for the model.
+        If the model isn't downloaded, triggers a download-notify to the user.
+
+        Raises HTTPException 404 if no instance and the model can't be loaded;
+        503 if a JIT auto-load is refused (reserve) or times out.
         """
-        if not any(
+        if self._model_has_instance(model_id):
+            return model_id
+
+        if jit_enabled() and self._model_is_downloaded(model_id):
+            await self._jit_ensure_instance(model_id)
+            return model_id
+
+        if not self._model_is_downloaded(model_id):
+            await self._trigger_notify_user_to_download_model(model_id)
+
+        raise HTTPException(
+            status_code=404, detail=f"No instance found for model {model_id}"
+        )
+
+    def _model_has_instance(self, model_id: ModelId) -> bool:
+        return any(
             instance.shard_assignments.model_id == model_id
             for instance in self.state.instances.values()
-        ):
-            # Check if model is actually downloaded
-            model_is_downloaded = any(
-                isinstance(download, DownloadCompleted)
-                and download.shard_metadata.model_card.model_id == model_id
-                for node_downloads in self.state.downloads.values()
-                for download in node_downloads
-            )
-            if not model_is_downloaded:
-                await self._trigger_notify_user_to_download_model(model_id)
+        )
 
+    def _model_is_downloaded(self, model_id: ModelId) -> bool:
+        return any(
+            isinstance(download, DownloadCompleted)
+            and download.shard_metadata.model_card.model_id == model_id
+            for node_downloads in self.state.downloads.values()
+            for download in node_downloads
+        )
+
+    def _model_instance_ready(self, model_id: ModelId) -> bool:
+        """True iff a resident instance for ``model_id`` has ALL runners ready."""
+        for instance in self.state.instances.values():
+            if instance.shard_assignments.model_id != model_id:
+                continue
+            runner_ids = instance.shard_assignments.runner_to_shard
+            if runner_ids and all(
+                isinstance(self.state.runners.get(rid), RunnerReady)
+                for rid in runner_ids
+            ):
+                return True
+        return False
+
+    def _model_instance_failed(self, model_id: ModelId) -> str | None:
+        """Return a failure message if any runner of the model's instance failed."""
+        for instance in self.state.instances.values():
+            if instance.shard_assignments.model_id != model_id:
+                continue
+            for rid in instance.shard_assignments.runner_to_shard:
+                status = self.state.runners.get(rid)
+                if isinstance(status, RunnerFailed):
+                    return status.error_message or "runner failed during load"
+        return None
+
+    async def _jit_ensure_instance(self, model_id: ModelId) -> None:
+        """Single-flight: place ``model_id`` (jit) and await RunnerReady.
+
+        Concurrent first-requests for the same model coalesce onto one placement
+        via a per-model_id ``anyio.Event``: the first caller drives the load and
+        the rest await the same event, then re-check residency.
+        """
+        existing = self._jit_inflight_loads.get(model_id)
+        if existing is not None:
+            await existing.wait()
+            if self._model_instance_ready(model_id):
+                return
+            # The leader's load failed/refused — surface a clean 503.
             raise HTTPException(
-                status_code=404, detail=f"No instance found for model {model_id}"
+                status_code=503,
+                detail=f"JIT auto-load for model {model_id} did not become ready",
             )
-        return model_id
+
+        done = anyio.Event()
+        self._jit_inflight_loads[model_id] = done
+        try:
+            await self._jit_place_and_wait(model_id)
+        finally:
+            done.set()
+            self._jit_inflight_loads.pop(model_id, None)
+
+    async def _jit_place_and_wait(self, model_id: ModelId) -> None:
+        """Choose a placement config, send a jit PlaceInstance, await readiness."""
+        try:
+            model_card = await ModelCard.load(model_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail=f"Failed to load model card: {exc}"
+            ) from exc
+
+        sharding, instance_meta, min_nodes = self._choose_jit_placement(model_card)
+
+        logger.info(
+            f"JIT auto-placing {model_id} "
+            f"(sharding={sharding.value}, meta={instance_meta.value}, "
+            f"min_nodes={min_nodes})"
+        )
+        await self._send(
+            PlaceInstance(
+                model_card=model_card,
+                sharding=sharding,
+                instance_meta=instance_meta,
+                min_nodes=min_nodes,
+                jit=True,
+            )
+        )
+
+        timeout = jit_load_timeout_seconds()
+        deadline = anyio.current_time() + timeout
+        while True:
+            if self._model_instance_ready(model_id):
+                return
+            failure = self._model_instance_failed(model_id)
+            if failure is not None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"JIT auto-load for model {model_id} failed: {failure}",
+                )
+            if anyio.current_time() >= deadline:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"JIT auto-load for model {model_id} timed out after "
+                        f"{timeout:.0f}s"
+                    ),
+                )
+            await anyio.sleep(0.25)
+
+    def _choose_jit_placement(
+        self, model_card: ModelCard
+    ) -> tuple[Sharding, InstanceMeta, int]:
+        """Pick the best admissible placement config for a JIT auto-load.
+
+        Mirrors the dashboard's pickOptimalPlacement priority, but validates each
+        candidate via a dry-run ``place_instance(jit=True)`` so the growth-reserve
+        admission check participates. Priority: multi-node Jaccl+Tensor (fastest)
+        → single-node Ring+Pipeline → any admissible config (fewest nodes). Raises
+        a clean 503 when nothing is admissible (reserve would be violated).
+        """
+        node_count = len(list(self.state.topology.list_nodes()))
+        candidates: list[tuple[Sharding, InstanceMeta, int]] = []
+        # Prefer the largest multi-node RDMA tensor-parallel placement.
+        for n in range(node_count, 1, -1):
+            candidates.append((Sharding.Tensor, InstanceMeta.MlxJaccl, n))
+        # Then single-node pipeline/ring.
+        candidates.append((Sharding.Pipeline, InstanceMeta.MlxRing, 1))
+        # Finally any remaining combination, fewest nodes first.
+        for n in range(1, node_count + 1):
+            for sharding in (Sharding.Pipeline, Sharding.Tensor):
+                for meta in (InstanceMeta.MlxRing, InstanceMeta.MlxJaccl):
+                    combo = (sharding, meta, n)
+                    if combo not in candidates:
+                        candidates.append(combo)
+
+        last_error: str | None = None
+        for sharding, instance_meta, min_nodes in candidates:
+            try:
+                placements = get_instance_placements(
+                    PlaceInstance(
+                        model_card=model_card,
+                        sharding=sharding,
+                        instance_meta=instance_meta,
+                        min_nodes=min_nodes,
+                        jit=True,
+                    ),
+                    node_memory=self.state.node_memory,
+                    node_network=self.state.node_network,
+                    node_backends=self.state.node_backends,
+                    topology=self.state.topology,
+                    current_instances=self.state.instances,
+                    download_status=self.state.downloads,
+                    node_rdma_ctl=self.state.node_rdma_ctl,
+                )
+            except ValueError as exc:
+                last_error = str(exc)
+                continue
+            new_ids = [
+                iid for iid in placements if iid not in self.state.instances
+            ]
+            if len(new_ids) == 1:
+                return (sharding, instance_meta, min_nodes)
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Cannot JIT-load model {model_card.model_id}: no admissible "
+                f"placement ({last_error or 'unknown reason'})"
+            ),
+        )
 
     def stream_events(self) -> StreamingResponse:
         def _generate_json_array(events: Iterable[Event]) -> Iterable[str]:
