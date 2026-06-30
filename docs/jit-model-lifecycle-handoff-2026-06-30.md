@@ -1,8 +1,19 @@
-# JIT Model Lifecycle — Handoff (2026-06-30)
+# JIT Model Lifecycle (2026-06-30)
 
-Branch: `feat/jit-model-lifecycle` (base commit `e70390e2`, branched from
-`main@3c7b700f`). The admission-safety **primitive** is committed; the rest of
-the feature is scoped here and NOT yet built.
+**STATUS: SHIPPED, DEPLOYED, AND VERIFIED LIVE.** The full feature is built,
+merged to `main` (merge commit `99c87b93`, feature work `ec2614b09`), deployed to
+the cluster, and exercised end-to-end against real DSv4 + Qwen3.6 workloads. It
+is enabled (`EXO_JIT_ENABLED=1`) with Qwen3.6 NOT co-hosted at boot.
+
+Operational guide for running/tuning/verifying it lives in the
+`exo-jit-model-lifecycle` skill; this doc is the design + implementation record.
+
+Originally branched as `feat/jit-model-lifecycle` (base `e70390e2`, from
+`main@3c7b700f`); the admission-safety primitive landed first (`e70390e2`), then
+the rest (Steps 1-5) in the follow-up session below.
+
+See **"IMPLEMENTED"** and **"DEPLOY + LIVE VERIFICATION"** sections below for what
+shipped; the original "scope" sections are retained for design rationale.
 
 ## Goal (user's words)
 
@@ -128,7 +139,38 @@ unchanged until `EXO_JIT_ENABLED=1` (master kill-switch, default off).
 
 Pre-commit gates: ruff clean; basedpyright introduces zero new errors (5
 pre-existing in api/main.py, 1 in placement.py — all unrelated); 142 master+api
-unit tests pass. NOT yet deployed to the cluster (needs an explicit relaunch).
+unit tests pass.
+
+## DEPLOY + LIVE VERIFICATION (2026-06-30)
+
+Merged `feat/jit-model-lifecycle` → `main` (clean merge `99c87b93`; the JIT env
+block at start_cluster.sh ~L395/~L919 auto-merged with main's
+`EXO_LEAF_SNAPSHOT_RETENTION` block at ~L283/~L972). Pushed `origin/main`.
+Deployed with `EXO_JIT_ENABLED=1 QWEN36_ENABLED=0 ./start_cluster.sh`:
+
+- Both nodes synced on `99c87b93`; cluster HEALTHY; DSv4-Flash auto-placed across
+  both Studios via RDMA, runners READY (2/2).
+- All four `EXO_JIT_*` vars confirmed in the runner process env.
+- DSv4 tagged `jit=False` (placed at boot → reaper-immune); Qwen3.6 NOT co-hosted.
+
+End-to-end test, all three behaviors confirmed:
+
+1. **Auto-load**: a single chat request to non-resident Qwen3.6-35B-A3B-8bit
+   auto-placed it (`sharding=Tensor, meta=MlxJaccl, min_nodes=2` — best RDMA
+   config, admitted against the 18 GB/node reserve), loaded, and answered
+   `'Paris'` (`finish_reason=stop`) in **19s**. Log (m4-1, the API node):
+   `JIT auto-placing mlx-community/Qwen3.6-35B-A3B-8bit (...)`.
+2. **Tagging**: Qwen3.6 `jit=True`, DSv4 `jit=False` in `/state`.
+3. **Idle reaper**: Qwen3.6 auto-unloaded at **idle 302s ≥ 300s**; DSv4 retained
+   and still served `'Paris'` after. Log (m4-2, the elected master):
+   `JIT idle reaper unloading instance ... (model ...Qwen3.6..., idle 302s >= 300s)`.
+
+Cross-node confirmation: auto-place logged on the request-receiving API node
+(m4-1), idle reaper on the elected master (m4-2) — see the `exo-jit-model-lifecycle`
+skill's CROSS-NODE GOTCHA. One gotcha surfaced during test: tiny `max_tokens`
+returns truncated chain-of-thought (`' of'`, `'-known'`, `finish_reason=length`)
+that LOOKS like a quality regression — both DSv4 and Qwen3.6 are thinking models;
+re-probe with `max_tokens≥2000` (then `finish_reason=stop`, clean answer).
 
 ## Original remaining-work scope (for reference)
 
@@ -190,13 +232,15 @@ unit tests pass. NOT yet deployed to the cluster (needs an explicit relaunch).
   instance after window.
 - Refusal path: no admissible cycle → 503, not OOM, not hang.
 
-## Config knobs (all new; document in start_cluster.sh allow-list like
+## Config knobs (all new; in the start_cluster.sh allow-list like
 `EXO_LEAF_SNAPSHOT_RETENTION`)
 
-- `EXO_JIT_MEMORY_RESERVE_GB` (default 18.0; 0 disables reserve) — **implemented**.
-- `EXO_JIT_LOAD_TIMEOUT_SECONDS` (default ~120) — TODO.
-- `EXO_JIT_IDLE_UNLOAD_SECONDS` (default ~300) — TODO.
-- Possibly `EXO_JIT_ENABLED` (master kill-switch; default off until proven) — TODO.
+All four are **implemented and shipped** (defaults block + EXO_ENV passthrough):
+
+- `EXO_JIT_ENABLED` (default `0`; master kill-switch, off until enabled).
+- `EXO_JIT_MEMORY_RESERVE_GB` (default `18.0`; `0` disables reserve).
+- `EXO_JIT_LOAD_TIMEOUT_SECONDS` (default `120`).
+- `EXO_JIT_IDLE_UNLOAD_SECONDS` (default `300`).
 
 ## Deploy / safety notes (exo cluster, see exo-cluster-operations skill)
 

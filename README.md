@@ -315,6 +315,10 @@ exo supports several environment variables for configuration:
 | `EXO_LIBP2P_NAMESPACE` | Custom namespace for cluster isolation | None |
 | `EXO_FAST_SYNCH` | Control MLX_METAL_FAST_SYNCH behavior (for JACCL backend) | Auto |
 | `EXO_TRACING_ENABLED` | Enable distributed tracing for performance analysis | `false` |
+| `EXO_JIT_ENABLED` | Just-in-time model lifecycle: a chat request for a downloaded-but-not-resident model auto-places it, serves it, and unloads it after an idle window (transparent to all clients). Master kill-switch. | `false` |
+| `EXO_JIT_MEMORY_RESERVE_GB` | Per-node free memory a JIT auto-load must leave on every node on top of its weight share, protecting an already-resident model whose KV/working-set grows with context. `0` disables the reserve. | `18.0` |
+| `EXO_JIT_LOAD_TIMEOUT_SECONDS` | Max time a JIT auto-load may take to become ready before the request gets a clean 503 (not a hang). | `120` |
+| `EXO_JIT_IDLE_UNLOAD_SECONDS` | Idle window after which a JIT-placed instance is auto-unloaded. Only JIT instances with no in-flight requests are reaped; explicitly-placed models are immune. | `300` |
 
 **Example usage:**
 
@@ -333,6 +337,9 @@ EXO_ENABLE_IMAGE_MODELS=true uv run exo
 
 # Use custom namespace for cluster isolation
 EXO_LIBP2P_NAMESPACE=my-dev-cluster uv run exo
+
+# Enable just-in-time model loading (auto-load on first request, idle-unload)
+EXO_JIT_ENABLED=true uv run exo
 ```
 
 ---
