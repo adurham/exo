@@ -283,6 +283,16 @@ fi
 : "${DSV4_MAX_PREFIX_SESSIONS:=2}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
+# Per-leaf KV snapshot retention for DSv4's non-sliceable (PoolingCache /
+# RotatingKVCache) layers. Snapshots are now retained EVENLY SPACED across the
+# leaf's token range (commit 3c7b700f) so a below-tip divergence restores from a
+# nearby snapshot instead of cold re-prefilling the whole prompt. Each snapshot
+# deep-copies pooled-attention state (~0.72 GB at ~108K ctx, measured), so the
+# count is the per-leaf memory knob: 4 -> ~3 GB/leaf, 3 -> ~2.2 GB/leaf. Lowered
+# 4->3 (2026-06-30) to reclaim ~0.7-1.5 GB/leaf of headroom on the co-hosted
+# 128 GB box where DSv4 active hits ~85 GB/node at 140K ctx; 3 still gives
+# endpoints + one interior rung (worst-case re-prefill ~= range/2).
+: "${EXO_LEAF_SNAPSHOT_RETENTION:=3}"
 # DSv4 sparse-index attention materializes a (B, n_heads, L, L×k) score buffer
 # at prefill — cubic in L until k saturates at index_topk=512, so any single
 # chunk above ~1.2K tokens crashes Metal allocation. Cap at 512 for safety
@@ -932,6 +942,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_HC_USE_OPS:-}" ]       && EXO_ENV="$EXO_ENV EXO_HC_USE_OPS=$EXO_HC_USE_OPS"
     [ -n "${EXO_DSV4_ACT_PROBE:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ACT_PROBE=$EXO_DSV4_ACT_PROBE"
     [ -n "${EXO_DSV4_MTP_DEDICATED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DEDICATED=$EXO_DSV4_MTP_DEDICATED"
+    [ -n "${EXO_LEAF_SNAPSHOT_RETENTION:-}" ] && EXO_ENV="$EXO_ENV EXO_LEAF_SNAPSHOT_RETENTION=$EXO_LEAF_SNAPSHOT_RETENTION"
     [ -n "${EXO_ARRAYSCACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_ARRAYSCACHE_DIAG=$EXO_ARRAYSCACHE_DIAG"
     # Eagle soft-embedding for chained MTP draft (Phase 14 Plan B.2).
     # Default OFF (0): mlx-lm's DeepseekV4MTPModule.__call__ uses the
