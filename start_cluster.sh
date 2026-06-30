@@ -375,6 +375,27 @@ fi
 : "${QWEN36_MAX_KV_TOKENS:=}"
 : "${QWEN36_PREFILL_STEP_SIZE:=}"
 
+# --- JIT model lifecycle (LM-Studio-style auto load/unload, in exo) ----------
+# When EXO_JIT_ENABLED=1, a chat request for a model with no resident instance
+# causes exo to auto-place it (transparent to the client), serve it, and unload
+# it after an idle window. Default OFF (kill-switch) until proven on this box.
+# The motivating use: keep DSv4-Flash interactive while Qwen3.6 (aux) loads on
+# demand and frees its ~17.5 GB/node when idle. Set QWEN36_ENABLED=0 to NOT
+# co-host Qwen at launch and let JIT bring it up only when an aux task needs it.
+: "${EXO_JIT_ENABLED:=0}"
+# Per-node free-memory reserve (GB) an auto-load must leave on EVERY node, on
+# top of its own weight share. Protects the resident interactive model whose
+# KV/working-set GROWS with context (storage_size is weights-only). 18 GB ≈
+# DSv4-Flash measured growth headroom. 0 disables the reserve (pre-JIT behavior).
+: "${EXO_JIT_MEMORY_RESERVE_GB:=18.0}"
+# Max seconds an auto-load may take to reach RunnerReady before the request
+# gets a clean 503 (NOT a hang). ~30-60s is typical for Qwen3.6.
+: "${EXO_JIT_LOAD_TIMEOUT_SECONDS:=120}"
+# Idle seconds after which a JIT-placed instance is auto-unloaded. Only JIT
+# instances with zero in-flight requests are reaped; the interactive model
+# (placed explicitly, jit=False) is immune.
+: "${EXO_JIT_IDLE_UNLOAD_SECONDS:=300}"
+
 # Cluster-wide sampling defaults (apply when neither request nor instance specifies).
 # Unset by default — instance and hardcoded fallbacks take over.
 : "${EXO_DEFAULT_TEMPERATURE:=}"
@@ -883,6 +904,12 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_ARGPARTITION_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ARGPARTITION_MIN_P=$EXO_DSV4_ARGPARTITION_MIN_P"
     [ -n "$EXO_DSV4_LMHEAD_LASTROW" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_LASTROW=$EXO_DSV4_LMHEAD_LASTROW"
     [ -n "$EXO_DSV4_SEQ_SPLIT" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT=$EXO_DSV4_SEQ_SPLIT"
+    # JIT model lifecycle (master + API read these; always forwarded so the
+    # kill-switch and reserve are explicit in the runner env).
+    EXO_ENV="$EXO_ENV EXO_JIT_ENABLED=$EXO_JIT_ENABLED"
+    EXO_ENV="$EXO_ENV EXO_JIT_MEMORY_RESERVE_GB=$EXO_JIT_MEMORY_RESERVE_GB"
+    EXO_ENV="$EXO_ENV EXO_JIT_LOAD_TIMEOUT_SECONDS=$EXO_JIT_LOAD_TIMEOUT_SECONDS"
+    EXO_ENV="$EXO_ENV EXO_JIT_IDLE_UNLOAD_SECONDS=$EXO_JIT_IDLE_UNLOAD_SECONDS"
     [ -n "${EXO_DSV4_HEAPCENSUS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HEAPCENSUS=$EXO_DSV4_HEAPCENSUS"
     [ -n "$EXO_DSV4_SEQ_SPLIT_MIN_L" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT_MIN_L=$EXO_DSV4_SEQ_SPLIT_MIN_L"
     [ -n "$EXO_PREFIX_CACHE_TRACE" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_TRACE=$EXO_PREFIX_CACHE_TRACE"

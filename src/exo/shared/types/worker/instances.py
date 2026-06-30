@@ -21,6 +21,12 @@ class BaseInstance(TaggedModel):
     instance_id: InstanceId
     shard_assignments: ShardAssignments
 
+    # True when this instance was auto-placed by the JIT request-path hook.
+    # The idle reaper only ever unloads JIT instances; explicit user/dashboard
+    # placements (jit=False) are "pinned" and immune to auto-unload. Carried in
+    # event-sourced state so the tag survives master failover/state rebuild.
+    jit: bool = False
+
     # Per-instance KV cache caps. None = unbounded (default behavior unchanged).
     # max_kv_tokens: per-active-request token cap (wraps KVCache → RotatingKVCache)
     # max_prefix_sessions: max number of cached past-prompt KV entries

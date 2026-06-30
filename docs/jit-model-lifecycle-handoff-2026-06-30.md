@@ -84,7 +84,53 @@ is already resident.**
 Both functions are currently **inert** — no callers yet. Merging this branch
 alone changes no behavior.
 
-## Remaining work (the actual feature)
+## IMPLEMENTED (2026-06-30, follow-up session)
+
+The full feature is now built on top of the primitive above. Default behavior is
+unchanged until `EXO_JIT_ENABLED=1` (master kill-switch, default off).
+
+- **`PlaceInstance.jit: bool`** (commands.py) + **`BaseInstance.jit: bool`**
+  (instances.py, event-sourced so the tag survives master failover). JIT
+  auto-placements set both; explicit user/dashboard placements leave them False.
+- **placement_utils.py**: added `jit_enabled()`, `jit_load_timeout_seconds()`
+  (default 120), `jit_idle_unload_seconds()` (default 300), `weight_share_per_node()`
+  (tensor=even split; pipeline=proportional to layer allocation, mirrors
+  `get_shard_assignments`), and `jit_instances_to_reap()` (pure reaper policy).
+- **Step 1 (placement.py)**: `place_instance()` filters candidate cycles by
+  `cycle_admits_with_reserve()` **only when `command.jit`**; no admissible cycle →
+  hard-refuse via `ValueError` (surfaced as a clean 503). Created instances are
+  tagged `jit=command.jit`.
+- **Step 2 (api/main.py)**: `_validate_model_has_instance()` now auto-places a
+  downloaded-but-not-resident model when JIT is on, via `_jit_ensure_instance()`
+  (single-flight per model_id using an `anyio.Event`) → `_jit_place_and_wait()`
+  (sends a `jit=True` PlaceInstance, polls `/state` runners for `RunnerReady`,
+  bounded by `EXO_JIT_LOAD_TIMEOUT_SECONDS`). `_choose_jit_placement()` mirrors
+  the dashboard's pickOptimalPlacement priority but dry-runs each config through
+  `place_instance(jit=True)` so the reserve participates. Refusal/timeout → 503;
+  not-downloaded → unchanged 404 + download-notify.
+- **Step 3 (master/main.py)**: `_jit_idle_reaper()` background task. Tracks
+  per-instance last-use (`_jit_instance_last_use`, bumped on every TextGeneration
+  dispatch), and unloads JIT instances idle beyond the window. Skips non-JIT
+  (pinned/interactive) instances and any instance with in-flight Pending/Running
+  tasks; re-checks in-flight immediately before the delete (computed + broadcast
+  with no await between) to close the check→delete race.
+- **Step 4**: refusal returns the standard `ErrorResponse` shape (503) via the
+  existing `http_exception_handler` — same OpenAI-compat envelope all other
+  errors use.
+- **Step 5**: `src/exo/master/tests/test_jit_lifecycle.py` (reserve config,
+  cycle_admits lopsided/boundary/disable, weight_share, place_instance jit
+  refusal vs non-jit pass, reaper policy) and
+  `src/exo/api/tests/test_jit_request_path.py` (jit-disabled 404, not-downloaded
+  404, single-flight one-placement-for-concurrent-requests). All green.
+- **start_cluster.sh**: `EXO_JIT_ENABLED` (default 0), `EXO_JIT_MEMORY_RESERVE_GB`
+  (18.0), `EXO_JIT_LOAD_TIMEOUT_SECONDS` (120), `EXO_JIT_IDLE_UNLOAD_SECONDS`
+  (300) added to the defaults block AND the EXO_ENV passthrough allow-list.
+
+Pre-commit gates: ruff clean; basedpyright introduces zero new errors (5
+pre-existing in api/main.py, 1 in placement.py — all unrelated); 142 master+api
+unit tests pass. NOT yet deployed to the cluster (needs an explicit relaunch).
+
+## Original remaining-work scope (for reference)
 
 ### Step 1 — wire admission into placement
 - In `place_instance()` (or a thin wrapper), after the existing

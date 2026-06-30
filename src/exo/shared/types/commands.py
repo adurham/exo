@@ -40,6 +40,13 @@ class PlaceInstance(BaseCommand):
     instance_meta: InstanceMeta
     min_nodes: int
 
+    # True when this placement was auto-triggered by the JIT request-path hook
+    # (a chat request arrived for a model with no resident instance). JIT
+    # placements get the extra growth-reserve admission check and the resulting
+    # instance is tagged JIT so the idle reaper may unload it. Explicit user /
+    # dashboard placements leave this False: no reserve check, never auto-reaped.
+    jit: bool = False
+
 
 class CreateInstance(BaseCommand):
     instance: Instance

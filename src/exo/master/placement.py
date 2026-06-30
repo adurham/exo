@@ -4,12 +4,15 @@ from typing import Sequence
 
 from exo.master.placement_utils import (
     Cycle,
+    cycle_admits_with_reserve,
     filter_cycles_by_memory,
     get_mlx_jaccl_coordinators,
     get_mlx_jaccl_devices_matrix,
     get_mlx_ring_hosts_by_node,
     get_shard_assignments,
     get_smallest_cycles,
+    jit_memory_reserve,
+    weight_share_per_node,
 )
 from exo.shared.models.model_cards import ModelId
 from exo.shared.topology import Topology
@@ -129,6 +132,33 @@ def place_instance(
     )
     if len(cycles_with_sufficient_memory) == 0:
         raise ValueError("No cycles found with sufficient memory")
+
+    # JIT auto-placements must additionally leave a per-node growth reserve free
+    # for whatever is already resident (the interactive model's KV/working-set
+    # grows with context; storage_size is weights-only and does NOT capture it).
+    # Hard-refuse when no cycle clears the reserve — the request path surfaces a
+    # clean 503 and the caller falls back, rather than silently OOMing the box.
+    # Explicit user placements (jit=False) skip this and behave as before.
+    if command.jit:
+        reserve = jit_memory_reserve()
+        admissible_cycles = [
+            cycle
+            for cycle in cycles_with_sufficient_memory
+            if cycle_admits_with_reserve(
+                cycle,
+                node_memory,
+                weight_share_per_node(
+                    command.model_card, cycle, node_memory, command.sharding
+                ),
+                reserve,
+            )
+        ]
+        if not admissible_cycles:
+            raise ValueError(
+                f"No cycle leaves the required {reserve.in_gb:.1f} GB/node JIT "
+                f"memory reserve free after placing {command.model_card.model_id}"
+            )
+        cycles_with_sufficient_memory = admissible_cycles
 
     if command.sharding == Sharding.Tensor:
         if not command.model_card.supports_tensor:
@@ -291,6 +321,7 @@ def place_instance(
                 shard_assignments=shard_assignments,
                 jaccl_devices=mlx_jaccl_devices,
                 jaccl_coordinators=mlx_jaccl_coordinators,
+                jit=command.jit,
             )
         case InstanceMeta.MlxRing:
             ephemeral_port = random_ephemeral_port()
@@ -305,6 +336,7 @@ def place_instance(
                 shard_assignments=shard_assignments,
                 hosts_by_node=hosts_by_node,
                 ephemeral_port=ephemeral_port,
+                jit=command.jit,
             )
 
     return target_instances
