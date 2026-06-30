@@ -251,6 +251,96 @@ def _find_nearest_snapshot(
     return best
 
 
+def _select_spaced_snapshots(
+    snapshots: list[CacheSnapshot],
+    keep: int,
+) -> list[CacheSnapshot]:
+    """Choose ``keep`` snapshots SPREAD EVENLY across the available token range
+    (endpoints inclusive), instead of the deepest ``keep`` bunched at the tip.
+
+    The old policy kept the ``keep`` deepest snapshots by token_count. On a
+    continuing conversation each turn extends by a small suffix and leaves a
+    snapshot near the new tip, so the deepest ``keep`` all cluster within ~1-2K
+    of the leaf's tip. That is great for a pure append (next turn re-diverges at
+    the tip) but useless for a turn whose prompt diverges further back — a
+    thinking model dropping its previous reasoning trace, a context edit, an
+    automatic compaction. When the divergence falls BELOW the shallowest
+    retained snapshot, ``_find_nearest_snapshot`` returns None and the whole
+    prompt is cold re-prefilled even though ~all of it is resident in the trie
+    (observed: a 112,873-token leaf, prompt shrank to 108,176 → divergence at
+    108,130 → full 108K re-prefill, ~6 min, despite a 99% trie prefix match).
+
+    Fix: ALWAYS keep the shallowest and deepest available snapshots, and spread
+    the remaining ``keep-2`` slots over evenly-spaced target depths in between,
+    snapping each target to the nearest available snapshot at-or-below it. This
+    guarantees ``_find_nearest_snapshot`` returns a usable restore point for ANY
+    divergence at-or-above the leaf's earliest snapshot — the worst-case
+    re-prefill is bounded by the largest gap between retained snapshots (range /
+    (keep-1)), never the whole context. Keeping the deepest preserves the cheap
+    pure-continuation hit; keeping the shallowest is what actually fixes the
+    observed bug (deepest-N dropped it). Same ``keep`` count, so the per-leaf
+    memory ceiling is unchanged.
+
+    Returns snapshots sorted ascending by token_count.
+    """
+    if keep <= 0:
+        return []
+    uniq = sorted(snapshots, key=lambda s: s.token_count)
+    if len(uniq) <= keep:
+        return uniq
+    shallowest = uniq[0]
+    deepest = uniq[-1]
+    if keep == 1:
+        return [deepest]
+    # Anchor both endpoints; fill the interior with evenly-spaced targets snapped
+    # to the nearest available snapshot at-or-below each target.
+    chosen: dict[int, CacheSnapshot] = {
+        shallowest.token_count: shallowest,
+        deepest.token_count: deepest,
+    }
+    span = deepest.token_count - shallowest.token_count
+    interior = keep - 2
+    for i in range(1, interior + 1):
+        target = shallowest.token_count + (span * i) // (keep - 1)
+        snap = _find_nearest_snapshot(uniq, target)
+        if snap is not None and snap.token_count not in chosen:
+            chosen[snap.token_count] = snap
+    # Even spacing can collide (sparse set) and leave slots unused — backfill
+    # with the deepest still-unchosen snapshots so the full budget is used.
+    if len(chosen) < keep:
+        for snap in reversed(uniq):
+            if snap.token_count not in chosen:
+                chosen[snap.token_count] = snap
+                if len(chosen) >= keep:
+                    break
+    return sorted(chosen.values(), key=lambda s: s.token_count)
+
+
+def _snapshot_nbytes(snap: CacheSnapshot) -> int:
+    """Best-effort live-array byte total of one snapshot's stored states.
+    Read-only; used for the [SNAPMEM] retention-cost log line. Never raises."""
+    total = 0
+
+    def _attr_bytes(obj: object) -> int:
+        acc = 0
+        for attr in ("keys", "values", "_pool_storage", "buf_kv", "buf_gate"):
+            arr = getattr(obj, attr, None)
+            nb = getattr(arr, "nbytes", None)
+            if isinstance(nb, int):
+                acc += nb
+        return acc
+
+    for st in snap.states:
+        if st is None:
+            continue
+        total += _attr_bytes(st)
+        sub = getattr(st, "caches", None)
+        if isinstance(sub, (list, tuple)):
+            for c in sub:  # type: ignore[reportUnknownVariableType]
+                total += _attr_bytes(c)  # type: ignore[reportUnknownArgumentType]
+    return total
+
+
 def is_non_trimmable_cache_entry(c: object) -> bool:
     """A cache entry is non-trimmable if `trim(n)` can't roll back its full
     state — meaning the prefill +2 rollback must snapshot+restore it instead.
@@ -678,14 +768,31 @@ class KVPrefixCache:
         # one full per-layer snapshot set every turn of a continuing
         # conversation (``restore_pos`` climbs monotonically, so the
         # ``<= restore_pos`` filter never drops a prior snapshot) — the DSv4
-        # multi-turn PoolingCache leak (~0.2-0.4 GB/turn). Keep the deepest
-        # ``_LEAF_SNAPSHOT_RETENTION`` by token_count: the next turn's
-        # continuation hit always lands at/near the leaf's full length and
-        # resolves to one of these; only a partial hit shallower than all
-        # retained snapshots degrades to a full re-prefill (correctness-safe).
+        # multi-turn PoolingCache leak (~0.2-0.4 GB/turn).
+        #
+        # Keep ``_LEAF_SNAPSHOT_RETENTION`` snapshots SPACED across the token
+        # range (deepest tip + a geometric ladder toward the root), NOT the
+        # deepest N. The deepest-N policy clustered every retained snapshot
+        # within a few hundred tokens of the tip on a continuing conversation,
+        # so a turn whose prompt diverged further back (reasoning-trace drop,
+        # context edit, auto-compaction) found NO snapshot at/below the
+        # divergence and cold re-prefilled the whole 100K+ prompt despite ~all
+        # of it being resident — a multi-minute stall. The spaced ladder keeps
+        # the same COUNT (memory ceiling unchanged; actually cheaper since
+        # shallow snapshots are smaller) while covering a divergence at any
+        # depth. See _select_spaced_snapshots.
         if len(merged) > _LEAF_SNAPSHOT_RETENTION:
-            merged.sort(key=lambda s: s.token_count)
-            merged = merged[-_LEAF_SNAPSHOT_RETENTION:]
+            merged = _select_spaced_snapshots(merged, _LEAF_SNAPSHOT_RETENTION)
+        if merged:
+            try:
+                total_b = sum(_snapshot_nbytes(s) for s in merged)
+                depths = ",".join(str(s.token_count) for s in merged)
+                logger.info(
+                    f"[SNAPMEM] leaf {leaf_id}: {len(merged)} snapshots "
+                    f"total={total_b / 1024**3:.2f}GB depths=[{depths}]"
+                )
+            except Exception:
+                pass
 
         old_depth = leaf.node.depth
         new_length = int(prompt_tokens.shape[0])

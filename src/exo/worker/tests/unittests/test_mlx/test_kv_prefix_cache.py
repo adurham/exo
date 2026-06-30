@@ -11,7 +11,10 @@ from mlx_lm.sample_utils import make_sampler
 from exo.shared.types.common import ModelId
 from exo.shared.types.text_generation import InputMessage, TextGenerationTaskParams
 from exo.worker.engines.mlx.cache import (
+    CacheSnapshot,
     KVPrefixCache,
+    _find_nearest_snapshot,
+    _select_spaced_snapshots,
     cache_length,
     encode_prompt,
     get_prefix_length,
@@ -1163,3 +1166,74 @@ class TestMultiTurnSnapshotLeak:
         assert len(set(tail)) == 1, (
             f"PoolingCache still leaking across turns: {pooling_trace}"
         )
+
+
+def _snap(tc: int) -> CacheSnapshot:
+    """A minimal CacheSnapshot at a given token_count (states irrelevant here)."""
+    return CacheSnapshot(states=[], token_count=tc)
+
+
+class TestSpacedSnapshotRetention:
+    """Regression tests for _select_spaced_snapshots — the spaced (stride-from-
+    tip) retention that replaced deepest-N. The deepest-N bug clustered all
+    retained snapshots at the tip, so a prompt that diverged a few thousand
+    tokens below the tip (reasoning-trace drop / compaction) found NO snapshot
+    at/below the divergence and cold re-prefilled the whole 100K+ prompt.
+    """
+
+    def test_under_budget_returns_all(self):
+        snaps = [_snap(1000), _snap(2000), _snap(3000)]
+        out = _select_spaced_snapshots(snaps, keep=4)
+        assert [s.token_count for s in out] == [1000, 2000, 3000]
+
+    def test_keeps_shallowest_and_deepest_endpoints(self):
+        # Simulate the observed failure: dense near-tip snapshots from small
+        # extends, tip ~112873. Deepest-4 kept [111631,112354,112639,112873] —
+        # nothing at/below a 108130 divergence. Even-spread must keep BOTH the
+        # shallowest (106670) and deepest (112873), so a below-tip divergence
+        # resolves.
+        tips = [106670, 107556, 108246, 109787, 111631, 112354, 112639, 112873]
+        out = _select_spaced_snapshots([_snap(t) for t in tips], keep=4)
+        depths = [s.token_count for s in out]
+        assert depths[0] == 106670, depths   # shallowest always kept
+        assert depths[-1] == 112873, depths  # deepest always kept
+        assert len(depths) == 4
+        assert depths == sorted(set(depths))
+
+    def test_divergence_below_tip_now_finds_snapshot(self):
+        # End-to-end intent: after spaced selection, _find_nearest_snapshot at
+        # the exact observed divergence depth returns a usable restore point
+        # (not None) — the whole point of the fix.
+        tips = [106670, 107556, 108246, 109787, 111631, 112354, 112639, 112873]
+        retained = _select_spaced_snapshots([_snap(t) for t in tips], keep=4)
+        snap = _find_nearest_snapshot(retained, 108130)
+        assert snap is not None
+        assert snap.token_count <= 108130
+
+    def test_even_spacing_bounds_worst_case_gap(self):
+        # 20 snapshots at 1000-token spacing (1000..20000), keep=4 → endpoints
+        # 1000 & 20000 plus 2 interior; the largest gap between retained
+        # snapshots must be bounded near range/(keep-1) ~= 6333, never the whole
+        # range. This bounds the worst-case re-prefill.
+        snaps = [_snap(1000 * i) for i in range(1, 21)]
+        out = _select_spaced_snapshots(snaps, keep=4)
+        depths = sorted(s.token_count for s in out)
+        assert depths[0] == 1000 and depths[-1] == 20000
+        assert len(depths) == 4
+        gaps = [b - a for a, b in zip(depths, depths[1:], strict=False)]
+        # Allow one snap-to-nearest rounding step (1000) above the ideal.
+        assert max(gaps) <= (20000 - 1000) // (4 - 1) + 1000, depths
+
+    def test_sparse_set_backfills_to_full_budget(self):
+        # Fewer distinct depths than keep slots after spacing collisions:
+        # backfill must still use the full budget with deepest snapshots.
+        snaps = [_snap(t) for t in (1000, 1100, 1200, 20000, 20100)]
+        out = _select_spaced_snapshots(snaps, keep=4)
+        assert len(out) == 4
+        assert out[0].token_count == 1000   # shallowest
+        assert out[-1].token_count == 20100  # deepest
+
+    def test_keep_one_returns_deepest(self):
+        snaps = [_snap(t) for t in (1000, 2000, 3000)]
+        out = _select_spaced_snapshots(snaps, keep=1)
+        assert [s.token_count for s in out] == [3000]
