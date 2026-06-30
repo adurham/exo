@@ -31,6 +31,7 @@ from exo.shared.types.chunks import (
 )
 from exo.shared.types.common import CommandId
 from exo.shared.types.text_generation import (
+    HIGH_PRIORITY_SERVICE_TIERS,
     LOW_PRIORITY_SERVICE_TIERS,
     Base64Image,
     InputMessage,
@@ -179,6 +180,10 @@ async def chat_request_to_text_generation(
         low_priority=(
             request.service_tier is not None
             and request.service_tier.lower() in LOW_PRIORITY_SERVICE_TIERS
+        ),
+        high_priority=(
+            request.service_tier is not None
+            and request.service_tier.lower() in HIGH_PRIORITY_SERVICE_TIERS
         ),
     )
 

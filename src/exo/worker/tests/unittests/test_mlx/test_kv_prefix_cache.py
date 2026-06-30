@@ -277,6 +277,104 @@ class TestRadixTrieStorage:
         )
         assert cache._leaves[leaf_id].low_priority is True  # pyright: ignore[reportPrivateUsage]
 
+    def test_high_priority_leaf_survives_when_normal_competes(self):
+        """A protected (high_priority) interactive leaf is NOT evicted to make
+        room for an untagged normal leaf, even when the high-priority leaf is the
+        LRU. This is the cross-turn protection for the user's hot 100K+ session
+        against an untagged co-equal session — the gap that plain low_priority
+        tagging (which only the cooperating background caller sets) didn't cover.
+        """
+        cache = KVPrefixCache(None, max_sessions=2)
+        # Protected session added FIRST → it is the LRU by last_used.
+        protected = mx.array([1, 2, 3, 4, 5, 10, 11], dtype=mx.int32)
+        untagged = mx.array([90, 91, 92, 93, 94, 95, 96], dtype=mx.int32)
+        third = mx.array([50, 51, 52, 53, 54, 55, 56], dtype=mx.int32)
+
+        id_protected = cache.add_kv_cache(
+            protected, _fake_kv_cache(num_layers=2, num_tokens=7),
+            high_priority=True,
+        )
+        cache.add_kv_cache(
+            untagged, _fake_kv_cache(num_layers=2, num_tokens=7),
+        )
+        # cap=2; adding a third forces ONE eviction. LRU alone would pick the
+        # protected leaf (oldest); priority must pick the untagged normal leaf.
+        cache.add_kv_cache(
+            third, _fake_kv_cache(num_layers=2, num_tokens=7),
+        )
+
+        assert id_protected in cache.prompts, (
+            "high_priority interactive leaf was wrongly evicted before a normal leaf"
+        )
+
+    def test_eviction_order_low_then_normal_then_high(self):
+        """Full three-class ordering: low_priority evicts first, then normal,
+        then high_priority — each only when the cheaper classes are exhausted."""
+        cache = KVPrefixCache(None, max_sessions=3)
+        low = mx.array([10, 11, 12, 13, 14, 15, 16], dtype=mx.int32)
+        normal = mx.array([20, 21, 22, 23, 24, 25, 26], dtype=mx.int32)
+        high = mx.array([30, 31, 32, 33, 34, 35, 36], dtype=mx.int32)
+        # Insert high FIRST (oldest), then normal, then low (newest) so that
+        # plain LRU would evict high → normal → low, the exact REVERSE of the
+        # priority order we require.
+        id_high = cache.add_kv_cache(
+            high, _fake_kv_cache(num_layers=2, num_tokens=7), high_priority=True
+        )
+        id_normal = cache.add_kv_cache(
+            normal, _fake_kv_cache(num_layers=2, num_tokens=7)
+        )
+        id_low = cache.add_kv_cache(
+            low, _fake_kv_cache(num_layers=2, num_tokens=7), low_priority=True
+        )
+
+        # 4th leaf → evict the low_priority leaf first.
+        cache.add_kv_cache(
+            mx.array([40, 41, 42, 43, 44, 45, 46], dtype=mx.int32),
+            _fake_kv_cache(num_layers=2, num_tokens=7),
+        )
+        assert id_low not in cache.prompts, "low_priority should evict first"
+        assert id_normal in cache.prompts and id_high in cache.prompts
+
+        # 5th leaf → no low_priority left → evict the normal leaf next.
+        cache.add_kv_cache(
+            mx.array([50, 51, 52, 53, 54, 55, 56], dtype=mx.int32),
+            _fake_kv_cache(num_layers=2, num_tokens=7),
+        )
+        assert id_normal not in cache.prompts, "normal should evict before high_priority"
+        assert id_high in cache.prompts, "high_priority must survive longest"
+
+    def test_high_priority_evicted_when_only_class_remaining(self):
+        """No starvation: a high_priority leaf CAN be evicted when it is the only
+        reclaimable (non-active) leaf left — protection is relative, not absolute.
+        """
+        cache = KVPrefixCache(None, max_sessions=1)
+        a = mx.array([1, 2, 3, 4, 5, 10, 11], dtype=mx.int32)
+        b = mx.array([1, 2, 3, 4, 5, 20, 21], dtype=mx.int32)
+        id_a = cache.add_kv_cache(
+            a, _fake_kv_cache(num_layers=2, num_tokens=7), high_priority=True
+        )
+        # Only one slot; a second leaf forces the high_priority leaf out since it
+        # is the sole non-active candidate (no cheaper class exists).
+        cache.add_kv_cache(b, _fake_kv_cache(num_layers=2, num_tokens=7))
+        assert id_a not in cache.prompts
+
+    def test_update_kv_cache_refreshes_high_priority(self):
+        """high_priority follows the latest request, surviving the in-place
+        extend AND the rebuild path (via _rebuild_leaf_in_place preservation)."""
+        cache = KVPrefixCache(None, max_sessions=2)
+        conv = mx.array([1, 2, 3, 4, 5, 10, 11], dtype=mx.int32)
+        leaf_id = cache.add_kv_cache(
+            conv, _fake_kv_cache(num_layers=2, num_tokens=7), high_priority=False
+        )
+        assert cache._leaves[leaf_id].high_priority is False  # pyright: ignore[reportPrivateUsage]
+        # Continue the same conversation, now tagged high_priority.
+        conv2 = mx.array([1, 2, 3, 4, 5, 10, 11, 12, 13], dtype=mx.int32)
+        cache.update_kv_cache(
+            leaf_id, conv2, _fake_kv_cache(num_layers=2, num_tokens=9),
+            snapshots=None, restore_pos=7, high_priority=True,
+        )
+        assert cache._leaves[leaf_id].high_priority is True  # pyright: ignore[reportPrivateUsage]
+
     def test_pin_prevents_eviction(self):
         cache = KVPrefixCache(None, max_sessions=1)
         tokens_a = mx.array([1, 2, 3, 4, 5], dtype=mx.int32)

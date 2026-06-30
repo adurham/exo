@@ -107,6 +107,18 @@ type ChatTemplateValue = Annotated[
 LOW_PRIORITY_SERVICE_TIERS: frozenset[str] = frozenset({"flex", "scale", "batch"})
 
 
+# OpenAI ``service_tier`` values that mark a request as a PROTECTED interactive
+# session. We map these to ``TextGenerationTaskParams.high_priority`` so the
+# prefix cache evicts such a request's leaf LAST — after low-priority background
+# leaves AND untagged normal-priority leaves are exhausted. This keeps a
+# long-lived interactive conversation's expensive hot KV cache resident across
+# turns against any competitor (background aux OR an untagged co-equal session)
+# and memory pressure, avoiding a multi-minute cold re-prefill of 100K+ context.
+# ``flex``/``scale``/``batch`` are low priority; ``auto``/``default`` and unset
+# remain normal priority; only the explicit ``priority`` tier is high priority.
+HIGH_PRIORITY_SERVICE_TIERS: frozenset[str] = frozenset({"priority"})
+
+
 class TextGenerationTaskParams(BaseModel, frozen=True):
     """Canonical internal task params for text generation.
 
@@ -130,6 +142,12 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     # (flex/scale/batch). Keeps a live conversation's KV from being evicted by
     # background aux work (e.g. context compression) that shares the instance.
     low_priority: bool = False
+    # Protected interactive request: its prefix-cache leaf is evicted LAST (after
+    # low-priority background AND untagged normal leaves). Set by the
+    # chat-completions adapter from the OpenAI ``service_tier: priority`` value.
+    # Keeps a live 100K+ conversation's hot KV resident across turns against any
+    # competing leaf and memory pressure, avoiding a multi-minute re-prefill.
+    high_priority: bool = False
     top_k: int | None = None
     stop: str | list[str] | None = None
     seed: int | None = None

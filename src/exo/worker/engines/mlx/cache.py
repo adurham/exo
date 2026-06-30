@@ -375,6 +375,7 @@ class _Leaf:
         "leaf_layer_caches",
         "leaf_snapshots",
         "low_priority",
+        "high_priority",
     )
 
     def __init__(
@@ -388,6 +389,7 @@ class _Leaf:
         leaf_layer_caches: list[object | None],
         leaf_snapshots: list[CacheSnapshot] | None,
         low_priority: bool = False,
+        high_priority: bool = False,
     ):
         self.leaf_id = leaf_id
         self.node = node
@@ -405,6 +407,16 @@ class _Leaf:
         # Eviction drops low-priority leaves before interactive ones so a
         # background aux call (e.g. compression) never evicts a live conversation.
         self.low_priority = low_priority
+        # Protected interactive session (from a `service_tier: priority` request).
+        # Eviction drops high-priority leaves LAST — after low-priority and
+        # normal-priority leaves are exhausted — so a long-lived interactive
+        # conversation with an expensive hot KV cache survives any competing
+        # leaf (background flex aux OR an untagged co-equal session) and memory
+        # pressure, keeping the cache hot to avoid a multi-minute re-prefill.
+        # Never absolute: the in-flight/sole leaf is protected separately, and a
+        # high-priority leaf can still be evicted when nothing else remains (no
+        # starvation).
+        self.high_priority = high_priority
 
 
 class _CacheProxy:
@@ -545,6 +557,7 @@ class KVPrefixCache:
         media_regions: list["MediaRegion"] | None = None,
         prefill_tps: float = 0.0,
         low_priority: bool = False,
+        high_priority: bool = False,
     ) -> int:
         """Insert a new session. Splits existing edges at divergence points.
 
@@ -580,6 +593,7 @@ class KVPrefixCache:
             leaf_layer_caches=leaf_layer_caches,
             leaf_snapshots=list(ssm_snapshots) if ssm_snapshots else None,
             low_priority=low_priority,
+            high_priority=high_priority,
         )
         self._leaves[leaf_id] = leaf
         self._increment_ref_count(node)
@@ -609,6 +623,7 @@ class KVPrefixCache:
         media_regions: list["MediaRegion"] | None = None,
         prefill_tps: float = 0.0,
         low_priority: bool = False,
+        high_priority: bool = False,
     ) -> None:
         """Extend an existing leaf with new suffix tokens and refreshed cache.
 
@@ -636,6 +651,7 @@ class KVPrefixCache:
                 media_regions=media_regions,
                 prefill_tps=prefill_tps,
                 low_priority=low_priority,
+                high_priority=high_priority,
             )
             return
         # Refresh the priority class from this turn's request. The extend path
@@ -643,6 +659,7 @@ class KVPrefixCache:
         # it from here onto the rebuilt leaf — so this single assignment covers
         # both paths.
         leaf.low_priority = low_priority
+        leaf.high_priority = high_priority
         self._trace(
             f"update_kv_cache leaf={leaf_id} leaves={len(self._leaves)} "
             f"old_depth={leaf.node.depth} new_length={int(prompt_tokens.shape[0])} "
@@ -822,6 +839,7 @@ class KVPrefixCache:
         """Tear down the leaf's old path and re-insert, preserving leaf_id."""
         was_pinned = leaf.pinned
         was_low_priority = leaf.low_priority
+        was_high_priority = leaf.high_priority
         leaf_id = leaf.leaf_id
         self._decrement_ref_count(leaf.node)
         del self._leaves[leaf_id]
@@ -845,6 +863,7 @@ class KVPrefixCache:
             leaf_layer_caches=leaf_layer_caches,
             leaf_snapshots=ssm_snapshots,
             low_priority=was_low_priority,
+            high_priority=was_high_priority,
         )
         self._leaves[leaf_id] = new_leaf
         self._increment_ref_count(node)
@@ -1364,17 +1383,29 @@ class KVPrefixCache:
             # cleanly; a genuinely over-budget single active session is handled
             # by graceful degradation, not by self-eviction.
             return False
-        # Priority-aware eviction: drop best-effort (low_priority) leaves before
-        # interactive ones. A background aux call (e.g. context compression)
-        # tagged via a non-default request service_tier parks a full-size leaf
-        # on the shared instance; without this, plain LRU could evict the user's
-        # live conversation to make room for it, forcing a full re-prefill of the
-        # exact context being served next turn. Restrict the candidate pool to
-        # low-priority leaves whenever any exist; only fall back to interactive
-        # leaves when there is no background leaf left to reclaim. LRU still
-        # orders eviction WITHIN the chosen priority class.
+        # Priority-aware eviction over three classes, reclaimed in this order:
+        #   1. low_priority  (best-effort background, e.g. context compression
+        #      tagged via a non-default request service_tier like `flex`)
+        #   2. normal        (untagged interactive leaves)
+        #   3. high_priority (a protected interactive session tagged
+        #      `service_tier: priority` — the user's live hot conversation)
+        # A background aux call parks a full-size leaf on the shared instance;
+        # without (1) plain LRU could evict the user's live conversation to make
+        # room for it. high_priority extends that protection across turns and
+        # against *any* competitor (untagged co-equal session OR memory
+        # pressure), not just tagged background leaves — losing a 100K+ hot cache
+        # costs a multi-minute re-prefill. Restrict the candidate pool to the
+        # lowest non-empty class; only fall through to a more protected class
+        # when nothing cheaper remains (no starvation — a high_priority leaf can
+        # still be evicted when it is the only reclaimable leaf). LRU still
+        # orders eviction WITHIN the chosen class.
         low_priority_candidates = [leaf for leaf in candidates if leaf.low_priority]
-        evictable = low_priority_candidates or candidates
+        normal_candidates = [
+            leaf
+            for leaf in candidates
+            if not leaf.low_priority and not leaf.high_priority
+        ]
+        evictable = low_priority_candidates or normal_candidates or candidates
         lru = min(evictable, key=lambda leaf: leaf.last_used)
         evicted_tokens = int(lru.full_tokens.shape[0])
         evicted_last_used = lru.last_used
@@ -1382,11 +1413,11 @@ class KVPrefixCache:
         del self._leaves[lru.leaf_id]
         logger.info(
             f"KV cache evicted leaf {lru.leaf_id} ({evicted_tokens} tokens, "
-            f"low_priority={lru.low_priority}) — {reason}"
+            f"low_priority={lru.low_priority} high_priority={lru.high_priority}) — {reason}"
         )
         self._trace(
             f"evict leaf={lru.leaf_id} tokens={evicted_tokens} "
-            f"low_priority={lru.low_priority} "
+            f"low_priority={lru.low_priority} high_priority={lru.high_priority} "
             f"last_used={evicted_last_used} leaves_after={len(self._leaves)} "
             f"reason={reason}"
         )

@@ -1381,6 +1381,8 @@ def mlx_generate(
                 restore_pos=prefix_hit_length,
                 media_regions=media_regions,
                 prefill_tps=prefill_tps,
+                low_priority=task.low_priority,
+                high_priority=task.high_priority,
             )
         else:
             kv_prefix_cache.add_kv_cache(
@@ -1389,6 +1391,8 @@ def mlx_generate(
                 cache_snapshots,
                 media_regions=media_regions,
                 prefill_tps=prefill_tps,
+                low_priority=task.low_priority,
+                high_priority=task.high_priority,
             )
 
     # stream_generate starts from the last token
