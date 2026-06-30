@@ -19,6 +19,63 @@ from exo.shared.types.worker.shards import (
 )
 
 
+# Headroom (in GB, per node) that a JIT/auto-placed instance must leave FREE on
+# every node it lands on, on top of its own weight share. This protects an
+# already-resident interactive model (e.g. DeepSeek-V4-Flash) whose KV cache and
+# transient prefill working-set GROW with context: `MemoryUsage.ram_available`
+# at admission time reflects the resident model's WEIGHTS but NOT its future
+# growth, so a naive weights-fit check can admit a second model that then OOMs
+# the box on the next deep prefill. Empirically DSv4-Flash active climbs to
+# ~85 GB/node at ~140K ctx with ~10 GB transient prefill peaks on top of its
+# ~77.5 GB weights — i.e. ~18 GB/node of growth headroom must stay free. Tunable
+# via EXO_JIT_MEMORY_RESERVE_GB; 0 disables the reserve (pre-JIT behavior).
+_JIT_MEMORY_RESERVE_GB_DEFAULT = 18.0
+
+
+def jit_memory_reserve() -> Memory:
+    """Per-node free-memory reserve required to admit a JIT/auto-placed model.
+
+    Read from EXO_JIT_MEMORY_RESERVE_GB (float GB); falls back to
+    ``_JIT_MEMORY_RESERVE_GB_DEFAULT``. A malformed value logs and uses the
+    default rather than raising — admission must never crash the master loop.
+    """
+    raw = os.environ.get("EXO_JIT_MEMORY_RESERVE_GB", "")
+    if raw.strip():
+        try:
+            return Memory.from_gb(float(raw))
+        except ValueError:
+            logger.warning(
+                "Invalid EXO_JIT_MEMORY_RESERVE_GB=%r; using default %.1f GB",
+                raw,
+                _JIT_MEMORY_RESERVE_GB_DEFAULT,
+            )
+    return Memory.from_gb(_JIT_MEMORY_RESERVE_GB_DEFAULT)
+
+
+def cycle_admits_with_reserve(
+    cycle: Cycle,
+    node_memory: Mapping[NodeId, MemoryUsage],
+    weight_share_per_node: Mapping[NodeId, Memory],
+    reserve: Memory,
+) -> bool:
+    """True iff placing an instance leaves >= ``reserve`` free on EVERY node.
+
+    Unlike the bare ``total_mem >= required`` cycle check, this is evaluated
+    PER NODE (a cycle can have lopsided free memory) and accounts for a growth
+    reserve for whatever is already resident. ``weight_share_per_node`` is the
+    incoming instance's weight footprint on each node (sharded), so the test is:
+    ``ram_available[node] - weight_share[node] >= reserve`` for all nodes.
+    """
+    for node_id in cycle.node_ids:
+        if node_id not in node_memory:
+            return False
+        available = node_memory[node_id].ram_available
+        share = weight_share_per_node.get(node_id, Memory())
+        if available - share < reserve:
+            return False
+    return True
+
+
 def filter_cycles_by_memory(
     cycles: list[Cycle],
     node_memory: Mapping[NodeId, MemoryUsage],
