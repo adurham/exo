@@ -1498,7 +1498,7 @@ requires-dist = [
 [[package]]
 name = "mlx-lm"
 version = "0.31.3"
-source = { git = "https://github.com/adurham/mlx-lm.git?branch=main#b6b7434e75f25ff97bff3ab94c4ebd160ef597ca" }
+source = { git = "https://github.com/adurham/mlx-lm.git?branch=main#751879030efd5fe322fd9a495001ff4a0d561d7b" }
 dependencies = [
     { name = "jinja2", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-3-exo-mlx-cpu' and extra == 'extra-3-exo-mlx-cuda12') or (extra == 'extra-3-exo-mlx-cpu' and extra == 'extra-3-exo-mlx-cuda13') or (extra == 'extra-3-exo-mlx-cpu' and extra == 'extra-3-exo-mlx-none') or (extra == 'extra-3-exo-mlx-cuda12' and extra == 'extra-3-exo-mlx-cuda13') or (extra == 'extra-3-exo-mlx-cuda12' and extra == 'extra-3-exo-mlx-none') or (extra == 'extra-3-exo-mlx-cuda13' and extra == 'extra-3-exo-mlx-none')" },
     { name = "mlx", version = "0.32.0.dev20260701+407a53cf", source = { git = "https://github.com/adurham/mlx.git?branch=main#407a53cf22d0b7e06623ed10fc99c205779d5299" }, marker = "sys_platform == 'darwin' or (extra == 'extra-3-exo-mlx-cpu' and extra == 'extra-3-exo-mlx-cuda12') or (extra == 'extra-3-exo-mlx-cpu' and extra == 'extra-3-exo-mlx-cuda13') or (extra == 'extra-3-exo-mlx-cpu' and extra == 'extra-3-exo-mlx-none') or (extra == 'extra-3-exo-mlx-cuda12' and extra == 'extra-3-exo-mlx-cuda13') or (extra == 'extra-3-exo-mlx-cuda12' and extra == 'extra-3-exo-mlx-none') or (extra == 'extra-3-exo-mlx-cuda13' and extra == 'extra-3-exo-mlx-none')" },
