@@ -396,7 +396,12 @@ fi
 # The motivating use: keep DSv4-Flash interactive while Qwen3.6 (aux) loads on
 # demand and frees its ~17.5 GB/node when idle. Set QWEN36_ENABLED=0 to NOT
 # co-host Qwen at launch and let JIT bring it up only when an aux task needs it.
-: "${EXO_JIT_ENABLED:=0}"
+# ENABLED 2026-07-01: eager Qwen3.6 placement was disabled (see QWEN36 block)
+# on the assumption JIT would load aux models on demand, but this switch was
+# left at 0 — so every Qwen-targeted aux task (curator/memory_extraction/
+# title_generation) 404'd with "No instance found". Turning JIT on closes that
+# gap: aux tasks auto-place Qwen when needed and it unloads after idle.
+: "${EXO_JIT_ENABLED:=1}"
 # Per-node free-memory reserve (GB) an auto-load must leave on EVERY node, on
 # top of its own weight share. Protects the resident interactive model whose
 # KV/working-set GROWS with context (storage_size is weights-only). 18 GB ≈
