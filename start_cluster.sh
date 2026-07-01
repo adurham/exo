@@ -355,7 +355,11 @@ fi
 # Sampling: Qwen3.6 is thinking-mode by default — upstream thinking
 # recommendation (temp 0.6 / top_p 0.95 / top_k 20 / min_p 0).
 : "${QWEN36_MODEL_ID:=mlx-community/Qwen3.6-35B-A3B-8bit}"
-: "${QWEN36_ENABLED:=1}"
+# DISABLED 2026-07-01: Qwen3.6 no longer launched at cluster start — JIT
+# (EXO_JIT_ENABLED path) loads/unloads it on demand, so co-hosting it eagerly
+# just wastes ~17.5 GB/node of DSv4 headroom. Set QWEN36_ENABLED=1 to restore
+# eager co-hosting at launch.
+: "${QWEN36_ENABLED:=0}"
 : "${QWEN36_TEMPERATURE:=0.6}"
 : "${QWEN36_TOP_P:=0.95}"
 : "${QWEN36_TOP_K:=20}"
