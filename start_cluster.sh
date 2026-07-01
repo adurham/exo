@@ -335,11 +335,21 @@ fi
 # guarantee is the DEGENERATION KILL-SWITCH in batch_generate.py
 # (EXO_LOOP_DETECT_ACTION="stop", default on): a detected token cycle
 # (period<=8, repeated>=6x) force-terminates the generation with
-# finish_reason="stop" — a hard stop a sampling penalty can't provide. If loops
-# still happen often enough to annoy (kill-switch makes them non-fatal but
-# truncates the turn), add a COUNT-based frequency_penalty next (it accumulates
-# over repeats, unlike repetition_penalty) — not wired into this script yet.
-: "${DSV4_REPETITION_PENALTY:=}"
+# finish_reason="stop" — a hard stop a sampling penalty can't provide.
+#
+# UPDATE 2026-07-01: the presence-based limitation was fixed at the source.
+# mlx-lm's make_repetition_penalty (adurham fork b6b7434) is now COUNT-AWARE:
+# it applies penalty**count over the window (via scatter-add occurrence
+# counts) instead of a single ÷penalty write, so a token dominating a loop is
+# penalized geometrically per step while a token appearing once is unchanged
+# (count==1 -> factor==penalty, bit-identical to the old behaviour). This makes
+# a modest repetition_penalty actually able to break the loops that 1.05
+# previously could not. Set to 1.1 (Ollama's proven universal default;
+# count==1 collateral is a gentle ÷1.1, loop tokens get ÷1.1**count). Tune with
+# a real long-context quality probe (needle-in-haystack 100K+, long structured
+# generation, long reasoning) — NOT a short "paris" prompt. The kill-switch
+# remains the deterministic backstop.
+: "${DSV4_REPETITION_PENALTY:=1.1}"
 
 # Qwen3.6-35B-A3B (MoE, ~17.5GB/rank at 8-bit across a 2-node TP shard). Small
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
