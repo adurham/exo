@@ -49,7 +49,15 @@
 # ~274-288 tok/s (the real, verified win). So 128 stays the default. OPT-4's
 # sparse-SDPA tiling code remains (gated, harmless at tile 128) but the 256
 # super-chunk is NOT a win on this hardware. Override via env.
-: "${EXO_PREFILL_STEP_SIZE:=128}"
+# 2026-07-01: RE-RAISED to 256 — the regression above predates PREFILL_
+# ARGPARTITION. With argpartition ON (default below), the indexer topk no
+# longer argsorts (B,256,P) rows per chunk, which was the L-scaling term that
+# made 256 lose. Client-side WALL-CLOCK A/B at 100K ctx (bench/
+# ab_probe_tier1.py, time-to-first-token over 76213 real tokens, no log
+# scraping): 128 = 289 t/s, 256 = 353 t/s (+22%), 512 = 293 t/s (regression
+# — OPT-4 gathered-tensor tiling overhead dominates). Needle + BOS-spam
+# gates clean. 512 stays a non-default override.
+: "${EXO_PREFILL_STEP_SIZE:=256}"
 # Context-adaptive prefill chunk sizing (2026-06-21). At LOW context, larger
 # chunks (256) amortize the ~390ms per-chunk fixed overhead (43 layers x kernel
 # launches x RDMA all_sum x eval x clear_cache) — +39% throughput at 100K. But
@@ -298,8 +306,24 @@ fi
 # chunk above ~1.2K tokens crashes Metal allocation. Cap at 512 for safety
 # margin until upstream PR #1192 lands the query-grouped sparse-SDPA fix.
 # See dsv4_prefill_blowup memory + docs/upstream-prs.md.
-# Lowered 256 -> 128 on 2026-05-11 - see EXO_PREFILL_STEP_SIZE note above.
-: "${DSV4_PREFILL_STEP_SIZE:=128}"
+# Lowered 256 -> 128 on 2026-05-11; re-raised to 256 on 2026-07-01 with
+# argpartition ON — see EXO_PREFILL_STEP_SIZE note above.
+: "${DSV4_PREFILL_STEP_SIZE:=256}"
+# Prefill indexer top-k via argpartition O(P) instead of argsort O(P log P)
+# (2026-07-01, quality-equivalent: top-k SET identical, downstream gathered-KV
+# softmax is order-invariant). MIN_P=8192 keeps argsort at small pools where
+# argpartition's launch overhead loses (measured 295->163 t/s at P=500).
+# Wall-clock A/B at 100K: baseline 255 t/s -> 289 t/s (+13%). Set
+# EXO_DSV4_PREFILL_ARGPARTITION=0 to disable.
+: "${EXO_DSV4_PREFILL_ARGPARTITION:=1}"
+: "${EXO_DSV4_ARGPARTITION_MIN_P:=8192}"
+# lm_head last-row-only during prefill chunks (2026-07-01). Prefill discards
+# the logits; projecting 129K-vocab x chunk rows is pure waste. Gated to
+# L > EXO_DSV4_LMHEAD_LASTROW_MIN_L (default 32) inside deepseek_v4.py so the
+# MTP verify forward (L=gamma+1, consumes ALL rows) keeps full projection —
+# the bare L>1 gate caused verify-slicing degeneration (mlx-lm 7c721d9).
+# Decode probes: 29.0 t/s mean, quality gates clean.
+: "${EXO_DSV4_LMHEAD_LASTROW:=1}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage.
