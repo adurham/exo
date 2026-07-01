@@ -133,9 +133,23 @@ unchanged until `EXO_JIT_ENABLED=1` (master kill-switch, default off).
   refusal vs non-jit pass, reaper policy) and
   `src/exo/api/tests/test_jit_request_path.py` (jit-disabled 404, not-downloaded
   404, single-flight one-placement-for-concurrent-requests). All green.
-- **start_cluster.sh**: `EXO_JIT_ENABLED` (default 0), `EXO_JIT_MEMORY_RESERVE_GB`
+- **start_cluster.sh**: `EXO_JIT_ENABLED` (default 0 at ship time — **flipped to
+  1 on 2026-07-01, commit `23fb58fc`**, see note below), `EXO_JIT_MEMORY_RESERVE_GB`
   (18.0), `EXO_JIT_LOAD_TIMEOUT_SECONDS` (120), `EXO_JIT_IDLE_UNLOAD_SECONDS`
   (300) added to the defaults block AND the EXO_ENV passthrough allow-list.
+
+**Update 2026-07-01 (`23fb58fc`): `EXO_JIT_ENABLED` default flipped `0` → `1`.**
+The 2026-06-30 deploy passed `EXO_JIT_ENABLED=1` explicitly at launch, but the
+baked-in default stayed `0`, so a plain `./start_cluster.sh` (or any restart
+without the override) came up with JIT OFF while eager Qwen3.6 placement was
+also off (`QWEN36_ENABLED=0`). Net effect: every Qwen-targeted Hermes aux task
+(curator, memory_extraction, title_generation) hit a model with no resident
+instance and no JIT path to summon it → HTTP 404 "No instance found for model
+mlx-community/Qwen3.6-35B-A3B-8bit", silently killing memory extraction on every
+exo session. Both Studios already hold the 8bit weights (verified 35G / 8
+safetensors each), so JIT's `_model_is_downloaded` precondition is satisfied —
+making `=1` the default closes the gap permanently. Re-verified live 2026-07-01:
+cold request to non-resident Qwen3.6-8bit auto-placed and generated in ~18s.
 
 Pre-commit gates: ruff clean; basedpyright introduces zero new errors (5
 pre-existing in api/main.py, 1 in placement.py — all unrelated); 142 master+api
