@@ -571,20 +571,21 @@ class DSv4MTPPredictor:
         self._active_uids = ()
 
     def _set_fence_async(self, arm: bool) -> None:
-        """Arm/disarm the c=1 async decode fence in mlx-lm's DSv4 layers.
+        """Set the "cache" arming key of the c=1 async decode fence.
 
         Disarming ALSO drains any deferred async graph (mx.synchronize)
         so cache merges/rebuilds can't race in-flight GPU work — the
-        2026-07-02 c=2 join corruption. Arming is only valid at
-        single-uid steady state, from a synced boundary.
+        2026-07-02 c=2 join corruption. The fence only actually goes
+        async when the request-level "engine" key (batch_generate) is
+        ALSO set; this method never overrides that owner.
         """
         from mlx_lm.models.deepseek_v4 import _set_fence_async_ok
 
         if not arm:
-            _set_fence_async_ok(False)
+            _set_fence_async_ok(False, key="cache")
             mx.synchronize()
         else:
-            _set_fence_async_ok(True)
+            _set_fence_async_ok(True, key="cache")
 
     def snapshot_for_uid(self, uid: int) -> None:
         """Snapshot the current single-stream ``self._cache`` under ``uid``.

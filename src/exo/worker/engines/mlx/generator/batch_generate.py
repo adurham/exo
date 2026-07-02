@@ -1079,6 +1079,30 @@ class ExoBatchGenerator:
             or self._pp_spec_gen is not None
         )
 
+    def _set_fence_async_engine(self, arm: bool) -> None:
+        """Set the "engine" arming key of the DSv4 c=1 async decode fence.
+
+        Disarming drains any deferred async graph (mx.synchronize) so a
+        newly admitted request's forwards can't interleave with in-flight
+        deferred collectives from the current stream (the 2026-07-02 c=2
+        corruption). No-op for models without the side channel.
+        """
+        try:
+            from mlx_lm.models.deepseek_v4 import _set_fence_async_ok
+        except ImportError:
+            return
+        if not arm:
+            _set_fence_async_ok(False, key="engine")
+            mx.synchronize()
+        else:
+            _set_fence_async_ok(True, key="engine")
+
+    def _update_fence_arming(self) -> None:
+        """Arm the engine key iff exactly one request is active."""
+        self._set_fence_async_engine(
+            len(self._active_tasks) == 1 and not self._pp_spec_active
+        )
+
     def submit(
         self,
         task_params: TextGenerationTaskParams,
@@ -1088,6 +1112,11 @@ class ExoBatchGenerator:
         on_generation_token: Callable[[], None] | None = None,
     ) -> int:
         from exo.worker.engines.mlx.trace import T
+
+        # Disarm the async fence before ANY forward for this request —
+        # its prefill must not interleave with deferred graphs from an
+        # already-decoding stream.
+        self._set_fence_async_engine(False)
 
         with T("submit.encode_prompt"):
             all_prompt_tokens = encode_prompt(self.tokenizer, prompt)
@@ -1382,6 +1411,7 @@ class ExoBatchGenerator:
             generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
             media_regions=media_regions,
         )
+        self._update_fence_arming()
 
         return uid
 
@@ -1416,6 +1446,10 @@ class ExoBatchGenerator:
 
         # Single-task fast path / wedge guard: degenerates to existing submit()
         # so c=1 deployments don't pay any new code-path cost.
+        # Disarm the async fence before ANY forward for these requests
+        # (batched prefill must not interleave with deferred graphs from
+        # an already-decoding stream).
+        self._set_fence_async_engine(False)
         if len(tasks) <= 1:
             # 2026-05-21 diag: log if we got len 1 despite rendezvous gathering 2.
             logger.info(f"submit_batched fallback gate-1: len(tasks)={len(tasks)}")
@@ -1757,6 +1791,7 @@ class ExoBatchGenerator:
                 generation_time_at_start=common_generation_time_at_start,
                 media_regions=[],
             )
+            self._update_fence_arming()
 
         return uids
 
@@ -1862,6 +1897,7 @@ class ExoBatchGenerator:
             generation_start_time=time.perf_counter(),
             prefill_tps=prefill_tps,
         )
+        self._update_fence_arming()
 
         return uid
 
@@ -2313,6 +2349,7 @@ class ExoBatchGenerator:
 
             if is_done:
                 del self._active_tasks[response.uid]
+                self._update_fence_arming()
             elif (
                 max_stop_len > 0
                 and len(state.potential_stop_sequence_text) > max_stop_len
@@ -2427,6 +2464,7 @@ class ExoBatchGenerator:
         self._mlx_gen.remove(uids)
         for uid in uids:
             self._active_tasks.pop(uid, None)
+        self._update_fence_arming()
 
     def close(self) -> None:
         self._mlx_gen.close()
