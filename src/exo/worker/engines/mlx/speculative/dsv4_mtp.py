@@ -2276,40 +2276,89 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
         any_rejection = any(acc < gamma for acc in n_accepted_per)
 
-        for c in gen_batch.prompt_cache:
-            if isinstance(c, CacheList):
-                # Inside CacheList: rotating KV is per-stream-aware,
-                # pooling/indexer are uniform (advance ≤1 entry per
-                # cycle at γ << compress_ratio so min-strategy is
-                # essentially exact).
-                for sub in c.caches:
-                    if isinstance(sub, PerStreamBatchRotatingKVCache):
-                        sub.trim_per_stream(rollback_per_stream_py)
-                    elif hasattr(sub, "trim"):
-                        sub.trim(n_min_rollback)
-                    elif hasattr(sub, "offset"):
-                        sub.offset -= n_min_rollback
-            elif isinstance(c, PerStreamBatchRotatingKVCache):
-                c.trim_per_stream(rollback_per_stream_py)
-            elif hasattr(c, "trim"):
-                c.trim(n_min_rollback)
-            elif hasattr(c, "offset"):
-                c.offset -= n_min_rollback
+        # Pool-consistency discipline, mirroring the single-uid path
+        # (2026-07-02 c=2 degeneration ROOT CAUSE). The old batched flow
+        # trimmed the caches and then UNCONDITIONALLY restore_meta'd the
+        # pools to their pre-verify snapshot on any rejection — assuming
+        # committed tokens would "re-enter naturally" next cycle. They
+        # never do (only [bonus, new drafts] enter the next forward), so
+        # every rejecting cycle silently deleted the committed prefix
+        # [y, *accepted] from the pool token stream. The pooled summaries
+        # then desync from true positions, the compressed/indexer
+        # attention reads shifted blocks, and output degenerates into the
+        # prompt-echo/repetition loop within a few cycles.
+        #
+        # Correct discipline (same as the c=1 path at ~3404):
+        #   (a) no pool flushed during verify -> rejected rows still sit
+        #       in the pool remainder tail; plain trim removes exactly
+        #       them (remainder grew by γ+1 >= rollback this cycle).
+        #   (b) a pool flushed -> the flush may have baked rejected
+        #       drafts into pooled summaries; restore pools to the
+        #       pre-verify snapshot, roll back ALL γ+1 verify rows from
+        #       every cache, and re-add the committed prefix with a small
+        #       plain commit-forward. Under BS>1 min-acceptance the
+        #       committed rows are batch-uniform (n_min + 1), so the
+        #       commit-forward is a single (N, n_min+1) batched call.
+        pool_flushed = any_rejection and any(
+            snap is not None
+            and hasattr(pc, "_pool_lengths")
+            and list(pc._pool_lengths) != list(snap[0])
+            for pc, snap in zip(_pool_caches, _pool_snaps)
+        )
 
-        # Restore the compressed POOL to its pre-verify state whenever any
-        # stream rejected drafts. The verify forward fed γ+1 tokens (incl.
-        # rejected drafts) through accumulate_windows; restoring undoes any
-        # draft-contaminated window flush. The committed tokens are re-pooled
-        # naturally on subsequent decode cycles (they re-enter via the normal
-        # accumulate_windows path), so no replay is needed — the snapshot
-        # simply rewinds _pool_lengths/remainder/_processed/buf so the next
-        # genuine flush overwrites the rejected slots. When no stream rejected
-        # (full acceptance), the pool already reflects only committed tokens,
-        # so skip the restore.
-        if any_rejection:
+        if not pool_flushed:
+            # (a) Cheap path (also the full-acceptance path): per-stream
+            # rotating trim + uniform pool remainder trim.
+            for c in gen_batch.prompt_cache:
+                if isinstance(c, CacheList):
+                    for sub in c.caches:
+                        if isinstance(sub, PerStreamBatchRotatingKVCache):
+                            sub.trim_per_stream(rollback_per_stream_py)
+                        elif hasattr(sub, "trim"):
+                            sub.trim(n_min_rollback)
+                        elif hasattr(sub, "offset"):
+                            sub.offset -= n_min_rollback
+                elif isinstance(c, PerStreamBatchRotatingKVCache):
+                    c.trim_per_stream(rollback_per_stream_py)
+                elif hasattr(c, "trim"):
+                    c.trim(n_min_rollback)
+                elif hasattr(c, "offset"):
+                    c.offset -= n_min_rollback
+        else:
+            # (b) Contamination path: restore snapshotted pools, drop all
+            # γ+1 verify rows everywhere, re-add committed rows.
             for pc, snap in zip(_pool_caches, _pool_snaps):
                 if snap is not None:
                     pc.restore_meta(snap)
+            _full = gamma + 1
+            _full_per_stream = [_full] * N
+            for c in gen_batch.prompt_cache:
+                if isinstance(c, CacheList):
+                    for sub in c.caches:
+                        if isinstance(sub, PerStreamBatchRotatingKVCache):
+                            sub.trim_per_stream(_full_per_stream)
+                        elif hasattr(sub, "trim"):
+                            sub.trim(_full)
+                        elif hasattr(sub, "offset"):
+                            sub.offset -= _full
+                elif isinstance(c, PerStreamBatchRotatingKVCache):
+                    c.trim_per_stream(_full_per_stream)
+                elif hasattr(c, "trim"):
+                    c.trim(_full)
+                elif hasattr(c, "offset"):
+                    c.offset -= _full
+            # Commit-forward: rows are the committed tokens per stream,
+            # batch-uniform length n_min + 1 (min-acceptance).
+            commit_rows = [
+                [int(tid) for (tid, _lp) in all_tokens_per[n]]
+                for n in range(N)
+            ]
+            commit_input = mx.array(commit_rows, dtype=mx.int32)  # (N, n_min+1)
+            _commit_logits = self.model(
+                commit_input, cache=gen_batch.prompt_cache
+            )
+            mx.eval(_commit_logits)
+            del _commit_logits
 
         # MTP-side cache: also per-stream when possible.
         mtp_cache = self.mtp._cache
