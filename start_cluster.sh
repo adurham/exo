@@ -1026,6 +1026,14 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
+    # c>=2 MTP spec gate RE-ARMED 2026-07-02 (=1 disables spec for ANY c>=2
+    # batch; c=1 keeps MTP at full speed). The c=2 batched verify corrupts
+    # output deterministically at ALL context lengths (repetition/prompt-echo
+    # from the first cycles; regression window 2026-06-18..07-01, NOT the
+    # bootstrap bug 48a4a3c fixed). Non-spec batched decode at c>=2 is clean
+    # (validated 20.5 t/s x2 coherent). Set to 0 to re-enable c>=2 spec once
+    # the batched B=2 L>1 verify forward is actually fixed.
+    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"
     [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
     [ -n "${EXO_DSV4_BATCHED_PREFILL_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL_DEBUG=$EXO_DSV4_BATCHED_PREFILL_DEBUG"
