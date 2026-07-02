@@ -33,14 +33,23 @@ NEEDLE = "The secret authorization code for project Nightingale is: FALCON-MERCU
 
 
 def build_prompt(target_tokens: int) -> str:
-    # ~4 chars/token heuristic; needle at 40% depth
+    # ~4 chars/token heuristic; needle at 40% depth.
+    # Cache-busting: a unique random header + per-run shuffled filler order
+    # so the KV prefix cache can NEVER serve a prior run's prefill (byte-
+    # identical prompts short-circuit prefill entirely — measured 98813
+    # "t/s" on a warm cluster, i.e. no prefill at all).
+    import random
+    import uuid
+    run_id = uuid.uuid4().hex
+    rng = random.Random(run_id)
     total_chars = target_tokens * 4
     n_fill = max(1, total_chars // len(FILLER))
-    fillers = [FILLER] * n_fill
+    fillers = [f"[run {run_id} seq {i} salt {rng.randint(0, 10**9)}] " + FILLER
+               for i in range(n_fill)]
     fillers.insert(int(n_fill * 0.4), " " + NEEDLE + " ")
     doc = "".join(fillers)
     return (
-        "Below is a long document. Read it carefully.\n\n" + doc +
+        f"Session {run_id}. Below is a long document. Read it carefully.\n\n" + doc +
         "\n\nWhat is the secret authorization code for project Nightingale? "
         "Reply with the code only."
     )
