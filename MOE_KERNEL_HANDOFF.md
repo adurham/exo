@@ -408,3 +408,90 @@ fcb5c691/ffe00c8c/0c526dc6 (direct pooled gather + revert), 24059598
 (tiled-P indexer), e3eb3499 (argpartition), the wide-ring PerStream
 commits (096515f/48a4a3c era). bench/concurrent_bench.py is the original
 validation harness if a richer gate is wanted.
+
+---
+
+# PART 5 (2026-07-02, later): c>=2 MTP CORRUPTION — ROOT-CAUSED AND FIXED
+
+## THE BUG (mlx-lm `_bootstrap_per_stream_ring`, cache.py)
+
+Not the batched verify forward at all. The corruption was injected at the
+BatchRotatingKVCache → PerStreamBatchRotatingKVCache upgrade (which only
+runs when spec dispatch engages at BS>1 — why MTP-off c>=2 was clean and
+why every single-process differential passed). Two defects:
+
+1. **Low-context prompt-KV wipe.** The bootstrap sliced the newest
+   `valid` tokens as `keys[..., -valid:, :]` from the FULL base buffer.
+   `_update_in_place` grows the buffer in `step`(256)-sized ZERO chunks,
+   so at low context the buffer is wider than the written region and the
+   slice reads the zero tail — the entire prompt KV of every stream
+   replaced with zeros. Model continues from an empty local window →
+   deterministic off-topic gibberish from ~token 3 ("Okay,Irwin…",
+   "Okay,Irregular verbs…"). At high context the buffer is exactly
+   max_size wide, so the 200K–500K needle validations passed — the bug
+   only fires at SHORT context. (All our c=2 probes were 51-token
+   prompts; all long-context validation was blind to it.)
+
+2. **Join offset stamp.** The bootstrap assumed uniform streams
+   ("no divergence has happened yet"), broadcast `offset[0]` to every
+   row and zeroed `left_padding`. At a decode-time join (veteran ~264,
+   newcomer ~74) the newcomer inherited the veteran's logical position
+   (observed `[264,264]` in the spec trace) → wrong RoPE/mask → instant
+   ' the.'-loop degeneration (killed by the kill-switch, then GPU
+   timeout wedged the cluster).
+
+The "regression window 06-18..07-01" was a red herring resolved: exo
+7debac7f (06-24) removed the `is_bench` gate on batched prefill, exposing
+/v1 traffic to the BS>1 spec path. Trigger, not cause.
+
+## THE FIX (mlx-lm 8b7b5f9, exo 1ab31258)
+
+Rebuild the per-stream ring from the base-class invariant (stream b's
+newest real row = logical `offset[b]-1`): per stream, take the newest
+`min(offset[b], max_size, real_w)` rows of the WRITTEN region
+`[0:real_w)` (`real_w = _idx`, not buffer width) and scatter at
+`pos % ring_width`; keep the true per-stream offset vector; zero
+left_padding only because the modular ring layout genuinely has none.
+Unit-verified bit-exact: uniform low-ctx pair, unequal-offset join,
+rotated high-ctx (the 48a4a3c case still passes).
+
+## VALIDATION (deployed, gate=0)
+
+- Simultaneous pair (rendezvous batched prefill): CLEAN — both streams
+  exact greedy text, 18.0 t/s/stream (was 8.4 corrupt).
+- Staggered join (6s): CLEAN both; joiner coherent from token 1,
+  21–22 t/s (was instant degeneration + cluster crash).
+- c=1 regression: 34.2 t/s (baseline 34.4), coherent.
+- B=2 acceptance: 0.80/stream vs 0.84 at B=1 (was pinned 0 — the
+  min-clamp was dragging every batch to 1 tok/cycle off the corrupt
+  streams' rejections).
+- start_cluster.sh default flipped: EXO_DSV4_MTP_C2_MAX_CTX=0 (spec ON
+  at c>=2 is production now).
+
+## HOW IT WAS FOUND (method note)
+
+EXO_DSV4_SPEC_TRACE=1 committed-token streams vs a c=1 ground-truth run:
+corruption predated the first spec cycle → not the verify. The per-cache
+offsets record showed `[264,264]` for a true `[264,74]` join → main
+rotating cache, upgrade path. Two shell-level red herrings burned time:
+a stale background watcher double-running the repro (made 2 requests
+look like 4 phantom streams), and m4-1's clock ~4.5min ahead of the
+laptop (made test requests look duplicated). Verify wall-clock skew
+before reading multi-host logs.
+
+## OPS NOTES (current state)
+
+- m4-1 WAN TCP is BROKEN since its reboot: ICMP/DNS fine, all outbound
+  TCP data stalls after handshake (ClientHello retransmits, no ACK).
+  Not ECN, not TSO, not MTU, not pf, not dual-interface (Wi-Fi now
+  off). Workaround in place: laptop pushes to bare mirrors in
+  ~/gitmirror/{exo,mlx-lm}.git on m4-1 + global insteadOf rewrite
+  git@github.com:adurham/ → /Users/adam.durham/gitmirror/. Deploys must
+  push mirrors first: `git push ssh://macstudio-m4-1/~/gitmirror/exo.git
+  main:main` (and mlx-lm HEAD:refs/heads/main). Router-side issue —
+  needs user attention (possibly Google Wifi device state for .201).
+- m4-2 exo process died earlier on a pydantic validation error when an
+  event carried the GPU-timeout string (extra_forbidden) — robustness
+  bug, unfixed, incidental.
+- trim_per_stream sets `_idx = max % max_size` while update_and_fetch
+  uses `% ring_width` — _idx is unused by PerStream paths, cosmetic.
