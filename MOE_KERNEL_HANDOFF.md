@@ -303,3 +303,52 @@ verify/rollback path in dsv4_mtp.py (~lines 1861-2290, batched cycle).
    sign-off on quality + eval battery). Kernel support already deployed.
 3. Decode: remaining verify wall is ~42ms (weights ~20ms + collectives);
    next lever after (1) is per-collective latency / jaccl smalls.
+
+===========================================================================
+2026-07-02 SESSION PART 3 — C=2 ROOT-CAUSE HUNT: FENCED TO B=2 L>1 ATTENTION
+===========================================================================
+
+## FAILING-CELL MAP (each cell direct-tested on-cluster)
+
+              L=1            L=3 (MTP verify)
+  B=1         OK             OK (c=1 validated all session)
+  B=2         OK (MTP off)   CORRUPT from the FIRST batched cycles
+
+Exonerated by direct A/B (each its own relaunch + c=2 battery):
+  temp (probes ran greedy), acceptance divergence (min-acceptance clamp
+  deployed — still corrupt from cycle ~2, BEFORE any divergence),
+  indexer selection (EXO_DSV4_INDEX_TOPK=999999 — still corrupt),
+  seq-split (gated L>=16, verify L=3 never bands), pool-vs-ring drift
+  (fixed by the min-acceptance clamp, still corrupt), async fence,
+  gather_qmv kernel, 2026-07-01 env knobs, MTP-cache scramble (DEGEN
+  probe: extracts consistent).
+
+=> The B=2, L>1 batched VERIFY FORWARD produces wrong logits from the
+start: core batched attention — causal mask construction at B=2 L>1
+over (PerStream)BatchRotatingKVCache, batched RoPE positions, or the
+L>1 ring write at B=2. Matches the 2026-06-17 in-code note
+("suspected per-stream verify mask/offset in the L>1 batched forward;
+investigation ongoing") at dsv4_mtp.py's residual-sampling branch.
+
+## SHIPPED THIS PART (kept as hardening, not the fix)
+
+exo 67846af5: BS>1 min-acceptance clamp (EXO_DSV4_BS_MIN_ACCEPT=1
+default). Repairs a REAL latent inconsistency (per-stream rotating-KV
+trims vs batch-uniform pooling/indexer trim + whole-batch restore_meta)
+that would corrupt once the forward is fixed. =0 reverts to per-stream
+acceptance for A/B.
+
+## NEXT SESSION: THE DECISIVE EXPERIMENT
+
+B=1-vs-B=2 logit differential: instrument the batched cycle to run the
+same verify_input rows through two B=1 forwards on cloned caches and
+mx.diff the logits (then bisect per-layer if they differ). One cache
+clone is GBs but feasible once. Alternatively EXO_DSV4_C2_TRACE=1
+(per-chain-step JSONL, built for the bistability hunt) on a corrupting
+run. Candidate code: mlx-lm cache.py BatchRotatingKVCache.update at
+L>1 B>1 (ring insertion), make_mask with per-stream left_padding at
+L>1, rope offset scalar-vs-per-stream in the batched attention.
+
+Repro (30s): two parallel `uv run python bench/decode_probe_ab.py
+--iters 1`; corrupt stream heads look like "Okay,Irwin,John,John" /
+"* * *" prompt-echo salad. Degenerate streams INFLATE t/s.
