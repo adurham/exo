@@ -543,3 +543,27 @@ true rows (k_i = len_i - (max_L - S_pre)); <2 true rows → skip prefill
   priority).
 - m4-2 exo pydantic extra_forbidden crash on GPU-timeout event strings
   (robustness, open).
+
+## PART 6 ADDENDUM: B=1/B=2 cycle profile + the "rank0 rollback" red herring
+
+MTP_PROFILE breakdown (ms/cycle, trace OFF): B=1 draft 4.7 / verify 42.2 /
+accept 0.9 / rollback 0.2 / total 48.0. B=2: 5.6 / 75.6 / 0.5 / 0.2 / 81.9.
+
+- Verify scales ~11ms/row (B=1 = 3 rows, B=2 = 6): each row routes to its
+  own top-8 of 256 experts (~8% overlap at 6 rows) → per-row expert-weight
+  bandwidth is intrinsic MoE physics. M-batched kernels can't help at
+  decode shapes (need >=2 rows/expert). Same physics that killed gamma=3;
+  tree drafting predicted to LOSE (each branch = +11ms row vs sub-row
+  marginal acceptance) — skipped on that basis.
+- EXO_DSV4_SPEC_TRACE costs ~10% end-to-end: 5.3ms/cycle of rank0-only
+  .tolist()/str(offsets) syncs inside the rollback window, ON the critical
+  path (rank totals 53.3 vs 48.0). Never benchmark with it on. All Part 6
+  A/B numbers had it on — consistent relatively, ~10% low absolutely.
+
+FINAL PRODUCTION NUMBERS (trace off, 2026-07-02): c=1 37.4/36.6 t/s;
+c=2 divergent pair 24.4/24.6 t/s/stream (~49 aggregate); long-context c=2
+(2x105K) needles 1/1, 24 t/s/stream. Session start: c=1 28.9, c=2 corrupt.
+
+Remaining decode headroom beyond this: mxfp4 experts (halves per-row
+expert bytes; quality-gated, user wants understanding first). Prefill:
+gather_qmv_rhs bucket extension (B/E>8 tile-over-N variant).
