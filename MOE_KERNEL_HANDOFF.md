@@ -165,3 +165,77 @@ fence-serialization, not wire time. After the M-batch GEMV lands, re-profile.
 2. Decode MTP_PROFILE measurement -> fence/collective attack if it's >20%.
 3. Re-run 727K after (1) — the O(P) MoE term shrinks, curve should lift.
 4. Merge tile-sweep-wip into mlx main if keeping the env override.
+
+===========================================================================
+2026-07-02 SESSION — M-BATCH GEMV BUILT; PREMISE CORRECTED; NEW PLAY: MXFP4
+===========================================================================
+
+## WHAT SHIPPED (mlx main = cb539cda, exo main = 2347fffa, deployed)
+
+gather_qmv_rhs — M-batched qmv over sorted expert runs, BOTH families:
+  fp_quantized.h:  fp_gather_qmv_rhs   (mxfp4/mxfp8/nvfp4, bits 4/8)
+  quantized.h:     affine_gather_qmv_rhs (affine, bits {4,8}, gs {32,64})
+Structure: grid (B, N/(2*RPS)); only run-start threadgroups work; a run is
+processed in M_TILE-row chunks holding x rows in registers (bf16 via
+qdot_xt in fp; fp32 + per-group sums in affine), qmv_fast weight streaming.
+BITWISE-IDENTICAL to the gather_qmv_fast path (gate:
+bench/qmv_mbatch_bitexact.py — 72/72 exact incl. affine, both tiles).
+Dispatch gate (GatherQMM::eval_gpu): M==1 && B>=16 && sorted && transpose
+&& bits in {4,8} && dense x && N%8==0 && K%block==0 && B/E in [2,8].
+Kill switch MLX_GATHER_QMV_RHS=0; MLX_GATHER_QMV_RHS_TILE (default 4),
+MLX_GATHER_QMV_RHS_RPS (default 4).
+
+## THE PREMISE CORRECTION (read this before optimizing MoE again)
+
+THE DEPLOYED DSv4-Flash CHECKPOINT IS AFFINE 8-BIT g64 — config.json
+quantization = {group_size: 64, bits: 8, mode: affine}. It is NOT
+mxfp4/mxfp8. make_quantization_config() in deepseek_v4.py (mxfp4 experts)
+is the CONVERSION RECIPE, not this checkpoint. Consequences:
+- The 2026-07-01 "141 GB/s prod path" was measured on synthetic MXFP4
+  weights. Production never ran that kernel or that mode.
+- fp_qmv_fast's 448 GB/s was also the fp family — irrelevant in-situ.
+- Actual prod prefill MoE shape: seq-split halves the 256-token chunk ->
+  B=768 pairs / 256 experts (B/E=3), affine 8b. At that shape the OLD
+  sorted path already runs at ~427 GB/s effective (SLC absorbs the 3x
+  re-reads). THERE WAS NO 3x BANDWIDTH LEVER. The e2e probe confirmed:
+  349 t/s @111K real = exactly the old 353@76K..306@495K curve.
+
+## MEASURED KERNEL MATRIX (m4-1, bench/qmv_mbatch_bench.py, ms/layer)
+
+  shape                      steel   qmv_rhs(best)  speedup
+  mxfp4  B=1536 (B/E=6)      11.56   7.81 (mt4)     1.48x
+  mxfp4  B=768  (B/E=3)       5.35   4.63 (mt6)     1.16x
+  affine8 B=1536 (B/E=6)     ~15.3  ~13.2 (mt4)     1.16x
+  affine8 B=768  (B/E=3)      8.56   8.48 (mt4)     1.01x
+  affine8 B=4096 (B/E=16)    12.80  38.96 (mt4)     0.33x  <- hence B/E<=8
+Kernel-iteration lessons (5 variants benched): threadgroup staging +
+barriers kill the streaming pipeline (v2); explicit dequant-once regressed
+— the compiler already hoists pack decode across the m-loop, w_vals just
+added spill (v3); the register wall is x_thread fp32 (64 floats OK, 96
+dead) — bf16 x registers fixed it (v5); RPS=8 x-amortization ~ +7% only.
+
+## THE ACTUAL 350@495K PLAY: CONVERT EXPERTS TO MXFP4
+
+mxfp4 B=768: 4.63 ms/layer vs affine8's 8.48 = 1.85x switch_mlp
+=> e2e 1/(0.57 + 0.43/1.85) ~ 1.25x => ~380 t/s @495K projected.
+Most of the win is the weight-byte halving itself; gather_qmv_rhs adds
+1.16x on top (and is already deployed for it). Decode should also gain
+(per-token expert reads halve). The recipe exists:
+deepseek_v4.make_quantization_config — mxfp4 experts, mxfp8
+shared_experts/attn. NEEDS: conversion run + quality gates (needle, BOS,
+perplexity/eval battery) — MODEL-QUALITY DECISION, get user sign-off.
+
+## VALIDATION STATE (this session)
+
+- smoke 2K: needle+BOS clean, 253 t/s prefill (warmup-skewed).
+- 111K real: 349 t/s, needle hit, no BOS spam == old curve (expected
+  after correction; kernel ~1.01x at prod shape).
+- 495K + decode probes: [being run at session end — see below / logs
+  /tmp/ab_probe_qmv_495k.json, /tmp/ab_probe_qmv_decode.json]
+
+## MEASUREMENT PITFALL #5 (add to the list)
+
+5. CHECK THE CHECKPOINT'S ACTUAL QUANTIZATION (config.json) before
+   benchmarking "the production shape". A model-file recipe function is
+   not the deployed checkpoint. One wrong mode assumption cost a full
+   kernel-optimization cycle aimed at the wrong 141 GB/s.
