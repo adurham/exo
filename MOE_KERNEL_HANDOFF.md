@@ -567,3 +567,19 @@ c=2 divergent pair 24.4/24.6 t/s/stream (~49 aggregate); long-context c=2
 Remaining decode headroom beyond this: mxfp4 experts (halves per-row
 expert bytes; quality-gated, user wants understanding first). Prefill:
 gather_qmv_rhs bucket extension (B/E>8 tile-over-N variant).
+
+## PART 7 (2026-07-02): gather_qmv_rhs bucket extension — RESOLVED NEGATIVE, gate bug fixed
+
+Full B/E x M_TILE sweep (M4 Max, DSv4 shapes, affine8 g64 + mxfp4 g32,
+MLX_GATHER_QMV_RHS_MAXBE lift): NO extension bucket exists. Larger M_TILE
+makes long runs WORSE (mt=8 at B/E=16 is 0.17x — register pressure beats
+restream savings), and steel's tile reuse owns everything past the
+crossover. Measured crossover (TILE=4): B/E=6 wins (1.16x affine8 / 1.48x
+mxfp4), B/E=7 parity, B/E=8 LOSES (0.63x / 0.86x), 12-32 lose more.
+
+The useful find: the shipped B/E<=8 gate included the (6,8] regression
+zone (only 3 and 6 were ever measured) — multi-stream batched prefill can
+land there. Fixed: default bound 6 (mlx 0362d105), exo uv.lock pin bumped.
+The mxfp4 crossover is also 6-7, so the bound holds for the mxfp4 play.
+Raising EXO_PREFILL_STEP_SIZE for bigger B/E is a dead idea too: steel at
+B/E=12 runs 206 GB/s vs 240-300 at smaller shapes.
