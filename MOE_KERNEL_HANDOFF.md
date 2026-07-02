@@ -352,3 +352,59 @@ L>1, rope offset scalar-vs-per-stream in the batched attention.
 Repro (30s): two parallel `uv run python bench/decode_probe_ab.py
 --iters 1`; corrupt stream heads look like "Okay,Irwin,John,John" /
 "* * *" prompt-echo salad. Degenerate streams INFLATE t/s.
+
+===========================================================================
+2026-07-02 SESSION PART 4 — C=2 FIXED IN PROD (GATE); REAL BUG = REGRESSION
+===========================================================================
+
+## SHIPPED FIX (validated): EXO_DSV4_MTP_C2_MAX_CTX=1 default
+
+start_cluster.sh now arms the existing c>=2 spec gate for ALL contexts:
+c=1 keeps MTP (37.45 +/- 0.57 t/s, needle+BOS clean), any c>=2 batch
+falls back to non-spec batched decode. Validation: 3 consecutive c=2
+join rounds, ALL streams coherent (byte-identical clean openings),
+~14 t/s per stream at 1200 tokens. Set =0 to re-enable c>=2 spec after
+the real fix.
+
+## KEY DISCOVERY: THE B=2 L>1 CORRUPTION IS A REGRESSION (06-18..07-01)
+
+The 2026-06-18 degeneration handoff (~/.hermes/pastes/paste_1_222627.txt;
+umbrella doc dsv4-mtp-batch-degeneration-and-diagnosis-2026-06-17.md was
+pruned by the skills curator) records BS=2 VALIDATED CLEAN via
+bench/concurrent_bench.py after the fusion removal (exo f0bd448f,
+mlx-lm 91c3a95). Today's corruption therefore regressed in
+1ece2f27..5619827c (116 commits, mostly the 06-21..06-24 perf wave:
+tiled-P indexer, argpartition, direct pooled gather + revert, OPT-9/10,
+wide-ring PerStream work, chunk sizing).
+
+## WHAT WAS EXONERATED BY DIFFERENTIAL HARNESSES (single-process, m4-1)
+
+bitwise-equal single-vs-batch: PoolingCache/BatchPoolingCache (ratio 4;
+ratio 128 trivially), RotatingKVCache/BatchRotatingKVCache (55-prefill +
+6 spec cycles with trims), rope array-vs-int offsets (both thetas, even
+unequal), _sparse_pooled_attention (L=1/3, masks on/off), BatchPooling
+make_mask verify guard. Whole-model 4-layer random-weight E2E: only bf16
+noise (argmax flips on random-logit near-ties — NOT the bug; don't chase
+that again). The real bug needs a production ingredient the harness
+lacks — most likely the 2-rank sharded execution.
+
+## ALSO SHIPPED (correct-discipline hardening, kept)
+
+- exo 67846af5: BS>1 min-acceptance (uniform commit lengths).
+- exo db9a473e: batched pool rollback now mirrors the c=1 flush-gated
+  restore + commit-forward discipline (the old unconditional restore
+  really did lose committed pool tokens on every rejecting cycle — a
+  genuine latent bug, just not THE trigger).
+
+## NEXT SESSION: BISECT THE REGRESSION (bounded, mechanical)
+
+git bisect exo 1ece2f27..5619827c (# ~7 steps), each step:
+start_cluster.sh relaunch (~8 min) + the 30-second repro (two parallel
+`uv run python bench/decode_probe_ab.py --iters 1`; corrupt = 'Okay,Irwin'
+/ '* * *' heads, often with INFLATED t/s). Set
+EXO_DSV4_MTP_C2_MAX_CTX=0 during bisect so spec actually runs at c=2.
+Prime suspects in the window: d26dc013 (indexer fold weights into q),
+fcb5c691/ffe00c8c/0c526dc6 (direct pooled gather + revert), 24059598
+(tiled-P indexer), e3eb3499 (argpartition), the wide-ring PerStream
+commits (096515f/48a4a3c era). bench/concurrent_bench.py is the original
+validation harness if a richer gate is wanted.
