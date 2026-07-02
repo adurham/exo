@@ -1005,9 +1005,21 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_FENCE_EVERY_N_LAYERS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_EVERY_N_LAYERS=$EXO_DSV4_FENCE_EVERY_N_LAYERS"
     [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
     [ -n "${EXO_DSV4_ALLSUM_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE_LOG_EVERY=$EXO_DSV4_ALLSUM_PROBE_LOG_EVERY"
-    # Decode fence overlap A/B (2026-07-02): non-blocking per-layer fence
-    # (mx.async_eval) in the DSv4 MoE all_sum site. Experimental — default
-    # OFF; see mlx-lm deepseek_v4.py _FENCE_ASYNC.
+    # Decode fence overlap (2026-07-02): non-blocking per-layer fence
+    # (mx.async_eval) at the DSv4 MoE all_sum site, armed ONLY at c=1
+    # steady state via a two-key side channel (batch_generate "engine" key:
+    # exactly one active request; dsv4_mtp "cache" key: single-uid steady,
+    # disarm+synchronize around cache transitions). Measured: c=1 decode
+    # 28.9 -> 37.0 t/s (+28%), outputs byte-identical (blocking-fence
+    # parity), needle/BOS clean. At c>=2 the fence stays blocking (keys
+    # disarmed).
+    # NOTE: c=2 MTP decode has a PRE-EXISTING output-corruption bug
+    # (repetition/keyword-list degeneration at stream join) that is
+    # UNRELATED to this fence — control-verified identical with the fence
+    # off, gather kernel off, and 2026-07-01 knobs reverted; MTP-off c=2
+    # is clean, so the bug lives in the MTP batched-verify path. See
+    # MOE_KERNEL_HANDOFF.md (2026-07-02 session).
+    : "${EXO_DSV4_FENCE_ASYNC:=1}"
     [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
     [ -n "${EXO_DSV4_ROUTE_HIST:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST=$EXO_DSV4_ROUTE_HIST"
     [ -n "${EXO_DSV4_ROUTE_HIST_DECODE_ONLY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST_DECODE_ONLY=$EXO_DSV4_ROUTE_HIST_DECODE_ONLY"
