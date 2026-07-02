@@ -1098,9 +1098,11 @@ class ExoBatchGenerator:
             _set_fence_async_ok(True, key="engine")
 
     def _update_fence_arming(self) -> None:
-        """Arm the engine key iff exactly one request is active."""
+        """Arm the engine key iff the active-request count is within the
+        async-fence limit (1 unless EXO_DSV4_FENCE_ASYNC_C2 raises it)."""
+        limit = max(1, int(os.environ.get("EXO_DSV4_FENCE_ASYNC_C2", "0") or "0") or 1)
         self._set_fence_async_engine(
-            len(self._active_tasks) == 1 and not self._pp_spec_active
+            1 <= len(self._active_tasks) <= limit and not self._pp_spec_active
         )
 
     def submit(

@@ -256,6 +256,15 @@ _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
 # per-stream acceptance (known-corrupt at c=2) for A/B.
 _BS_MIN_ACCEPT = os.environ.get("EXO_DSV4_BS_MIN_ACCEPT", "1") != "0"
 
+# Max concurrent streams the async decode fence may stay armed for
+# (cache-owner key). 1 = validated c=1-only arming. Raised by
+# EXO_DSV4_FENCE_ASYNC_C2=N to extend async fencing to batched decode —
+# must match the model-side gate (deepseek_v4._FENCE_ASYNC_MAX_B) and the
+# engine-side limit (batch_generate._update_fence_arming).
+_FENCE_ASYNC_MAX_STREAMS = max(
+    1, int(os.environ.get("EXO_DSV4_FENCE_ASYNC_C2", "0") or "0") or 1
+)
+
 
 class _PhaseTimer:
     """Per-cycle phase timer for MTP profiling, sliced by batch size.
@@ -659,7 +668,7 @@ class DSv4MTPPredictor:
         if uids_t == self._active_uids:
             # No transition — keep the fence arming in sync with the
             # (unchanged) stream count.
-            self._set_fence_async(len(uids_t) == 1)
+            self._set_fence_async(len(uids_t) <= _FENCE_ASYNC_MAX_STREAMS)
             return  # Already active for this uid set.
 
         # Disarm the async fence AND drain any deferred graph before
@@ -704,7 +713,7 @@ class DSv4MTPPredictor:
             self._cache = batched
 
         # Re-arm the async fence only when back at single-stream.
-        self._set_fence_async(len(uids_t) == 1)
+        self._set_fence_async(len(uids_t) <= _FENCE_ASYNC_MAX_STREAMS)
 
         # ── DEGEN PROBE: stamp this BS-transition per uid + log the
         # extract phys-vs-size consistency tell (zero cost when OFF). ──
