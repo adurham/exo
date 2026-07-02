@@ -14,13 +14,15 @@ import os
 import subprocess
 import sys
 
-B_PAIRS = 1536
+import os as _os
+
+B_PAIRS = int(_os.environ.get("QMV_PAIRS", "1536"))
 N_EXPERTS = 256
 HIDDEN = 4096
 INTER = 1024
-GROUP = 32
-BITS = 4
-MODE = "mxfp4"
+GROUP = int(_os.environ.get("QMV_GROUP", "32"))
+BITS = int(_os.environ.get("QMV_BITS", "4"))
+MODE = _os.environ.get("QMV_MODE", "mxfp4")
 N_ITERS = 30
 N_WARM = 5
 

@@ -21,7 +21,13 @@ import os
 import subprocess
 import sys
 
-MODES = [("mxfp4", 32, 4), ("mxfp8", 32, 8)]
+MODES = [
+    ("mxfp4", 32, 4),
+    ("mxfp8", 32, 8),
+    ("affine", 64, 8),  # DSv4-Flash production checkpoint
+    ("affine", 64, 4),
+    ("affine", 32, 8),
+]
 # (K, N): gate/up projection and down projection production shards
 SHAPES = [(4096, 1024), (1024, 4096)]
 N_EXPERTS = 32
