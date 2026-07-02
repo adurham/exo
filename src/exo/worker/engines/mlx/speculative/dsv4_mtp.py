@@ -240,6 +240,22 @@ def _build_tree_mask_and_positions(
 # pipelining — measurements are upper bounds on real production walls.
 _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
 
+# BS>1 MIN-ACCEPTANCE (2026-07-02, default ON). The per-stream acceptance
+# migration let per-stream rotating-KV offsets diverge from the
+# batch-UNIFORM pooling/indexer caches (uniform trim + whole-batch
+# restore_meta): after the first cross-stream acceptance divergence the
+# pool consumes the wrong ring rows for one stream and the sparse indexer
+# retrieves shifted blocks — the deterministic BS=2 degeneration loop
+# (2026-06-17 note at the residual-sampling branch; isolated 2026-07-02:
+# MTP-off c=2 clean, greedy c=2 corrupt). Clamping every stream to
+# n_min = min(n_accepted) keeps ALL caches in lockstep by construction —
+# the class docstring's original, 2026-05-22-validated strategy. Streams
+# that accepted beyond n_min stage their accepted draft at position n_min
+# as the next-cycle token, so no valid work is discarded beyond the
+# documented min-strategy cost. EXO_DSV4_BS_MIN_ACCEPT=0 reverts to
+# per-stream acceptance (known-corrupt at c=2) for A/B.
+_BS_MIN_ACCEPT = os.environ.get("EXO_DSV4_BS_MIN_ACCEPT", "1") != "0"
+
 
 class _PhaseTimer:
     """Per-cycle phase timer for MTP profiling, sliced by batch size.
@@ -1987,6 +2003,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 n_accepted_per = combined[:N]
                 bonus_vals = combined[N:]
 
+            # BS>1 min-acceptance clamp (see _BS_MIN_ACCEPT). A stream cut
+            # below its own acceptance stages its ACCEPTED draft at n_min
+            # as next cycle's token (at greedy that position was a match,
+            # so the draft IS the target argmax); the min stream keeps its
+            # canonical bonus. Deterministic on post-broadcast data, so
+            # rank-consistent.
+            if N > 1 and _BS_MIN_ACCEPT:
+                _n_min_c = min(n_accepted_per)
+                bonus_vals = [
+                    int(draft_int[n][_n_min_c])
+                    if n_accepted_per[n] > _n_min_c
+                    else bonus_vals[n]
+                    for n in range(N)
+                ]
+                bonus_lps = [logprobs_all[n, _n_min_c] for n in range(N)]
+                n_accepted_per = [_n_min_c] * N
+
             # Build all_tokens_per using canonical n_accepted_per so
             # accepted-draft prefix length matches across ranks.
             all_tokens_per: list[list[tuple[int, mx.array]]] = []
@@ -2184,6 +2217,22 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             else:
                 n_accepted_per = k_local
                 bonus_vals = bonus_local
+
+            # BS>1 min-acceptance clamp (see _BS_MIN_ACCEPT). A stream cut
+            # below its own acceptance stages its ACCEPTED draft at n_min
+            # as next cycle's token (that position passed its rejection
+            # test, so committing it preserves the sampling distribution);
+            # the min stream keeps its canonical correction/bonus sample.
+            if N > 1 and _BS_MIN_ACCEPT:
+                _n_min_c = min(n_accepted_per)
+                bonus_vals = [
+                    int(draft_concat_int[n][_n_min_c])
+                    if n_accepted_per[n] > _n_min_c
+                    else bonus_vals[n]
+                    for n in range(N)
+                ]
+                bonus_lps = [logprobs_all[n, _n_min_c] for n in range(N)]
+                n_accepted_per = [_n_min_c] * N
 
             # Build all_tokens_per using canonical n_accepted_per.
             all_tokens_per = []
