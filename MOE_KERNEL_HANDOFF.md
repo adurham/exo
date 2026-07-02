@@ -245,3 +245,61 @@ perplexity/eval battery) — MODEL-QUALITY DECISION, get user sign-off.
    benchmarking "the production shape". A model-file recipe function is
    not the deployed checkpoint. One wrong mode assumption cost a full
    kernel-optimization cycle aimed at the wrong 141 GB/s.
+
+===========================================================================
+2026-07-02 SESSION PART 2 — DECODE: ASYNC FENCE +28%; C=2 BUG ISOLATED
+===========================================================================
+
+## DECODE WIN (deployed, default ON): EXO_DSV4_FENCE_ASYNC
+
+MTP-PROF (EXO_DSV4_MTP_PROFILE=200) decode cycle budget at c=1:
+  total 62.3ms | verify 56.3 (90%) | draft 4.9 (8%) | accept+rb 1.1
+  ALLSUM probe: 44 per-layer fence walls x ~1.1ms; ~0.5ms/layer weight
+  floor => ~0.3-0.5ms/layer CPU-GPU serialization from the BLOCKING
+  mx.eval(y) at the Phase H Lever 1 fence.
+
+Fix: mx.async_eval(y) at the SAME per-layer commit points (dispatch order
+preserved; CPU encodes layer n+1 while GPU runs n). This is NOT OPT-7
+(which removed evals and paid batched-graph cost).
+  c=1 decode: 28.89 -> 37.03 +/- 0.5 t/s (+28%), verify 56.3 -> 42.2ms.
+  Outputs BYTE-IDENTICAL to blocking fence. Needle + BOS clean.
+
+Arming (all in code, env only enables the feature):
+  two-key side channel in deepseek_v4._FENCE_ASYNC_CTX — "engine" key
+  (batch_generate: exactly 1 active task, disarm+mx.synchronize at
+  submit/submit_batched entry, re-arm at registration/removal) AND
+  "cache" key (dsv4_mtp: single-uid steady, disarm+sync around cache
+  merges). Fence async only when BOTH true AND B==1 AND L<=8.
+  UNCONDITIONAL async (no arming) corrupts + wedges c=2 within seconds —
+  do not simplify this away.
+
+## C=2 DECODE CORRUPTION — PRE-EXISTING BUG, ISOLATED TO MTP VERIFY
+
+Repro: two concurrent decode_probe_ab runs. Signature: repetition /
+keyword-list degeneration from the join window ("Okay,Irwin,John,John",
+"* * * *" spam), occasionally wedges ranks after repeated joins.
+Degenerate streams show INFLATED t/s (repetition -> high MTP acceptance).
+
+Bisect matrix (all on 2026-07-02 stack, 3-round join batteries):
+  async fence OFF (control):        CORRUPT  -> fence exonerated
+  MLX_GATHER_QMV_RHS=0:             CORRUPT  -> new kernel exonerated
+  2026-07-01 knobs reverted
+  (LASTROW/TAIL_PMASK/ARGPART/192): CORRUPT  -> yesterday exonerated
+  EXO_DSV4_DEGEN_PROBE=1:           extracts consistent, snapshots fresh
+                                    -> MTP-cache scramble exonerated
+  EXO_DSV4_MTP=0:                   CLEAN (20.5 t/s x2, coherent)
+                                    -> BUG IS IN MTP BATCHED VERIFY (B=2)
+
+Age: older than 2026-07-01; last known-good c=2 validation was the
+2026-05-22 fence sweep (34.18 agg). Next tools: EXO_DSV4_C2_TRACE=1
+per-chain-step JSONL tracer (built for exactly this), then read the B=2
+verify/rollback path in dsv4_mtp.py (~lines 1861-2290, batched cycle).
+
+## PRIORITY ORDER FOR NEXT SESSION (revised)
+
+1. Fix c=2 MTP batched-verify corruption (correctness; affects any
+   concurrent Hermes usage TODAY, and predates this session).
+2. mxfp4 expert conversion (the 350@495K prefill play; needs user
+   sign-off on quality + eval battery). Kernel support already deployed.
+3. Decode: remaining verify wall is ~42ms (weights ~20ms + collectives);
+   next lever after (1) is per-collective latency / jaccl smalls.
