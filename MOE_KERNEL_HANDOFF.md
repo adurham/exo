@@ -495,3 +495,49 @@ before reading multi-host logs.
   bug, unfixed, incidental.
 - trim_per_stream sets `_idx = max % max_size` while update_and_fetch
   uses `% ring_width` — _idx is unused by PerStream paths, cosmetic.
+
+---
+
+# PART 6 (2026-07-02): c=2 DECODE LEVERS — +36%/stream (15.0 → 20.4 t/s)
+
+Post-root-cause-fix A/B matrix (divergent-prompt staggered pair, 800 tok,
+per-stream t/s; twin-prompt repros can't distinguish clamp settings —
+identical streams accept identically, the clamp is a no-op there):
+
+| config                              | t/s/stream | quality |
+|-------------------------------------|-----------|---------|
+| min-clamp ON + sync fence (old)     | 15.0      | clean   |
+| per-stream acceptance (clamp off)   | 18.7      | clean   |
+| async fence at B<=2 (clamp on)      | 17.2      | clean   |
+| BOTH (new production default)       | 20.4      | clean   |
+
+c=1 unchanged (34.2); twin-prompt repro CLEAN at ~21 t/s/stream in all.
+Per-stream acceptance verified genuinely exercised: 65% of B=2 cycles had
+unequal n_accepted (means 0.68/0.80).
+
+- `EXO_DSV4_BS_MIN_ACCEPT=0` (now default): the clamp's "known-corrupt"
+  rationale was contaminated by the bootstrap bug; per-stream rollback
+  (`trim_per_stream`) handles divergence correctly post-fix.
+- `EXO_DSV4_FENCE_ASYNC_C2=2` (now default, new env): extends the async
+  decode fence arming to <=2 streams (engine + cache keys and the model-
+  side B-gate all read it; exo b76b6a3e + mlx-lm submodule). c>2 arming
+  untested — raise only with a validation pass.
+
+## NEW BUG FOUND + FIXED: ragged rendezvous batched MTP prefill crash
+
+Two /v1 requests with DIFFERENT prompt lengths inside the 200ms rendezvous
+window crashed the runner: the batched prefill right-pads to max_L and the
+captured last-chunk pre_norm is uniform, but the per-stream MTP cache
+prefill paired it with each stream's unpadded token tail →
+[broadcast_shapes] (1,21,4096) vs (1,72,4096) at dsv4_mtp.predict. Fixed in
+batch_generate._submit_batched_eligible: slice both sides to the stream's
+true rows (k_i = len_i - (max_L - S_pre)); <2 true rows → skip prefill
+(cold draft cache, no crash). Equal-length behavior bit-identical.
+
+## REMAINING VALIDATION GAPS
+
+- Long-context (200K+) c=2 needle under the new defaults (levers don't
+  touch cache layout, but unsoaked).
+- c=3..5 concurrency battery under per-stream acceptance.
+- m4-2 exo pydantic extra_forbidden crash on GPU-timeout event strings
+  (robustness, open).

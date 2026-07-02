@@ -1021,8 +1021,15 @@ for NODE in "${NODES[@]}"; do
     # MOE_KERNEL_HANDOFF.md (2026-07-02 session).
     : "${EXO_DSV4_FENCE_ASYNC:=1}"
     [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
-    # Experimental levers (2026-07-02): async fence at c>=2 (max streams)
-    # and per-stream acceptance (BS_MIN_ACCEPT=0 disables the min-clamp).
+    # c=2 decode levers, defaults set from the 2026-07-02 A/B matrix
+    # (divergent-prompt pair, per-stream t/s): clamp-on+sync 15.0 →
+    # per-stream acceptance 18.7 (+24%) → async fence at B<=2 17.2 (+15%)
+    # → both 20.4 (+36%), c=1 unchanged 34.2, all outputs coherent.
+    # EXO_DSV4_BS_MIN_ACCEPT=1 restores the min-clamp; FENCE_ASYNC_C2=0
+    # restores c=1-only fencing. Keep FENCE_ASYNC_C2 at 2 unless c>2
+    # batched arming gets its own validation pass.
+    : "${EXO_DSV4_FENCE_ASYNC_C2:=2}"
+    : "${EXO_DSV4_BS_MIN_ACCEPT:=0}"
     [ -n "${EXO_DSV4_FENCE_ASYNC_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC_C2=$EXO_DSV4_FENCE_ASYNC_C2"
     [ -n "${EXO_DSV4_BS_MIN_ACCEPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BS_MIN_ACCEPT=$EXO_DSV4_BS_MIN_ACCEPT"
     [ -n "${EXO_DSV4_ROUTE_HIST:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST=$EXO_DSV4_ROUTE_HIST"

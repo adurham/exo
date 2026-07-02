@@ -1721,21 +1721,32 @@ class ExoBatchGenerator:
                 stream_pre_norm = captured_prompt_pre_norm[i : i + 1]
                 self._mlx_gen.mtp.reset_cache()
                 S_pre = stream_pre_norm.shape[1]
-                if S_pre > 1:
-                    toks_list = all_prompt_tokens_list[i].tolist()
-                    # MTP cache prefill uses tokens[1:S_pre] paired with pre_norm[:, :-1, :]
-                    # — matches the offset semantics of the serial submit() path.
-                    # Take the last S_pre tokens of the prompt since batched
-                    # prefill captures only the final-chunk pre_norm.
-                    n_total = len(toks_list)
-                    mtp_tokens = toks_list[n_total - S_pre + 1 : n_total]
+                # Ragged batch: the captured chunk is RIGHT-padded to the
+                # batch max_L, so a shorter stream's true rows are the FIRST
+                # k_i = len_i - (max_L - S_pre) rows; its tail rows are
+                # padding. Pairing the uniform S_pre-row capture with this
+                # stream's unpadded token tail crashed the runner on any
+                # rendezvous batch of unequal-length prompts
+                # ([broadcast_shapes] (1,21,4096) vs (1,72,4096), 2026-07-02).
+                # Slice both sides to the stream's true rows; if fewer than
+                # 2 true rows land in the captured chunk, skip the prefill —
+                # the draft cache just starts cold for this stream.
+                max_l = max(len(t) for t in all_prompt_tokens_list)
+                toks_list = all_prompt_tokens_list[i].tolist()
+                n_total = len(toks_list)
+                k_i = min(S_pre, n_total - (max_l - S_pre))
+                if k_i > 1:
+                    # hidden rows 0..k_i-2 (positions n-k_i .. n-2) pair with
+                    # tokens n-k_i+1 .. n-1 — same offset semantics as the
+                    # serial submit() path.
+                    mtp_tokens = toks_list[n_total - k_i + 1 : n_total]
                     _ = self._mlx_gen.mtp.predict(
-                        stream_pre_norm[:, :-1, :],
+                        stream_pre_norm[:, : k_i - 1, :],
                         mx.array([mtp_tokens]),
                     )
                     mx.eval(_)
                     logger.info(
-                        f"MTP cache prefilled ({S_pre} positions, batched stream {i})"
+                        f"MTP cache prefilled ({k_i} positions, batched stream {i})"
                     )
                 if hasattr(self._mlx_gen.mtp, "snapshot_for_uid"):
                     self._mlx_gen.mtp.snapshot_for_uid(uid)
