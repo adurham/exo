@@ -536,8 +536,10 @@ true rows (k_i = len_i - (max_L - S_pre)); <2 true rows → skip prefill
 
 ## REMAINING VALIDATION GAPS
 
-- Long-context (200K+) c=2 needle under the new defaults (levers don't
-  touch cache layout, but unsoaked).
-- c=3..5 concurrency battery under per-stream acceptance.
+- Long-context c=2 CLOSED (2026-07-02): 2x~105K simultaneous divergent
+  streams (rendezvous batched prefill at depth), needles 1/1 both, no BOS
+  spam, 24.1/23.8 t/s/stream concurrent decode.
+- c=3..5 concurrency battery under per-stream acceptance (user: not a
+  priority).
 - m4-2 exo pydantic extra_forbidden crash on GPU-timeout event strings
   (robustness, open).
