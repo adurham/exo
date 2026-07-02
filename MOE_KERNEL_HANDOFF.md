@@ -227,11 +227,17 @@ perplexity/eval battery) — MODEL-QUALITY DECISION, get user sign-off.
 
 ## VALIDATION STATE (this session)
 
-- smoke 2K: needle+BOS clean, 253 t/s prefill (warmup-skewed).
+- smoke 2K: needle+BOS clean (both deploys).
 - 111K real: 349 t/s, needle hit, no BOS spam == old curve (expected
-  after correction; kernel ~1.01x at prod shape).
-- 495K + decode probes: [being run at session end — see below / logs
-  /tmp/ab_probe_qmv_495k.json, /tmp/ab_probe_qmv_decode.json]
+  after correction; kernel ~1.01x at the 768-pair shape).
+- 559K real (495K-target run): 304.7 t/s, needle hit, no BOS spam.
+  Old curve: 306@495K, 215@727K => ~280 interpolated at 559K. So the
+  curve shifted up at depth (~+8%) — consistent with the adaptive
+  prefill schedule growing chunks past 256 at deep context into the
+  B/E 4-8 window where affine qmv_rhs wins ~1.16x.
+- decode (3x1200 tok): 28.89 +/- 0.35 t/s vs 29.0 reference — unchanged
+  (B/E < 2 at decode keeps the old path, as designed).
+- Deployed: mlx cb539cda on both Studios, exo main 2347fffa, healthy.
 
 ## MEASUREMENT PITFALL #5 (add to the list)
 
