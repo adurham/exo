@@ -125,7 +125,9 @@ def main():
         return kernel(
             inputs=[w_q, w_s, x],
             template=[("T", mx.bfloat16)],
-            grid=(1, N_OUT // 8, 1),
+            # grid is in THREADS: 64 threads/tg (2 simdgroups x 4 rows = 8
+            # output rows per tg), N/8 threadgroups along y.
+            grid=(64, N_OUT // 8, 1),
             threadgroup=(64, 1, 1),
             output_shapes=[(M_ROWS, N_OUT)],
             output_dtypes=[mx.bfloat16],
