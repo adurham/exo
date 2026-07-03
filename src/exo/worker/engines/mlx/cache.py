@@ -1047,13 +1047,28 @@ class KVPrefixCache:
                 False,
             )
 
-        # Materialize a cache up to restore_pos: concat trie slices for sliceable
-        # layers, deepcopy + trim for leaf-held non-sliceable layers.
+        # Materialize a cache up to restore_pos: concat trie slices for
+        # sliceable layers, snapshot states for non-sliceable layers. strict:
+        # a missing per-layer snapshot state aborts (None) rather than
+        # restoring the donor's final-state cache at the wrong position.
         materialized = self._materialize_cache_to_depth(
             donor_leaf=donor_leaf,
             target_depth=restore_pos,
             snapshot=snapshot,
+            strict_snapshot=True,
         )
+        if materialized is None:
+            self._trace(
+                f"get_kv_cache STRICT-MISS (non-sliceable layer without "
+                f"snapshot state) matched_leaf={donor_leaf.leaf_id} "
+                f"restore_pos={restore_pos}"
+            )
+            return (
+                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
+                prompt_tokens,
+                None,
+                False,
+            )
 
         self._access_counter += 1
         donor_leaf.last_used = self._access_counter
@@ -1358,10 +1373,23 @@ class KVPrefixCache:
         donor_leaf: _Leaf,
         target_depth: int,
         snapshot: CacheSnapshot | None,
-    ) -> KVCacheType:
+        strict_snapshot: bool = False,
+    ) -> KVCacheType | None:
         """Build a fresh per-layer KV cache whose contents cover tokens
         [0, target_depth) for sliceable layers and match the snapshot (at
         snapshot.token_count <= target_depth) for non-sliceable layers.
+
+        With ``strict_snapshot`` (the prefix-restore path), a non-sliceable
+        layer whose snapshot state is missing ABORTS the materialization
+        (returns None) instead of falling back to the leaf's FINAL cache.
+        The fallback restored a cache whose rotating rings held the donor
+        session's final contents/offset while every other layer sat at
+        ``target_depth`` — a layer-offset/content mismatch that crashed the
+        next prefill ([broadcast_shapes] (63,66) vs (1,64,63,190)) or, when
+        the shapes happened to broadcast, silently attended to the donor's
+        stale ring and degenerated the generation (' his his his' loops).
+        DSv4 hits this on EVERY partial hit: snapshot_ssm_states stores
+        None for trimmable CacheLists, which is what DSv4 layers use.
         """
         # Walk root→donor_leaf.node collecting edges up to target_depth.
         path = _collect_path(self._root, donor_leaf.node)
@@ -1393,13 +1421,20 @@ class KVPrefixCache:
         for layer_idx in range(num_layers):
             leaf_layer = donor_leaf.leaf_layer_caches[layer_idx]
             if leaf_layer is not None:
-                # Non-sliceable layer: deepcopy leaf's full cache, then trim to snapshot.
-                c = deepcopy(leaf_layer)
-                if snapshot is not None:
-                    snap_state = snapshot.states[layer_idx]
-                    if snap_state is not None:
-                        c = deepcopy(snap_state)
-                new_cache.append(c)  # type: ignore[arg-type]
+                snap_state = (
+                    snapshot.states[layer_idx] if snapshot is not None else None
+                )
+                if snap_state is not None:
+                    new_cache.append(deepcopy(snap_state))  # type: ignore[arg-type]
+                    continue
+                if strict_snapshot:
+                    # No usable snapshot state for this non-sliceable layer.
+                    # The leaf's final cache is at the WRONG position — abort
+                    # so the caller falls back to a full prefill.
+                    return None
+                # Diagnostics path (_materialize_full_leaf_cache): the leaf's
+                # final cache IS the state at target_depth == leaf depth.
+                new_cache.append(deepcopy(leaf_layer))  # type: ignore[arg-type]
                 continue
 
             ks = per_layer_keys[layer_idx]
@@ -1424,9 +1459,13 @@ class KVPrefixCache:
         """
         leaf = self._leaves[leaf_id]
         target_depth = leaf.node.depth
-        return self._materialize_cache_to_depth(
+        materialized = self._materialize_cache_to_depth(
             donor_leaf=leaf, target_depth=target_depth, snapshot=None
         )
+        # strict_snapshot is off: the leaf's final cache is valid at its own
+        # full depth, so materialization cannot abort here.
+        assert materialized is not None
+        return materialized
 
     # ── Ref counting + eviction ────────────────────────────────────────────
     def _increment_ref_count(self, node: _TrieNode) -> None:

@@ -1237,3 +1237,104 @@ class TestSpacedSnapshotRetention:
         snaps = [_snap(t) for t in (1000, 2000, 3000)]
         out = _select_spaced_snapshots(snaps, keep=1)
         assert [s.token_count for s in out] == [3000]
+
+
+class TestStrictSnapshotRestore:
+    """Regression guard for the stale-final-cache prefix restore.
+
+    ``snapshot_ssm_states`` stores ``None`` for TRIMMABLE CacheLists — which
+    is what DSv4 layers are for SHORT sessions (empty PoolingCache) and in
+    early-depth snapshots of long sessions. ``_materialize_cache_to_depth``
+    then fell back to ``deepcopy(leaf_layer)`` — the donor leaf's FINAL
+    rotating ring at its final offset — while sliceable layers and
+    ``restore_pos`` sat at the snapshot depth. The next prefill either
+    crashed ([broadcast_shapes] (63,66) vs (1,64,63,190)) or silently
+    attended to the donor's stale ring and degenerated (' his his his').
+
+    The fix: a missing per-layer snapshot state on the restore path must
+    turn the lookup into a full-prefill MISS, never substitute final state.
+    """
+
+    @staticmethod
+    def _rotating(num_tokens: int) -> RotatingKVCache:
+        r = RotatingKVCache(max_size=4096)
+        r.keys = mx.zeros((1, 2, num_tokens, 4), dtype=mx.bfloat16)
+        r.values = mx.zeros((1, 2, num_tokens, 4), dtype=mx.bfloat16)
+        r.offset = num_tokens
+        r._idx = num_tokens
+        return r
+
+    @classmethod
+    def _short_session_cache(cls, num_tokens: int, n_layers: int = 3):
+        # Empty PoolingCache => CacheList.is_trimmable() -> True => the
+        # snapshot capture path stores None for the layer.
+        return [
+            CacheList(cls._rotating(num_tokens), PoolingCache(128))
+            for _ in range(n_layers)
+        ]
+
+    def test_partial_hit_without_snapshot_state_is_a_miss(self):
+        from unittest.mock import MagicMock
+
+        from exo.worker.engines.mlx.cache import snapshot_ssm_states
+
+        prefix_cache = KVPrefixCache(None)
+        donor_tokens = list(range(1, 13))  # tiny 'hi'-like session
+        donor_cache = self._short_session_cache(len(donor_tokens))
+        # Capture exactly as production does: trimmable CacheList => None
+        # states.
+        snap = snapshot_ssm_states(donor_cache)
+        assert all(s is None for s in snap.states)
+        prefix_cache.add_kv_cache(
+            mx.array(donor_tokens, dtype=mx.int32),
+            donor_cache,
+            ssm_snapshots=[snap],
+        )
+
+        # A longer prompt sharing the first 6 tokens (chat-header-like).
+        new_prompt = mx.array(
+            donor_tokens[:6] + list(range(100, 163)), dtype=mx.int32
+        )
+        model = MagicMock()
+        cache, remaining, leaf_id, is_exact = prefix_cache.get_kv_cache(
+            model, new_prompt
+        )
+        # Must be a full-prefill miss: no leaf claimed, ALL tokens remaining.
+        assert leaf_id is None
+        assert not is_exact
+        assert int(remaining.shape[0]) == int(new_prompt.shape[0])
+
+    def test_partial_hit_with_snapshot_state_still_restores(self):
+        from unittest.mock import MagicMock
+
+        from exo.worker.engines.mlx.cache import CacheSnapshot
+
+        prefix_cache = KVPrefixCache(None)
+        donor_tokens = list(range(1, 13))
+        donor_cache = self._short_session_cache(len(donor_tokens))
+        # Hand-build a snapshot WITH per-layer states at depth 6.
+        states = [
+            CacheList(self._rotating(6), PoolingCache(128))
+            for _ in donor_cache
+        ]
+        snap = CacheSnapshot(states=states, token_count=6)
+        prefix_cache.add_kv_cache(
+            mx.array(donor_tokens, dtype=mx.int32),
+            donor_cache,
+            ssm_snapshots=[snap],
+        )
+
+        new_prompt = mx.array(
+            donor_tokens[:6] + list(range(100, 163)), dtype=mx.int32
+        )
+        model = MagicMock()
+        cache, remaining, leaf_id, is_exact = prefix_cache.get_kv_cache(
+            model, new_prompt
+        )
+        assert leaf_id is not None
+        assert int(remaining.shape[0]) == int(new_prompt.shape[0]) - 6
+        # The restored rotating layers must sit at the snapshot offset,
+        # not the donor's final offset.
+        for layer in cache:
+            if isinstance(layer, CacheList):
+                assert layer.caches[0].offset == 6
