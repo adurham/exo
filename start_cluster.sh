@@ -1014,22 +1014,32 @@ for NODE in "${NODES[@]}"; do
     # 28.9 -> 37.0 t/s (+28%), outputs byte-identical (blocking-fence
     # parity), needle/BOS clean. At c>=2 the fence stays blocking (keys
     # disarmed).
-    # NOTE: c=2 MTP decode has a PRE-EXISTING output-corruption bug
-    # (repetition/keyword-list degeneration at stream join) that is
-    # UNRELATED to this fence — control-verified identical with the fence
-    # off, gather kernel off, and 2026-07-01 knobs reverted; MTP-off c=2
-    # is clean, so the bug lives in the MTP batched-verify path. See
-    # MOE_KERNEL_HANDOFF.md (2026-07-02 session).
+    # NOTE (history): the 2026-07-02 c=2 JOIN corruption was the per-stream
+    # ring bootstrap (fixed, mlx-lm 8b7b5f9) — unrelated to this c=1 fence.
+    # The 2026-07-03 c=2 DEEP-generation corruption is a different bug,
+    # implicated on FENCE_ASYNC_C2 (see below); this B==1-gated arming is
+    # not affected.
     : "${EXO_DSV4_FENCE_ASYNC:=1}"
     [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
-    # c=2 decode levers, defaults set from the 2026-07-02 A/B matrix
-    # (divergent-prompt pair, per-stream t/s): clamp-on+sync 15.0 →
-    # per-stream acceptance 18.7 (+24%) → async fence at B<=2 17.2 (+15%)
-    # → both 20.4 (+36%), c=1 unchanged 34.2, all outputs coherent.
-    # EXO_DSV4_BS_MIN_ACCEPT=1 restores the min-clamp; FENCE_ASYNC_C2=0
-    # restores c=1-only fencing. Keep FENCE_ASYNC_C2 at 2 unless c>2
-    # batched arming gets its own validation pass.
-    : "${EXO_DSV4_FENCE_ASYNC_C2:=2}"
+    # c=2 decode levers. Per-stream acceptance (BS_MIN_ACCEPT=0) kept from
+    # the 2026-07-02 A/B (+24% vs min-clamp, exonerated for corruption by
+    # the 2026-07-03 deep battery).
+    #
+    # FENCE_ASYNC_C2 DEFAULT 0 (2026-07-03): async fencing at c=2 is
+    # IMPLICATED in the deep-generation corruption. 4000-token divergent
+    # c=2 pairs with FENCE_ASYNC_C2=2 degenerate at ~27%/pair (repetition
+    # loops at tokens 1400-3900, kill-switch fires, then the mid-batch
+    # kill rank-desyncs a collective -> 100% CPU spin wedge needing
+    # kill -9). Same battery with FENCE_ASYNC_C2=0: 12/12 clean.
+    # Exonerated by direct A/B: MLX_LM_SDPA_ROWSPLIT, BS_MIN_ACCEPT,
+    # MTP-off (clean -> spec path), preceded-by-c1, xctrace attach.
+    # Part 6's 800-token validation was too shallow to catch this.
+    # Cost: c=2 drops ~24.5 -> ~19 t/s/stream; c=1 keeps its +28% async
+    # win (FENCE_ASYNC=1 arming is B==1-gated and validated deep).
+    # Re-enable only with a fix for the steady-state batched-cycle race
+    # (per-stream ring trims vs in-flight deferred async graphs) plus a
+    # 4000-token c=2 battery. See MOE_KERNEL_HANDOFF.md 2026-07-03.
+    : "${EXO_DSV4_FENCE_ASYNC_C2:=0}"
     : "${EXO_DSV4_BS_MIN_ACCEPT:=0}"
     [ -n "${EXO_DSV4_FENCE_ASYNC_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC_C2=$EXO_DSV4_FENCE_ASYNC_C2"
     [ -n "${EXO_DSV4_BS_MIN_ACCEPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BS_MIN_ACCEPT=$EXO_DSV4_BS_MIN_ACCEPT"
