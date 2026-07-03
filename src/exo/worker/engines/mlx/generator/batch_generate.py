@@ -2478,6 +2478,23 @@ class ExoBatchGenerator:
         # inside the response loop which runs identically on every rank, so the
         # remove() is symmetric. Best-effort: removal failure must not break the
         # decode loop.
+        # Wedge tracer (EXO_DSV4_WEDGE_TRACE=1): the c>=2 degen-kill wedge is a
+        # rank desync on a mid-batch eviction. Log, per rank, the batch size the
+        # generator sees each step and every eviction, so a cross-rank diff shows
+        # whether the eviction (and the resulting B-transition) is symmetric.
+        if os.environ.get("EXO_DSV4_WEDGE_TRACE") == "1":
+            _wt_rank = self.group.rank() if self.group is not None else 0
+            _wt_step = getattr(self, "_wedge_trace_step", 0) + 1
+            self._wedge_trace_step = _wt_step
+            _wt_gb = getattr(self._mlx_gen, "_generation_batch", None)
+            _wt_b = len(_wt_gb) if _wt_gb is not None else -1
+            if _wt_b >= 2 or _evict_from_generator_uids:
+                logger.info(
+                    f"[WEDGE_TRACE] rank={_wt_rank} step={_wt_step} B={_wt_b} "
+                    f"active={sorted(self._active_tasks.keys())} "
+                    f"evict={sorted(_evict_from_generator_uids)}"
+                )
+
         if _evict_from_generator_uids:
             try:
                 self._mlx_gen.remove(_evict_from_generator_uids)
@@ -2485,6 +2502,14 @@ class ExoBatchGenerator:
                 logger.warning(
                     f"injected-finish generator-evict failed for "
                     f"{_evict_from_generator_uids}: {_evict_err}"
+                )
+            if os.environ.get("EXO_DSV4_WEDGE_TRACE") == "1":
+                _wt_gb2 = getattr(self._mlx_gen, "_generation_batch", None)
+                _wt_b2 = len(_wt_gb2) if _wt_gb2 is not None else -1
+                _wt_rank2 = self.group.rank() if self.group is not None else 0
+                logger.info(
+                    f"[WEDGE_TRACE] rank={_wt_rank2} POST-EVICT B={_wt_b2} "
+                    f"removed={sorted(_evict_from_generator_uids)}"
                 )
 
         return results
