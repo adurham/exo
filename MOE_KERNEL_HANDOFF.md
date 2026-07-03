@@ -656,3 +656,57 @@ Session-close production state: c=1 37.4 t/s, c=2 24.5/stream divergent
 (~49 aggregate), depth table in this doc, all quality gates green.
 Deployed with EXO_DSV4_MTP_PROFILE=100 (negligible; drop on next deploy
 if desired).
+
+---
+
+# NEW SESSION: START HERE (state as of 2026-07-02 session end)
+
+## Current production state
+- Cluster: 2x Mac Studio M4 (m4-1 .201 rank0 API, m4-2 .202), TB RDMA.
+  Deploy: push to adurham/exo main FIRST, then `EXO_TARGET_BRANCH=main
+  ./start_cluster.sh` from the laptop. Never push mid-deploy.
+- Model: mlx-community/DeepSeek-V4-Flash, ~284B, **MIXED quant: experts
+  mxfp4 g32, attention/shared/embed/lm_head affine8 g64**. config.json's
+  quantization header LIES (says uniform affine8) — always read
+  safetensors shard headers (part 8 has the how).
+- Perf: c=1 37.4 t/s decode; c=2 24.5 t/s/stream divergent pair (~49
+  aggregate); prefill/decode by depth in the PRODUCTION BASELINE TABLE
+  above (355->311 prefill, 42->23 decode, 100K->500K, needles all OK).
+- Defaults now in start_cluster.sh: EXO_DSV4_FENCE_ASYNC=1,
+  EXO_DSV4_FENCE_ASYNC_C2=2, EXO_DSV4_BS_MIN_ACCEPT=0,
+  EXO_DSV4_MTP_C2_MAX_CTX=0 (spec ON at c>=2 — the corruption is
+  root-fixed, part 5). mlx pin: gather_qmv_rhs B/E<=6 (part 7).
+  mlx-lm: SDPA row-split at B>1/L>1 (part 9, MLX_LM_SDPA_ROWSPLIT=0).
+
+## Open work, in priority order
+1. B=2 verify residual: ~640us/layer excess over B=1 (69.7 vs 42.2ms
+   verify). Attribution plan: mx.metal.start_capture around ONE B=1 and
+   ONE B=2 verify cycle, per-kernel diff in Xcode. Do NOT use span
+   profiling (lazy eval scrambles it) or trust microbench absolute
+   times (ratios only). Potential: c=2 -> ~30 t/s/stream.
+2. Prefill re-profiling at depth (indexer/pool shares at 300-500K) —
+   untouched since the +8% kernel win.
+3. Reliability: m4-2 exo crashes on pydantic extra_forbidden when an
+   event carries GPU-timeout strings; m4-1 WAN TCP broke once after
+   reboot (fixed by another reboot; LAN git-mirror workaround procedure
+   in part 5 ops notes if it recurs).
+4. Tabled: mxfp4 (already shipped in the checkpoint — part 8); tree
+   drafting (needs #1's data first); c>2 fence arming (validate before
+   raising EXO_DSV4_FENCE_ASYNC_C2).
+
+## Tooling that exists (don't rebuild)
+- 30s c=2 quality repro: /tmp/c2_repro_check.sh (laptop).
+- Decode probe: /tmp/decode_probe_ab.py; nonce/divergent variant in the
+  session scratchpad pattern (append --suffix to defeat prefix cache;
+  IDENTICAL twin prompts cannot A/B acceptance policies — use divergent
+  same-length suffixes, staggered 6s to dodge rendezvous).
+- Depth stress: bench/mtp_longctx_probe.py (target-tokens ~1.9x actual).
+- Per-cycle phase timer: EXO_DSV4_MTP_PROFILE=100 (B-sliced draft/verify/
+  accept/rollback). EXO_DSV4_SPEC_TRACE costs 10% on rank0 — never
+  benchmark with it on.
+- Kernel benches on m4-1: ~/scratch/tilesweep-venv + ~/scratch/mlx-tilesweep
+  (adurham/mlx main), qmv_mbatch_bench.py (QMV_MODE/BITS/GROUP/PAIRS +
+  MLX_GATHER_QMV_RHS_MAXBE), rowscale_bench.py, sdpa_sweep.py,
+  rowsplit_check.py.
+- Memory files (auto-recall): exo_dsv4_quantization, exo_dsv4_c2_mtp_corruption,
+  exo_dsv4_decode_async_fence, exo_gather_qmv_rhs_kernel.
