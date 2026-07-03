@@ -2297,8 +2297,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # while making the mutations safe. B=1 is unaffected: its trims
         # are pure offset decrements (no buffer mutation), which is why
         # c=1 async has always been clean. Re-armed after the MTP-cache
-        # trim below.
-        self._set_fence_async(False)
+        # trim below. (_set_fence_async lives on the predictor module.)
+        self.mtp._set_fence_async(False)
         rollback_per_stream_py = [gamma - acc for acc in n_accepted_per]
         n_min = min(n_accepted_per)
         n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
@@ -2401,7 +2401,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Re-arm the async fence for the next cycle's forwards (same
         # B-gate as activate_for_uids). All cache mutations for this
         # cycle are done.
-        self._set_fence_async(N <= _FENCE_ASYNC_MAX_STREAMS)
+        self.mtp._set_fence_async(N <= _FENCE_ASYNC_MAX_STREAMS)
 
         # 5. Update per-uid pre_norm to each stream's first-rejection
         #    position in verify_pre_norm.
