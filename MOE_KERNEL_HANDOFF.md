@@ -626,3 +626,33 @@ pools, switch_mlp, collectives) to find the true +11ms/row owner.
 
 (mtp_longctx_probe, exact server-side token counts, single stream, no
 prefix cache, spam=no everywhere. Reference for any future A/B.)
+
+## PART 9 (2026-07-02, late): B=2 verify row-cost hunt — partial attribution
+
+Found + shipped: **MLX fused SDPA cliff at B>1 AND L>1** (the batched
+verify shape). Sweep (M4 Max, heads=64/kv=1/dk=512): B=2 L=3 costs 2.9x
+two B=1 calls at ctx512, 4.4x at 1024, 9.0x at 4096; B>1 L=1 and B=1 L>1
+are both fine. Fix: mlx-lm base.py row-splits into B fused B=1 calls
+(2<=B<=8, 1<L<=8, MLX_LM_SDPA_ROWSPLIT=0 kill switch). allclose, not
+bitexact.
+
+BUT production DSv4 barely hits it: main attention kv = ~136-slot local
+ring (below cliff onset); sparse-pooled L>1 path uses the hand-rolled
+split-softmax inner kernel, not fused SDPA. Result: B=2 verify 75.5 ->
+69.7ms, e2e c=2 flat (~24 t/s/stream). Kept anyway (right for other
+shapes/models, and for any future kv-length growth).
+
+REMAINING: B=2 verify still ~69.7ms vs B=1 42.2ms (~27.5ms/cycle,
+~640us/layer). Microbench-sized suspects each account for a fraction
+(dense qmms get FASTER at B=2; expert gather +155us; ring-sized sdpa
++~100us; collectives 2x bytes but latency-bound). Attribution needs
+per-kernel GPU traces: mx.metal.start_capture around ONE B=1 and ONE
+B=2 verify, diff kernel-by-kernel in Xcode. Span profiling is USELESS
+here (lazy eval scrambles attribution — verified empirically, don't
+retry). Op microbenches mislead on absolute cost (launch overhead
+pipelines away in the real graph) — only use them for RATIOS.
+
+Session-close production state: c=1 37.4 t/s, c=2 24.5/stream divergent
+(~49 aggregate), depth table in this doc, all quality gates green.
+Deployed with EXO_DSV4_MTP_PROFILE=100 (negligible; drop on next deploy
+if desired).
