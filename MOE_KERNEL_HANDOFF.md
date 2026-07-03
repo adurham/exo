@@ -1072,3 +1072,49 @@ real window). NEXT session's tools for the residual race:
 - OPEN: (1) residual c=2 async-fence race (above); (2) rank0-only
   eviction desync wedge (design in previous section); (3) B=2 verify
   perf = op-count/fusion direction (attribution complete).
+
+## 2026-07-03 (afternoon): REFCHECK VERDICT — TIE-FLIPS, NOT CORRUPTION
+
+Batched REFCHECK shipped (ba2c5c82, EXO_DSV4_MTP_REFCHECK_BATCH=<jsonl>;
+per-cycle batched L=1 clean forward vs verify bonus row, argmax + top-2
+margins, TP-safe, self-disabling on error).
+
+ASYNC ARM RESULT (1001 cycles, one corrupting pair): verify-vs-clean
+argmax disagreements on 2% of cycles — EVERY ONE a 1-ulp tie (max
+disagreeing margin 0.125 = the bf16 logit quantum; zero > 1.0). The
+B=2 verify does NOT read corrupted state. Mechanism reframed: at temp 0,
+~44 tie-flips per 4000-token stream re-roll the greedy trajectory; some
+walks enter the model's own repetition attractors (' *', ' **', ' his'
+are legitimate greedy loops of this checkpoint). This explains why
+corrupt tokens are always common markdown-ish tokens and why REFCHECK
+margins near onset stay tiny.
+
+IMPLICATIONS:
+- The "corruption" is temp-0 trajectory INSTABILITY at c=2, not state
+  damage. Production Hermes runs temp 1.0/0.3 where 1-ulp logit shifts
+  are absorbed by sampling — likely unaffected (UNVALIDATED: run a
+  temp-1.0 deep c=2 battery to confirm).
+- The fence A/B (5/19+2/3 corrupt async vs 12/12+3/3 clean sync,
+  uninstrumented) remains real but is now best read as the fence
+  changing FLIP RATE (scheduling nondeterminism), not causing state
+  corruption. NOTE: a 13th sync pair DID corrupt (with REFCHECK
+  deployed) — sync is not absolutely immune.
+- A true fix for temp-0 c=2 stability needs a batch-invariant argmax
+  (e.g. fp32 bonus-row recompute on a fixed-shape path), NOT the old
+  eps-window tiebreak (0.5-window corrupts this flat checkpoint —
+  6e978650).
+
+OPEN PUZZLES (for next session):
+1. The sync-arm REFCHECK run wrote ZERO rows (env verified present in
+   the runner, spec gates open, code identical to the async arm that
+   wrote 31). Unresolved — first step: check the runner log for the
+   self-disable warning and whether _speculative_next_batch executed
+   at all in that launch (add a liveness marker row on cycle 1
+   unconditionally).
+2. Whether the REFCHECK trim(1)+refeed itself perturbs pool state at
+   flush boundaries (tag rows landed pool_flushed=false throughout the
+   async run, so no evidence yet — but the instrumented sync pair
+   corrupted while the uninstrumented sync record was 12/12).
+
+PRODUCTION (session close): committed defaults (FENCE_ASYNC_C2=0),
+exo ba2c5c82 both nodes, c=1 39.8 t/s clean. All instruments off.
