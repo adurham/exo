@@ -2039,8 +2039,11 @@ class ExoBatchGenerator:
         # 48k+ times across a 2h run; present since the kill-switch shipped,
         # for BOTH stop and error actions). We must explicitly evict these
         # uids from the generator AFTER the response loop (can't mutate the
-        # generator while iterating its responses).
-        _killswitch_evict_uids: list[int] = []
+        # generator while iterating its responses). Covers BOTH injected-finish
+        # cases — the degen kill-switch AND string-level stop-sequence matches —
+        # since neither is visible to mlx-lm's native matcher, so it would keep
+        # decoding the uid (a phantom stream) otherwise.
+        _evict_from_generator_uids: list[int] = []
 
         # per-token profiling accumulators
         _t_callback_total = 0.0
@@ -2223,6 +2226,16 @@ class ExoBatchGenerator:
                         )
                         text = text_before_stop[chunk_start:]
                         finish_reason = "stop"
+                        # This "stop" is INJECTED by our string-level matcher —
+                        # mlx-lm's native token matcher never saw it, so it keeps
+                        # the uid in its batch and decodes it to max_tokens
+                        # (phantom stream: "response uid N was not found" spam, an
+                        # occupied slot that inflates B and disarms the B==1-gated
+                        # fence/spec). Evict it after the loop, same as the degen
+                        # kill-switch below. Rank-safe: this loop runs identically
+                        # on all ranks (verified — both ranks emit byte-identical
+                        # step responses), so the eviction is symmetric.
+                        _evict_from_generator_uids.append(response.uid)
                         break
             # Degeneration kill-switch: a detected repetition loop terminates the
             # generation here. This is the deterministic guarantee against an
@@ -2241,7 +2254,7 @@ class ExoBatchGenerator:
                     finish_reason = "stop"
                 # Evict from the MLX generator after the loop — our injected
                 # finish_reason won't make mlx-lm drop the sequence on its own.
-                _killswitch_evict_uids.append(response.uid)
+                _evict_from_generator_uids.append(response.uid)
             _t_stop_total += time.perf_counter() - _t0
 
             is_done = finish_reason is not None
@@ -2457,18 +2470,21 @@ class ExoBatchGenerator:
             except Exception:
                 pass
 
-        # Evict any kill-switch-terminated sequences from the MLX generator so
-        # it stops emitting them next step (the injected finish_reason alone
-        # does not). Done here, after iterating this step's responses, to avoid
-        # mutating the generator mid-iteration. Best-effort: removal failure
-        # must not break the decode loop.
-        if _killswitch_evict_uids:
+        # Evict any injected-finish sequences (degen kill-switch OR string-level
+        # stop-sequence match) from the MLX generator so it stops emitting them
+        # next step — the injected finish_reason alone does not make mlx-lm drop
+        # the uid. Done here, after iterating this step's responses, to avoid
+        # mutating the generator mid-iteration. Rank-safe: this list is populated
+        # inside the response loop which runs identically on every rank, so the
+        # remove() is symmetric. Best-effort: removal failure must not break the
+        # decode loop.
+        if _evict_from_generator_uids:
             try:
-                self._mlx_gen.remove(_killswitch_evict_uids)
+                self._mlx_gen.remove(_evict_from_generator_uids)
             except Exception as _evict_err:
                 logger.warning(
-                    f"kill-switch generator-evict failed for "
-                    f"{_killswitch_evict_uids}: {_evict_err}"
+                    f"injected-finish generator-evict failed for "
+                    f"{_evict_from_generator_uids}: {_evict_err}"
                 )
 
         return results
