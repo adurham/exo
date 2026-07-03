@@ -2280,6 +2280,25 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         #    to trim_per_stream so it does its arithmetic without
         #    syncing self.offset — at 43+ layers that saves ~6ms per
         #    spec cycle on cluster.
+        #
+        # ASYNC-FENCE DRAIN (2026-07-03 c=2 deep-degeneration root fix).
+        # With EXO_DSV4_FENCE_ASYNC_C2 armed, the verify forward's
+        # per-layer commits are mx.async_eval. mx.eval(verify_logits)
+        # only waits for the LOGITS' dependency chain — pool/indexer
+        # side-chain writes consumed by FUTURE forwards (pooled
+        # summaries, indexer state) can still be in flight here. The
+        # rollback below then mutates those same buffers
+        # (trim_per_stream ring scatters, restore_meta, pool trims) and
+        # races the deferred graph → stochastically corrupted pooled
+        # state → deep-generation repetition loops (' *'/' **'/' his',
+        # onset 1400-3900 tok, ~30%/4000-tok pair) and occasionally a
+        # rank-desynced collective wedge. A single drain per cycle here
+        # keeps the intra-forward async pipelining (the +25% c=2 win)
+        # while making the mutations safe. B=1 is unaffected: its trims
+        # are pure offset decrements (no buffer mutation), which is why
+        # c=1 async has always been clean. Re-armed after the MTP-cache
+        # trim below.
+        self._set_fence_async(False)
         rollback_per_stream_py = [gamma - acc for acc in n_accepted_per]
         n_min = min(n_accepted_per)
         n_min_rollback = gamma - n_min  # uniform amount for non-per-stream caches
@@ -2378,6 +2397,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 mtp_cache.trim(n_min_rollback)
             elif hasattr(mtp_cache, "offset"):
                 mtp_cache.offset -= n_min_rollback
+
+        # Re-arm the async fence for the next cycle's forwards (same
+        # B-gate as activate_for_uids). All cache mutations for this
+        # cycle are done.
+        self._set_fence_async(N <= _FENCE_ASYNC_MAX_STREAMS)
 
         # 5. Update per-uid pre_norm to each stream's first-rejection
         #    position in verify_pre_norm.
