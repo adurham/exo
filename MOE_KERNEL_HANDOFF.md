@@ -613,3 +613,16 @@ Fallout:
 
 NEXT: intra-verify profile at B=1 vs B=2 (per-section: MLA attn, indexer,
 pools, switch_mlp, collectives) to find the true +11ms/row owner.
+
+## PRODUCTION BASELINE TABLE (2026-07-02, c=1, post-everything)
+
+| ctx | prefill t/s | decode t/s | needle |
+|-----|------------|------------|--------|
+| 100K | 354.9 | 42.3 | OK |
+| 200K | 345.4 | 33.9 | OK |
+| 300K | 334.6 | 32.8 | OK |
+| 400K | 322.5 | 29.2 | OK |
+| 500K | 311.4 | 23.2 | OK |
+
+(mtp_longctx_probe, exact server-side token counts, single stream, no
+prefix cache, spam=no everywhere. Reference for any future A/B.)
