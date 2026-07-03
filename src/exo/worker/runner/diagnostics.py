@@ -6,6 +6,8 @@ import re
 from collections import deque
 from typing import final
 
+from pydantic import Field
+
 from exo.utils.pydantic_ext import TaggedModel
 
 _EVIDENCE_LINES = 4
@@ -28,7 +30,12 @@ _RING_TRANSPORT_ABORT_RE = re.compile(
 
 class BaseRunnerDiagnostic(TaggedModel):
     message: str
-    evidence: tuple[str, ...] = ()
+    # strict=False: TaggedModel's wrap-validator re-validates the parsed JSON
+    # payload in Python mode, where a strict tuple field rejects the JSON
+    # array (now a list). Lax mode restores list -> tuple coercion; without
+    # it, any event carrying a diagnostic kills every receiving node's
+    # router (unhandled ValidationError in _networking_recv).
+    evidence: tuple[str, ...] = Field(default=(), strict=False)
 
 
 class RunnerMetalGpuTimeout(BaseRunnerDiagnostic):
