@@ -999,3 +999,76 @@ plausibly BOTH bugs are real.
   cycle's steady-state cache mutations (trim_per_stream / pool
   flush-restore) in _speculative_next_batch, then a 12-pair deep
   battery to re-earn FENCE_ASYNC_C2=2 (+25% c=2).
+
+## 2026-07-03 (day): ASYNC-FENCE ROOT FIX SHIPPED; WEDGE ROOT-CAUSED (fix designed, not shipped)
+
+- FENCE ROOT FIX (exo d4a50cf2 + 6978f56f): one mx.synchronize per
+  batched cycle (via self.mtp._set_fence_async(False)) BEFORE the
+  rollback's cache mutations, re-armed with the standard B-gate after
+  the MTP-cache trim. Mechanism: mx.eval(verify_logits) only waits for
+  the logits' dependency chain; pool/indexer side-chain writes consumed
+  by FUTURE forwards were still in flight when trim_per_stream /
+  restore_meta mutated the same buffers. B=1 immune (offset-decrement
+  trims). First deploy crashed: _set_fence_async is on DSv4MTPPredictor
+  (self.mtp), NOT the DSv4MTPBatchGenerator hosting the batched cycle.
+  Validation battery (async fence armed, 12 pairs) in flight.
+
+- WEDGE ROOT CAUSE (found, NOT fixed): the degen kill-switch eviction
+  in batch_generate.step() (~line 2465) calls self._mlx_gen.remove()
+  DIRECTLY on rank0 only. Degen detection lives in the detokenization
+  loop that only rank0 runs; rank1 never learns → rank0 at B=1, rank1
+  at B=2 → collective mismatch → 100% CPU jaccl spin (SIGTERM-immune).
+  Natural completions are safe (token-level, rank-deterministic on the
+  broadcast committed stream); client cancels are safe
+  (agree_on_cancellations). ANY rank0-only termination (degen kill,
+  string-level stop sequences?) has this hazard at c>=2.
+  FIX DESIGN: an agree-on-evictions step at the batched-cycle boundary
+  using the agree_on_cancellations_fast pattern (mx_any fast path on
+  the coord group; all_gather only when someone has evictions), called
+  in lockstep from _speculative_next_batch entry. NOT shipped: touches
+  the decode hot loop's collective structure (known JACCL fragility:
+  all_gather at decode rate has corrupted return buffers before) and
+  deserves its own validation pass. Exposure is low post-fence-fix
+  (degen kills should no longer occur). CHECK whether string-level stop
+  sequences at c>=2 hit the same path before relying on them in prod.
+
+## 2026-07-03 (final): DRAIN FIX INSUFFICIENT — FENCE RACE IS DEEPER
+
+Validation (drain fix 6978f56f deployed, async fence armed, 12-pair
+battery): 3 clean at FULL async throughput (23.4-24.2 t/s/stream — the
+drain costs ~nothing), then iter 4 CORRUPT (uid=10, ' **"**' period-3
+loop at token 2098 — a NEW multi-token loop variant). So the
+rollback-vs-deferred-graph window is real but NOT the whole bug. The
+remaining race is upstream of the rollback: most likely INSIDE the
+B=2 forward — async per-layer commits vs CPU-side pool/indexer
+metadata (Python-held _pool_lengths / ring bookkeeping read while the
+deferred graph that produces the matching arrays is still in flight),
+which a cycle-boundary synchronize cannot reach.
+
+Production restored: committed defaults (FENCE_ASYNC_C2=0), c=1 40.4
+t/s validated. The drain code stays (harmless, principled, closes a
+real window). NEXT session's tools for the residual race:
+- Port REFCHECK into _speculative_next_batch (design in the 2026-07-03
+  early section): per-cycle batched L=1 reference forward, catches the
+  FIRST divergent cycle with the async fence on.
+- Or bisect inside the forward: arm async for layer ranges
+  (EXO_DSV4_FENCE_ASYNC layer-gating would need a small env) to fence
+  which subsystem's deferred work corrupts.
+- The corrupt-token attractors are always markdown-ish tokens (982
+  ' *', 2619 ' **', 793 ' his', now [2619,4,666] ' **"**') — suggests
+  the corrupted state biases a narrow logit region; a REFCHECK diff at
+  the first divergence would show HOW wrong the logits are (1ulp tie
+  flip vs gross corruption), discriminating metadata-desync from
+  torn-buffer reads.
+
+## FINAL SESSION STATE (2026-07-03)
+
+- Production: exo 6978f56f (all fixes incl. harmless drain), defaults:
+  FENCE_ASYNC_C2=0. c=1 ~40 t/s; c=2 ~19-21 t/s/stream, quality clean
+  (12/12 + 3/3 deep pairs on this config).
+- FIXED this session: pydantic event cascade (c0dc8456), prefix-cache
+  stale restore (e9609516, crash repro 3/3 clean), fence flip
+  (f028dc9c), drain (d4a50cf2+6978f56f, partial).
+- OPEN: (1) residual c=2 async-fence race (above); (2) rank0-only
+  eviction desync wedge (design in previous section); (3) B=2 verify
+  perf = op-count/fusion direction (attribution complete).
