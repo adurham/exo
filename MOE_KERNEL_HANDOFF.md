@@ -710,3 +710,292 @@ if desired).
   rowsplit_check.py.
 - Memory files (auto-recall): exo_dsv4_quantization, exo_dsv4_c2_mtp_corruption,
   exo_dsv4_decode_async_fence, exo_gather_qmv_rhs_kernel.
+
+===========================================================================
+2026-07-03 SESSION — c=2 DEEP-DEGEN FOUND; PYDANTIC CASCADE FIXED; B=2
+RESIDUAL REPRODUCED LOCALLY
+===========================================================================
+
+## NEW BUG: c=2 DEEP-GENERATION DEGENERATION (OPEN, under A/B)
+
+4000-token divergent c=2 pairs degenerate stochastically: 3/10 pairs on
+the row-split-ON stack had a stream collapse into a repetition loop
+(3 of 4 corrupt streams locked onto markdown-star ' *'/' **', ids
+982/2619; onset tokens 1840/2106/3782/3905). c=1 is 6/6 clean at the
+same depths. EXONERATED by direct A/B: xctrace attach, preceded-by-c1
+session, tiebreak fix (correctly OFF since 06-09 — re-enabling would
+corrupt this flat-logit checkpoint, see 6e978650). Part 6's 800-token
+validation horizon was blind to this. Detection: server-side
+DEGENERATION DETECTED kill-switch (action=error), degen streams end
+without usage frame.
+
+Current experiment: 6-pair battery with MLX_LM_SDPA_ROWSPLIT=0 (part 9's
+row-split shipped AFTER the last deep c=2 quality validation and is the
+prime suspect; passthrough added to start_cluster.sh, commit 25f61362).
+Battery scripts: scratchpad c2_battery2.sh (readiness probe uses a
+full-length prompt — a tiny 'hi' probe crashes the runner, see below).
+
+## FIXED + DEPLOYED: THE CLUSTER-KILLING EVENT CASCADE (exo c0dc8456)
+
+The 06-30 "m4-2 pydantic extra_forbidden" open bug root-caused: corrupt
+stream → degen kill → GPU timeout → runner death → supervisor emits
+ErrorChunk carrying RunnerMetalGpuTimeout diagnostics → EVERY receiving
+node's router died on unhandled ValidationError → cluster 503 until
+relaunch. Mechanism: TaggedModel's wrap-validator re-validates parsed
+JSON in PYTHON mode, where strict tuple[str,...] (evidence field)
+rejects the JSON array (a list). Fix: Field(strict=False) on evidence +
+round-trip regression test (test_event_serialization.py). Validated in
+anger: a later corrupt iteration no longer took the cluster down.
+Wire-model rule: NO strict tuple fields in TaggedModels.
+
+## NEW BUG: PREFIX-HIT PREFILL CRASH (OPEN, task: repro + fix)
+
+max_tokens=1 'hi' request, then a ~69-token prompt sharing the chat
+header → runner dies: [broadcast_shapes] (59,62) vs (1,64,59,186) in
+fast SDPA, MTP draft block (sinks path). 62 = 59 new rows + offset 3
+(readycheck's draft bookkeeping); 186 = 127 STALE draft-ring rows from
+the PREVIOUS session + 59. The part-6 "<2 true rows → skip prefill
+(cold draft cache)" path leaves the draft cache STALE, not cold.
+_clamp_mask_to_kv only handles mask-wider-than-kv, not narrower.
+
+## B=2 VERIFY RESIDUAL: REPRODUCED SINGLE-PROCESS (no collectives)
+
+~/scratch/dsv4_bverify_perf.py (m4-1): 4-layer random-weight DSv4,
+production quant (experts mxfp4 g32, rest affine8 g64), depth-1500
+chunked prefill, PerStream upgrade at B=2, verify(B,3)+trim cycles.
+  B=1: 11.48 ms/cycle   B=2: 14.20 ms/cycle  →  +680us/layer
+Matches prod's +640us/layer/node — WITH FULL-WIDTH layers and no
+collectives/MTP machinery. Width-independence suggests a fixed
+per-layer cost (dispatch/serialization), not bandwidth. Also: prod
+GPU-busy analysis (metal-gpu-execution-points, (1,X)=begin/(2,X)=end
+per cmdbuf) shows B=2 excess is GPU EXECUTION, not fence idle (busy
+83.5% c=1 vs 81.1% c=2).
+
+## NEW TOOLING: XCODE-FREE PER-KERNEL GPU ATTRIBUTION
+
+- mlx debug build (MLX_METAL_DEBUG=ON + JIT) in m4-1 tilesweep venv
+  (mlx-0.32.0.dev+0362d105): labels every command buffer with primitive
+  names; verified the labels flow into xctrace exports.
+  Build: PATH needs ~/scratch/tilesweep-venv/bin (cmake) via ssh.
+- Import into exo venv via PYTHONPATH=$HOME/scratch/tilesweep-venv/lib/
+  python3.13/site-packages (same mlx rev as prod pin, debug-compiled).
+- Pipeline: MLX_MAX_OPS_PER_BUFFER=1 + xctrace Metal System Trace,
+  export metal-application-encoders-list (cmdbuf-id → label) +
+  metal-gpu-execution-points (GPU begin/end per cmdbuf), join →
+  named GPU intervals. Aggregator: scratchpad gpu_bylabel.py.
+- PITFALL: xctrace --attach against short-lived harness processes hangs
+  and writes empty stub traces; use --launch (validated) or attach only
+  to long-lived processes (prod runner captures worked). Also pgrep -f
+  matches watcher shells whose cmdline contains the pattern — attach to
+  $! of the launched python, never pgrep.
+- PITFALL: metal-shader-profiler-intervals is EMPTY in both attach and
+  launch modes — per-shader profiling isn't available headless; the
+  cmdbuf-label join is the workable granularity.
+
+## OPS NOTES
+
+- Both Studios rebooted 2026-07-03 (user-initiated; cleared xctrace
+  zombies + paged-out weights). m4-1 WAN survived this reboot.
+- Battery readiness probes MUST use full-length prompts (see prefix-hit
+  crash above).
+- exo pre-existing test failures (NOT from this session): pytest
+  collection error in master/tests/test_routing_concurrency.py (stale
+  import), failure in worker/tests/.../test_event_ordering.py; tests/
+  conftest needs missing exo_tools module.
+
+## PRIORITY ORDER (revised)
+
+1. c=2 deep-degen: finish ROWSPLIT=0 battery → implicate/exonerate;
+   if exonerated, next arms: EXO_DSV4_FENCE_ASYNC_C2=0, per-stream
+   acceptance off, then spec-trace instrumented repro.
+2. B=2 verify residual: labeled B=1/B=2 captures (launch mode) + 
+   gpu_bylabel diff — harness already reproduces the excess.
+3. Prefix-hit prefill crash: repro (30s, kills runner), then fix stale
+   draft-ring reset; also fixes battery-harness fragility.
+
+## 2026-07-03 (cont): ROWSPLIT EXONERATED; WEDGE ANATOMY; MTP-OFF ARM
+
+- ROWSPLIT=0 battery: 4 clean, then iter 5 CORRUPT (uid=14, ' his' id 793,
+  period-1 at token 1403). Rate ~ matches ROWSPLIT=1 (3/10). Row-split is
+  NOT the corruption cause. Corrupt-token attractors so far: ' *' 982,
+  ' **' 2619 (x2), ' his' 793 — varies, always period-1 or -8 loops,
+  onset 1403-3905.
+- WEDGE ANATOMY (second failure layer, reproduced + sampled): after the
+  degen kill mid-batch, rank0's runner spins at 100% CPU inside an mlx
+  collective (mlx core frames; sample in m4-1:~/scratch/wedge_sample_0044
+  .txt) waiting on a peer that never comes — rank desync B=2→B=1 on the
+  kill path. SIGTERM does NOT kill it (signal never reaches the
+  interpreter inside the native spin) — use kill -9. exo then self-heals
+  (worker respawns runner, JIT re-places, ~5 min).
+- Readiness-probe pitfall: curl -w %{http_code} returns 200 when HEADERS
+  arrive; against a wedged cluster the body then hangs. Battery
+  wait_ready must require a body token, not a 200.
+- pgrep -f "<pid>" matches command LINES, not pids — cost one bogus
+  "runner killed" verification. Use ps -p.
+- Current arm: EXO_DSV4_MTP=0 (prod defaults otherwise, row-split back
+  to default ON), 4x 4000-tok c2only pairs. Discriminates: corruption in
+  core batched decode (B=2 L=1) vs the spec verify/accept path. If spec
+  implicated → port REFCHECK (exists only in c=1 _speculative_next,
+  dsv4_mtp.py:3520) into _speculative_next_batch (1836): batched L=1
+  reference forward (trim-all-streams-by-1 + refeed batch), per-stream
+  argmax compare, trigger on rank-canonical values only (TP safety).
+
+## 2026-07-03 (overnight): DEEP-DEGEN ROOT ARM FOUND — ASYNC FENCE AT C=2
+
+Full A/B matrix (4000-tok divergent c2only pairs, degen kill-switch as
+the detector):
+  FENCE_ASYNC_C2=2 arms (any rowsplit/accept combo):  5 corrupt / 19
+  FENCE_ASYNC_C2=0 (sync fence at c=2):               0 / 12  (~98% conf)
+  EXO_DSV4_MTP=0 (fence never arms):                  0 / 4
+  BS_MIN_ACCEPT=1 (async fence still on):             1 / 4  -> accept
+                                                      policy exonerated
+Shipped: start_cluster.sh default EXO_DSV4_FENCE_ASYNC_C2=0 (f028dc9c).
+c=2 falls ~24.5 -> ~19 t/s/stream; c=1 keeps +28% (B==1-gated arming
+validated deep all session). The corrupt+wedge pattern is one bug:
+async-deferred graph races the batched cycle's cache mutations →
+sometimes wrong logits (repetition attractor), and the subsequent
+mid-batch degen kill rank-desyncs a collective (100% CPU spin, SIGTERM-
+immune, kill -9 + self-heal).
+
+SUSPECTED RACE (for the real fix): the "cache"/"engine" arming keys
+disarm+synchronize around BS-transitions (reset/snapshot/activate,
+dsv4_mtp.py:588-716) but NOT around the steady-state batched cycle's
+per-stream ring trims / pool flush-restores — at B=2 those mutate cache
+buffers every rejection cycle while a deferred async graph may still be
+in flight. c=1 is safe because its cycle fully drains (single stream, no
+per-stream trims). Fix sketch: disarm+mx.synchronize around
+trim_per_stream/pool-restore in _speculative_next_batch (cost: bounded,
+those are rare-ish sync points) then re-validate 12+ pairs deep.
+
+Battery tooling: c2_battery3.sh (scratchpad) is hands-free — watchdog
+kills probes at 480s, SIGKILLs >50%-CPU spinners on both nodes, exo
+self-heals (~5 min), battery continues. wait_ready requires a body
+token (a bare 200 lies — headers arrive from a wedged cluster).
+
+## 2026-07-03: B=2 VERIFY RESIDUAL — ATTRIBUTED (task closed)
+
+Labeled per-primitive GPU diff (4-layer harness, MLX_METAL_DEBUG build,
+OPS_PER_BUFFER=1, positional queue-filtered join; scratchpad
+gpu_bylabel3.py; validation: 0 encode-after-begin violations, 0.2% skew):
+
+  B=1: 10.2 ms GPU-busy/cycle   B=2: 13.6   excess +3.4 ms (~860us/layer)
+
+Where it goes: NOT the heavy kernels. QuantizedMatmul gets FASTER
+per-dispatch at B=2 (78.7->52.9us); GatherQMM/Gather/RMSNorm scale ~2x
+for 2x rows (bandwidth-proper). The excess is the LONG TAIL: ~490 tiny
+dispatches/cycle (Sum alone ~220/cycle at 8-14us) whose per-op cost
+floor rises with rows, plus inter-op serialization (busy AND idle gaps
+both grow). An apparent 10x cliff on CompiledSigmoidMultiplyMultiply
+(20->194us) did NOT reproduce in an isolated shape-exact microbench
+(flat ~100us rows 1-12) — it is dependency-stall time attributed to the
+dispatch at OPS=1, i.e. serialization, not a kernel bug.
+
+CONCLUSION: the B=2 decode-shape verify graph is LAUNCH/SERIALIZATION-
+BOUND. The production lever is op-count reduction / fusion in the
+per-layer decode graph (compile broader regions; fold the MoE routing
+Sum-chain — ~55 Sum dispatches per layer per cycle), not kernel tuning.
+This also explains the width-independence of the +640us/layer/node and
+why every part-9 microbench only accounted for a fraction.
+
+Tooling shipped: gpu_bylabel3.py (join exec-points GPU intervals to
+MLX_METAL_DEBUG cmdbuf labels POSITIONALLY — the two id columns are
+DIFFERENT counters, never value-join them; filter exec rows to the
+dominant queue id first; validate with encode<=gpu-begin and count
+skew).
+
+## 2026-07-03 (late): PLOT TWIST — SYNC-FENCE PAIR CORRUPTED AFTER A TINY REQUEST
+
+A 13th sync-fence c=2 pair DEGENERATED (uid=40, ' his' id-793 again,
+token 656 — much earlier than the 1400-3900 fence-era onsets). Unique
+antecedent: a genuine ~10-token-prompt max_tokens=2 'hi' request (from
+the prefix-crash repro) ran right before it. The 12 clean sync-fence
+pairs all used FULL-LENGTH readiness prompts. Hypothesis: the task-3
+stale-draft-ring state (tiny/skipped MTP prefill leaves the previous
+session's draft KV with fresh offset bookkeeping) is an INDEPENDENT
+corruption trigger — the crash ((59,62) vs 186) is its loud variant,
+the ' his'-loop degeneration its quiet variant. The async fence may be
+an AMPLIFIER (raises background rate via cache-state races) rather than
+the sole root. Discriminator running: 3x ['hi' max_tokens=2 -> c=2 pair
+800tok] on the sync-fence stack (scratchpad hi_trigger_test.sh).
+
+Suspect code (from the crash arithmetic): MTP snapshot/reset lifecycle
+in dsv4_mtp.py — snapshot_for_uid stores a REFERENCE to the live cache
+(line ~635); reset_cache replaces self._cache but merge/extract paths
+may alias buffers; a session with <2 true rows skips MTP prefill
+"(cold draft cache)" (batch_generate.py:~1749 area, part-6 fix) leaving
+STALE ring contents with reset offsets.
+
+## 2026-07-03 (pre-dawn): PREFIX-CACHE RESTORE ROOT-CAUSED + FIXED (deploy pending)
+
+THE MECHANISM (deterministic crash repro'd twice, unifies the crash and
+plausibly the quiet degeneration):
+- snapshot_ssm_states stores None for TRIMMABLE CacheLists. DSv4 layers
+  are trimmable exactly when the PoolingCache is empty — i.e. SHORT
+  sessions (<~128 tokens: a 'hi' readiness ping) and early-depth
+  snapshots of long sessions.
+- _materialize_cache_to_depth's fallback for a None state silently
+  deepcopied the donor leaf's FINAL cache: rotating ring at final
+  offset/contents while sliceable layers + restore_pos sat at snapshot
+  depth. Next prefill: [broadcast_shapes] (63,66) vs (1,64,63,190)
+  (mask = restore_pos+L, kv = stale-ring+L) — or, when shapes happened
+  to broadcast, silent attention over the donor's stale ring.
+- Trigger chain: tiny request seeds a short trie leaf -> next
+  prefix-sharing prompt partial-hits it -> poisoned restore. Repro:
+  round 1 of hi_trigger_test.sh crashed stream A's prefill exactly so.
+
+FIX (exo e9609516, committed + pushed to m4-1 LAN mirror; GITHUB PUSH
+PENDING — 1Password ssh agent locked): strict_snapshot on the restore
+path — a non-sliceable layer without a snapshot state turns the lookup
+into a full-prefill MISS (trace: "STRICT-MISS"). Never substitutes
+final-state caches. Regression tests: TestStrictSnapshotRestore (miss
+on None states; happy path still restores at snapshot offset).
+
+## THE MORNING EXPERIMENT (decides the fence question)
+
+Deploy e9609516, then re-run the deep c=2 battery WITH
+EXO_DSV4_FENCE_ASYNC_C2=2 (c2_battery3.sh 12). Two outcomes:
+- Clean: the async-fence correlation (5/19 vs 0/12) was the prefix
+  poisoning wearing a fence costume (or fence-amplified); re-enable
+  FENCE_ASYNC_C2=2 -> c=2 back to ~24.5 t/s/stream (+25%).
+- Corrupt: fence race is real and independent; keep FENCE_ASYNC_C2=0,
+  pursue the batched-cycle disarm fix.
+Caveat kept in view: all fence-battery arms had identical trie traffic,
+so 5/19 vs 0/12 is hard to explain by trie state alone (~2% chance) —
+plausibly BOTH bugs are real.
+
+## SESSION END STATE (2026-07-03 ~04:30)
+
+- Cluster: healthy, 2 runners READY on f028dc9c (fence flip deployed;
+  prefix fix NOT yet deployed). c=1 39.6 t/s validated.
+- Commits: c0dc8456 (pydantic wire fix), 25f61362 (ROWSPLIT passthru),
+  f028dc9c (FENCE_ASYNC_C2=0 default), e9609516 (prefix-cache strict
+  restore — needs github push + relaunch).
+- Open: task-3 adjacent — MTP draft-cache lifecycle across sessions was
+  NOT implicated in the end (the crash lives in main-model prefill via
+  prefix restore); the (59,62)-style crash is fully explained. The
+  wedge (rank-desync collective spin on mid-batch kill) remains a real
+  robustness hole — kill -9 + self-heal works, a clean B-transition on
+  stream error is the proper fix.
+- Batteries/tooling: c2_battery3.sh (hands-free), hi_trigger_test.sh
+  (crash repro), dsv4_bverify_perf.py + gpu_bylabel3.py (labeled GPU
+  attribution), all in session scratchpad; copies of harness+aggregator
+  on m4-1:~/scratch{,/gpucap}.
+
+## 2026-07-03 (morning): DEPLOYED + FENCE QUESTION SETTLED
+
+- e9609516 (prefix-cache strict restore) pushed to github + deployed.
+- Crash-repro validation on the fixed stack: 3/3 hi-trigger rounds
+  CLEAN (previously: deterministic runner crash on round 1).
+- FENCE RETEST (async fence at c=2 + prefix fix): 2 CORRUPT / 3 pairs
+  (uid=1 ' **' @2721, uid=8 ' *' @2469 — the deep-onset signature).
+  VERDICT: the c=2 async-fence race is REAL and independent of the
+  prefix-cache bug. TWO distinct corruption bugs existed:
+    prefix-restore poisoning — early onset (~656) + crash variant, FIXED;
+    async-fence race       — deep onset (1400-3900), MITIGATED by
+                             FENCE_ASYNC_C2=0 default (f028dc9c).
+- Production restored to committed defaults and validated: c=1 42.5 t/s,
+  clean. c=2 runs ~19-21 t/s/stream on the sync fence.
+- Real fence fix remains open: disarm+mx.synchronize around the batched
+  cycle's steady-state cache mutations (trim_per_stream / pool
+  flush-restore) in _speculative_next_batch, then a 12-pair deep
+  battery to re-earn FENCE_ASYNC_C2=2 (+25% c=2).
