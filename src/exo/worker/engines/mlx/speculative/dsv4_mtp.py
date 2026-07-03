@@ -2403,6 +2403,85 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # cycle are done.
         self.mtp._set_fence_async(N <= _FENCE_ASYNC_MAX_STREAMS)
 
+        # ── BATCHED REFERENCE-FORWARD REFCHECK (env-gated diagnostic) ──
+        # EXO_DSV4_MTP_REFCHECK_BATCH=<jsonl path>: every cycle, trim the
+        # last committed token from every stream and re-feed it as an
+        # (N, 1) batched L=1 forward — the non-spec batched decode shape
+        # that is clean at depth (MTP-off battery 4/4). Its logits are
+        # P(next | committed prefix) per stream. Compare argmax against
+        # the verify forward's bonus row (verify_logits[n, acc]) — a
+        # disagreement pinpoints the FIRST cycle the B=2 L>1 verify (or
+        # its async-fence interplay) diverges from a clean forward, and
+        # the top-2 margins say HOW wrong (1ulp tie flip vs gross).
+        # TP SAFETY: the trigger is the env var alone, so every rank runs
+        # the identical trim + forward (collective) + refeed; only rank 0
+        # writes. Runs AFTER the fence re-arm so production arming (and
+        # the race under investigation) stays live during the refeed.
+        # trim(1)+refeed is the same primitive the pool-flush commit
+        # forward relies on; cycles where a pool flushed are tagged (the
+        # refeed may cross a flush boundary and add noise).
+        _refcheck_batch_path = os.environ.get("EXO_DSV4_MTP_REFCHECK_BATCH")
+        if _refcheck_batch_path and not getattr(
+            self, "_refcheck_batch_err_logged", False
+        ):
+            try:
+                _rc_ones = [1] * N
+                for c in gen_batch.prompt_cache:
+                    if isinstance(c, CacheList):
+                        for sub in c.caches:
+                            if isinstance(sub, PerStreamBatchRotatingKVCache):
+                                sub.trim_per_stream(_rc_ones)
+                            elif hasattr(sub, "trim"):
+                                sub.trim(1)
+                            elif hasattr(sub, "offset"):
+                                sub.offset -= 1
+                    elif isinstance(c, PerStreamBatchRotatingKVCache):
+                        c.trim_per_stream(_rc_ones)
+                    elif hasattr(c, "trim"):
+                        c.trim(1)
+                    elif hasattr(c, "offset"):
+                        c.offset -= 1
+                _rc_last = [int(all_tokens_per[n][-1][0]) for n in range(N)]
+                _rc_input = mx.array([[t] for t in _rc_last], dtype=mx.int32)
+                _rc_logits = self.model(_rc_input, cache=gen_batch.prompt_cache)
+                _rc_rows = _rc_logits[:, 0, :].astype(mx.float32)
+                _rc_top2 = mx.topk(_rc_rows, 2, axis=-1)
+                _rc_arg = mx.argmax(_rc_rows, axis=-1)
+                _v_rows = mx.stack(
+                    [verify_logits[n, n_accepted_per[n]] for n in range(N)]
+                ).astype(mx.float32)
+                _v_top2 = mx.topk(_v_rows, 2, axis=-1)
+                _v_arg = mx.argmax(_v_rows, axis=-1)
+                mx.eval(_rc_arg, _rc_top2, _v_arg, _v_top2)
+                _rc_arg_l = [int(x) for x in _rc_arg.tolist()]
+                _v_arg_l = [int(x) for x in _v_arg.tolist()]
+                _rc_cyc = getattr(self, "_refcheck_batch_cycle", 0) + 1
+                self._refcheck_batch_cycle = _rc_cyc
+                _sg = self._get_sharding_group()
+                if (_sg is None or _sg.rank() == 0) and (
+                    _rc_arg_l != _v_arg_l or _rc_cyc % 100 == 1
+                ):
+                    _rc_t2 = cast(list[list[float]], _rc_top2.tolist())
+                    _v_t2 = cast(list[list[float]], _v_top2.tolist())
+                    with open(_refcheck_batch_path, "a") as _rcf:
+                        _rcf.write(json.dumps({
+                            "cycle": _rc_cyc,
+                            "uids": list(uids),
+                            "n_accepted": list(n_accepted_per),
+                            "verify_argmax": _v_arg_l,
+                            "ref_argmax": _rc_arg_l,
+                            "agree": _rc_arg_l == _v_arg_l,
+                            # mx.topk value order is not guaranteed
+                            "v_margin": [abs(r[0] - r[1]) for r in _v_t2],
+                            "r_margin": [abs(r[0] - r[1]) for r in _rc_t2],
+                            "bonus_vals": [int(b) for b in bonus_vals],
+                            "pool_flushed": bool(pool_flushed),
+                        }) + "\n")
+            except Exception as _rc_err:  # diagnostics must never kill decode
+                if not getattr(self, "_refcheck_batch_err_logged", False):
+                    self._refcheck_batch_err_logged = True
+                    logger.warning(f"REFCHECK_BATCH failed (disabled): {_rc_err}")
+
         # 5. Update per-uid pre_norm to each stream's first-rejection
         #    position in verify_pre_norm.
         for n, uid in enumerate(uids):
