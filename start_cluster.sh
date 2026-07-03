@@ -939,6 +939,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_DEGEN_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DEGEN_PROBE=$EXO_DSV4_DEGEN_PROBE"
     [ -n "${MLX_GPU_TIME_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV MLX_GPU_TIME_LOG_EVERY=$MLX_GPU_TIME_LOG_EVERY"
     [ -n "${MLX_SDPA_BLOCKS:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
+    [ -n "${MLX_LM_SDPA_ROWSPLIT:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SDPA_ROWSPLIT=$MLX_LM_SDPA_ROWSPLIT"
     [ -n "${MLX_BUILD_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_BUILD_PROBE=$MLX_BUILD_PROBE"
     [ -n "${MLX_BUILD_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV MLX_BUILD_PROBE_LOG_EVERY=$MLX_BUILD_PROBE_LOG_EVERY"
     [ -n "${MLX_OP_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_OP_PROBE=$MLX_OP_PROBE"
@@ -1124,6 +1125,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_INDEXER_PBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_PBLOCK=$EXO_DSV4_INDEXER_PBLOCK"
     # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
     [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
+    # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).
+    [ -n "${MLX_LM_SDPA_ROWSPLIT:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SDPA_ROWSPLIT=$MLX_LM_SDPA_ROWSPLIT"
     # JACCL per-call trace (Phase 0 c=2 corruption diagnostic). When set
     # to 1, every collective entry writes one line to
     # /tmp/jaccl_trace_rank_${MLX_RANK}.log on each runner host. Use
