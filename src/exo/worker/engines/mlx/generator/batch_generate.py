@@ -2478,6 +2478,29 @@ class ExoBatchGenerator:
         # inside the response loop which runs identically on every rank, so the
         # remove() is symmetric. Best-effort: removal failure must not break the
         # decode loop.
+        # Wedge INJECTOR (EXO_DSV4_WEDGE_INJECT=<step>): deterministically
+        # reproduce the c>=2 degen-kill B-transition WITHOUT waiting for a random
+        # degen. At the given step, if the generator batch is B>=2, force-evict
+        # the highest active uid — SYMMETRICALLY on every rank (the step counter
+        # advances in lockstep, verified: 2103==2103). If a provably-symmetric
+        # eviction still wedges, the cause is the BS-transition mechanics (async
+        # graph vs cache rebuild), not eviction asymmetry. Diagnostic only.
+        _wt_inject = os.environ.get("EXO_DSV4_WEDGE_INJECT")
+        if _wt_inject:
+            _inj_step = getattr(self, "_wedge_inject_step", 0) + 1
+            self._wedge_inject_step = _inj_step
+            _inj_gb = getattr(self._mlx_gen, "_generation_batch", None)
+            _inj_b = len(_inj_gb) if _inj_gb is not None else -1
+            if _inj_b >= 2 and _inj_step == int(_wt_inject) and self._active_tasks:
+                _inj_uid = max(self._active_tasks.keys())
+                if _inj_uid not in _evict_from_generator_uids:
+                    _evict_from_generator_uids.append(_inj_uid)
+                    logger.info(
+                        f"[WEDGE_INJECT] rank="
+                        f"{self.group.rank() if self.group is not None else 0} "
+                        f"step={_inj_step} B={_inj_b} force-evict uid={_inj_uid}"
+                    )
+
         # Wedge tracer (EXO_DSV4_WEDGE_TRACE=1): the c>=2 degen-kill wedge is a
         # rank desync on a mid-batch eviction. Log, per rank, the batch size the
         # generator sees each step and every eviction, so a cross-rank diff shows

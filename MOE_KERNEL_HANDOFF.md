@@ -1118,3 +1118,179 @@ OPEN PUZZLES (for next session):
 
 PRODUCTION (session close): committed defaults (FENCE_ASYNC_C2=0),
 exo ba2c5c82 both nodes, c=1 39.8 t/s clean. All instruments off.
+
+## 2026-07-03 (evening): TEMP>0 c=2 BATTERY — FENCE HYPOTHESIS FALSIFIED; SYNC NOT IMMUNE EITHER
+
+The afternoon REFCHECK verdict left one load-bearing UNVALIDATED claim:
+"production Hermes runs temp 1.0/0.3 where 1-ulp shifts are absorbed by
+sampling — likely unaffected." Ran the deep temp-1.0 c=2 battery to settle
+it (4000-tok divergent staggered pairs, server degen kill-switch + client
+full-text repetition/chars-per-token detector as the signal).
+
+### RESULT — temp 1.0 does NOT rescue c=2 (both arms corrupt)
+
+| config (temp 1.0, 4000-tok c=2 pairs)      | corrupt / total |
+|--------------------------------------------|-----------------|
+| async fence (EXO_DSV4_FENCE_ASYNC_C2=2)    | 2 / 5   (~40%)  |
+| sync  fence (EXO_DSV4_FENCE_ASYNC_C2=0, PROD) | 3 / 13  (~23%)  |
+| sync  fence @ temp 0.3                     | 0 / 3   (underpowered) |
+
+- Async arm corruptions were REAL degeneration, not tie-flip noise:
+  t10-3 (server DEGENERATION kill uid=5, backtick period-1 @token 2226,
+  partner stream hidden-degen cpt=1.29 @118 t/s) and t10-5 (protein-folding
+  stream collapsed into a " . . . . ." whitespace-repetition attractor,
+  partner truncated by the batch kill). Sampling at temp 1.0 sometimes
+  WALKS INTO the corrupted-logit region rather than away from it — the rate
+  (~40%) is if anything worse than the temp-0 async rate (5/19 ≈ 26%).
+- => The REFCHECK "just tie-flips, prod likely unaffected" framing is
+  FALSIFIED for the async fence. Arming FENCE_ASYNC_C2=2 would corrupt real
+  sampled Hermes traffic. Keeping FENCE_ASYNC_C2=0 is correct, not merely
+  conservative; the +25% c=2 stays locked out until the intra-forward race
+  is fixed.
+- SYNC fence (production default) ALSO corrupts at temp 1.0: 3/13. The
+  three: t10-7 (uid13 period-1 @token1410, HARD WEDGE — see below),
+  t10-3cont (uid5 period-2 "** ** **" markdown attractor @token2982,
+  runners restarted clean), t10-6cont (uid '**"  "****' attractor, killed
+  cleanly, NO wedge). All deep-onset, all markdown/dash repetition
+  attractors, all server-degen-kill. So c=2 concurrent serving is NOT
+  fully quality-safe in production at sampling temps regardless of fence —
+  the async fence AMPLIFIES a race that is present under sync too. The
+  afternoon note "a 13th sync pair DID corrupt" was not a fluke; the sync
+  rate is real and non-trivial (~23%). temp 0.3: 0/3 (underpowered — do
+  not read as safe).
+
+### NEW: the wedge fires under the PROD default and does NOT self-heal
+
+The wedge on a degen kill is STOCHASTIC (3 sync degens, 3 different
+outcomes): t10-7 HARD-wedged (both runners GPU-timeout DIED,
+IOConnectUnmapMemory teardown, master stuck 8+ min in "Selecting
+coordinator" placement loop WITHOUT reloading — no self-heal, full
+start_cluster.sh relaunch required); t10-3cont restarted the runners
+cleanly ("bye from the runner" → fresh bootstrap, ~4 min back to READY);
+t10-6cont killed only the degenerate stream (action=error) while its
+partner finished normally, cluster stayed fully up. So the rank0-only
+eviction desync fires only SOMETIMES.
+
+Root of the no-self-heal: a runner that dies via GPU-timeout mid-collective
+comes back as RunnerConnecting bound to the STALE instance, never
+transitioning to RunnerFailed — so the plan.py:88 "RunnerFailed → Shutdown
+→ re-place" recovery cycle never fires (verified in
+worker/plan.py:_shutdown_failed / _create_runner). This upgrades wedge
+open-item #2: it needs BOTH the agree-on-evictions fix (prevent the desync)
+AND a runner-death detector that marks the peer RunnerFailed so re-placement
+runs (or start_cluster's placement-retry needs to run continuously, not
+just at launch).
+
+### PRODUCTION-SAFETY IMPLICATION (needs user decision)
+
+At c>=2 with temp>0, deep generations (>~1400 tok) can degenerate AND can
+wedge the cluster requiring manual relaunch. Options, in order of effort:
+1. Gate c=2 spec back off for long generations (revive
+   EXO_DSV4_MTP_C2_MAX_CTX-style gate but keyed on max_tokens/output
+   length, not context) — cheap mitigation, costs c=2 throughput on long
+   outputs only.
+2. Fix the wedge (agree-on-evictions + RunnerFailed-on-death) so a
+   degen at least fails one request cleanly instead of taking the cluster.
+3. Fix the underlying batch-nondeterminism (batch-invariant fp32 bonus-row
+   argmax) so c=2 stops degenerating at all — the real fix.
+
+### TOOLING (session scratchpad, hardened)
+- c2_pair_probe.py: streaming c=2 pair probe. Full-text saved to
+  m4-1:~/scratch/c2_texts/<pair>_s<i>.txt; detects tail-loop, body-loop,
+  and chars-per-token collapse; requires repeated unit to fill >=200 tail
+  chars (ellipsis/rule false-positive fixed). printf (not echo) write so
+  backslashes in essay text don't mangle the JSONL.
+- c2_temp_battery.sh: N_T10/N_T03 pairs; wait_ready requires a body token;
+  quick_ready gates spinner-killing on CONFIRMED API unresponsiveness
+  (>90% CPU only); lenient JSONL summary.
+- Battery watchdog LESSON (cost a healthy-runner kill this session): a
+  loop detector that flags trailing "..."/"---" plus a >50%-CPU spinner
+  rule will kill a live decoding runner. Both fixed. Always gate destructive
+  watchdog actions on an independent liveness signal.
+
+## 2026-07-03 (evening): PHANTOM-STREAM LEAK ON STOP-SEQUENCE FINISH — CONFIRMED + QUANTIFIED
+
+Verified the code-traced hypothesis on-cluster (m4-1, sequential requests,
+no c=2/no degen — benign; cluster stayed 2/2 Ready throughout).
+
+### THE LEAK (proven)
+
+A request that finishes via a STRING STOP-SEQUENCE match (OpenAI `stop`
+param) leaks a phantom decode stream: exo's wrapper sets
+finish_reason="stop", del's the uid from ITS _active_tasks and sends
+FinishedResponse, but NEVER removes the uid from the underlying mlx-lm
+BatchGenerator. mlx-lm keeps the uid in self.uids and keeps decoding it to
+ITS OWN max_tokens. Every subsequent step emits that uid →
+"response uid N was not found - should be active" (batch_generate.py:2054),
+and the uid keeps occupying a batch slot.
+
+Only the DEGEN kill-switch path evicts (via _killswitch_evict_uids →
+_mlx_gen.remove()); the stop-sequence path has no equivalent. EOS/length
+finishes are clean — those are mlx-lm's OWN stop conditions so it self-drops
+the uid.
+
+### MEASURED (phantom_leak_test2.py, on m4-1)
+
+One stop-terminated request (stop=["\n"], max_tokens=2000) RETURNED after
+33 real tokens, then leaked ~1292+ phantom decode steps ("should be active"
+count 644→1936). Throughput cost on a CONCURRENT request: 12.2 t/s vs 16.4
+baseline = ratio 0.74 (~26% slower — the phantom occupies a 2nd batch slot,
+forcing B=2). (Absolute t/s here are wall-inclusive-of-prefill on short 250-
+tok probes; the RATIO is the valid signal, not the absolutes.)
+
+### WORSE THAN "BOUNDED WASTE": THE PHANTOM FREEZES + RE-ATTACHES
+
+The runner's outer loop is `while self.active_tasks:` (runner.py:424), so
+the phantom is NOT stepped while no real request is in flight — it FREEZES.
+The counter proved it: +690 steps during probe C, +0 during a 15s idle
+poll, then +602 MORE during probe E. So one leaked phantom degrades EVERY
+subsequent request (~25% each) until it burns its full max_tokens budget of
+co-scheduled steps — it does not expire on wall-clock. (My first analysis
+misread the idle-freeze flat counter as "phantom completed"; corrected.)
+
+### PRODUCTION IMPACT
+
+- Any client using `stop` with a generous max_tokens leaves a slot-occupying
+  phantom that taxes throughput on following requests.
+- CRITICAL COUPLING: the phantom raises B. The c=1 async decode fence and
+  the c>=2 spec gates are B==1-gated — a phantom silently disarms them, so a
+  nominally-single-stream workload with stop sequences loses the +28% fence
+  AND can trip the c>=2 corruption path documented above. (Inferred from the
+  B-gate arming, not separately measured.)
+- EXPOSURE UNKNOWN: could not confirm from the log whether real Hermes
+  clients set `stop` (only my own probes were in recent traffic). CHECK the
+  Hermes gateway / frontend request params before rating severity.
+
+### THE FIX (rank-safe direction; NOT shipped — needs c=2 validation)
+
+Root: exo does string-level stop matching in its OWN layer
+(potential_stop_sequence_text / _stop_sequences, batch_generate.py:2211) and
+does NOT pass the stops to mlx-lm's native token-level matcher. mlx-lm's
+BatchGenerator.next() ALREADY has stop state-machines (generate.py:1588,
+state_machines[i].match → finish_reason="stop" → self.filter(keep)) that
+self-drop the uid SYMMETRICALLY on all ranks (the TP _step() forward is
+deterministic, so every rank matches identically — no collective needed).
+
+Preferred fix: wire the request's stop sequences into mlx-lm's insert()/
+submit() so its native matcher fires and filters the uid. Rank-safe BY
+CONSTRUCTION; also lets exo drop (or keep as belt-and-suspenders) its own
+string layer.
+
+Why NOT a naive rank0 evict: appending stop-finished uids to
+_killswitch_evict_uids and calling _mlx_gen.remove() risks the SAME wedge as
+the degen kill-switch (handoff open #2) IF exo's stop detection is not
+symmetric across ranks. The DSv4 path uses DSv4MTPBatchGenerator.
+next_generated() (not the vanilla next() read above) whose rank behavior for
+detok/sampling is the subtle part the wedge note warns about. Do not ship a
+hot-loop eviction without a c=2 concurrent-stop-sequence validation pass
+(which itself can trigger the SIGKILL-immune wedge). The native-matcher
+route sidesteps this entirely.
+
+NOTE: this UNIFIES with wedge open-item #2 — both the phantom leak and the
+degen-kill wedge are the missing "symmetric mid-batch eviction" primitive.
+The native-matcher fix solves the stop-sequence half cleanly; the degen-kill
+half still needs agree-on-evictions (or its own native-matcher equivalent).
+
+Tooling: scratchpad phantom_leak_test.py (v1, spam-count proof) +
+phantom_leak_test2.py (v2, throughput ratio + lifetime), copies on
+m4-1:~/scratch.
