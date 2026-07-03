@@ -583,3 +583,33 @@ land there. Fixed: default bound 6 (mlx 0362d105), exo uv.lock pin bumped.
 The mxfp4 crossover is also 6-7, so the bound holds for the mxfp4 play.
 Raising EXO_PREFILL_STEP_SIZE for bigger B/E is a dead idea too: steel at
 B/E=12 runs 206 GB/s vs 240-300 at smaller shapes.
+
+## PART 8 (2026-07-02, evening): THE CHECKPOINT WAS MIXED ALL ALONG
+
+Verified by reading safetensors shard headers (config.json's quantization
+section is WRONG — claims uniform affine8 g64, no overrides):
+- switch_mlp experts: **mxfp4 g32** (U32 packed 8/word, U8 E8M0 scales, no
+  biases) — ~137e9 of the 155e9 bytes.
+- attention / shared_experts / embed / lm_head: affine 8-bit g64 (~18e9 B).
+- Model is ~284B params, not ~146B.
+
+Fallout:
+1. The mxfp4-conversion play (350@495K + decode-halving projections) is
+   ALREADY REALIZED in prod. Dead. The part-1 "premise correction" of this
+   handoff overcorrected — the original mxfp4 premise was right for the
+   experts, which is what the kernels touch.
+2. mlx-community/DeepSeek-V4-Flash-mxfp4 (uniform 4-bit) would only push
+   the 8-bit remainder to 4-bit: ~9GB/node fewer once-per-forward reads,
+   quality risk on attention/lm_head. Not worth an A/B. No download.
+3. The B=1→B=2 verify scaling (~11ms/row) CANNOT be per-row expert reads
+   (top-6/row ≈ 40MB/node ≈ 0.2ms at 200GB/s). The "MoE physics" verdict
+   in part 6-addendum is RETRACTED. The row cost is elsewhere: batched
+   sparse-attention/indexer path, kernel dispatch, or collectives. Decode
+   B>=2 headroom is REOPENED (and tree-drafting is un-killed pending a
+   real intra-verify profile).
+4. gather_qmv_rhs B/E<=6 bound holds regardless (mxfp4 crossover also 6-7).
+   Prefill expert gathers use the FP kernel family; the affine variant
+   built this morning serves no prod tensor today (harmless, kept).
+
+NEXT: intra-verify profile at B=1 vs B=2 (per-section: MLA attn, indexer,
+pools, switch_mlp, collectives) to find the true +11ms/row owner.
