@@ -1063,6 +1063,24 @@ for NODE in "${NODES[@]}"; do
     : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"
     [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
+    # jaccl start-of-collective ACK barrier (mesh_impl.h ack_sync_pre). Keeps
+    # the two TP ranks in lockstep at each collective boundary so a leading
+    # rank's data/ack SEND never arrives before the peer posts its RECV WR —
+    # the UC-silent-drop that wedges drain_acks/the data loop under c>=2. The
+    # dedicated ACK QP (mesh.cpp 2026-05-17) fixes ack_sync_POST; this closes
+    # the remaining PRE-side data-path race. Gated OFF upstream for A/B.
+    [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+    [ -n "${JACCL_POLL_INSTRUMENT:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
+    [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
+    [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
+    # Runner hang watchdog (supervisor _check_hang). Default 45s SIGKILLs a
+    # runner wedged in a native jaccl collective under c>=2 load (self-heal).
+    # Raise it for diagnostics to widen the sampling window before the kill.
+    [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
+    # Batch-invariant matmul (mlx-lm deepseek_v4): per-row gemv for small M so
+    # c>=2 decode bitwise-matches c=1 — the bf16 batch-drift corruption fix.
+    [ -n "${EXO_DSV4_BATCH_INVARIANT_MM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM=$EXO_DSV4_BATCH_INVARIANT_MM"
+    [ -n "${EXO_DSV4_BATCH_INVARIANT_MM_MAX_M:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM_MAX_M=$EXO_DSV4_BATCH_INVARIANT_MM_MAX_M"
     [ -n "${EXO_DSV4_BATCHED_PREFILL_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL_DEBUG=$EXO_DSV4_BATCHED_PREFILL_DEBUG"
     [ -n "${EXO_HC_USE_OPS:-}" ]       && EXO_ENV="$EXO_ENV EXO_HC_USE_OPS=$EXO_HC_USE_OPS"
     [ -n "${EXO_DSV4_ACT_PROBE:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ACT_PROBE=$EXO_DSV4_ACT_PROBE"
