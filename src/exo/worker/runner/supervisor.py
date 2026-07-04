@@ -40,6 +40,7 @@ from exo.shared.types.worker.runners import (
     RunnerFailed,
     RunnerIdle,
     RunnerLoading,
+    RunnerReady,
     RunnerRunning,
     RunnerShuttingDown,
     RunnerStatus,
@@ -69,10 +70,26 @@ DECODE_TIMEOUT_SECONDS = 5
 # hanging until a manual `kill -9` + relaunch. Generous vs real work: decode
 # emits a token sub-second, prefill emits per-chunk progress; only a true hang
 # stays silent this long. 0 disables. Override: EXO_RUNNER_HANG_TIMEOUT_SECONDS.
-try:
-    HANG_TIMEOUT_SECONDS = float(os.environ.get("EXO_RUNNER_HANG_TIMEOUT_SECONDS", "45"))
-except ValueError:
-    HANG_TIMEOUT_SECONDS = 45.0
+def _env_seconds(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+HANG_TIMEOUT_SECONDS = _env_seconds("EXO_RUNNER_HANG_TIMEOUT_SECONDS", 45.0)
+
+# Companion watchdog for the PRE-serving phase. _check_hang only fires once a
+# task is in_progress, so a runner wedged during connect/load — e.g. the jaccl
+# re-place after a peer's mid-GPU-op SIGKILL leaves RDMA state that never
+# completes QP->RTR — sits in RunnerConnecting forever with no in_progress task
+# and no event, and nothing ever re-places it (the "needs a reboot" mode). If a
+# runner emits no event for this long while STILL not serving (not Ready/Running),
+# SIGKILL it so is_alive() flips -> RunnerFailed -> master re-places (self-heal).
+# Healthy connect/load streams status + progress events well inside this window;
+# only a truly stuck bring-up stays silent. 0 disables. Override:
+# EXO_RUNNER_CONNECT_TIMEOUT_SECONDS.
+CONNECT_TIMEOUT_SECONDS = _env_seconds("EXO_RUNNER_CONNECT_TIMEOUT_SECONDS", 180.0)
 
 
 @dataclass(eq=False)
@@ -385,6 +402,7 @@ class RunnerSupervisor:
                     await self._check_runner(RuntimeError("Runner found to be dead"))
                     return
                 self._check_hang()
+                self._check_stuck_init()
 
     def _check_hang(self) -> None:
         """SIGKILL a runner that has in-progress work but has gone silent.
@@ -414,6 +432,42 @@ class RunnerSupervisor:
             f"Runner {self.bound_instance.bound_runner_id} hung: "
             f"{len(self.in_progress)} task(s) in progress, no event for "
             f"{silent_for:.0f}s (>{HANG_TIMEOUT_SECONDS:.0f}s). SIGKILLing to "
+            f"force RunnerFailed + re-placement."
+        )
+        with contextlib.suppress(Exception):
+            os.kill(self.runner_process.pid, signal.SIGKILL)
+
+    def _check_stuck_init(self) -> None:
+        """SIGKILL a runner wedged during bring-up (never reached serving).
+
+        Companion to _check_hang for the PRE-serving phase. _check_hang is
+        gated on in_progress being non-empty, so a runner that wedges while
+        still connecting/loading — most importantly the jaccl re-place that
+        gets stuck in RunnerConnecting (QP->RTR never completes) after a peer's
+        mid-GPU-op SIGKILL corrupts RDMA state — has no in_progress task, emits
+        no event, and would otherwise hang forever (the "needs a reboot" mode).
+
+        If the runner has emitted no event for CONNECT_TIMEOUT_SECONDS while
+        still NOT serving (not Ready/Running), SIGKILL it: is_alive() flips
+        false -> RunnerFailed -> master re-places (self-heal). Any status/
+        progress event bumps _last_event_monotonic, so a healthy bring-up that
+        keeps making progress never trips this. Fires once per runner.
+        """
+        if (
+            CONNECT_TIMEOUT_SECONDS <= 0
+            or self._hang_killed
+            or not self.runner_process.is_alive()
+            or isinstance(self.status, (RunnerReady, RunnerRunning))
+        ):
+            return
+        silent_for = time.monotonic() - self._last_event_monotonic
+        if silent_for < CONNECT_TIMEOUT_SECONDS:
+            return
+        self._hang_killed = True
+        logger.critical(
+            f"Runner {self.bound_instance.bound_runner_id} stuck in bring-up: "
+            f"status={type(self.status).__name__}, no event for "
+            f"{silent_for:.0f}s (>{CONNECT_TIMEOUT_SECONDS:.0f}s). SIGKILLing to "
             f"force RunnerFailed + re-placement."
         )
         with contextlib.suppress(Exception):
