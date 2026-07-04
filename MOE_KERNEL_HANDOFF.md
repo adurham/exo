@@ -1387,3 +1387,29 @@ mitigates). DECISION NEEDED before implementing.
 - Branch fix/c2-serving-hardening carries env-gated diagnostics (WEDGE_TRACE,
   WEDGE_INJECT) that should be squashed out before a clean merge to main.
 - Production restored to committed defaults after validation.
+
+### FIX 2 ADDENDUM — ROOT CAUSE PINPOINTED (batch-non-invariance from layer 0)
+
+User chose the ROOT-CAUSE fix. dsv4_bdiff_layers.py (m4-1, 4-layer random-
+weight, B=2 vs two B=1) localizes it: batched-vs-single hidden divergence is
+0.0078 at LAYER 0 (= 1 bf16 ULP near 1.0), compounding 0.0137 -> 0.0195 ->
+0.2266 through layers -> 16.7% of final argmaxes differ (0.833 agree). So the
+matmul/attention kernels accumulate in a batch-SIZE-dependent order; B=2 rounds
+to different bf16 values than B=1 from the first op, and it compounds. temp>0
+sampling turns those tie-flips into the repetition attractors. This is the
+canonical batch-invariance problem (cf. Thinking Machines 2025).
+
+Root-cause fix routes (both major, NOT session-sized):
+(A) Batch-invariant kernels — fixed reduction/tiling order in the batched
+    matmul + attention (+ maybe rmsnorm) so bf16 output is identical regardless
+    of batch size. No perf cost; the pure fix. MLX has no batch-invariant mode
+    OOTB -> custom Metal kernels, built on m4-1 (local toolchain broken),
+    bitexactness + perf + c=2 quality validation. Multi-week.
+(B) Precision lift — run the batched verify forward (or the residual stream)
+    in fp32 so ULP drift is fp32-scale (~6e-8) and flips vanish. ~2x verify
+    cost; more tractable, still real work + validation.
+Next concrete step for either: extend the layer-bisect to op-granularity
+(attention vs quantized-MoE matmul vs norm) to confirm which kernel(s) carry
+the batch-dependence, then implement + bitexactness-gate. Production stays on
+FENCE_ASYNC_C2=0 (sync) meanwhile — c=1 unaffected; deep temp>0 c=2 ~23% degen
+is the accepted exposure until this lands.
