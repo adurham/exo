@@ -1,6 +1,8 @@
 import codecs
 import contextlib
+import os
 import signal
+import time
 from dataclasses import dataclass, field
 from os import PathLike
 from typing import Callable, Self
@@ -57,6 +59,20 @@ from exo.worker.runner.diagnostics import (
 
 PREFILL_TIMEOUT_SECONDS = 60
 DECODE_TIMEOUT_SECONDS = 5
+
+# Hang watchdog: if a runner has in-progress work but emits NO event (prefill
+# progress, generated token, status update) for this long, it is presumed hung
+# — the c>=2 degen-kill / GPU-timeout wedge spins a runner at 100% CPU inside a
+# native jaccl collective, where SIGTERM does not reach the interpreter. The
+# watchdog SIGKILLs it so is_alive() flips false -> RunnerFailed -> the master
+# tears the instance down and re-places it (self-heal), instead of the cluster
+# hanging until a manual `kill -9` + relaunch. Generous vs real work: decode
+# emits a token sub-second, prefill emits per-chunk progress; only a true hang
+# stays silent this long. 0 disables. Override: EXO_RUNNER_HANG_TIMEOUT_SECONDS.
+try:
+    HANG_TIMEOUT_SECONDS = float(os.environ.get("EXO_RUNNER_HANG_TIMEOUT_SECONDS", "45"))
+except ValueError:
+    HANG_TIMEOUT_SECONDS = 45.0
 
 
 @dataclass(eq=False)
@@ -199,6 +215,10 @@ class RunnerSupervisor:
     _cancel_watch_runner: anyio.CancelScope = field(
         default_factory=anyio.CancelScope, init=False
     )
+    # Monotonic timestamp of the last event received from the runner. Drives the
+    # hang watchdog (see HANG_TIMEOUT_SECONDS). Bumped on every event.
+    _last_event_monotonic: float = field(default_factory=time.monotonic, init=False)
+    _hang_killed: bool = field(default=False, init=False)
 
     @classmethod
     async def create(
@@ -321,6 +341,8 @@ class RunnerSupervisor:
         try:
             with self._ev_recv as events:
                 async for event in events:
+                    # Any event = the runner made progress; reset the hang clock.
+                    self._last_event_monotonic = time.monotonic()
                     if isinstance(event, RunnerTerminationError):
                         # try to get exception if possible
                         await self._check_runner(event)
@@ -361,6 +383,41 @@ class RunnerSupervisor:
                 await anyio.sleep(5)
                 if not self.runner_process.is_alive():
                     await self._check_runner(RuntimeError("Runner found to be dead"))
+                    return
+                self._check_hang()
+
+    def _check_hang(self) -> None:
+        """SIGKILL a runner that has in-progress work but has gone silent.
+
+        Detects the c>=2 degen-kill / GPU-timeout wedge: the runner spins at
+        100% CPU inside a native jaccl collective, so it is_alive() (this loop's
+        other check never fires) yet emits no events. SIGTERM does not reach the
+        interpreter mid-spin, so we go straight to SIGKILL; the next _watch_runner
+        tick then sees is_alive()==False and raises RunnerFailed, which the
+        master turns into instance teardown + re-placement (self-heal).
+
+        Gated on in_progress being non-empty so model load / idle windows (which
+        legitimately emit no events) never trip it. Fires once per runner.
+        """
+        if (
+            HANG_TIMEOUT_SECONDS <= 0
+            or self._hang_killed
+            or not self.in_progress
+            or not self.runner_process.is_alive()
+        ):
+            return
+        silent_for = time.monotonic() - self._last_event_monotonic
+        if silent_for < HANG_TIMEOUT_SECONDS:
+            return
+        self._hang_killed = True
+        logger.critical(
+            f"Runner {self.bound_instance.bound_runner_id} hung: "
+            f"{len(self.in_progress)} task(s) in progress, no event for "
+            f"{silent_for:.0f}s (>{HANG_TIMEOUT_SECONDS:.0f}s). SIGKILLing to "
+            f"force RunnerFailed + re-placement."
+        )
+        with contextlib.suppress(Exception):
+            os.kill(self.runner_process.pid, signal.SIGKILL)
 
     async def _check_runner(
         self, e: RunnerTerminationError | Exception | None = None
