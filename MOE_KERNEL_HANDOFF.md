@@ -1413,3 +1413,54 @@ Next concrete step for either: extend the layer-bisect to op-granularity
 the batch-dependence, then implement + bitexactness-gate. Production stays on
 FENCE_ASYNC_C2=0 (sync) meanwhile — c=1 unaffected; deep temp>0 c=2 ~23% degen
 is the accepted exposure until this lands.
+
+## 2026-07-03 (deep night): c=2 CORRUPTION ROOT-CAUSED — bf16 BATCH-NON-INVARIANCE (fp32 fix validated single-process; TP deploy blocked on jaccl)
+
+BREAKTHROUGH: the c=2 corruption is NOT TP-1ulp-only (all prior sessions'
+belief). It is LOCAL bf16 BATCH-SIZE-DEPENDENT ROUNDING, reproducible
+SINGLE-PROCESS (no TP, no cluster) in ~30s.
+
+Evidence (m4-1 ~/scratch harnesses, 4-layer random-weight DSv4, real dims):
+- bdiff_matched.py (MATCHED batched-cache maker for B=2 and B=1):
+    bf16: argmax agree 0.833 (16.7% flips), max|logit diff| 0.031
+    fp32: argmax agree ~1.000, max diff 1e-5
+  => MLX tiles matmul/attn reductions differently for B=1 vs B=2, so bf16
+     rounds each op's output in a batch-dependent order; the error compounds
+     (bdiff_final.py: layer0 0.0078 = 1 bf16 ULP -> layer3 0.18) and temp>0
+     sampling turns the tie-flips into the repetition-attractor degeneration.
+- PITFALL that misled prior analysis: the harness cache mismatch. Using
+  _make_cache (batched) for B=2 but model.make_cache() (single) for B=1
+  makes the ratio-128 CompressedAttention's KEYS diverge 0.93 (bdiff_sdpa.py
+  call 3) — a CACHE-MAKER artifact, NOT the bug. Always use the SAME cache
+  maker on both sides. With matched caches + bf16, the real 16.7% flip shows.
+
+FIX (validated single-process): EXO_DSV4_FP32_ACT=1 upcasts activations to
+fp32 at the embedding for batched (B>=2) forwards only. Weights stay
+bf16/quantized (MLX auto-promotes; quantized_matmul dequants to fp32 — probe:
+bf16 3.3us vs fp32 4.9us/matmul, ~1.4x, weight-bandwidth-bound so modest).
+c=1/prefill untouched (bf16, gated on B>=2). Single-process agree 0.833->1.000.
+Committed: mlx-lm 98bb26d (fp32 upcast) + b450473 (collectives downcast
+fp32->bf16 for jaccl-safety, batch-invariant). exo pin 75a1f764.
+
+DEPLOY BLOCKER (OPEN): on the 2-rank TP cluster, c=2 with EXO_DSV4_FP32_ACT=1
+CRASHES the runner: "[jaccl] Changing queue pair to RTR failed errno 16"
+(EBUSY — an RDMA QP resize, i.e. a message-size change bf16->fp32) and
+corrupts RDMA state (respawn's mx.distributed.init also errno-16s until a full
+start_cluster relaunch clears the TB/RDMA routes). The b450473 collective
+downcast did NOT prevent it — so either (a) a fp32 collective slips past the
+all_sum/all_gather wrappers (sum_gradients is forward-identity in inference so
+not it; pipeline collectives are off for TP; suspect: the batched-prefill exo
+path, or a decode-vs-prefill message-size QP resize), or (b) fp32 triggers a
+GPU/cache error that cascades to jaccl. Needs a STABLE cluster + instrumented
+deploy (log every collective's dtype/shape at c=2) to catch the exact site.
+
+ALTERNATIVE if the collective path proves intractable: UNBATCH the c>=2
+verify — run it as B separate B=1 forwards (each bitwise-identical to c=1 ->
+no batch-non-invariance -> no corruption; collectives run at B=1 bf16, no
+jaccl issue). Bigger change (dsv4_mtp batched verify path) and loses verify
+batching efficiency, but sidesteps fp32 entirely.
+
+PRODUCTION: recovered + stable on exo 75a1f764, EXO_DSV4_FP32_ACT OFF (bf16
+c=2, ~23% deep-degen but no crash), #1 phantom + #7 watchdog live, c=1 clean.
+The fp32-act fix stays in code env-gated off; enabling it needs the jaccl
+blocker resolved first.
