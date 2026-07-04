@@ -424,7 +424,53 @@ class Runner:
         while self.active_tasks:
             if _runner_probe:
                 _t_step_start = time.perf_counter()
-            results = self.generator.step()
+            try:
+                results = self.generator.step()
+            except Exception as step_err:
+                # In-place recovery of a c>=2 jaccl transport wedge. Both ranks
+                # surface the fault (StallWatch on the rank owning the lost
+                # completion; Event::wait total-timeout on the peer), so both
+                # reach group.reconnect(), whose coordinator barrier re-syncs
+                # them. We reset the QPs, drop the in-flight batch (clients
+                # retry those requests), and resume serving with the 72GB model
+                # RESIDENT — instead of exiting -> full instance re-place (~90s
+                # reload). Only jaccl transport faults are recoverable this way;
+                # anything else (or a reconnect that itself fails, e.g. the
+                # driver rejects RESET) propagates and the instance re-places.
+                grp = getattr(self.generator, "group", None)
+                _msg = str(step_err)
+                _recoverable = grp is not None and any(
+                    marker in _msg
+                    for marker in (
+                        "STALLED",
+                        "[Event::wait] Timed out",
+                        "drain_acks",
+                        "all_reduce",
+                        "[jaccl]",
+                    )
+                )
+                if not _recoverable:
+                    raise
+                logger.warning(
+                    f"jaccl transport fault in generator.step(): {_msg}. "
+                    "Attempting in-place reconnect (both ranks) to avoid a re-place."
+                )
+                try:
+                    grp.reconnect()
+                except Exception as rc_err:
+                    logger.error(
+                        f"jaccl reconnect failed ({rc_err!r}); propagating for re-place."
+                    )
+                    raise step_err from rc_err
+                dropped = self.generator.reset_after_reconnect()
+                for task_id in list(self.active_tasks.keys()):
+                    self.send_task_status(task_id, TaskStatus.Failed)
+                    self.active_tasks.pop(task_id, None)
+                logger.warning(
+                    f"jaccl reconnect complete; dropped {len(dropped)} in-flight "
+                    "sequence(s), resumed serving with model resident."
+                )
+                break
             if _runner_probe:
                 _t_step_end = time.perf_counter()
 

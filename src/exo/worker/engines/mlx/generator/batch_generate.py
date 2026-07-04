@@ -2543,6 +2543,25 @@ class ExoBatchGenerator:
             self._active_tasks.pop(uid, None)
         self._update_fence_arming()
 
+    def reset_after_reconnect(self) -> list[int]:
+        """Drop ALL in-flight sequences after an in-place jaccl reconnect.
+
+        The wedged collective aborted mid-batch, so every active sequence's
+        partial forward/KV state is discarded (the requests are failed and the
+        clients retry). The model weights stay resident — only per-request state
+        is cleared. Returns the uids that were dropped.
+        """
+        uids = list(self._active_tasks.keys())
+        if uids:
+            try:
+                self._mlx_gen.remove(uids)
+            except Exception as e:
+                logger.warning(f"reset_after_reconnect: generator remove failed: {e!r}")
+            for uid in uids:
+                self._active_tasks.pop(uid, None)
+            self._update_fence_arming()
+        return uids
+
     def close(self) -> None:
         self._mlx_gen.close()
         mx.clear_cache()
