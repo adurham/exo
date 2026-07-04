@@ -912,7 +912,22 @@ def dsv4_speculative_forward(
     """
     del speculative  # rollback is caller's responsibility; trim() is enough
 
-    logits = model(inputs, cache=cache)
+    # Diagnostic (EXO_DSV4_FP32_ACT debug): capture the ROOT exception + full
+    # traceback of the verify forward to a file, so the fp32 c=2 crash cause
+    # survives log rotation on the runner respawn.
+    if os.environ.get("EXO_DSV4_VERIFY_TRACE") == "1":
+        try:
+            logits = model(inputs, cache=cache)
+            mx.eval(logits)
+        except Exception:
+            import traceback as _tb
+            with open("/tmp/dsv4_verify_crash.txt", "a") as _f:
+                _f.write("=== verify forward crash: inputs shape=%s dtype=%s ===\n"
+                         % (tuple(inputs.shape), inputs.dtype))
+                _f.write(_tb.format_exc() + "\n")
+            raise
+    else:
+        logits = model(inputs, cache=cache)
     pre_norm = captured.get("pre_norm")
     if pre_norm is None:
         raise RuntimeError(

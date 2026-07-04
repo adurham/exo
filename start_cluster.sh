@@ -1123,6 +1123,8 @@ for NODE in "${NODES[@]}"; do
     # ~17% of argmaxes at B=2 vs B=1 -> temp>0 repetition degeneration). Weights
     # stay bf16/quantized so the weight-bandwidth-bound cost is ~unchanged.
     [ -n "${EXO_DSV4_FP32_ACT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FP32_ACT=$EXO_DSV4_FP32_ACT"
+    [ -n "${EXO_DSV4_FP32_COLL_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FP32_COLL_LOG=$EXO_DSV4_FP32_COLL_LOG"
+    [ -n "${EXO_DSV4_VERIFY_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_TRACE=$EXO_DSV4_VERIFY_TRACE"
     [ -n "${EXO_DSV4_VERIFY_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_DIAG=$EXO_DSV4_VERIFY_DIAG"
     # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
