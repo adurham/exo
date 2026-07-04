@@ -1294,3 +1294,96 @@ half still needs agree-on-evictions (or its own native-matcher equivalent).
 Tooling: scratchpad phantom_leak_test.py (v1, spam-count proof) +
 phantom_leak_test2.py (v2, throughput ratio + lifetime), copies on
 m4-1:~/scratch.
+
+## 2026-07-03 (night): THREE c=2 SERVING FIXES — branch fix/c2-serving-hardening
+
+Follow-up to the temp>0 c=2 battery finding (async AND sync fence both corrupt
+~23-40% of deep temp-1.0 c=2 pairs). User asked to fix: (1) phantom-stream
+leak, (2) the c=2 corruption, (3) the wedge. Status: #1 shipped+validated,
+#3 half shipped+validated (recovery watchdog; full auto-heal has a residual
+RDMA gap), #2 designed with a hard tradeoff (needs a decision).
+
+### FIX 1 — PHANTOM-STREAM LEAK (SHIPPED + VALIDATED, commit b66c49f5)
+
+A request finishing via a string STOP-SEQUENCE match set finish_reason="stop"
+and dropped from _active_tasks, but was NEVER removed from the mlx-lm
+BatchGenerator — mlx-lm's native matcher never saw the injected stop, so it
+kept decoding the uid to max_tokens: a phantom stream (should-be-active spam,
+an occupied batch slot that inflates B and disarms the B==1-gated fence/spec).
+Fix: route stop-sequence finishes through the same generator-eviction the
+degen kill-switch uses (renamed _killswitch_evict_uids ->
+_evict_from_generator_uids). Rank-safe — the step() response loop runs
+identically on every rank (proven on-cluster: both ranks logged byte-identical
+1936 should-be-active counts).
+VALIDATION: 1 stop req (33 real tokens, max_tokens 2000) leaked 0 phantom steps
+(was ~1292); concurrent probe ratio 1.01 (was 0.74 = B=2 tax gone); stop
+behaviour preserved (finish=stop).
+
+### FIX 3 — WEDGE: reframed to RECOVERY (watchdog SHIPPED + VALIDATED, ada52e99)
+
+INJECTOR EXPERIMENT (ccdceee3, EXO_DSV4_WEDGE_INJECT) disproved the handoff's
+"rank0-only eviction" wedge hypothesis: a forced SYMMETRIC mid-batch B=2->1
+eviction (both ranks evict uid=1 at step 120 in lockstep, async fence armed)
+did NOT wedge — cluster kept serving. Committed tokens are already
+broadcast_from_canonical (n_accepted+bonus), and steady-state c=2 is rank-
+symmetric (tracer: 2103==2103 both ranks). => the wedge is a DOWNSTREAM symptom
+of the corruption/degen state (async/1ulp-drift corrupted logits + GPU
+timeout), NOT an eviction bug. "agree-on-evictions" is UNNECESSARY.
+
+So #3 became a RECOVERY fix. Root of the non-self-heal: a GPU-timeout /
+degen-kill spins a runner at 100% CPU inside a native jaccl collective —
+is_alive() stays true (so _watch_runner's existing death check never fires),
+no events flow, and SIGTERM doesn't reach the interpreter mid-spin. Today that
+hangs the cluster until a manual kill-9 + relaunch.
+FIX: RunnerSupervisor._check_hang — if a runner has in_progress work but emits
+no event for HANG_TIMEOUT_SECONDS (default 45, env EXO_RUNNER_HANG_TIMEOUT_
+SECONDS), SIGKILL it. is_alive() flips false -> RunnerFailed -> existing
+re-placement. Gated on in_progress non-empty (model-load/idle never trip it).
+VALIDATION (both-runners-frozen SIGSTOP, 15s timeout): m4-2 log "Runner ...
+hung: 1 task(s) in progress, no event for 17s (>15s). SIGKILLing" -> signal=9
+(SIGKILL; pre-existing path uses SIGTERM/sig15) -> Runner found to be dead ->
+RunnerFailed -> Shutdown -> CreateRunner. Detection + kill + recovery-TRIGGER
+all confirmed.
+RESIDUAL GAP (honest): after RunnerFailed -> CreateRunner, the NEW runners
+stalled at RunnerConnecting (inter-node RDMA/jaccl rendezvous did not complete)
+— a full start_cluster (which clears stale TB/RDMA routes) is still needed for
+end-to-end recovery in the both-hung case. The watchdog is necessary (it
+surfaces the silent spin as a logged RunnerFailed and triggers re-placement)
+but not sufficient for auto-heal; the RDMA-route reset on runner-recreate is a
+separate, larger fix. Pre-existing SIGTERM path (~8s) already handles single-
+runner death (peer collective errors); the watchdog covers the both-hung /
+SIGTERM-immune case the old path missed.
+
+### FIX 2 — c=2 CORRUPTION (DESIGNED, NOT SHIPPED — needs a decision)
+
+The real wedge CAUSE and the temp>0 c=2 quality bug. Two viable approaches,
+both with a hard cost:
+- REFCHECK-AUTHORITATIVE: the batched REFCHECK (ba2c5c82) already computes a
+  clean (N,1) forward each cycle — the shape that is corruption-free (the
+  failing cell is B=2 L>1, not L=1), and its verdict showed the divergence
+  enters at the BONUS row. Make that clean-forward token authoritative for the
+  committed bonus at c>=2 (sampled under the request temp, not just argmax).
+  Correct + localized, reuses proven infra. COST: a 2nd full model forward per
+  c=2 cycle ~ HALVES c=2 throughput (~24->~12 t/s/stream, worse than today's
+  sync-fence ~19). Accepted-draft tokens come from the draft model (not the
+  corrupted verify), so correcting the bonus addresses the primary divergence.
+- BATCH-INVARIANT KERNELS: make the TP verify forward bitwise rank/batch-
+  invariant (fixed reduction order in matmul/attention/rmsnorm) so no
+  divergence occurs. No throughput cost, the "right" fix, but substantial mlx
+  Metal kernel work built on m4-1 (local Metal toolchain broken) + extensive
+  validation.
+Either needs many temp-1.0 c=2 batteries to validate (each risks the wedge #3
+mitigates). DECISION NEEDED before implementing.
+
+### DEPLOY / OPS NOTES (this session)
+
+- m4-1 WAN to github is BROKEN again (banner-exchange timeout; m4-2 reaches
+  github fine). Workaround used: insteadOf on m4-1 (git@github.com:adurham/ ->
+  /Users/adam.durham/gitmirror/) so m4-1 fetches exo from its LOCAL mirror;
+  push to github relayed via m4-2's mirror (git push ssh://git@github.com/...
+  bypasses m4-2's own https-insteadOf). Both node mirrors (~/gitmirror/exo.git)
+  now exist. sudo timestamp expires between deploys (sudo errors in
+  start_cluster are non-fatal — the Metal limit persists — so retry works).
+- Branch fix/c2-serving-hardening carries env-gated diagnostics (WEDGE_TRACE,
+  WEDGE_INJECT) that should be squashed out before a clean merge to main.
+- Production restored to committed defaults after validation.
