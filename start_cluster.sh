@@ -1114,6 +1114,10 @@ for NODE in "${NODES[@]}"; do
     # symmetric. Diagnostic only.
     [ -n "${EXO_DSV4_WEDGE_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_WEDGE_TRACE=$EXO_DSV4_WEDGE_TRACE"
     [ -n "${EXO_DSV4_WEDGE_INJECT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_WEDGE_INJECT=$EXO_DSV4_WEDGE_INJECT"
+    # Runner hang-watchdog timeout (supervisor.py). Default 45s in-code; lower
+    # only to validate the watchdog (a short value risks false kills under
+    # legitimately slow steps).
+    [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
     [ -n "${EXO_DSV4_VERIFY_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_DIAG=$EXO_DSV4_VERIFY_DIAG"
     # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
     # logs MTP top-5 IDs and _speculative_next joins them with verify-target
