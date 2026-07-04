@@ -1217,6 +1217,21 @@ for NODE in "${NODES[@]}"; do
     # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
     : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
     [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+    # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
+    # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
+    # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
+    # that ignores its timeout when a c>=2 collective is wedged). Polling lets a
+    # wedged PEER self-abort (surface a captured stream exception, or hit the
+    # total timeout) and reach group.reconnect() for in-place transport recovery
+    # instead of hanging until the _check_hang SIGKILL. TIMEOUT_MS default 20000
+    # (< the 45s watchdog and >> any healthy/warmup wait; keeps the primary's
+    # StallWatch->reconnect->coordinator-barrier wait for the peer well under the
+    # watchdog). POLL_US = sleep granularity (default 50), SPIN = spins before
+    # sleeping (default 2000). POLL_US=0 restores the legacy blocking wait.
+    : "${MLX_EVENT_WAIT_TIMEOUT_MS:=20000}"
+    [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
+    [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
+    [ -n "${MLX_EVENT_WAIT_SPIN:-}" ]       && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_SPIN=$MLX_EVENT_WAIT_SPIN"
     # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
     # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
     # poll-stall under MTP load. Default off.
