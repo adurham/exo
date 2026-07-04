@@ -1464,3 +1464,44 @@ PRODUCTION: recovered + stable on exo 75a1f764, EXO_DSV4_FP32_ACT OFF (bf16
 c=2, ~23% deep-degen but no crash), #1 phantom + #7 watchdog live, c=1 clean.
 The fp32-act fix stays in code env-gated off; enabling it needs the jaccl
 blocker resolved first.
+
+## 2026-07-03 (deep night, cont): fp32-ACT FAILS IN TP — 3 distinct integration issues found
+
+Instrumented the fp32-act path on the 2-rank cluster (EXO_DSV4_FP32_COLL_LOG,
+EXO_DSV4_VERIFY_TRACE; mlx-lm 7d8b295). Findings — the single-process fix does
+NOT transfer to TP; three separate problems:
+
+1. fp32 DOESN'T PROPAGATE through the sharded layers. The FP32_COLL log showed
+   only TINY collectives as fp32 (all_sum shape=() scalar, all_gather (2,1,8)
+   metadata). The BIG activation collectives (MoE/attn all_sum, ~(2,3,4096))
+   NEVER appeared as fp32 -> their input was bf16 -> the fp32 residual is being
+   downcast to bf16 somewhere inside each layer (suspect: SwitchGLU/quantized
+   experts output bf16, or HyperConnection/MultiLinear casts to weight dtype).
+   So the MoE contribution stays bf16-batch-dependent -> corruption NOT fixed.
+2. GARBAGE OUTPUT at c=2 (cpt 0.01, ~2 chars per 200 tokens). Likely the B>=2
+   gate creating a CACHE DTYPE MIX: a stream prefilled at c=1 (bf16 KV cache)
+   then verified at c=2 (fp32 writes) -> inconsistent cache -> broken logits.
+3. INTERMITTENT jaccl crash (errno 16, long runs) — the original blocker; the
+   comprehensive collective wrap (all_sum/all_gather/all_max/all_min/
+   sum_scatter downcast) stopped it on the short run but a long run may still
+   resize a QP.
+
+VERDICT on fp32-act: not viable as-is. To make it work would require (a)
+forcing fp32 to propagate (find+stop the intra-layer downcast, incl. quantized
+expert output dtype), (b) a consistent-dtype cache across a stream's c1<->c2
+lifecycle (or global fp32 model = big perf/mem cost), (c) fp32-safe collectives
+(done). That's a lot; the intra-layer downcast (1) alone needs per-op dtype
+tracing.
+
+=> UNBATCH-VERIFY is the more robust path: run the c>=2 verify as N separate
+B=1 model() forwards (each bitwise-identical to the working c=1 path -> no
+batch-non-invariance, bf16 throughout, no fp32 anywhere). The work is in the
+CACHE: gen_batch.prompt_cache is a batched CacheList (PerStreamBatchRotating +
+BatchPooling + indexer); a B=1 forward per stream needs that stream's single-
+stream cache VIEW (read+write), then results reassembled. Non-trivial
+(per-stream cache extract/merge each cycle) but avoids ALL the fp32-TP issues.
+Entry point: dsv4_speculative_forward / _speculative_next_batch (verify_input
+(N,γ+1) -> loop N of model(verify_input[b:b+1], cache=stream_b_cache)).
+
+Diagnostics committed (env-gated off): EXO_DSV4_FP32_COLL_LOG,
+EXO_DSV4_VERIFY_TRACE. Production recovered to bf16 (fp32 OFF).
