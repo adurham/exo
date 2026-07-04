@@ -87,6 +87,52 @@ class HostList(RootModel[list[str]]):
         return cls(root=[str(host) for host in hosts])
 
 
+# jaccl init retry-with-backoff. A runner SIGKILLed mid-RDMA (the c>=2 peer
+# wedge path) leaks its QPs; the Thunderbolt RDMA driver reaps them
+# ASYNCHRONOUSLY, so the very next runner's `queue_pair_rtr` hits errno 16
+# (EBUSY) and crashes. Without backoff the master re-places instantly with a
+# FRESH instance_id (placement.py mints a new one each time), resetting the
+# per-instance retry budget — so the loop hammers <1s apart forever, keeping the
+# device saturated and never letting the leaked QPs drain (instance stuck
+# PREPARING until a full redeploy). Retrying init IN-PROCESS with backoff fixes
+# it at the source: a failed init RAII-destroys its own QPs (Connection::
+# ~Connection -> ibv_destroy_qp), so retries don't accumulate, and the wait lets
+# the prior runner's leaked QPs get reaped -> a later attempt succeeds, usually
+# WITHOUT the runner ever crashing (no re-place cycle at all). Total worst-case
+# wait stays under the supervisor's 180s bring-up watchdog.
+_JACCL_INIT_MAX_ATTEMPTS = int(os.environ.get("EXO_JACCL_INIT_MAX_ATTEMPTS", "6"))
+_JACCL_INIT_BACKOFF_BASE = float(os.environ.get("EXO_JACCL_INIT_BACKOFF_BASE", "3.0"))
+_JACCL_INIT_BACKOFF_CAP = float(os.environ.get("EXO_JACCL_INIT_BACKOFF_CAP", "30.0"))
+
+
+def _init_jaccl_with_backoff(rank: int) -> mx.distributed.Group:
+    """mx.distributed.init(jaccl) with backoff over transient RDMA-busy init
+    failures (leaked-QP EBUSY from a prior runner's ungraceful teardown)."""
+    for attempt in range(_JACCL_INIT_MAX_ATTEMPTS):
+        try:
+            group = mx.distributed.init(backend="jaccl", strict=True)
+            if attempt > 0:
+                logger.info(
+                    f"rank {rank} jaccl init succeeded on attempt {attempt + 1}"
+                )
+            return group
+        except Exception as e:
+            if attempt + 1 >= _JACCL_INIT_MAX_ATTEMPTS:
+                raise
+            delay = min(
+                _JACCL_INIT_BACKOFF_CAP, _JACCL_INIT_BACKOFF_BASE * (2.0**attempt)
+            )
+            logger.warning(
+                f"rank {rank} jaccl init attempt {attempt + 1}/"
+                f"{_JACCL_INIT_MAX_ATTEMPTS} failed: {e}. Likely leaked-QP EBUSY "
+                f"from a prior runner's RDMA teardown; backing off {delay:.0f}s to "
+                f"let the device drain, then retrying."
+            )
+            time.sleep(delay)
+    # Unreachable: the final attempt either returns or raises above.
+    raise RuntimeError("jaccl init retry loop exited unexpectedly")
+
+
 def mlx_distributed_init(
     bound_instance: BoundInstance,
 ) -> mx.distributed.Group:
@@ -140,7 +186,7 @@ def mlx_distributed_init(
                 os.environ["MLX_IBV_DEVICES"] = coordination_file
                 os.environ["MLX_RANK"] = str(rank)
                 os.environ["MLX_JACCL_COORDINATOR"] = jaccl_coordinator
-                group = mx.distributed.init(backend="jaccl", strict=True)
+                group = _init_jaccl_with_backoff(rank)
 
         logger.info(f"Rank {rank} mlx distributed initialization complete")
 
