@@ -1048,14 +1048,19 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
-    # c>=2 MTP spec gate DISARMED 2026-07-02 (=0: spec runs at any c). The
-    # c>=2 corruption root cause was _bootstrap_per_stream_ring (mlx-lm
-    # 8b7b5f9): it wiped prompt KV at low context (zero-tail slice of the
-    # step-grown buffer) and stamped offset[0] over joining streams. Fixed +
-    # validated (simultaneous pair, staggered join, c=1 34.2 t/s, B=2
-    # acceptance 0.80/stream). Set to a positive token threshold to disable
-    # c>=2 spec again if a regression surfaces.
-    : "${EXO_DSV4_MTP_C2_MAX_CTX:=0}"
+    # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
+    # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
+    # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
+    # (that's fixed, mlx-lm 8b7b5f9); it is batch-dependent bf16 rounding
+    # DRIFT in the decode: on-cluster spec-trace showed a c=2 stream match
+    # its canonical c=1 trajectory BITWISE for 75 tokens then flip a near-tie,
+    # which cascades into a repetition attractor (~23% of deep temp-1.0 c=2
+    # pairs). fp32 activations fix it (batch-invariant, proven: 0 server degen)
+    # but reliably crash this cluster's jaccl/RDMA transport at ~2 c=2 pairs
+    # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
+    # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
+    # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
+    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"
     [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
     [ -n "${EXO_DSV4_BATCHED_PREFILL_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL_DEBUG=$EXO_DSV4_BATCHED_PREFILL_DEBUG"
