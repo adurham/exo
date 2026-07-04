@@ -1210,6 +1210,12 @@ for NODE in "${NODES[@]}"; do
     # default preserves the post-Plan-A baseline; bench-time opt-in
     # via this env. See mlx/mlx/distributed/jaccl/mesh_impl.h
     # jaccl_ack_sync_pre_enabled() and the long doc block at the top.
+    # Default flipped ON 2026-07-04: measured to keep c>=2 wedge failures
+    # CLEANER — ACK_SYNC_PRE=1 self-heals with 0 IOConnectUnmapMemory GPU
+    # faults; =0 saw the peer GPU-fault and the re-place stick in
+    # RunnerConnecting. Pairs with the StallWatch UC-drop recovery
+    # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
+    : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
     [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
     # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
     # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
