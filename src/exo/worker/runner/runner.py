@@ -451,6 +451,22 @@ class Runner:
                 )
                 if not _recoverable:
                     raise
+                import os as _os_diag
+
+                if _os_diag.environ.get("MLX_DIAG_HOLD_WEDGE"):
+                    # DIAGNOSTIC ONLY: hold the wedge open (do NOT reconnect or
+                    # re-place) so the PEER stays parked in its real stuck
+                    # location for clean sampling — instead of thrashing into a
+                    # model reload that contaminates every capture. Pair with a
+                    # large EXO_RUNNER_HANG_TIMEOUT_SECONDS.
+                    import time as _time_diag
+
+                    logger.warning(
+                        f"[DIAG] jaccl fault ({_msg}); HOLDING wedge open for "
+                        "300s (MLX_DIAG_HOLD_WEDGE) — sample the peer NOW."
+                    )
+                    _time_diag.sleep(300)
+                    raise step_err
                 logger.warning(
                     f"jaccl transport fault in generator.step(): {_msg}. "
                     "Attempting in-place reconnect (both ranks) to avoid a re-place."

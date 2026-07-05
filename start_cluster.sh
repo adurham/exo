@@ -1232,6 +1232,9 @@ for NODE in "${NODES[@]}"; do
     [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
     [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
     [ -n "${MLX_EVENT_WAIT_SPIN:-}" ]       && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_SPIN=$MLX_EVENT_WAIT_SPIN"
+    # MLX_DIAG_HOLD_WEDGE: diagnostic only — hold a c>=2 wedge open (no
+    # reconnect/re-place) so the peer can be sampled in its real stuck location.
+    [ -n "${MLX_DIAG_HOLD_WEDGE:-}" ]       && EXO_ENV="$EXO_ENV MLX_DIAG_HOLD_WEDGE=$MLX_DIAG_HOLD_WEDGE"
     # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
     # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
     # poll-stall under MTP load. Default off.
