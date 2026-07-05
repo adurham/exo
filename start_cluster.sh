@@ -1226,6 +1226,11 @@ for NODE in "${NODES[@]}"; do
     # RDMA data-recv ordering; post runs after data drains).
     [ -n "${MLX_JACCL_CONFIRMED_BARRIER_PRE:-}" ]  && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_PRE=$MLX_JACCL_CONFIRMED_BARRIER_PRE"
     [ -n "${MLX_JACCL_CONFIRMED_BARRIER_POST:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_POST=$MLX_JACCL_CONFIRMED_BARRIER_POST"
+    # MLX_JACCL_RELIABLE_DATA: reliable ARQ all_reduce data path (2-rank) — chunks
+    # carry a seq header, receiver assembles + dedups + defers the reduce, and a
+    # coordinator bitmask barrier retransmits missing chunks. Eliminates the
+    # data-phase all_reduce STALLED wedge. Gated (perf cost + core-path change).
+    [ -n "${MLX_JACCL_RELIABLE_DATA:-}" ]         && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_DATA=$MLX_JACCL_RELIABLE_DATA"
     # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
     # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
     # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
