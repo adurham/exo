@@ -1222,6 +1222,10 @@ for NODE in "${NODES[@]}"; do
     # Deterministic recv-side wedge PREVENTION for c>=2. Default off (adds a
     # coordinator round-trip per ack barrier); set =1 for c>=2 correctness.
     [ -n "${MLX_JACCL_CONFIRMED_BARRIER:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER=$MLX_JACCL_CONFIRMED_BARRIER"
+    # Split gates to isolate pre vs post confirmed barrier (pre is entangled with
+    # RDMA data-recv ordering; post runs after data drains).
+    [ -n "${MLX_JACCL_CONFIRMED_BARRIER_PRE:-}" ]  && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_PRE=$MLX_JACCL_CONFIRMED_BARRIER_PRE"
+    [ -n "${MLX_JACCL_CONFIRMED_BARRIER_POST:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_POST=$MLX_JACCL_CONFIRMED_BARRIER_POST"
     # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
     # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
     # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
