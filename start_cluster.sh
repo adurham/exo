@@ -1217,6 +1217,11 @@ for NODE in "${NODES[@]}"; do
     # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
     : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
     [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+    # MLX_JACCL_CONFIRMED_BARRIER: reliable ack barrier over the TCP coordinator
+    # instead of the UC ack exchange (which wedges on a lost completion).
+    # Deterministic recv-side wedge PREVENTION for c>=2. Default off (adds a
+    # coordinator round-trip per ack barrier); set =1 for c>=2 correctness.
+    [ -n "${MLX_JACCL_CONFIRMED_BARRIER:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER=$MLX_JACCL_CONFIRMED_BARRIER"
     # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
     # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
     # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
