@@ -927,6 +927,13 @@ for NODE in "${NODES[@]}"; do
     [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
     [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
     [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"
+    # EXO_RUNNER_HANG_TIMEOUT_SECONDS: raise for the reliable ARQ path — large
+    # prefill all_reduces are slow (4KB stop-and-wait; UC can't do fast large or
+    # concurrent sends) and can legitimately run past the default 45s.
+    [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]  && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
+    # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. MUST be 1 —
+    # concurrent UC sends corrupt on this librdma (like large ones).
+    [ -n "${MLX_JACCL_RELIABLE_INFLIGHT:-}" ]      && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_INFLIGHT=$MLX_JACCL_RELIABLE_INFLIGHT"
     [ -n "${MLX_LOG_ARRAY_DESC_COUNT_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=$MLX_LOG_ARRAY_DESC_COUNT_INTERVAL"
     [ -n "${MLX_PER_TYPE_DUMP_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_DUMP_INTERVAL=$MLX_PER_TYPE_DUMP_INTERVAL"
     [ -n "${MLX_PER_TYPE_TRACK:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_TRACK=$MLX_PER_TYPE_TRACK"
