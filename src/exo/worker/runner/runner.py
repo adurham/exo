@@ -506,6 +506,24 @@ class Runner:
             for task_id in finished:
                 self.active_tasks.pop(task_id, None)
 
+            # Liveness heartbeat. Under sustained c>=2, when a request is
+            # admitted into a running batch the batched generator can decode
+            # for many seconds (batch-size transition) WITHOUT yielding any
+            # response — step() returns [] every cycle even though the GPU is
+            # busy and the runner is healthy. With no event emitted, the
+            # supervisor's hang watchdog (_last_event_monotonic) SIGKILLs a
+            # working runner (false positive). A returned-but-empty step()
+            # proves liveness (a genuine hang stuck INSIDE step() never returns,
+            # so it is still caught). Re-emit the current status, throttled, to
+            # reset the watchdog clock. Cheap: only fires during such stalls.
+            if self.active_tasks:
+                _hb_now = time.monotonic()
+                if _n_results_this_cycle > 0:
+                    self._last_hb_monotonic = _hb_now
+                elif _hb_now - getattr(self, "_last_hb_monotonic", 0.0) >= 15.0:
+                    self.update_status(self.current_status)
+                    self._last_hb_monotonic = _hb_now
+
             if _runner_probe:
                 _t_loop_end = time.perf_counter()
                 # total = step + send_chunks + finished_pop + queue check
