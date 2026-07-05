@@ -1231,6 +1231,12 @@ for NODE in "${NODES[@]}"; do
     # coordinator bitmask barrier retransmits missing chunks. Eliminates the
     # data-phase all_reduce STALLED wedge. Gated (perf cost + core-path change).
     [ -n "${MLX_JACCL_RELIABLE_DATA:-}" ]         && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_DATA=$MLX_JACCL_RELIABLE_DATA"
+    # MLX_JACCL_RELIABLE_MAX_SZ: cap reliable chunk size class (0=4KB..7=512KB).
+    # Larger => fewer chunks => faster, but must still reliably COMPLETE on
+    # librdma (large UC sends >=64KB/sz>=4 stick). Bisect for the sweet spot.
+    [ -n "${MLX_JACCL_RELIABLE_MAX_SZ:-}" ]        && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_MAX_SZ=$MLX_JACCL_RELIABLE_MAX_SZ"
+    # MLX_JACCL_RELIABLE_IDLE_US: sleep per idle drain poll (anti-CPU-spin).
+    [ -n "${MLX_JACCL_RELIABLE_IDLE_US:-}" ]       && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_IDLE_US=$MLX_JACCL_RELIABLE_IDLE_US"
     # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
     # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
     # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
