@@ -632,7 +632,16 @@ class Runner:
             # reset the watchdog clock. Cheap: only fires during such stalls.
             if self.active_tasks:
                 _hb_now = time.monotonic()
-                if _n_results_this_cycle > 0:
+                # Results only count as implicit liveness on rank 0: send_chunk
+                # drops ChunkGenerated on every other rank (the c=2 dedup
+                # guard), so a NON-zero rank that is healthily streaming emits
+                # ZERO events for the whole stream — its supervisor's hang
+                # watchdog then SIGKILLs it after HANG_TIMEOUT of normal
+                # decode, and the peer rank dies on ECONNRESET mid-collective
+                # (both 2026-07-06 c=2 kills; very likely the original task
+                # #25 false-positive too). Non-zero ranks therefore heartbeat
+                # unconditionally, throttled to one status re-emit per 15 s.
+                if _n_results_this_cycle > 0 and self.device_rank == 0:
                     self._last_hb_monotonic = _hb_now
                 elif _hb_now - getattr(self, "_last_hb_monotonic", 0.0) >= 15.0:
                     self.update_status(self.current_status)
