@@ -1,6 +1,21 @@
 # DeepSeek-V4-Flash c=2 serving hardening — handoff (2026-07-06)
 
-Branch: `fix/c2-serving-hardening` · exo `e3a8250f` · mlx `26ac74b7` (adurham/main) · mlx-lm `d46ac14`
+> **RESOLVED (2026-07-06, later session) — task #25 root-caused and fixed; Part B below is
+> OBSOLETE.** The "admission wedge" was never a generator stall or rank divergence: it was
+> **rank-1 event starvation**. `send_chunk` drops ChunkGenerated on rank != 0 (the c=2 dedup
+> guard) and the liveness heartbeat suppressed itself whenever step() returned results, so a
+> *healthily streaming* rank-1 runner emitted ZERO supervisor events for the whole stream;
+> after `EXO_RUNNER_HANG_TIMEOUT_SECONDS` its own supervisor SIGKILLed it, the peer died on
+> ECONNRESET mid-collective, and the SIGKILL leaked QPs. Evidence: two kills on 2026-07-06
+> ("2 task(s) in progress, no event for 46s/121s"), PROF lines showing steps returning at
+> B=2 decode rate (~96 ms) through the whole "silent" window, stall sampler confirming NO
+> in-step stall, zero uid-drop warnings, and both kills landing on whichever node held
+> rank 1 that placement. Verified fixed: 3/3 battery pairs (mid-decode admissions,
+> asymmetric stop-finish, drain) fully clean — all streams complete, zero kills/deadlines.
+> See "Session 2 addendum" at the bottom for the fix stack, the warmup QP-flake findings,
+> and current open items.
+
+Branch: `fix/c2-serving-hardening` · exo `a8884075` · mlx `26ac74b7` (adurham/main) · mlx-lm `d46ac14`
 
 ## TL;DR
 
@@ -226,3 +241,85 @@ mid-decode.
 Related memory / prior handoffs: `exo_jaccl_uc_send_limits`,
 `exo_dsv4_c2_mtp_corruption`, `exo_dsv4_gemv_gemm_batchdrift`,
 `docs/deepseek-v4-c2-mtp-verify-fixes.md`.
+
+---
+
+# Session 2 addendum (2026-07-06) — task #25 RESOLVED + serving self-heal hardening
+
+## Root cause of task #25 (the real one)
+
+**Rank-1 event starvation → false-positive watchdog SIGKILL → cascade.**
+
+- `runner.py send_chunk` drops `ChunkGenerated` on `device_rank != 0` (correct c=2 dedup).
+- The liveness heartbeat (`handle_generation_tasks`) skipped emitting whenever
+  `step()` returned results — valid only on rank 0 where chunks double as events.
+- `supervisor._check_hang` is rank-blind.
+- Net effect: any stream longer than the hang timeout got its **rank-1 runner
+  SIGKILLed while perfectly healthy** (GPU decoding at ~96 ms/step B=2 the whole
+  time). The peer then hit ECONNRESET / reliable-deadline mid-collective → re-place;
+  the SIGKILL leaked QPs (no destructors). The handoff's Part B "internal forward
+  loop / catch-up + rank divergence" was a misreading of this cascade's symptoms.
+
+**Fix:** non-zero ranks re-emit their runner status every 15 s while tasks are
+active, unconditionally (`runner.py` heartbeat; commit message has full detail).
+
+**Verified:** `specoff_battery.py 3` — 3/3 pairs clean with full per-stream stats
+(4000/4000 length, 2827-stop/4000 asymmetric finish, 4000/4000), zero SIGKILLs,
+zero deadlines, zero re-places across the run; c=1 smoke clean before and after.
+
+## Second finding: warmup/connect QP flake (NEW, partially mitigated)
+
+Fresh jaccl QP pairs intermittently come up with the **UC data path silently dead
+in BOTH directions** (`all_recv=0` for the full 15 s reliable window on both ranks,
+`outstanding_sends` stuck; TCP side-channel fine). Reproduced on a **freshly
+rebooted OS** → NOT accumulated driver state, NOT settle-time, NOT the `!` route
+flag (present on healthy links too). In-process `group.reconnect()` retries did
+NOT heal it (3/3 attempts failed within a process); a fresh runner process
+sometimes does (~1 in 2-4). Previously each roll cost a full model load because
+the failure only surfaced in warmup.
+
+Mitigations landed:
+- `_warmup_with_reconnect` (runner.py): warmup retries through jaccl faults.
+- **Connect-time data-path probe** (`mlx/builder.py _probe_data_path`): two
+  all_sums (1-chunk + ~128 KB sz=2) right after distributed init, reconnect-and-
+  retry up to `EXO_JACCL_CONNECT_PROBE_ATTEMPTS` (default 5) — moves the dice
+  roll BEFORE the load. Deployed but not yet observed in action (next placement).
+- Root cause in jaccl/librdma QP establishment still OPEN (likely recv-not-ready /
+  activation race; needs mesh-level investigation).
+
+## Serving self-heal fixes (all deployed)
+
+- `supervisor._check_runner`: a runner that reports a critical exception and exits
+  rc=0 during NON-generation work (warmup/load) now emits `RunnerFailed` — kills
+  the "WARMING UP zombie with zero runner processes" mode (hit twice today).
+- Bounded `step()` (one `_next()` pass per call) — next_generated()'s internal
+  loop can no longer hold step() open.
+- Stall sampler: `EXO_STALL_SAMPLER_SECONDS=N` dumps all-thread stacks to
+  `~/exo_stall_dumps/` (reboot-durable) when step() stops returning. Proved the
+  "stall" wasn't one.
+
+## Commit index (session 2, exo, newest first)
+
+- `a8884075` feat(builder): jaccl data-path probe at connect
+- `6a4…/…`   fix(runner): non-zero ranks heartbeat unconditionally  ← the task #25 fix
+- `65dd052d` diag(runner): stall dumps to ~/exo_stall_dumps
+- `10e9d471` fix(supervisor): RunnerFailed for clean-exit crashes in non-generation work
+- `a6e1c589` fix(runner): warmup retries through jaccl faults via reconnect
+- `c44a76c0` fix(engine): bounded step() + stall stack sampler
+
+## Current cluster state / gotchas
+
+- Both Studios were OS-rebooted today (ruled out driver-state theories).
+  `iogpu.wired_limit_mb` reverted to default (0) — exo sets its own per-process
+  wired limit (107.5 GiB) so serving is fine, but re-apply 115000 via sudo when
+  Qwen co-hosting returns (see start_cluster.sh rationale).
+- Launch scripts on the nodes (`~/relaunch_exo.sh`) carry two diagnostic envs:
+  `EXO_STALL_SAMPLER_SECONDS=10` (keep, cheap) and
+  `EXO_RUNNER_HANG_TIMEOUT_SECONDS=120` (was for diagnosis; with the heartbeat
+  fix the default 45 is fine again — drop on next restart).
+- Known minor open item: rank-0 segfaulted once inside `group.reconnect()` when
+  its peer had just been SIGKILLed mid-collective (09:51). Rare now that the
+  false-positive kills are gone; jaccl reconnect-vs-dead-peer robustness is a
+  future item.
+- The mlx gated-diag-fprintf cleanup and task #21 notes from Part A/leftovers
+  still stand.
