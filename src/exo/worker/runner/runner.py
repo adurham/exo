@@ -356,7 +356,7 @@ class Runner:
                 self.update_status(RunnerWarmingUp())
                 self.acknowledge_task(task)
 
-                self.generator.warmup()
+                self._warmup_with_reconnect()
 
                 logger.info(
                     f"runner initialized in {time.time() - self.setup_start_time} seconds"
@@ -384,6 +384,59 @@ class Runner:
                 raise ValueError(
                     f"Received {task.__class__.__name__} outside of state machine in {self.current_status=}"
                 )
+
+    def _warmup_with_reconnect(self) -> None:
+        """Run engine warmup, retrying through jaccl transport faults.
+
+        The first reliable collectives after QP creation intermittently hit a
+        unidirectional dead UC path (observed 2026-07-06, 2 of 3 warmups:
+        reliable_all_reduce drain deadline with rank 0 all_recv=0 while
+        rank 1 all_recv=7 — one direction drops everything for the whole
+        15 s window). A warmup crash previously took BOTH runners down and
+        left the instance as a permanent WARMING UP zombie. Treat the same
+        fault class the step() loop already recovers from as retryable:
+        group.reconnect() (both ranks fault → both reach the reconnect
+        coordinator barrier, which re-syncs them) and re-run warmup.
+        """
+        assert isinstance(self.generator, Engine)
+        attempts = int(os.environ.get("EXO_WARMUP_RECONNECT_ATTEMPTS", "2"))
+        for attempt in range(attempts + 1):
+            try:
+                self.generator.warmup()
+                return
+            except Exception as warmup_err:  # noqa: BLE001
+                group = getattr(self.generator, "group", None)
+                message = str(warmup_err)
+                recoverable = (
+                    group is not None
+                    and attempt < attempts
+                    and any(
+                        marker in message
+                        for marker in (
+                            "STALLED",
+                            "[Event::wait] Timed out",
+                            "drain_acks",
+                            "all_reduce",
+                            "[jaccl]",
+                        )
+                    )
+                )
+                if not recoverable:
+                    raise
+                logger.warning(
+                    f"jaccl transport fault during warmup "
+                    f"(attempt {attempt + 1}/{attempts + 1}): {message}. "
+                    "Reconnecting group and retrying warmup."
+                )
+                assert group is not None
+                try:
+                    group.reconnect()  # pyright: ignore[reportAny]
+                except Exception as reconnect_err:
+                    logger.error(
+                        f"jaccl reconnect during warmup failed "
+                        f"({reconnect_err!r}); propagating original fault."
+                    )
+                    raise warmup_err from reconnect_err
 
     def shutdown(self, task: Task):
         logger.info("runner shutting down")
