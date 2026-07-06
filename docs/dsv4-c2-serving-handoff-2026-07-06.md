@@ -166,10 +166,10 @@ mid-decode.
   (TOKENS=4000, stream), which produces mid-decode admissions → the task-#25 wedge
   within ~2–3 pairs. c=2-from-start (2 simultaneous single requests) does NOT wedge.
 - **Forward-progress probe** (loop detector): a throttled `[DSV4_SHAPE] fwd# B L`
-  print in `DeepseekV4Model.__call__` — pushed to `adurham/mlx-lm` (commit `5848648`)
-  but **reverted from the deploy** (`d46ac14`) because `flush=True` on every prefill
-  forward stalls the forward → peer `reliable_all_reduce` deadline → re-place loop.
-  Re-enable only via a separate branch if needed; don't ship it.
+  print in `DeepseekV4Model.__call__` — parked on `adurham/mlx-lm` branch
+  **`diag-c2-admission`** (`5848648`). `main` is clean at `d46ac14`. **Do NOT deploy
+  the diag branch**: `flush=True` on every prefill forward stalls the forward → peer
+  `reliable_all_reduce` deadline → re-place loop. This exact trap cost a debug cycle.
 - GPU util: `ioreg -r -d 1 -w 0 -c IOAccelerator | grep "Device Utilization %"`.
 - Live stack of a stuck runner: `sample <pid> 4 -file /tmp/x.txt` (find pid via
   `pgrep -f multiprocessing.spawn`).
@@ -184,6 +184,25 @@ mid-decode.
   --force-reinstall ./mlx-lm`).
 - mlx is pinned in `uv.lock`; bump with `uv lock --upgrade-package mlx` after pushing
   to `adurham/main`.
+
+## Known leftovers / cleanup TODO
+
+- **mlx reliable path retains 5 gated diagnostic `fprintf`s** in
+  `mlx/distributed/jaccl/lib/jaccl/mesh_impl.h` (compiled into the deployed `26ac74b7`):
+  `ENTER` (L351), `post_send FAILED` (L379), `RECV` (L403), `DEADLINE` (L467),
+  `BARRIER` (L536). All gated (first-N calls or `jaccl_progress_enabled()`), so
+  harmless, but trim for a clean prod mlx. **Keep `DEADLINE`** — it's the clean-fault
+  log when a reliable collective is abandoned.
+- **exo runner heartbeat** (`runner.py` ~L508) is committed and kept (correct
+  direction, harmless) but only **partially** fixes task #25 — see Part B.
+- **`adurham/mlx-lm main` is clean (`d46ac14`)**; diag prints live only on
+  `diag-c2-admission` — never deploy that branch.
+- **Task #21 (in-place collective recovery) — parked, not viable on this hardware.**
+  The peer parks in an *uninterruptible* Metal/GPU wait, so an in-place jaccl
+  reconnect cannot reliably resume both ranks. The accepted recovery model is: the
+  reliable path's 15 s drain deadline (or the coordinator/`Event::wait` timeouts)
+  surfaces a clean fault → runner catches jaccl-transport faults and attempts
+  `group.reconnect()` (model stays resident), else propagates → full re-place (~90 s).
 
 ## File & commit index
 
