@@ -380,3 +380,44 @@ ever cleared the dead-UC-path wedge — at ~0.15 s instead of a re-place.
   `uv sync` keeps it.
 - Future: cascade fresh reconnect to subgroups (child registry + rebuild) so
   SERVING-time faults can also recover in-process with the model resident.
+
+## Session 2 addendum, part 4 — MTP RE-ENABLED AT c>=2 (pooling B-invariance fix)
+
+**The "c=2 verify corruption" root cause is REWRITTEN — structural, not kernel
+numerics.** `PoolingCache` (c=1) runs the W4 path-1 DEFERRED pool update by
+default (just-pooled entry attendable NEXT step); `BatchPoolingCache.
+update_and_fetch_deferred` was a documented synchronous fallback ("c=2
+frozen"), so at B>=2 the entry was attendable IMMEDIATELY — different pool
+visibility for identical content in every pooled attention layer, worst in
+L>1 MTP-verify chunks (measured P=13 vs P=14 at the r4 indexer). The
+gemv/gemm kernel-drift theory is demoted: an M-sweep probe showed ALL
+quantized matmuls (affine8+mxfp4, every DSv4 shape incl. lm_head) already
+batch-invariant to M=8; only plain bf16 mm K>=1024 flips at M=2, a ~0.04
+residual, sub-threshold.
+
+Fix (mlx-lm `a7db9e2` + sizing fix, adurham/mlx-lm main; submodule bumped):
+true per-stream deferral in BatchPoolingCache — `_pending_bumps` staged in
+update_and_fetch_deferred (pre-write tensor returned), applied in
+commit_pending; `_visible_width` keeps make_mask sized to the consumed
+tensor; save/restore_meta carry bumps through spec rollback; structural ops
+(filter/extend/extract/merge/meta_state) commit eagerly AND resize the
+bumps list (missing resize in extend() was an IndexError at the first
+post-admission deferred update — fixed).
+
+Validated:
+- dsv4_bdiff_model.py: B=2-vs-B=1 max drift 0.318 -> 0.039, argmax 1.000,
+  [OK] plainBatch + PerStream; pool lengths/SDPA shapes now identical.
+- mlx-lm test_prompt_cache: 21 passed, 2 pre-existing failures (identical
+  on unpatched venv).
+- **specoff_battery 3 pairs with `EXO_DSV4_MTP_C2_MAX_CTX=0` (MTP ON at
+  c=2): 3/3 clean** — mid-decode admissions, temp=1.0, mixed stop/length
+  finishes, zero degeneration/kills/deadlines.
+- Throughput: c=2 MTP-on 14.3 tok/s/stream (28.6 agg, incl. prefill) vs
+  ~8-10 spec-off.
+
+Config: `EXO_DSV4_MTP_C2_MAX_CTX=0` now in both relaunch scripts (spec ON
+at all batch sizes). Follow-ups: retest `EXO_DSV4_FENCE_ASYNC_C2=2` on top
+(gave 20.4 t/s/stream pre-MTP), and a high-context needle pass (200K+)
+before calling long-context quality fully validated. Diagnostic tools:
+`~/scratch/bdiff_r128_bisect.py`, `qmm_invariance_sweep.py`,
+`dsv4_bdiff_model.py` (fixed-seed 4-layer repro, ~60 s).
