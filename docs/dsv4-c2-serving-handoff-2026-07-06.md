@@ -356,3 +356,27 @@ self-heals; worst case is added startup latency, never a stuck cluster.
 **True fix (future):** jaccl "hard reconnect" — rebuild device context, PD,
 CQ, and re-register all buffers in place. Significant C++ surgery in
 `mesh.cpp`/`rdma.cpp`; do not attempt without a repro to validate against.
+
+## Session 2 addendum, part 3 — jaccl reconnect_fresh (the QP-flake fix, LANDED)
+
+mlx `e399ecfb` (adurham/main; exo uv.lock bumped): `MeshGroup::reconnect_fresh()`
+closes and reopens the ibv device contexts and rebuilds everything on top
+(PD/CQ/QP, buffer MRs — registered BEFORE the INIT transition, macOS librdma
+locks the QP MR table there — exchange/RTR/RTS over the surviving TCP side
+channel, MeshImpl/RingImpl span views, ACK recv pool, bootstrap barrier). This
+is the in-process equivalent of the runner respawn — the only recovery that
+ever cleared the dead-UC-path wedge — at ~0.15 s instead of a re-place.
+
+- Gate: `MLX_JACCL_RECONNECT_FRESH=1` (now in both nodes' `~/relaunch_exo.sh`);
+  `reconnect()` takes the fresh path pre-split and falls back to QP-only reset
+  once subgroups exist (they borrow the parent's contexts; `has_split_`).
+- exo connect probe defaults to 3 attempts under fresh mode (each retry is a
+  real fresh-context roll) vs 1 (fail fast to respawn) without.
+- Validated: 10/10 fresh rebuild loops on both ranks, ~0.15 s each, collectives
+  bit-correct after every rebuild (exact small + 106 KB bf16 all-elements);
+  clean serving placement + smoke on the new build.
+- Deploy note: mlx now installed on the nodes from `~/repos/mlx` (branch merged
+  to adurham/main); exo `uv.lock` pins `e399ecfb`, so `start_cluster.sh`'s
+  `uv sync` keeps it.
+- Future: cascade fresh reconnect to subgroups (child registry + rebuild) so
+  SERVING-time faults can also recover in-process with the model resident.
