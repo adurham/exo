@@ -504,7 +504,15 @@ class RunnerSupervisor:
             for t in self.in_progress.values()
             if isinstance(t, (TextGeneration, ImageGeneration, ImageEdits))
         ]
-        if rc == 0 and not abandoned_generation:
+        # `e` non-None means the runner told us it died (RunnerTerminationError
+        # from bootstrap's crash handler) or we detected it dead ourselves —
+        # never classify that as a clean exit, even at rc==0. Bootstrap catches
+        # a critical exception, sends the termination error, and exits 0; the
+        # rc==0 early-return here used to swallow exactly that for NON-generation
+        # work: a warmup crash (jaccl reliable deadline) emitted no RunnerFailed,
+        # so the master kept the instance WARMING UP forever with zero runner
+        # processes alive — the 2026-07-06 zombie, twice.
+        if rc == 0 and e is None and not abandoned_generation:
             return
 
         if isinstance(rc, int) and rc < 0:
