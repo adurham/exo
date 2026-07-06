@@ -2020,12 +2020,17 @@ class ExoBatchGenerator:
                 t.task_params.logprobs for t in self._active_tasks.values()
             )
             _step_tic = time.perf_counter()
-            # New mlx-lm BatchGenerator.next() returns (prompt_resps, gen_resps).
-            # Use next_generated() to keep the old list-of-generations semantics.
-            if hasattr(self._mlx_gen, "next_generated"):
-                responses = self._mlx_gen.next_generated()
-            else:
-                responses = self._mlx_gen.next()  # legacy fork fallback
+            # Bounded step (task #25). Call next() — exactly ONE _next() pass —
+            # instead of next_generated(). next_generated()'s while-loop keeps
+            # iterating INSIDE the generator whenever a pass produces prompt
+            # work but no generation responses; during a mid-decode admission
+            # that can hold step() open for many seconds, so the runner never
+            # returns to its loop, no event (or heartbeat) is emitted, and the
+            # supervisor hang watchdog SIGKILLs a healthy decoding runner.
+            # Returning after every pass keeps the semantics identical (the
+            # runner re-calls step() immediately; prompt-only passes yield [])
+            # while making the runner-level liveness heartbeat reachable.
+            _prompt_responses, responses = self._mlx_gen.next()
             _next_elapsed = time.perf_counter() - _step_tic
             request_trace.record("decode.step.mlx_next", _step_tic)
 

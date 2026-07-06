@@ -143,8 +143,62 @@ class Runner:
         self._work_queue: queue.Queue[WorkItem] = queue.Queue()
         self._task_reader_thread: threading.Thread | None = None
 
+        self._step_beat: float = time.monotonic()
+        self._stall_sampler_thread: threading.Thread | None = None
+        self._start_stall_sampler()
+
         logger.info("runner created")
         self.update_status(RunnerIdle())
+
+    def _start_stall_sampler(self) -> None:
+        """Diagnostic sampler for step-loop stalls (task #25 admission wedge).
+
+        When ``EXO_STALL_SAMPLER_SECONDS`` is set (> 0), a daemon thread
+        watches ``self._step_beat`` — updated every time ``generator.step()``
+        returns. If tasks are active and step() hasn't returned for that many
+        seconds, it appends every thread's Python stack to
+        ``/tmp/exo_stall_rank{rank}_pid{pid}.log`` (throttled to one dump per
+        5 s). Repeated dumps sample a silent in-generator loop line-by-line;
+        a rank parked in a collective shows the exact mx.eval/all_reduce
+        frame. Reads other threads' frames from THIS thread, so it works even
+        while the main thread is stuck inside a C call — the case py-spy
+        would need root for on macOS. Zero overhead when the env var is
+        unset.
+        """
+        interval = float(os.environ.get("EXO_STALL_SAMPLER_SECONDS", "0") or "0")
+        if interval <= 0 or self._stall_sampler_thread is not None:
+            return
+
+        def loop() -> None:
+            import traceback
+
+            path = f"/tmp/exo_stall_rank{self.device_rank}_pid{os.getpid()}.log"
+            last_dump = 0.0
+            while True:
+                time.sleep(1.0)
+                if not self.active_tasks:
+                    continue
+                now = time.monotonic()
+                stalled = now - self._step_beat
+                if stalled < interval or now - last_dump < 5.0:
+                    continue
+                last_dump = now
+                try:
+                    with open(path, "a") as handle:
+                        handle.write(
+                            f"\n===== stall={stalled:.1f}s wall={time.time():.3f} "
+                            f"active={list(self.active_tasks.keys())} =====\n"
+                        )
+                        for thread_id, frame in sys._current_frames().items():  # noqa: SLF001
+                            handle.write(f"--- thread {thread_id} ---\n")
+                            handle.write("".join(traceback.format_stack(frame)))
+                except Exception:  # noqa: BLE001
+                    pass
+
+        self._stall_sampler_thread = threading.Thread(
+            target=loop, name="stall-sampler", daemon=True
+        )
+        self._stall_sampler_thread.start()
 
     def _start_prefill_server(self) -> int | None:
         if not ENABLE_DISAGGREGATION:
@@ -421,11 +475,13 @@ class Runner:
         if _runner_probe:
             _probe_last_total_start = time.perf_counter()
 
+        self._step_beat = time.monotonic()
         while self.active_tasks:
             if _runner_probe:
                 _t_step_start = time.perf_counter()
             try:
                 results = self.generator.step()
+                self._step_beat = time.monotonic()
             except Exception as step_err:
                 # In-place recovery of a c>=2 jaccl transport wedge. Both ranks
                 # surface the fault (StallWatch on the rank owning the lost
