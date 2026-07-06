@@ -323,3 +323,36 @@ Mitigations landed:
   future item.
 - The mlx gated-diag-fprintf cleanup and task #21 notes from Part A/leftovers
   still stand.
+
+## Session 2 addendum, part 2 — warmup QP-flake investigation (deep dive)
+
+**Where the wedge lives (narrowed, not fully root-caused):** the dead UC data
+path is a *device-context-level* state in Apple librdma. Evidence: a stuck
+send (post_send OK, CQE never arrives, nothing on wire) survives
+`MeshGroup::reconnect()` — which by design resets ONLY QPs and preserves
+PD/CQ/MRs/ibv-context (3/3 in-process reconnects failed at 09:27) — but a
+fresh process (fresh `ibv_open_device`) rolls new dice. The prod failing
+fingerprint: reliable call_ids 1-3 (tiny) pass, the first sz=2 multi-chunk
+collective (call_id 4) deadlines, sometimes asymmetrically (one direction
+clean, the other's first send stuck).
+
+**Repro attempts (all NEGATIVE — 56 standalone harness rolls + 3 fresh real
+placement cycles, all clean):** minimal init+probe; 45 s idle QPs; SIGKILL-
+leaked QPs from a prior pair; 60 GB wired-memory pressure; init during a
+60 GB wired teardown; two-Mesh coord-subgroup interleave replicating
+warmup's exact op sequence + full prod env. The morning's 5-of-8 failure
+rate could not be reproduced in the afternoon — the dice are not
+stationary and the elevated-failure trigger remains unidentified.
+Harness: `~/scratch/jaccl_probe_harness.py` on both Studios (rank,
+coordinator, [delay_s], [wire_gb]; `PROBE_TWO_MESH=1` for the warmup-like
+sequence) — 2-second rolls, no model load; keep for future hunts.
+
+**Recovery posture (what makes the flake operationally moot):** connect-time
+data-path probe (pre-load, ≤30 s, default ONE reconnect then fail-fast) →
+RunnerFailed → supervisor re-place spawns a fresh process = fresh device
+context. Warmup retry + zombie fix backstop the late cases. Every stage
+self-heals; worst case is added startup latency, never a stuck cluster.
+
+**True fix (future):** jaccl "hard reconnect" — rebuild device context, PD,
+CQ, and re-register all buffers in place. Significant C++ surgery in
+`mesh.cpp`/`rdma.cpp`; do not attempt without a repro to validate against.
