@@ -68,15 +68,22 @@ class MlxBuilder(Builder):
         group = self.group
         if group is None or group.size() < 2:
             return
-        # Default ONE reconnect retry: every observed instance of the dead
-        # data path survived in-process QP recreation (3/3 reconnects failed
-        # at 09:27 on 2026-07-06) but cleared on a fresh process — the wedge
-        # sits at the ibv device-context level, and only a process respawn
-        # reopens the device. Failing fast hands the dice roll to the
-        # supervisor's re-place loop, which is the recovery that works; the
-        # probe runs pre-load, so each process roll costs seconds, not a
-        # model load.
-        attempts = int(os.environ.get("EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "1"))
+        # Retry budget depends on what reconnect() actually rebuilds. The
+        # dead data path survives QP-only recreation (3/3 in-process
+        # reconnects failed 2026-07-06) but clears with a fresh ibv device
+        # context. With MLX_JACCL_RECONNECT_FRESH=1 (jaccl e399ecfb9+),
+        # reconnect() reopens the device contexts in-process — each retry is
+        # then a REAL fresh-context roll, so retrying here (default 3) beats
+        # a runner respawn. Without fresh mode, in-process retries are
+        # futile: default 1, then fail fast to the supervisor re-place loop
+        # (process respawn = fresh context). Probe runs pre-load either way,
+        # so no roll ever costs a model load.
+        _fresh = os.environ.get("MLX_JACCL_RECONNECT_FRESH") == "1"
+        attempts = int(
+            os.environ.get(
+                "EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "3" if _fresh else "1"
+            )
+        )
         for attempt in range(attempts + 1):
             try:
                 small = mx.distributed.all_sum(mx.array([1.0]), group=group)
