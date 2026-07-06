@@ -172,7 +172,12 @@ class Runner:
         def loop() -> None:
             import traceback
 
-            path = f"/tmp/exo_stall_rank{self.device_rank}_pid{os.getpid()}.log"
+            # NOT /tmp — macOS wipes it on reboot, and the dumps matter most
+            # when a stall cascades into a SIGKILL → leaked QPs → TB-stack
+            # wedge that ends in exactly such a reboot (2026-07-06).
+            dump_dir = os.path.expanduser("~/exo_stall_dumps")
+            os.makedirs(dump_dir, exist_ok=True)
+            path = f"{dump_dir}/exo_stall_rank{self.device_rank}_pid{os.getpid()}.log"
             last_dump = 0.0
             while True:
                 time.sleep(1.0)
