@@ -46,6 +46,51 @@ class MlxBuilder(Builder):
     def connect(self, bound_instance: BoundInstance) -> None:
         self.group = initialize_mlx(bound_instance)
         self.bound_instance = bound_instance
+        self._probe_data_path()
+
+    def _probe_data_path(self) -> None:
+        """Exercise the RDMA data path end-to-end BEFORE the model load.
+
+        On this hardware a freshly established jaccl QP pair intermittently
+        comes up with the UC data path silently dead (all_recv=0 on both
+        ranks for the full reliable-deadline window; TCP side-channel fine;
+        observed repeatedly on 2026-07-06, including on a freshly rebooted
+        OS). When that happens, the failure previously surfaced only in
+        WARMUP — after a multi-minute model load — so every dice roll on QP
+        setup cost a full load cycle. Probe here with two collectives that
+        mirror warmup's failing shapes (1-chunk tiny and ~128 KB multi-chunk
+        at sz=2); on a reliable-deadline throw, group.reconnect() re-creates
+        the QPs and the probe retries — each roll costs at most ~2×15 s and
+        no load. Both ranks run connect() together, and observed failures
+        are symmetric (both deadline), so both reach reconnect()'s
+        coordinator barrier together.
+        """
+        group = self.group
+        if group is None or group.size() < 2:
+            return
+        attempts = int(os.environ.get("EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "5"))
+        for attempt in range(attempts + 1):
+            try:
+                small = mx.distributed.all_sum(mx.array([1.0]), group=group)
+                mx.eval(small)
+                large = mx.distributed.all_sum(
+                    mx.zeros((32768,), dtype=mx.float32), group=group
+                )
+                mx.eval(large)
+                if attempt > 0:
+                    logger.info(
+                        f"jaccl data-path probe passed after {attempt} reconnect(s)"
+                    )
+                return
+            except Exception as probe_err:
+                if attempt >= attempts or not hasattr(group, "reconnect"):
+                    raise
+                logger.warning(
+                    f"jaccl data-path probe failed "
+                    f"(attempt {attempt + 1}/{attempts + 1}): {probe_err}. "
+                    "Reconnecting QPs and retrying."
+                )
+                group.reconnect()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
     def load(self, bound_instance: BoundInstance) -> Generator[ModelLoadingResponse]:
         self.bound_instance = bound_instance
