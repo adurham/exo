@@ -1,5 +1,6 @@
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from typing import BinaryIO
 
 from exo.shared.types.chunks import Chunk
@@ -15,6 +16,22 @@ from exo.worker.disaggregated.server import PrefillRequest
 
 class Engine(ABC):
     _cancelled_tasks: set[TaskId]
+
+    # Liveness hook installed by the Runner after build(). Non-zero ranks emit
+    # no client-visible events (the c>=2 chunk dedup guard), so during a long
+    # prefill they would otherwise stay silent past the supervisor's hang
+    # watchdog and get SIGKILLed while healthy — same starvation class as the
+    # decode-side rank heartbeat in Runner.handle_generation_tasks.
+    heartbeat: Callable[[], None] | None = None
+    _last_prefill_heartbeat_monotonic: float = 0.0
+
+    def prefill_heartbeat(self) -> None:
+        if self.heartbeat is None:
+            return
+        now = time.monotonic()
+        if now - self._last_prefill_heartbeat_monotonic >= 15.0:
+            self._last_prefill_heartbeat_monotonic = now
+            self.heartbeat()
 
     def should_cancel(self, task_id: TaskId) -> bool:
         return (

@@ -333,6 +333,8 @@ class SequentialGenerator(Engine):
                         ),
                     )
                 )
+            else:
+                self.prefill_heartbeat()
 
         def distributed_prompt_progress_callback() -> None:
             self.agree_on_cancellations_fast()
@@ -852,6 +854,8 @@ class BatchGenerator(Engine):
                         ),
                     )
                 )
+            else:
+                self.prefill_heartbeat()
 
         def distributed_prompt_progress_callback() -> None:
             t0 = time.perf_counter()
@@ -925,6 +929,8 @@ class BatchGenerator(Engine):
                                 ),
                             )
                         )
+                    else:
+                        self.prefill_heartbeat()
 
                 return on_prefill_progress
 

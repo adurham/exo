@@ -349,6 +349,15 @@ class Runner:
                     )
 
                 self.generator = self.generator.build()
+                # Liveness hook for non-zero ranks during long prefills: the
+                # engine calls this (throttled) from its prefill-progress
+                # callback, since rank != 0 sends no PrefillProgressChunk and
+                # a prefill outlasting EXO_RUNNER_HANG_TIMEOUT_SECONDS would
+                # otherwise get this healthy runner SIGKILLed (same class as
+                # the decode-side heartbeat in handle_generation_tasks).
+                self.generator.heartbeat = lambda: self.update_status(
+                    self.current_status
+                )
 
                 self.send_task_status(task.task_id, TaskStatus.Complete)
                 self.update_status(RunnerLoaded())
