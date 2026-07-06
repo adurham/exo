@@ -68,7 +68,15 @@ class MlxBuilder(Builder):
         group = self.group
         if group is None or group.size() < 2:
             return
-        attempts = int(os.environ.get("EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "5"))
+        # Default ONE reconnect retry: every observed instance of the dead
+        # data path survived in-process QP recreation (3/3 reconnects failed
+        # at 09:27 on 2026-07-06) but cleared on a fresh process — the wedge
+        # sits at the ibv device-context level, and only a process respawn
+        # reopens the device. Failing fast hands the dice roll to the
+        # supervisor's re-place loop, which is the recovery that works; the
+        # probe runs pre-load, so each process roll costs seconds, not a
+        # model load.
+        attempts = int(os.environ.get("EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "1"))
         for attempt in range(attempts + 1):
             try:
                 small = mx.distributed.all_sum(mx.array([1.0]), group=group)
