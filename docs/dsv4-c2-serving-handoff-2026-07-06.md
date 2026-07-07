@@ -1185,3 +1185,32 @@ co-host quickly and relieve memory pressure — not a stale default. Do
 not raise it. If DSv4 should stay permanently warm alongside that
 policy, place IT explicitly (jit=False = pinned, reaper-immune) and let
 Qwen ride the 5-min JIT reaper.
+
+## Session 6, part 5 — start_cluster.sh CANONICALIZED (bare run == verified prod config)
+
+User requirement: a bare `./start_cluster.sh` must bring up the exact
+validated production configuration. It did NOT — a mechanical env diff
+(bare-invocation EXO_ENV vs the validated node relaunch env) found the
+script would have launched a pre-session-3 config: NO reliable/optimistic
+jaccl transport (wedge-prone raw UC), prefill step 256, LOG_LEVEL=DEBUG,
+tracing on, MTP restricted at c=2, and `main` as the deploy branch.
+
+Fixed (exo commits on fix/c2-serving-hardening):
+- All drifted defaults reconciled to the validated values; the diff now
+  reports ZERO drift. Includes correcting a stale "INFLIGHT MUST be 1"
+  comment (predates the sz<=2 send-pipelining patch).
+- EXO_TARGET_BRANCH / PUSH_CHECK_BRANCH default to the prod branch.
+- DSv4 per-instance prefillStepSize override dropped (env is the single
+  source of truth). DSV4_ENABLED=1 auto-places DSv4 PINNED (jit=False);
+  QWEN36_ENABLED=0 keeps Qwen JIT-on-demand (5-min reaper).
+- start_cluster now GENERATES ~/relaunch_exo.sh on each node from its own
+  EXO_ENV (header: GENERATED — do not hand-edit) — node-local quick
+  restarts can no longer drift from the canonical config. First-pass
+  escaping bug found in verification ($!/$EXO_PID expanded at generation
+  time → inert caffeinate; benign on the Studios, pmset sleep=0) — fixed
+  (single-quoted tail + local printf render + scp), node files repaired.
+
+Verified end-to-end with a full bare run: deploy + venv pin + builds +
+launch on the reconciled env + generated relaunch scripts + auto-placed
+pinned DSv4 → READY 2/2, instance jit=False, temp=0 smoke '7',
+4K rung decode 35.41 t/s (34-38 band). The canonical path is proven.
