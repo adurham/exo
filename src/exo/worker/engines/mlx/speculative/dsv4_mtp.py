@@ -480,6 +480,40 @@ def _c2_trace_metal_mb() -> tuple[float, float]:
         return -1.0, -1.0
 
 
+def _build_low_bit_lm_head_copy(lm_head: Any, bits: int) -> Optional[Any]:
+    """Build a lower-bit quantized COPY of ``lm_head`` for draft-only use.
+
+    Returns None when there is nothing to gain (already at or below the
+    requested bit width) or the module type is unsupported. The copy is
+    affine group-64 (the qmv-supported layout). Deterministic: identical
+    input weights on every rank produce identical copies, so the
+    cross-rank draft-determinism contract is unchanged.
+    """
+    import mlx.nn as nn
+
+    if isinstance(lm_head, nn.QuantizedLinear):
+        if lm_head.bits <= bits:
+            return None
+        w = mx.dequantize(
+            lm_head.weight,
+            lm_head.scales,
+            lm_head.biases,
+            group_size=lm_head.group_size,
+            bits=lm_head.bits,
+        )
+        lin = nn.Linear(w.shape[1], w.shape[0], bias=False)
+        lin.weight = w
+        q = nn.QuantizedLinear.from_linear(lin, group_size=64, bits=bits)
+        mx.eval(q.parameters())
+        del w, lin
+        return q
+    if isinstance(lm_head, nn.Linear):
+        q = nn.QuantizedLinear.from_linear(lm_head, group_size=64, bits=bits)
+        mx.eval(q.parameters())
+        return q
+    return None
+
+
 class DSv4MTPPredictor:
     """Thin wrapper around ``model.model.mtp[mtp_idx]`` that exposes the
     ``predict`` API expected by :func:`mtp_module.draft_tokens`.
@@ -556,6 +590,44 @@ class DSv4MTPPredictor:
         # sharpens the mixture toward top-1 → better directional match
         # to the hard embed the MTP head was trained on → acceptance up.
         self.eagle_t = float(os.environ.get("EXO_DSV4_MTP_EAGLE_T", "1.0"))
+
+        # Draft-only low-bit lm_head (2026-07-07). The draft chain reads
+        # the full replicated lm_head (~925 MB affine8 at 129K vocab) once
+        # per draft step — the dominant share of the ~4.9 ms context-flat
+        # draft phase. A 4-bit COPY used ONLY for draft predict() calls
+        # halves that read. Output-distribution safety is exact by the
+        # rejection-sampling property: the draft's probs q are the softmax
+        # of the SAME low-bit logits it samples from (a valid proposal
+        # distribution), and the verify/accept side keeps the full-
+        # precision target lm_head — at temp=0 accepted tokens are the
+        # target's own argmax regardless of the draft head. Only the
+        # acceptance RATE can move (validated via the 4K decode band).
+        # lm_head is replicated per rank (DSv4 shards only MoE) and the
+        # dequant→requant is deterministic, so cross-rank draft
+        # determinism is preserved. Gate: EXO_DSV4_MTP_DRAFT_LMHEAD_BITS
+        # (0 = off/default, 4 = build a 4-bit affine g64 copy).
+        self.draft_lm_head: Optional[Any] = None
+        _draft_bits_env = os.environ.get("EXO_DSV4_MTP_DRAFT_LMHEAD_BITS", "0")
+        try:
+            _draft_bits = int(_draft_bits_env or "0")
+        except ValueError:
+            _draft_bits = 0
+        if _draft_bits in (4, 8):
+            try:
+                self.draft_lm_head = _build_low_bit_lm_head_copy(
+                    self.lm_head, _draft_bits
+                )
+                if self.draft_lm_head is not None:
+                    logger.info(
+                        "DSv4MTPPredictor: draft lm_head copy at "
+                        f"{_draft_bits}-bit built"
+                    )
+            except Exception as exc:  # noqa: BLE001 — draft head is optional
+                logger.warning(
+                    f"DSv4MTPPredictor: draft lm_head build failed ({exc}); "
+                    "drafting with the full-precision lm_head"
+                )
+                self.draft_lm_head = None
 
     def set_eagle_soft_emb(self, emb: Optional[mx.array]) -> None:
         """Install or clear the Eagle soft-embedding side channel on the
@@ -799,9 +871,10 @@ class DSv4MTPPredictor:
                 of.
             return_hidden: if True, also return the post-MTP-block,
                 pre-final-norm hidden state for the next chained step.
-            draft_mode: ignored for DSv4 (no truncated lm_head shortcut
-                yet — the gain on the cluster is small and adds quant
-                bookkeeping; can be added later if profiling justifies).
+            draft_mode: when True and a low-bit draft lm_head copy was
+                built (EXO_DSV4_MTP_DRAFT_LMHEAD_BITS), project logits
+                through it instead of the full-precision lm_head. Draft
+                chain only — the verify/accept side never sees it.
 
         Returns:
             ``logits`` (B, S, vocab) when ``return_hidden=False``,
@@ -809,7 +882,9 @@ class DSv4MTPPredictor:
             logits are squeezed to ``(B, vocab)`` to match the Qwen3.5
             convention.
         """
-        del draft_mode  # not yet implemented for DSv4
+        _head = self.lm_head
+        if draft_mode and self.draft_lm_head is not None:
+            _head = self.draft_lm_head
 
         if token_ids.ndim == 1:
             token_ids = token_ids.reshape(1, -1)
@@ -867,7 +942,7 @@ class DSv4MTPPredictor:
             next_token=token_ids,
             embed_tokens=self.embed_tokens,
             final_norm=self.final_norm,
-            lm_head=self.lm_head,
+            lm_head=_head,
             mask=mtp_mask,
             cache=self._cache,
             return_hidden=return_hidden,
@@ -2769,7 +2844,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _c2_t_after_eagle_install_ns = time.perf_counter_ns()
             try:
                 logits, h = self.mtp.predict(
-                    h, tok_arr, return_hidden=True, draft_mode=False
+                    h, tok_arr, return_hidden=True,
+                    draft_mode=(
+                        getattr(self.mtp, "draft_lm_head", None) is not None
+                    ),
                 )
             finally:
                 if _eagle_installed:
@@ -3037,6 +3115,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         next_token_arr = y.reshape(1, 1)
         draft_ids, draft_probs = draft_tokens(
             self.mtp, pre_norm, next_token_arr, gamma, temp,
+            fast_lm_head=getattr(self.mtp, "draft_lm_head", None) is not None,
             sync_group=coord_group,
         )
 
