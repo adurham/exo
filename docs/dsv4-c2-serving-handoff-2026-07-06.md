@@ -1214,3 +1214,14 @@ Verified end-to-end with a full bare run: deploy + venv pin + builds +
 launch on the reconciled env + generated relaunch scripts + auto-placed
 pinned DSv4 → READY 2/2, instance jit=False, temp=0 smoke '7',
 4K rung decode 35.41 t/s (34-38 band). The canonical path is proven.
+
+## fix/c2-serving-hardening MERGED TO MAIN (2026-07-07 ~13:00)
+
+User call: production must run main. The branch (99 commits: the entire
+c=2 hardening + 500K speed campaign, sessions 1-6) fast-forward merged —
+main had zero unique commits, nothing lost. start_cluster.sh branch
+defaults restored to main; both nodes checked out main (identical tree,
+running processes unaffected — verified smoke + venv gates + submodule
+pin 4d87751). The branch is retained as a historical pointer. From here:
+work lands on main (or short-lived branches merged promptly); a bare
+./start_cluster.sh deploys main = the verified prod config.
