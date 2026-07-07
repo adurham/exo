@@ -674,3 +674,76 @@ perf/reliable-optimistic to adurham/main). Cluster runs
   async fence) — decode ~1.7x slower, prefill ~40% slower. Attribution only.
 - DSv4 streaming: count BOTH `content` and `reasoning_content` deltas.
 - m4-2 ~/repos/mlx origin was HTTPS (WAN-broken) — now SSH like m4-1.
+
+## Session 4, part 2 (2026-07-07 early) — MTP verify slope: root-cause hunt + partial fixes
+
+**MTP-PROF phase timing** (`EXO_DSV4_MTP_PROFILE=N`, per-cycle draft/verify/
+accept/rollback means every N cycles — the tool that cracked it): draft
+4.9ms / accept 1.1 / rollback 0.3 are ALL context-flat; **verify (the L=3
+main forward) is the entire slope: 45ms @4K → ~67ms @256K → ~89ms @500K.**
+Acceptance is context-flat too (0.86-1.0 at every ctx — MTP_LOG windows), so
+the yield collapse is pure cycle-time growth.
+
+**Verify-slope decomposition at 256K** (NOP windows, cached-prefix sessions;
+use VERIFY MEAN not decode_tps — garbage-quality toggles inflate acceptance
+up to 1.66/2):
+- indexer (score+topk over P): ~6.3 ms/token
+- pool write+compress: ~3.7 ms/token (compressor_compress window — NB it
+  also skips the write via empty px)
+- `compressor_pool` NOP (pool frozen at 1 entry → ALL pool-path work gone,
+  acceptance-normal window): ~19.7 ms/token → a ~10 ms/token remainder that
+  is NOT indexer-score, NOT k-proportional (EXO_DSV4_INDEX_TOPK=192 A/B:
+  24.08 vs 24.0 t/s = ZERO effect at 256K — k-gather/sdpa is cheap), NOT
+  the write. Mechanism unresolved — next tool: mx.metal.start_capture GPU
+  trace of one verify at 4K vs 256K.
+
+**Pool-write donation fixes (landed, measured NEUTRAL so far):** mlx-lm
+276869c + f0ll0wup — the W4 deferred pool update's pre-write view blocks MLX
+slice-update donation → O(P·D) copy per flush (microbenched: 0.85ms/flush
+at 500K shapes vs ~0 donated; `EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES`
+threshold, default 32MB, 8MB in prod config; + mx.async_eval enqueue for
+ordering). e2e effect at 256K: none measurable — either donation still
+loses to in-graph aliasing or the copies were already amortized. The
+sync'd section-time compressor-span growth (+88% at 256K) says SOMETHING
+in that span scales; capture will tell. Semantics unchanged (post-write
+prefix view = same values), so the code is safe to keep.
+
+**Dead/neutral levers this session:** EXO_DSV4_INDEX_TOPK=192 (no speed
+effect at 256K, k=512 kept for quality margin), topk_fused live-enable (no
+e2e effect), pool donation threshold/async_eval (neutral so far).
+
+**Incidents:** one coord-subgroup `drain_acks STALLED` (lost UC completion,
+call_id 27027) mid-256K-prefill → clean re-place, self-healed. Same flaky-UC
+class as the warmup QP flake; NOT the v2 data path (zero v2
+DEADLINE/PROTOCOL/WC_ERR all session). Also: NOPing `sparse_attn` at long
+ctx crashes a runner (garbage → engine cascade) — bench-only toggles.
+
+## FINAL STATE (2026-07-07 ~00:30)
+
+| metric | before session | after |
+|--------|----------------|-------|
+| 4K decode | 29.5 t/s | **37-38 t/s** (+29%) |
+| 256K decode | 21.1-24 | ~24-27 |
+| 500K decode | 17.5 | **~19.7-20.2 t/s** (target 30 — OPEN) |
+| 500K prefill | 342 | 332-363 (target 300 — HOLDING) |
+| stability | — | battery 3/3 clean ×3 runs; smoke correct |
+
+Prod config: `~/relaunch_exo.sh` on both nodes (v2 ON, pool threshold 8MB,
+k=512, no diag envs; previous prod backed up as relaunch_exo.sh.bak-pre-v2).
+Variants kept: `relaunch_exo_v2.sh` (+MTP_PROFILE/MTP_LOG diag),
+`relaunch_exo_attrib.sh` (MTP off + allsum probe), `relaunch_exo_k192.sh`.
+mlx main = 57ffb39a (v2 merged; uv.lock pinned); mlx-lm main @ pool-donation
+commits (submodule bumped).
+
+**Path to 30 t/s @500K (residual ~-17ms/token needed), in order:**
+1. mx.metal.start_capture kernel diff of ONE verify forward 4K vs 256K —
+   pin the unexplained ~10ms/token pool-path term. (The answer is IN the
+   pool path: freezing it recovers everything.)
+2. Pool-write batching (accumulate K=16 entries, write every 16th flush —
+   staleness ≤64 tokens, covered by the 128-token local window; ~30-line
+   PoolingCache change sketched in session notes) — recovers the write term
+   robustly regardless of donation mechanics.
+3. Indexer score GEMV: fp8/int8 indexer pool cache (halves the 32MB/layer
+   scan bandwidth) — kernel work, see exo_gather_qmv_rhs_kernel lessons.
+4. Draft-side: 4.9ms × ~1 draft-phase per cycle is 10% of cycle — EAGLE_K/
+   gamma tuning interplay only after the verify slope is gone.
