@@ -747,3 +747,132 @@ commits (submodule bumped).
    scan bandwidth) — kernel work, see exo_gather_qmv_rhs_kernel lessons.
 4. Draft-side: 4.9ms × ~1 draft-phase per cycle is 10% of cycle — EAGLE_K/
    gamma tuning interplay only after the verify slope is gone.
+
+---
+
+# Session 5 addendum (2026-07-07 overnight) — decode @500K: verify-slope root cause + SDPA dispatch fixes
+
+Goal: decode 30 t/s @500K c=1 (from ~19.7-20.2). Constraint: pure compute
+optimizations only — no stability or quality changes.
+
+## Root cause of the verify slope (single-node harness decomposition)
+
+New tool: `~/scratch/verify_slope_ladder.py` (m4-1) — 4-layer random-weight
+model, prod quantization, real verify shape (B=1 L=3 trim 2), context ladder
+4K/64K/256K, sub-op ablation via /tmp/dsv4_nop_targets + in-process patches
+(gates OFF via EXO_DSV4_CATTN_LSPLIT_MAX_L=0 / EXO_DSV4_SPARSE_VERIFY_BATCHED=0).
+
+Findings (p50 per cycle, 4 layers; ×5 ≈ prod's 20 layers per ratio class):
+
+- **Per-layer pool compute is nearly FLAT in context** (ratio-4 base
+  11.45→11.90ms from 4K→256K). The prod "indexer 6.3ms / write 3.7ms"
+  session-4 numbers reproduce (score+topk 1.15ms/4L ×5 ≈ 5.8 ✓).
+- **The session-4 "unexplained ~10ms/token" = the sparse verify per-row
+  block** (gather + mask build + per-row L=1 SDPA): sparse0 delta
+  1.52-1.86ms/4L ×5 ≈ 9.3ms — k-fixed (why k=192 didn't move it), mostly
+  context-flat kernel-count overhead.
+- **The real context slope is the ratio-128 (CompressedAttention) dense
+  SDPA at L=3**: csdpa0 delta 0.73ms/4L @4K → 3.39ms/4L @256K (L=1 same
+  ctx: only 0.65). ×5 ≈ 17ms/verify @256K, extrapolating ~29ms @500K.
+  Cause is kernel DISPATCH, not architecture: mx.fast.sdpa at B=1,
+  1<L<=8 over a long local+pooled KV falls off the single-query fast
+  path and costs ~5x the same work as L separate L=1 calls.
+
+## Fixes landed (mlx-lm `9da3cd4`, adurham main; exo submodule bump `1f4f36289`)
+
+1. **CompressedAttention L-split** (`8162930`): at 1<L<=8, B=1, array
+   mask with per-row rows — issue L separate L=1 fused SDPA calls.
+   Gate `EXO_DSV4_CATTN_LSPLIT_MAX_L` (default 8; 0 disables).
+   Harness: ratio-128 @256K 13.26 → 10.99ms/4L (−2.27ms, −11ms/verify at
+   prod scale, grows with ctx). Equivalence: 20 paired forwards @256K,
+   worst max|dlogit| 0.024 (1-2 bf16 ulp — same class as landed variant_d
+   / pooling fixes), argmax 60/60 identical; L=1 path is the MORE accurate
+   fp32-fused kernel (same argument as the sparse per-position split).
+2. **Sparse verify batched prep** (`33bb37a`): the small-L sparse path ran
+   gather + KV concat + mask fill/broadcast/concat PER ROW (~30 small
+   kernels/layer); now built once at (B,·,L,·) with per-row slice views.
+   **Bit-exact** (paired forwards: worst diff 0.00000), SDPA calls
+   unchanged. Gate `EXO_DSV4_SPARSE_VERIFY_BATCHED` (default 1).
+   Harness: −0.21ms/4L @4K (context-flat win).
+
+Dead ends ruled out tonight: fused top-K at k=512 is NOT quality-safe
+(threadgroup kernel keeps 4 candidates/thread = 1024 total; at k=512 the
+Poisson tail loses ~3% of true top-k — fine at the k<=160 it was built
+for, wrong at 512). argpartition/argsort at L=3 are already pipelinable —
+not the slope. Isolated-op microbenches UNDERSTATE in-graph costs ~60x
+(dependency-chain latency vs throughput) — ablate in-model instead.
+
+## Deploy incident (self-inflicted, resolved) — venv restoration
+
+A plain `uv sync` (and a `--force-reinstall ./mlx-lm` without `--no-deps`)
+on the nodes broke the venvs: bare sync uninstalls the whole `mlx` extra
+(mlx/mlx-lm/mlx-vlm/mflux/torch — WAN git+https unreachable aborts it),
+the no-`--no-deps` install bumped transformers 5.9→5.13 breaking imports.
+Restored via the canonical start_cluster.sh sequence (sync --extra mlx
+--all-packages + vendored mlx-lm pin + maturin exo_rs rebuild) after
+setting `git config --global url."ssh://git@github.com/".insteadOf
+"https://github.com/"` on both nodes (makes uv's git fetch work over SSH).
+The serving cluster rode through it (imports already resident). Recipe now
+in CC memory `exo-node-deploy-gotchas`.
+
+## Session 5, part 2 — pre-existing L==1 prefill-remainder crash found + fixed
+
+The first 500K validation rung died with a runner crash at the sparse
+L==1 fast path: `mx.concatenate([lm, pm])` → "dimensions 2 and 4". NOT a
+session-5 regression — the identical crash is in the log at 2026-07-06
+23:07 on pre-patch code. Trigger: a prefill remainder chunk of exactly 1
+token reaches the L==1 path carrying the model-level 2-D (L,S) causal
+mask while the gathered sparse_mask is 4-D; prompt-length dependent
+(needs an unlucky length ≡ tail-1 in the chunking), which is why the
+ladder only hit it sometimes. Fix (mlx-lm `85531a3`, main; submodule
+bump in exo): the same 2D→4D normalization the 1<L<=16 branch already
+applies. Unit-verified: crash shape now returns output bitwise-identical
+to a pre-normalized call (diff 0.0).
+
+## Session 5 FINAL STATE (2026-07-07 ~04:00)
+
+Validation on the deployed build (mlx-lm `85531a3` = L-split + batched
+sparse prep + L==1 mask fix; exo `fix/c2-serving-hardening` submodule-
+bumped; mlx unchanged `57ffb39a`):
+
+| metric | session-4 end | session-5 end |
+|--------|---------------|---------------|
+| 4K decode | 33-38 t/s (±20% prompt noise) | 34-35 t/s (same band; harness shows the patch is ≥neutral at 4K) |
+| ~300K decode | ~21.3-21.5 t/s | **28.3 t/s** |
+| deep rung decode | 17.5-20.2 @500K | **25.6 @586K** (~26.4 interpolated @500K) |
+| prefill @586K | 342 @500K | 328-362 (target 300 HOLDING at 586K) |
+| verify forward | ~89ms @500K | ~65ms @586K (from cycle math) |
+| MTP acceptance @586K | 0.86-1.0 band | 1.07-1.18/2 first windows (≥ band) |
+| c=2 battery | 3/3 clean | 3/3 clean (mid-decode admissions, temp 1.0) |
+| temp=0 smoke | ✓ | ✓ ('7') |
+
+**Decode @500K: ~26.4 t/s vs target 30 — OPEN, gap ~12%.** (Was 41-52%.)
+
+Cluster state: both nodes on `~/relaunch_exo.sh` (prod, no diag), model
+warm, smoke verified. Both venvs restored canonically (see part 2).
+Cleanup note: `relaunch_exo_g3.sh` (staged gamma-3 A/B, never used —
+acceptance math says gamma 3 is a wash: per-depth decay too steep) can be
+deleted.
+
+**Path to 30 t/s @500K (residual ~-8ms/verify needed), in order:**
+1. Remaining O(P) verify terms measured in the harness at 256K, scale ~2x
+   to 500K, per 20 layers: indexer score GEMM ~5ms, topk block
+   (idxnop-score0 = argpartition + `-scores` + idx-side compressor)
+   ~6ms, CompressedAttention L-split residual (q-chain + concat + 3x L=1
+   sdpa) ~5.6ms. An EXACT fused top-k needs a histogram/threshold
+   two-pass design (the existing threadgroup kernel LOSES ~3% of true
+   top-512 — candidates/thread too few; do NOT just raise the gate).
+2. Indexer-pool fp8 scan (halves the 32MB/layer score read) — QUALITY-
+   SENSITIVE (bf16-perturbation acceptance lesson); needs needle +
+   acceptance validation before prod.
+3. CompressedAttention: reserved-tail pool layout to kill the per-step
+   local+pool concat (~0.4ms, bit-exact, small).
+4. Re-run the verify_slope_ladder decomposition at PROMPT_L=500K to
+   re-rank 1-3 with the L-split already landed (numbers above are 256K
+   extrapolations).
+
+Tooling added this session (m4-1 ~/scratch): verify_slope_ladder.py
+(slope decomposition w/ gates), lsplit_equiv.py + sparse_batched_equiv.py
+(paired-forward equivalence gates), sdpa_rowsplit_microbench.py,
+validate2.sh (smoke/rung/battery driver). Lesson recorded: isolated-op
+microbenches understate in-graph costs ~60x — always ablate in-model.
