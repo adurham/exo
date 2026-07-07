@@ -177,6 +177,15 @@ def run_rung(target: int, k: int, label: str, url: str, model: str,
             round((n_deltas - 1) / decode_s, 2)
             if (decode_s and n_deltas > 1) else None
         ),
+        # Cross-check for servers that batch >1 token per SSE delta (the
+        # primary decode_tps assumes per-token deltas, true for exo /
+        # LM Studio / llama.cpp; batching servers undercount there). Uses
+        # the server-reported completion_tokens over the same wall window.
+        "decode_tps_usage": (
+            round((completion_tokens - 1) / decode_s, 2)
+            if (decode_s and completion_tokens and completion_tokens > 1)
+            else None
+        ),
         "needle_recall": f"{hits}/{len(needles)}",
         "recall_frac": round(hits / len(needles), 3),
         "per_needle": per_needle,
