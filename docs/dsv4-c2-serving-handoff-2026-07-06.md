@@ -1166,3 +1166,14 @@ Gate criterion for a numerics-perturbing variant: recall >= 10/10 at
 rerun confirming non-systematic), decode t/s >= baseline row - noise.
 Next per the plan: fp8/affine8 indexer pool scan behind an env gate,
 judged against this baseline.
+
+### Config delta 2026-07-07 ~12:15: EXO_JIT_IDLE_UNLOAD_SECONDS 300 → 1800
+
+User-reported surprise: model unloading "before 30 min". Investigated —
+NOT a bug: the reaper honors the pin contract (only instance.jit=True
+auto-placements are ever unloaded, placement_utils.py:204; manual/
+dashboard placements are jit=False = immune), and every load today was
+request-triggered (jit=True). The window was simply the 300s default.
+Both relaunch scripts now carry 1800s; cluster restarted + smoked. To
+make the model PERMANENTLY resident, place it explicitly (dashboard
+launch / place command) — explicit placements never auto-unload.
