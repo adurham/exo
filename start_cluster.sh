@@ -749,7 +749,7 @@ SUBNET_M4_1_M4_2=$(echo "$M4_1_TO_M4_2" | awk -F. '{print $1"."$2"."$3".0/24"}')
 echo "Cross-subnet routes skipped (2-node direct link)."
 
 # 0. Pre-deploy push check — verify local HEAD is on origin/$TARGET_BRANCH
-PUSH_CHECK_BRANCH="${EXO_TARGET_BRANCH:-fix/c2-serving-hardening}"
+PUSH_CHECK_BRANCH="${EXO_TARGET_BRANCH:-main}"
 echo "Verifying local commits are pushed to origin/$PUSH_CHECK_BRANCH..."
 LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "none")
 git fetch origin --quiet 2>/dev/null || true
@@ -839,9 +839,9 @@ for NODE in "${NODES[@]}"; do
     ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
     
     # Update and Build Logic
-    # Default to the serving prod branch — a BARE ./start_cluster.sh must bring up
-    # the verified production config (2026-07-07). Override with EXO_TARGET_BRANCH.
-    TARGET_BRANCH="${EXO_TARGET_BRANCH:-fix/c2-serving-hardening}"
+    # main IS the verified production config (fix/c2-serving-hardening merged
+    # 2026-07-07). Override with EXO_TARGET_BRANCH for experiments only.
+    TARGET_BRANCH="${EXO_TARGET_BRANCH:-main}"
     ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
     
     echo "Ensuring build dependencies on $NODE..."
