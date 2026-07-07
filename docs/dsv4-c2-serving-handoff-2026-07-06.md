@@ -1177,3 +1177,11 @@ request-triggered (jit=True). The window was simply the 300s default.
 Both relaunch scripts now carry 1800s; cluster restarted + smoked. To
 make the model PERMANENTLY resident, place it explicitly (dashboard
 launch / place command) — explicit placements never auto-unload.
+
+### Correction: EXO_JIT_IDLE_UNLOAD_SECONDS reverted 1800 → 300 (user-intentional)
+
+The 300s window is DELIBERATE: it exists to reap a JIT-loaded Qwen
+co-host quickly and relieve memory pressure — not a stale default. Do
+not raise it. If DSv4 should stay permanently warm alongside that
+policy, place IT explicitly (jit=False = pinned, reaper-immune) and let
+Qwen ride the 5-min JIT reaper.
