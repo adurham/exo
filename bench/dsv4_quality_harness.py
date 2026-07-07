@@ -36,8 +36,8 @@ import time
 import urllib.request
 import uuid
 
-URL = "http://localhost:52415/v1/chat/completions"
-MODEL = "mlx-community/DeepSeek-V4-Flash"
+DEFAULT_URL = "http://localhost:52415/v1/chat/completions"
+DEFAULT_MODEL = "mlx-community/DeepSeek-V4-Flash"
 DEFAULT_LADDER = [100000, 256000, 500000]
 K_NEEDLES = 10
 GEN_TOKENS = 8000
@@ -85,11 +85,11 @@ def build_prompt(n_words: int, seed: int, k: int):
     return prompt, needles
 
 
-def run_rung(target: int, k: int, label: str):
+def run_rung(target: int, k: int, label: str, url: str, model: str):
     n_words = max(1000, int(target * WORDS_PER_TOKEN))
     prompt, needles = build_prompt(n_words, seed=target, k=k)
     body = json.dumps({
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": GEN_TOKENS,
         "temperature": 0.0,
@@ -98,7 +98,7 @@ def run_rung(target: int, k: int, label: str):
     }).encode()
     timeout = target / PESSIMISTIC_PREFILL_TPS + 1800
     req = urllib.request.Request(
-        url=URL, data=body, headers={"Content-Type": "application/json"}
+        url=url, data=body, headers={"Content-Type": "application/json"}
     )
     t_req_start = time.time()
     t0 = time.monotonic()
@@ -220,6 +220,8 @@ def main():
     ap.add_argument("--label", default="unlabeled")
     ap.add_argument("--out", default=None)
     ap.add_argument("--needles", type=int, default=K_NEEDLES)
+    ap.add_argument("--url", default=DEFAULT_URL)
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("ladder", nargs="*", type=int, default=None)
     args = ap.parse_args()
     ladder = args.ladder or DEFAULT_LADDER
@@ -228,7 +230,7 @@ def main():
     for target in ladder:
         print(f'{{"start": {target}, "t": "{time.strftime("%H:%M:%S")}"}}',
               flush=True)
-        r = run_rung(target, args.needles, args.label)
+        r = run_rung(target, args.needles, args.label, args.url, args.model)
         acc = parse_acceptance_windows(
             r["t_start_epoch"], r["t_end_epoch"]
         )
