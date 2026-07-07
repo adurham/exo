@@ -421,3 +421,256 @@ at all batch sizes). Follow-ups: retest `EXO_DSV4_FENCE_ASYNC_C2=2` on top
 before calling long-context quality fully validated. Diagnostic tools:
 `~/scratch/bdiff_r128_bisect.py`, `qmm_invariance_sweep.py`,
 `dsv4_bdiff_model.py` (fixed-seed 4-layer repro, ~60 s).
+
+---
+
+# Session 3 addendum (2026-07-06) — long-context speed: 500K ladder baseline + prefill bottleneck
+
+Goal: 300 tok/s prefill and 30 tok/s decode at 500K context (c=1).
+
+## Bug fixed first: rank-1 event starvation during long prefill (exo `0cfb16b7`)
+
+Any prefill longer than EXO_RUNNER_HANG_TIMEOUT_SECONDS SIGKILLed the rank-1
+runner while healthy: `on_prefill_progress` emits PrefillProgressChunk only on
+rank 0, and the task-#25 decode heartbeat lives in the step() loop — never
+reached while submit() is inside a long synchronous prefill. Same starvation
+class as task #25, prefill edition. Fix: `Engine.heartbeat` hook (installed by
+Runner after build()); non-zero ranks fire it throttled (15 s) from all three
+prefill-progress callback sites. Verified: 59-minute 500K prefill, zero kills.
+
+## 500K ladder baseline (c=1, MTP on, prod config, fresh salted prompts)
+
+| context | prefill tok/s | decode tok/s |
+|---------|---------------|--------------|
+| 4.7K    | 152           | 27.6         |
+| 32K     | 151           | 28.0         |
+| 64K     | 152           | 27.4         |
+| 128K    | 152           | 24.2         |
+| 256K    | 150           | 21.3         |
+| 500K    | 141.6         | 17.2         |
+
+- **Prefill is FLAT in context** — purely per-token constant cost, not a
+  long-context cliff. Gap to target: 2.1x.
+- **Decode droops linearly** (~44 µs/token added per 100K ctx; 500K measured
+  17.2 exactly on the extrapolation). Gap at 500K: 1.74x.
+- Peak wired 83.7 GB / 128 GB at 500K (KV headroom fine; 1M would squeeze).
+- GPU util during 256K prefill: **75% on BOTH nodes** → NOT compute-saturated.
+
+## Prefill bottleneck: reliable ARQ is stop-and-wait at sz=2
+
+`mesh_impl.h reliable_all_reduce`: `SEND_INFLIGHT = (sz==0) ? inflight : 1` —
+at the production chunk class (sz=2, 16KB) exactly ONE send is in flight;
+MLX_JACCL_RELIABLE_INFLIGHT does nothing. Measured with a standalone bench
+(`~/scratch/jaccl_bw_bench.py`, both nodes, cluster idle):
+
+| payload | per-op | effective | note |
+|---------|--------|-----------|------|
+| 8 KB    | 0.19 ms | 44 MB/s  | decode-shaped (1 chunk + TCP barrier) |
+| 2 MB    | 4.4 ms  | 475 MB/s | prefill-shaped; **identical at inflight=1 and =2** |
+| 8 MB    | 16.9 ms | 497 MB/s | |
+
+Consistency check: 688 KB collective traffic per prefill token ÷ 475 MB/s ≈
+1.45 ms of the 6.6 ms/token budget ≈ 22% — matches the 25% GPU idle.
+
+Patch (mlx `452fbebf`, branch `perf/reliable-send-pipelining`, pushed to
+adurham + both nodes): honor RELIABLE_INFLIGHT for sz<=2 (concurrent <=16KB
+UC sends measured clean 2026-07-05; ENOMEM only >=64KB) + NUM_BUFFERS 2->8.
+
+## Decode target notes (next after prefill)
+
+- EVERY reliable collective pays a TCP coordinator barrier round-trip (bitmask
+  exchange) even for 1-chunk decode payloads — the 0.19 ms 8KB floor.
+- Decode context-slope (~44 µs/100K) is separate (indexer scan?); profile with
+  EXO_PROFILER=spans + EXO_DECODE_PROBE at 256K+.
+- Follow-up from session 2 still open: retest EXO_DSV4_FENCE_ASYNC_C2=2.
+
+## Session 3, part 2 — ARQ send pipelining LANDED (mlx `452fbebf`)
+
+Patch validated and deployed (adurham/main; exo uv.lock bumped `e463883e`;
+MLX_JACCL_RELIABLE_INFLIGHT=8 in both relaunch scripts):
+
+- Standalone bench: 2MB collectives 475 -> 3711 MB/s (if=8), 8MB -> 4287 MB/s.
+  8KB decode-shaped unchanged ~0.17ms (TCP-barrier floor, expected).
+- Bitexact: 80/80 pipelined collectives exact. specoff_battery 3/3 clean
+  (c=2 mid-decode admissions, MTP on).
+- One warmup QP-flake DEADLINE on first placement post-restart —
+  reconnect_fresh healed in-process (~0.15s), warmup completed. Watch whether
+  depth-8 raises flake frequency (faster sends after QP establishment).
+
+Ladder, baseline -> pipelined:
+
+| context | prefill tok/s      | decode tok/s     |
+|---------|--------------------|------------------|
+| 64K     | 152 -> **316**     | 27.4 -> **32.1** |
+| ~300K   | 150 -> **302**     | 21.3 -> 21.5     |
+| 500K    | 141.6 -> **249**   | 17.2 -> 18.6     |
+
+Targets (300 prefill / 30 decode @500K): prefill 83% there (droop 316->249
+past 300K = a context-dependent prefill cost emerging — indexer/attention
+share?); decode 62% there (context-linear ~44µs/100K term dominates; comms
+pipelining barely moves it, as predicted).
+
+Next: profiled 500K run (EXO_PROFILER=spans + EXO_DECODE_PROBE=1, in both
+relaunch scripts as of 17:05) to attribute (a) the 500K prefill droop and
+(b) the decode linear term (suspect: indexer top-k scan over full ctx).
+Decode-phase spans flush at the NEXT request's prefill start — the profiled
+run submits 500K then a 4K chaser for exactly this.
+
+## Session 3, part 3 — profiling attribution + prefill A/Bs
+
+**Span attribution** (EXO_PROFILER=spans, ratios only — spans under lazy eval
+are unreliable for absolutes; ~2-2.6x overhead while armed):
+- Prefill 500K: moe.switch_mlp ~45% (flat vs 4K), attn grows 33.8→37.9%,
+  driven by attn.sdpa 3.8→7.0% and attn.indexer 1.4→4.2% — that pair is the
+  >300K prefill droop (316@64K → 249@500K). Comms ~19% post-pipelining.
+- Decode 500K vs 4K: context-linear cost is ALL attention-path —
+  attn.sdpa 9.5→18.8% (avg 369→917µs/layer-step), indexer 7.0%,
+  compressor 6.5%. MoE + comms shares SHRINK. Decode@500K = indexer/sparse
+  kernel problem, not comms. (Task: optimize the O(ctx) indexer scan.)
+
+**A/B results (64K probe, unprofiled):**
+| config change | 64K prefill | verdict |
+|---|---|---|
+| tracing off (EXO_TRACING_ENABLED=false, LOG_LEVEL=INFO) | 317 (=) | keep off anyway; decode deltas within MTP-acceptance noise (±20% across prompts — don't A/B decode via single 256-tok gens) |
+| EXO_DSV4_FUSED_MOE=1 | 317 (=) | DEAD for prefill; reverted to 0 |
+| EXO_PREFILL_STEP_SIZE 256→1024 | **393 (+24%)** | ADOPTED (both relaunch scripts) |
+| EXO_PREFILL_STEP_SIZE 2048 | 440-467 mid-run, then **hard GPU wedge** | REJECTED |
+
+**2048 wedge detail:** froze at 12K/63K tokens; stall sampler caught main
+thread in `mx.eval(y)` at the per-layer MoE all_sum fence (deepseek_v4.py
+~1647) with NO jaccl DEADLINE in 112s → the pre-existing uninterruptible
+Metal/GPU wedge class (tasks #15-19), likelier with 16MB collectives /
+L=2048 command buffers. Hang watchdog killed + re-placed cleanly.
+
+specoff_battery 3/3 clean at step 1024. Final validation ladder running.
+
+## Session 3, part 4 — seq-split gather fix + FINAL 500K numbers
+
+**Step-1024 wedge root-caused and fixed.** The 256K failure at step 1024 was
+the seq-split band all_gather: it runs on a jaccl SUBGROUP (no TCP
+coordinator → reliable ARQ can't arm → raw UC), and ~4MB bands
+intermittently hit the UC stuck-send wedge; subgroup reconnect can't heal
+(reconnect_fresh is top-level only) → full re-place. Fix (mlx-lm `7de756d`,
+submodule bump exo `0c2bee10`): reconstruct bands via ZERO-PADDED all_sum on
+the top-level group — bit-exact, rides the pipelined reliable path, kills
+the wedge class. Gate: EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM (default 1).
+
+**FINAL ladder (pipelined ARQ if=8 + step 1024 + reliable gather + tracing off):**
+
+| context | prefill tok/s (was, 09:00 today) | decode tok/s |
+|---------|----------------------------------|--------------|
+| 4.7K    | 363.5 (152)                      | 29.5 (27.6)  |
+| 256K    | 367.4 (150)                      | 21.1 (21.3)  |
+| 500K    | **342.4 (141.6) — TARGET 300 MET** | 17.5 (17.2)  |
+
+GPU util during 500K prefill: ~94-95% (was 75%) — comms overhead gone.
+Zero kills/wedges across the final ladder.
+
+**Decode @500K remains the open target (17.5 vs 30).** Attribution says the
+gap is context-linear attention-path cost (indexer O(ctx) scan + sparse
+gather/sdpa + compressor — sdpa avg 369→917µs/layer-step from 4K→500K
+profiled) plus the per-collective TCP-barrier floor (~0.17ms × ~dozens of
+collectives/token). Next levers, in order:
+1. Indexer scan kernel at long ctx (the ~44µs/100K/token slope) — kernel
+   work; see gather_qmv experience in memory `exo_gather_qmv_rhs_kernel`.
+2. TCP-barrier elimination for 1-chunk reliable collectives (piggybacked
+   UC ack or barrier-every-N) — mesh_impl.h.
+3. Retest EXO_DSV4_FENCE_ASYNC_C2=2 on the new transport (old +36% c=2).
+
+**Config deltas today (both relaunch scripts):** MLX_JACCL_RELIABLE_INFLIGHT
+2→8, EXO_PREFILL_STEP_SIZE 256→1024, EXO_TRACING_ENABLED true→false,
+LOG_LEVEL DEBUG→INFO, EXO_DSV4_FUSED_MOE stays 0 (A/B'd: dead for prefill),
+step 2048 REJECTED (GPU wedge at 16MB command buffers).
+
+**Commits:** exo `0cfb16b7` (prefill heartbeat), `e463883e` (mlx lock bump),
+`0c2bee10` (mlx-lm bump); mlx `452fbebf` (ARQ pipelining, adurham/main);
+mlx-lm `7de756d` (reliable gather). All pushed; node repos + venvs synced.
+
+---
+
+# Session 4 addendum (2026-07-06 evening) — decode @500K: attribution + optimistic ARQ (v2)
+
+Goal: decode 30 tok/s @500K c=1 (from 17.5). Prefill target already MET (342).
+
+## Attribution (NOP-toggle method — the ground truth)
+
+Method: `/tmp/dsv4_nop_targets` live block-disable + fixed unsalted prompt
+(prefix cache pays the 500K prefill ONCE) + MTP/spec OFF so median
+inter-delta gap == per-forward ms. Driver: laptop `nop_attrib.py` (in
+scratchpad; salt-free variant of longctx_bench). Toggles flip BETWEEN
+requests on both nodes (never mid-flight — and never NOP `sparse_attn` at
+500K: garbage output crashed a runner → ECONNRESET cascade → re-place).
+
+**Decode per-forward composition (p50 ms, spec-off, allsum-probe config):**
+
+| component (NOP delta) | 4K    | 500K  |
+|-----------------------|-------|-------|
+| baseline forward      | 65.1  | 67.5  |
+| collectives (all_sum) | 23.0  | 19.3  |
+| MoE compute           | ~16.7 | —     |
+| sparse sdpa+gather    | 10.2  | (crashed) |
+| compressor            | 6.5   | —     |
+| indexer (score+topk)  | 3.9   | 7.1   |
+| topk_fused live-on    | ±0    | ±0    |
+
+**Two decisive findings:**
+1. **The spec-off forward is nearly FLAT in context** (65→67.5ms; indexer
+   +3.2ms is the only slope). The synthetic op microbench agrees (per-op
+   O(ctx) terms are ~100-285us/layer at 500K — small).
+2. **The 500K decode droop is an MTP-effectiveness collapse**: MTP-on/spec-off
+   yield = 1.96x @4K → 1.27x @500K. Fixing the forward path can't close the
+   500K gap; the MTP cycle (acceptance and/or per-cycle cost) at long ctx is
+   the target. Hypothesis: draft/verify top-k selection agreement degrades as
+   k=512 covers 0.4% of the 125K pool (vs 43% @4K) — the code already
+   documents acceptance sensitivity to tiny top-k perturbations (bf16 note in
+   `_indexer_score`). First lever: EXO_DSV4_INDEX_TOPK at long ctx.
+   Measure first: `EXO_DSV4_MTP_LOG_INTERVAL=50` (NOT `EXO_DSV4_MTP_LOG` —
+   stale comment) prints mean_accept + histogram per 50 cycles.
+3. Comms is ~19-23ms/forward FLAT — the #1 decode cost at every context.
+
+## Optimistic reliable ARQ (v2) — LANDED, +29% decode @4K
+
+mlx branch `perf/reliable-optimistic` (572e29e1a + da03b622, pushed to
+adurham): `reliable_all_reduce_v2`, gate `MLX_JACCL_RELIABLE_OPTIMISTIC=1`.
+Kills the per-collective TCP coordinator barrier for SMALL collectives
+(num_chunks<=3 — all decode all_sums):
+
+- 12-byte in-band header {call_id, seq, len}; **uniform cap size class for
+  ALL v2 messages** (Apple librdma silently kills size-class-mismatched
+  send/recv pairs — the documented LOC_LEN_ERR FIFO class; first build
+  deadlined on this).
+- Standing 8-recv pool per peer (cap class, repost-on-consume, re-armed via
+  reset_ack_state on reconnect) — peer recv queue can never be "not ready".
+- Optimistic exit: leave on (all peer chunks + own send CQEs). Send buffers
+  parity-partitioned (call_id&1 → slots 0-3/4-7) and retained one collective;
+  a stuck peer's quiet-timeout STATUS (got-bitmask) is answered verbatim from
+  retained buffers by the NEXT collective's poll loop. Skew is provably <=1.
+- One-call lookahead stash; skew>1 or malformed header throws (clean
+  re-place); 15s deadline unchanged. LARGE collectives (prefill) keep the TCP
+  rendezvous exit but ride the same pool/header; their send pipeline is now 4
+  parity slots (was 8) — measured -5% on 2MB ops (3623→3429MB/s), prefill
+  unchanged e2e (345-362 t/s @4K rung).
+- exo side (`fix/c2-serving-hardening` f342996e7): warmup + cache-pressure
+  all_gathers rerouted to the coord subgroup — the model group's data QP must
+  be ALL-all_sum for the pool. **PP placements must keep the gate OFF**
+  (PipelineLastLayer send/recv/all_gather ride the model group).
+
+Validation: `~/scratch/jaccl_v2_validate.py` (bitexact soak, mixed
+small/large transitions, skew stress, latency ladder) — OK on both ranks;
+decode-shaped all_sum 147.5→91.6us idle-link. Serving: smoke correct,
+specoff_battery 3/3 clean (c=2 mid-decode admissions, MTP on), **4K decode
+29.5 → 38.3/37.4 t/s (+29%)** — matches 86 collectives/forward × ~56us saved.
+
+Deploy state: nodes' venvs run mlx da03b622 from ~/repos/mlx (NOT in
+uv.lock — a `uv sync` REVERTS to 452fbebf; bump the lock after merging
+perf/reliable-optimistic to adurham/main). Cluster runs
+`~/relaunch_exo_v2.sh` (prod + OPTIMISTIC=1 + MTP_LOG_INTERVAL=50).
+
+## Diagnostic gotchas learned this session
+
+- `EXO_DSV4_SECTION_TIME` dump gate was dead (layer_count increment removed
+  in a refactor) — fixed in mlx-lm `9a1e21f`.
+- `EXO_DSV4_ALLSUM_PROBE=1` forces per-layer blocking eval (replaces the
+  async fence) — decode ~1.7x slower, prefill ~40% slower. Attribution only.
+- DSv4 streaming: count BOTH `content` and `reasoning_content` deltas.
+- m4-2 ~/repos/mlx origin was HTTPS (WAN-broken) — now SSH like m4-1.
