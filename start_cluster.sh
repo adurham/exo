@@ -749,7 +749,7 @@ SUBNET_M4_1_M4_2=$(echo "$M4_1_TO_M4_2" | awk -F. '{print $1"."$2"."$3".0/24"}')
 echo "Cross-subnet routes skipped (2-node direct link)."
 
 # 0. Pre-deploy push check — verify local HEAD is on origin/$TARGET_BRANCH
-PUSH_CHECK_BRANCH="${EXO_TARGET_BRANCH:-main}"
+PUSH_CHECK_BRANCH="${EXO_TARGET_BRANCH:-fix/c2-serving-hardening}"
 echo "Verifying local commits are pushed to origin/$PUSH_CHECK_BRANCH..."
 LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "none")
 git fetch origin --quiet 2>/dev/null || true
