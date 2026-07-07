@@ -1133,3 +1133,36 @@ scratch + one relaunch variant); no cluster risk.
 Expected if 2+3 land clean: ~27.6 → ~30 @500K. If they fail the harness,
 30 t/s @500K requires either relaxing quality constraints explicitly or
 architectural work (speculative pipelining, draft-cost restructuring).
+
+### Quality harness BUILT + BASELINED (2026-07-07 ~12:00) — step 1 of the plan DONE
+
+`bench/dsv4_quality_harness.py` (canonical; run copy on m4-1
+`~/scratch/quality_harness.py`). Fixed-seed word-soup + 10 needles at
+depths 5%..95%, temp=0, recall scored over reasoning+content (DSv4
+reasons first — content-only scoring reads 0/10 while the model is
+actually 10/10; the 16K shakeout caught this), decode t/s over the
+generation as the acceptance proxy, salt-only cache defeat so variants
+prefill identical needles. Usage: `--label X --out results.jsonl
+[ctx...]`; full ladder ~60 min.
+
+**Baseline on the validated build (mlx-lm `baa3b59`+`4d87751`, exact-topk
+ON), `~/scratch/quality_baseline.jsonl`:**
+
+| ctx (actual) | needle recall | decode t/s | prefill t/s |
+|---|---|---|---|
+| 100,467 | 10/10 | 36.19 | 377.4 |
+| 256,575 | 10/10 | 32.97 | 362.4 |
+| 501,695 | **10/10** | **28.94** | 339.5 |
+
+Notes: (1) perfect retrieval at every depth incl. 500K — the exact-topk
+tie-set change did not dent recall; (2) decode t/s is workload-dependent:
+this needle task at TRUE 500K runs 28.94 t/s vs the word-count task's
+27.04 at 586K — by the 500K-workload measure the 30 t/s target gap is
+~3.5%, by the 586K word-count measure ~10%. Future A/Bs must compare
+LIKE-for-LIKE harness rows, not across tasks.
+
+Gate criterion for a numerics-perturbing variant: recall >= 10/10 at
+100K/256K and >= 9/10 at 500K (one marginal needle allowed only with a
+rerun confirming non-systematic), decode t/s >= baseline row - noise.
+Next per the plan: fp8/affine8 indexer pool scan behind an env gate,
+judged against this baseline.
