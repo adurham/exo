@@ -1225,3 +1225,12 @@ running processes unaffected — verified smoke + venv gates + submodule
 pin 4d87751). The branch is retained as a historical pointer. From here:
 work lands on main (or short-lived branches merged promptly); a bare
 ./start_cluster.sh deploys main = the verified prod config.
+
+## Tool inventory (post-merge, all on main)
+
+| tool | path | purpose |
+|---|---|---|
+| quality harness | `bench/dsv4_quality_harness.py` | needle recall + decode-t/s gate for numerics changes; portable (`--url/--model/--api-key`); baseline `~/scratch/quality_baseline.jsonl` (m4-1, label baseline-etopk-27.04) |
+| c=2 stress battery | `bench/specoff_battery.py` | mid-decode-admission degeneration gate ("battery 3/3 clean") |
+| ladder bench | m4-1 `~/scratch/longctx_bench.py` | prefill/decode t/s rungs (unversioned scratch) |
+| verify-slope harness | m4-1 `~/scratch/verify_slope_ladder.py` | single-node sub-op ablation (unversioned scratch) |
