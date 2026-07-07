@@ -994,3 +994,45 @@ attribution shows the remaining ~8ms/verify is REQUIRED compute
 so the next session should start from the ranked list above (exact fused
 top-k with an acceptance gate is the best-value target), not from
 overhead hunting.
+
+## Session 6, part 2 — EXACT fused top-k LANDED (mlx-lm `4d87751`)
+
+The ranked-list #1 lever, done this session after all. Histogram/threshold
+two-pass Metal kernel replaces `-scores` + argsort/argpartition in
+Indexer.__call__ at L<=16 (decode + verify): monotonic 16-bit key over
+bf16 scores → exact threshold via two 256-bin histogram passes → one
+deterministic index-ordered compaction (all > threshold, then
+lowest-index ties to fill k). Gate `EXO_DSV4_EXACT_TOPK=1` (default);
+`exact_topk_off` in /tmp/dsv4_nop_targets disables live.
+
+- Exactness: selected score MULTISET always == argpartition's (unit gate:
+  heavy-ties/all-const/99%-masked/P=k+1/B=2/L=16 all OK). Tie IDENTITIES
+  at the boundary differ (deterministic lowest-index vs argpartition's
+  implementation-defined pick) — the same documented arbitrary-ties class.
+  Only fires at P > k (ctx >~2K): short-context outputs bitwise unchanged.
+- Isolated: 0.145 → 0.045ms at (1,3,125K) k=512 (3.2x). In-model 4-layer
+  harness @256K: −0.14ms/4L reproducible (first real in-model timing win
+  of the night). Model gate: worst |dlogit| 0.125, 3/48 argmax flips —
+  pure tie-set identity effect (etopk-vs-etopk control 0.0e+00).
+- Draft-phase note: the MTP module is LocalAttention+MoE+shared-lm_head —
+  no indexer/topk; its 4.9ms is dominated by the ~925MB quantized lm_head
+  gemv read (bandwidth). Vocab-pruning the draft lm_head would be
+  quality-SAFE for outputs (rejection sampling preserves the target
+  distribution) but acceptance-risky — future lever, needs measurement.
+### Exact top-k e2e validation (2026-07-07 ~10:00) — ALL GREEN, kept ON
+
+| check | result |
+|---|---|
+| temp=0 smoke | ✓ ('7' — bitwise-unchanged path at short ctx) |
+| 4K rung pre/post-battery | 34.99 / 34.88 t/s (band 34-38 — acceptance HELD) |
+| 586K rung | prefill 331.1, **decode 27.04 t/s (was 25.94 same depth, +4.2%)** |
+| c=2 battery | 3/3 pairs clean, 0 degenerated |
+
+**Decode @500K ≈ 27.6 t/s interpolated (27.04 @586K) vs target 30 — gap
+now ~9% (was ~17% at session-5 end).** Cluster state: both nodes on
+mlx-lm `4d87751` (exact-topk ON + node diet ON + fused-sdpa OFF), exo
+`fix/c2-serving-hardening`, prod `~/relaunch_exo.sh` unchanged, model
+warm, all watchers clean. Remaining ranked levers: indexer score GEMM
+bandwidth (fp8 pool scan — quality-gate required), head-shared fused
+sparse SDPA (post-mortem above), draft lm_head bandwidth (~925MB/step —
+vocab pruning is output-quality-safe but acceptance-risky).
