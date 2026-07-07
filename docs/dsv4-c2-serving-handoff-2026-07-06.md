@@ -876,3 +876,99 @@ Tooling added this session (m4-1 ~/scratch): verify_slope_ladder.py
 (paired-forward equivalence gates), sdpa_rowsplit_microbench.py,
 validate2.sh (smoke/rung/battery driver). Lesson recorded: isolated-op
 microbenches understate in-graph costs ~60x — always ablate in-model.
+
+---
+
+# Session 6 addendum (2026-07-07 overnight) — decode @500K: attribution CORRECTED, fused-kernel post-mortem, bitwise node diet
+
+Goal: decode 30 t/s @500K c=1 (from ~25.6 @586K). Constraint: pure compute
+optimizations, zero stability/quality changes.
+
+## The load-bearing negative result: NOP attribution deltas were inflated by lazy-graph dead-code pruning
+
+The session-4/5 "unexplained in-graph overhead" (isolated ops ~0.14ms vs
+2.3ms NOP delta per 4 sparse layers) was largely an artifact: NOPing a
+block (e.g. `sparse_attn` → zeros) makes everything that ONLY feeds that
+block dead code in the lazy graph — mx.eval prunes it. So `sparse0`'s
+delta included the ENTIRE indexer chain (score GEMM + topk), not just the
+gather+SDPA it nominally ablates. Corrected @500K r4 L=3 verify budget
+(per 4L → per 21 prod layers, full-width single-node):
+
+| block | corrected delta | per verify |
+|---|---|---|
+| indexer chain total (idxnop) | 1.60ms/4L | ~8.4ms (score GEMM ~4.0, topk block ~4.4) |
+| sparse gather+SDPA TRUE (sparse0 − idxnop) | 0.70ms/4L | ~3.7ms |
+| CATTN sdpa + its pruned q-chain (csdpa0, r128) | 1.47ms/4L | ~7.4ms/20L |
+| pool write (poolw0) | 0.11ms/4L | ~0.6ms |
+
+Implication: the remaining decode budget is mostly REQUIRED compute
+(argpartition sort over P=125K, score GEMM bandwidth, CATTN q-chain), not
+removable dispatch overhead. When ablating with /tmp/dsv4_nop_targets,
+always difference against a NOP that keeps the upstream chain alive.
+
+## Fused sparse gather-SDPA kernel — built, validated, REJECTED (kept default-OFF)
+
+mlx-lm branch work now on main, gate `EXO_DSV4_SPARSE_FUSED_SDPA=0`
+(default). One mx.fast.metal_kernel replacing gather+concat+mask+SDPA loop.
+Findings that killed it (all measured):
+- These shapes NEVER hit MLX's fused SDPA kernels: `use_fallback` requires
+  qsl*gqa <= 32; DSv4 attention is 64:1 MQA (gqa=64) with D=512 (not in
+  the vector kernel's head-dim list either). Every decode/verify SDPA call
+  is the COMPOSED fallback (bf16 score matmul → where → precise softmax →
+  bf16 probs matmul). The mlx-lm "fused fp32 kernel" comments are wrong
+  for this model; the CATTN L-split win is actually gemv(M=1) vs gemm(M=3)
+  dispatch, consistent with exo_dsv4_gemv_gemm_batchdrift.
+- Rounding-matched kernel (bf16-rounded scaled-q/scores/probs, fp32
+  fast::exp softmax, reciprocal-multiply) gets to ≤1 bf16 ulp per call
+  ("no masks" case bit-exact) but model-level compounding measured worst
+  |dlogit| 0.141 with 5/60 argmax flips at 256K — 6x the landed L-split
+  bar (0.024, 60/60). Quality gate FAILED.
+- GPU-time neutral at D=512: one threadgroup per (b,l,h) row re-reads the
+  640-row KV per head (the composed matmul shares K reads across all 64
+  heads). A win needs a head-shared flash-style restructure AND bitwise
+  gemv/softmax accumulation-order matching. Post-mortem in the kernel
+  comment block in deepseek_v4.py.
+- sdpa_vector kernel contract documented: masks with batch>1 must be
+  (B,H)-dense — the kernel indexes (b*H+h)*head_stride with ONE stride;
+  an H=1 mask at B>1 silently reads out of bounds. (Found while chasing a
+  fold-equivalence failure; the mask H-broadcasts in the sparse paths are
+  load-bearing, now commented as KERNEL CONTRACT.)
+
+Also rejected on measurement: batch-fold of the verify SDPA rows
+(EXO_DSV4_SPARSE_VERIFY_FOLD=0 default; neutral-to-slower in-model),
+MLX_MAX_OPS_PER_BUFFER raise (50 beat 200/800 in-harness; prod stays 200),
+indexer score 3x-gemv split (41% faster isolated but perturbs top-k tie
+selection — acceptance risk not worth it), argpartition negation
+avoidance (~2%, same tie-perturbation class), reserved-tail pool layout
+(BatchPoolingCache surgery for ~0.2ms — stability risk), CATTN
+_extend_mask caching (mask/kv-order semantics not fully verifiable
+tonight — revisit with fresh eyes on _extend_mask's clamp alignment).
+
+## Landed: bitwise-exact decode node diet (mlx-lm `abdba1e`, main)
+
+`EXO_DSV4_DECODE_NODE_DIET=1` (default): cached verify combined mask
+((L,sw)-structural; pool mask is None at L<=8 per PoolingCache.make_mask),
+B==1 gather offset-chain skip, per-module attn_sink cast cache, cached
+zero-width update_and_fetch values arg. ~200 graph nodes/step removed.
+Gate: 20 paired 256K verify forwards worst |dlogit| 0.00000, argmax 60/60
+— bitwise-exact by construction (first build runs the legacy op chain).
+Harness timing: neutral (the removed nodes were off the critical path —
+consistent with the corrected attribution); kept because it is free CPU
+work reduction on the 2-rank lockstep path and strictly exact.
+
+## Where the remaining ~8ms/verify must come from (ranked, for next session)
+
+1. Exact fused top-k (histogram/threshold two-pass) for the indexer topk
+   block (~4.4ms/verify): NOTE ties at the threshold are selected
+   arbitrarily — set-equal only for distinct scores; bf16 ties at P=125K
+   are common, so this still needs an acceptance gate, not just a
+   bitexact one. argpartition itself is ~2.4ms of real GPU sort time.
+2. Head-shared flash-style fused sparse SDPA with bitwise gemv-order
+   matching (the full sparse block ~3.7ms + CATTN sdpa share) — hard; see
+   post-mortem.
+3. Indexer score GEMM (~4.0ms): pure bandwidth (32MB/layer @500K);
+   fp8 pool scan halves it but is QUALITY-SENSITIVE (session-4 lesson).
+4. MTP cycle shape (draft 4.9ms flat, gamma-3 a wash per session-5) — the
+   yield side is already near its ceiling (acceptance 0.86-1.18 flat in
+   ctx), only cycle-time cuts remain.
+
