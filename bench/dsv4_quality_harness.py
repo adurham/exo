@@ -85,7 +85,8 @@ def build_prompt(n_words: int, seed: int, k: int):
     return prompt, needles
 
 
-def run_rung(target: int, k: int, label: str, url: str, model: str):
+def run_rung(target: int, k: int, label: str, url: str, model: str,
+             api_key=None):
     n_words = max(1000, int(target * WORDS_PER_TOKEN))
     prompt, needles = build_prompt(n_words, seed=target, k=k)
     body = json.dumps({
@@ -97,9 +98,10 @@ def run_rung(target: int, k: int, label: str, url: str, model: str):
         "stream_options": {"include_usage": True},
     }).encode()
     timeout = target / PESSIMISTIC_PREFILL_TPS + 1800
-    req = urllib.request.Request(
-        url=url, data=body, headers={"Content-Type": "application/json"}
-    )
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url=url, data=body, headers=headers)
     t_req_start = time.time()
     t0 = time.monotonic()
     t_first = None
@@ -222,6 +224,8 @@ def main():
     ap.add_argument("--needles", type=int, default=K_NEEDLES)
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--api-key", default=None,
+                    help="Bearer token for authenticated endpoints")
     ap.add_argument("ladder", nargs="*", type=int, default=None)
     args = ap.parse_args()
     ladder = args.ladder or DEFAULT_LADDER
@@ -230,7 +234,8 @@ def main():
     for target in ladder:
         print(f'{{"start": {target}, "t": "{time.strftime("%H:%M:%S")}"}}',
               flush=True)
-        r = run_rung(target, args.needles, args.label, args.url, args.model)
+        r = run_rung(target, args.needles, args.label, args.url, args.model,
+                     api_key=args.api_key)
         acc = parse_acceptance_windows(
             r["t_start_epoch"], r["t_end_epoch"]
         )
