@@ -57,7 +57,7 @@
 # scraping): 128 = 289 t/s, 256 = 353 t/s (+22%), 512 = 293 t/s (regression
 # — OPT-4 gathered-tensor tiling overhead dominates). Needle + BOS-spam
 # gates clean. 512 stays a non-default override.
-: "${EXO_PREFILL_STEP_SIZE:=256}"
+: "${EXO_PREFILL_STEP_SIZE:=1024}"  # session-3 validated (+24% prefill; 2048 wedges)
 # Context-adaptive prefill chunk sizing (2026-06-21). At LOW context, larger
 # chunks (256) amortize the ~390ms per-chunk fixed overhead (43 layers x kernel
 # launches x RDMA all_sum x eval x clear_cache) — +39% throughput at 100K. But
@@ -169,7 +169,7 @@ fi
 # c>=6, producing a 16% per-request regression and 25% bad-run rate.
 # macOS dynamically adjusts priorities better than a static pin.
 : "${EXO_RUNNER_QOS:=off}"
-: "${LOG_LEVEL:=DEBUG}"
+: "${LOG_LEVEL:=INFO}"  # DEBUG measurably slows serving (session 3)
 
 # DeepSeek V4 Flash (~100 GB/rank at 6-bit): 158B total / 13B activated, hybrid
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
@@ -308,7 +308,7 @@ fi
 # See dsv4_prefill_blowup memory + docs/upstream-prs.md.
 # Lowered 256 -> 128 on 2026-05-11; re-raised to 256 on 2026-07-01 with
 # argpartition ON — see EXO_PREFILL_STEP_SIZE note above.
-: "${DSV4_PREFILL_STEP_SIZE:=256}"
+: "${DSV4_PREFILL_STEP_SIZE:=}"  # empty = inherit EXO_PREFILL_STEP_SIZE env (single source of truth)
 # Prefill indexer top-k via argpartition O(P) instead of argsort O(P log P)
 # (2026-07-01, quality-equivalent: top-k SET identical, downstream gathered-KV
 # softmax is order-invariant). MIN_P=8192 keeps argsort at small pools where
@@ -839,7 +839,9 @@ for NODE in "${NODES[@]}"; do
     ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
     
     # Update and Build Logic
-    TARGET_BRANCH="${EXO_TARGET_BRANCH:-main}"
+    # Default to the serving prod branch — a BARE ./start_cluster.sh must bring up
+    # the verified production config (2026-07-07). Override with EXO_TARGET_BRANCH.
+    TARGET_BRANCH="${EXO_TARGET_BRANCH:-fix/c2-serving-hardening}"
     ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
     
     echo "Ensuring build dependencies on $NODE..."
@@ -922,8 +924,11 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
+    : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
     EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
-    [ "${EXO_TRACING_ENABLED:-true}" != "false" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
+    # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
+    [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
+    [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
     [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
     [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
     [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"
@@ -931,8 +936,10 @@ for NODE in "${NODES[@]}"; do
     # prefill all_reduces are slow (4KB stop-and-wait; UC can't do fast large or
     # concurrent sends) and can legitimately run past the default 45s.
     [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]  && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
-    # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. MUST be 1 —
-    # concurrent UC sends corrupt on this librdma (like large ones).
+    # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. Depth 8 is
+    # validated for sz<=2 chunks (<=16KB concurrent UC sends are clean; the old
+    # MUST-be-1 note predates the 2026-07-06 pipelining patch, mlx 452fbebf).
+    : "${MLX_JACCL_RELIABLE_INFLIGHT:=8}"
     [ -n "${MLX_JACCL_RELIABLE_INFLIGHT:-}" ]      && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_INFLIGHT=$MLX_JACCL_RELIABLE_INFLIGHT"
     [ -n "${MLX_LOG_ARRAY_DESC_COUNT_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=$MLX_LOG_ARRAY_DESC_COUNT_INTERVAL"
     [ -n "${MLX_PER_TYPE_DUMP_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_DUMP_INTERVAL=$MLX_PER_TYPE_DUMP_INTERVAL"
@@ -1067,7 +1074,7 @@ for NODE in "${NODES[@]}"; do
     # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
     # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
     # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
-    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"
+    : "${EXO_DSV4_MTP_C2_MAX_CTX:=0}"  # 0 = MTP ON at all c>=2 ctx (pooling B-invariance fix, validated)
     [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
     # jaccl start-of-collective ACK barrier (mesh_impl.h ack_sync_pre). Keeps
@@ -1224,6 +1231,21 @@ for NODE in "${NODES[@]}"; do
     # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
     : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
     [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+    # MLX_JACCL_RECONNECT_FRESH: in-process device-context rebuild — the warmup
+    # QP-flake fix (mlx e399ecfb); ~0.15s vs a 90s re-place. Validated prod default.
+    : "${MLX_JACCL_RECONNECT_FRESH:=1}"
+    [ -n "${MLX_JACCL_RECONNECT_FRESH:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RECONNECT_FRESH=$MLX_JACCL_RECONNECT_FRESH"
+    # MLX_JACCL_RELIABLE_OPTIMISTIC: v2 small-collective path (no TCP barrier),
+    # +29% decode @4K (mlx 57ffb39a). PP placements must keep this OFF —
+    # PipelineLastLayer send/recv/all_gather ride the model group.
+    : "${MLX_JACCL_RELIABLE_OPTIMISTIC:=1}"
+    [ -n "${MLX_JACCL_RELIABLE_OPTIMISTIC:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_OPTIMISTIC=$MLX_JACCL_RELIABLE_OPTIMISTIC"
+    # Pool-write donation threshold (session-4 pool fixes) — validated prod value.
+    : "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:=8388608}"
+    [ -n "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES=$EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES"
+    # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
+    : "${EXO_STALL_SAMPLER_SECONDS:=10}"
+    [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
     # MLX_JACCL_CONFIRMED_BARRIER: reliable ack barrier over the TCP coordinator
     # instead of the UC ack exchange (which wedges on a lost completion).
     # Deterministic recv-side wedge PREVENTION for c>=2. Default off (adds a
@@ -1237,10 +1259,12 @@ for NODE in "${NODES[@]}"; do
     # carry a seq header, receiver assembles + dedups + defers the reduce, and a
     # coordinator bitmask barrier retransmits missing chunks. Eliminates the
     # data-phase all_reduce STALLED wedge. Gated (perf cost + core-path change).
+    : "${MLX_JACCL_RELIABLE_DATA:=1}"  # validated prod default (task #23/24 wedge fix)
     [ -n "${MLX_JACCL_RELIABLE_DATA:-}" ]         && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_DATA=$MLX_JACCL_RELIABLE_DATA"
     # MLX_JACCL_RELIABLE_MAX_SZ: cap reliable chunk size class (0=4KB..7=512KB).
     # Larger => fewer chunks => faster, but must still reliably COMPLETE on
     # librdma (large UC sends >=64KB/sz>=4 stick). Bisect for the sweet spot.
+    : "${MLX_JACCL_RELIABLE_MAX_SZ:=2}"  # 16KB — MUST stay <=2 (>=sz4 UC sends stick)
     [ -n "${MLX_JACCL_RELIABLE_MAX_SZ:-}" ]        && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_MAX_SZ=$MLX_JACCL_RELIABLE_MAX_SZ"
     # MLX_JACCL_RELIABLE_IDLE_US: sleep per idle drain poll (anti-CPU-spin).
     [ -n "${MLX_JACCL_RELIABLE_IDLE_US:-}" ]       && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_IDLE_US=$MLX_JACCL_RELIABLE_IDLE_US"
@@ -1339,12 +1363,34 @@ for NODE in "${NODES[@]}"; do
     # IMPORTANT: don't `caffeinate -s python` because caffeinate is hardened
     # and dyld strips DYLD_INSERT_LIBRARIES (and other DYLD_*) when exec-ing
     # into a hardened binary, breaking our abort_tracer interposer.
+    # Regenerate the node-local relaunch script from THIS script's EXO_ENV so a
+    # quick node-side restart (~/relaunch_exo.sh) always uses the exact env that
+    # start_cluster.sh (the single source of truth) would launch with. Session
+    # 2026-07-07 lesson: the hand-edited relaunch scripts and this script had
+    # drifted apart (transport stack, prefill step, log level, ...); deriving
+    # one from the other closes that class of drift permanently.
     if [ "$NODE" == "macstudio-m4-1" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID .venv/bin/python -m exo -v >> ~/exo.log 2>&1 & EXO_PID=\$!; caffeinate -s -w \$EXO_PID 2>/dev/null & wait \$EXO_PID'"
+        NODE_PEERS="/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID"
     elif [ "$NODE" == "macstudio-m4-2" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo -v >> ~/exo.log 2>&1 & EXO_PID=\$!; caffeinate -s -w \$EXO_PID 2>/dev/null & wait \$EXO_PID'"
+        NODE_PEERS="/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID"
     else
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
+        NODE_PEERS="/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID"
+    fi
+    LAUNCH_CMD="cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1 & EXO_PID=\$!; caffeinate -s -w \$EXO_PID 2>/dev/null & wait \$EXO_PID"
+    ssh "$NODE" "cat > ~/relaunch_exo.sh <<RELAUNCH_EOF
+#!/bin/zsh
+# GENERATED by start_cluster.sh $(date +%Y-%m-%d) — do not hand-edit; env
+# changes belong in start_cluster.sh (single source of truth). This script
+# only restarts the exo PROCESS; it does NOT deploy code or place models
+# (run start_cluster.sh for the full canonical bring-up incl. pinned DSv4).
+screen -dmS exorun zsh -l -c '$LAUNCH_CMD'
+RELAUNCH_EOF
+chmod +x ~/relaunch_exo.sh"
+
+    if [ "$NODE" == "macstudio-m4-1" ] || [ "$NODE" == "macstudio-m4-2" ]; then
+         ssh "$NODE" "screen -dmS exorun zsh -l -c '$LAUNCH_CMD'"
+    else
+         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
     fi
 done
 
