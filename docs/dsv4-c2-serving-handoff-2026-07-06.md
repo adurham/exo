@@ -850,9 +850,9 @@ bumped; mlx unchanged `57ffb39a`):
 
 Cluster state: both nodes on `~/relaunch_exo.sh` (prod, no diag), model
 warm, smoke verified. Both venvs restored canonically (see part 2).
-Cleanup note: `relaunch_exo_g3.sh` (staged gamma-3 A/B, never used —
-acceptance math says gamma 3 is a wash: per-depth decay too steep) can be
-deleted.
+Cleanup note: the staged gamma-3 A/B scripts were deleted (never used —
+acceptance math says gamma 3 is a wash: per-depth decay too steep; MTP
+tokens/cycle is 1.84, so a third draft adds ~0.1 tok for ~7ms of cycle).
 
 **Path to 30 t/s @500K (residual ~-8ms/verify needed), in order:**
 1. Remaining O(P) verify terms measured in the harness at 256K, scale ~2x
