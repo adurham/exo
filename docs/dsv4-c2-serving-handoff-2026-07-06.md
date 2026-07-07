@@ -972,3 +972,25 @@ work reduction on the 2-rank lockstep path and strictly exact.
    yield side is already near its ceiling (acceptance 0.86-1.18 flat in
    ctx), only cycle-time cuts remain.
 
+## Session 6 FINAL STATE (2026-07-07 ~08:00) — deployed + validated
+
+Build: mlx-lm `baa3b59` (node diet ON, fused kernel OFF), exo
+`fc4218ced` (fix/c2-serving-hardening), mlx unchanged `57ffb39a`.
+Both nodes pinned (`uv pip install --no-deps --force-reinstall ./mlx-lm`),
+cluster restarted on `~/relaunch_exo.sh` (prod config unchanged).
+
+| check | result |
+|---|---|
+| temp=0 smoke | ✓ ('7') |
+| 586K rung | prefill 331 t/s (target 300 HOLDING), **decode 25.94 t/s** (was 25.6 same depth) |
+| c=2 battery | 3/3 pairs clean, 0 degenerated (mid-decode admissions, MTP on) |
+| 4K rung | prefill 349 t/s, decode 34.8 t/s (in the 34-38 band) |
+| new-build log | zero DEADLINE / SIGKILL / RunnerFailed |
+
+**Decode @500K: ~26.5 t/s interpolated (25.94 @586K) vs target 30 — OPEN.**
+Session 6's contribution is knowledge, not tokens/s: the corrected
+attribution shows the remaining ~8ms/verify is REQUIRED compute
+(argpartition sort ~2.4ms GPU + score GEMM bandwidth + CATTN q-chain),
+so the next session should start from the ranked list above (exact fused
+top-k with an acceptance gate is the best-value target), not from
+overhead hunting.
