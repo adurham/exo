@@ -1059,3 +1059,77 @@ Measured (validated build, fresh salted prompts):
 Future refinement if wanted: enable the low-bit draft head conditionally
 below ~64K context (where it measured positive) — needs a cheap ctx
 signal in the predictor and its own validation pass.
+
+## Session 6, part 4 — MLX-level (C++/Metal) options: measured, ranked, and the plan forward
+
+Question examined: what remains at the mlx-framework level (vs the
+mlx-lm/exo Python level, where sessions 5-6 worked)?
+
+### Measured dead end: skinny-M quantized matmul
+
+Hypothesis: the verify is M=3-shaped through all 43 layers, so if
+quantized matmul had the gemv/gemm M-cliff, a row-batched qmv path
+(gather_qmv_rhs playbook) would be the top mlx lever. Microbenched
+2026-07-07 on m4-2 at prod shapes (affine8 g64, M=3 qmm vs 3x qmv):
+
+| shape | M=3 qmm | 3x qmv | ratio | maxdiff |
+|---|---|---|---|---|
+| wq_b 1536→32768 | 0.172 ms | 0.220 ms | 0.78x | 0.0 |
+| wkv 7168→512 | 0.022 | 0.030 | 0.74x | 0.0 |
+| wq_a 7168→1536 | 0.027 | 0.030 | 0.91x | 0.0 |
+| lm_head 7168→129280 | 3.144 | 5.784 | 0.54x | 0.0 |
+
+qmm at M=3 is ALREADY faster than row-split AND bitexact against it
+(no qmv/qmm drift in the quantized path — unlike dense bf16 gemm), and
+runs ~295 GB/s ≈ bandwidth-optimal. No headroom. The M-cliff exists only
+in DENSE bf16 gemm (the composed-SDPA fallback's score/probs matmuls),
+which the landed L-split already converts to M=1. Do not revisit.
+
+### The one real mlx C++ project: head-shared fused SDPA (MQA 64:1, D=512, qsl<=8)
+
+mlx has NO fused attention path for this model's shape class —
+use_fallback requires qsl*gqa <= 32 (DSv4 gqa=64) and head_dim in
+{64..256} (DSv4 D=512), so every decode/verify SDPA is composed ops with
+materialized intermediates. A sdpa_vector variant where one threadgroup
+loads each K/V row ONCE and computes all 64 heads against it would:
+- target the two largest remaining verify blocks (CATTN ~7.4ms/20L +
+  sparse ~3.7ms/21L, session-6 corrected attribution) — est. −4-5ms/verify
+  ≈ +1.5-2 t/s @500K, the largest single remaining lever;
+- fix exactly what made session-6's JIT kernel GPU-neutral (per-head K/V
+  re-reads — one threadgroup per (b,l,h) row cannot share reads);
+- CHANGE NUMERICS (fp32 online softmax vs the fallback's bf16-rounded
+  score pipeline) — the class that failed session-6's logit gate at 6x
+  the L-split bar. It CANNOT ship on a logit-diff gate.
+
+### Prerequisite for everything left: long-context quality harness
+
+Every remaining lever is blocked on judgment, not implementation:
+- head-shared SDPA (above) — numerics change;
+- fp8/int8 indexer pool scan (~4ms score GEMM is bandwidth; needs ZERO
+  new mlx code — affine8 qmv exists; store the indexer pool quantized) —
+  target-side score perturbation, the exact class the session-4 bf16
+  lesson and the session-6 draft-head sign-flip warn about;
+- ctx-conditional 4-bit draft head (positive <~64K, negative at depth).
+
+Required harness: needle-recall at 100/256/500K (insert K needles at
+controlled depths in the longctx_bench prompt style, score retrieval
+accuracy) + MTP acceptance-band measurement (EXO_DSV4_MTP_LOG_INTERVAL
+windows at fixed prompts, not single-rung tok/s) + the existing battery/
+smoke. A numerics-perturbing change ships only if needle recall and
+acceptance hold at depth vs baseline. ~a day of Python (laptop/m4-1
+scratch + one relaunch variant); no cluster risk.
+
+### Plan forward (ordered)
+
+1. Build the long-context quality harness; baseline it on the CURRENT
+   validated build (27.04 @586K) — the baseline numbers are the gate.
+2. fp8/affine8 indexer pool scan behind an env gate; judge with the
+   harness. (Cheapest lever, no mlx changes.)
+3. Head-shared fused SDPA in ~/repos/mlx (C++/Metal, sdpa_vector
+   variant); judge with the harness. Biggest lever, most work.
+4. Optional: ctx-conditional draft lm_head (<64K enable) if c<64K
+   workloads matter; harness-judged.
+
+Expected if 2+3 land clean: ~27.6 → ~30 @500K. If they fail the harness,
+30 t/s @500K requires either relaxing quality constraints explicitly or
+architectural work (speculative pipelining, draft-cost restructuring).
