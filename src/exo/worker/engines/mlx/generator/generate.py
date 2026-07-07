@@ -63,6 +63,7 @@ from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
     fix_unmatched_think_end_tokens,
+    get_coord_group,
     mx_barrier,
     system_prompt_token_count,
 )
@@ -1087,11 +1088,16 @@ def warmup_inference(
 
     logger.info(f"warmed up by generating {tokens_generated} tokens")
     if group is not None:
+        # Control-plane sync: run on the coord subgroup (isolated call_id
+        # counter + QPs) like every other non-model-forward collective, so
+        # the model group's data QP carries ONLY all_sums. Required by the
+        # jaccl reliable-optimistic path's standing recv pool, and correct
+        # hygiene regardless (matches agree_on_tasks / mx_min_int).
         check_for_cancel_every = int(
             mx.max(
                 mx.distributed.all_gather(
                     mx.array([check_for_cancel_every]),
-                    group=group,
+                    group=get_coord_group(group),
                 )
             ).item()
         )

@@ -26,6 +26,7 @@ from exo.worker.engines.mlx.constants import (
     TURBOQUANT_SKETCH_DIM,
 )
 from exo.worker.engines.mlx.types import KVCacheType, Model
+from exo.worker.engines.mlx.utils_mlx import get_coord_group
 from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:
@@ -1093,9 +1094,12 @@ class KVPrefixCache:
         if self._group is None:
             return local_pressure
 
+        # Control-plane sync on the coord subgroup: keeps the model group's
+        # data QP all_sum-only (required by the jaccl reliable-optimistic
+        # standing recv pool) and isolates the call_id counter.
         all_pressure = mx.distributed.all_gather(
             mx.array([local_pressure], dtype=mx.float32),
-            group=self._group,
+            group=get_coord_group(self._group),
         )
         max_pressure = float(mx.max(all_pressure).item())
         return max_pressure
