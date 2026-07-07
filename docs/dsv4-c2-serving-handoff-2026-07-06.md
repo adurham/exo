@@ -1036,3 +1036,26 @@ warm, all watchers clean. Remaining ranked levers: indexer score GEMM
 bandwidth (fp8 pool scan — quality-gate required), head-shared fused
 sparse SDPA (post-mortem above), draft lm_head bandwidth (~925MB/step —
 vocab pruning is output-quality-safe but acceptance-risky).
+
+## Session 6, part 3 — 4-bit draft lm_head: MEASURED, ROLLED BACK (context-dependent sign)
+
+exo `da48a0fe`: EXO_DSV4_MTP_DRAFT_LMHEAD_BITS=4 builds a 4-bit affine g64
+COPY of the replicated lm_head at predictor construction, used ONLY inside
+the draft chain (c=1 + c>=2 paths; verify keeps the full head). Output
+distribution is exact by the rejection-sampling property (draft q =
+softmax of the same low-bit logits it samples; at temp=0 accepted tokens
+are the target's own argmax) — only acceptance RATE moves.
+
+Measured (validated build, fresh salted prompts):
+- 4K decode: 37.87 / 34.63 / 36.39 (mean 36.3 vs 34.9 baseline, +4%) —
+  at short ctx the ~1.8ms/cycle draft saving beats the acceptance loss.
+- **586K decode: 24.69 vs 27.04 baseline (−8.7%) → ROLLED BACK.** At
+  depth the verify is ~63ms/cycle, so every acceptance-lost token costs
+  ~35x what the draft saving recovers. The lever's sign flips with
+  context length.
+- Rollback: env removed from both relaunch scripts (backups
+  `relaunch_exo.sh.bak-pre-draftlmhead`); code stays, gated default 0.
+
+Future refinement if wanted: enable the low-bit draft head conditionally
+below ~64K context (where it measured positive) — needs a cheap ctx
+signal in the predictor and its own validation pass.
