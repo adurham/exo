@@ -140,6 +140,50 @@ to the first MTP cycles. Facts:**
   base cycle (L=2 verify + commit) under TP → build the cycle-level
   model harness (drive verify+trim+commit against sequential).
 
+**STATUS 2026-07-10 (evening): residual ROOT-CAUSED to the batch cache
+classes; three gated fixes landed; byte-equality still blocked on two
+mlx-lm defects, precisely bounded with a ready harness. Chain of evidence:**
+
+1. Cycle stats (`EXO_DSV4_MTP_CYCLE_STATS`, exo `a012be9f6`): serving
+   p1 run = 78 cycles, 58 rejections (from token 0), **regime_b = 0** →
+   the pool-contamination repair NEVER runs in serving.
+2. Cause: mlx-lm's batched generator converts pools to
+   **BatchPoolingCache at insert, which does NOT subclass PoolingCache**
+   → `_collect_pooling_caches` returns [] at every concurrency. Fixed
+   gated (`EXO_DSV4_POOL_SNAPSHOT_BATCH`, exo `da6bd3437`) with
+   class-aware snapshot predicate + flush detection (also fixes the batch
+   path's pending-bump false positive).
+3. Regime-b ordering bug (exo `e954dff99`,
+   `EXO_DSV4_POOL_RESTORE_AFTER_TRIM`): restore_meta'd pools were
+   re-trimmed by the blanket CacheList.trim(γ+1) — double rollback.
+   Proven bitwise-fixed on plain caches by `~/scratch/ldiff_cycles.py`
+   (accept/reject0/reject1 all CLEAN with trim-then-restore).
+4. **Remaining defects (mlx-lm, harness-reproducible single-node):** with
+   the REAL serving classes (`LDIFF_BATCH_CACHE=all`), even full-accept
+   L=3 rowseq chains DRIFT from sequential (first at the first ratio-4
+   flush boundary; ~0.08 logits). Bisect: ring-only CLEAN, pool-only
+   accept3 CLEAN, ring+pool DRIFT → interaction (batch-ring ARRAY offsets
+   into the batch pool). Pool-state comparer: first divergence is
+   **buf_kv CONTENT with all structural counters equal** → the pooled/
+   buffered VALUES written by an L=3 forward differ from three L=1
+   forwards (accumulate_windows / update_and_fetch_deferred under array
+   offsets). Reject cycles drift additionally (rollback fidelity of the
+   batch pool beyond the ordering fix).
+   **Implication: the campaign's rowseq bitwise proof used PLAIN caches —
+   serving (batch classes) rowseq at ≥32K is likely still ulp-drifting.**
+5. Also landed en route: byte-equality probe scripts, `ldiff_mixedq.py`
+   (real mixed-quant recipe: BITWISE CLEAN at 4K and tiny ctx), M-dispatch
+   kernel probes (quantized matmuls M-invariant at all probed shapes;
+   bf16 dense M-dependent at many shapes but the only decode-path bf16
+   matmul — the router gate (4096,256) — is M-invariant).
+
+**Next unit of work:** make BatchPoolingCache L-invariant under batch-ring
+offsets (mlx-lm cache/attention surgery) + rollback fidelity; iterate with
+`LDIFF_BATCH_CACHE=all ldiff_cycles.py` until all three modes are BITWISE
+CLEAN; then serving byte-equality (gates: SNAPSHOT_BATCH=1,
+RESTORE_AFTER_TRIM=1, ACCEPT_LOGPROBS=1, MIN_CTX=0), then DSML battery,
+then flip the four gate defaults in start_cluster.sh.
+
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
 
