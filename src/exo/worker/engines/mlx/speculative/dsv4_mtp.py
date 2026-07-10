@@ -38,6 +38,7 @@ from typing import Any, BinaryIO, Optional, Sequence, cast
 import mlx.core as mx
 
 from mlx_lm.models.cache import (
+    BatchPoolingCache,
     BatchRotatingKVCache,
     CacheList,
     PerStreamBatchRotatingKVCache,
@@ -306,6 +307,57 @@ _POOL_RESTORE_AFTER_TRIM = (
 # lets a serving-level trajectory fork be correlated with cycle events
 # without any unsound trim+refeed instrumentation. B=1 path only.
 _CYCLE_STATS = os.environ.get("EXO_DSV4_MTP_CYCLE_STATS", "0") == "1"
+
+# BATCH-POOL SNAPSHOT FIX (2026-07-10, default OFF until gates pass). The
+# batched generator converts every PoolingCache to BatchPoolingCache at
+# insert (mlx-lm generate._make_cache / _merge_caches) — and
+# BatchPoolingCache subclasses _BaseCache, NOT PoolingCache. So
+# _collect_pooling_caches's isinstance(sub, PoolingCache) has returned []
+# in serving at EVERY concurrency since that hierarchy existed: no pool is
+# ever snapshotted, pool_flushed is always False, and regime b (the
+# 2026-05-29 pool-contamination repair) is INERT — every flush-straddling
+# rejection bakes rejected-draft rows into the compressed pools. Confirmed
+# live 2026-07-10 via EXO_DSV4_MTP_CYCLE_STATS: 78 cycles, 58 rejections,
+# regime_b=0. This is the residual serving-only ulp drift (onset at the
+# first cycles) behind the MTP-on vs MTP-off byte-inequality.
+# EXO_DSV4_POOL_SNAPSHOT_BATCH=1 collects BatchPoolingCache too and uses
+# class-appropriate snapshot predicates and flush detection (per-stream
+# lengths + pending bumps — comparing _pool_lengths alone false-positives
+# whenever the verify's commit_pending applies a PRIOR staged bump).
+# Pair with EXO_DSV4_POOL_RESTORE_AFTER_TRIM=1: activating snapshots with
+# the legacy restore-then-trim order would re-introduce the double-rollback.
+_POOL_SNAPSHOT_BATCH = (
+    os.environ.get("EXO_DSV4_POOL_SNAPSHOT_BATCH", "0") == "1"
+)
+
+
+def _pool_flushed_since(pc: Any, snap: Any) -> bool:
+    """True iff this pool flushed a NEW entry since ``snap`` (save_meta).
+
+    Uses the TOTAL (visible lengths/offset + staged pending bumps): the
+    deferred path's commit_pending() at the top of the verify forward moves
+    a PRIOR staged bump from pending into the visible count (total
+    unchanged), so comparing the visible count alone false-positives. A
+    real flush this cycle increases the total.
+    """
+    if hasattr(pc, "_pool_lengths"):  # BatchPoolingCache: per-stream lists
+        cur = [
+            int(l) + int(p)
+            for l, p in zip(pc._pool_lengths, pc._pending_bumps, strict=True)
+        ]
+        pre = [int(l) + int(p) for l, p in zip(snap[0], snap[5], strict=True)]
+        return cur != pre
+    return (pc._pool_offset + pc._pending_offset_bump) != (snap[0] + snap[1])
+
+
+def _pool_may_flush(pc: Any, verify_len: int) -> bool:
+    """Snapshot predicate: could the next ``verify_len``-token forward flush
+    this pool? (Snapshotting is the expensive part — buf copies — so only
+    pools that can flush are snapshotted.)"""
+    rem = pc.remainder
+    if isinstance(rem, list):  # BatchPoolingCache: per-stream
+        rem = max(rem) if rem else 0
+    return rem + verify_len >= pc.ratio
 
 
 # Max concurrent streams the async decode fence may stay armed for
@@ -1341,13 +1393,18 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         them around verify to keep the compressed-attention context
         consistent with the committed token stream. See PoolingCache.save_meta.
         """
+        pool_classes: tuple[type, ...] = (
+            (PoolingCache, BatchPoolingCache)
+            if _POOL_SNAPSHOT_BATCH
+            else (PoolingCache,)
+        )
         pools: list[Any] = []
         for c in gen_batch.prompt_cache:
             if isinstance(c, CacheList):
                 for sub in c.caches:
-                    if isinstance(sub, PoolingCache):
+                    if isinstance(sub, pool_classes):
                         pools.append(sub)
-            elif isinstance(c, PoolingCache):
+            elif isinstance(c, pool_classes):
                 pools.append(c)
         return pools
 
@@ -2516,10 +2573,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         #       committed rows are batch-uniform (n_min + 1), so the
         #       commit-forward is a single (N, n_min+1) batched call.
         pool_flushed = any_rejection and any(
-            snap is not None
-            and hasattr(pc, "_pool_lengths")
-            and list(pc._pool_lengths) != list(snap[0])
-            for pc, snap in zip(_pool_caches, _pool_snaps)
+            snap is not None and _pool_flushed_since(pc, snap)
+            for pc, snap in zip(_pool_caches, _pool_snaps, strict=True)
         )
 
         if not pool_flushed:
@@ -3265,9 +3320,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # ratio=128 → flush every 128th cycle).
         _verify_len = gamma + 1
         _pool_snaps: list[Any] = [
-            pc.save_meta()
-            if pc.remainder + _verify_len >= pc.ratio
-            else None
+            pc.save_meta() if _pool_may_flush(pc, _verify_len) else None
             for pc in _pool_caches
         ]
 
@@ -3829,9 +3882,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # Only pools that were snapshotted (snap is not None = flush
             # predicted) can have actually flushed. Check those.
             pool_flushed = any(
-                snap is not None
-                and (pc._pool_offset + pc._pending_offset_bump) != (snap[0] + snap[1])
-                for pc, snap in zip(_pool_caches, _pool_snaps)
+                snap is not None and _pool_flushed_since(pc, snap)
+                for pc, snap in zip(_pool_caches, _pool_snaps, strict=True)
             )
 
             if not pool_flushed:
