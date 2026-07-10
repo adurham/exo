@@ -175,6 +175,7 @@ fi
 # pool by a row on every flush-straddling rejection). Default OFF until the
 # byte-equality gate + battery pass.
 : "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:=0}"
+: "${EXO_DSV4_POOL_SNAPSHOT_BATCH:=0}"
 # Rowseq per-row decode masks + unified spec-state rollback (2026-07-10):
 # with these + POOL_SNAPSHOT_BATCH + ACCEPT_LOGPROBS, the MTP verify cycle
 # is bitwise-faithful to sequential decode on the REAL batch cache classes
@@ -1253,6 +1254,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
     # Greedy accept-rule alignment (see defaults block above).
     [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
+    [ -n "${EXO_DSV4_POOL_SNAPSHOT_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_SNAPSHOT_BATCH=$EXO_DSV4_POOL_SNAPSHOT_BATCH"
     # Regime-b double-rollback fix (see defaults block above).
     [ -n "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_RESTORE_AFTER_TRIM=$EXO_DSV4_POOL_RESTORE_AFTER_TRIM"
     # Per-request MTP cycle statistics (diagnostic; one log line per stream).
