@@ -96,6 +96,47 @@ script check). No kernel work.
 
 ## 2. Generator-step vs model() ulp parity (moderate; unlocks the gold-standard gate)
 
+**STATUS 2026-07-10: step 1 archaeology DONE, harness authored
+(`~/scratch/ulp_gen_vs_model.py`, staged on m4-1), first run pending
+(cluster-gated). Key findings that REVISE the suspect list below:**
+
+- **Mask is NOT a suspect at c=1.** Neither path passes `mask=`; the model
+  builds it internally from the same cache object, and
+  `RotatingKVCache.make_mask(N=1, window_size=sliding_window)` returns
+  `None` whenever `max_size == window_size` (ours) — identical for both
+  paths. (Batch-cache classes at B>1 DO build arrays; different story.)
+- **LMHEAD_LASTROW is inert on both paths** — the slice requires
+  `L > 32` (deepseek_v4.py:4443-4462); decode L=1 and verify L=γ+1≤9 never
+  trigger it. Rule out (harness asserts it for the record).
+- **NEW top suspect — sampling-boundary decision rules, not kernels:** the
+  generator picks `argmax(logits - logsumexp(logits))` in native bf16
+  (generate.py:1462, batched path has NO fp32 cast, unlike single-stream
+  generate_step); the MTP accept path argmaxes RAW `verify_logits`
+  (dsv4_mtp.py:3220); and the **tie-break fix (default ON,
+  `EXO_DSV4_MTP_TIEBREAK_EPS=0.5`) picks the LOWEST id within 0.5 logits
+  of max** for the bonus token (dsv4_mtp.py:3248-3262). Any top-2 gap
+  < 0.5 therefore diverges MTP-on from MTP-off **even with bitwise-equal
+  logits**. Byte-equality (step 3's gate) structurally requires retiring
+  the tie-break fix — which its own comment says exists only to mask the
+  batched-vs-sequential ulp gap. Sequence: prove bitwise parity → flip
+  `EXO_DSV4_MTP_TIEBREAK_FIX=0` → land the gate.
+- **Remaining numeric suspects (harness E1 toggles each):** thread-local
+  generation-stream context (generate.py:2037) vs default stream; input
+  construction (generator: materialized uint32 sampler output; commit/
+  refeed: materialized int32; verify: LAZY uint32 concat of argmax rows);
+  `pre_norm` capture hook (MTP generators wrap the final norm —
+  mtp_batch_generator.py:58-84 — retaining an extra graph output that can
+  change fusion; stock MTP-off generator does not); extra
+  async_eval/eval barrier placement.
+- **Interlock with item 3:** the byte-equality gate also needs rowseq at
+  ALL ctx (below 32K prod still runs classic batched verify, not bitwise),
+  so the gate lands at full strength only after item 3 drops the threshold.
+- Harness layout: E1 single-state factor attribution (bitwise logits diff
+  per factor, fresh deterministic prefill per variant — ldiff trick);
+  E2 decision-rule divergence on identical logits (X vs Y vs Y+tiebreak,
+  reports min top-2 gap); E3 X-replica vs Y-replica trajectory loop
+  (first divergence classified DECISION-RULE vs NUMERIC via bitwise check).
+
 **Gap:** the generator's L=1 decode step and a raw `model()` L=1 call differ
 by ulps, so MTP-on vs MTP-off produce different-but-equally-valid
 trajectories at temp=0. Byte-equality across serving modes is therefore not
