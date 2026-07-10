@@ -392,9 +392,40 @@ class Worker:
 
     async def _create_supervisor(self, task: CreateRunner) -> RunnerSupervisor:
         """Creates and stores a new AssignedRunner with initial downloading status."""
+        this_runner_id = task.bound_instance.bound_runner_id
+
+        def _sibling_loading() -> bool:
+            # True while any OTHER runner on this node is bringing up a model
+            # (connect/load/warmup). A co-host JIT load saturates the GPU and
+            # can starve a mid-generation runner silent for minutes; the hang
+            # watchdog defers instead of SIGKILLing it (observed 2026-07-09
+            # 16:15:08: DSv4 runner killed at 298s silent during a Qwen load).
+            from exo.shared.types.tasks import LoadModel as _LoadModel
+            from exo.shared.types.worker.runners import (
+                RunnerConnecting as _Conn,
+            )
+            from exo.shared.types.worker.runners import (
+                RunnerLoading as _Load,
+            )
+            from exo.shared.types.worker.runners import (
+                RunnerWarmingUp as _Warm,
+            )
+
+            for rid, sup in self.runners.items():
+                if rid == this_runner_id:
+                    continue
+                if isinstance(sup.status, (_Conn, _Load, _Warm)):
+                    return True
+                if any(
+                    isinstance(t, _LoadModel) for t in sup.in_progress.values()
+                ):
+                    return True
+            return False
+
         runner = await RunnerSupervisor.create(
             bound_instance=task.bound_instance,
             event_sender=self.event_sender.clone(),
+            sibling_loading=_sibling_loading,
         )
         self.runners[task.bound_instance.bound_runner_id] = runner
         self._tg.start_soon(runner.run)

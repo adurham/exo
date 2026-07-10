@@ -5,7 +5,7 @@ import signal
 import time
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import Callable, Self
+from typing import Callable, Optional, Self
 
 import anyio
 from anyio import (
@@ -236,6 +236,13 @@ class RunnerSupervisor:
     # hang watchdog (see HANG_TIMEOUT_SECONDS). Bumped on every event.
     _last_event_monotonic: float = field(default_factory=time.monotonic, init=False)
     _hang_killed: bool = field(default=False, init=False)
+    # Worker-injected predicate: True while a SIBLING runner on this node is
+    # loading a model. A co-host JIT load saturates the GPU/memory bus and can
+    # starve a mid-generation runner of progress for minutes (observed
+    # 2026-07-09 16:15:08: DSv4 runner SIGKILLed at 298s silent while Qwen
+    # weights loaded for a consult) — that is starvation, not a wedge, so the
+    # hang watchdog must hold fire for the duration of the sibling load.
+    sibling_loading: Optional[Callable[[], bool]] = None
 
     @classmethod
     async def create(
@@ -244,6 +251,7 @@ class RunnerSupervisor:
         bound_instance: BoundInstance,
         event_sender: Sender[Event],
         initialize_timeout: float = 400,
+        sibling_loading: Optional[Callable[[], bool]] = None,
     ) -> Self:
         ev_send, ev_recv = mp_channel[Event | RunnerTerminationError]()
         task_sender, task_recv = mp_channel[Task]()
@@ -276,6 +284,7 @@ class RunnerSupervisor:
             _task_sender=task_sender,
             _cancel_sender=cancel_sender,
             _event_sender=event_sender,
+            sibling_loading=sibling_loading,
         )
 
         return self
@@ -426,6 +435,18 @@ class RunnerSupervisor:
             return
         silent_for = time.monotonic() - self._last_event_monotonic
         if silent_for < HANG_TIMEOUT_SECONDS:
+            return
+        if self.sibling_loading is not None and self.sibling_loading():
+            # A sibling runner is mid-model-load on this node: silence here is
+            # GPU starvation, not a wedge. Reset the clock so the runner gets
+            # a full HANG_TIMEOUT window after the load finishes; a genuinely
+            # wedged runner is still killed one timeout past load completion.
+            logger.warning(
+                f"Runner {self.bound_instance.bound_runner_id} silent for "
+                f"{silent_for:.0f}s but a sibling runner is loading a model — "
+                "deferring hang watchdog until the load completes."
+            )
+            self._last_event_monotonic = time.monotonic()
             return
         self._hang_killed = True
         logger.critical(
