@@ -300,6 +300,14 @@ _POOL_RESTORE_AFTER_TRIM = (
     os.environ.get("EXO_DSV4_POOL_RESTORE_AFTER_TRIM", "0") == "1"
 )
 
+# Per-request cycle statistics (EXO_DSV4_MTP_CYCLE_STATS=1): one WARNING
+# line per finished stream with cycle/rejection/regime-b counts and the
+# committed-token index of the first rejection and first regime-b repair —
+# lets a serving-level trajectory fork be correlated with cycle events
+# without any unsound trim+refeed instrumentation. B=1 path only.
+_CYCLE_STATS = os.environ.get("EXO_DSV4_MTP_CYCLE_STATS", "0") == "1"
+
+
 # Max concurrent streams the async decode fence may stay armed for
 # (cache-owner key). 1 = validated c=1-only arming. Raised by
 # EXO_DSV4_FENCE_ASYNC_C2=N to extend async fencing to batched decode —
@@ -1292,6 +1300,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 "uids_before": list(gen_batch.uids),
                 "num_tokens": list(gen_batch._num_tokens),
             })
+        if _CYCLE_STATS:
+            _st = getattr(self, "_cycle_stats", {}).pop(uid, None)
+            if _st is not None:
+                logger.warning(
+                    f"[CYCLE-STATS] uid={uid} cycles={_st[0]} "
+                    f"rejects={_st[1]} regime_b={_st[2]} "
+                    f"first_reject_tok={_st[3]} first_regime_b_tok={_st[4]} "
+                    f"committed={_st[5]}"
+                )
         if hasattr(self.mtp, "drop_uid"):
             self.mtp.drop_uid(uid)
         self._recent_tokens.pop(uid, None)
@@ -3828,6 +3845,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             else:
                 # (b) Contamination path: restore snapshotted pools, leave
                 # unsnapshotted ones to trim() (they didn't flush).
+                _stats_regime_b = True
                 if not _POOL_RESTORE_AFTER_TRIM:
                     # LEGACY ORDER (double-rollback bug, see
                     # _POOL_RESTORE_AFTER_TRIM): the blanket trim below
@@ -3868,6 +3886,25 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     mtp_cache.trim(rollback)
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
+
+        if _CYCLE_STATS:
+            _stats = getattr(self, "_cycle_stats", None)
+            if _stats is None:
+                _stats = {}
+                self._cycle_stats = _stats
+            # [cycles, rejects, regime_b, first_reject_tok,
+            #  first_regime_b_tok, committed_tokens]
+            _st = _stats.setdefault(uid, [0, 0, 0, -1, -1, 0])
+            _st[0] += 1
+            if rollback > 0:
+                _st[1] += 1
+                if _st[3] < 0:
+                    _st[3] = _st[5]
+                if locals().get("_stats_regime_b", False):
+                    _st[2] += 1
+                    if _st[4] < 0:
+                        _st[4] = _st[5]
+            _st[5] += n_accepted + 1
 
         # ── TIE RE-VERIFY (paired with the gate in step 4) ───────────────
         # ⚠ RETIRED FROM PROD (2026-07-10, keep gated OFF): the trim+refeed

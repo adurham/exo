@@ -1246,6 +1246,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
     # Regime-b double-rollback fix (see defaults block above).
     [ -n "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_RESTORE_AFTER_TRIM=$EXO_DSV4_POOL_RESTORE_AFTER_TRIM"
+    # Per-request MTP cycle statistics (diagnostic; one log line per stream).
+    [ -n "${EXO_DSV4_MTP_CYCLE_STATS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_CYCLE_STATS=$EXO_DSV4_MTP_CYCLE_STATS"
     # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
     [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
