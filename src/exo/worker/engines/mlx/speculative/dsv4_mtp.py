@@ -330,6 +330,26 @@ _POOL_SNAPSHOT_BATCH = (
     os.environ.get("EXO_DSV4_POOL_SNAPSHOT_BATCH", "0") == "1"
 )
 
+# UNIFIED SPEC-STATE ROLLBACK (2026-07-10, default OFF until gates pass).
+# trim() is NOT rollback-safe on a ROTATED ring: the verify's draft writes
+# physically overwrite the ring's oldest rows (destroying historical KV that
+# sequential decode still has), decrement left_padding, and can wrap _idx —
+# none of which trim() undoes. ldiff_cycles.py: reject cycles are bitwise
+# clean at short unwrapped ctx but drift the moment the ring rotates
+# (P=41 drifts exactly at abs 127; P=4096 immediately; up to 0.6 logits
+# with junk drafts). With EXO_DSV4_SPEC_STATE_RESTORE=1 the B=1 path takes
+# an O(1) reference snapshot of every ring (slice-assign rebinds
+# keys/values, so pre-verify refs preserve pre-verify contents) plus a
+# save_meta of every pool BEFORE verify; on ANY rejection it restores all
+# of them wholesale and re-commits [y]+accepted with one small forward
+# (bitwise = sequential under rowseq+rowmask). This supersedes the
+# regime-a/-b distinction entirely in this mode. Cost: ring-donation
+# blocking during verify + pool buf copies per cycle + one commit-forward
+# per rejection — the price of exactness; default path unchanged.
+_SPEC_STATE_RESTORE = (
+    os.environ.get("EXO_DSV4_SPEC_STATE_RESTORE", "0") == "1"
+)
+
 
 def _pool_flushed_since(pc: Any, snap: Any) -> bool:
     """True iff this pool flushed a NEW entry since ``snap`` (save_meta).
@@ -3319,10 +3339,24 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # need them (the vast majority: ratio=4 → flush every 4th cycle,
         # ratio=128 → flush every 128th cycle).
         _verify_len = gamma + 1
-        _pool_snaps: list[Any] = [
-            pc.save_meta() if _pool_may_flush(pc, _verify_len) else None
-            for pc in _pool_caches
-        ]
+        _ring_caches: list[Any] = []
+        _ring_snaps: list[Any] = []
+        if _SPEC_STATE_RESTORE:
+            # Unified rollback: snapshot EVERYTHING the verify can mutate
+            # (all pools — every pool's remainder grows on every row — and
+            # every ring, by O(1) reference).
+            _pool_snaps = [pc.save_meta() for pc in _pool_caches]
+            for c in gen_batch.prompt_cache:
+                subs = c.caches if hasattr(c, "caches") else [c]
+                for sub in subs:
+                    if hasattr(sub, "save_spec_state"):
+                        _ring_caches.append(sub)
+                        _ring_snaps.append(sub.save_spec_state())
+        else:
+            _pool_snaps = [
+                pc.save_meta() if _pool_may_flush(pc, _verify_len) else None
+                for pc in _pool_caches
+            ]
 
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
@@ -3871,7 +3905,41 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         #       one paying the extra forward.
         draft_int_values = [int(v) for v in draft_concat[0].tolist()]
         rollback = gamma - n_accepted
-        if rollback > 0:
+        if rollback > 0 and _SPEC_STATE_RESTORE:
+            # Unified faithful rollback (see _SPEC_STATE_RESTORE): wholesale
+            # restore of every ring + pool to the pre-verify state, then one
+            # commit-forward re-plays [y, *accepted] exactly as sequential
+            # decode would have.
+            #
+            # ASYNC-FENCE DRAIN: with EXO_DSV4_FENCE_ASYNC armed, the verify
+            # forward's per-layer commits are mx.async_eval — pool/ring
+            # side-chain writes can still be in flight here. The legacy B=1
+            # rollback was safe because its trims were pure offset
+            # decrements; THIS mode rebinds keys/values/pool buffers, which
+            # would race the deferred graph. Drain first, re-arm after the
+            # commit-forward (mirrors the batch path's discipline).
+            _stats_regime_b = True
+            self.mtp._set_fence_async(False)
+            for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
+                rc.restore_spec_state(rsnap)
+            for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True):
+                if psnap is not None:
+                    pc.restore_meta(psnap)
+            commit_tokens = [y_val] + draft_int_values[:n_accepted]
+            commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
+            _commit_logits = self.model(
+                commit_input, cache=gen_batch.prompt_cache
+            )
+            mx.eval(_commit_logits)
+            del _commit_logits
+            mtp_cache = self.mtp._cache
+            if mtp_cache is not None:
+                if hasattr(mtp_cache, "trim"):
+                    mtp_cache.trim(rollback)
+                elif hasattr(mtp_cache, "offset"):
+                    mtp_cache.offset -= rollback
+            self.mtp._set_fence_async(True)
+        elif rollback > 0:
             # Detect whether any pool flushed a NEW entry during verify.
             # Use the TOTAL (visible offset + staged pending bump): the
             # deferred path's commit_pending() runs at the top of the verify
