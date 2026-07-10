@@ -169,6 +169,12 @@ fi
 # between MTP-on and MTP-off (the mismatch the retired tie-break fix papered
 # over). Default OFF until the byte-equality gate + DSML battery pass.
 : "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:=0}"
+# Regime-b double-rollback fix (2026-07-10): in the pool-flush rollback path,
+# restore snapshotted pools AFTER the blanket trim (the legacy order let
+# CacheList.trim re-trim the just-restored pools, corrupting the compressed
+# pool by a row on every flush-straddling rejection). Default OFF until the
+# byte-equality gate + battery pass.
+: "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:=0}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
@@ -1238,6 +1244,8 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
     # Greedy accept-rule alignment (see defaults block above).
     [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
+    # Regime-b double-rollback fix (see defaults block above).
+    [ -n "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_RESTORE_AFTER_TRIM=$EXO_DSV4_POOL_RESTORE_AFTER_TRIM"
     # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
     [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
