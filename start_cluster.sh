@@ -163,6 +163,12 @@ fi
 # order of a bf16 ulp at logit scale, ~1e-2 — NOT 0.5.)
 : "${EXO_DSV4_MTP_TIEBREAK_FIX:=0}"
 : "${EXO_DSV4_MTP_TIEBREAK_EPS:=0.5}"
+# Greedy accept-rule alignment (2026-07-10): argmax over logsumexp-normalized
+# logprobs (the MTP-off generator's rule) instead of raw verify_logits for the
+# temp=0 accept/bonus decisions — removes the near-tie trajectory divergence
+# between MTP-on and MTP-off (the mismatch the retired tie-break fix papered
+# over). Default OFF until the byte-equality gate + DSML battery pass.
+: "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:=0}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
@@ -1228,6 +1234,8 @@ for NODE in "${NODES[@]}"; do
     # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
     [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
     [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
+    # Greedy accept-rule alignment (see defaults block above).
+    [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
     # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
     [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
