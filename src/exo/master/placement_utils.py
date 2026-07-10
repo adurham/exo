@@ -19,6 +19,22 @@ from exo.shared.types.worker.shards import (
     TensorShardMetadata,
 )
 
+
+class InsufficientMemoryError(ValueError):
+    """Placement failed ONLY because of currently-reported node memory.
+
+    Raised instead of a bare ``ValueError`` when candidate cycles exist
+    (topology and node set are fine) but ``ram_available`` — or the JIT
+    growth reserve derived from it — is what blocks the placement. This
+    matters operationally: after an exo kill, macOS takes ~a minute to
+    reclaim the previous runners' wired Metal pages, so a quick relaunch
+    reports transiently-low ``ram_available``. The JIT request path treats
+    this error class as retryable (poll node memory up to
+    ``EXO_JIT_PLACEMENT_WAIT_SECONDS``) where every other placement error
+    stays an immediate hard failure.
+    """
+
+
 # Headroom (in GB, per node) that a JIT/auto-placed instance must leave FREE on
 # every node it lands on, on top of its own weight share. This protects an
 # already-resident interactive model (e.g. DeepSeek-V4-Flash) whose KV cache and
@@ -32,6 +48,11 @@ from exo.shared.types.worker.shards import (
 _JIT_MEMORY_RESERVE_GB_DEFAULT = 18.0
 _JIT_LOAD_TIMEOUT_SECONDS_DEFAULT = 120.0
 _JIT_IDLE_UNLOAD_SECONDS_DEFAULT = 300.0
+# Default OFF (0 = hard-fail immediately, the pre-existing behavior) per the
+# standing default-off-until-validated discipline. Flip to ~120 in
+# start_cluster.sh once the kill/relaunch-cycling gate passes (zero placement
+# 503s, bounded time-to-first-token after relaunch).
+_JIT_PLACEMENT_WAIT_SECONDS_DEFAULT = 0.0
 
 
 def jit_memory_reserve() -> Memory:
@@ -91,6 +112,21 @@ def jit_load_timeout_seconds() -> float:
     """
     return _jit_float_env(
         "EXO_JIT_LOAD_TIMEOUT_SECONDS", _JIT_LOAD_TIMEOUT_SECONDS_DEFAULT
+    )
+
+
+def jit_placement_wait_seconds() -> float:
+    """Window to poll node memory when a JIT placement is memory-blocked.
+
+    Read from EXO_JIT_PLACEMENT_WAIT_SECONDS. Applies ONLY when every viable
+    placement candidate failed with :class:`InsufficientMemoryError` (nodes
+    present, topology fine, just not enough ``ram_available`` yet) — the
+    post-kill reclaim-lag window where memory recovers by itself within
+    ~a minute. 0 (the default) preserves the immediate hard-fail. Malformed
+    → default.
+    """
+    return _jit_float_env(
+        "EXO_JIT_PLACEMENT_WAIT_SECONDS", _JIT_PLACEMENT_WAIT_SECONDS_DEFAULT
     )
 
 
@@ -329,7 +365,7 @@ def _allocate_and_validate_layers(
         required_memory = (total_storage * node_layers) // total_layers
         available_memory = node_memory[node_id].ram_available
         if required_memory > available_memory:
-            raise ValueError(
+            raise InsufficientMemoryError(
                 f"Node {i} ({node_id}) has insufficient memory: "
                 f"requires {required_memory.in_gb:.2f} GB for {node_layers} layers, "
                 f"but only has {available_memory.in_gb:.2f} GB available"

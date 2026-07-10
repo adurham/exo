@@ -15,12 +15,14 @@ import pytest
 
 from exo.master.placement import place_instance
 from exo.master.placement_utils import (
+    InsufficientMemoryError,
     cycle_admits_with_reserve,
     jit_enabled,
     jit_idle_unload_seconds,
     jit_instances_to_reap,
     jit_load_timeout_seconds,
     jit_memory_reserve,
+    jit_placement_wait_seconds,
     weight_share_per_node,
 )
 from exo.master.tests.conftest import (
@@ -358,6 +360,86 @@ def test_place_instance_jit_admits_with_headroom(
     assert len(placements) == 1
     instance = next(iter(placements.values()))
     assert instance.jit is True
+
+
+# --------------------------------------------------------------------------- #
+# Memory-blocker classification (EXO_JIT_PLACEMENT_WAIT_SECONDS retry gate)
+# --------------------------------------------------------------------------- #
+def test_jit_placement_wait_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", raising=False)
+    assert jit_placement_wait_seconds() == 0.0
+
+
+def test_jit_placement_wait_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", "120")
+    assert jit_placement_wait_seconds() == 120.0
+
+
+def test_place_instance_reserve_blocker_is_memory_typed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Same layout as the hard-refusal test: the reserve blocker must surface
+    # as InsufficientMemoryError so the JIT request path knows waiting for
+    # post-kill reclaim could clear it.
+    monkeypatch.setenv("EXO_JIT_MEMORY_RESERVE_GB", "18")
+    card = _card(20, n_layers=10)
+    topology, node_memory, node_network, _a, _b = _two_node_topology(
+        25 * 1024**3, 25 * 1024**3
+    )
+    with pytest.raises(InsufficientMemoryError):
+        place_instance(
+            _place_cmd(card, jit=True),
+            topology,
+            {},
+            node_memory,
+            node_network,
+            _metal_only(node_memory),
+        )
+
+
+def test_place_instance_low_memory_blocker_is_memory_typed() -> None:
+    # Cycles exist (2-node topology is fine) but ram_available can't hold the
+    # weights anywhere — the post-kill reclaim-lag signature.
+    card = _card(200, n_layers=10)
+    topology, node_memory, node_network, _a, _b = _two_node_topology(
+        25 * 1024**3, 25 * 1024**3
+    )
+    with pytest.raises(InsufficientMemoryError):
+        place_instance(
+            _place_cmd(card, jit=False),
+            topology,
+            {},
+            node_memory,
+            node_network,
+            _metal_only(node_memory),
+        )
+
+
+def test_place_instance_topology_blocker_is_not_memory_typed() -> None:
+    # min_nodes larger than the cluster: no candidate cycle at all. Waiting for
+    # memory reclaim can never fix this, so it must stay a plain ValueError.
+    card = _card(1, n_layers=10)
+    topology, node_memory, node_network, _a, _b = _two_node_topology(
+        80 * 1024**3, 80 * 1024**3
+    )
+    command = PlaceInstance(
+        command_id=CommandId(),
+        model_card=card,
+        sharding=Sharding.Pipeline,
+        instance_meta=InstanceMeta.MlxRing,
+        min_nodes=3,
+        jit=False,
+    )
+    with pytest.raises(ValueError) as exc:
+        place_instance(
+            command,
+            topology,
+            {},
+            node_memory,
+            node_network,
+            _metal_only(node_memory),
+        )
+    assert not isinstance(exc.value, InsufficientMemoryError)
 
 
 # --------------------------------------------------------------------------- #

@@ -4,6 +4,7 @@ from typing import Sequence
 
 from exo.master.placement_utils import (
     Cycle,
+    InsufficientMemoryError,
     cycle_admits_with_reserve,
     filter_cycles_by_memory,
     get_mlx_jaccl_coordinators,
@@ -131,6 +132,12 @@ def place_instance(
         candidate_cycles, node_memory, command.model_card.storage_size
     )
     if len(cycles_with_sufficient_memory) == 0:
+        if candidate_cycles:
+            # Cycles exist (topology + node count are fine); the ONLY blocker
+            # is currently-reported ram_available (or a node's memory report
+            # not having arrived yet). Typed so the JIT request path can poll
+            # through the post-kill reclaim-lag window instead of 503ing.
+            raise InsufficientMemoryError("No cycles found with sufficient memory")
         raise ValueError("No cycles found with sufficient memory")
 
     # JIT auto-placements must additionally leave a per-node growth reserve free
@@ -154,7 +161,7 @@ def place_instance(
             )
         ]
         if not admissible_cycles:
-            raise ValueError(
+            raise InsufficientMemoryError(
                 f"No cycle leaves the required {reserve.in_gb:.1f} GB/node JIT "
                 f"memory reserve free after placing {command.model_card.model_id}"
             )

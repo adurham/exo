@@ -33,6 +33,33 @@ Item 4 is attribution-first, fix-only-if-cheap.
 
 ## 1. Placement/reclaim tolerance after kills (smallest, first)
 
+**STATUS 2026-07-10: IMPLEMENTED (laptop), cluster validation pending.**
+- 1a placement wait: `EXO_JIT_PLACEMENT_WAIT_SECONDS` (note the `_SECONDS`
+  suffix for consistency with the other JIT knobs). Memory blockers are now
+  typed (`InsufficientMemoryError`) end-to-end: `filter_cycles_by_memory`
+  empty with candidates present, the JIT reserve refusal, and per-node
+  pipeline layer-fit all classify as memory-blocked; the API polls
+  `state.node_memory` every 2 s inside the single-flight lock and only for
+  memory blockers. Default **0 = off** per standing discipline;
+  start_cluster.sh plumbs it and documents the flip to ~120 after the gate.
+- 1a graceful shutdown: runner SIGTERM path now drops the model graph and
+  returns the MLX pool to the OS pre-exit (`_release_gpu_memory_before_exit`
+  in bootstrap.py: unbind builder/runner → gc.collect → mx.synchronize →
+  mx.clear_cache). Known limitation: with `EXO_STALL_SAMPLER_SECONDS` set,
+  the sampler thread's frame pins the runner ref and the release degrades to
+  the old exit-time reclaim (diagnostic-only env, acceptable).
+- 1b reclaim curve: `wait_for_memory_reclaim` in start_cluster.sh (kill
+  timestamps per node, wired+compressor residual via vm_stat, warn-only
+  explicit STUCK MEMORY alert naming the reboot escape hatch; knobs
+  `EXO_RECLAIM_CHECK/RESIDUAL_MAX_GB/DEADLINE_SECONDS`). The generated
+  `~/relaunch_exo.sh` now does the graceful SIGTERM kill + reclaim wait
+  itself (previously it only started exo, leaving quick node-side restarts
+  to hand-run `screen -X quit`/pkill −9).
+- **Remaining to close item 1:** run the validation gate on the cluster
+  (kill/relaunch cycling with `EXO_JIT_PLACEMENT_WAIT_SECONDS=120`; expect
+  zero placement 503s, bounded TTFT), then flip the default in
+  start_cluster.sh. Coordinate before touching the cluster (hermes).
+
 **Symptom:** after killing exo, ~60GB/node stays unreclaimed for ~1 min;
 JIT placement instantly 503s ("no admissible placement") on quick relaunch.
 Once (2026-07-09) m4-2 kept 61GB stuck in the compressor with no owning

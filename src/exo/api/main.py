@@ -128,8 +128,10 @@ from exo.api.types.openai_responses import (
 from exo.master.image_store import ImageStore
 from exo.master.placement import place_instance as get_instance_placements
 from exo.master.placement_utils import (
+    InsufficientMemoryError,
     jit_enabled,
     jit_load_timeout_seconds,
+    jit_placement_wait_seconds,
 )
 from exo.metrics import (
     CONTENT_TYPE_LATEST as _METRICS_CONTENT_TYPE,
@@ -232,6 +234,28 @@ from exo.utils.task_group import TaskGroup
 
 _API_EVENT_LOG_DIR = EXO_EVENT_LOG_DIR / "api"
 ONBOARDING_COMPLETE_FILE = EXO_CACHE_HOME / "onboarding_complete"
+
+# Poll cadence for the EXO_JIT_PLACEMENT_WAIT_SECONDS retry loop. Node memory
+# reports arrive on the info-gatherer cadence (seconds), so polling faster
+# than this only re-reads the same stale state.
+_JIT_PLACEMENT_POLL_SECONDS = 2.0
+
+
+class JitPlacementUnavailableError(Exception):
+    """No admissible JIT placement config right now.
+
+    ``memory_blocked`` is True when at least one candidate config failed ONLY
+    on currently-reported node memory (``InsufficientMemoryError``) — i.e.
+    waiting for the OS to finish reclaiming a killed run's wired pages could
+    make the placement admissible without any operator action. Every other
+    blocker (topology, backends, RDMA, model constraints) is permanent for
+    the lifetime of the request and fails immediately.
+    """
+
+    def __init__(self, detail: str, *, memory_blocked: bool) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.memory_blocked = memory_blocked
 
 
 def _format_to_content_type(image_format: Literal["png", "jpeg", "webp"] | None) -> str:
@@ -1140,7 +1164,9 @@ class API:
                 status_code=503, detail=f"Failed to load model card: {exc}"
             ) from exc
 
-        sharding, instance_meta, min_nodes = self._choose_jit_placement(model_card)
+        sharding, instance_meta, min_nodes = await self._choose_jit_placement_with_wait(
+            model_card
+        )
 
         logger.info(
             f"JIT auto-placing {model_id} "
@@ -1178,6 +1204,48 @@ class API:
                 )
             await anyio.sleep(0.25)
 
+    async def _choose_jit_placement_with_wait(
+        self, model_card: ModelCard
+    ) -> tuple[Sharding, InstanceMeta, int]:
+        """Choose a JIT placement, polling through transient memory blockers.
+
+        After an exo kill, macOS takes ~a minute to reclaim the previous
+        runners' wired Metal pages, so a quick relaunch + JIT request sees
+        transiently-low ``ram_available`` and used to 503 instantly ("no
+        admissible placement"). When the ONLY blocker is memory
+        (``memory_blocked`` on ``JitPlacementUnavailableError``) and
+        EXO_JIT_PLACEMENT_WAIT_SECONDS > 0, re-evaluate placement against the
+        refreshing ``state.node_memory`` every ``_JIT_PLACEMENT_POLL_SECONDS``
+        until the window closes. Any non-memory blocker — and the wait-window
+        default of 0 — preserves the immediate hard 503.
+        """
+        wait_seconds = jit_placement_wait_seconds()
+        deadline = anyio.current_time() + wait_seconds
+        waiting_logged = False
+        while True:
+            try:
+                return self._choose_jit_placement(model_card)
+            except JitPlacementUnavailableError as exc:
+                remaining = deadline - anyio.current_time()
+                if not exc.memory_blocked or remaining <= 0:
+                    detail = f"Cannot JIT-load model {model_card.model_id}: {exc.detail}"
+                    if exc.memory_blocked and wait_seconds > 0:
+                        detail += (
+                            f" (still blocked after waiting {wait_seconds:.0f}s "
+                            "for memory reclaim; if this follows an exo kill, "
+                            "node memory may be stuck — see reclaim runbook)"
+                        )
+                    raise HTTPException(status_code=503, detail=detail) from exc
+                if not waiting_logged:
+                    waiting_logged = True
+                    logger.info(
+                        f"JIT placement for {model_card.model_id} blocked only "
+                        f"by node memory ({exc.detail}); polling for up to "
+                        f"{wait_seconds:.0f}s (EXO_JIT_PLACEMENT_WAIT_SECONDS) "
+                        "while the OS reclaims."
+                    )
+                await anyio.sleep(min(_JIT_PLACEMENT_POLL_SECONDS, remaining))
+
     def _choose_jit_placement(
         self, model_card: ModelCard
     ) -> tuple[Sharding, InstanceMeta, int]:
@@ -1187,7 +1255,8 @@ class API:
         candidate via a dry-run ``place_instance(jit=True)`` so the growth-reserve
         admission check participates. Priority: multi-node Jaccl+Tensor (fastest)
         → single-node Ring+Pipeline → any admissible config (fewest nodes). Raises
-        a clean 503 when nothing is admissible (reserve would be violated).
+        ``JitPlacementUnavailableError`` when nothing is admissible; the caller
+        surfaces it as a clean 503 (after the optional memory-reclaim wait).
         """
         node_count = len(list(self.state.topology.list_nodes()))
         candidates: list[tuple[Sharding, InstanceMeta, int]] = []
@@ -1205,6 +1274,7 @@ class API:
                         candidates.append(combo)
 
         last_error: str | None = None
+        memory_blocked = False
         for sharding, instance_meta, min_nodes in candidates:
             try:
                 placements = get_instance_placements(
@@ -1223,6 +1293,13 @@ class API:
                     download_status=self.state.downloads,
                     node_rdma_ctl=self.state.node_rdma_ctl,
                 )
+            except InsufficientMemoryError as exc:
+                # This candidate is viable except for currently-reported node
+                # memory — the one blocker that can clear by itself (post-kill
+                # reclaim lag). Remember it so the caller can poll.
+                memory_blocked = True
+                last_error = str(exc)
+                continue
             except ValueError as exc:
                 last_error = str(exc)
                 continue
@@ -1232,12 +1309,9 @@ class API:
             if len(new_ids) == 1:
                 return (sharding, instance_meta, min_nodes)
 
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"Cannot JIT-load model {model_card.model_id}: no admissible "
-                f"placement ({last_error or 'unknown reason'})"
-            ),
+        raise JitPlacementUnavailableError(
+            f"no admissible placement ({last_error or 'unknown reason'})",
+            memory_blocked=memory_blocked,
         )
 
     def stream_events(self) -> StreamingResponse:

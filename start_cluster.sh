@@ -467,6 +467,28 @@ fi
 # instances with zero in-flight requests are reaped; the interactive model
 # (placed explicitly, jit=False) is immune.
 : "${EXO_JIT_IDLE_UNLOAD_SECONDS:=300}"
+# Window (seconds) the API polls node memory when a JIT placement is blocked
+# ONLY by ram_available before 503ing. Covers the ~1 min post-kill reclaim
+# lag: relaunch exo, first JIT request used to fail instantly with "no
+# admissible placement" while macOS was still reclaiming the previous
+# runners' wired pages. Non-memory blockers still hard-fail immediately.
+# Default 0 (= pre-existing hard-fail) per the default-off-until-validated
+# discipline — flip to ~120 here once the kill/relaunch cycling gate passes
+# (docs/dsv4-rowseq-followups-plan-2026-07-10.md item 1a).
+: "${EXO_JIT_PLACEMENT_WAIT_SECONDS:=0}"
+
+# --- Post-kill memory reclaim check (item 1b of the same plan) ---------------
+# After killing exo, macOS normally returns the runners' ~60-80 GB of wired
+# Metal pages within ~1 min. If (wired + compressor) has not recovered by
+# EXO_RECLAIM_DEADLINE_SECONDS after the kill, the node is in the pathological
+# stuck state (AGX pages orphaned by a SIGKILL mid-GPU-op; m4-2 2026-07-09:
+# 61 GB stuck in the compressor with no owning process) — alert EXPLICITLY
+# before launch instead of letting the session die in mysterious placement
+# 503s. Warn-only: the launch proceeds so the operator decides. Escape hatch
+# for the stuck state is a reboot; userspace cannot reclaim those pages.
+: "${EXO_RECLAIM_CHECK:=1}"
+: "${EXO_RECLAIM_RESIDUAL_MAX_GB:=25}"
+: "${EXO_RECLAIM_DEADLINE_SECONDS:=180}"
 
 # Cluster-wide sampling defaults (apply when neither request nor instance specifies).
 # Unset by default — instance and hardcoded fallbacks take over.
@@ -800,6 +822,52 @@ else
     echo "  Local HEAD ($LOCAL_HEAD) is on origin/$PUSH_CHECK_BRANCH ✓"
 fi
 
+# Residual (wired + compressor) GB on a node — the memory classes exo's dead
+# runners leave behind. Healthy idle macOS sits well under the threshold;
+# freshly-killed exo takes ~1 min to drain back under it.
+node_residual_gb() {
+    ssh "$1" "vm_stat" | awk '
+        /page size of/                 { page_size = $8 }
+        /Pages wired down:/            { wired = $4 }
+        /Pages occupied by compressor:/ { compressor = $5 }
+        END { printf "%d", (wired + compressor) * page_size / 1e9 }
+    '
+}
+
+# Reclaim-curve check: poll a node's residual memory from its kill timestamp
+# until it recovers or EXO_RECLAIM_DEADLINE_SECONDS pass, then alert
+# explicitly (warn-only). See the EXO_RECLAIM_* block up top.
+wait_for_memory_reclaim() {
+    local NODE=$1 KILL_EPOCH=$2
+    [ "$EXO_RECLAIM_CHECK" == "1" ] || return 0
+    [ -n "$KILL_EPOCH" ] || return 0
+    local DEADLINE=$(( KILL_EPOCH + EXO_RECLAIM_DEADLINE_SECONDS ))
+    local RESIDUAL
+    while :; do
+        RESIDUAL=$(node_residual_gb "$NODE")
+        if [ -n "$RESIDUAL" ] && [ "$RESIDUAL" -le "$EXO_RECLAIM_RESIDUAL_MAX_GB" ]; then
+            echo "  Memory reclaim on $NODE complete (wired+compressor ${RESIDUAL} GB <= ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB)."
+            return 0
+        fi
+        if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+            echo ""
+            echo "  ============================ STUCK MEMORY ============================"
+            echo "  WARNING: $NODE wired+compressor is still ${RESIDUAL:-?} GB"
+            echo "  (> ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB) ${EXO_RECLAIM_DEADLINE_SECONDS}s after the exo kill."
+            echo "  This is the pathological post-SIGKILL state: AGX/Metal wired pages"
+            echo "  orphaned mid-GPU-op (m4-2 2026-07-09: 61 GB stuck in the compressor"
+            echo "  with no owning process). Model placement on this node will refuse /"
+            echo "  JIT requests will 503 until it clears."
+            echo "  ESCAPE HATCH: reboot $NODE — userspace cannot reclaim these pages."
+            echo "  ======================================================================"
+            echo ""
+            return 1
+        fi
+        echo "  Waiting for memory reclaim on $NODE (wired+compressor ${RESIDUAL:-?} GB > ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB)..."
+        sleep 5
+    done
+}
+
 # 1. Cleanup, Update, and Build
 for NODE in "${NODES[@]}"; do
     echo "Preparing $NODE..."
@@ -853,6 +921,10 @@ for NODE in "${NODES[@]}"; do
     fi
     
     ssh "$NODE" "screen -wipe || true"
+
+    # Timestamp the kill for the reclaim-curve check before launch (bash 3.2:
+    # no associative arrays, so one dynamically-named scalar per node).
+    printf -v "KILL_EPOCH_${NODE//-/_}" '%s' "$(date +%s)"
 
     echo "Ensuring Xcode developer directory on $NODE..."
     ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
@@ -925,7 +997,13 @@ echo "Nodes synchronized on commit $COMMIT_M4_1."
 # 3. Start Exo on each node
 for NODE in "${NODES[@]}"; do
     echo "Starting Exo on $NODE..."
-    
+
+    # Reclaim-curve check (item 1b): make stuck post-kill memory an explicit,
+    # named alert at launch time instead of a mysterious placement 503 later.
+    # Warn-only — a failed check does not abort the launch.
+    _kill_epoch_var="KILL_EPOCH_${NODE//-/_}"
+    wait_for_memory_reclaim "$NODE" "${!_kill_epoch_var}" || true
+
     # Build the node environment string
     # AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1: Apple GPU driver env var that relaxes
     # the command buffer context store timeout. Without it, macOS's IOGPU
@@ -1001,6 +1079,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_JIT_MEMORY_RESERVE_GB=$EXO_JIT_MEMORY_RESERVE_GB"
     EXO_ENV="$EXO_ENV EXO_JIT_LOAD_TIMEOUT_SECONDS=$EXO_JIT_LOAD_TIMEOUT_SECONDS"
     EXO_ENV="$EXO_ENV EXO_JIT_IDLE_UNLOAD_SECONDS=$EXO_JIT_IDLE_UNLOAD_SECONDS"
+    EXO_ENV="$EXO_ENV EXO_JIT_PLACEMENT_WAIT_SECONDS=$EXO_JIT_PLACEMENT_WAIT_SECONDS"
     [ -n "${EXO_DSV4_HEAPCENSUS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HEAPCENSUS=$EXO_DSV4_HEAPCENSUS"
     [ -n "$EXO_DSV4_SEQ_SPLIT_MIN_L" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT_MIN_L=$EXO_DSV4_SEQ_SPLIT_MIN_L"
     [ -n "$EXO_PREFIX_CACHE_TRACE" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_TRACE=$EXO_PREFIX_CACHE_TRACE"
@@ -1418,6 +1497,41 @@ for NODE in "${NODES[@]}"; do
         printf '# in start_cluster.sh (single source of truth). This script only restarts\n'
         printf '# the exo PROCESS; it does NOT deploy code or place models (run\n'
         printf '# start_cluster.sh for the full canonical bring-up incl. pinned DSv4).\n'
+        # Quoted heredoc: nothing expands locally; the body is literal zsh
+        # that runs on the node.
+        cat <<'RELAUNCH_BODY'
+# Graceful kill of any live exo FIRST. SIGTERM lets runners tear down their
+# RDMA QPs cleanly AND release their Metal buffers before exit. Never use
+# `screen -X quit` / `pkill -9` here: both skip the destructors, leaking QPs
+# (TB-stack wedge) and orphaning ~60-80 GB of wired pages the OS then takes
+# ~a minute (or a reboot) to reclaim.
+pkill -TERM -f 'python.*exo' 2>/dev/null || true
+for _i in {1..20}; do
+  pgrep -f 'python.*exo' >/dev/null 2>&1 || break
+  sleep 1
+done
+if pgrep -f 'python.*exo' >/dev/null 2>&1; then
+  echo 'WARNING: exo did not exit on SIGTERM after 20s — escalating to SIGKILL (may leak RDMA QPs; reboot if TB wedges).'
+  pkill -9 -f 'python.*exo' 2>/dev/null || true
+  sleep 1
+fi
+screen -wipe >/dev/null 2>&1 || true
+# Reclaim-curve check: wait for wired+compressor to drain before relaunching
+# so the first placement does not refuse on transiently-low ram_available.
+# Still stuck at the deadline = post-SIGKILL orphaned AGX pages (m4-2
+# 2026-07-09: 61 GB in the compressor, no owning process) — reboot to clear.
+_deadline=$(( $(date +%s) + 180 ))
+while :; do
+  _residual=$(vm_stat | awk '/page size of/{ps=$8} /Pages wired down:/{w=$4} /Pages occupied by compressor:/{c=$5} END{printf "%d",(w+c)*ps/1e9}')
+  [ -n "$_residual" ] && [ "$_residual" -le 25 ] && break
+  if [ "$(date +%s)" -ge "$_deadline" ]; then
+    echo "WARNING: STUCK MEMORY — wired+compressor still ${_residual} GB 180s after the kill. Placement will refuse / JIT will 503 until it clears. ESCAPE HATCH: reboot this node."
+    break
+  fi
+  echo "waiting for memory reclaim (${_residual} GB wired+compressor)..."
+  sleep 5
+done
+RELAUNCH_BODY
         printf "screen -dmS exorun zsh -l -c '%s'\n" "$LAUNCH_CMD"
     } > "$RELAUNCH_TMP"
     scp -q "$RELAUNCH_TMP" "$NODE:relaunch_exo.sh"

@@ -1,4 +1,5 @@
 import ctypes
+import gc
 import os
 import resource
 import signal
@@ -161,6 +162,39 @@ def _maybe_register_profiler_hook() -> None:
     logger.info(f"mlx-lm profiler hook registered: {sorted(requested)}")
 
 
+def _release_gpu_memory_before_exit() -> None:
+    """Free the model's Metal buffers BEFORE the process exits.
+
+    The caller must have dropped its builder/runner references first — this
+    only collects and returns the pool. A runner that merely unwinds on
+    SIGTERM leaves its ~60-80 GB of wired Metal pages to be reclaimed
+    post-mortem by the kernel — observed as ~a minute of depressed
+    ``ramAvailable`` after a kill, during which a quick relaunch's JIT
+    placement 503s ("no admissible placement"); and once (2026-07-09, m4-2)
+    as 61 GB orphaned in the compressor with no owning process, needing a
+    reboot. Dropping the model graph, draining in-flight command buffers,
+    and clearing the MLX allocator pool here — while the process is still
+    alive — releases the buffers back to the OS deterministically instead.
+    Best-effort: any failure (including a second SIGTERM landing as
+    SystemExit mid-release) falls back to the old exit-time reclaim.
+    """
+    try:
+        # Break MLX array-graph ref cycles so the freed model graph actually
+        # lands in the allocator pool (same discipline as the idle-transition
+        # reclaim in runner.py).
+        gc.collect()
+
+        import mlx.core as mx
+
+        # Drain in-flight command buffers so their buffers are releasable,
+        # then return the whole pool to the OS.
+        mx.synchronize()
+        mx.clear_cache()
+        logger.info("Released MLX buffers before exit")
+    except BaseException as e:  # noqa: BLE001
+        logger.warning(f"Best-effort MLX buffer release on exit failed: {e!r}")
+
+
 def entrypoint(
     bound_instance: BoundInstance,
     event_sender: MpSender[Event | RunnerTerminationError],
@@ -236,7 +270,7 @@ def entrypoint(
     try:
         from exo.worker.runner.runner import Runner
 
-        builder: Builder
+        builder: Builder | None
 
         if bound_instance.is_image_model:
             from exo.worker.engines.image.builder import MfluxBuilder
@@ -257,7 +291,6 @@ def entrypoint(
                 event_sender=event_sender_downcast,
                 cancel_receiver=cancel_receiver,
             )
-
         runner = Runner(bound_instance, builder, event_sender_downcast, task_receiver)
         runner.main()
 
@@ -300,6 +333,12 @@ def entrypoint(
         # diagnostics field (which is now required on RunnerFailed).
         event_sender.send(RunnerTerminationError.from_exception(e))
     finally:
+        # Unbind this frame's builder/runner references — the last strong
+        # refs to the engine + model graph — so the pre-exit release below
+        # can actually return the model's Metal buffers to the OS.
+        builder = None
+        runner = None
+        _release_gpu_memory_before_exit()
         try:
             event_sender.close()
             task_receiver.close()

@@ -7,13 +7,17 @@ Covers the behavior of ``_validate_model_has_instance`` and the single-flight
   - JIT enabled, model already resident → returns immediately.
   - JIT enabled, model not downloaded → 404 (no auto-place).
   - Single-flight: concurrent first-requests trigger exactly ONE placement.
+  - EXO_JIT_PLACEMENT_WAIT_SECONDS: memory-blocked placements poll through
+    the post-kill reclaim window; non-memory blockers and the default 0
+    hard-fail immediately.
 """
 
 import anyio
 import pytest
 from fastapi import HTTPException
 
-from exo.api.main import API
+import exo.api.main as api_main
+from exo.api.main import API, JitPlacementUnavailableError
 from exo.shared.models.model_cards import ModelCard, ModelId, ModelTask
 from exo.shared.types.backends import Backend
 from exo.shared.types.common import NodeId
@@ -24,10 +28,11 @@ from exo.shared.types.worker.downloads import (
 )
 from exo.shared.types.worker.instances import (
     InstanceId,
+    InstanceMeta,
     MlxRingInstance,
 )
 from exo.shared.types.worker.runners import RunnerId, RunnerReady, ShardAssignments
-from exo.shared.types.worker.shards import PipelineShardMetadata
+from exo.shared.types.worker.shards import PipelineShardMetadata, Sharding
 
 
 def _make_api(state: State) -> API:
@@ -178,3 +183,92 @@ async def test_single_flight_one_placement_for_concurrent_requests(
     assert all(r == model for r in results)
     # Single-flight map is cleared after the load completes.
     assert api._jit_inflight_loads == {}
+
+
+_PlacementConfig = tuple[Sharding, InstanceMeta, int]
+
+
+def _wait_api(
+    choose_results: list[JitPlacementUnavailableError | _PlacementConfig],
+) -> tuple[API, list[int]]:
+    """API stub whose ``_choose_jit_placement`` pops scripted results.
+
+    Each entry is either an exception (raised) or a config tuple (returned).
+    The last entry repeats if the loop polls past the script's end. Returns
+    the api and a single-element call-count list.
+    """
+    api = _make_api(State())
+    calls = [0]
+
+    def _choose(model_card: ModelCard) -> _PlacementConfig:
+        calls[0] += 1
+        result = choose_results[min(calls[0] - 1, len(choose_results) - 1)]
+        if isinstance(result, JitPlacementUnavailableError):
+            raise result
+        return result
+
+    api._choose_jit_placement = _choose
+    return api, calls
+
+
+async def test_placement_wait_default_off_hard_fails_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", raising=False)
+    api, calls = _wait_api(
+        [JitPlacementUnavailableError("no memory", memory_blocked=True)]
+    )
+    with pytest.raises(HTTPException) as exc:
+        await api._choose_jit_placement_with_wait(_card())
+    assert exc.value.status_code == 503
+    assert calls[0] == 1
+
+
+async def test_placement_wait_polls_through_memory_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", "5")
+    monkeypatch.setattr(api_main, "_JIT_PLACEMENT_POLL_SECONDS", 0.01)
+    config: _PlacementConfig = (Sharding.Tensor, InstanceMeta.MlxJaccl, 2)
+    api, calls = _wait_api(
+        [
+            JitPlacementUnavailableError("no memory", memory_blocked=True),
+            JitPlacementUnavailableError("no memory", memory_blocked=True),
+            config,
+        ]
+    )
+    result = await api._choose_jit_placement_with_wait(_card())
+    assert result == config
+    assert calls[0] == 3
+
+
+async def test_placement_wait_ignores_non_memory_blockers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", "5")
+    monkeypatch.setattr(api_main, "_JIT_PLACEMENT_POLL_SECONDS", 0.01)
+    api, calls = _wait_api(
+        [JitPlacementUnavailableError("no RDMA cycles", memory_blocked=False)]
+    )
+    with pytest.raises(HTTPException) as exc:
+        await api._choose_jit_placement_with_wait(_card())
+    assert exc.value.status_code == 503
+    assert "no RDMA cycles" in exc.value.detail
+    assert calls[0] == 1
+
+
+async def test_placement_wait_gives_up_after_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", "0.05")
+    monkeypatch.setattr(api_main, "_JIT_PLACEMENT_POLL_SECONDS", 0.01)
+    api, calls = _wait_api(
+        [JitPlacementUnavailableError("no memory", memory_blocked=True)]
+    )
+    with pytest.raises(HTTPException) as exc:
+        await api._choose_jit_placement_with_wait(_card())
+    assert exc.value.status_code == 503
+    # The operator-facing detail should say we DID wait and point at the
+    # stuck-memory runbook, not read like an instant refusal.
+    assert "memory reclaim" in exc.value.detail
+    assert calls[0] > 1
