@@ -250,15 +250,47 @@ replay, and it's gone — EXO_DSV4_SPEC_CACHE_ROLLBACK.**
   later); flip candidates after task #8: six fixes + CACHE_ROLLBACK +
   MIN_CTX=0 at −4%.
 
-**Next unit of work:** 2-rank TP harness — run ldiff_cycles under
-mx.distributed (2 local ring ranks or the real jaccl pair) with the
-sharded model; bitwise-compare verify chains vs sequential per rank.
-First probe: all_reduce/matmul M-dependence per rank at M=1 vs M=γ+1
-(the v6 fork-later datapoint says per-forward TP numerics, not cache
-state). Then fix, re-run the serving byte-equality gate
-(ACCEPT_LOGPROBS+SNAPSHOT_BATCH+RESTORE_AFTER_TRIM+ROWSEQ_ROWMASK+
-SPEC_STATE_RESTORE+CACHE_ROLLBACK+MIN_CTX=0), DSML battery, and only
-then flip defaults.
+**RESOLVED (same day, third leg): GOLD GATE PASSES 3/3 — MTP-on serving
+is byte-identical to MTP-off at temp=0.** The "TP residual" was never
+TP/jaccl at all (both ranks agreed bitwise in every trace; DSv4 TP
+sharding is MoE-only, attention replicated, seq-split gated to L≥16).
+Three stacked causes, found via the new serving layer/sub-op/cache hash
+instrument (EXO_DSV4_LAYER_HASH_DUMP / _SUBOPS, mlx-lm):
+
+1. **hc-op M-dependence** (bf16 HyperConnection post/comb/x at verify
+   M=γ+1 vs decode M=1, real-weight value-dependent, first-diff at the
+   two LocalAttention layers L00/L01, NOT reproducible in the tiny-model
+   harness incl. with serving-parity per-layer fence). Fix:
+   **EXO_DSV4_ROWSEQ_FULLBLOCK** — run the whole block per row (hc, norms,
+   attention; MoE stays batched) + per-row hc_head at model level (final
+   norm stays batched — the MTP generator's capture wraps `norm` and needs
+   the full (B,L,D) pre-norm).
+2. **Pools were NEVER rolled back in serving** — EXO_DSV4_POOL_SNAPSHOT_BATCH
+   (and POOL_RESTORE_AFTER_TRIM) were never plumbed into runner env by
+   start_cluster.sh, so _collect_pooling_caches matched only plain
+   PoolingCache → [] with the batch classes. Every v4/v5/v6 gate run had
+   silent pool contamination (compressor-pool remainder leaking +1 per
+   kept-flush rejection — visible in the L02 cache-state trace). Fixed in
+   start_cluster.sh.
+3. **MoE M-dependence** — with everything else per-row and caches
+   bitwise-aligned, L34 pos-179: ffn_in matched, ffn_out differed (~1 in
+   6k layer-forwards, real-weight; the tokens-per-expert/gather-boundary
+   class item 4 hypothesized). Fix: **EXO_DSV4_ROWSEQ_FULLBLOCK_MOE** —
+   per-row MoE in fullblock verifies.
+
+**Gate results (all default-off envs: six fixes + CACHE_ROLLBACK +
+FULLBLOCK + FULLBLOCK_MOE + MIN_CTX=0):** byte gate **3/3 IDENTICAL** to
+MTP-off (600 tok × 3 prompts), self-repeat 3/3, layer-hash trace clean
+through the fork region. Perf ladder @600tok c=1: prod lossy 27.3 t/s;
+lossless-minus-MoE-per-row 26.2 (−4%, gate 1/3 — rare MoE event forks at
+near-ties); **fully lossless 20.7 (−24%, gate 3/3)**.
+
+**Remaining before default flips:** DSML battery on the lossless stack;
+decide lossy-27.3 vs lossless-20.7 vs near-lossless-26.2 as prod default;
+perf work on the MoE M-dependence (batch-invariant gather/gate kernels —
+item 4 is now a perf item, its attribution DONE: the event lives inside
+`self.ffn` between ffn_in and ffn_out at batched M) could recover most of
+the −24% → −4%.
 
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
