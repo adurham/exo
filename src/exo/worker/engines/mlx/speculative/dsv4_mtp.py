@@ -1787,6 +1787,37 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                             pass
                 if _max_ctx > _c2_max:
                     spec_eligible = False
+        # ALL-C high-context MTP gate (2026-07-09). At c=1, 100K+ ctx the
+        # batched L>1 verify forward drifts vs a clean single-token forward
+        # by up to ~1.7 logits (REFCHECK delta_128822 on the hermes-replay
+        # corpus; same unattributed family as the qL=3 sdpa residuals up to
+        # 2.8 seen in the c2 pooling-skew work). Near-tied structural tokens
+        # then flip and corrupt rigid DSML blocks (the ``</｜DSML｜inv>``
+        # class). The margin-gated tie re-verify (step 4) catches only the
+        # flips where the VERIFY row itself shows a small gap — drift larger
+        # than the gap escapes one-sided gating. Until the drift is
+        # attributed and fixed, cap MTP by context at ANY concurrency:
+        # above the threshold, sequential decode (bitwise the MTP-off path,
+        # the known-clean configuration). 0 disables the gate.
+        if spec_eligible:
+            _allc_max = int(os.environ.get("EXO_DSV4_MTP_MAX_CTX", "0"))
+            if _allc_max > 0:
+                _max_ctx_allc = 0
+                for _c in gen_batch.prompt_cache:
+                    _subs = _c.caches if hasattr(_c, "caches") else [_c]
+                    for _sub in _subs:
+                        try:
+                            _off = _sub.offset
+                            if hasattr(_off, "shape"):
+                                _off = int(mx.max(_off))
+                            else:
+                                _off = int(_off)
+                            if _off > _max_ctx_allc:
+                                _max_ctx_allc = _off
+                        except Exception:
+                            pass
+                if _max_ctx_allc > _allc_max:
+                    spec_eligible = False
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             self._mtp_trace_log("dispatch_decision", {
                 "spec_eligible": spec_eligible,
@@ -3410,6 +3441,43 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 else:
                     break
 
+        # ── TIE RE-VERIFY GATE (EXO_DSV4_MTP_TIE_REVERIFY=1, temp=0) ────
+        # The batched L>1 verify forward carries small numeric drift vs a
+        # clean single-token forward; at NEAR-TIED logits that flips the
+        # argmax and a wrong token gets committed (REFCHECK-proven
+        # 2026-07-09 at 115K ctx: emitted 270, clean-ref argmax 566, top-2
+        # gap 0.5 — the DSML-corruption class, e.g. ``</｜DSML｜inv>``).
+        # Clear-margin rows are immune (drift ≪ gap), so scan the rows that
+        # decide this cycle's commits (0..n_accepted inclusive: accepted
+        # drafts + the bonus/correction row). At the FIRST row whose top-2
+        # gap < eps, stop trusting the verify forward: truncate acceptance
+        # there (the standard rollback below then trims the cache exactly
+        # like a natural rejection) and mark the cycle so the post-rollback
+        # re-verify block emits the CLEAN single-token forward's argmax at
+        # that position instead. Unlike the rolled-back 2026-06 lowest-id
+        # tie-break heuristic, the replacement is ground truth by
+        # definition — it IS sequential decode's pick. The decision folds
+        # into the existing canonical broadcast (no extra round-trip); the
+        # extra 1-token forward runs only on tie cycles.
+        _tie_reverify = 0
+        if temp == 0 and os.environ.get(
+            "EXO_DSV4_MTP_TIE_REVERIFY", "0"
+        ) == "1":
+            _trv_eps = float(
+                os.environ.get("EXO_DSV4_MTP_TIE_REVERIFY_EPS", "1.0")
+            )
+            _trv_rows = verify_logits[0, : n_accepted + 1]
+            _trv_top2 = mx.topk(_trv_rows, 2, axis=-1)
+            _trv_gaps = mx.abs(_trv_top2[..., -1] - _trv_top2[..., -2])
+            for _trv_i, _trv_g in enumerate(
+                cast(list[float], _trv_gaps.tolist())
+            ):
+                if _trv_g < _trv_eps:
+                    _tie_reverify = 1
+                    if _trv_i < n_accepted:
+                        n_accepted = _trv_i
+                    break
+
         # Compute local bonus_val using local n_accepted, BEFORE the
         # cross-rank broadcast. This lets us combine n_accepted +
         # bonus_val into ONE broadcast (one ACK barrier round-trip
@@ -3443,13 +3511,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # at γ=2 with ~30 cycles/sec/stream this saves one round-trip
         # per cycle = ~3% wall time per stream.
         if sync_drafts:
+            # Third slot: the tie re-verify flag. Rank-local gap scans can
+            # disagree at the very ties they detect (~1ulp TP drift), so the
+            # canonical (rank 0) decision must drive every rank — a rank-
+            # divergent branch around the re-verify forward would deadlock
+            # the TP collective. Same 1-broadcast budget as before.
             combined_arr = broadcast_from_canonical(
-                mx.array([n_accepted, bonus_val], dtype=mx.int32),
+                mx.array(
+                    [n_accepted, bonus_val, _tie_reverify], dtype=mx.int32
+                ),
                 coord_group,
             )
             combined = cast(list[int], combined_arr.tolist())
             n_accepted = combined[0]
             bonus_val = combined[1]
+            _tie_reverify = combined[2]
         # bonus_lp stays local — only used for response.logprobs
         # (informational, master picks rank 0's response only).
 
@@ -3714,7 +3790,82 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
 
+        # ── TIE RE-VERIFY (paired with the gate in step 4) ───────────────
+        # ⚠ RETIRED FROM PROD (2026-07-10, keep gated OFF): the trim+refeed
+        # primitive this block (and the refcheck below) trusts is UNSOUND at
+        # pool-flush cycles — PoolingCache.trim() cannot un-flush and the
+        # refeed re-flushes, so the "clean reference forward" itself computes
+        # over corrupted pool state whenever the trimmed token flushed a pool
+        # (ratio-4 layers flush every 4th token). Superseded by the real fix:
+        # EXO_DSV4_VERIFY_ROWSEQ in deepseek_v4.py makes the verify forward
+        # bitwise-sequential, removing the drift this tried to patch.
+        # Canonical flag says some committed row this cycle was a near-tie:
+        # the cache now ends at exactly the committed prefix
+        # [..., y, drafts[:n_accepted]], so reconstruct the CLEAN sequential
+        # next-token distribution with the same trim+refeed primitive the
+        # refcheck below uses (trim one token, re-run just it through the
+        # target — restores the cache offset as a side effect) and commit
+        # ITS argmax. TP SAFETY: every rank reaches this block (flag is from
+        # the canonical broadcast) and runs the identical forward; the
+        # rank-local argmax is then canonicalized with one extra broadcast —
+        # paid only on tie cycles. bonus_lp intentionally keeps the verify
+        # row's logprob (informational only; master reads rank 0's text).
+        if _tie_reverify and temp == 0:
+            _trv_committed = [y_val] + draft_int_values[:n_accepted]
+            _trv_last = _trv_committed[-1]
+            for _trv_c in gen_batch.prompt_cache:
+                if hasattr(_trv_c, "trim"):
+                    _trv_c.trim(1)
+                elif hasattr(_trv_c, "offset"):
+                    _trv_c.offset -= 1
+            _trv_in = mx.array([_trv_last], dtype=mx.int32).reshape(1, 1)
+            _trv_out = self.model(_trv_in, cache=gen_batch.prompt_cache)
+            _trv_row = _trv_out[0, 0]
+            mx.eval(_trv_row)
+            _trv_pick = int(mx.argmax(_trv_row).item())
+            if sync_drafts:
+                _trv_arr = broadcast_from_canonical(
+                    mx.array([_trv_pick], dtype=mx.int32), coord_group
+                )
+                _trv_pick = int(cast(list[int], _trv_arr.tolist())[0])
+            self._tie_reverify_cycles = (
+                getattr(self, "_tie_reverify_cycles", 0) + 1
+            )
+            if _trv_pick != bonus_val:
+                self._tie_reverify_flips = (
+                    getattr(self, "_tie_reverify_flips", 0) + 1
+                )
+            # Flip instrument: stdlib logger INFO is swallowed in the runner
+            # (no handler; only loguru sinks reach exo.log — the reason the
+            # refcheck writes JSONL). Same idiom here, opt-in via env path.
+            _trv_log = os.environ.get("EXO_DSV4_MTP_TIE_REVERIFY_LOG")
+            if _trv_log and (sync_group is None or sync_group.rank() == 0):
+                try:
+                    with open(_trv_log, "a") as _trv_f:
+                        _trv_f.write(json.dumps({
+                            "cycle": int(self._spec_cycles),
+                            "uid": int(uid),
+                            "n_accepted": int(n_accepted),
+                            "verify_pick": int(bonus_val),
+                            "clean_pick": int(_trv_pick),
+                            "flipped": bool(_trv_pick != bonus_val),
+                            "reverified": self._tie_reverify_cycles,
+                            "flips": getattr(self, "_tie_reverify_flips", 0),
+                        }) + "\n")
+                except Exception as _trv_err:
+                    logger.warning(f"tie-reverify log failed: {_trv_err}")
+            bonus_val = _trv_pick
+
         # ── REFERENCE-FORWARD REFCHECK (env-gated, temp=0) ───────────────
+        # ⚠ JUDGE BIAS (2026-07-10): the trim(1)+refeed below is only sound
+        # when the trimmed token did NOT flush a pool — trim() cannot
+        # un-flush and the refeed re-flushes (duplicate pooled entry), so on
+        # flush cycles the "clean" reference row is itself corrupted and a
+        # logged disagreement may be the INSTRUMENT's fault, not the
+        # verify's. Interpret refcheck rows at non-flush cycles only; the
+        # trustworthy end-to-end judges are the ldiff harness
+        # (~/scratch/ldiff_seq_vs_batched.py, bitwise) and MTP-on vs MTP-off
+        # output comparison.
         # Decisive losslessness test for the spurious-</think> bug. At this
         # point gen_batch.prompt_cache has been rolled back to EXACTLY the
         # committed prefix [.., y, *accepted_drafts] (rejected drafts trimmed

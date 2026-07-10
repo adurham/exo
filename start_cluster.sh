@@ -163,6 +163,25 @@ fi
 # order of a bf16 ulp at logit scale, ~1e-2 — NOT 0.5.)
 : "${EXO_DSV4_MTP_TIEBREAK_FIX:=0}"
 : "${EXO_DSV4_MTP_TIEBREAK_EPS:=0.5}"
+# Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
+# =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
+# (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
+# L sequential steps — rotating-KV in-place writes truncate earlier rows'
+# windows, pool flushes become visible to all rows at once, and the indexer
+# score GEMM's M=L reduction order flips near-cutoff top-k membership;
+# cumulative drift reached ~1.7 logits @115K and flipped near-tied structural
+# tokens. REAL FIX: EXO_DSV4_VERIFY_ROWSEQ (deepseek_v4.py) runs verify
+# attention per row with per-row cache updates — bitwise-sequential (ldiff
+# harness: 0.0 divergence @4K/32K/131K). Row-seq costs ~1.6x vs classic
+# batched verify at short ctx (extra dispatches + TP all_reduces), so it
+# arms only at ROWSEQ_MIN_CTX+, where the drift demonstrably corrupts and
+# where attention compute dominates the dispatch overhead.
+# TIE_REVERIFY stays default-OFF: its trim+refeed primitive is unsound at
+# pool-flush cycles (see dsv4_mtp.py step-5 warning); superseded by row-seq.
+: "${EXO_DSV4_MTP_MAX_CTX:=0}"
+: "${EXO_DSV4_MTP_TIE_REVERIFY:=0}"
+: "${EXO_DSV4_VERIFY_ROWSEQ:=1}"
+: "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:=32768}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
@@ -1130,6 +1149,15 @@ for NODE in "${NODES[@]}"; do
     # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
     [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
     [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
+    # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
+    [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
+    [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
+    [ -n "${EXO_DSV4_MTP_TIE_REVERIFY_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY_EPS=$EXO_DSV4_MTP_TIE_REVERIFY_EPS"
+    [ -n "${EXO_DSV4_MTP_TIE_REVERIFY_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY_LOG=$EXO_DSV4_MTP_TIE_REVERIFY_LOG"
+    # Row-sequential verify attention (the losslessness root fix).
+    [ -n "${EXO_DSV4_VERIFY_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ=$EXO_DSV4_VERIFY_ROWSEQ"
+    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=$EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX"
+    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MAX_L:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MAX_L=$EXO_DSV4_VERIFY_ROWSEQ_MAX_L"
     # min_p tail-clip for the temp>0 MTP correction/bonus sampling (default 0.05
     # in code = the DSv4 card value; set 0 to disable for A/B). Stops MTP
     # committing extreme-tail tokens that seed structured-output degeneration.
