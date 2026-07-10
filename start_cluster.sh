@@ -175,6 +175,13 @@ fi
 # pool by a row on every flush-straddling rejection). Default OFF until the
 # byte-equality gate + battery pass.
 : "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:=0}"
+# Rowseq per-row decode masks + unified spec-state rollback (2026-07-10):
+# with these + POOL_SNAPSHOT_BATCH + ACCEPT_LOGPROBS, the MTP verify cycle
+# is bitwise-faithful to sequential decode on the REAL batch cache classes
+# (ldiff_cycles 9/9 CLEAN incl. wrapped rings). Default OFF until the
+# serving byte-equality gate + battery pass.
+: "${EXO_DSV4_ROWSEQ_ROWMASK:=0}"
+: "${EXO_DSV4_SPEC_STATE_RESTORE:=0}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
@@ -1248,6 +1255,10 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_RESTORE_AFTER_TRIM=$EXO_DSV4_POOL_RESTORE_AFTER_TRIM"
     # Per-request MTP cycle statistics (diagnostic; one log line per stream).
     [ -n "${EXO_DSV4_MTP_CYCLE_STATS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_CYCLE_STATS=$EXO_DSV4_MTP_CYCLE_STATS"
+    # Rowseq per-row REAL decode masks (batch-cache SDPA parity).
+    [ -n "${EXO_DSV4_ROWSEQ_ROWMASK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_ROWMASK=$EXO_DSV4_ROWSEQ_ROWMASK"
+    # Unified bitwise-faithful spec rollback (ring+pool wholesale restore).
+    [ -n "${EXO_DSV4_SPEC_STATE_RESTORE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_STATE_RESTORE=$EXO_DSV4_SPEC_STATE_RESTORE"
     # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
     [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
