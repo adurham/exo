@@ -182,6 +182,7 @@ fi
 # serving byte-equality gate + battery pass.
 : "${EXO_DSV4_ROWSEQ_ROWMASK:=0}"
 : "${EXO_DSV4_SPEC_STATE_RESTORE:=0}"
+: "${EXO_DSV4_SPEC_CACHE_ROLLBACK:=0}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
@@ -1259,6 +1260,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_ROWSEQ_ROWMASK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_ROWMASK=$EXO_DSV4_ROWSEQ_ROWMASK"
     # Unified bitwise-faithful spec rollback (ring+pool wholesale restore).
     [ -n "${EXO_DSV4_SPEC_STATE_RESTORE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_STATE_RESTORE=$EXO_DSV4_SPEC_STATE_RESTORE"
+    [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK=$EXO_DSV4_SPEC_CACHE_ROLLBACK"
     # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
     [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"

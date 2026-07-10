@@ -350,6 +350,22 @@ _SPEC_STATE_RESTORE = (
     os.environ.get("EXO_DSV4_SPEC_STATE_RESTORE", "0") == "1"
 )
 
+# EXO_DSV4_SPEC_CACHE_ROLLBACK=1 (requires _SPEC_STATE_RESTORE): replace the
+# per-rejection commit-forward with cache-level exact undo. The verify's
+# cache writes for COMMITTED rows are already bitwise-sequential (rowseq +
+# rowmask), so re-running the whole model on [y]+accepted only regenerates
+# rows the verify computed — at prod reject rates that extra forward cost
+# −41% decode t/s (27.3 → 16.0 measured 2026-07-10). Instead: rings/pools
+# stash the rows pushed during verify (arm_spec_stash) and on rejection are
+# rolled back at the cache level (restore snapshot + re-push committed rows
+# through the sequential-decode write path — see cache.py). Pools that
+# cannot roll back cache-level (B>1, or multi-flush at gamma+1 > ratio)
+# report spec_can_rollback=False and the whole rejection falls back to the
+# commit-forward path.
+_SPEC_CACHE_ROLLBACK = (
+    os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK", "0") == "1"
+)
+
 
 def _pool_flushed_since(pc: Any, snap: Any) -> bool:
     """True iff this pool flushed a NEW entry since ``snap`` (save_meta).
@@ -1379,7 +1395,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     f"[CYCLE-STATS] uid={uid} cycles={_st[0]} "
                     f"rejects={_st[1]} regime_b={_st[2]} "
                     f"first_reject_tok={_st[3]} first_regime_b_tok={_st[4]} "
-                    f"committed={_st[5]}"
+                    f"committed={_st[5]} "
+                    f"cache_rb={_st[6] if len(_st) > 6 else 0}"
                 )
         if hasattr(self.mtp, "drop_uid"):
             self.mtp.drop_uid(uid)
@@ -3352,6 +3369,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     if hasattr(sub, "save_spec_state"):
                         _ring_caches.append(sub)
                         _ring_snaps.append(sub.save_spec_state())
+            if _SPEC_CACHE_ROLLBACK:
+                # Stash the rows the verify pushes so a rejection can be
+                # undone at the cache level (no commit-forward).
+                for pc in _pool_caches:
+                    pc.arm_spec_stash()
+                for rc in _ring_caches:
+                    rc.arm_spec_stash()
         else:
             _pool_snaps = [
                 pc.save_meta() if _pool_may_flush(pc, _verify_len) else None
@@ -3364,6 +3388,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             gen_batch.prompt_cache,
             self._captured,
         )
+
+        if _SPEC_STATE_RESTORE and _SPEC_CACHE_ROLLBACK:
+            # Disarm BEFORE any other forward (the commit-forward fallback
+            # must not append to the stash); the stashed rows themselves
+            # stay bound for the rollback below.
+            for pc in _pool_caches:
+                pc.disarm_spec_stash()
+            for rc in _ring_caches:
+                rc.disarm_spec_stash()
 
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
@@ -3919,19 +3952,45 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # would race the deferred graph. Drain first, re-arm after the
             # commit-forward (mirrors the batch path's discipline).
             _stats_regime_b = True
-            self.mtp._set_fence_async(False)
-            for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
-                rc.restore_spec_state(rsnap)
-            for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True):
-                if psnap is not None:
-                    pc.restore_meta(psnap)
-            commit_tokens = [y_val] + draft_int_values[:n_accepted]
-            commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
-            _commit_logits = self.model(
-                commit_input, cache=gen_batch.prompt_cache
+            _keep = _verify_len - rollback  # committed rows: [y]+accepted
+            _cache_level = (
+                _SPEC_CACHE_ROLLBACK
+                and all(
+                    rc.spec_pushed_rows() == _verify_len for rc in _ring_caches
+                )
+                and all(
+                    pc.spec_can_rollback(psnap, _keep, _verify_len)
+                    for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True)
+                )
             )
-            mx.eval(_commit_logits)
-            del _commit_logits
+            _stats_cache_rb = _cache_level
+            self.mtp._set_fence_async(False)
+            if _cache_level:
+                # Cache-level exact undo (see _SPEC_CACHE_ROLLBACK): restore
+                # each ring and re-push the committed rows through the
+                # sequential-decode write path; pools trim or restore+
+                # re-accumulate per their flush attribution. No model
+                # forward — the verify already computed every committed
+                # row's cache state bitwise-sequentially.
+                for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
+                    rc.rollback_spec_write(rsnap, _keep)
+                for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True):
+                    pc.spec_rollback(psnap, _keep)
+            else:
+                for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
+                    rc.restore_spec_state(rsnap)
+                for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True):
+                    if psnap is not None:
+                        pc.restore_meta(psnap)
+                commit_tokens = [y_val] + draft_int_values[:n_accepted]
+                commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(
+                    1, -1
+                )
+                _commit_logits = self.model(
+                    commit_input, cache=gen_batch.prompt_cache
+                )
+                mx.eval(_commit_logits)
+                del _commit_logits
             mtp_cache = self.mtp._cache
             if mtp_cache is not None:
                 if hasattr(mtp_cache, "trim"):
@@ -4013,8 +4072,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _stats = {}
                 self._cycle_stats = _stats
             # [cycles, rejects, regime_b, first_reject_tok,
-            #  first_regime_b_tok, committed_tokens]
-            _st = _stats.setdefault(uid, [0, 0, 0, -1, -1, 0])
+            #  first_regime_b_tok, committed_tokens, cache_rb]
+            _st = _stats.setdefault(uid, [0, 0, 0, -1, -1, 0, 0])
             _st[0] += 1
             if rollback > 0:
                 _st[1] += 1
@@ -4024,6 +4083,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _st[2] += 1
                     if _st[4] < 0:
                         _st[4] = _st[5]
+                if locals().get("_stats_cache_rb", False):
+                    _st[6] += 1
             _st[5] += n_accepted + 1
 
         # ── TIE RE-VERIFY (paired with the gate in step 4) ───────────────
