@@ -177,12 +177,50 @@ mlx-lm defects, precisely bounded with a ready harness. Chain of evidence:**
    bf16 dense M-dependent at many shapes but the only decode-path bf16
    matmul — the router gate (4096,256) — is M-invariant).
 
-**Next unit of work:** make BatchPoolingCache L-invariant under batch-ring
-offsets (mlx-lm cache/attention surgery) + rollback fidelity; iterate with
-`LDIFF_BATCH_CACHE=all ldiff_cycles.py` until all three modes are BITWISE
-CLEAN; then serving byte-equality (gates: SNAPSHOT_BATCH=1,
-RESTORE_AFTER_TRIM=1, ACCEPT_LOGPROBS=1, MIN_CTX=0), then DSML battery,
-then flip the four gate defaults in start_cluster.sh.
+**STATUS 2026-07-10 (night): model-level cycle machinery PROVEN
+bitwise-faithful (mlx-lm `c0ddfbd`, exo `8a948c3b5`+fence-drain commit);
+serving still forks — TP=2 is the last suspect standing.**
+
+- Three more root causes found + fixed via the batch-cache harness:
+  (a) `EXO_DSV4_ROWSEQ_ROWMASK` — rowseq rows hardcoded mask=None, wrong
+  for batch rings (make_mask returns an ARRAY at N=1 → different SDPA
+  specialization; proven by forcing the sequential reference to None:
+  accept-chains went CLEAN); (b) BatchPoolingCache restore left the
+  pooled tensor at its deferred-write PADDED width (visible_width 13 vs
+  12 → different SDPA K-length); (c) ring `trim()` is NOT rollback-safe
+  once rotated (draft writes destroy the oldest window rows, decrement
+  left_padding, wrap _idx) → new `save_spec_state`/`restore_spec_state`
+  + `EXO_DSV4_SPEC_STATE_RESTORE` unified rollback (wholesale ring+pool
+  restore + commit-replay; supersedes regime a/b at B=1). CRITICAL MLX
+  FACT: `__setitem__` AND `+=` on mx arrays mutate IN PLACE (aliased) —
+  reference "snapshots" do NOT preserve pre-write state; materialize
+  with `mx.array()` (a held offset reference was a 0.8-2.7-logit bug).
+- Harness gate: accept3/reject0/reject1 × P=48/41/4096 ALL BITWISE CLEAN
+  on the real batch classes (previously drift at every reject shape and
+  at all wrapped-ring shapes).
+- Serving (v4/v5 gate runs, all five fixes + MIN_CTX=0): self-repeat
+  DETERMINISTIC (after adding the async-fence drain around the unified
+  rollback — the B=1 restore rebinds buffers and raced the verify's
+  async side-chain); CYCLE-STATS shows the unified path fires on every
+  rejection (158/158); FENCE_ASYNC=0 A/B is byte-identical (fence is
+  value-neutral). BUT MTP-on still forks from MTP-off at a near-tie
+  (~token 39), with 1-2-ulp top-5 tail drift from token 2 — the same
+  signature as before all fixes. Single-node model level is exhaustively
+  clean ⇒ the drift source is TP-specific (2-rank jaccl: sharded-weight
+  kernels at verify-batched M vs M=1, or collective-adjacent eval
+  segmentation).
+- Perf note: unified rollback + MIN_CTX=0 ≈ 15-16 t/s @600tok vs ~26 t/s
+  pre-fix MTP-on — do NOT flip defaults yet; needs the per-row ring
+  history optimization (snapshot only the γ+1 overwritten rows +
+  counters) and the rejection-rate-aware commit before prod.
+
+**Next unit of work:** 2-rank TP harness — run ldiff_cycles under
+mx.distributed (2 local ring ranks or the real jaccl pair) with the
+sharded model; bitwise-compare verify chains vs sequential per rank.
+Then fix whatever it finds, re-run the serving byte-equality gate
+(ACCEPT_LOGPROBS+SNAPSHOT_BATCH+RESTORE_AFTER_TRIM+ROWSEQ_ROWMASK+
+SPEC_STATE_RESTORE+MIN_CTX=0), DSML battery, and only then consider
+default flips (with the perf work above).
 
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
