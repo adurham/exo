@@ -474,14 +474,16 @@ fi
 # (placed explicitly, jit=False) is immune.
 : "${EXO_JIT_IDLE_UNLOAD_SECONDS:=300}"
 # Window (seconds) the API polls node memory when a JIT placement is blocked
-# ONLY by ram_available before 503ing. Covers the ~1 min post-kill reclaim
-# lag: relaunch exo, first JIT request used to fail instantly with "no
-# admissible placement" while macOS was still reclaiming the previous
-# runners' wired pages. Non-memory blockers still hard-fail immediately.
-# Default 0 (= pre-existing hard-fail) per the default-off-until-validated
-# discipline — flip to ~120 here once the kill/relaunch cycling gate passes
-# (docs/dsv4-rowseq-followups-plan-2026-07-10.md item 1a).
-: "${EXO_JIT_PLACEMENT_WAIT_SECONDS:=0}"
+# ONLY by ram_available before 503ing. Covers the post-kill reclaim window:
+# relaunch exo, first JIT request used to fail instantly with "no admissible
+# placement" while macOS reclaimed the previous runners' wired pages.
+# Non-memory blockers still hard-fail immediately.
+# VALIDATED 2026-07-10 (kill/relaunch cycling, model resident): the graceful
+# SIGTERM path now releases the full ~85 GB in ~1 s (bootstrap pre-exit
+# release), so this wait rarely engages — it remains as the guard for the
+# pathological stuck-memory mode and slow-reclaim edge cases. Gate result:
+# 5 cycles, zero placement 503s, kill→served 54 s (incl. 38 s model load).
+: "${EXO_JIT_PLACEMENT_WAIT_SECONDS:=120}"
 
 # --- Post-kill memory reclaim check (item 1b of the same plan) ---------------
 # After killing exo, macOS normally returns the runners' ~60-80 GB of wired

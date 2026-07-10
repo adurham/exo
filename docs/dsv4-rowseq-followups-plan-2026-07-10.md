@@ -33,7 +33,19 @@ Item 4 is attribution-first, fix-only-if-cheap.
 
 ## 1. Placement/reclaim tolerance after kills (smallest, first)
 
-**STATUS 2026-07-10: IMPLEMENTED (laptop), cluster validation pending.**
+**STATUS 2026-07-10 (later): VALIDATED ON CLUSTER — item 1 CLOSED.**
+- Gate run (5 kill/relaunch cycles, incl. kill with 85 GB resident): ZERO
+  placement 503s; kill→served 54 s (boot ~15 s + JIT load 38 s); the
+  graceful SIGTERM path releases the FULL model footprint in ~1 s
+  (vm_stat curve: 85 GB → 2 GB in one sample) — the ~60 s reclaim lag is
+  gone at the source, so EXO_JIT_PLACEMENT_WAIT_SECONDS rarely engages and
+  stays as the guard for the pathological mode. Default flipped to 120 in
+  start_cluster.sh. Reclaim-curve check ran green on every bring-up.
+- Note: vm_stat 'Pages wired down' does include the MLX model footprint
+  (~86 GB when DSv4 is resident on a node), so the wired+compressor
+  residual metric is sound.
+
+**(earlier same day) IMPLEMENTED (laptop):**
 - 1a placement wait: `EXO_JIT_PLACEMENT_WAIT_SECONDS` (note the `_SECONDS`
   suffix for consistency with the other JIT knobs). Memory blockers are now
   typed (`InsufficientMemoryError`) end-to-end: `filter_cycles_by_memory`
@@ -96,9 +108,40 @@ script check). No kernel work.
 
 ## 2. Generator-step vs model() ulp parity (moderate; unlocks the gold-standard gate)
 
-**STATUS 2026-07-10: step 1 archaeology DONE, harness authored
-(`~/scratch/ulp_gen_vs_model.py`, staged on m4-1), first run pending
-(cluster-gated). Key findings that REVISE the suspect list below:**
+**STATUS 2026-07-10 (later): attribution RUN + accept-rule fix LANDED;
+byte-equality NOT yet achieved — residual serving-only ulp drift localized
+to the first MTP cycles. Facts:**
+
+- Harness results (m4-1, quantized random model): E1 — EVERY construction
+  factor bitwise EQUAL (stream ctx, input dtype/laziness, pre_norm hook,
+  full genstep replica). E3 — first trajectory split at step 30 with
+  logits bitwise EQUAL → pure DECISION-RULE divergence. E2 — 4/64 steps
+  flip between argmax(raw) and argmax(bf16-normalized logprobs).
+- Fix landed: `EXO_DSV4_MTP_ACCEPT_LOGPROBS=1` (exo `6d48cd69f`, default
+  off) aligns the three greedy accept/bonus sites to the generator's rule
+  (argmax over logsumexp-normalized bf16 logprobs). Supersedes the
+  tie-break fix (already off in prod).
+- Serving byte-equality gate (MIN_CTX=0 + ACCEPT_LOGPROBS=1 + TIEBREAK=0,
+  temp=0, 3 prompts x 600 tok): each config reproduces ITSELF 3/3
+  byte-identical (incl. through the prefix cache), but MTP-on still forks
+  from MTP-off at ~token 78. Logprob forensics: sampled-token logprobs
+  bitwise-equal to tok 60, but top-5 TAIL values differ from tok[2]
+  (abs pos 43) by 1-2 raw-logit ulps → the residual drift starts at the
+  FIRST cycles and accumulates silently. Abs pos 44 = the first ratio-4
+  pool-flush boundary after the 41-token prompt.
+- Model level is clean EVERYWHERE tested single-node: mixed-quant ldiff
+  with the REAL recipe (experts mxfp4 g32, rest affine8 g64) bitwise
+  CLEAN at 4K and at tiny ctx (16/64/256); logsumexp + argmax are
+  batch-shape-invariant. So the residual lives in serving-only cycle
+  machinery (reject-trim / pool-flush repair / commit-forward) or TP.
+- **Next bisect:** relaunch with `EXO_SPECULATIVE_GAMMA=1` (and check
+  whether γ=0 = bonus-only is valid): no/l fewer rejections → no trims.
+  If drift vanishes → reject-trim/flush-repair path; if it persists →
+  base cycle (L=2 verify + commit) under TP → build the cycle-level
+  model harness (drive verify+trim+commit against sequential).
+
+**(earlier same day) step 1 archaeology, key findings that REVISE the
+suspect list below:**
 
 - **Mask is NOT a suspect at c=1.** Neither path passes `mask=`; the model
   builds it internally from the same cache object, and
