@@ -256,6 +256,27 @@ _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
 # per-stream acceptance (known-corrupt at c=2) for A/B.
 _BS_MIN_ACCEPT = os.environ.get("EXO_DSV4_BS_MIN_ACCEPT", "1") != "0"
 
+# GREEDY ACCEPT-RULE ALIGNMENT (2026-07-10, default OFF until the
+# byte-equality gate passes). At temp=0 the plain (MTP-off) generator picks
+# argmax over LOGSUMEXP-NORMALIZED logprobs in native bf16 (mlx-lm
+# generate.py GenerationBatch._step — the batched path has NO fp32 cast),
+# while this file's accept/bonus picked argmax over RAW verify_logits.
+# Round-to-nearest is monotone, so the bf16 subtraction can collapse two
+# near-tied logits onto the SAME value; first-index argmax then picks the
+# lower id — a DIFFERENT token than raw argmax, with bitwise-identical
+# logits. Attribution harness (~/scratch/ulp_gen_vs_model.py, m4-1
+# 2026-07-10): every construction factor (stream ctx, input dtype/laziness,
+# pre_norm hook, full genstep replica) is bitwise EQUAL; the ONLY
+# divergence between the generator step and a raw model() call is this
+# decision rule (E3: first trajectory split at step 30 with logits
+# bitwise-equal; E2: 4/64 raw-vs-normalized argmax flips). With
+# EXO_DSV4_MTP_ACCEPT_LOGPROBS=1 the greedy accept/bonus argmaxes are taken
+# over the SAME normalized logprobs the generator samples from, making
+# MTP-on token selection rule-identical to MTP-off. Supersedes the
+# tie-break fix (EXO_DSV4_MTP_TIEBREAK_FIX, already OFF in prod): that
+# masked ties by picking lowest-id-within-eps; this removes the mismatch.
+_ACCEPT_LOGPROBS = os.environ.get("EXO_DSV4_MTP_ACCEPT_LOGPROBS", "0") == "1"
+
 # Max concurrent streams the async decode fence may stay armed for
 # (cache-owner key). 1 = validated c=1-only arming. Raised by
 # EXO_DSV4_FENCE_ASYNC_C2=N to extend async fencing to batched decode —
@@ -2080,11 +2101,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )  # (N, γ)
 
         if all_greedy:
-            matches = mx.equal(target_tokens, draft_concat)  # (N, γ)
-            all_next = mx.argmax(verify_logits, axis=-1)  # (N, γ+1)
             logprobs_all = verify_logits - mx.logsumexp(
                 verify_logits, axis=-1, keepdims=True
             )  # (N, γ+1, vocab)
+            if _ACCEPT_LOGPROBS:
+                # Same decision rule as the MTP-off generator: argmax over
+                # bf16-normalized logprobs (see _ACCEPT_LOGPROBS above).
+                target_tokens = mx.argmax(logprobs_all[:, :gamma, :], axis=-1)
+                all_next = mx.argmax(logprobs_all, axis=-1)  # (N, γ+1)
+            else:
+                all_next = mx.argmax(verify_logits, axis=-1)  # (N, γ+1)
+            matches = mx.equal(target_tokens, draft_concat)  # (N, γ)
             mx.async_eval(matches, all_next, logprobs_all, verify_pre_norm)
             # Per-uid n_accepted = first-mismatch index.
             matches_arr = matches.tolist()  # list[list[bool]] (N, γ)
@@ -3216,11 +3243,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         all_next: Optional[mx.array] = None
 
         if temp == 0:
-            matches = mx.equal(target_tokens, draft_concat).squeeze(0)
-            all_next = mx.argmax(verify_logits[0], axis=-1)
             logprobs_all = verify_logits[0] - mx.logsumexp(
                 verify_logits[0], axis=-1, keepdims=True
             )
+            if _ACCEPT_LOGPROBS:
+                # Same decision rule as the MTP-off generator: argmax over
+                # bf16-normalized logprobs (see _ACCEPT_LOGPROBS above).
+                target_tokens = mx.argmax(logprobs_all[:gamma], axis=-1)[None]
+                all_next = mx.argmax(logprobs_all, axis=-1)
+            else:
+                all_next = mx.argmax(verify_logits[0], axis=-1)
+            matches = mx.equal(target_tokens, draft_concat).squeeze(0)
             # TIE-BREAK LOSSLESSNESS FIX (gated by EXO_DSV4_MTP_TIEBREAK_FIX=1).
             # The batched verify forward differs from a sequential single-token
             # decode by ~1ulp; at temp 0 that flips TIED tokens, and one flipped
@@ -4193,10 +4226,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         # 3. Per-tree-node verify argmax. all_next[i] is what target argmax
         # says should be the NEXT token after node i.
-        all_next = mx.argmax(verify_logits[0], axis=-1)  # (n_nodes,)
         logprobs_all = verify_logits[0] - mx.logsumexp(
             verify_logits[0], axis=-1, keepdims=True
         )
+        if _ACCEPT_LOGPROBS:
+            # Same decision rule as the MTP-off generator (see
+            # _ACCEPT_LOGPROBS above).
+            all_next = mx.argmax(logprobs_all, axis=-1)  # (n_nodes,)
+        else:
+            all_next = mx.argmax(verify_logits[0], axis=-1)  # (n_nodes,)
 
         # First-cycle diagnostic: dump verify_logits' argmax so we can
         # tell whether the tree-verify forward gives the right next-token
