@@ -277,6 +277,29 @@ _BS_MIN_ACCEPT = os.environ.get("EXO_DSV4_BS_MIN_ACCEPT", "1") != "0"
 # masked ties by picking lowest-id-within-eps; this removes the mismatch.
 _ACCEPT_LOGPROBS = os.environ.get("EXO_DSV4_MTP_ACCEPT_LOGPROBS", "0") == "1"
 
+# REGIME-B DOUBLE-ROLLBACK FIX (2026-07-10, default OFF until the
+# byte-equality gate + battery pass). In the pool-flush rollback path
+# (regime b), the code restore_meta()s every SNAPSHOTTED pool to its
+# pre-verify state and THEN runs the blanket trim(γ+1) over all caches —
+# but CacheList.trim recurses into those same pools, subtracting up to γ+1
+# from the remainder that restore_meta just rewound. The pool's remainder
+# buffer rows then misalign (the commit-forward overwrites the wrong row),
+# so every flush-straddling rejection corrupts the compressed-context pool
+# by a row — surfacing as ulp-scale logit drift vs sequential decode that
+# accumulates over cycles (the residual MTP-on vs MTP-off byte-inequality
+# after the accept-rule fix; localized by ~/scratch/ldiff_cycles.py:
+# accept-only chains BITWISE CLEAN, reject cycles DRIFT from the first
+# snapshotted rollback; trim-first-then-restore = BITWISE CLEAN across
+# 36/24 regime-b cycles). With EXO_DSV4_POOL_RESTORE_AFTER_TRIM=1 the
+# blanket trim runs FIRST (rewinding ring KV and the NON-snapshotted
+# pools, which do need it) and restore_meta runs AFTER, so the restored
+# state is what the commit-forward actually sees. Applies to the B=1 and
+# batch rollback paths; the tree path freezes pools during verify and has
+# no restore_meta.
+_POOL_RESTORE_AFTER_TRIM = (
+    os.environ.get("EXO_DSV4_POOL_RESTORE_AFTER_TRIM", "0") == "1"
+)
+
 # Max concurrent streams the async decode fence may stay armed for
 # (cache-owner key). 1 = validated c=1-only arming. Raised by
 # EXO_DSV4_FENCE_ASYNC_C2=N to extend async fencing to batched decode —
@@ -2503,9 +2526,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         else:
             # (b) Contamination path: restore snapshotted pools, drop all
             # γ+1 verify rows everywhere, re-add committed rows.
-            for pc, snap in zip(_pool_caches, _pool_snaps):
-                if snap is not None:
-                    pc.restore_meta(snap)
+            if not _POOL_RESTORE_AFTER_TRIM:
+                # LEGACY ORDER (double-rollback bug, see
+                # _POOL_RESTORE_AFTER_TRIM): the blanket trim below re-trims
+                # the pools restore_meta just rewound.
+                for pc, snap in zip(_pool_caches, _pool_snaps):
+                    if snap is not None:
+                        pc.restore_meta(snap)
             _full = gamma + 1
             _full_per_stream = [_full] * N
             for c in gen_batch.prompt_cache:
@@ -2523,6 +2550,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     c.trim(_full)
                 elif hasattr(c, "offset"):
                     c.offset -= _full
+            if _POOL_RESTORE_AFTER_TRIM:
+                # FIXED ORDER: restore AFTER the blanket trim so snapshotted
+                # pools enter the commit-forward at exactly their pre-verify
+                # state (see _POOL_RESTORE_AFTER_TRIM).
+                for pc, snap in zip(_pool_caches, _pool_snaps, strict=True):
+                    if snap is not None:
+                        pc.restore_meta(snap)
             # Commit-forward: rows are the committed tokens per stream,
             # batch-uniform length n_min + 1 (min-acceptance).
             commit_rows = [
@@ -3794,9 +3828,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             else:
                 # (b) Contamination path: restore snapshotted pools, leave
                 # unsnapshotted ones to trim() (they didn't flush).
-                for pc, snap in zip(_pool_caches, _pool_snaps):
-                    if snap is not None:
-                        pc.restore_meta(snap)
+                if not _POOL_RESTORE_AFTER_TRIM:
+                    # LEGACY ORDER (double-rollback bug, see
+                    # _POOL_RESTORE_AFTER_TRIM): the blanket trim below
+                    # re-trims the pools restore_meta just rewound.
+                    for pc, snap in zip(_pool_caches, _pool_snaps):
+                        if snap is not None:
+                            pc.restore_meta(snap)
                 # Trim γ+1 (root y included) so the commit-forward re-adds
                 # [y, *accepted] without double-counting y.
                 for c in gen_batch.prompt_cache:
@@ -3804,6 +3842,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         c.trim(gamma + 1)
                     elif hasattr(c, "offset"):
                         c.offset -= gamma + 1
+                if _POOL_RESTORE_AFTER_TRIM:
+                    # FIXED ORDER: restore AFTER the blanket trim so the
+                    # snapshotted pools enter the commit-forward at exactly
+                    # their pre-verify state (bitwise-sequential, proven by
+                    # ldiff_cycles.py).
+                    for pc, snap in zip(_pool_caches, _pool_snaps, strict=True):
+                        if snap is not None:
+                            pc.restore_meta(snap)
                 commit_tokens = [y_val] + draft_int_values[:n_accepted]
                 commit_input = mx.array(
                     commit_tokens, dtype=mx.int32
