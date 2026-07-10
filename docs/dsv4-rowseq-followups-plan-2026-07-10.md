@@ -1,0 +1,170 @@
+# DSv4 serving follow-ups plan — 2026-07-10
+
+Continuation plan for the four items deliberately deferred at the end of the
+verify-losslessness campaign (see `docs/` handoff lineage and the commit
+chain mlx-lm `9a95c84`/`4aefe36`, exo `90b4a7eeb`..`d7d0e1088`).
+
+## Context: what is already true
+
+- **Root fix shipped:** `EXO_DSV4_VERIFY_ROWSEQ` makes the L>1 MTP verify
+  attention bitwise-identical to sequential decode (per-row attention with
+  per-row cache updates; FFN/MoE batched). Proven bitwise-zero on the ldiff
+  harness (`~/scratch/ldiff_seq_vs_batched.py`, quantized 4-layer random
+  model) at 4K/32K/131K.
+- **Prod config:** classic batched verify below `EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=32768`
+  (clean in months of batteries, 1.6x cheaper), row-seq at and above it.
+  Decode @122K: row-seq 24.6 t/s vs 19.1 sequential vs 26.2 uncorrected.
+- **Regression gates available:** ldiff harness (bitwise, model level),
+  `~/scratch/ldiff_b2.py` (B=2), `bench/dsv4_dsml_battery.py` (serving-level
+  tool-call fidelity ladder, passed 4K/65K/122K), quality harness (needle),
+  perf probes (4K gen + 122K cached-prefix decode timing).
+- **Instrument caveat:** trim(1)+refeed diagnostics (REFCHECK, tie-reverify)
+  are unsound at pool-flush cycles — do not use them as judges. Use the
+  harnesses above; for serving-vs-serving questions use one-shot
+  identical-prefix payloads to avoid trajectory-divergence false positives.
+
+## Recommended sequence: 1 → 2 → 3 → 4
+
+Items 1 and 2 are self-contained and independently landable. Item 3 is best
+validated after item 2 lands (byte-equality becomes an acceptance gate).
+Item 4 is attribution-first, fix-only-if-cheap.
+
+---
+
+## 1. Placement/reclaim tolerance after kills (smallest, first)
+
+**Symptom:** after killing exo, ~60GB/node stays unreclaimed for ~1 min;
+JIT placement instantly 503s ("no admissible placement") on quick relaunch.
+Once (2026-07-09) m4-2 kept 61GB stuck in the compressor with no owning
+process and needed a reboot.
+
+Two distinct problems:
+
+### 1a. Normal reclaim lag (~60 s) — operational fix
+- exo API/placement layer: when the ONLY placement blocker is
+  `ramAvailable` (both nodes present, topology fine), poll node memory with
+  backoff for up to a gated window before failing the request. Proposed env:
+  `EXO_JIT_PLACEMENT_WAIT` (default ~120 s, 0 = current hard-fail).
+- Runner graceful-shutdown path: SIGTERM handler that drops MLX buffer
+  pools / clears caches before exit, SIGKILL only as fallback, so
+  reclamation starts immediately and cleanly. (The relaunch scripts
+  currently `screen -X quit` + `pkill`, which SIGKILLs.)
+- **Validation:** kill/relaunch cycling in a loop; zero placement 503s;
+  time-to-first-token after relaunch bounded.
+
+### 1b. Pathological stuck memory (rare) — detect + runbook
+- Likely AGX/Metal wired pages orphaned by SIGKILL mid-GPU-op; not fixable
+  from userspace. Mitigation is the same graceful-termination ordering
+  (cancel GPU work, drain command buffers, then kill — the sibling-load
+  watchdog fix `5d5f3494a` already gives the supervisor the right hook
+  point/discipline).
+- Add a reclaim-curve check to relaunch tooling: if free pages have not
+  recovered ~3 min after kill, alert explicitly (instead of mysterious
+  503s). Reboot documented as the escape hatch.
+
+**Scope:** contained patch (placement layer + small signal handler +
+script check). No kernel work.
+
+---
+
+## 2. Generator-step vs model() ulp parity (moderate; unlocks the gold-standard gate)
+
+**Gap:** the generator's L=1 decode step and a raw `model()` L=1 call differ
+by ulps, so MTP-on vs MTP-off produce different-but-equally-valid
+trajectories at temp=0. Byte-equality across serving modes is therefore not
+usable as a regression assertion today (measured: X_seq reproduces itself
+exactly; Y/rowseq differs from X at early near-ties while being bitwise
+clean at the model level).
+
+### Plan
+1. **Attribute:** harness that freezes one cache state and computes
+   next-token logits via (a) the generator step path and (b) a raw
+   `model()` L=1 call; diff bitwise. Suspects in likely order:
+   - mask argument differences (explicit array vs `None` → different SDPA
+     kernel specialization),
+   - `EXO_DSV4_LMHEAD_LASTROW` slicing differences,
+   - input array construction/dtype differences,
+   - capture hooks (`pre_norm`) perturbing lazy-graph fusion decisions.
+2. **Align:** make the MTP verify/commit/refeed input+mask construction
+   exactly match the generator step (or vice versa — whichever diff is
+   smaller). Acceptance: the harness reads bitwise-equal over N random
+   states.
+3. **Land the gate:** one-command assertion
+   `MTP-on output == MTP-off output, byte-for-byte, temp=0` (short + long
+   ctx rungs). This becomes the cheapest strongest gate for every future
+   serving change, including item 3.
+
+**Scope:** plumbing archaeology in `batch_generate.py` + `dsv4_mtp.py`;
+no kernel work.
+
+---
+
+## 3. Row-seq short-ctx perf refinement → drop the 32K threshold (largest)
+
+**Problem:** row-seq currently loops the ENTIRE attention module per row:
+3x projection dispatches and — worse under TP — 3x o_proj all_reduces per
+layer per cycle. That overhead is the whole 1.6x short-ctx cost
+(4K gen: 35.9 s row-seq vs 22.9 s classic).
+
+### Design: hoist the invariant parts out of the per-row loop
+- **Batched (hoisted):** Q/K/V projections at M=L (quantized qmm —
+  bitwise batch-invariant, proven), and the output projection at M=L with
+  its SINGLE TP all_reduce per layer (down from L).
+- **Per-row (kept):** exactly the state-bearing parts — rotating-cache
+  mutation, pool updates (incl. deferred bumps), indexer scoring (M=1
+  gemv is REQUIRED for bitwise anyway), top-k, gather, SDPA.
+- Restructure inside each of the three attention classes
+  (`LocalAttention`, `CompressedAttention`, `SparseCompressedAttention`)
+  rather than at the `DeepseekV4Block` level. Keep the block-level gate as
+  the fallback path; new behavior behind e.g.
+  `EXO_DSV4_VERIFY_ROWSEQ_HOISTED=1` until validated, then default.
+
+### Non-negotiable gates
+1. ldiff harness bitwise ZERO at 4K/32K/131K (and `ldiff_b2.py` at B=2).
+2. With item 2 landed: end-to-end byte-equality vs MTP-off at temp=0.
+3. DSML battery ladder clean.
+4. Perf: 4K decode within ~10% of classic MTP → set
+   `EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=0` and retire the threshold concept.
+   If the residual is larger, pick the break-even ctx from measurement
+   (probe ladder 4K/8K/16K/32K) instead of the current 32K guess.
+
+**Scope:** real surgery across three attention implementations in a
+4.6K-line file dense with env gates — the largest item; no new Metal
+kernels. Method reminder from the campaign: isolated microbenches
+understate in-graph costs; always A/B in-model.
+
+---
+
+## 4. MoE expert-batching M-dependence (attribution only; lowest priority)
+
+**Observation (ldiff_b2, 2026-07-10):** at B=2, verify-vs-stepping residual
+~0.03 logits, argmax-stable, unchanged by row-seq. Hypothesis:
+tokens-per-expert differs between an M=6 batched pass and M=2 stepping,
+crossing the gather-kernel B/E∈[2,8] selection gate → different kernel /
+accumulation order per expert.
+
+### Plan
+1. Extend `qmm_invariance_sweep` to the MoE gather path: fixed router
+   assignments, same token processed inside an M=2 vs M=6 batch, bitwise
+   diff per expert. Pin the component: gather_qmv selection gate,
+   sorted-run accumulation order, or dense fallback.
+2. **Decide, don't assume:**
+   - kernel-selection boundary → canonicalize selection (key on
+     per-expert row count consistently); likely cheap;
+   - accumulation order deep in gather_qmv → fixing costs perf for an
+     effect 50x below the corruption threshold; document as the known
+     noise floor for c≥2 and stop.
+
+**Scope:** attribution is a small harness extension reusing existing
+tooling. No fix work until the attribution says it is cheap.
+
+---
+
+## Standing discipline for all four
+- Same commit/push/bundle-sync flow as the campaign (m4-1 WAN git broken →
+  git bundles over scp; venv site-packages `deepseek_v4.py` must match the
+  mlx-lm commit).
+- Any relaunch kills live sessions — coordinate before touching the
+  cluster while hermes is in use.
+- Every change lands behind an env gate, default-off until its gates pass,
+  then defaults flipped in `start_cluster.sh` + node relaunch scripts.
