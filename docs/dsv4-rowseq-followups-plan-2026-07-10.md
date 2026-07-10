@@ -214,13 +214,51 @@ serving still forks — TP=2 is the last suspect standing.**
   history optimization (snapshot only the γ+1 overwritten rows +
   counters) and the rejection-rate-aware commit before prod.
 
+**RESOLVED (same day, follow-up leg): the −41% was the commit-forward
+replay, and it's gone — EXO_DSV4_SPEC_CACHE_ROLLBACK.**
+
+- Attribution A/B (c=1, 600-tok): prod 27.3 t/s; +six fixes with rowseq
+  ≥32K only 16.0 (−41%); +MIN_CTX=0 15.8 (−1% more). The ENTIRE
+  regression was the per-rejection commit-forward (rejects fire on
+  60-85% of cycles); **rowseq at all contexts is ~free ⇒ plan item 3 is
+  effectively closed** (drop the 32K threshold whenever the fix stack is
+  on).
+- Fix (mlx-lm 387e567, exo 95ae7a787): cache-level exact undo. Rings
+  arm_spec_stash() → rollback_spec_write(snap, keep) = restore snapshot +
+  re-push committed rows through _update_in_place (sequential decode's
+  own write path). Pools spec_rollback(snap, keep) by flush attribution:
+  flush in committed prefix (or none) → trim() is already exact; flush
+  caused by a rejected token → restore_meta + re-accumulate committed
+  prefix from the stash (cannot re-flush at γ+1 ≤ ratio).
+  spec_can_rollback refuses B>1 / multi-flush → commit-forward fallback.
+  Deferred-bump split (applied vs pending) after a kept flush at the last
+  committed row is commit_pending-equivalent; harness comparer normalized
+  to totals.
+- Harness: accept3/reject0/reject1 × P=48/41/4096/4222 (ratio-128 flush
+  straddling the verify boundary) × batch+plain classes = **15/15 BITWISE
+  CLEAN**, cache-level path firing on every reject cycle (harness raises
+  on fallback; none fired).
+- Serving (v6 gate runs, six fixes + CACHE_ROLLBACK + MIN_CTX=0):
+  **26.2 t/s (−4% vs prod 27.3)**; CYCLE-STATS cache_rb=263/263 rejects
+  (zero fallbacks); self-repeat 3/3 deterministic; **forks vs MTP-off
+  moved LATER — v4 (commit-forward) forked at chars 131/149/291, v6
+  forks at 473/280/361.** Every replay forward was itself a TP-drift
+  injection point; removing them narrows the residual to the verify
+  forward under TP. Concrete task-#8 hypothesis: jaccl/TP all_reduce (or
+  sharded-kernel) numerics at verify M=γ+1 vs decode M=1.
+- Defaults still OFF pending the TP residual (byte gate 0/3, forks just
+  later); flip candidates after task #8: six fixes + CACHE_ROLLBACK +
+  MIN_CTX=0 at −4%.
+
 **Next unit of work:** 2-rank TP harness — run ldiff_cycles under
 mx.distributed (2 local ring ranks or the real jaccl pair) with the
 sharded model; bitwise-compare verify chains vs sequential per rank.
-Then fix whatever it finds, re-run the serving byte-equality gate
+First probe: all_reduce/matmul M-dependence per rank at M=1 vs M=γ+1
+(the v6 fork-later datapoint says per-forward TP numerics, not cache
+state). Then fix, re-run the serving byte-equality gate
 (ACCEPT_LOGPROBS+SNAPSHOT_BATCH+RESTORE_AFTER_TRIM+ROWSEQ_ROWMASK+
-SPEC_STATE_RESTORE+MIN_CTX=0), DSML battery, and only then consider
-default flips (with the perf work above).
+SPEC_STATE_RESTORE+CACHE_ROLLBACK+MIN_CTX=0), DSML battery, and only
+then flip defaults.
 
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
