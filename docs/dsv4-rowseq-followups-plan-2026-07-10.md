@@ -285,12 +285,21 @@ through the fork region. Perf ladder @600tok c=1: prod lossy 27.3 t/s;
 lossless-minus-MoE-per-row 26.2 (−4%, gate 1/3 — rare MoE event forks at
 near-ties); **fully lossless 20.7 (−24%, gate 3/3)**.
 
-**Remaining before default flips:** DSML battery on the lossless stack;
-decide lossy-27.3 vs lossless-20.7 vs near-lossless-26.2 as prod default;
-perf work on the MoE M-dependence (batch-invariant gather/gate kernels —
-item 4 is now a perf item, its attribution DONE: the event lives inside
-`self.ffn` between ffn_in and ffn_out at batched M) could recover most of
-the −24% → −4%.
+**MoE M-dependence BISECTED (fourth leg): it's the ROUTER GATE.**
+EXO_DSV4_MOE_PARTS_ROWSEQ (part-wise per-row MoE sub-ops) bisect:
+`gate,combine,shared` → 3/3; `combine` alone → 1/3 (unchanged forks);
+**`gate` alone → 3/3.** The MoEGate score computation (bf16
+(M,4096)→(M,256) matmul + transform) is gemv/gemm M-dependent on real
+weights; ulp-different scores scale the expert-weighted sum → ffn_out
+ulps. Per-row gate is ~free.
+
+**FINAL LOSSLESS STACK: 26.7 t/s (−2.4% vs prod 27.3), byte gate 3/3,
+self-repeat 3/3** — six fixes + SPEC_CACHE_ROLLBACK + ROWSEQ_FULLBLOCK +
+MOE_PARTS_ROWSEQ=gate + MIN_CTX=0. (FULLBLOCK_MOE=1, the full per-row MoE
+at 20.7 t/s, retained as a diagnostic superset only.)
+
+**Remaining:** DSML battery on the final stack (running), c=2 concurrent
+smoke, then flip the nine defaults in start_cluster.sh.
 
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
