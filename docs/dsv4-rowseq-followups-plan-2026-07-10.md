@@ -323,6 +323,20 @@ byte-identical), c=1 gold gate still 3/3, c=1 26.8 t/s.
 **Final prod state (all defaults):** c=1 lossless 26.8 t/s (gate 3/3,
 battery clean), c=2 pools-correct 15.3 t/s/stream. Campaign closed.
 
+**POLISH SHIPPED (seventh leg): MLX_GEMV_BATCH_INVARIANT — losslessness
+is now FREE.** adurham/mlx `1fe020ed` (host-side only): M∈[2,8] matmuls
+dispatch as a batch of M gemvs (rows folded into gemv's batch dims, vec
+stride = row stride, shared weights at batch stride 0, general-strides
+kernel path) — every row bitwise-identical to the M=1 gemv by
+construction. Validation: gemv_bi_test 146/146 correct + bitexact
+(control without the env: 98/146 non-bitexact — the drift class is far
+broader than bf16-4096); per-call perf equal-or-better than steel at the
+affected shapes. On-cluster: the kernel ALONE (ROWSEQ_FULLBLOCK=0,
+MOE_PARTS_ROWSEQ off) passes the byte gate 3/3 — both model-level
+workarounds retired from defaults (kept as diagnostics). **Shipping
+defaults: gate 3/3, DSML battery CLEAN, c=1 27.4 t/s (== the old lossy
+baseline), c=2 15.3 t/s/stream.** exo uv.lock pinned to mlx 1fe020ed.
+
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
 
