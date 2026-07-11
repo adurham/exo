@@ -2726,10 +2726,24 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     if snap is not None:
                         pc.restore_meta(snap)
             # Commit-forward: rows are the committed tokens per stream,
-            # batch-uniform length n_min + 1 (min-acceptance).
+            # batch-uniform length n_min + 1 (min-acceptance) — EXCEPT a
+            # stream that hit a stop token mid-cycle, whose committed list
+            # is truncated shorter. mx.array rejects ragged rows
+            # ("Initialization encountered non-uniform length", crashed the
+            # runner 2026-07-10; this path was unreachable before
+            # POOL_SNAPSHOT_BATCH activated pool collection at c>=2). Pad
+            # short (finished) rows by repeating their last token: their
+            # caches get extra rows past the stop, but the stream is
+            # finished and removed at the next filter, so the padding is
+            # never attended by a live stream.
             commit_rows = [
                 [int(tid) for (tid, _lp) in all_tokens_per[n]]
                 for n in range(N)
+            ]
+            _commit_w = max(len(r) for r in commit_rows)
+            commit_rows = [
+                r + [r[-1]] * (_commit_w - len(r)) if r else [0] * _commit_w
+                for r in commit_rows
             ]
             commit_input = mx.array(commit_rows, dtype=mx.int32)  # (N, n_min+1)
             _commit_logits = self.model(
