@@ -1,5 +1,18 @@
 # DSv4 serving follow-ups plan — 2026-07-10
 
+> **STATUS: CAMPAIGN CLOSED (2026-07-10, seven legs — resolution log at the
+> bottom of this doc).** All four items resolved and SHIPPED as defaults:
+> MTP-on serving is byte-identical to MTP-off at temp=0 (gold gate 3/3,
+> DSML battery clean) at **zero throughput cost** — c=1 27.4 t/s (== the
+> old lossy baseline), c=2 pools-correct 15.3 t/s/stream. Cornerstones:
+> cache-level spec rollback (mlx-lm, B=1 + c≥2), the unplumbed-pool-gate
+> fix, and `MLX_GEMV_BATCH_INVARIANT` (adurham/mlx `1fe020ed`) which fixes
+> the gemv/gemm M-dispatch rounding drift at the source. Gates:
+> `bench/gemv_bi_test.py`, `bench/ldiff_cycles.py`,
+> `bench/dsv4_dsml_battery.py` (tracked); `byte_equality_gate.sh` +
+> `measure_tps.sh` in `bench/` untracked (`bench/*.sh` gitignored by
+> repo convention; copies in `~/scratch/`).
+
 Continuation plan for the four items deliberately deferred at the end of the
 verify-losslessness campaign (see `docs/` handoff lineage and the commit
 chain mlx-lm `9a95c84`/`4aefe36`, exo `90b4a7eeb`..`d7d0e1088`).
