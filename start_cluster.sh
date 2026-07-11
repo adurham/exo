@@ -168,25 +168,25 @@ fi
 # temp=0 accept/bonus decisions — removes the near-tie trajectory divergence
 # between MTP-on and MTP-off (the mismatch the retired tie-break fix papered
 # over). Default OFF until the byte-equality gate + DSML battery pass.
-: "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:=0}"
+: "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:=1}"
 # Regime-b double-rollback fix (2026-07-10): in the pool-flush rollback path,
 # restore snapshotted pools AFTER the blanket trim (the legacy order let
 # CacheList.trim re-trim the just-restored pools, corrupting the compressed
 # pool by a row on every flush-straddling rejection). Default OFF until the
 # byte-equality gate + battery pass.
-: "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:=0}"
-: "${EXO_DSV4_POOL_SNAPSHOT_BATCH:=0}"
+: "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:=1}"
+: "${EXO_DSV4_POOL_SNAPSHOT_BATCH:=1}"
 # Rowseq per-row decode masks + unified spec-state rollback (2026-07-10):
 # with these + POOL_SNAPSHOT_BATCH + ACCEPT_LOGPROBS, the MTP verify cycle
 # is bitwise-faithful to sequential decode on the REAL batch cache classes
 # (ldiff_cycles 9/9 CLEAN incl. wrapped rings). Default OFF until the
 # serving byte-equality gate + battery pass.
-: "${EXO_DSV4_ROWSEQ_ROWMASK:=0}"
-: "${EXO_DSV4_SPEC_STATE_RESTORE:=0}"
-: "${EXO_DSV4_SPEC_CACHE_ROLLBACK:=0}"
-: "${EXO_DSV4_ROWSEQ_FULLBLOCK:=0}"
+: "${EXO_DSV4_ROWSEQ_ROWMASK:=1}"
+: "${EXO_DSV4_SPEC_STATE_RESTORE:=1}"
+: "${EXO_DSV4_SPEC_CACHE_ROLLBACK:=1}"
+: "${EXO_DSV4_ROWSEQ_FULLBLOCK:=1}"
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=0}"
-: "${EXO_DSV4_MOE_PARTS_ROWSEQ:=}"
+: "${EXO_DSV4_MOE_PARTS_ROWSEQ:=gate}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
@@ -205,7 +205,7 @@ fi
 : "${EXO_DSV4_MTP_MAX_CTX:=0}"
 : "${EXO_DSV4_MTP_TIE_REVERIFY:=0}"
 : "${EXO_DSV4_VERIFY_ROWSEQ:=1}"
-: "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:=32768}"
+: "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:=0}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
