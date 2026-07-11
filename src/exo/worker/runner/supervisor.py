@@ -578,7 +578,12 @@ class RunnerSupervisor:
             for d in self._runner_stdio_handler.diagnostics.diagnostics()
             if not isinstance(d, RunnerUnknown)
         ]
-        for task in self.in_progress.values():
+        # Snapshot: the awaits below yield to the event loop, which can
+        # mutate in_progress (task completion/cleanup) mid-iteration —
+        # observed 2026-07-10 as "RuntimeError: dictionary changed size
+        # during iteration" here, escalating a contained runner crash into
+        # killing the whole exo-main process (no self-heal).
+        for task in list(self.in_progress.values()):
             if isinstance(task, (TextGeneration, ImageGeneration, ImageEdits)):
                 with anyio.CancelScope(shield=True):
                     await self._event_sender.send(

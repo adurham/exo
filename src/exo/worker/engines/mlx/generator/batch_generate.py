@@ -1678,6 +1678,27 @@ class ExoBatchGenerator:
             captured_prompt_pre_norm = self._mlx_gen._captured.get("prompt_pre_norm")
             if captured_prompt_pre_norm is not None:
                 mx.eval(captured_prompt_pre_norm)
+            # The per-stream slicing below assumes the capture came from ONE
+            # final forward over ALL N streams — (N, last_chunk, hidden).
+            # When the batched prefill's last forward covered fewer streams
+            # (ragged lengths / per-stream chunking), the capture batch dim
+            # is smaller: slicing stream i then yields the WRONG stream's
+            # hidden rows for i < B (silent draft-cache contamination) and a
+            # ZERO-batch tensor for i >= B, which crashed the runner in
+            # mtp_module._combine ("reshape 841 into (0,841)", 2026-07-10).
+            # Guard: skip MTP prefill entirely on a batch-dim mismatch —
+            # the draft caches start cold (perf-only; verify corrects).
+            if (
+                captured_prompt_pre_norm is not None
+                and captured_prompt_pre_norm.shape[0] != len(tasks)
+            ):
+                logger.warning(
+                    "prompt_pre_norm capture batch {} != {} streams; "
+                    "skipping MTP cache prefill (cold draft caches)".format(
+                        captured_prompt_pre_norm.shape[0], len(tasks)
+                    )
+                )
+                captured_prompt_pre_norm = None
 
         # ---- Per-stream insert + MTP cache prefill (sequential) ----
         # Each stream's MTP-cache prefill is wall-time non-trivial (~5-15s at
