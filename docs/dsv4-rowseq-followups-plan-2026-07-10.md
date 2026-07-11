@@ -309,9 +309,19 @@ were inert there too), at a measured c=2 cost of 14.9 → 10.8 t/s/stream
 (regime-b pool snapshots + commit-forwards). Kept ON: this is the
 needle-miss corruption class the original campaign existed to kill.
 
-**Follow-up (perf, not correctness):** extend cache-level rollback
-(spec stash + exact undo) to the c≥2 per-stream path to recover most of
-the c=2 −28%, mirroring how it recovered c=1 from −41% to −2%.
+**DONE (sixth leg): c≥2 cache-level rollback SHIPPED
+(EXO_DSV4_SPEC_CACHE_ROLLBACK_C2, default ON).** BatchPoolingCache
+spec rollback generalized to B>1 (per-stream flush attribution,
+batch-uniform keep = n_min+1 under min-acceptance; mixed attribution
+falls back to the commit-forward). Path (b) now composes path (a)'s
+validated per-stream ring trims with the exact pool undo — no model
+forward. Validated: **c=2 15.3 t/s/stream** (vs 10.8 with
+commit-forwards, and better than the old pools-inert lossy 14.9),
+deep 2×2200-tok c=2 run clean (no repetition loops, streams
+byte-identical), c=1 gold gate still 3/3, c=1 26.8 t/s.
+
+**Final prod state (all defaults):** c=1 lossless 26.8 t/s (gate 3/3,
+battery clean), c=2 pools-correct 15.3 t/s/stream. Campaign closed.
 
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
