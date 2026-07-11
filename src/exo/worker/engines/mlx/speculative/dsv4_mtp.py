@@ -366,6 +366,23 @@ _SPEC_CACHE_ROLLBACK = (
     os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK", "0") == "1"
 )
 
+# EXO_DSV4_SPEC_CACHE_ROLLBACK_C2=1 (default OFF): cache-level pool undo
+# for the BS>1 min-acceptance path. With POOL_SNAPSHOT_BATCH now active,
+# the c>=2 contamination path (b) pays a batched commit-forward on every
+# flush-rejection (ratio-4 pools flush ~every 4th token, and B streams
+# multiply the odds) — measured c=2 cost 14.9 -> 10.8 t/s/stream. This
+# gate replaces path (b) with: path (a)'s validated per-stream ring trims
+# + pool spec_rollback (trim when every stream keeps its flushes; restore
+# + re-accumulate the batch-uniform committed prefix — keep = n_min + 1 —
+# when no stream's committed prefix flushed; mixed attribution falls back
+# to the commit-forward). Rings keep verify-row values for committed
+# tokens instead of commit-forward recomputes — the same batched-M
+# approximation class (c>=2 has no bitwise gate; the bar is
+# no-contamination, which the pool undo preserves exactly).
+_SPEC_CACHE_ROLLBACK_C2 = (
+    os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK_C2", "0") == "1"
+)
+
 
 def _pool_flushed_since(pc: Any, snap: Any) -> bool:
     """True iff this pool flushed a NEW entry since ``snap`` (save_meta).
@@ -2215,6 +2232,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             pc.save_meta() if hasattr(pc, "save_meta") else None
             for pc in _pool_caches
         ]
+        if _SPEC_CACHE_ROLLBACK_C2:
+            for pc in _pool_caches:
+                if hasattr(pc, "arm_spec_stash"):
+                    pc.arm_spec_stash()
 
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
@@ -2223,6 +2244,13 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             self._captured,
         )
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
+        if _SPEC_CACHE_ROLLBACK_C2:
+            # Disarm before any other forward (the commit-forward fallback
+            # must not append to the stash); stashed rows stay bound for
+            # the rollback below.
+            for pc in _pool_caches:
+                if hasattr(pc, "disarm_spec_stash"):
+                    pc.disarm_spec_stash()
 
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
@@ -2614,7 +2642,38 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             for pc, snap in zip(_pool_caches, _pool_snaps, strict=True)
         )
 
-        if not pool_flushed:
+        # Cache-level pool undo (see _SPEC_CACHE_ROLLBACK_C2): when every
+        # pool can roll back at the cache level, take path (a)'s validated
+        # per-stream trims for rings/other caches and spec_rollback the
+        # pools — no commit-forward. keep is batch-uniform (min-acceptance).
+        _c2_cache_level = False
+        if pool_flushed and _SPEC_CACHE_ROLLBACK_C2:
+            _c2_keep = n_min + 1
+            _c2_pushed = gamma + 1
+            _c2_cache_level = all(
+                snap is not None
+                and hasattr(pc, "spec_can_rollback")
+                and pc.spec_can_rollback(snap, _c2_keep, _c2_pushed)
+                for pc, snap in zip(_pool_caches, _pool_snaps, strict=True)
+            )
+            if _c2_cache_level:
+                for c in gen_batch.prompt_cache:
+                    subs = c.caches if isinstance(c, CacheList) else [c]
+                    for sub in subs:
+                        if isinstance(sub, PerStreamBatchRotatingKVCache):
+                            sub.trim_per_stream(rollback_per_stream_py)
+                        elif any(sub is pc for pc in _pool_caches):
+                            continue  # handled by spec_rollback below
+                        elif hasattr(sub, "trim"):
+                            sub.trim(n_min_rollback)
+                        elif hasattr(sub, "offset"):
+                            sub.offset -= n_min_rollback
+                for pc, snap in zip(_pool_caches, _pool_snaps, strict=True):
+                    pc.spec_rollback(snap, _c2_keep)
+
+        if _c2_cache_level:
+            pass  # rollback fully handled above
+        elif not pool_flushed:
             # (a) Cheap path (also the full-acceptance path): per-stream
             # rotating trim + uniform pool remainder trim.
             for c in gen_batch.prompt_cache:
