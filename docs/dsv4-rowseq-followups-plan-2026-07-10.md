@@ -298,8 +298,20 @@ self-repeat 3/3** — six fixes + SPEC_CACHE_ROLLBACK + ROWSEQ_FULLBLOCK +
 MOE_PARTS_ROWSEQ=gate + MIN_CTX=0. (FULLBLOCK_MOE=1, the full per-row MoE
 at 20.7 t/s, retained as a diagnostic superset only.)
 
-**Remaining:** DSML battery on the final stack (running), c=2 concurrent
-smoke, then flip the nine defaults in start_cluster.sh.
+**SHIPPED (fifth leg): defaults FLIPPED — prod now runs the lossless
+stack.** Validation on pure defaults: gold gate 3/3, DSML battery CLEAN
+(4K/64K/120K × 6 turns), c=1 26.9 t/s (−2% vs lossy 27.3), self-repeat
+clean. The per-row modes are **B=1-scoped in code** (FULLBLOCK /
+MOE_PARTS_ROWSEQ / rowmask; `_rowseq_min_ctx` pins B≥2 rowseq to ≥32K),
+so the c≥2 verify path is bitwise-unchanged by the flip — EXCEPT
+POOL_SNAPSHOT_BATCH=1 now also fixes the c≥2 pool contamination (pools
+were inert there too), at a measured c=2 cost of 14.9 → 10.8 t/s/stream
+(regime-b pool snapshots + commit-forwards). Kept ON: this is the
+needle-miss corruption class the original campaign existed to kill.
+
+**Follow-up (perf, not correctness):** extend cache-level rollback
+(spec stash + exact undo) to the c≥2 per-stream path to recover most of
+the c=2 −28%, mirroring how it recovered c=1 from −41% to −2%.
 
 **(earlier same day) step 1 archaeology, key findings that REVISE the
 suspect list below:**
