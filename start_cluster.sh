@@ -185,9 +185,10 @@ fi
 : "${EXO_DSV4_SPEC_STATE_RESTORE:=1}"
 : "${EXO_DSV4_SPEC_CACHE_ROLLBACK:=1}"
 : "${EXO_DSV4_SPEC_CACHE_ROLLBACK_C2:=1}"
-: "${EXO_DSV4_ROWSEQ_FULLBLOCK:=1}"
+: "${MLX_GEMV_BATCH_INVARIANT:=1}"
+: "${EXO_DSV4_ROWSEQ_FULLBLOCK:=0}"
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=0}"
-: "${EXO_DSV4_MOE_PARTS_ROWSEQ:=gate}"
+: "${EXO_DSV4_MOE_PARTS_ROWSEQ:=}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
