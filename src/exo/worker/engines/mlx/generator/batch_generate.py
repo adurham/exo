@@ -1381,6 +1381,37 @@ class ExoBatchGenerator:
                 if hasattr(self._mlx_gen.mtp, 'snapshot_for_uid'):
                     self._mlx_gen.mtp.snapshot_for_uid(uid)
 
+        # DSpark ctx warm-up + per-request reset. The draft module's rotating
+        # ctx-KV window must (a) NOT carry the previous request's context —
+        # stale ctx never breaks correctness (verification rejects bad
+        # drafts) but silently depresses acceptance — and (b) start warm
+        # from this prompt's tail: the capture side channel holds the
+        # hc-means from the most recent prefill forward (the last chunk /
+        # the incremental suffix on a prefix-cache hit). RoPE positions are
+        # window-relative (constant absolute shift cancels in q·k), matching
+        # how the per-cycle appends extend the same cache.
+        _dspark_mod = getattr(
+            getattr(self._mlx_gen, "model", None), "model", None
+        )
+        _dspark_mod = getattr(_dspark_mod, "dspark", None)
+        if _dspark_mod is not None:
+            from mlx_lm.models.deepseek_v4 import get_dspark_ctx
+
+            self._mlx_gen._dspark_caches = _dspark_mod.make_cache()
+            _ds_ctx = get_dspark_ctx(_dspark_mod.target_layer_ids)
+            if _ds_ctx is not None:
+                if _ds_ctx.shape[0] != 1:
+                    _ds_ctx = _ds_ctx[-1:, :, :]
+                _dspark_mod.append_ctx(
+                    _ds_ctx, self._mlx_gen._dspark_caches
+                )
+                mx.eval(
+                    [c.keys for c in self._mlx_gen._dspark_caches]
+                )
+                logger.info(
+                    f"DSpark ctx warmed ({_ds_ctx.shape[1]} positions)"
+                )
+
         # Set per-request temperature for speculative. EXO_SPECULATIVE_TEMP
         # overrides everything; otherwise fall through the same resolution
         # chain (request → instance → cluster → hardcoded) as the sampler.
