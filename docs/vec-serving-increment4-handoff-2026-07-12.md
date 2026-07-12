@@ -1,135 +1,107 @@
-> **INCREMENT 4 LANDED 2026-07-12 (same day): vec ENGAGES in serving — vec+tau0.5 measured 34.1 t/s (+16% over the 29.4 loop champion) — but the serving gold gate FAILS (0/3, near-tie flips ~150 tok in), so the loop champion stays prod default.** Landed (mlx-lm 4ebd37f, exo pin bumped): batch-ring vec core (ok/apply/bookkeeping), spec-stash feed (cache-level rollback compatible — 96% reject rate at full-γ with ZERO commit-forwards, rollback 1.9ms), loop-parity masks (batch array masks, _extend_mask pooled columns, per-row pmask stacking), flush-row per-row fallback (masked sdpa with real False entries is NOT batch-invariant even under steel-BI — probe ~1e-3), and the ROOT-CAUSE offset fix (batch ring offset mx-array mutated in place by apply's +=L; inverse rope built post-apply captured offset+L; plain rings immune — the same defensive copy __call__ line ~3440 uses). Harness matrix 15/15 BITWISE (γ∈{2,5} × BATCH_CACHE∈{all,ring,pool,0}). Gold-gate forensics: loop+steel-BI is 3/3 IDENTICAL (steel-BI exonerated in serving); vec diverges ~150 tok in, coherent near-tie flips — the REAL-WEIGHT VALUE-DEPENDENT batched-vs-single class (~1 in 6k layer-forwards; the 4-layer random-weight harness statistically cannot catch it — same lesson as the FULLBLOCK campaign). Perf data: vec+tau0 26.3 t/s (verify 112→77ms, acceptance 2.39/cycle doesn't pay), vec+tau0.5 34.1 t/s (57.9ms cycle). NEXT: A/B the vec win composition — per-row sdpa dispatches with batched projections/views (keeps kernel class+batch identical to the loop per row, removes the value-dependence surface); suspects for the residual = fused sparse gather-sdpa (custom kernel, steel-BI pins don't cover it) and mx.fast sdpa masked/batched at real values; serving-parity harness envs (LDIFF_FENCE, more layers, real-weight worktree run) to reproduce offline.
+# Verify-vec serving campaign — handoff after increment 4 (2026-07-12)
 
-# Verify-vec serving enablement (increment 4) — handoff 2026-07-12
+## State (all committed and pushed)
+- **Prod default: loop champion, byte-lossless, 29.4–29.7 t/s** (pure
+  `./start_cluster.sh` defaults; full ladder green earlier today —
+  rollback-cost campaign, see
+  rollback-cost-campaign-handoff-2026-07-12.md).
+- **Increment 4 LANDED** (mlx-lm `4ebd37f`, exo pin `d96b11b44`+): vec
+  engages on serving's Batch* cache classes, feeds the spec stash, and
+  carries loop-parity masks. Harness matrix **15/15 BITWISE**
+  (LDIFF_GAMMA ∈ {2,5} × LDIFF_BATCH_CACHE ∈ {all, ring, pool, 0},
+  accept3/reject0/reject1, cache-level rollback refusal-free).
+- **Measured** (both opt-in via env, gated off by default):
+  - vec + tau0.5: **34.1 t/s** (+16%), cycle 57.9ms, rollback 0.9ms,
+    zero commit-forwards.
+  - vec + tau0 (full-γ): 26.3 t/s — acceptance 2.39 tok/cycle doesn't
+    pay for the 77ms verify. The old ~38 projection is dead; full-γ is
+    not the win, pruned+vec is.
+  - Opt-in launch: `EXO_DSV4_VERIFY_ROWSEQ_VEC=1
+    MLX_STEEL_BATCH_INVARIANT=1 ./start_cluster.sh` (LOSSY, see below).
+- **Serving gold gate FAILS 0/3 for vec** (dspark_identity_gen.py,
+  same-numerics legs, both MLX_STEEL_BATCH_INVARIANT=1): coherent
+  near-tie flips starting ~150 tokens in, all 3 prompts.
+  **Control: loop + steel-BI is 3/3 IDENTICAL** — steel-BI and the
+  serving stack are exonerated; the drift is vec's batched compute.
+- Diagnosis: the real-weight **value-dependent batched-vs-single
+  kernel class** (~1 flip per ~6k layer-forwards — matches the
+  ~150-token onset at 43 layers). The 4-layer random-weight ldiff
+  harness is statistically blind to it (the FULLBLOCK campaign learned
+  the same lesson). Probe-proven instance of the class: mx.fast sdpa
+  with an array mask containing REAL False entries is NOT
+  batch-invariant even under steel-BI (~1e-3 batched-vs-single);
+  all-true masks tested bitwise at probe values but are value-suspect.
+  Prime suspects for the residual: the fused sparse gather-SDPA kernel
+  (custom Metal, EXO_DSV4_SPARSE_FUSED_SDPA=1 default, NO BI pins) and
+  mx.fast sdpa batched-with-mask at real values.
 
-## Objective
-Make EXO_DSV4_VERIFY_ROWSEQ_VEC actually engage in serving, so the
-vec+tau0 full-γ config can be measured. That is the remaining path to the
-~38 t/s projection. Current champion: loop + tau=0.5 at **29.4 t/s**
-(rollback-cost campaign closed same day — see
-rollback-cost-campaign-handoff-2026-07-12.md closure note).
+## NEXT CAMPAIGN: lossless ~34 via per-row-sdpa vec variant
+Keep the batched projections + gathered ring views (the cheap 80% of
+the vec win), but issue every sdpa/fused-kernel call PER ROW — kernel
+class AND batch size identical to the loop's L=1 calls, bitwise by
+construction, no dependence on kernel BI at all.
+1. Add `EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=1` (or fold into the vec
+   gate): in `_RowseqVecMixin.rowseq_vec`, `_compressed_rowseq_vec`,
+   `_sparse_rowseq_vec`, replace the batched attention call with a
+   per-row loop over the SAME q_rows/views/masks (the flush-row
+   fallback already shows the exact shape — generalize it to all rows).
+2. Measure: expect between 29.4 (loop) and 34.1 (full vec). If ≥ ~32,
+   run the ladder; champion-flip only on gold gate 3/3 + battery +
+   probe (steel-BI must be ON in both identity legs).
+3. If the number disappoints, profile which batched op carried the win
+   (projections vs sdpa) via EXO_DSV4_MTP_PROFILE + a variant that
+   batches only projections.
+4. Longer term (real 34+ lossless): BI-pin the fused sparse kernel and
+   the masked sdpa batched path in mlx (adurham/mlx), then re-enable
+   full batching. The probe in
+   ~/scratch/probe_sdpa_mask_bi.py (m4-1) reproduces the masked-sdpa
+   gap standalone.
 
-## The two blockers (both PROVEN today)
+## Landed mechanics (for code archaeology)
+- `_rowseq_vec_ring_ok/_apply`: BatchRotatingKVCache at B==1 steady
+  state; keep=0 wrap; mirrors `_update_in_place` bookkeeping (offset
+  array += L, `_offset` += L, `left_padding -= L`, rotated, mx.depends).
+- Spec-stash feed in the apply (both ring classes): one L-row entry,
+  `(kv, zero-width values)`; without it every vec rejection refused
+  cache-level rollback → 72ms commit-forward.
+- **Offset in-place-mutation root cause** (the batch-ring drift): the
+  ring apply's `offset += L` mutates the mx array object; graph nodes
+  built AFTER the apply (the inverse rope) capture the post-push value
+  → output roped at offset+L. Plain rings immune (int offset).
+  Defensive copy at capture — same idiom as LocalAttention.__call__
+  (~line 3440), which exists for exactly this reason.
+- Loop-parity masks: batch rings emit an ARRAY decode mask at N=1
+  (all-true at vec's precondition but the kernel class must match);
+  compressed extends over pooled columns via `_extend_mask` (the batch
+  pool's donation path relies on the MASK to hide the deferred slot —
+  the plain class slices instead); sparse gathers per-row pmasks,
+  None rows contribute all-true.
+- Flush-row per-row fallback: rows with non-None pmask (~1 per
+  compress_ratio) run the loop's exact L=1 call.
 
-### 1. Vec never engages in serving
-Serving converts caches at insert (mlx-lm generate.py `_make_cache`,
-~line 922): RotatingKVCache → **BatchRotatingKVCache**, PoolingCache →
-**BatchPoolingCache**. But every vec gate requires the PLAIN classes:
-- `_rowseq_vec_ring_ok` (deepseek_v4.py ~4591): `isinstance(local_cache,
-  RotatingKVCache)` — Batch ring is NOT a subclass → all three attention
-  classes' vec paths no-op in serving.
-- `_compressed_rowseq_vec_supported` (~4699): additionally requires
-  `isinstance(pool_cache, PoolingCache)`.
-
-Consequence: the task-#23 "serving gold gate 3/3" trivially passed (it
-gated the loop), and the 16.5→27.6 t/s tau=0 measurement in the
-exo_dspark_port memory CANNOT have been the current serving stack —
-re-verify its provenance before trusting any vec serving numbers.
-
-### 2. Vec ring write bypasses the spec stash
-`_rowseq_vec_ring_apply` writes `cache.keys` manually and never feeds
-`_spec_pushed`. Under cache-level rollback (prod default,
-EXO_DSV4_SPEC_CACHE_ROLLBACK=1) a rejection then sees
-`spec_pushed_rows()==0 != verify_len` → refusal → **commit-forward
-fallback returns on every vec-engaged rejection** (the exact ~72ms cost
-the task-#24 campaign just eliminated). ldiff-proven: γ=5 vec plain-ring
-reject0 refuses with `rings=False pools=True` at cycle 2 (cycle 1 ran the
-loop — the vec/loop alternation is offset-dependent).
-
-## Increment-4 work plan
-
-### 4a. Ring core (shared by all three attention classes)
-- `_rowseq_vec_ring_ok`: also accept BatchRotatingKVCache with
-  `keys is not None and keys.shape[0]==1 and keys.shape[2]==max_size and
-  _offset >= max_size and _lengths is None`.
-- `_rowseq_vec_slot_map`: unchanged; batch ring wraps to 0 (keep=0).
-- `_rowseq_vec_ring_apply`: branch on class for the end-state write.
-  Batch bookkeeping per L rows (mirror `_update_in_place`):
-  `offset` (mx per-stream array) += L; `_offset` (python int) += L;
-  `left_padding -= L` (steady state is rotated); `rotated = True`;
-  `_idx = slots[-1]+1`; final
-  `keys = mx.depends(keys, (left_padding, offset))`.
-- **Stash feed in BOTH classes** (fixes blocker 2): when
-  `cache._spec_stash_armed`, append `(kv, zero_width_values)` — values
-  are (B,1,L,0) `_zero_values`-style; `rollback_spec_write` iterates rows
-  within one entry, so a single L-row entry is fine. NOTE the POOL mixed
-  gate requires single-row POOL stash entries — pools already push
-  per-row via the real compressor calls; do not conflate the two.
-- `save_spec_state`/`restore_spec_state` on the batch ring already cover
-  everything the vec write mutates (keys copy, offset/left_padding
-  copies, _offset/_idx/rotated) — verified.
-
-### 4b. Mask parity (the bitwise-risk area)
-Loop path on batch classes passes per-row ARRAY masks
-(`_rowseq_row_mask` → `BatchRotatingKVCache.make_mask(N=1)`: window +
-left_padding validity, `mx.roll`ed by _idx+1 — at steady state with
-left_padding≤0 the content is ALL-TRUE, but the KERNEL class differs from
-mask=None). Vec currently passes mask=None (correct only for plain rings,
-whose N=1 make_mask returns None at full window).
-- LocalAttention vec on batch rings: build per-row masks by READ-ONLY
-  emulation of make_mask with _idx advanced per row (make_mask mutates
-  nothing), stack to (L,1,1,W), pass to the batched sdpa. Whether
-  batched-array-mask sdpa == per-row-array-mask sdpa bitwise under
-  MLX_STEEL_BATCH_INVARIANT is UNKNOWN — the ldiff harness decides; if it
-  drifts, that is a steel-BI pin gap to fix in mlx (sdpa mask
-  specialization), not a reason to fudge the mask.
-- CompressedAttention: the decode path extends the ring mask over pooled
-  columns (`_extend_mask(mask, _dispatch_pmask(pool_cache, L, offset),
-  width)` ~line 3610). Vec must replicate the extended array per row
-  within its width groups. Also relax its gate to BatchPoolingCache
-  (B==1) — the per-row `self.compressor(...)` calls are class-generic.
-- SparseCompressedAttention: per-row pmask gathers already exist in the
-  vec path; the ring-mask component needs the same treatment as
-  LocalAttention. Check `BatchPoolingCache.make_mask` at N=1/B=1 (may be
-  an array where the plain class returns None).
-
-### 4c. Gate matrix (all on m4-1, cluster DOWN — see operational notes)
-1. `~/scratch/ldiff_cycles.py 6000 4 48` with LDIFF_SPEC_STATE=1
-   LDIFF_CACHE_ROLLBACK=1 LDIFF_RESTORE_AFTER_TRIM=1
-   EXO_DSV4_VERIFY_ROWSEQ=1 EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=0
-   EXO_DSV4_ROWSEQ_ROWMASK=1 EXO_DSV4_VERIFY_ROWSEQ_VEC=1
-   MLX_STEEL_BATCH_INVARIANT=1 MLX_GEMV_BATCH_INVARIANT=1, sweeping
-   LDIFF_GAMMA ∈ {2,5} × LDIFF_BATCH_CACHE ∈ {ring, pool, all, 0}.
-   `ring` isolates 4a; `all` is the serving-classes gate. Every chain
-   must be BITWISE CLEAN and refusal-free (the harness RAISES on
-   cache-level refusal — that is the stash-compat gate).
-2. Deploy (envs: EXO_DSV4_VERIFY_ROWSEQ_VEC=1 MLX_STEEL_BATCH_INVARIANT=1
-   EXO_DSV4_DSPARK_CONF_TAU=0 + EXO_DSV4_MTP_PROFILE=64
-   EXO_DSV4_RB_PROFILE=1 — all plumbed in start_cluster.sh as of exo
-   HEAD): expect MTP-PROF verify to collapse from ~60ms (pruned loop) /
-   ~112ms (full-γ loop), rb_commitfwd ABSENT, rollback <1ms.
-3. Gold gate (dspark_identity_gen.py specON/specOFF legs — same-numerics:
-   BOTH legs need MLX_STEEL_BATCH_INVARIANT=1), DSML battery, degen
-   probe, measure_tps. Champion decision: vec+tau0 must beat 29.4 by
-   enough to justify steel-BI's −5% global tax (it applies to EVERYTHING,
-   including prefill).
-
-## Operational notes (hard-won today, do not skip)
-- The ldiff harness model is ~30GB bf16 (unquantized 4-layer DSv4 at full
-  vocab). NEVER run it on m4-1 with the cluster loaded: jetsam SIGKILLs
-  the 72GB runner, the m4-2 peer rank survives as a zombie holding ~118GB
-  wired, and re-placement wedges. Teardown recipe (no reboot needed,
-  twice proven): on both nodes `screen -S exorun -X quit; pkill -f
-  "python -m exo"; sleep 3; pkill -9 -f multiprocessing.spawn`, verify
-  `vm_stat | grep wired` drops to ~190K pages, then ./start_cluster.sh.
-- ldiff harness env gotchas: it reads LDIFF_* flags, NOT the EXO_DSV4
-  rollback envs; defaults drive the legacy known-dirty path. Its reject
-  chunk builders were γ=2-hardcoded — fixed in the m4-1 scratch copy
-  (LDIFF_GAMMA now generalizes; γ=2 token values unchanged). The fixed
-  copy lives ONLY at m4-1:~/scratch/ldiff_cycles.py.
-- m4-1 worktree ~/scratch/mlxlm-dspark currently has the mixed-rollback
-  cache.py copied over 2dc4f85 (matches mlx-lm f00a9a9). `git stash list`
-  is empty; reconcile with a real fetch/checkout of f00a9a9 before new
-  edits.
-- Deploy flow: commit → push origin → ./start_cluster.sh (~5 min).
-  MTP-PROF dumps land in m4-1:~/.exo/exo_log/runner_log/stderr.log —
-  APPEND-ONLY ACROSS RESTARTS: snapshot `stat -f %z` before a run and
-  read `tail -c +OFFSET`, or stale dumps from prior sessions will
-  masquerade as fresh (cost this campaign an hour).
-
-## Current state (all pushed)
-- exo main d96b11b44 + env plumbing commit (VERIFY_ROWSEQ_VEC / CONF_TAU
-  forwards); mlx-lm main f00a9a9 (mixed-flush cache-level rollback).
-- Prod: loop champion, pure defaults, 29.4 t/s, byte-lossless, full
-  ladder green. rb_commitfwd = 0; rollback 0.79ms mean.
-- Rollback is NO LONGER the vec+tau0 blocker; increments 4a/4b are.
+## Operational notes (hard-won, do not skip)
+- The ldiff harness model is ~30GB bf16. NEVER run it on m4-1 with the
+  cluster loaded: jetsam SIGKILLs the 72GB runner, the m4-2 peer rank
+  survives holding ~118GB wired, placement wedges. Teardown (no reboot,
+  proven 3×): on both nodes `screen -S exorun -X quit; pkill -f
+  "python -m exo"; sleep 3; pkill -9 -f multiprocessing.spawn`, check
+  `vm_stat | grep wired` drops to ~190K pages, then start_cluster.
+- ldiff harness reads LDIFF_* flags (SPEC_STATE/CACHE_ROLLBACK/
+  RESTORE_AFTER_TRIM=1 for the prod rollback twin), NOT the EXO_DSV4
+  rollback envs; defaults drive the legacy known-dirty path. LDIFF_GAMMA
+  generalization + reject chunk fixes live ONLY in
+  m4-1:~/scratch/ldiff_cycles.py.
+- The m4-1 worktree ~/scratch/mlxlm-dspark has deepseek_v4.py/cache.py
+  scp'd over 2dc4f85; reconcile with a real fetch/checkout of 4ebd37f
+  before new edits.
+- MTP-PROF dumps: m4-1:~/.exo/exo_log/runner_log/stderr.log is
+  APPEND-ONLY ACROSS RESTARTS — snapshot `stat -f %z` before a run and
+  read `tail -c +OFFSET`, or stale dumps masquerade as fresh.
+- measure_tps.sh reuses one prompt — a warm prefix-cache can return
+  600 tok in 0.0s; use a fresh prompt for post-restart confirmations.
+- start_cluster can land nodes on DIFFERENT commits if a push races the
+  deploy (saw e41b437f vs b7876405); it stops at the consistency check —
+  rerun after confirming the push propagated.
+- Deploy envs all plumbed: EXO_DSV4_VERIFY_ROWSEQ_VEC,
+  EXO_DSV4_DSPARK_CONF_TAU, MLX_STEEL_BATCH_INVARIANT,
+  EXO_DSV4_MTP_PROFILE, EXO_DSV4_RB_PROFILE.
