@@ -333,7 +333,14 @@ fi
 # in-flight prefills got uncomfortably tight (free dropped toward the floor
 # 2026-06-29). 2 keeps the live session safe from a single concurrent caller —
 # the actual bug — while worst-casing at only ~6 GB of retained KV.
-: "${DSV4_MAX_PREFIX_SESSIONS:=2}"
+# 2026-07-11: 2 → 4. Live hermes traffic runs 2+ conversations plus consult
+# calls through DSv4 concurrently; at 2 the LRU thrashes and a 22-44K-context
+# turn pays a full re-prefill (observed: 24,759 tok / 72.9 s stall, 5 full
+# misses in one evening session). Observed session KV at 24-44K ctx is
+# ~0.5-0.6 GB (MEMPROF), so 4 sessions retain ~2.5 GB typical; the 100K-ctx
+# worst case (~12 GB) remains the documented risk if long-context sessions
+# return.
+: "${DSV4_MAX_PREFIX_SESSIONS:=4}"
 : "${DSV4_MAX_KV_TOKENS:=}"
 : "${DSV4_MAX_PREFIX_BYTES:=}"
 # Per-leaf KV snapshot retention for DSv4's non-sliceable (PoolingCache /
@@ -1200,7 +1207,17 @@ for NODE in "${NODES[@]}"; do
     # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
     # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
     # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
-    : "${EXO_DSV4_MTP_C2_MAX_CTX:=0}"  # 0 = MTP ON at all c>=2 ctx (pooling B-invariance fix, validated)
+    # 2026-07-11: RE-ARMED =1. The =0 flip ("pooling B-invariance fix,
+    # validated") is DISPROVEN by live traffic: 4 kill-switch degens in 3 min
+    # on ragged c=2 hermes pairs (44K+24K ctx, temp=1.0), word-stutter within
+    # ~100 tok of the batch going c=2, retries dying at the same depth, two
+    # streams degenerating in the same cycle window. MLX_GEMV_BATCH_INVARIANT
+    # closed the MATMUL dispatch drift only — some B>=2 path (suspect: sdpa /
+    # attention kernel selection) still drifts, so the near-tie repetition
+    # attractor survives. Validation that flipped this to 0 ran temp=0 or c=1
+    # gates only; any future re-flip needs a deep temp-1.0 ragged c=2 battery
+    # (bench: c2_temp1_degen_probe.py).
+    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"  # 1 = spec-off at c>=2 (clean); 0 = spec on (corrupt)
     [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
     # jaccl start-of-collective ACK barrier (mesh_impl.h ack_sync_pre). Keeps
