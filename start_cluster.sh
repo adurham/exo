@@ -186,6 +186,13 @@ fi
 : "${EXO_DSV4_SPEC_CACHE_ROLLBACK:=1}"
 : "${EXO_DSV4_SPEC_CACHE_ROLLBACK_C2:=1}"
 : "${MLX_GEMV_BATCH_INVARIANT:=1}"
+# Steel-level batch invariance (generalized collapse, M*N tiles, split-K
+# off): required before re-enabling spec at c>=2 (kernel layer is proven
+# bitexact with it, mlx ac73d0c9) but costs ~5% c=1 decode and the c>=2
+# spec corruption ALSO has an unresolved serving-logic component
+# (2026-07-11 probe: degens persist on the bitexact build), so keep off
+# until that lands. Flip together with EXO_DSV4_MTP_C2_MAX_CTX=0.
+: "${MLX_STEEL_BATCH_INVARIANT:=0}"
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK:=0}"
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=0}"
 : "${EXO_DSV4_MOE_PARTS_ROWSEQ:=}"
@@ -1287,6 +1294,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK=$EXO_DSV4_SPEC_CACHE_ROLLBACK"
     [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK_C2=$EXO_DSV4_SPEC_CACHE_ROLLBACK_C2"
     [ -n "${MLX_GEMV_BATCH_INVARIANT:-}" ] && EXO_ENV="$EXO_ENV MLX_GEMV_BATCH_INVARIANT=$MLX_GEMV_BATCH_INVARIANT"
+    [ -n "${MLX_STEEL_BATCH_INVARIANT:-}" ] && EXO_ENV="$EXO_ENV MLX_STEEL_BATCH_INVARIANT=$MLX_STEEL_BATCH_INVARIANT"
     [ -n "${EXO_DSV4_ROWSEQ_FULLBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_FULLBLOCK=$EXO_DSV4_ROWSEQ_FULLBLOCK"
     [ -n "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=$EXO_DSV4_ROWSEQ_FULLBLOCK_MOE"
     [ -n "${EXO_DSV4_MOE_PARTS_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_PARTS_ROWSEQ=$EXO_DSV4_MOE_PARTS_ROWSEQ"
