@@ -1297,6 +1297,10 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_EAGLE_T:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_T=$EXO_DSV4_MTP_EAGLE_T"
     [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
     [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
+    # Rollback sub-phase attribution (rb_snap/rb_gate/rb_drain/rb_ring/
+    # rb_pool/rb_commitfwd/rb_tail lines in the MTP-PROF dump). Diagnostic:
+    # inserts mx.synchronize sub-boundaries; pair with EXO_DSV4_MTP_PROFILE.
+    [ -n "${EXO_DSV4_RB_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_RB_PROFILE=$EXO_DSV4_RB_PROFILE"
     [ -n "${EXO_DSV4_MTP_REFCHECK_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK_BATCH=$EXO_DSV4_MTP_REFCHECK_BATCH"
     [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"
     # W3 diagnostic: per-draft-step top-8 softmax dump. NOT a production

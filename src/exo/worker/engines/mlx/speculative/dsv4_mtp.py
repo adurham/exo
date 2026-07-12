@@ -241,6 +241,22 @@ def _build_tree_mask_and_positions(
 # pipelining — measurements are upper bounds on real production walls.
 _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
 
+# ROLLBACK SUB-PHASE ATTRIBUTION (EXO_DSV4_RB_PROFILE=1, requires
+# EXO_DSV4_MTP_PROFILE>0; B=1 _SPEC_STATE_RESTORE path only). The "rollback"
+# bracket lumps together costs with very different fixes: the
+# mx.synchronize() drain inside _set_fence_async(False) (pays for
+# UNCOLLECTED verify side-chain work under FENCE_ASYNC — fix is overlap,
+# not cheaper rollback), the per-ring restore/re-push dispatch, the pool
+# spec_rollback trim-vs-restore branches, and the commit-forward fallback.
+# This gate splits them with mx.synchronize() sub-boundaries (serialises
+# the pipeline — SHARES are trustworthy, absolute totals are upper
+# bounds, same caveat as EXO_DSV4_SECTION_TIME) and also brackets the
+# pre-verify snapshot/arm block (rb_snap), whose mx.array copies
+# otherwise hide inside the "verify" phase. rb_pool_restores counts pools
+# taking the restore+re-accumulate branch that cycle (vs trim).
+
+_RB_PROFILE = os.environ.get("EXO_DSV4_RB_PROFILE", "0") == "1"
+
 # BS>1 MIN-ACCEPTANCE (2026-07-02, default ON). The per-stream acceptance
 # migration let per-stream rotating-KV offsets diverge from the
 # batch-UNIFORM pooling/indexer caches (uniform trim + whole-batch
@@ -484,10 +500,10 @@ class _PhaseTimer:
             f"B={b}:{c}" for b, c in sorted(self.cycles_by_b.items())
         )
         logger.warning(f"[MTP-PROF] cycles={self.cycles} {bs_summary}")
+        known = ("draft", "verify", "accept", "commit", "rollback", "total")
         for b in sorted(self.samples.keys()):
-            for phase in (
-                "draft", "verify", "accept", "commit", "rollback", "total",
-            ):
+            extras = tuple(sorted(k for k in self.samples[b] if k not in known))
+            for phase in known + extras:
                 xs = self.samples[b].get(phase)
                 if not xs:
                     continue
@@ -3534,6 +3550,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # need them (the vast majority: ratio=4 → flush every 4th cycle,
         # ratio=128 → flush every 128th cycle).
         _verify_len = gamma + 1
+        _rbp = _RB_PROFILE and prof is not None
+        _t_rb_snap0 = 0.0
+        if _rbp:
+            mx.synchronize()
+            _t_rb_snap0 = time.perf_counter()
         _ring_caches: list[Any] = []
         _ring_snaps: list[Any] = []
         if _SPEC_STATE_RESTORE:
@@ -3559,6 +3580,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 pc.save_meta() if _pool_may_flush(pc, _verify_len) else None
                 for pc in _pool_caches
             ]
+        if _rbp and prof is not None:
+            mx.synchronize()
+            prof.record(
+                "rb_snap", (time.perf_counter() - _t_rb_snap0) * 1000.0
+            )
 
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
@@ -4144,6 +4170,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # commit-forward (mirrors the batch path's discipline).
             _stats_regime_b = True
             _keep = _verify_len - rollback  # committed rows: [y]+accepted
+            _rbt0 = time.perf_counter()
+            _rbt1 = _rbt2 = _rbt3 = _rbt4 = _rbt0
             _cache_level = (
                 _SPEC_CACHE_ROLLBACK
                 and all(
@@ -4155,7 +4183,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 )
             )
             _stats_cache_rb = _cache_level
+            if _rbp and prof is not None:
+                _rbt1 = time.perf_counter()
+                prof.record("rb_gate", (_rbt1 - _rbt0) * 1000.0)
             self.mtp._set_fence_async(False)
+            if _rbp and prof is not None:
+                # _set_fence_async(False) ends in mx.synchronize(): this
+                # bracket is the drain of everything still in flight from
+                # the verify forward (FENCE_ASYNC side-chain commits).
+                _rbt2 = time.perf_counter()
+                prof.record("rb_drain", (_rbt2 - _rbt1) * 1000.0)
             if _cache_level:
                 # Cache-level exact undo (see _SPEC_CACHE_ROLLBACK): restore
                 # each ring and re-push the committed rows through the
@@ -4165,8 +4202,32 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # row's cache state bitwise-sequentially.
                 for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
                     rc.rollback_spec_write(rsnap, _keep)
+                if _rbp and prof is not None:
+                    mx.synchronize()
+                    _rbt3 = time.perf_counter()
+                    prof.record("rb_ring", (_rbt3 - _rbt2) * 1000.0)
+                _rb_pool_restores = 0
                 for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True):
+                    if _rbp:
+                        # Trim-vs-restore attribution, duck-typed per class
+                        # (PoolingCache vs BatchPoolingCache snapshots and
+                        # flush-count helpers differ).
+                        if hasattr(pc, "_spec_flush_counts"):
+                            _, _rb_ft, _rb_fc = pc._spec_flush_counts(
+                                psnap[2], _keep
+                            )
+                            if _rb_fc != _rb_ft:
+                                _rb_pool_restores += 1
+                        elif hasattr(pc, "_spec_stream_flushes"):
+                            _, _rb_per = pc._spec_stream_flushes(psnap, _keep)
+                            if not all(ft == fc for ft, fc in _rb_per):
+                                _rb_pool_restores += 1
                     pc.spec_rollback(psnap, _keep)
+                if _rbp and prof is not None:
+                    mx.synchronize()
+                    _rbt4 = time.perf_counter()
+                    prof.record("rb_pool", (_rbt4 - _rbt3) * 1000.0)
+                    prof.record("rb_pool_restores", float(_rb_pool_restores))
             else:
                 for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
                     rc.restore_spec_state(rsnap)
@@ -4182,6 +4243,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 )
                 mx.eval(_commit_logits)
                 del _commit_logits
+                if _rbp and prof is not None:
+                    mx.synchronize()
+                    prof.record(
+                        "rb_commitfwd",
+                        (time.perf_counter() - _rbt2) * 1000.0,
+                    )
             mtp_cache = self.mtp._cache
             if mtp_cache is not None:
                 if hasattr(mtp_cache, "trim"):
@@ -4189,6 +4256,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 elif hasattr(mtp_cache, "offset"):
                     mtp_cache.offset -= rollback
             self.mtp._set_fence_async(True)
+            if _rbp and prof is not None and _cache_level:
+                mx.synchronize()
+                prof.record(
+                    "rb_tail", (time.perf_counter() - _rbt4) * 1000.0
+                )
         elif rollback > 0:
             # Detect whether any pool flushed a NEW entry during verify.
             # Use the TOTAL (visible offset + staged pending bump): the
