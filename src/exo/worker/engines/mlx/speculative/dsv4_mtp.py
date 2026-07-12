@@ -3419,11 +3419,57 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # token sequence and verify forward are bit-exact downstream so
         # only draft sync is needed.
         next_token_arr = y.reshape(1, 1)
-        draft_ids, draft_probs = draft_tokens(
-            self.mtp, pre_norm, next_token_arr, gamma, temp,
-            fast_lm_head=getattr(self.mtp, "draft_lm_head", None) is not None,
-            sync_group=coord_group,
-        )
+        # DSpark draft branch (task #19): one parallel block forward + Markov
+        # sequential sampling replaces the γ chained MTP predicts. gamma is
+        # re-bound to block_size for the WHOLE cycle so verify length, pool
+        # snapshot arithmetic, and rollback all size themselves off the
+        # DSpark block. Verify/accept/rollback machinery below is unchanged.
+        _dspark = getattr(getattr(self.model, "model", None), "dspark", None)
+        if _dspark is not None:
+            gamma = _dspark.block_size
+            if getattr(self, "_dspark_caches", None) is None:
+                self._dspark_caches = _dspark.make_cache()
+            _dsc = self._dspark_caches
+
+            # Cross-rank draft sync: the sharded MoE all_sum makes the block
+            # forward rank-identical, but temp>0 sampling uses per-rank RNG
+            # and even temp=0 keeps the chained path's broadcast discipline.
+            def _dspark_sample(step_logits: mx.array, _k: int) -> mx.array:
+                if temp > 0:
+                    t = mx.random.categorical(step_logits / max(temp, 1e-6))
+                else:
+                    t = mx.argmax(step_logits, axis=-1)
+                if sync_drafts:
+                    t = broadcast_from_canonical(
+                        t.astype(mx.int32), coord_group
+                    )
+                return t
+
+            _toks, _corrected, _dspark_conf = _dspark.draft(
+                y.reshape(1),
+                self.model.model.embed_tokens,
+                self.model.lm_head,
+                _dsc,
+                temperature=temp,
+                sample_fn=_dspark_sample,
+            )
+            # Block KV must not persist as draft context; committed rows'
+            # ctx is appended after acceptance (post-verify capture).
+            for _c in _dsc:
+                _c.trim(_dspark.block_size)
+            draft_ids = [_toks[:, k] for k in range(gamma)]
+            draft_probs = [
+                mx.softmax(_corrected[:, k, :] / max(temp, 1e-6), axis=-1)
+                if temp > 0
+                else mx.softmax(_corrected[:, k, :], axis=-1)
+                for k in range(gamma)
+            ]
+        else:
+            draft_ids, draft_probs = draft_tokens(
+                self.mtp, pre_norm, next_token_arr, gamma, temp,
+                fast_lm_head=getattr(self.mtp, "draft_lm_head", None) is not None,
+                sync_group=coord_group,
+            )
 
         if prof is not None:
             mx.eval(*draft_ids)
@@ -3839,6 +3885,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # (informational, master picks rank 0's response only).
 
         self._record_acceptance(n_accepted)
+
+        # DSpark ctx feed: the verify forward just captured hc-means at the
+        # tap layers for rows [y, d0..dγ-1]; commit the first n_accepted+1
+        # rows into the draft module's rotating ctx-KV window. Rejected rows
+        # are simply never appended — no ctx rollback needed.
+        if _dspark is not None:
+            from mlx_lm.models.deepseek_v4 import get_dspark_ctx
+
+            _ctx_cat = get_dspark_ctx(_dspark.target_layer_ids)
+            if _ctx_cat is not None:
+                _dspark.append_ctx(
+                    _ctx_cat[:, : n_accepted + 1], self._dspark_caches
+                )
 
         # ── VERIFY AUDIT (env-gated, temp=0 only) ────────────────────────
         # Diagnostic for the MTP losslessness break: the linear verify forward

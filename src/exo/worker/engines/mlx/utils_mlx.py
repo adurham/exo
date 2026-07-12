@@ -367,6 +367,18 @@ def shard_and_load(
                 f"DSv4 dedicated MTP overlay failed ({e}); keeping native MTP head."
             )
 
+    # DSpark 3-stage draft head (task #19, arXiv:2607.05147). Attached BEFORE
+    # tensor sharding so its DeepseekV4MoE ffns shard exactly like the native
+    # mtp head's. Draft-phase swap in dsv4_mtp is separately gated on the
+    # module being present.
+    if os.environ.get("EXO_DSV4_DSPARK", "0") == "1":
+        try:
+            _overlay_dsv4_dspark(model)
+        except Exception as e:
+            logger.warning(
+                f"DSv4 DSpark overlay failed ({e}); falling back to MTP-1 draft."
+            )
+
     if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
         pass
         # TODO: See if we should quantize the model.
@@ -595,6 +607,111 @@ def _overlay_dsv4_dedicated_mtp(model: Any, model_path: Path) -> None:
     logger.info(
         f"Overlaid dedicated DSv4 MTP head from {repo} "
         f"({len(remap)} tensors) onto mtp[0]."
+    )
+
+
+def _overlay_dsv4_dspark(model: Any) -> None:
+    """Attach + load the DSpark 3-stage draft head as ``model.model.dspark``.
+
+    Loads the locally converted dedicated head (built by the DSpark
+    converter from deepseek-ai/DeepSeek-V4-Flash-DSpark's mtp.* shards;
+    recipe-matched to the serving checkpoint: mxfp4 experts / mxfp8
+    projections at group 32, bf16 markov heads, f32 confidence/hc). Also
+    arms the ctx-capture taps at ``dspark_target_layer_ids``.
+    """
+    import json as _json
+    import re as _re
+
+    import mlx.core as mx
+    import mlx.nn as nn
+    from mlx_lm.models.deepseek_v4 import (
+        DeepseekV4DSparkModule,
+        set_dspark_taps,
+    )
+
+    inner = getattr(model, "model", None)
+    if inner is None or not hasattr(inner, "args"):
+        raise RuntimeError("model has no inner DSv4 model/args")
+
+    head_dir = Path(
+        os.environ.get(
+            "EXO_DSV4_DSPARK_DIR",
+            str(Path.home() / ".exo/models/local--DeepSeek-V4-Flash-DSpark-MTP"),
+        )
+    )
+    head_cfg = _json.loads((head_dir / "config.json").read_text())
+    for _k in (
+        "dspark_block_size",
+        "dspark_markov_rank",
+        "dspark_noise_token_id",
+        "dspark_target_layer_ids",
+        "n_mtp_layers",
+    ):
+        if _k in head_cfg:
+            setattr(inner.args, _k, head_cfg[_k])
+
+    raw = mx.load(str(head_dir / "model.safetensors"))
+
+    _specials = {
+        "main_proj": "main_proj",
+        "main_norm": "main_norm",
+        "norm": "norm",
+        "hc_head": "hc_head",
+        "markov_head.markov_w1": "markov_w1",
+        "markov_head.markov_w2": "markov_w2",
+        "confidence_head.proj": "confidence_proj",
+    }
+
+    def _remap(k: str) -> str:
+        m = _re.match(r"decoder\.(\d+)\.(.*)", k)
+        st, rest = m.group(1), m.group(2)
+        for pre, dst in _specials.items():
+            if rest == pre or rest.startswith(pre + "."):
+                return dst + rest[len(pre):]
+        return f"stages.{st}.{rest}"
+
+    weights = {_remap(k): v for k, v in raw.items()}
+
+    mod = DeepseekV4DSparkModule(inner.args)
+
+    # Per-layer scheme inference (same convention as the dedicated-MTP
+    # overlay): uint8 scales with no biases -> mxfp; bits from the u32
+    # packing ratio at group 32.
+    schemes: dict[str, dict[str, Any]] = {}
+    for k, v in weights.items():
+        if not k.endswith(".scales"):
+            continue
+        base = k[: -len(".scales")]
+        w = weights[base + ".weight"]
+        in_packed = int(w.shape[-1])
+        n_groups = int(v.shape[-1])
+        for cand_bits in (4, 8):
+            in_features = in_packed * (32 // cand_bits)
+            if n_groups and in_features % n_groups == 0 and in_features // n_groups == 32:
+                schemes[base] = {
+                    "group_size": 32,
+                    "bits": cand_bits,
+                    "mode": "mxfp4" if cand_bits == 4 else "mxfp8",
+                }
+                break
+        else:
+            raise RuntimeError(f"cannot infer quant scheme for {base}")
+
+    def _qpred(path: str, m: Any) -> Any:
+        if not (hasattr(m, "to_quantized") and path in schemes):
+            return False
+        return schemes[path]
+
+    nn.quantize(mod, group_size=32, bits=8, class_predicate=_qpred)
+    mod.load_weights(list(weights.items()), strict=True)
+    mx.eval(mod.parameters())
+
+    inner.dspark = mod
+    set_dspark_taps(mod.target_layer_ids)
+    logger.info(
+        f"DSpark draft head attached from {head_dir} "
+        f"({len(weights)} tensors, {len(mod.stages)} stages, "
+        f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
     )
 
 

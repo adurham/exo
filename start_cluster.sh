@@ -1219,6 +1219,14 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
+    # DSpark 3-stage draft head (task #19): replaces the MTP-1 chained draft
+    # at c=1 when enabled. Requires the converted local head dir on every
+    # node (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP). Default OFF
+    # until the gate ladder passes (temp=0 equivalence, battery, probe,
+    # perf A/B). EXO_DSV4_DSPARK_DIR overrides the head location.
+    : "${EXO_DSV4_DSPARK:=0}"
+    [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
+    [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
     # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
