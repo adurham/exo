@@ -1522,7 +1522,18 @@ for NODE in "${NODES[@]}"; do
     # localize cross-rank divergence at the c=2→c=1 transition.
     [ -n "${EXO_DSV4_MTP_TRANSITION_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TRANSITION_TRACE=$EXO_DSV4_MTP_TRANSITION_TRACE"
 
-    # Metal GPU timeout mitigations
+    # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
+    # these three vars is read anywhere in exo or mlx source, and macOS 26.5
+    # exposes no iogpu watchdog-timeout sysctl (only wired-limit knobs). The
+    # kIOGPUCommandBufferCallbackErrorTimeout runner death at 19:42 on
+    # 2026-07-11 fired straight through them — the watchdog measures
+    # completion latency INCLUDING queue wait, so GPU oversubscription
+    # (spec-on c>=3 + Qwen co-host + concurrent prefill) is what actually
+    # trips it. Real levers: MLX_MAX_OPS_PER_BUFFER / MLX_MAX_MB_PER_BUFFER
+    # (bounded buffers), spec-off at c>=2 (EXO_DSV4_MTP_C2_MAX_CTX=1), and
+    # the supervisor self-heal (contains the death: instance re-place,
+    # field-proven 19:43:11). Kept only to avoid perturbing a known-good
+    # env set; do not rely on them.
     if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
         EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
     fi
