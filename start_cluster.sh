@@ -1219,12 +1219,17 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
-    # DSpark 3-stage draft head (task #19): replaces the MTP-1 chained draft
-    # at c=1 when enabled. Requires the converted local head dir on every
-    # node (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP). Default OFF
-    # until the gate ladder passes (temp=0 equivalence, battery, probe,
-    # perf A/B). EXO_DSV4_DSPARK_DIR overrides the head location.
-    : "${EXO_DSV4_DSPARK:=0}"
+    # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
+    # MTP-1 chained draft at c=1. DEFAULT ON 2026-07-12 — full ladder green:
+    # identity gate 3/3 (byte-lossless at temp=0), DSML battery clean
+    # (4K/64K/120K), degen probe 4/4 clean, c=1 29.0 t/s vs MTP-1's 27.4
+    # (+6%; tokens/cycle 2.4-2.8 vs 1.84 — the remaining gap to ~40 t/s is
+    # verify cost, see the batched-bitwise-verify campaign, task #23).
+    # Confidence pruning via EXO_DSV4_DSPARK_CONF_TAU (default 0.5; 0
+    # disables). Requires the converted local head dir on every node
+    # (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a missing dir
+    # fails rank-consistently back to MTP-1. EXO_DSV4_DSPARK_DIR overrides.
+    : "${EXO_DSV4_DSPARK:=1}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
