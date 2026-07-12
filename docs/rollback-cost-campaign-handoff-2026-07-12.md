@@ -1,3 +1,4 @@
+> **CLOSED 2026-07-12** (same day, follow-up session): premise revised by sub-phase profiling (EXO_DSV4_RB_PROFILE) — pruned-champion rollback was already ~2ms; the real cost was the ~72ms commit-forward fallback on MIXED flush attribution. Fixed at cache level in mlx-lm f00a9a9 (partial restore: keep committed flushes, drop rejected ones), deployed via exo d96b11b44. Ladder green: ldiff γ=2+γ=5 both cache classes CLEAN, gold gate 3/3, battery clean, degen probe clean, 29.0-29.3 t/s, rb_commitfwd n=0, rollback 0.79ms mean. Freeze+replay candidate not needed. Next: vec+tau0 full-γ champion attempt.
 # Rollback-cost campaign handoff (task #24) — 2026-07-12
 
 ## Objective
