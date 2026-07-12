@@ -3457,6 +3457,33 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # ctx is appended after acceptance (post-verify capture).
             for _c in _dsc:
                 _c.trim(_dspark.block_size)
+
+            # Confidence-scheduled verification (paper §3.2): prune the
+            # block to the leading prefix whose per-position survival
+            # estimate clears the threshold. Verify length — and with it
+            # the rowseq per-row verify cost AND the pool-flush rollback
+            # frequency — shrinks on low-confidence cycles; acceptance per
+            # verified token rises. Pruning uses only draft-side info, so
+            # the non-anticipating property (exact target-distribution
+            # recovery) is preserved. Confidence is fp32 over
+            # rank-identical inputs (all_sum'd block hiddens + broadcast
+            # tokens), so the kept-length agrees across ranks without an
+            # extra broadcast.
+            _conf_tau = float(
+                os.environ.get("EXO_DSV4_DSPARK_CONF_TAU", "0.5")
+            )
+            if _conf_tau > 0.0:
+                _conf_vals = _dspark_conf[0].tolist()
+                _kept = 0
+                for _cv in _conf_vals:
+                    if float(_cv) < _conf_tau:
+                        break
+                    _kept += 1
+                # The verify machinery below needs >=1 draft; a
+                # zero-confidence block still verifies its first draft
+                # (that is also the cheapest possible cycle).
+                gamma = max(1, min(_kept, gamma))
+
             draft_ids = [_toks[:, k] for k in range(gamma)]
             draft_probs = [
                 mx.softmax(_corrected[:, k, :] / max(temp, 1e-6), axis=-1)
