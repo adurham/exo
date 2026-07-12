@@ -1239,6 +1239,10 @@ for NODE in "${NODES[@]}"; do
     # Vectorized rowseq verify (task #23, bitwise-proven vs the loop;
     # REQUIRES MLX_STEEL_BATCH_INVARIANT=1).
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC=$EXO_DSV4_VERIFY_ROWSEQ_VEC"
+    # Per-row-sdpa vec sub-mode (lossless-34 campaign): batched
+    # projections + gathered ring views, but every sdpa/fused call per
+    # row — the loop's exact L=1 kernel class, no kernel-BI dependence.
+    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=$EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
     # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
