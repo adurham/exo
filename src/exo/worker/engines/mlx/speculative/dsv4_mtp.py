@@ -4209,18 +4209,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _rb_pool_restores = 0
                 for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True):
                     if _rbp:
-                        # Trim-vs-restore attribution, duck-typed per class
-                        # (PoolingCache vs BatchPoolingCache snapshots and
-                        # flush-count helpers differ).
-                        if hasattr(pc, "_spec_flush_counts"):
+                        # Trim-vs-restore attribution, duck-typed per class.
+                        # Check the BATCH helper first: BatchPoolingCache
+                        # also inherits/defines _spec_flush_counts but its
+                        # snapshots carry per-stream LISTS — calling the
+                        # PoolingCache helper on it TypeErrors (crashed the
+                        # runner 2026-07-12; every rejection cycle died).
+                        if hasattr(pc, "_spec_stream_flushes"):
+                            _, _rb_per = pc._spec_stream_flushes(psnap, _keep)
+                            if not all(ft == fc for ft, fc in _rb_per):
+                                _rb_pool_restores += 1
+                        elif hasattr(pc, "_spec_flush_counts"):
                             _, _rb_ft, _rb_fc = pc._spec_flush_counts(
                                 psnap[2], _keep
                             )
                             if _rb_fc != _rb_ft:
-                                _rb_pool_restores += 1
-                        elif hasattr(pc, "_spec_stream_flushes"):
-                            _, _rb_per = pc._spec_stream_flushes(psnap, _keep)
-                            if not all(ft == fc for ft, fc in _rb_per):
                                 _rb_pool_restores += 1
                     pc.spec_rollback(psnap, _keep)
                 if _rbp and prof is not None:
