@@ -372,12 +372,35 @@ def shard_and_load(
     # mtp head's. Draft-phase swap in dsv4_mtp is separately gated on the
     # module being present.
     if os.environ.get("EXO_DSV4_DSPARK", "0") == "1":
+        _dspark_ok = 1
         try:
             _overlay_dsv4_dspark(model)
         except Exception as e:
+            _dspark_ok = 0
             logger.warning(
                 f"DSv4 DSpark overlay failed ({e}); falling back to MTP-1 draft."
             )
+        # RANK-CONSISTENCY GUARD (2026-07-12, field incident): a rank with a
+        # missing/partial head dir falls back to MTP-1 while its peer attaches
+        # DSpark — the two ranks then run DIFFERENT draft paths and desync the
+        # TP collectives on the first spec cycle. Agree across the group: if
+        # ANY rank failed, ALL ranks detach and fall back together.
+        if group is not None and group.size() > 1:
+            _agree = mx.distributed.all_sum(
+                mx.array([_dspark_ok], dtype=mx.int32), group=group
+            )
+            mx.eval(_agree)
+            if int(_agree.item()) < group.size() and _dspark_ok:
+                inner_m = getattr(model, "model", None)
+                if inner_m is not None and hasattr(inner_m, "dspark"):
+                    del inner_m.dspark
+                from mlx_lm.models.deepseek_v4 import set_dspark_taps
+
+                set_dspark_taps([])
+                logger.warning(
+                    "DSpark overlay succeeded locally but failed on a peer "
+                    "rank; detaching for rank consistency (MTP-1 fallback)."
+                )
 
     if hasattr(model, "model") and isinstance(model.model, DeepseekV3Model):  # type: ignore
         pass
