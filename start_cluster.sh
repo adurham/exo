@@ -1232,6 +1232,13 @@ for NODE in "${NODES[@]}"; do
     : "${EXO_DSV4_DSPARK:=1}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
+    # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
+    # with EXO_DSV4_VERIFY_ROWSEQ_VEC=1 + MLX_STEEL_BATCH_INVARIANT=1 —
+    # the vec+tau0 config from the task #23/#24 campaigns).
+    [ -n "${EXO_DSV4_DSPARK_CONF_TAU:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_CONF_TAU=$EXO_DSV4_DSPARK_CONF_TAU"
+    # Vectorized rowseq verify (task #23, bitwise-proven vs the loop;
+    # REQUIRES MLX_STEEL_BATCH_INVARIANT=1).
+    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC=$EXO_DSV4_VERIFY_ROWSEQ_VEC"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
     # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
