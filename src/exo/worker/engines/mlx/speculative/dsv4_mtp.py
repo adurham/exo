@@ -255,7 +255,35 @@ _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
 # as the next-cycle token, so no valid work is discarded beyond the
 # documented min-strategy cost. EXO_DSV4_BS_MIN_ACCEPT=0 reverts to
 # per-stream acceptance (known-corrupt at c=2) for A/B.
+#
+# 2026-07-12: the corruption predicted here happened in production. The
+# start_cluster.sh deployment default was =0 (set while spec was off at
+# c>=2, so the lever was dormant and its A/B "exoneration" void); the
+# 2026-07-11 spec re-enable awakened it — per-stream yields vs the
+# batch-uniform pool rollback bled committed tokens from higher-accepting
+# streams' pools, repetition attractor within ~300 tok at temp=1.0.
+# _warn_min_accept_off below trips loudly if the combination ever runs.
 _BS_MIN_ACCEPT = os.environ.get("EXO_DSV4_BS_MIN_ACCEPT", "1") != "0"
+
+_warned_min_accept_off = False
+
+
+def _warn_min_accept_off(n_streams: int) -> None:
+    """One-shot loud warning: BS>1 spec with per-stream acceptance is a
+    KNOWN-CORRUPT mode (batch-uniform pool rollback loses committed tokens
+    on every acceptance-spread cycle). Kept only as an explicit A/B lever."""
+    global _warned_min_accept_off
+    if _warned_min_accept_off:
+        return
+    _warned_min_accept_off = True
+    logger.error(
+        f"EXO_DSV4_BS_MIN_ACCEPT=0 with {n_streams} concurrent spec "
+        "streams: per-stream acceptance is KNOWN-CORRUPT at BS>1 (pool "
+        "rollback is batch-uniform; committed tokens bleed from "
+        "higher-accepting streams' pools -> repetition within a few "
+        "hundred tokens at temp>0). Set EXO_DSV4_BS_MIN_ACCEPT=1 or "
+        "disable c>=2 spec (EXO_DSV4_MTP_C2_MAX_CTX=1)."
+    )
 
 # GREEDY ACCEPT-RULE ALIGNMENT (2026-07-10, default OFF until the
 # byte-equality gate passes). At temp=0 the plain (MTP-off) generator picks
@@ -2338,6 +2366,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 ]
                 bonus_lps = [logprobs_all[n, _n_min_c] for n in range(N)]
                 n_accepted_per = [_n_min_c] * N
+            elif N > 1:
+                _warn_min_accept_off(N)
 
             # Build all_tokens_per using canonical n_accepted_per so
             # accepted-draft prefix length matches across ranks.
@@ -2552,6 +2582,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 ]
                 bonus_lps = [logprobs_all[n, _n_min_c] for n in range(N)]
                 n_accepted_per = [_n_min_c] * N
+            elif N > 1:
+                _warn_min_accept_off(N)
 
             # Build all_tokens_per using canonical n_accepted_per.
             all_tokens_per = []

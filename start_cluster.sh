@@ -1175,9 +1175,26 @@ for NODE in "${NODES[@]}"; do
     # not affected.
     : "${EXO_DSV4_FENCE_ASYNC:=1}"
     [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
-    # c=2 decode levers. Per-stream acceptance (BS_MIN_ACCEPT=0) kept from
-    # the 2026-07-02 A/B (+24% vs min-clamp, exonerated for corruption by
-    # the 2026-07-03 deep battery).
+    # c=2 decode levers.
+    #
+    # BS_MIN_ACCEPT DEFAULT 1 (2026-07-12, was 0). Per-stream acceptance
+    # (=0) was kept from the 2026-07-02 A/B (+24% vs min-clamp) and
+    # believed "exonerated" by the 2026-07-03 deep battery — but that whole
+    # era ran spec-OFF at c>=2 (MTP_C2_MAX_CTX=1), so the lever was DORMANT
+    # and the battery could never see it. When the 2026-07-11 campaign
+    # re-enabled c>=2 spec, =0 turned out to be THE c>=2 temp>0 repetition
+    # attractor: per-stream yields (n_acc[n]+1 tokens) vs batch-UNIFORM
+    # pool rollback arithmetic (keep = n_min+1 / trim = gamma-n_min) bleed
+    # committed tokens out of every higher-accepting stream's PoolingCache
+    # on each acceptance-spread cycle -> pooled positions desync ->
+    # repetition within ~300 tok at temp=1.0 (probe: 3 degens + runner
+    # hang in 4 rounds at =0; 8/8 clean at =1, kernels identical). The
+    # dsv4_mtp.py code default has said "known-corrupt at c=2" since
+    # 2026-07-02 — this file was overriding it. Perf at c=2 spec-on with
+    # =1 is ~14.3 t/s/stream (parity with spec-off). Second instance of
+    # the "flipping a gate awakens a latent env" lesson (cf. the
+    # 2026-07-10 pool-gate crash) — A/B "exoneration" is void if the
+    # lever was dormant when tested.
     #
     # FENCE_ASYNC_C2 DEFAULT 0 (2026-07-03): async fencing at c=2 is
     # IMPLICATED in the deep-generation corruption. 4000-token divergent
@@ -1194,7 +1211,7 @@ for NODE in "${NODES[@]}"; do
     # (per-stream ring trims vs in-flight deferred async graphs) plus a
     # 4000-token c=2 battery. See MOE_KERNEL_HANDOFF.md 2026-07-03.
     : "${EXO_DSV4_FENCE_ASYNC_C2:=0}"
-    : "${EXO_DSV4_BS_MIN_ACCEPT:=0}"
+    : "${EXO_DSV4_BS_MIN_ACCEPT:=1}"
     [ -n "${EXO_DSV4_FENCE_ASYNC_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC_C2=$EXO_DSV4_FENCE_ASYNC_C2"
     [ -n "${EXO_DSV4_BS_MIN_ACCEPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BS_MIN_ACCEPT=$EXO_DSV4_BS_MIN_ACCEPT"
     [ -n "${EXO_DSV4_ROUTE_HIST:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST=$EXO_DSV4_ROUTE_HIST"
@@ -1214,17 +1231,20 @@ for NODE in "${NODES[@]}"; do
     # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
     # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
     # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
-    # 2026-07-11: RE-ARMED =1. The =0 flip ("pooling B-invariance fix,
-    # validated") is DISPROVEN by live traffic: 4 kill-switch degens in 3 min
-    # on ragged c=2 hermes pairs (44K+24K ctx, temp=1.0), word-stutter within
-    # ~100 tok of the batch going c=2, retries dying at the same depth, two
-    # streams degenerating in the same cycle window. MLX_GEMV_BATCH_INVARIANT
-    # closed the MATMUL dispatch drift only — some B>=2 path (suspect: sdpa /
-    # attention kernel selection) still drifts, so the near-tie repetition
-    # attractor survives. Validation that flipped this to 0 ran temp=0 or c=1
-    # gates only; any future re-flip needs a deep temp-1.0 ragged c=2 battery
-    # (bench: c2_temp1_degen_probe.py).
-    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"  # 1 = spec-off at c>=2 (clean); 0 = spec on (corrupt)
+    # 2026-07-11: RE-ARMED =1 after live degens (4 kill-switch events on
+    # ragged c=2 hermes pairs at temp=1.0).
+    # 2026-07-12 ROOT CAUSE FOUND — it was never kernel drift: the degens
+    # were EXO_DSV4_BS_MIN_ACCEPT=0 (see the c=2 decode levers block below)
+    # desyncing the batch-uniform pool rollback. With BS_MIN_ACCEPT=1,
+    # spec-on c=2 is CLEAN (probe 8/8 ragged temp-1.0 pairs, zero degens)
+    # but only perf-PARITY with spec-off (~14.3 vs ~15 t/s/stream — the
+    # min-clamp wastes drafts), so spec stays OFF at c>=2 for the smaller
+    # code surface. Safe to set =0 for experiments ONLY with
+    # BS_MIN_ACCEPT=1; gate any default flip on bench/c2_temp1_degen_probe.py
+    # (temp=0 batteries are blind to acceptance-spread bugs). Making c>=2
+    # spec actually PROFITABLE needs per-stream pool rollback (pools track
+    # per-stream keeps like PerStreamBatchRotatingKVCache.trim_per_stream).
+    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"  # 1 = spec-off at c>=2 (default); 0 = spec on (needs BS_MIN_ACCEPT=1)
     [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
     [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
     # jaccl start-of-collective ACK barrier (mesh_impl.h ack_sync_pre). Keeps
