@@ -1254,12 +1254,16 @@ for NODE in "${NODES[@]}"; do
     # loop attention body + hoisted projections (lossless champion).
     : "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:=3}"
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=$EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA"
-    # Attention-tail all_sum on replicated attention (2026-07-12
-    # investigation): =0 skips it on BOTH loop and vec tails
-    # (single-node-reference numerics — changes the output baseline).
-    # EXO_DSV4_ALLSUM_PROBE=<path> dumps pre/post norms + prehash for
-    # the first 200 sums (compare prehashes across nodes for rank
-    # equality).
+    # Attention-tail all_sum on replicated attention — DEFAULT 0 since
+    # 2026-07-12: the probe proved it an EXACT 2.000000 doubling of
+    # bitwise rank-identical replicas (a latent 2-node numerics bug, not
+    # a resync; single-node semantics are the reference). With it off:
+    # vec == loop == MTP-off 3/3, 36.1-36.3 t/s short-ctx, 39.1 t/s +
+    # 10/10 recall at 100K, and one fewer network round trip per
+    # compressed/sparse layer. Set =1 to reproduce the historical
+    # (doubled) 2-node numerics. EXO_DSV4_ALLSUM_PROBE=<path> dumps
+    # pre/post norms + prehash for the first 200 sums.
+    : "${EXO_DSV4_ATTN_ALLSUM:=0}"
     [ -n "${EXO_DSV4_ATTN_ALLSUM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ATTN_ALLSUM=$EXO_DSV4_ATTN_ALLSUM"
     [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched

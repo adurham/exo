@@ -151,3 +151,29 @@ Lesson for the file: single-rank harnesses can never catch rank-level
 serving path must replicate the loop's DISTRIBUTED tail, not just its
 per-rank math — grep for `sharding_group` consumers before declaring a
 path loop-exact.
+
+---
+
+## FOLLOW-UP: the all_sum itself was a latent 2-node numerics bug
+
+Probe (`EXO_DSV4_ALLSUM_PROBE`, both ranks, first 200 sums): ratio
+**2.000000 exactly on every layer**, prehashes **bitwise identical
+across ranks**. The attention-tail all_sum was summing two identical
+replicas — the compressed/sparse attention branch ran DOUBLED on
+2-node serving vs single-node reference numerics, and the sum wasn't
+even needed as a rank resync.
+
+`EXO_DSV4_ATTN_ALLSUM=0` (skip on BOTH loop and vec tails, MoE
+reductions untouched): **vec == loop == MTP-off 3/3** within the
+corrected baseline; **36.1–36.3 t/s short-ctx** (vs 33.7 doubled
+champion — the skipped sum also saves a network round trip per
+compressed/sparse layer per verify); **100K rung: 10/10 recall,
+39.1 t/s decode, 359 t/s prefill**. Outputs differ from the historical
+doubled baseline by construction.
+
+Tau sweep on the corrected baseline: 0.4 = 33.7, 0.5 = 36.1–36.3,
+0.6 = 36.2 — the 0.5 default is at the plateau, unchanged.
+
+Champion: defaults now vec + ROWSDPA=3 + steel-BI + ATTN_ALLSUM=0
+(mlx-lm `<pin>`, exo start_cluster defaults). Historical numerics
+reproducible with EXO_DSV4_ATTN_ALLSUM=1.
