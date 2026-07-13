@@ -68,6 +68,15 @@
 # Defaults: high-ctx unset => fixed step (unchanged behavior). Set both to enable.
 : "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:=}"
 : "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=}"
+# Clear MLX Metal buffer cache every N prefill chunks (default 1 = every chunk,
+# original behavior). Setting N>1 amortizes the allocator release/re-acquire
+# overhead across chunks — each clear_cache forces the Metal allocator to drop
+# its pooled buffers, which then get re-allocated on the next forward pass.
+# At 1024 tokens/chunk across a 500K prefill that's ~500 cycles. N=4 or 8 cuts
+# this to ~125 or ~63 cycles. Memory grows by at most (N-1) chunks' worth of
+# intermediates between clears (MLX's pool reuses freed buffers). Zero quality
+# risk — purely an allocator timing lever.
+: "${EXO_PREFILL_CLEAR_CACHE_INTERVAL:=1}"
 # DSv4-Flash seq-split (all_gather batch-safe fix, mlx-lm 8a9cdee).
 # Default ON — verified clean quality + throughput at B=2 100K-500K
 # (docs/b2-mtp-resolution-2026-06-24.md). Without it, B>1 concurrent
@@ -1109,6 +1118,7 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
     [ -n "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_HIGH_CTX=$EXO_PREFILL_STEP_SIZE_HIGH_CTX"
     [ -n "${EXO_PREFILL_STEP_SIZE_CROSSOVER:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_CROSSOVER=$EXO_PREFILL_STEP_SIZE_CROSSOVER"
+    EXO_ENV="$EXO_ENV EXO_PREFILL_CLEAR_CACHE_INTERVAL=$EXO_PREFILL_CLEAR_CACHE_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
     EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
     [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
