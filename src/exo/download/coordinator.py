@@ -408,15 +408,16 @@ class DownloadCoordinator:
                             status = self._completed_from_path(
                                 progress.shard, found, progress.total
                             )
-                        elif progress.downloaded_this_session.in_bytes == 0:
-                            status = DownloadPending(
-                                node_id=self.node_id,
-                                shard_metadata=progress.shard,
-                                model_directory=self._default_model_dir(model_id),
-                                downloaded=progress.downloaded,
-                                total=progress.total,
-                            )
-                        else:
+                        elif progress.downloaded.in_bytes == 0:
+                            # Skip emitting DownloadPending for models with zero
+                            # bytes on disk. The full built-in model catalog
+                            # (240+ entries) otherwise floods /state with inert
+                            # "pending" entries that no user requested and that
+                            # reappear on every restart. Genuinely partial
+                            # downloads (downloaded > 0 but not complete) still
+                            # emit DownloadPending below so users can resume.
+                            continue
+                        elif progress.downloaded_this_session.in_bytes > 0:
                             status = DownloadOngoing(
                                 node_id=self.node_id,
                                 shard_metadata=progress.shard,
@@ -424,6 +425,14 @@ class DownloadCoordinator:
                                     progress
                                 ),
                                 model_directory=self._default_model_dir(model_id),
+                            )
+                        else:
+                            status = DownloadPending(
+                                node_id=self.node_id,
+                                shard_metadata=progress.shard,
+                                model_directory=self._default_model_dir(model_id),
+                                downloaded=progress.downloaded,
+                                total=progress.total,
                             )
                     else:
                         continue
