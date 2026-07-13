@@ -107,3 +107,47 @@ All legs `MLX_STEEL_BATCH_INVARIANT=1`, `dspark_identity_gen.py`
   on m4-1 is `~/measure_tps.sh`.
 - Cluster restored to prod default (pure ./start_cluster.sh, loop
   champion, steel-BI 0) at the end of this campaign.
+
+---
+
+## RESOLUTION (same day, later session)
+
+**Root cause found and fixed; vec+ROWSDPA=3 is the new champion.**
+
+Layer-hash forensics (`EXO_DSV4_LAYER_HASH_SUBOPS=0..42`, gate prompt 1,
+both legs): every hash identical through pos 128; first divergence at
+**pos 129 — the first vec-engaged forward — at B02.attn_out** (first
+CompressedAttention layer), with `attn_in` and ALL pre-forward
+cache-state hashes (ring, pool, indexer) IDENTICAL. LocalAttention
+layers matched everywhere. All three ROWSDPA levels produced
+byte-identical output — the divergence was invariant to every cache/
+mask/projection mechanic.
+
+Cause: `DeepseekV4ShardingStrategy` replicates attention but sets
+`attn.sharding_group` on Compressed/SparseCompressedAttention when
+`EXO_DSV4_SEQ_SPLIT=1` (prod default) — so the loop's per-row
+`__call__` ends with `elif self.sharding_group is not None:
+all_sum(out)`, a distributed reduction **no vec path ever performed**
+(increments 1-4 and ROWSDPA 1-3 alike). Deterministic rank-level
+numeric difference on every compressed/sparse forward; the single-rank
+ldiff harness (sharding_group=None) is structurally blind to it — which
+is why four increments of bitwise-proven mechanics never moved the
+serving gate.
+
+Fix: `_rowsdpa_sharding_allsum` mirrors the loop tail in all five vec
+tails (mlx-lm `095c98c`, exo `4b9932322`).
+
+**Validation:** gold gate 3/3 IDENTICAL vs loop+steel-BI; 100K quality
+rung 10/10 needle recall, decode 36.9 t/s, prefill 360 t/s; MTP-off
+identity leg (see below). Short-ctx decode 33.7 t/s (vs 29.5 loop
+champion, +14%); the all_sum costs ~1.8 t/s vs the pre-fix lossy 35.5.
+
+Champion flip: start_cluster.sh defaults now
+`EXO_DSV4_VERIFY_ROWSEQ_VEC=1`, `EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=3`,
+`MLX_STEEL_BATCH_INVARIANT=1`.
+
+Lesson for the file: single-rank harnesses can never catch rank-level
+(distributed-reduction) asymmetries between code paths. Any alternate
+serving path must replicate the loop's DISTRIBUTED tail, not just its
+per-rank math — grep for `sharding_group` consumers before declaring a
+path loop-exact.

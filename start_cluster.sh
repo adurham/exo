@@ -192,7 +192,11 @@ fi
 # spec corruption ALSO has an unresolved serving-logic component
 # (2026-07-11 probe: degens persist on the bitexact build), so keep off
 # until that lands. Flip together with EXO_DSV4_MTP_C2_MAX_CTX=0.
-: "${MLX_STEEL_BATCH_INVARIANT:=0}"
+# 2026-07-12: default ON — the vec+ROWSDPA=3 champion's identity legs
+# (gold gate vs loop and vs MTP-off) were validated with steel-BI=1.
+# The ~5% c=1 decode cost noted above is absorbed by the vec win
+# (33.7 vs 29.5 net). Set =0 only with EXO_DSV4_VERIFY_ROWSEQ_VEC=0.
+: "${MLX_STEEL_BATCH_INVARIANT:=1}"
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK:=0}"
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=0}"
 : "${EXO_DSV4_MOE_PARTS_ROWSEQ:=}"
@@ -1236,12 +1240,19 @@ for NODE in "${NODES[@]}"; do
     # with EXO_DSV4_VERIFY_ROWSEQ_VEC=1 + MLX_STEEL_BATCH_INVARIANT=1 —
     # the vec+tau0 config from the task #23/#24 campaigns).
     [ -n "${EXO_DSV4_DSPARK_CONF_TAU:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_CONF_TAU=$EXO_DSV4_DSPARK_CONF_TAU"
-    # Vectorized rowseq verify (task #23, bitwise-proven vs the loop;
-    # REQUIRES MLX_STEEL_BATCH_INVARIANT=1).
+    # Vectorized rowseq verify (task #23) — CHAMPION since 2026-07-12:
+    # vec + ROWSDPA=3 (hoisted batched projections over the REAL per-row
+    # loop attention body: real update_and_fetch / row masks / buffer
+    # reads, + the sharding_group all_sum fix, mlx-lm 095c98c).
+    # Byte-lossless: gold gate 3/3 vs the loop AND vs MTP-off; 33.7 t/s
+    # short-ctx (vs 29.5 loop champion), 36.9 t/s + 10/10 needle recall
+    # at 100K. Set EXO_DSV4_VERIFY_ROWSEQ_VEC=0 to fall back to the loop.
+    : "${EXO_DSV4_VERIFY_ROWSEQ_VEC:=1}"
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC=$EXO_DSV4_VERIFY_ROWSEQ_VEC"
-    # Per-row-sdpa vec sub-mode (lossless-34 campaign): batched
-    # projections + gathered ring views, but every sdpa/fused call per
-    # row — the loop's exact L=1 kernel class, no kernel-BI dependence.
+    # ROWSDPA levels: 1 = per-row sdpa over gathered views + manual ring
+    # write (35.5 t/s), 2 = +per-row projections (diagnostic), 3 = real
+    # loop attention body + hoisted projections (lossless champion).
+    : "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:=3}"
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=$EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
