@@ -77,6 +77,12 @@
 # intermediates between clears (MLX's pool reuses freed buffers). Zero quality
 # risk — purely an allocator timing lever.
 : "${EXO_PREFILL_CLEAR_CACHE_INTERVAL:=1}"
+# Balanced causal seq-split (default 1). Interleaves query row assignment
+# across nodes so each node's total causal attention FLOPs are balanced
+# (~1.67x ratio vs 3.0x for contiguous bands). Eliminates the straggler that
+# stalls all_gather waiting for the node with heavier causal work. Zero
+# quality risk — bit-identical math. Kill switch: =0 restores contiguous.
+: "${EXO_DSV4_SEQSPLIT_BALANCED:=1}"
 # DSv4-Flash seq-split (all_gather batch-safe fix, mlx-lm 8a9cdee).
 # Default ON — verified clean quality + throughput at B=2 100K-500K
 # (docs/b2-mtp-resolution-2026-06-24.md). Without it, B>1 concurrent
@@ -1119,6 +1125,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_HIGH_CTX=$EXO_PREFILL_STEP_SIZE_HIGH_CTX"
     [ -n "${EXO_PREFILL_STEP_SIZE_CROSSOVER:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_CROSSOVER=$EXO_PREFILL_STEP_SIZE_CROSSOVER"
     EXO_ENV="$EXO_ENV EXO_PREFILL_CLEAR_CACHE_INTERVAL=$EXO_PREFILL_CLEAR_CACHE_INTERVAL"
+    EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_BALANCED=$EXO_DSV4_SEQSPLIT_BALANCED"
     EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
     EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
     [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
