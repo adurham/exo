@@ -83,6 +83,12 @@
 # stalls all_gather waiting for the node with heavier causal work. Zero
 # quality risk — bit-identical math. Kill switch: =0 restores contiguous.
 : "${EXO_DSV4_SEQSPLIT_BALANCED:=1}"
+# Sparse SDPA tile size (default 128). Tiles the L dimension of sparse
+# attention into chunks of this size to keep the gathered tensor small.
+# Set to 0 to disable tiling (one SDPA call per layer — bigger GEMMs,
+# fewer dispatches). Test: Fable 5 suggested batching may cut dispatch
+# overhead with zero custom Metal.
+: "${EXO_DSV4_SPARSE_SDPA_TILE:=128}"
 # DSv4-Flash seq-split (all_gather batch-safe fix, mlx-lm 8a9cdee).
 # Default ON — verified clean quality + throughput at B=2 100K-500K
 # (docs/b2-mtp-resolution-2026-06-24.md). Without it, B>1 concurrent
@@ -1126,6 +1132,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_PREFILL_STEP_SIZE_CROSSOVER:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_CROSSOVER=$EXO_PREFILL_STEP_SIZE_CROSSOVER"
     EXO_ENV="$EXO_ENV EXO_PREFILL_CLEAR_CACHE_INTERVAL=$EXO_PREFILL_CLEAR_CACHE_INTERVAL"
     EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_BALANCED=$EXO_DSV4_SEQSPLIT_BALANCED"
+    [ -n "${EXO_DSV4_SPARSE_SDPA_TILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPARSE_SDPA_TILE=$EXO_DSV4_SPARSE_SDPA_TILE"
     EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
     EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
     [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
