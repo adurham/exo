@@ -57,7 +57,7 @@
 # scraping): 128 = 289 t/s, 256 = 353 t/s (+22%), 512 = 293 t/s (regression
 # — OPT-4 gathered-tensor tiling overhead dominates). Needle + BOS-spam
 # gates clean. 512 stays a non-default override.
-: "${EXO_PREFILL_STEP_SIZE:=1024}"  # session-3 validated (+24% prefill; 2048 wedges)
+: "${EXO_PREFILL_STEP_SIZE:=2048}"  # validated 2026-07-13 (+7% prefill at all context levels; 4096 breaks quality)
 # Context-adaptive prefill chunk sizing (2026-06-21). At LOW context, larger
 # chunks (256) amortize the ~390ms per-chunk fixed overhead (43 layers x kernel
 # launches x RDMA all_sum x eval x clear_cache) — +39% throughput at 100K. But
