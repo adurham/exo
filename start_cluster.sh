@@ -1591,7 +1591,7 @@ for NODE in "${NODES[@]}"; do
     # rank 0 can't proceed until rank 1 sends. Raise the event timeout to
     # 120s for PP so the legitimate pipeline-drain skew doesn't self-abort.
     if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        MLX_EVENT_WAIT_TIMEOUT_MS=120000
+        MLX_EVENT_WAIT_TIMEOUT_MS=300000
     fi
     [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
     # PP mode: disable coord collectives (mx_any / agree_on_*). Under MlxRing
