@@ -1967,6 +1967,17 @@ EXPECTED_RUNNERS=0
 # footprint is why Qwen3.6's prefix/KV cache is hard-capped.
 if [ "${DSV4_ENABLED:-0}" = "1" ]; then
     echo ""
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        echo "  ⚠️  PP mode (DSV4_SHARDING=Pipeline) — SINGLE-REQUEST-ONLY."
+        echo "      EXO_PP_NO_COORD_COLLECTIVE=1 disables coord collectives (mx_any,"
+        echo "      agree_on_tasks, agree_on_cancellations) to avoid TCP socket contention"
+        echo "      with the p2p send/recv. This means:"
+        echo "        - NO concurrent requests (c>=2 will deadlock — no task-set agreement)"
+        echo "        - NO mid-decode cancellation (rank 1 blocks on recv forever)"
+        echo "      MTP speculation is also disabled (EXO_PP_SPEC_DISABLE=1)."
+        echo "      Event::wait timeout raised to 300s for pipeline-drain skew at high context."
+        echo ""
+    fi
     echo "Auto-placing DeepSeek V4 Flash ($DSV4_MODEL_ID) across both Studios via RDMA..."
 
     EXISTING_DSV4=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" \
