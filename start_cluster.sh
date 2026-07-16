@@ -1582,6 +1582,14 @@ for NODE in "${NODES[@]}"; do
     # watchdog). POLL_US = sleep granularity (default 50), SPIN = spins before
     # sleeping (default 2000). POLL_US=0 restores the legacy blocking wait.
     : "${MLX_EVENT_WAIT_TIMEOUT_MS:=20000}"
+    # PP mode needs a longer Event::wait timeout — the first decode step at
+    # high context (500K) takes >20s (attention over the full KV cache + the
+    # p2p hidden handoff), and the default 20s self-abort kills the runner.
+    # 120s is enough for 500K first decode; normal operation is unaffected
+    # (healthy waits return in <1s).
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        MLX_EVENT_WAIT_TIMEOUT_MS=120000
+    fi
     [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
     [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
     [ -n "${MLX_EVENT_WAIT_SPIN:-}" ]       && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_SPIN=$MLX_EVENT_WAIT_SPIN"
