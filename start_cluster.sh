@@ -35,6 +35,12 @@
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
+# Allow explicit empty to disable PP speculation (the := below re-assigns
+# empty to the default; EXO_PP_SPEC_DISABLE=1 short-circuits the path).
+if [ "${EXO_PP_SPEC_DISABLE:-0}" = "1" ]; then
+    EXO_PP_DRAFT_MODEL=""
+    EXO_SPECULATIVE=0
+fi
 # DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
 # dsv4_prefill_chunk_size_curve memory. Smaller chunks also produce
 # more chunk-boundary cache snapshots, which is what the prefix-cache
@@ -1090,8 +1096,10 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
-    : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
-    EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
+    if [ "${EXO_PP_SPEC_DISABLE:-0}" != "1" ]; then
+        : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
+        EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
+    fi
     # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
     [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
     [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
