@@ -194,7 +194,13 @@ class PipelineFirstLayer(CustomMlxLayer):
         self.is_prefill: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        import os as _pf_os
+        import sys as _pf_sys
+        import time as _pf_time
+        _pf_dbg = _pf_os.environ.get("EXO_PP_DEBUG") == "1"
         if self.r != 0:
+            if _pf_dbg:
+                _pf_sys.stderr.write(f"[PP FIRST-RECV-PRE r={self.r} t={_pf_time.perf_counter():.3f} shape={x.shape}]\n"); _pf_sys.stderr.flush()
             # We want to avoid GPU timeout errors by evalling the distributed operation
             # so that it stays on CPU, which does not have a timeout.
             # JACCL/RDMA requires bf16 for transport — cast to bf16 for recv template,
@@ -206,6 +212,8 @@ class PipelineFirstLayer(CustomMlxLayer):
             mx.eval(x)
             if x_dtype != mx.bfloat16:
                 x = x.astype(x_dtype)
+            if _pf_dbg:
+                _pf_sys.stderr.write(f"[PP FIRST-RECV-POST r={self.r} t={_pf_time.perf_counter():.3f} sum={float(mx.abs(x).sum()):.4f}]\n"); _pf_sys.stderr.flush()
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -273,6 +281,7 @@ class PipelineLastLayer(CustomMlxLayer):
         # model forward (which runs the full pipeline and does this handoff).
         import os as _pp_os
         import sys as _pp_sys
+        import time as _pp_time
         _pp_dbg = _pp_os.environ.get("EXO_PP_DEBUG") == "1"
         if _pp_dbg and not hasattr(self, "_pp_cnt"):
             self._pp_cnt = 0
@@ -285,19 +294,20 @@ class PipelineLastLayer(CustomMlxLayer):
                 # Last rank: send to rank 0
                 mx.eval(output)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
                 sent = mx.distributed.send(output, 0, group=self.group)
                 mx.eval(sent)
                 if _pp_dbg:
+                    _pp_sys.stderr.write(f"[PP SEND-DONE #{self._pp_cnt} t={_pp_time.perf_counter():.3f}]\n"); _pp_sys.stderr.flush()
                     self._pp_cnt += 1
             elif self.r == 0:
                 # Rank 0: receive from last rank
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape}]\n"); _pp_sys.stderr.flush()
                 output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
                 mx.eval(output)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} t={_pp_time.perf_counter():.3f} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
                     self._pp_cnt += 1
             # Middle ranks (if any): no-op, pass through
 
