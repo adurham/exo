@@ -1549,7 +1549,15 @@ def mx_all_gather_tasks(
     uuid_byte_length = 36
 
     n_tasks = len(tasks)
-    my_rank = 0 if group is None else group.rank()
+    # group=None (PP mode with EXO_PP_NO_COORD_COLLECTIVE): skip the collective
+    # entirely. mx.distributed.all_gather with group=None uses the DEFAULT
+    # group (the full PP group), not "no group" — so calling it would still
+    # do a 2-rank collective, defeating the purpose. Return local-only.
+    if group is None:
+        agreed = list(tasks)
+        different: list[TextGeneration] = []
+        return agreed, different
+    my_rank = group.rank()
     # Route through the CPU stream (same as mx_any). On the default GPU
     # stream this all_gather aliases its output buffer with whatever bf16
     # decode op happened to land there last, and we read back float-bit
