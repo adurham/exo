@@ -262,39 +262,47 @@ class PipelineLastLayer(CustomMlxLayer):
         # sampling. Was all_gather (every rank gets every chunk), but ring
         # all_gather may interleave with p2p traffic incorrectly. Use p2p
         # send/recv instead: last rank (r=s-1) sends, rank 0 receives. Middle
-        # ranks pass through. Runs for BOTH prefill and decode — rank 0 needs
-        # the final hidden state to apply norm + lm_head in both regimes.
+        # ranks pass through.
+        #
+        # DECODE ONLY. During prefill, pipeline_parallel_prefill orchestrates
+        # its own send/recv schedule via queue_sends + flush_prefill_sends, and
+        # the prefill model forward only fills the KV cache (the output is
+        # discarded). The output handoff is unnecessary during prefill and
+        # deadlocks the pipelined prefill if it fires mid-pipeline. Rank 0
+        # gets the final hidden state it needs from the FIRST decode step's
+        # model forward (which runs the full pipeline and does this handoff).
         import os as _pp_os
         import sys as _pp_sys
         _pp_dbg = _pp_os.environ.get("EXO_PP_DEBUG") == "1"
         if _pp_dbg and not hasattr(self, "_pp_cnt"):
             self._pp_cnt = 0
-        gather_dtype = output.dtype
-        if output.dtype != mx.bfloat16:
-            output = output.astype(mx.bfloat16)
+        if not self.is_prefill:
+            gather_dtype = output.dtype
+            if output.dtype != mx.bfloat16:
+                output = output.astype(mx.bfloat16)
 
-        if self.r == self.s - 1:
-            # Last rank: send to rank 0
-            mx.eval(output)
-            if _pp_dbg:
-                _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
-            sent = mx.distributed.send(output, 0, group=self.group)
-            mx.eval(sent)
-            if _pp_dbg:
-                self._pp_cnt += 1
-        elif self.r == 0:
-            # Rank 0: receive from last rank
-            if _pp_dbg:
-                _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
-            output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
-            mx.eval(output)
-            if _pp_dbg:
-                _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
-                self._pp_cnt += 1
-        # Middle ranks (if any): no-op, pass through
+            if self.r == self.s - 1:
+                # Last rank: send to rank 0
+                mx.eval(output)
+                if _pp_dbg:
+                    _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                sent = mx.distributed.send(output, 0, group=self.group)
+                mx.eval(sent)
+                if _pp_dbg:
+                    self._pp_cnt += 1
+            elif self.r == 0:
+                # Rank 0: receive from last rank
+                if _pp_dbg:
+                    _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
+                mx.eval(output)
+                if _pp_dbg:
+                    _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                    self._pp_cnt += 1
+            # Middle ranks (if any): no-op, pass through
 
-        if gather_dtype != mx.bfloat16:
-            output = output.astype(gather_dtype)
+            if gather_dtype != mx.bfloat16:
+                output = output.astype(gather_dtype)
 
         return output
 
