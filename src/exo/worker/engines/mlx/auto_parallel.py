@@ -259,14 +259,25 @@ class PipelineLastLayer(CustomMlxLayer):
                 mx.eval(_cache.keys)  # type: ignore
 
         if not self.is_prefill:
-            # JACCL/RDMA requires bf16 for transport
+            # PP decode: last rank sends final hidden state to rank 0 for sampling.
+            # Was all_gather (every rank gets every chunk), but ring all_gather
+            # may interleave with p2p traffic incorrectly. Use p2p send/recv instead:
+            # last rank (r=s-1) sends, rank 0 receives. Middle ranks pass through.
             gather_dtype = output.dtype
             if output.dtype != mx.bfloat16:
                 output = output.astype(mx.bfloat16)
-            output = mx.distributed.all_gather(output, group=self.group)[
-                -output.shape[0] :
-            ]
-            mx.eval(output)
+
+            if self.r == self.s - 1:
+                # Last rank: send to rank 0
+                mx.eval(output)
+                sent = mx.distributed.send(output, 0, group=self.group)
+                mx.eval(sent)
+            elif self.r == 0:
+                # Rank 0: receive from last rank
+                output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
+                mx.eval(output)
+            # Middle ranks (if any): no-op, pass through
+
             if gather_dtype != mx.bfloat16:
                 output = output.astype(gather_dtype)
 
