@@ -1582,14 +1582,24 @@ for NODE in "${NODES[@]}"; do
     # watchdog). POLL_US = sleep granularity (default 50), SPIN = spins before
     # sleeping (default 2000). POLL_US=0 restores the legacy blocking wait.
     : "${MLX_EVENT_WAIT_TIMEOUT_MS:=20000}"
+    # PP mode: the first decode step's p2p recv_like in PipelineLastLayer
+    # blocks waiting for rank 1 to finish draining the prefill pipeline +
+    # its decode forward. At high context (500K) this takes >20s (rank 1's
+    # last attention microbatches over the full KV cache). The coord
+    # collective fix (EXO_PP_NO_COORD_COLLECTIVE) removes the mx_any
+    # rendezvous, but the p2p handoff itself is an UNAVOIDABLE rendezvous —
+    # rank 0 can't proceed until rank 1 sends. Raise the event timeout to
+    # 120s for PP so the legitimate pipeline-drain skew doesn't self-abort.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        MLX_EVENT_WAIT_TIMEOUT_MS=120000
+    fi
     [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
     # PP mode: disable coord collectives (mx_any / agree_on_*). Under MlxRing
     # (TCP backend), group.split() throws, so coord collectives share the full
-    # PP group's TCP socket with the p2p send/recv. When a p2p recv blocks
-    # (rank 0 waiting for rank 1's model forward at 500K context), the coord
-    # all_sum can't be sent → Event::wait timeout → runner crash. Both PP ranks
-    # serve the same request so the collective gate is unnecessary — the p2p
-    # handoff in PipelineFirstLayer/PipelineLastLayer already synchronizes them.
+    # PP group's TCP socket with the p2p send/recv. The mx_any gate is an
+    # unnecessary rendezvous for PP (both ranks serve the same request; the p2p
+    # handoff already synchronizes them). Removing it eliminates one ~20s
+    # skew point; the 120s timeout above covers the remaining one (p2p recv).
     if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
         EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=1"
     fi
