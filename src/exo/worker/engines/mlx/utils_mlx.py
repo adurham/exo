@@ -1443,9 +1443,21 @@ def get_coord_group(
     first use. Returns ``group`` itself when there's no need to split
     (single-rank or non-TP). Both ranks must call this in matching
     order — same code path on both ranks at the same point.
+
+    PP mode (EXO_PP_NO_COORD_COLLECTIVE=1): returns None so that mx_any /
+    agree_on_* calls become local-only no-ops. Under MlxRing (TCP backend),
+    group.split() throws ("[ring] Group split not supported"), so coord
+    collectives would share the full PP group's TCP socket with the p2p
+    send/recv. When a p2p recv blocks (rank 0 waiting for rank 1's model
+    forward at 500K context), the coord all_sum can't be sent until the p2p
+    completes → Event::wait timeout → runner crash. Both PP ranks serve the
+    same request so the collective gate is unnecessary — the p2p handoff in
+    PipelineFirstLayer/PipelineLastLayer already synchronizes the ranks.
     """
     if group is None or group.size() <= 1:
         return group
+    if os.environ.get("EXO_PP_NO_COORD_COLLECTIVE") == "1":
+        return None
     cached = _COORD_GROUP_CACHE.get(id(group))
     if cached is not None:
         return cached
