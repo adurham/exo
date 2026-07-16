@@ -581,11 +581,31 @@ def _find_connection_ip(
     node_i: NodeId,
     node_j: NodeId,
     cycle_digraph: Topology,
+    node_network: Mapping[NodeId, NodeNetworkInfo] | None = None,
 ) -> Generator[str, None, None]:
-    """Find all IP addresses that connect node i to node j."""
+    """Find all IP addresses that connect node i to node j.
+
+    Yields from SocketConnection edges first. If no SocketConnection exists,
+    falls back to looking up the IP address on node_j for the RDMA interface
+    (source_rdma_iface from RDMAConnection). This enables MlxRing (TCP) to
+    work on clusters that only have RDMA connections in the topology.
+    """
+    has_rdma = False
+    rdma_iface = None
     for connection in cycle_digraph.get_all_connections_between(node_i, node_j):
         if isinstance(connection, SocketConnection):
             yield connection.sink_multiaddr.ip_address
+        elif isinstance(connection, RDMAConnection):
+            has_rdma = True
+            rdma_iface = connection.sink_rdma_iface
+
+    # Fallback: if we only have RDMA connections, derive the IP from the
+    # RDMA interface name on node_j.
+    if has_rdma and rdma_iface and node_network is not None:
+        other_network = node_network.get(node_j, NodeNetworkInfo())
+        for iface in other_network.interfaces:
+            if iface.name == rdma_iface and iface.ip_address:
+                yield iface.ip_address
 
 
 def find_ip_prioritised(
@@ -599,7 +619,7 @@ def find_ip_prioritised(
 
     Priority: ethernet > wifi > unknown > thunderbolt
     """
-    ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph))
+    ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph, node_network))
     if not ips:
         return None
     other_network = node_network.get(other_node_id, NodeNetworkInfo())

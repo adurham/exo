@@ -1014,6 +1014,8 @@ for NODE in "${NODES[@]}"; do
     echo "Syncing dependencies on $NODE..."
     ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages'" || { echo "Failed to sync on $NODE"; exit 1; }
 
+    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx'" || { echo "Failed to rebuild MLX from source on $NODE"; exit 1; }
+
     # Pin mlx-lm to the vendored ./mlx-lm submodule (uv sync installs a stale copy).
     #
     # uv sync resolves mlx-lm from uv.lock, which pins an EXACT commit SHA
