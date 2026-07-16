@@ -1449,7 +1449,12 @@ def get_coord_group(
     cached = _COORD_GROUP_CACHE.get(id(group))
     if cached is not None:
         return cached
-    sub = group.split(_COORD_GROUP_COLOR)
+    try:
+        sub = group.split(_COORD_GROUP_COLOR)
+    except RuntimeError:
+        # Ring backend doesn't support group.split(). TCP is already reliable,
+        # so the coordinator subgroup isn't needed. Use the full group.
+        sub = group
     _COORD_GROUP_CACHE[id(group)] = sub
     return sub
 
