@@ -264,6 +264,11 @@ class PipelineLastLayer(CustomMlxLayer):
         # send/recv instead: last rank (r=s-1) sends, rank 0 receives. Middle
         # ranks pass through. Runs for BOTH prefill and decode — rank 0 needs
         # the final hidden state to apply norm + lm_head in both regimes.
+        import os as _pp_os
+        import sys as _pp_sys
+        _pp_dbg = _pp_os.environ.get("EXO_PP_DEBUG") == "1"
+        if _pp_dbg and not hasattr(self, "_pp_cnt"):
+            self._pp_cnt = 0
         gather_dtype = output.dtype
         if output.dtype != mx.bfloat16:
             output = output.astype(mx.bfloat16)
@@ -271,12 +276,21 @@ class PipelineLastLayer(CustomMlxLayer):
         if self.r == self.s - 1:
             # Last rank: send to rank 0
             mx.eval(output)
+            if _pp_dbg:
+                _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
             sent = mx.distributed.send(output, 0, group=self.group)
             mx.eval(sent)
+            if _pp_dbg:
+                self._pp_cnt += 1
         elif self.r == 0:
             # Rank 0: receive from last rank
+            if _pp_dbg:
+                _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
             output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
             mx.eval(output)
+            if _pp_dbg:
+                _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} r={self.r} shape={output.shape} dtype={output.dtype} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                self._pp_cnt += 1
         # Middle ranks (if any): no-op, pass through
 
         if gather_dtype != mx.bfloat16:
