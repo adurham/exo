@@ -1957,7 +1957,7 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
         echo -n "Waiting for 2 DeepSeek V4 runner(s) to become Ready..."
         READY=false
         READY_COUNT=0
-        for i in {1..180}; do
+        for i in {1..600}; do
             READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" '
                 . as $root
                 | [ $root.instances | to_entries[]
