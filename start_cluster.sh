@@ -1109,6 +1109,13 @@ for NODE in "${NODES[@]}"; do
     # EXO_RUNNER_HANG_TIMEOUT_SECONDS: raise for the reliable ARQ path — large
     # prefill all_reduces are slow (4KB stop-and-wait; UC can't do fast large or
     # concurrent sends) and can legitimately run past the default 45s.
+    # PP mode: must be >= MLX_EVENT_WAIT_TIMEOUT_MS (1800s) so the supervisor
+    # doesn't SIGKILL the runner during a legitimate long first-decode drain.
+    # Default 45s is incoherent with the 1800s Event::wait — the supervisor
+    # kills at 45s before the GPU wait can resolve.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ] && [ -z "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]; then
+        EXO_RUNNER_HANG_TIMEOUT_SECONDS=1800
+    fi
     [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]  && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
     # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. Depth 8 is
     # validated for sz<=2 chunks (<=16KB concurrent UC sends are clean; the old
