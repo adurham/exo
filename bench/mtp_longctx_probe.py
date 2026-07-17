@@ -41,9 +41,14 @@ SPECIAL_TOKEN_MARKERS = [
 ]
 
 
-def build_prompt(target_tokens: int, needle_frac: float | None = None) -> tuple[str, str]:
-    # Qwen3.6 tokenizer ~1.39 tokens/word-ish; empirically ~2.9 chars/token
-    target_chars = int(target_tokens * 2.9)
+def build_prompt(
+    target_tokens: int, needle_frac: float | None = None, chars_per_token: float = 2.9
+) -> tuple[str, str]:
+    # Qwen3.6 tokenizer ~1.39 tokens/word-ish; empirically ~2.9 chars/token.
+    # DSv4-Flash's tokenizer is denser on this FILLER text: measured
+    # 262652 real tokens from 1450222 chars (target_tokens=500000) on
+    # 2026-07-16 == ~5.52 chars/token. Pass --chars-per-token 5.52 for DSv4.
+    target_chars = int(target_tokens * chars_per_token)
     needle = (
         f"\n\nIMPORTANT SECRET: The access code is {NEEDLE_CODE}. "
         f"Remember it.\n\n"
@@ -99,7 +104,7 @@ def run_once(base_url, model, prompt, max_tokens):
     n = 0
     content_pieces: list[str] = []
     all_pieces: list[str] = []
-    with urllib.request.urlopen(req, timeout=1200) as resp:
+    with urllib.request.urlopen(req, timeout=3600) as resp:
         for raw in resp:
             line = raw.decode().strip()
             if not line.startswith("data:"):
@@ -156,10 +161,19 @@ def main():
         help="Fixed needle position as fraction of doc (e.g. 0.99 = local "
         "window, 0.1 = deep pool). Omit for random 0.35-0.6.",
     )
+    ap.add_argument(
+        "--chars-per-token",
+        type=float,
+        default=2.9,
+        help="Calibration for this FILLER text under the target tokenizer. "
+        "Default 2.9 is Qwen3.6-calibrated. Use 5.52 for DSv4-Flash "
+        "(measured 2026-07-16: 262652 real tok from 1450222 chars at "
+        "target=500000, i.e. the default under-shoots DSv4 by ~1.9x).",
+    )
     args = ap.parse_args()
 
     random.seed(args.seed)
-    prompt, needle = build_prompt(args.target_tokens, args.needle_frac)
+    prompt, needle = build_prompt(args.target_tokens, args.needle_frac, args.chars_per_token)
     print(f"[{args.label}] prompt chars={len(prompt)} (~{args.target_tokens} tok target), needle={needle}")
 
     rates, ttfts = [], []

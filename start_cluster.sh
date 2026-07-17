@@ -1106,6 +1106,22 @@ for NODE in "${NODES[@]}"; do
     [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
     [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
     [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"
+    # EXO_PP_LAYER_SPLIT: manual override for placement_utils.py's proportional
+    # (memory-fraction-based) layer allocation across PP ranks. Format "A,B"
+    # for a 2-node split (e.g. "21,22"). Used to A/B test whether the
+    # rank-to-layer-count assignment (which drifts run-to-run based on each
+    # node's free RAM at placement time) affects prefill throughput decay.
+    # The master (elected on either node) reads this from its own env, so it
+    # must be in the shared EXO_ENV applied to both nodes, not runner-only.
+    [ -n "${EXO_PP_LAYER_SPLIT:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_LAYER_SPLIT=$EXO_PP_LAYER_SPLIT"
+    # MLX_JACCL_STALL_TIMEOUT_US: jaccl's collective-poll-loop stall watchdog
+    # (mesh_impl.h StallWatch), default 8s. Calibrated for TP-style frequent
+    # short collectives ("well under a second" per the source comment) — PP's
+    # long individual p2p send/recv (model forward on the peer rank between
+    # handoffs) can legitimately exceed 8s at high context, same class of
+    # issue as the MLX_EVENT_WAIT_TIMEOUT_MS / EXO_RUNNER_HANG_TIMEOUT_SECONDS
+    # fixes already applied for MlxRing PP mode. Raise for PP+MlxJaccl testing.
+    [ -n "${MLX_JACCL_STALL_TIMEOUT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_STALL_TIMEOUT_US=$MLX_JACCL_STALL_TIMEOUT_US"
     # EXO_RUNNER_HANG_TIMEOUT_SECONDS: raise for the reliable ARQ path — large
     # prefill all_reduces are slow (4KB stop-and-wait; UC can't do fast large or
     # concurrent sends) and can legitimately run past the default 45s.
