@@ -448,13 +448,44 @@ def pp_speculative_decode_loop(
             _prof_r1_compute += _dt_r1_compute
 
             # ==== TOKEN EXCHANGE (both ranks sync here) ====
+            # FIX (2026-07-17): this was mx.distributed.all_gather(group=pp_group)
+            # -- a genuine collective op on the same jaccl mesh group that
+            # PipelineFirstLayer/PipelineLastLayer use for their own automatic
+            # p2p send/recv handoff during decode. Mixing a collective with
+            # raw p2p sends/recvs on one transport starved the jaccl
+            # reliability layer's ack bookkeeping: reproduced consistently as
+            # "[jaccl] drain_acks STALLED ... UC completion lost" a few steps
+            # into PP+MTP decode, forcing a runner crash + re-place every
+            # time. For world_size=2 (the only topology this module
+            # supports -- see is_rank0/is_last_rank throughout), all_gather's
+            # result is just fan-out of the last rank's own contribution:
+            # gathered_token[-1] is rank (world_size-1)'s value, i.e.
+            # is_last_rank's own `sampled`, unchanged. Replaced with a plain
+            # send (last rank -> rank 0) + recv (rank 0 only), matching the
+            # send/recv discipline already used by every other cross-rank
+            # exchange in this file (hidden-state exchange right below,
+            # PipelineFirstLayer/PipelineLastLayer's own handoff) instead of
+            # introducing a second, collective-based protocol on the same
+            # transport.
             _t0 = time.perf_counter()
-            gathered_token = mx.distributed.all_gather(
-                sampled.reshape(1) if is_last_rank else mx.zeros(1, dtype=mx.int32),
-                group=pp_group,
-            )
-            mx.eval(gathered_token)
-            final_token = gathered_token[-1:]
+            if is_last_rank:
+                final_token = sampled.reshape(1)
+                mx.eval(final_token)
+                _sent_tok = mx.distributed.send(final_token, 0, group=pp_group)
+                mx.eval(_sent_tok)
+            elif is_rank0:
+                final_token = mx.distributed.recv_like(
+                    mx.zeros(1, dtype=mx.int32), pp_world_size - 1, group=pp_group,
+                )
+                mx.eval(final_token)
+            else:
+                # Middle ranks (pp_world_size > 2): not a supported topology
+                # elsewhere in this module (only is_rank0/is_last_rank are
+                # ever branched on), so there is nothing meaningful to do
+                # here today. Keep a defined value rather than an
+                # UnboundLocalError if this module is ever extended to >2
+                # ranks without updating this exchange.
+                final_token = mx.zeros(1, dtype=mx.int32)
             _dt_tok_xchg = time.perf_counter() - _t0
             _prof_token_exchange += _dt_tok_xchg
 
