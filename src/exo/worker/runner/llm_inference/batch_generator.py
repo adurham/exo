@@ -985,6 +985,9 @@ class BatchGenerator(Engine):
         self._gen.close()
         del self.model, self.tokenizer, self.group
 
+    def reset_after_reconnect(self) -> list[int]:
+        return self._gen.reset_after_reconnect()
+
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
         cache = run_prefill_for_request(
             model=self.model,
