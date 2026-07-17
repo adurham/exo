@@ -1152,13 +1152,44 @@ class ExoBatchGenerator:
 
         is_bench = task_params.bench
 
+        # Multi-rank Pipeline-Parallel serving with coord collectives disabled
+        # (EXO_PP_NO_COORD_COLLECTIVE=1, the standard PP launch config) has no
+        # channel left to make the prefix-cache hit/miss DECISION collective:
+        # get_coord_group() deliberately returns None in this mode specifically
+        # to keep mx_any/mx_min_int off the shared p2p transport (a coord
+        # all_sum queued behind a blocked p2p recv can deadlock -- see
+        # get_coord_group()'s docstring). Without that agreement step, each
+        # rank's independent, per-process kv_prefix_cache can reach a
+        # DIFFERENT hit/miss verdict for the identical logical request (rank A
+        # hits, rank B misses), and since PP's prefill pipeline is a lockstep
+        # handoff protocol keyed on token count, a hit-length mismatch desyncs
+        # the two ranks' iteration counts -- the short-prefill rank finishes
+        # and moves on while its peer is still mid-prefill waiting on
+        # handoffs that never arrive, which eventually trips the jaccl
+        # drain-loop deadline ("[jaccl] recv() deadline in drain") and the
+        # request is lost. Force a cold prefill (hit_length=0, identical on
+        # every rank by construction, no collective needed) whenever this
+        # exact no-agreement-possible condition holds. Real fix is to
+        # propagate rank 0's hit-length decision downstream piggybacked on
+        # the existing p2p handoff (dataflow-ordered, no new deadlock risk)
+        # instead of suppressing the cache -- out of scope for today.
+        pp_no_coord_collective = (
+            os.environ.get("EXO_PP_NO_COORD_COLLECTIVE") == "1"
+            and self.group is not None
+            and self.group.size() > 1
+        )
+
         prefix_hit_length = 0
         matched_index: int | None = None
         is_exact_hit = False
         prompt_tokens = all_prompt_tokens
 
         with T("submit.kv_prefix_cache_lookup"):
-            if self.kv_prefix_cache is not None and not is_bench:
+            if (
+                self.kv_prefix_cache is not None
+                and not is_bench
+                and not pp_no_coord_collective
+            ):
                 cache, remaining_tokens, matched_index, is_exact_hit = (
                     self.kv_prefix_cache.get_kv_cache(
                         self.model, all_prompt_tokens, media_regions=media_regions
@@ -1174,6 +1205,14 @@ class ExoBatchGenerator:
                 else:
                     cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
             else:
+                if pp_no_coord_collective and self.kv_prefix_cache is not None:
+                    logger.debug(
+                        "Suppressing prefix-cache hit check: PP mode with "
+                        "coord collectives disabled has no cross-rank "
+                        "agreement channel for the hit/miss decision -- "
+                        "forcing a cold prefill on every rank to avoid a "
+                        "rank-asymmetric pipeline handoff desync."
+                    )
                 cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
 
         seed = task_params.seed if task_params.seed is not None else 42
