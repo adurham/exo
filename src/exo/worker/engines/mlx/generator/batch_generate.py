@@ -546,21 +546,66 @@ class ExoBatchGenerator:
                 if get_pipeline_info(self.model) is not None:
                     self._pp_spec_active = True
                     logger.info("PP speculation enabled in BatchGenerator")
-                    # Load MTP for PP speculation (prefer pre-quantized 4-bit, 3.7GB)
+                    # Load MTP for PP speculation. BUG FIX (2026-07-17): this
+                    # used to unconditionally construct mtp_module.MTPPredictor
+                    # (the Qwen3.5-style loader that resolves a SEPARATE MTP
+                    # weights file via _resolve_mtp_weights()) via a bare name
+                    # reference with no import in this scope. For any model
+                    # whose native checkpoint already carries an MTP head
+                    # (DSv4-Flash's model.model.mtp[0] -- the is_dsv4_with_mtp
+                    # branch above in this same method), the deferred
+                    # `from ...mtp_module import MTPPredictor` never executes
+                    # (it's ONLY imported in the sibling Qwen3.5-style else
+                    # branch), so this raised UnboundLocalError on every PP+MTP
+                    # attempt for DSv4-Flash specifically -- caught by the
+                    # inner except below, logged, and silently downgraded to
+                    # draft-model-only PP speculation (no MTP) every time.
+                    # Mirror the same is_dsv4_with_mtp detection block A uses:
+                    # DSv4's MTP head needs no separate weights file at all
+                    # (DSv4MTPPredictor wraps the already-loaded, already-
+                    # sharded model.model.mtp[0] directly), so skip
+                    # _resolve_mtp_weights()'s whole cache/HF-download
+                    # resolution pipeline for that case.
                     if use_speculative:
-                        mtp_weights = self._resolve_mtp_weights()
-                        if mtp_weights:
+                        _inner_pp = getattr(self.model, "model", None)
+                        _is_dsv4_with_mtp = (
+                            _inner_pp is not None
+                            and type(_inner_pp).__name__ == "DeepseekV4Model"
+                            and hasattr(_inner_pp, "mtp")
+                            and len(_inner_pp.mtp) > 0
+                        )
+                        if _is_dsv4_with_mtp:
                             try:
-                                self._pp_mtp = MTPPredictor(
-                                    self.model, mtp_weights, quantize=False,
+                                from exo.worker.engines.mlx.speculative.dsv4_mtp import (
+                                    DSv4MTPPredictor,
                                 )
-                                logger.info(f"PP MTP loaded from {mtp_weights}")
+
+                                self._pp_mtp = DSv4MTPPredictor(self.model, mtp_idx=0)
+                                logger.info(
+                                    "PP MTP loaded (DSv4 native head, mtp_idx=0)"
+                                )
                             except Exception as e:
                                 import traceback
                                 logger.warning(f"PP MTP load failed: {e}\n{traceback.format_exc()}")
                                 self._pp_mtp = None
                         else:
-                            self._pp_mtp = None
+                            mtp_weights = self._resolve_mtp_weights()
+                            if mtp_weights:
+                                try:
+                                    from exo.worker.engines.mlx.speculative.mtp_module import (
+                                        MTPPredictor,
+                                    )
+
+                                    self._pp_mtp = MTPPredictor(
+                                        self.model, mtp_weights, quantize=False,
+                                    )
+                                    logger.info(f"PP MTP loaded from {mtp_weights}")
+                                except Exception as e:
+                                    import traceback
+                                    logger.warning(f"PP MTP load failed: {e}\n{traceback.format_exc()}")
+                                    self._pp_mtp = None
+                            else:
+                                self._pp_mtp = None
                     else:
                         self._pp_mtp = None
             except Exception:
