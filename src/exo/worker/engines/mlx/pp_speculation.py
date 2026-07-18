@@ -1135,6 +1135,293 @@ def pp_chained_decode_loop(
 
 
 # ---------------------------------------------------------------------------
+# PP + DSpark (opt-in, EXO_PP_DSPARK=1): rank1-owned draft+verify cycle
+# ---------------------------------------------------------------------------
+#
+# DSpark (arXiv:2607.05147) is a dedicated 3-stage semi-autoregressive draft
+# head -- a completely separate, more capable mechanism than the plain
+# single-layer MTP head (mtp[0]) the pp_chained_decode_loop/pp_speculative_
+# decode_loop functions above target. ONE parallel forward over
+# [anchor, noise x (block_size-1)] produces draft logits for the WHOLE
+# block at once (not a sequential feed-back-in chain), followed by a
+# lightweight Markov correction pass and confidence scoring.
+#
+# CRITICAL PP-specific fact (found 2026-07-18): DSpark's context-conditioning
+# mechanism (append_ctx, fed by hc-mean hidden states captured at specific
+# GLOBAL target layers -- e.g. layers 40-42) and the real lm_head both live
+# on RANK1 (the rank owning the model's LAST layers) in our 2-rank PP split,
+# not rank0. This is the OPPOSITE of pp_speculative_decode_loop's design,
+# which puts the drafter on rank0 to use its otherwise-idle time. That
+# overlap doesn't even apply to DSpark: drafting can't start until rank1's
+# own forward has produced the tap-layer hiddens for THIS cycle, so
+# "rank0 drafts during rank1's compute" has no analogue here regardless.
+#
+# Architecture: RANK1 owns 100% of the DSpark draft+verify+accept logic,
+# entirely self-contained (own model, own cache, own lm_head, own DSpark
+# module/cache) -- rank0 contributes NOTHING to the drafting itself. Rank0's
+# only role is a "dumb" forward of whatever fixed-width token batch rank1
+# tells it to run (this cycle's committed token + rank1's just-drafted
+# candidates), to keep rank0's own KV cache in sync and produce the hidden
+# state rank1 needs to continue its own forward through the pipeline
+# boundary (the existing SpecPipelineFirstLayer/LastLayer send/recv,
+# unmodified, now naturally (block_size+1)-wide instead of single-token).
+#
+# Per-cycle protocol (rank1 drives, rank0 follows):
+#   1. rank1 (from the END of the previous cycle): already knows this
+#      cycle's committed token `y` and has already drafted d_0..d_{bs-1}
+#      via _dspark.draft() (self-contained, rank1-only, no rank0 needed).
+#   2. rank1 -> rank0: ONE fixed-shape message, the (bs+1)-token batch
+#      [y, d_0, ..., d_{bs-1}] as int32 (bs = dspark block_size, config-
+#      fixed per checkpoint -- NOT sample-dependent, so the message shape
+#      never varies run-to-run).
+#   3. rank0: trims its own KV by however many of the PREVIOUS cycle's
+#      speculative positions weren't actually committed (computed from
+#      the accept-count rank1 sends back at the end of ITS OWN previous
+#      cycle -- see step 6), then forwards the (bs+1)-token batch through
+#      its own layers, sending the resulting hidden batch to rank1 via
+#      the existing pipeline boundary send (unmodified).
+#   4. rank1: receives the hidden batch (existing pipeline boundary recv,
+#      unmodified), continues its own forward through its own layers
+#      (this is what naturally captures the tap-layer hiddens DSpark
+#      needs for cycle N+1's append_ctx, as a side effect of computing
+#      real logits for verification).
+#   5. rank1: verifies (accept-longest-matching-prefix against d_0..
+#      d_{bs-1}, temp=0 argmax-equality per the established TP pattern),
+#      computes n_accepted and the bonus token, commits DSpark ctx for
+#      the accepted prefix via append_ctx, trims its OWN dspark draft
+#      cache back to empty (draft-only KV never persists), drafts the
+#      NEXT cycle's d_0..d_{bs-1} using the bonus token as the new anchor
+#      (self-contained on rank1 again, no rank0 needed for this step).
+#   6. rank1 -> rank0: a SECOND small fixed-shape message -- the trim
+#      amount for rank0's OWN main-model KV cache (bs - n_accepted) plus
+#      the bonus token id (rank0 needs the bonus token as part of NEXT
+#      cycle's batch -- it's the committed `y` for cycle N+1).
+#
+# Only temp=0 (greedy) is implemented for the first version, matching how
+# this was validated tonight -- temp>0 needs the TP path's categorical-
+# sampling + rejection-sampling machinery (accept_ratios/uniforms), not
+# ported here yet.
+_PP_DSPARK_ENABLED = os.environ.get("EXO_PP_DSPARK", "0") == "1"
+
+
+def pp_dspark_decode_loop(
+    model: nn.Module,
+    prompt_cache: list[Any],
+    first_y: mx.array,
+    max_tokens: int,
+    pp_rank: int,
+    pp_world_size: int,
+    pp_group: mx.distributed.Group,
+) -> Generator[tuple[int, mx.array], None, None]:
+    """PP decode loop with DSpark draft+verify entirely owned by rank1.
+
+    Opt-in via EXO_PP_DSPARK=1. Requires model.model.dspark to already be
+    attached (via _overlay_dsv4_dspark, gated on EXO_DSV4_DSPARK=1 at model
+    load time) AND the pipeline_start_idx PP-tap-capture fix (auto_parallel.py
+    + deepseek_v4.py, 2026-07-18) to be present, or DSpark's context
+    conditioning silently never populates under PP (get_dspark_ctx returns
+    None every cycle -- draft() still runs, just without ctx conditioning,
+    degrading quality/acceptance rather than crashing).
+    """
+    from mlx_lm.models.deepseek_v4 import get_dspark_ctx
+
+    is_rank0 = pp_rank == 0
+    is_last_rank = pp_rank == pp_world_size - 1
+
+    inner = getattr(model, "language_model", model)
+    inner_model = getattr(inner, "model", inner)
+    embed_tokens = inner_model.embed_tokens
+
+    spec_first, spec_last = None, None
+    for layer in inner_model.layers:  # type: ignore
+        if isinstance(layer, SpecPipelineFirstLayer):
+            spec_first = layer
+        elif isinstance(layer, SpecPipelineLastLayer):
+            spec_last = layer
+    if spec_first is None and spec_last is None:
+        spec_first, spec_last = _install_spec_layers(inner_model)
+
+    _captured: dict[str, mx.array] = {}
+    if is_last_rank:
+        _captured = _install_hidden_capture(model)
+
+    _dspark = getattr(inner_model, "dspark", None)
+    if _dspark is None:
+        raise RuntimeError(
+            "pp_dspark_decode_loop: model.model.dspark not found on rank "
+            f"{pp_rank} -- requires EXO_DSV4_DSPARK=1 at model load time "
+            "(DSpark must be attached on EVERY rank, even though only "
+            "rank1 ever calls .draft()/.append_ctx() on it -- rank0 just "
+            "needs its own copy's block_size to size the wire messages)"
+        )
+    bs = _dspark.block_size
+    _dsc = _dspark.make_cache() if is_last_rank else None
+
+    def _dspark_sample_greedy(step_logits: mx.array, _k: int) -> mx.array:
+        return mx.argmax(step_logits, axis=-1)
+
+    y = first_y
+    # rank1's own running state across cycles (self-contained, no rank0
+    # visibility needed for any of this except the two small wire messages).
+    _draft_ids: list[int] = []
+
+    _accepted_total = 0
+    _drafted_total = 0
+
+    _log(f"dspark decode loop start: max_tokens={max_tokens}, "
+         f"block_size={bs if is_last_rank else '?'}")
+
+    try:
+        n = 0
+        # rank1 drafts ONCE up front (cold start -- no previous cycle's
+        # verify to draft from yet, matches pp_chained_decode_loop's
+        # cold-start precedent: the very first cycle's "draft" is
+        # whatever DSpark produces from the PP-priming call's anchor
+        # token, conditioned on whatever ctx state exists -- likely
+        # empty/uninitialized on the true first cycle, same as the TP
+        # path's own first-cycle behavior).
+        if is_last_rank:
+            _toks, _corrected, _conf = _dspark.draft(
+                y.reshape(1), embed_tokens, model.lm_head, _dsc,
+                temperature=0.0, sample_fn=_dspark_sample_greedy,
+            )
+            mx.eval(_toks)
+            _draft_ids = [int(v) for v in _toks[0].tolist()]
+            for _c in _dsc:
+                _c.trim(bs)
+            _drafted_total += len(_draft_ids)
+
+        while n < max_tokens:
+            # ==== rank1 -> rank0: fixed-shape (bs+1)-token batch ====
+            # world_size is always 2 for this module (is_rank0/is_last_rank
+            # exhaustive, no middle-rank case -- see module docstring),
+            # so _wire_batch/_trim_amount are always set on both branches
+            # below despite the type-checker's inability to prove that
+            # statically across an if/elif with no else.
+            _wire_batch: mx.array = mx.zeros(bs + 1, dtype=mx.int32)
+            if is_last_rank:
+                _batch_ids = [int(y.item())] + _draft_ids
+                _wire_batch = mx.array(_batch_ids, dtype=mx.int32)
+                mx.eval(_wire_batch)
+                _log(f"n={n} dspark_batch_send PRE (rank1->0)")
+                _sent = mx.distributed.send(_wire_batch, 0, group=pp_group)
+                mx.eval(_sent)
+                _log(f"n={n} dspark_batch_send POST")
+            elif is_rank0:
+                _log(f"n={n} dspark_batch_recv PRE (rank0<-{pp_world_size - 1})")
+                _wire_batch = mx.distributed.recv_like(
+                    mx.zeros(bs + 1, dtype=mx.int32),
+                    pp_world_size - 1, group=pp_group,
+                )
+
+            # ==== rank0: forward the batch through its own layers ====
+            if is_rank0:
+                _configure_layers(spec_first, spec_last,
+                                  pp_send=True, state_list=None, hidden_idx=-1)
+                _batch_tok = _wire_batch.reshape(1, -1)
+                with mx.stream(generation_stream):
+                    model(_batch_tok, cache=prompt_cache)
+
+            # ==== rank1: recv hidden batch (existing pipeline boundary,
+            # unmodified -- shape-agnostic) + continue its own forward ====
+            accepted_ids: list[int] = []
+            bonus_token: int | None = None
+            n_accepted = 0
+            if is_last_rank:
+                _configure_layers(spec_first, spec_last,
+                                  pp_recv=True, pp_decode=True,
+                                  state_list=None, hidden_idx=-1)
+                with mx.stream(generation_stream):
+                    _verify_input = mx.array([[int(y.item())] + _draft_ids])
+                    out = model(_verify_input, cache=prompt_cache)
+                    all_next = mx.argmax(out[0], axis=-1)
+                    mx.eval(all_next)
+                    _all_next_list = [int(v) for v in all_next.tolist()]
+                    for i in range(bs):
+                        if _all_next_list[i] == _draft_ids[i]:
+                            accepted_ids.append(_draft_ids[i])
+                            n_accepted += 1
+                        else:
+                            break
+                    bonus_token = _all_next_list[n_accepted]
+                    _accepted_total += n_accepted
+
+                    # Commit DSpark ctx for the accepted prefix (matches TP
+                    # pattern exactly: get_dspark_ctx pulls the hc-mean
+                    # hiddens captured as a side effect of THIS verify
+                    # forward, at the tap layers -- now correctly keyed by
+                    # GLOBAL layer index per the pipeline_start_idx fix).
+                    _ctx_cat = get_dspark_ctx(_dspark.target_layer_ids)
+                    if _ctx_cat is not None:
+                        _dspark.append_ctx(
+                            _ctx_cat[:, : n_accepted + 1], _dsc
+                        )
+
+                    # Draft the NEXT cycle now (self-contained, rank1-only)
+                    # using the bonus token as the new anchor.
+                    _next_toks, _next_corrected, _next_conf = _dspark.draft(
+                        mx.array([bonus_token]), embed_tokens, model.lm_head,
+                        _dsc, temperature=0.0, sample_fn=_dspark_sample_greedy,
+                    )
+                    mx.eval(_next_toks)
+                    _draft_ids = [int(v) for v in _next_toks[0].tolist()]
+                    for _c in _dsc:
+                        _c.trim(bs)
+                    _drafted_total += len(_draft_ids)
+
+            # ==== rank1 -> rank0: (trim_amount, bonus_token) ====
+            _trim_amount: int = 0
+            if is_last_rank:
+                _trim_amount = bs - n_accepted
+                _wire2 = mx.array([_trim_amount, bonus_token], dtype=mx.int32)
+                mx.eval(_wire2)
+                _log(f"n={n} dspark_trim_send PRE (rank1->0) "
+                     f"trim={_trim_amount} bonus={bonus_token}")
+                _sent2 = mx.distributed.send(_wire2, 0, group=pp_group)
+                mx.eval(_sent2)
+                _log(f"n={n} dspark_trim_send POST")
+            elif is_rank0:
+                _log(f"n={n} dspark_trim_recv PRE (rank0<-{pp_world_size - 1})")
+                _wire2 = mx.distributed.recv_like(
+                    mx.zeros(2, dtype=mx.int32), pp_world_size - 1, group=pp_group,
+                )
+                mx.eval(_wire2)
+                _log(f"n={n} dspark_trim_recv POST")
+                _trim_amount = int(_wire2[0].item())
+                bonus_token = int(_wire2[1].item())
+
+            # ==== KV rollback (both ranks, deterministic given bs and
+            # n_accepted -- rank0 learns n_accepted only via _trim_amount,
+            # sufficient since it never needs n_accepted directly) ====
+            if _trim_amount > 0:
+                for c in prompt_cache:
+                    if hasattr(c, "trim"):
+                        c.trim(_trim_amount)
+
+            # ==== yield accepted tokens + bonus token ====
+            for tok_id in accepted_ids:
+                yield tok_id, mx.zeros(1)
+                n += 1
+                if n >= max_tokens:
+                    break
+            if n < max_tokens and bonus_token is not None:
+                yield bonus_token, mx.zeros(1)
+                y = mx.array([bonus_token])
+                n += 1
+            elif accepted_ids:
+                y = mx.array([accepted_ids[-1]])
+
+    finally:
+        _configure_layers(spec_first, spec_last)
+        if _drafted_total > 0:
+            logger.debug(
+                f"PP DSpark: {_accepted_total}/{_drafted_total} "
+                f"drafted tokens accepted ({_accepted_total/_drafted_total*100:.0f}%), "
+                f"block_size={bs}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Draft model loading
 # ---------------------------------------------------------------------------
 

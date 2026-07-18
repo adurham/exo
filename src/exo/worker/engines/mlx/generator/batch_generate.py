@@ -1967,6 +1967,7 @@ class ExoBatchGenerator:
             _install_spec_layers,
             get_pipeline_info,
             pp_chained_decode_loop,
+            pp_dspark_decode_loop,
             pp_speculative_decode_loop,
         )
 
@@ -2039,6 +2040,20 @@ class ExoBatchGenerator:
 
         # Create the spec decode generator
         request_trace.mark("pp_spec.decode_loop_start")
+        # DSpark (opt-in, EXO_PP_DSPARK=1) -- highest priority when available:
+        # a dedicated 3-stage semi-autoregressive draft head, strictly more
+        # capable than either the plain single-MTP-head chained path below
+        # or the original single-token MTP path. See pp_speculation.py's
+        # module-level comment above pp_dspark_decode_loop for the full
+        # rank1-owned draft+verify design and why DSpark's context-
+        # conditioning taps + lm_head being rank1-resident inverts the
+        # rank0-drafts-during-idle-time assumption the other two paths use.
+        _inner_pp_for_dspark = getattr(self.model, "model", None)
+        _has_dspark = (
+            _inner_pp_for_dspark is not None
+            and getattr(_inner_pp_for_dspark, "dspark", None) is not None
+        )
+        _pp_dspark_enabled = os.environ.get("EXO_PP_DSPARK", "0") == "1"
         # Opt-in k-token chained MTP draft + batched verify (see
         # pp_speculation.py's module-level comment above _PP_MTP_CHAIN_K
         # for the full design). Only reachable when: (a) explicitly
@@ -2049,7 +2064,17 @@ class ExoBatchGenerator:
         # Falls back to the proven single-token path otherwise --
         # default (EXO_PP_MTP_CHAIN_K unset or =1) is UNCHANGED behavior.
         _chain_k = int(os.environ.get("EXO_PP_MTP_CHAIN_K", "1"))
-        if _chain_k > 1 and _pp_mtp is not None and hasattr(_pp_mtp, "predict"):
+        if _pp_dspark_enabled and _has_dspark:
+            logger.info("PP speculation using DSpark (rank1-owned draft+verify)")
+            self._pp_spec_gen = pp_dspark_decode_loop(
+                model=self.model,
+                prompt_cache=cache,
+                first_y=first_y,
+                max_tokens=max_tokens - 1,
+                pp_rank=pp_rank, pp_world_size=pp_world_size,
+                pp_group=pp_group,
+            )
+        elif _chain_k > 1 and _pp_mtp is not None and hasattr(_pp_mtp, "predict"):
             logger.info(f"PP speculation using chained MTP draft, k={_chain_k}")
             self._pp_spec_gen = pp_chained_decode_loop(
                 model=self.model,

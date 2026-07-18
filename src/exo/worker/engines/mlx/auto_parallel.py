@@ -509,6 +509,21 @@ def pipeline_auto_parallel(
                 has_linear=has_mamba,
             )
 
+    # DSv4 DSpark tap-capture fix (2026-07-18): deepseek_v4.py's DSpark
+    # context-capture loop does `if _ap_i in _dspark_tap` where _ap_i is
+    # enumerate()'s LOCAL index into this rank's already-sliced
+    # `self.pipeline_layers` -- but dspark_target_layer_ids (e.g. [40,41,42])
+    # are GLOBAL layer indices. Under PP, self.layers IS the local slice
+    # (exo's own sharding, not upstream PipelineMixin's start_idx/end_idx
+    # mechanism), so _ap_i never matches the global tap ids on ANY rank --
+    # DSpark's ctx capture silently never fires under PP. Store the true
+    # global start offset so the model's tap loop can convert
+    # global_idx = pipeline_start_idx + _ap_i and check membership correctly.
+    # Harmless/inert for every other model class -- only deepseek_v4.py's
+    # DSpark path reads this attribute (falls back to offset 0 -- today's
+    # TP-path behavior -- when absent via getattr default).
+    inner_model_instance.pipeline_start_idx = start_layer  # type: ignore
+
     _set_layers(model, layers)
 
     assert isinstance(layers, list), (
