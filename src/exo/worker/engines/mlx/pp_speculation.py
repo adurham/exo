@@ -1392,37 +1392,71 @@ def pp_dspark_decode_loop(
                         _c.trim(bs)
                     _drafted_total += len(_draft_ids)
 
-            # ==== rank1 -> rank0: (trim_amount, bonus_token) ====
-            _trim_amount: int = 0
+            # ==== rank1 -> rank0: (n_accepted, accepted_ids padded to bs,
+            # bonus_token) -- FIXED SHAPE regardless of n_accepted's value.
+            # BUG FIX (2026-07-18): the original version sent only
+            # trim_amount (a derived count) + bonus_token. rank0 has no
+            # other source for the actual accepted draft token IDs -- its
+            # own `accepted_ids` list stays permanently empty (only ever
+            # appended to inside the `if is_last_rank:` block above), so
+            # its yield loop below silently emitted ZERO of the accepted
+            # tokens every cycle, only the single bonus token. Since
+            # send_chunk() in runner.py ONLY emits ChunkGenerated on
+            # rank0 (device_rank==0; existing PP dedup mechanism, not
+            # specific to this code), the HTTP client received roughly
+            # 1/6th of the real generated tokens (bonus tokens only) --
+            # producing what looked like an empty/stalled response even
+            # though the server-side decode loop completed perfectly
+            # cleanly (confirmed via logs: correct accept rates, no
+            # errors). This ALSO desynced the two ranks' own `n` counters
+            # (rank0's incremented ~6x slower than rank1's), which could
+            # independently cause the `while n < max_tokens:` loop to
+            # terminate at different points on each rank -- a second,
+            # latent bug this same fix resolves.
+            _accepted_ids: list[int] = []
+            _n_accepted_wire = 0
+            _bonus_wire = 0
             if is_last_rank:
-                _trim_amount = bs - n_accepted
-                _wire2 = mx.array([_trim_amount, bonus_token], dtype=mx.int32)
+                _accepted_ids = accepted_ids
+                _n_accepted_wire = n_accepted
+                _bonus_wire = bonus_token if bonus_token is not None else 0
+                _padded = _accepted_ids + [-1] * (bs - len(_accepted_ids))
+                _wire2 = mx.array(
+                    [_n_accepted_wire, _bonus_wire] + _padded, dtype=mx.int32
+                )
                 mx.eval(_wire2)
                 _log(f"n={n} dspark_trim_send PRE (rank1->0) "
-                     f"trim={_trim_amount} bonus={bonus_token}")
+                     f"n_accepted={_n_accepted_wire} bonus={_bonus_wire}")
                 _sent2 = mx.distributed.send(_wire2, 0, group=pp_group)
                 mx.eval(_sent2)
                 _log(f"n={n} dspark_trim_send POST")
             elif is_rank0:
                 _log(f"n={n} dspark_trim_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire2 = mx.distributed.recv_like(
-                    mx.zeros(2, dtype=mx.int32), pp_world_size - 1, group=pp_group,
+                    mx.zeros(2 + bs, dtype=mx.int32),
+                    pp_world_size - 1, group=pp_group,
                 )
                 mx.eval(_wire2)
                 _log(f"n={n} dspark_trim_recv POST")
-                _trim_amount = int(_wire2[0].item())
-                bonus_token = int(_wire2[1].item())
+                _wire2_list = [int(v) for v in _wire2.tolist()]
+                _n_accepted_wire = _wire2_list[0]
+                bonus_token = _wire2_list[1]
+                _accepted_ids = _wire2_list[2 : 2 + _n_accepted_wire]
 
             # ==== KV rollback (both ranks, deterministic given bs and
-            # n_accepted -- rank0 learns n_accepted only via _trim_amount,
-            # sufficient since it never needs n_accepted directly) ====
+            # n_accepted) ====
+            _trim_amount = bs - _n_accepted_wire
             if _trim_amount > 0:
                 for c in prompt_cache:
                     if hasattr(c, "trim"):
                         c.trim(_trim_amount)
 
             # ==== yield accepted tokens + bonus token ====
-            for tok_id in accepted_ids:
+            # Uses _accepted_ids (correctly populated on BOTH ranks now via
+            # the wire message fix above), NOT the stale `accepted_ids`
+            # local (which stayed empty on rank0 -- see bug-fix comment
+            # above the wire2 message construction).
+            for tok_id in _accepted_ids:
                 yield tok_id, mx.zeros(1)
                 n += 1
                 if n >= max_tokens:
@@ -1431,8 +1465,8 @@ def pp_dspark_decode_loop(
                 yield bonus_token, mx.zeros(1)
                 y = mx.array([bonus_token])
                 n += 1
-            elif accepted_ids:
-                y = mx.array([accepted_ids[-1]])
+            elif _accepted_ids:
+                y = mx.array([_accepted_ids[-1]])
 
     finally:
         _configure_layers(spec_first, spec_last)
