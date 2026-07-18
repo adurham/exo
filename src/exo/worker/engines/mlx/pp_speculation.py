@@ -881,6 +881,10 @@ def pp_chained_decode_loop(
             def _nop_lm_head(h: mx.array) -> mx.array:
                 return h
             _lm_head_owner.lm_head = _nop_lm_head  # type: ignore
+            _log(f"lm_head nop check: mtp_predictor.lm_head is real_lm_head = "
+                 f"{getattr(mtp_predictor, 'lm_head', None) is _real_lm_head}, "
+                 f"mtp_predictor.lm_head is nop = "
+                 f"{getattr(mtp_predictor, 'lm_head', None) is _nop_lm_head}")
 
     y = first_y
     # first_logprobs unused here -- kept in the function signature only
