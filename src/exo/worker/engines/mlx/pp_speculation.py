@@ -107,9 +107,6 @@ class SpecPipelineFirstLayer(PipelineFirstLayer):
         self._pp_recv: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        import sys as _canary_sys
-        _canary_sys.stderr.write(f"[CANARY] SpecPipelineFirstLayer.__call__ ENTERED r={self.r}\n")
-        _canary_sys.stderr.flush()
         if _TRACE:
             _log(f"SpecPipelineFirstLayer.__call__ r={self.r} _pp_recv={self._pp_recv} "
                  f"is_prefill={self.is_prefill}")
@@ -146,9 +143,6 @@ class SpecPipelineLastLayer(PipelineLastLayer):
         self._hidden_idx: int = -1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
-        import sys as _canary_sys
-        _canary_sys.stderr.write(f"[CANARY] SpecPipelineLastLayer.__call__ ENTERED r={self.r} s={self.s}\n")
-        _canary_sys.stderr.flush()
         if _TRACE:
             _log(f"SpecPipelineLastLayer.__call__ r={self.r} s={self.s} "
                  f"_speculative={self._speculative} _pp_send={self._pp_send} "
@@ -324,14 +318,25 @@ def pp_speculative_decode_loop(
     hidden_size = getattr(embed_tokens, "dims", embed_tokens.weight.shape[1])
 
     # Find speculative layer wrappers (already installed by caller)
+    # FIX (2026-07-17): must scan/install on inner_model.layers (the real,
+    # persistent layer list), not inner.layers. For DeepSeek-V4 (no
+    # language_model attr, inner falls back to `model` itself), `model`'s
+    # own `.layers` is a PROPERTY returning `self.model.pipeline_layers`
+    # -- itself a property computing a FRESH slice of the real list on
+    # every access. Scanning/mutating that disposable slice has zero
+    # effect on what the model's actual forward pass iterates (confirmed
+    # via canary prints in SpecPipelineFirstLayer/SpecPipelineLastLayer's
+    # __call__ that never fired despite this scan reporting valid-looking
+    # non-None spec_first/spec_last). inner_model (resolved just above)
+    # is the object whose `.layers` is the real, persistent list.
     spec_first, spec_last = None, None
-    for layer in inner.layers:  # type: ignore
+    for layer in inner_model.layers:  # type: ignore
         if isinstance(layer, SpecPipelineFirstLayer):
             spec_first = layer
         elif isinstance(layer, SpecPipelineLastLayer):
             spec_last = layer
     if spec_first is None and spec_last is None:
-        spec_first, spec_last = _install_spec_layers(inner)
+        spec_first, spec_last = _install_spec_layers(inner_model)
     _log(f"spec layers found: spec_first={'r='+str(spec_first.r) if spec_first else None} "
          f"spec_last={'r='+str(spec_last.r)+' s='+str(spec_last.s) if spec_last else None} "
          f"pp_rank={pp_rank} pp_world_size={pp_world_size}")
@@ -423,24 +428,6 @@ def pp_speculative_decode_loop(
                     _log(f"n={n} r0_compute EXIT")
                 else:
                     mx.eval(_cache_state[_hidden_idx])
-                    # DIAGNOSTIC (2026-07-17): force a full synchronize before
-                    # this send. The cached-hidden value was already
-                    # evaluated at the END of the PREVIOUS iteration (inside
-                    # _rank0_speculative_fwd), so this branch posts its send
-                    # within microseconds of entering the iteration -- near-
-                    # zero inter-message spacing vs. the fresh-forward
-                    # branch's ~30-40ms of real compute beforehand. Testing
-                    # whether jaccl's completion/buffer-reuse tracking has an
-                    # implicit minimum-spacing assumption that back-to-back
-                    # posts violate (suspected receiver-side ring-slot reuse
-                    # race, not an application-level send/recv count
-                    # mismatch -- counts are confirmed equal per iteration in
-                    # both branches). If this resolves the "[jaccl] send()
-                    # deadline in drain" stall, it confirms the timing theory
-                    # and the real fix belongs in mesh_impl.h (receiver
-                    # credits / sender slot-free confirmation), not here --
-                    # this synchronize is a diagnostic probe, not the fix.
-                    mx.synchronize()
                     _to_send = _cache_state[_hidden_idx]
                     if _to_send.dtype != mx.bfloat16:
                         _to_send = _to_send.astype(mx.bfloat16)

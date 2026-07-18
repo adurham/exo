@@ -1975,8 +1975,31 @@ class ExoBatchGenerator:
             pp_rank, pp_world_size, pp_group = pp_info
 
         with T("pp_spec.install_spec_layers"):
+            # FIX (2026-07-17): must resolve to the TRUE inner model (the
+            # object whose `.layers` is the actual persistent list the
+            # forward pass iterates), not `language_model`/`model` alone.
+            # For DeepSeek-V4 (no `language_model` attr), the outer `Model`
+            # class exposes a `.layers` PROPERTY that returns
+            # `self.model.pipeline_layers` -- itself a property computing
+            # `self.layers[start_idx:end_idx]`, i.e. a BRAND NEW list
+            # object on every single access. _install_spec_layers used to
+            # be called with `inner = getattr(self.model, "language_model",
+            # self.model)` (= self.model itself here, since no
+            # language_model attr exists), so `inner.layers` resolved to
+            # that disposable property-computed slice -- mutating it had
+            # ZERO effect on the model's real, persistent layer list.
+            # SpecPipelineFirstLayer/SpecPipelineLastLayer were correctly
+            # constructed and "installed" into a list that was discarded
+            # the instant this function returned, so the model's actual
+            # forward pass never called them -- confirmed via unconditional
+            # canary prints in both classes' __call__ that never fired
+            # despite _install_spec_layers appearing to succeed. Resolve
+            # one level deeper (mirroring pp_speculation.py's own
+            # `inner_model = getattr(inner, "model", inner)` pattern) so
+            # this mutates the actual persistent `.layers` list.
             inner = getattr(self.model, "language_model", self.model)
-            _install_spec_layers(inner)
+            inner_model = getattr(inner, "model", inner)
+            _install_spec_layers(inner_model)
 
         _pp_draft = getattr(self.model, "_pp_draft_model", None)
         _pp_draft_cache = getattr(self.model, "_pp_draft_cache", None)
