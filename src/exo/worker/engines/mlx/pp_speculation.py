@@ -392,7 +392,7 @@ def pp_speculative_decode_loop(
         while n < max_tokens:
             _loop_tic = time.perf_counter()
 
-            # ==== RANK 0: compute + send hidden, then draft during idle time ====
+            # ==== RANK 0: compute + send hidden ====
             _t0 = time.perf_counter()
             if is_rank0:
                 if _draft_token is None:
@@ -414,37 +414,7 @@ def pp_speculative_decode_loop(
             _dt_r0_compute = time.perf_counter() - _t0
             _prof_r0_compute += _dt_r0_compute
 
-            # -- Draft DURING rank 1's compute (the ~14ms idle window) --
-            _t0 = time.perf_counter()
-            if is_rank0:
-                _used_mtp = False
-                try:
-                    if mtp_predictor is not None and _mtp_hidden is not None:
-                        logits = mtp_predictor.predict(_mtp_hidden, mx.array([[y.item()]]))
-                        draft_tok = logits.argmax(axis=-1)
-                        mx.eval(draft_tok)
-                        _draft_token = int(draft_tok.item())
-                        _used_mtp = True
-                    elif mtp_predictor is None and draft_model is not None:
-                        draft_logits = draft_model(mx.array([[y.item()]]), cache=draft_cache)
-                        draft_tok = draft_logits[0, -1].argmax()
-                        mx.eval(draft_tok)
-                        _draft_token = int(draft_tok.item())
-
-                    if _draft_token is not None:
-                        _spec_snap = _snapshot_cache(prompt_cache)
-                        _rank0_speculative_fwd(_draft_token)
-                        _log(f"n={n} drafted={_draft_token} ({'mtp' if _used_mtp else 'draft'})")
-                except Exception as _draft_err:
-                    _log(f"n={n} draft FAILED: {_draft_err}")
-                    _draft_token = None
-                    _spec_snap = None
-                    if spec_last is not None:
-                        spec_last._speculative = False
-            _dt_r0_draft = time.perf_counter() - _t0
-            _prof_r0_draft += _dt_r0_draft
-
-            # ==== RANK 1: recv hidden + compute + sample (parallel with rank 0's draft) ====
+            # ==== RANK 1: recv hidden + compute + sample ====
             _t0 = time.perf_counter()
             if is_last_rank:
                 sampled, lp = _rank1_compute(y)
@@ -498,6 +468,35 @@ def pp_speculative_decode_loop(
             _prof_token_exchange += _dt_tok_xchg
 
             # ==== HIDDEN STATE EXCHANGE (rank 1 → rank 0, for MTP drafting) ====
+            # ORDERING FIX (2026-07-17): both this exchange and the token
+            # exchange above used to run AFTER rank 0's draft block (MTP
+            # predict + speculative forward). That block's cost is variable
+            # and, on its first real invocation (n=1 -- n=0 always skips it,
+            # no prior MTP hidden yet), can run long enough that rank 0
+            # doesn't get around to posting/evaluating its recv for many
+            # seconds -- meanwhile rank 1 is already blocked inside
+            # mx.distributed.send(), waiting for rank 0 to consume it, and
+            # gives up with "[jaccl] send() deadline in drain" once its own
+            # retry budget is exhausted. Reproduced live, confirmed via
+            # per-rank tracing: rank 1 logged "tok_send PRE" with no
+            # matching POST for 15s before crashing, while rank 0 was still
+            # inside the draft try/except the whole time, never having
+            # reached "tok_recv PRE".
+            #
+            # Fix: move both exchanges to run immediately after rank 1's
+            # compute (i.e. as soon as rank 0's own local work for this
+            # step is done), BEFORE the draft block, so rank 0 posts and
+            # evaluates its recvs promptly regardless of how long drafting
+            # takes. This does NOT change which hidden state the draft
+            # uses -- _mtp_draft_input, saved below before this exchange
+            # overwrites _mtp_hidden, is deliberately the value captured by
+            # the PREVIOUS iteration's exchange (drafting the token that
+            # follows `y` must condition on the hidden state that produced
+            # `y`, not on the hidden state this iteration's exchange is
+            # about to deliver, which corresponds to the token about to be
+            # verified). Only the WHEN of posting the recv changed, not
+            # which value each iteration's draft consumes.
+            _mtp_draft_input = _mtp_hidden
             _t0 = time.perf_counter()
             if mtp_predictor is not None:
                 if is_last_rank and 'pre_norm' in _captured:
@@ -521,6 +520,43 @@ def pp_speculative_decode_loop(
                         _mtp_hidden = _mtp_hidden.astype(COMPUTE_DTYPE)
             _dt_hidden_xchg = time.perf_counter() - _t0
             _prof_hidden_exchange += _dt_hidden_xchg
+
+            # -- Draft AFTER this step's exchanges complete (see ordering-fix
+            # comment above hidden exchange for why this moved here from
+            # before rank1_compute/the exchanges). Uses _mtp_draft_input
+            # (captured above, BEFORE this iteration's hidden exchange
+            # overwrote _mtp_hidden with the value for NEXT iteration's
+            # draft) so the draft still targets "the token that follows y",
+            # exactly as before the reorder -- only the wall-clock position
+            # of this block changed, not which MTP hidden state it reads. --
+            _t0 = time.perf_counter()
+            if is_rank0:
+                _used_mtp = False
+                try:
+                    if mtp_predictor is not None and _mtp_draft_input is not None:
+                        logits = mtp_predictor.predict(_mtp_draft_input, mx.array([[y.item()]]))
+                        draft_tok = logits.argmax(axis=-1)
+                        mx.eval(draft_tok)
+                        _draft_token = int(draft_tok.item())
+                        _used_mtp = True
+                    elif mtp_predictor is None and draft_model is not None:
+                        draft_logits = draft_model(mx.array([[y.item()]]), cache=draft_cache)
+                        draft_tok = draft_logits[0, -1].argmax()
+                        mx.eval(draft_tok)
+                        _draft_token = int(draft_tok.item())
+
+                    if _draft_token is not None:
+                        _spec_snap = _snapshot_cache(prompt_cache)
+                        _rank0_speculative_fwd(_draft_token)
+                        _log(f"n={n} drafted={_draft_token} ({'mtp' if _used_mtp else 'draft'})")
+                except Exception as _draft_err:
+                    _log(f"n={n} draft FAILED: {_draft_err}")
+                    _draft_token = None
+                    _spec_snap = None
+                    if spec_last is not None:
+                        spec_last._speculative = False
+            _dt_r0_draft = time.perf_counter() - _t0
+            _prof_r0_draft += _dt_r0_draft
 
             # ==== VERIFY draft ====
             _t0 = time.perf_counter()
