@@ -401,6 +401,24 @@ def pp_speculative_decode_loop(
                     _log(f"n={n} r0_compute EXIT")
                 else:
                     mx.eval(_cache_state[_hidden_idx])
+                    # DIAGNOSTIC (2026-07-17): force a full synchronize before
+                    # this send. The cached-hidden value was already
+                    # evaluated at the END of the PREVIOUS iteration (inside
+                    # _rank0_speculative_fwd), so this branch posts its send
+                    # within microseconds of entering the iteration -- near-
+                    # zero inter-message spacing vs. the fresh-forward
+                    # branch's ~30-40ms of real compute beforehand. Testing
+                    # whether jaccl's completion/buffer-reuse tracking has an
+                    # implicit minimum-spacing assumption that back-to-back
+                    # posts violate (suspected receiver-side ring-slot reuse
+                    # race, not an application-level send/recv count
+                    # mismatch -- counts are confirmed equal per iteration in
+                    # both branches). If this resolves the "[jaccl] send()
+                    # deadline in drain" stall, it confirms the timing theory
+                    # and the real fix belongs in mesh_impl.h (receiver
+                    # credits / sender slot-free confirmation), not here --
+                    # this synchronize is a diagnostic probe, not the fix.
+                    mx.synchronize()
                     _to_send = _cache_state[_hidden_idx]
                     if _to_send.dtype != mx.bfloat16:
                         _to_send = _to_send.astype(mx.bfloat16)
