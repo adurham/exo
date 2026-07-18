@@ -107,9 +107,14 @@ class SpecPipelineFirstLayer(PipelineFirstLayer):
         self._pp_recv: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        if _TRACE:
+            _log(f"SpecPipelineFirstLayer.__call__ r={self.r} _pp_recv={self._pp_recv} "
+                 f"is_prefill={self.is_prefill}")
         if self._pp_recv and self.r != 0:
             # Recv hidden from previous rank (blocks until rank 0 sends)
             # JACCL/RDMA requires bf16 for transport
+            if _TRACE:
+                _log(f"SpecPipelineFirstLayer TAKING SPEC RECV BRANCH r={self.r}")
             x_dtype = x.dtype
             x_bf16 = x.astype(mx.bfloat16) if x_dtype != mx.bfloat16 else x
             mx.eval(x_bf16)
@@ -119,6 +124,8 @@ class SpecPipelineFirstLayer(PipelineFirstLayer):
                 x = x.astype(x_dtype)
             return self.original_layer(x, *args, **kwargs)
         # Normal path (prefill or rank 0)
+        if _TRACE:
+            _log(f"SpecPipelineFirstLayer FALLTHROUGH TO BASE r={self.r}")
         return super().__call__(x, *args, **kwargs)
 
 
@@ -136,6 +143,10 @@ class SpecPipelineLastLayer(PipelineLastLayer):
         self._hidden_idx: int = -1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        if _TRACE:
+            _log(f"SpecPipelineLastLayer.__call__ r={self.r} s={self.s} "
+                 f"_speculative={self._speculative} _pp_send={self._pp_send} "
+                 f"_pp_decode={self._pp_decode} is_prefill={self.is_prefill}")
         if self._speculative:
             # Speculative mode: compute, store, NO send (don't leak speculation to rank 1)
             output = self.original_layer(x, *args, **kwargs)
@@ -166,6 +177,8 @@ class SpecPipelineLastLayer(PipelineLastLayer):
             return output
 
         # Normal path (prefill)
+        if _TRACE:
+            _log(f"SpecPipelineLastLayer FALLTHROUGH TO BASE r={self.r} s={self.s}")
         return super().__call__(x, *args, **kwargs)
 
 
@@ -313,6 +326,9 @@ def pp_speculative_decode_loop(
             spec_last = layer
     if spec_first is None and spec_last is None:
         spec_first, spec_last = _install_spec_layers(inner)
+    _log(f"spec layers found: spec_first={'r='+str(spec_first.r) if spec_first else None} "
+         f"spec_last={'r='+str(spec_last.r)+' s='+str(spec_last.s) if spec_last else None} "
+         f"pp_rank={pp_rank} pp_world_size={pp_world_size}")
 
     # State list for hidden exchange
     _cache_state = [c.state if hasattr(c, 'state') else c for c in prompt_cache]
