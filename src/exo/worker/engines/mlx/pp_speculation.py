@@ -396,17 +396,21 @@ def pp_speculative_decode_loop(
             _t0 = time.perf_counter()
             if is_rank0:
                 if _draft_token is None:
+                    _log(f"n={n} r0_compute ENTER (fresh forward, no draft pending)")
                     _rank0_compute(y)
+                    _log(f"n={n} r0_compute EXIT")
                 else:
                     mx.eval(_cache_state[_hidden_idx])
                     _to_send = _cache_state[_hidden_idx]
                     if _to_send.dtype != mx.bfloat16:
                         _to_send = _to_send.astype(mx.bfloat16)
+                    _log(f"n={n} r0_hidden_send PRE (from cached speculative fwd)")
                     sent = mx.distributed.send(
                         _to_send,
                         (pp_rank + 1) % pp_world_size, group=pp_group
                     )
                     mx.eval(sent)
+                    _log(f"n={n} r0_hidden_send POST")
             _dt_r0_compute = time.perf_counter() - _t0
             _prof_r0_compute += _dt_r0_compute
 
@@ -471,13 +475,17 @@ def pp_speculative_decode_loop(
             if is_last_rank:
                 final_token = sampled.reshape(1)
                 mx.eval(final_token)
+                _log(f"n={n} tok_send PRE (rank{pp_rank}->0)")
                 _sent_tok = mx.distributed.send(final_token, 0, group=pp_group)
                 mx.eval(_sent_tok)
+                _log(f"n={n} tok_send POST")
             elif is_rank0:
+                _log(f"n={n} tok_recv PRE (rank0<-{pp_world_size - 1})")
                 final_token = mx.distributed.recv_like(
                     mx.zeros(1, dtype=mx.int32), pp_world_size - 1, group=pp_group,
                 )
                 mx.eval(final_token)
+                _log(f"n={n} tok_recv POST")
             else:
                 # Middle ranks (pp_world_size > 2): not a supported topology
                 # elsewhere in this module (only is_rank0/is_last_rank are
@@ -495,14 +503,18 @@ def pp_speculative_decode_loop(
                 if is_last_rank and 'pre_norm' in _captured:
                     _pn = _captured['pre_norm'][:, -1:, :].astype(mx.bfloat16)
                     mx.eval(_pn)
+                    _log(f"n={n} hidden_send PRE (rank{pp_rank}->0, MTP feedback)")
                     _sent = mx.distributed.send(_pn, 0, group=pp_group)
                     mx.eval(_sent)
+                    _log(f"n={n} hidden_send POST")
                 elif is_rank0:
+                    _log(f"n={n} hidden_recv PRE (rank0<-{pp_world_size - 1}, MTP feedback)")
                     _mtp_hidden = mx.distributed.recv_like(
                         mx.zeros((1, 1, hidden_size), dtype=mx.bfloat16),
                         pp_world_size - 1, group=pp_group,
                     )
                     mx.eval(_mtp_hidden)
+                    _log(f"n={n} hidden_recv POST")
                     # Cast back to model's compute dtype after bf16 transport
                     if _mtp_hidden.dtype != mx.float16:
                         from exo.worker.engines.mlx.patches.qwen3_5_moe.common import COMPUTE_DTYPE
