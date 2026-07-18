@@ -1966,6 +1966,7 @@ class ExoBatchGenerator:
         from ..pp_speculation import (
             _install_spec_layers,
             get_pipeline_info,
+            pp_chained_decode_loop,
             pp_speculative_decode_loop,
         )
 
@@ -2038,16 +2039,40 @@ class ExoBatchGenerator:
 
         # Create the spec decode generator
         request_trace.mark("pp_spec.decode_loop_start")
-        self._pp_spec_gen = pp_speculative_decode_loop(
-            model=self.model, draft_model=_pp_draft,
-            prompt_cache=cache, draft_cache=_pp_draft_cache,
-            sampler=sampler, logits_processors=logits_processors,
-            first_y=first_y, first_logprobs=mx.zeros(1),
-            max_tokens=max_tokens - 1,
-            pp_rank=pp_rank, pp_world_size=pp_world_size,
-            pp_group=pp_group,
-            mtp_predictor=_pp_mtp,
-        )
+        # Opt-in k-token chained MTP draft + batched verify (see
+        # pp_speculation.py's module-level comment above _PP_MTP_CHAIN_K
+        # for the full design). Only reachable when: (a) explicitly
+        # requested via EXO_PP_MTP_CHAIN_K>1, and (b) a native DSv4 MTP
+        # predictor is active (the generic draft-model fallback and the
+        # Qwen3.5-style MTPPredictor don't implement predict()'s
+        # return_hidden=True chaining contract this path depends on).
+        # Falls back to the proven single-token path otherwise --
+        # default (EXO_PP_MTP_CHAIN_K unset or =1) is UNCHANGED behavior.
+        _chain_k = int(os.environ.get("EXO_PP_MTP_CHAIN_K", "1"))
+        if _chain_k > 1 and _pp_mtp is not None and hasattr(_pp_mtp, "predict"):
+            logger.info(f"PP speculation using chained MTP draft, k={_chain_k}")
+            self._pp_spec_gen = pp_chained_decode_loop(
+                model=self.model,
+                prompt_cache=cache,
+                sampler=sampler,
+                first_y=first_y, first_logprobs=mx.zeros(1),
+                max_tokens=max_tokens - 1,
+                pp_rank=pp_rank, pp_world_size=pp_world_size,
+                pp_group=pp_group,
+                mtp_predictor=_pp_mtp,
+                chain_k=_chain_k,
+            )
+        else:
+            self._pp_spec_gen = pp_speculative_decode_loop(
+                model=self.model, draft_model=_pp_draft,  # type: ignore
+                prompt_cache=cache, draft_cache=_pp_draft_cache,  # type: ignore
+                sampler=sampler, logits_processors=logits_processors,
+                first_y=first_y, first_logprobs=mx.zeros(1),
+                max_tokens=max_tokens - 1,
+                pp_rank=pp_rank, pp_world_size=pp_world_size,
+                pp_group=pp_group,
+                mtp_predictor=_pp_mtp,
+            )
 
         self._uid_counter += 1
         uid = self._uid_counter

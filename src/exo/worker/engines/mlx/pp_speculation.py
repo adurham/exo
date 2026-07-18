@@ -730,6 +730,360 @@ def pp_speculative_decode_loop(
 
 
 # ---------------------------------------------------------------------------
+# Chained multi-token MTP draft + batched verify (opt-in, EXO_PP_MTP_CHAIN_K>1)
+# ---------------------------------------------------------------------------
+#
+# Single-token PP+MTP (pp_speculative_decode_loop above) is structurally
+# capped near ~1/rank1_step_time tok/s regardless of MTP draft-acceptance
+# rate: rank1 (the "verify" rank, owning the model's last N layers) always
+# does exactly one full forward per loop iteration, whether the draft is
+# accepted or not. At long context (500K+), that forward is ~55-60ms,
+# dominated by KV-cache read bandwidth -- capping throughput around 17-20
+# tok/s even at high (~80-90%) acceptance. Confirmed via direct profiling
+# on a live cluster, 2026-07-17/18.
+#
+# Mechanism: rank0 chains k MTP-head-only forwards (mtp_predictor.predict
+# with return_hidden=True feeding each step's predicted token + returned
+# hidden into the next) to cheaply draft k candidate tokens WITHOUT
+# touching the main (22/21-layer) model at all for drafting -- the MTP
+# head is a single lightweight transformer block, not a full model
+# re-forward (unlike the single-token path's _rank0_speculative_fwd,
+# which does re-forward the WHOLE main model per draft). Rank0 then does
+# ONE main-model forward with [y, d_1, ..., d_{k-1}] as a batched
+# sequence (k tokens total: the current committed token plus k-1 of the
+# k drafts -- d_k is deliberately excluded, see trim-arithmetic note
+# below) to get k hidden states, sent to rank1 in one message. Rank1
+# does ONE forward over those k positions, samples/verifies each
+# position's logits against the corresponding draft token in order
+# (standard "accept prefix until first mismatch"), and returns a fixed-
+# shape 2-int32 message: accepted count m (0<=m<=k-1) and a "bonus
+# token" resampled from rank1's own logits at position m (legitimate:
+# rank1 already computed real logits there, whether or not the draft at
+# that position matched).
+#
+# Wire protocol is fixed-shape regardless of the ACTUAL value of m, to
+# avoid the exact class of jaccl protocol-mismatch bug fixed earlier
+# this session (send/recv count or shape divergence between ranks
+# causes a transport-level stall, not a clean application-level error).
+#
+# KV rollback: both ranks appended k-1 speculative positions (d_1
+# through d_{k-1}) to their respective caches (main model AND, on
+# rank0, the MTP predictor's OWN cache) during this iteration's forward.
+# If m < k-1, both ranks trim (k-1-m) positions from their MAIN model
+# cache (deterministic given k and m, no extra data needed -- rank0
+# already knows k, and m arrives from rank1 in the fixed 2-int32
+# message). The MTP predictor's cache trim amount is a SEPARATE
+# quantity (it advanced by the chain depth actually drafted, which may
+# differ from k-1 if EOS or an error truncated the chain early) and
+# must be computed independently, not reused from the main-model trim.
+_PP_MTP_CHAIN_K = int(os.environ.get("EXO_PP_MTP_CHAIN_K", "1"))
+
+
+def _mtp_chain_draft(
+    mtp_predictor: Any,
+    seed_hidden: mx.array,
+    seed_token: int,
+    depth: int,
+) -> tuple[list[int], mx.array]:
+    """Chain ``depth`` MTP-head-only predict() calls to draft candidate
+    tokens cheaply, without touching the main model.
+
+    Args:
+        seed_hidden: (1, 1, hidden) pre-norm hidden from the PREVIOUS
+            real step (the hidden that produced ``seed_token``).
+        seed_token: the token actually committed last step (``y``).
+        depth: number of chained draft tokens to produce (k-1 in the
+            caller's k-token-batch terminology -- see module docstring
+            above for why the seed token itself isn't counted here).
+
+    Returns:
+        (draft_token_ids, last_hidden) -- draft_token_ids has length
+        <= depth (shorter if a draft step raises, e.g. transient cache
+        state issue; caller must handle a short list, NOT assume
+        exactly `depth` tokens came back). last_hidden is the final
+        chained hidden state (unused today, returned for future
+        deeper-chain / diagnostic use).
+    """
+    draft_ids: list[int] = []
+    h = seed_hidden
+    tok = seed_token
+    for _ in range(depth):
+        try:
+            logits, h = mtp_predictor.predict(
+                h, mx.array([[tok]]), return_hidden=True,
+            )
+            draft_tok = logits.argmax(axis=-1)
+            mx.eval(draft_tok)
+            tok = int(draft_tok.item())
+            draft_ids.append(tok)
+        except Exception as _chain_err:
+            _log(f"mtp chain draft step {len(draft_ids)} FAILED: {_chain_err}")
+            break
+    return draft_ids, h
+
+
+def pp_chained_decode_loop(
+    model: nn.Module,
+    prompt_cache: list[Any],
+    sampler: Callable,
+    first_y: mx.array,
+    first_logprobs: mx.array,
+    max_tokens: int,
+    pp_rank: int,
+    pp_world_size: int,
+    pp_group: mx.distributed.Group,
+    mtp_predictor: Any,
+    chain_k: int,
+) -> Generator[tuple[int, mx.array], None, None]:
+    """PP decode loop with k-token chained MTP draft + batched verify.
+
+    Opt-in replacement for pp_speculative_decode_loop's single-token
+    path when EXO_PP_MTP_CHAIN_K>1. See the module-level comment block
+    above _PP_MTP_CHAIN_K for the full design rationale and wire
+    protocol. Requires mtp_predictor (native DSv4 MTP head) -- the
+    generic draft-model fallback path is not supported here (chaining
+    relies on predict()'s return_hidden=True, which the Qwen3.5-style
+    MTPPredictor class does not implement identically -- scope this to
+    DSv4MTPPredictor only for now).
+    """
+    is_rank0 = pp_rank == 0
+    is_last_rank = pp_rank == pp_world_size - 1
+    k = max(2, chain_k)  # k=1 has no batching benefit; caller should
+    # have dispatched to pp_speculative_decode_loop instead, but clamp
+    # defensively rather than silently no-op the whole mechanism.
+
+    inner = getattr(model, "language_model", model)
+    inner_model = getattr(inner, "model", inner)
+    embed_tokens = inner_model.embed_tokens
+    hidden_size = getattr(embed_tokens, "dims", embed_tokens.weight.shape[1])
+
+    spec_first, spec_last = None, None
+    for layer in inner_model.layers:  # type: ignore
+        if isinstance(layer, SpecPipelineFirstLayer):
+            spec_first = layer
+        elif isinstance(layer, SpecPipelineLastLayer):
+            spec_last = layer
+    if spec_first is None and spec_last is None:
+        spec_first, spec_last = _install_spec_layers(inner_model)
+
+    _captured: dict[str, mx.array] = {}
+    if is_last_rank:
+        _captured = _install_hidden_capture(model)
+
+    if is_rank0:
+        mtp_predictor.reset_cache()
+
+    _lm_head_owner = getattr(model, "language_model", model)
+    _real_lm_head = None
+    if is_rank0:
+        _real_lm_head = getattr(_lm_head_owner, "lm_head", None)
+        if _real_lm_head is not None:
+            def _nop_lm_head(h: mx.array) -> mx.array:
+                return h
+            _lm_head_owner.lm_head = _nop_lm_head  # type: ignore
+
+    y = first_y
+    # first_logprobs unused here -- kept in the function signature only
+    # for parity with the PP priming call site's shared setup pattern
+    # (see pp_speculative_decode_loop's identical parameter).
+    del first_logprobs
+    # Seed hidden for the MTP chain: the pre-norm hidden that PRODUCED
+    # `y`. On the very first iteration this comes from the ordinary PP
+    # priming step (stream_generate, before this loop starts) the same
+    # way pp_speculative_decode_loop's _mtp_hidden starts as None and
+    # gets populated by the first real hidden-exchange -- see that
+    # function's own n=0 handling for the precedent this mirrors.
+    _mtp_seed_hidden: mx.array | None = None
+
+    _accepted_total = 0
+    _drafted_total = 0
+
+    _log(f"chained decode loop start: max_tokens={max_tokens}, k={k}")
+
+    try:
+        n = 0
+        while n < max_tokens:
+            # ==== RANK 0: draft k-1 tokens via cheap MTP-head-only chain ====
+            draft_ids: list[int] = []
+            if is_rank0 and _mtp_seed_hidden is not None:
+                draft_ids, _ = _mtp_chain_draft(
+                    mtp_predictor, _mtp_seed_hidden, int(y.item()), k - 1,
+                )
+                _drafted_total += len(draft_ids)
+            # Pad with a sentinel that can never match a real sampled
+            # token id (real ids are >= 0) if the chain came back short
+            # (error, or fewer than k-1 requested -- shouldn't happen
+            # today since _mtp_chain_draft always requests exactly k-1,
+            # but a short list from an exception must still produce a
+            # fixed-length batch for the main-model forward and wire
+            # message). This keeps the wire protocol fixed-shape
+            # regardless of how many real drafts came back.
+            while len(draft_ids) < k - 1:
+                draft_ids.append(-1)
+
+            # ==== RANK 0: ONE main-model forward over [y, d_1..d_{k-1}] ====
+            if is_rank0:
+                _configure_layers(spec_first, spec_last,
+                                  pp_send=True, state_list=None, hidden_idx=-1)
+                _batch_ids = [int(y.item())] + [
+                    max(0, d) for d in draft_ids  # sentinel -1 -> 0 for the
+                    # forward itself (never sampled/committed if rejected;
+                    # using 0 keeps embed_tokens lookup in-bounds without
+                    # affecting correctness, since verify will reject any
+                    # position whose draft was the -1 sentinel anyway).
+                ]
+                _batch_tok = mx.array([_batch_ids])
+                with mx.stream(generation_stream):
+                    model(_batch_tok, cache=prompt_cache)
+
+            # ==== RANK 1: recv k-token hidden batch (via layer wrapper's
+            # existing recv, now naturally k-wide -- SpecPipelineFirstLayer's
+            # recv branch is shape-agnostic, no changes needed there) +
+            # ONE forward + per-position verify ====
+            accepted_ids: list[int] = []
+            bonus_token: int | None = None
+            m = 0
+            _next_seed_hidden: mx.array | None = None
+            if is_last_rank:
+                _configure_layers(spec_first, spec_last,
+                                  pp_recv=True, pp_decode=True,
+                                  state_list=None, hidden_idx=-1)
+                with mx.stream(generation_stream):
+                    _batch_tok_r1 = mx.array([[int(y.item())] + [
+                        max(0, d) for d in draft_ids
+                    ]])
+                    out = model(_batch_tok_r1, cache=prompt_cache)
+                    # out: (1, k, vocab). Position i's logits predict the
+                    # token AFTER input position i -- i.e. out[:, i, :]
+                    # is what should equal draft_ids[i] (the token fed at
+                    # input position i+1), for i in 0..k-2. Standard
+                    # speculative-decoding verify: accept the longest
+                    # matching PREFIX, starting from i=0.
+                    lp_all = out - mx.logsumexp(out, axis=-1, keepdims=True)
+                    for i in range(k - 1):
+                        if draft_ids[i] < 0:
+                            break  # sentinel: no real draft at this position
+                        pos_sampled = sampler(lp_all[:, i, :])
+                        mx.eval(pos_sampled)
+                        real_tok = int(pos_sampled.item())
+                        if real_tok == draft_ids[i]:
+                            accepted_ids.append(real_tok)
+                            m += 1
+                        else:
+                            # Reject: this position's REAL sampled token
+                            # becomes the bonus token (legitimate --
+                            # rank1 already computed real logits here).
+                            bonus_token = real_tok
+                            break
+                    else:
+                        # All k-1 drafts accepted -- bonus token comes
+                        # from position k-1 (the last real forward
+                        # position, predicting what follows d_{k-1}).
+                        _bonus_sampled = sampler(lp_all[:, k - 1, :])
+                        mx.eval(_bonus_sampled)
+                        bonus_token = int(_bonus_sampled.item())
+                    _pn = _captured.get('pre_norm')
+                    # Seed hidden for rank0's NEXT chain: the pre-norm
+                    # hidden at whichever position corresponds to the
+                    # last COMMITTED token this iteration (index m, since
+                    # accepted_ids has length m and the bonus token sits
+                    # logically at position m too).
+                    _seed_idx = min(m, k - 1)
+                    _next_seed_hidden = (
+                        _pn[:, _seed_idx:_seed_idx + 1, :].astype(mx.bfloat16)
+                        if _pn is not None else None
+                    )
+            # ==== FIXED-SHAPE WIRE: rank1 -> rank0, (m, bonus_token) ====
+            if is_last_rank:
+                _wire = mx.array([m, bonus_token if bonus_token is not None else 0], dtype=mx.int32)
+                mx.eval(_wire)
+                _log(f"n={n} chain_verify_send PRE (rank1->0) m={m} bonus={bonus_token}")
+                _sent_wire = mx.distributed.send(_wire, 0, group=pp_group)
+                mx.eval(_sent_wire)
+                _log(f"n={n} chain_verify_send POST")
+            elif is_rank0:
+                _log(f"n={n} chain_verify_recv PRE (rank0<-{pp_world_size - 1})")
+                _wire = mx.distributed.recv_like(
+                    mx.zeros(2, dtype=mx.int32), pp_world_size - 1, group=pp_group,
+                )
+                mx.eval(_wire)
+                _log(f"n={n} chain_verify_recv POST")
+                m = int(_wire[0].item())
+                bonus_token = int(_wire[1].item())
+            else:
+                m = 0
+                bonus_token = 0
+
+            # ==== FIXED-SHAPE WIRE: rank1 -> rank0, next seed hidden ====
+            if mtp_predictor is not None:
+                if is_last_rank:
+                    _hs = _next_seed_hidden if _next_seed_hidden is not None else mx.zeros(
+                        (1, 1, hidden_size), dtype=mx.bfloat16
+                    )
+                    mx.eval(_hs)
+                    _log(f"n={n} chain_hidden_send PRE (rank1->0)")
+                    _sent_h = mx.distributed.send(_hs, 0, group=pp_group)
+                    mx.eval(_sent_h)
+                    _log(f"n={n} chain_hidden_send POST")
+                elif is_rank0:
+                    _log(f"n={n} chain_hidden_recv PRE (rank0<-{pp_world_size - 1})")
+                    _mtp_seed_hidden = mx.distributed.recv_like(
+                        mx.zeros((1, 1, hidden_size), dtype=mx.bfloat16),
+                        pp_world_size - 1, group=pp_group,
+                    )
+                    mx.eval(_mtp_seed_hidden)
+                    _log(f"n={n} chain_hidden_recv POST")
+
+            # ==== KV ROLLBACK (both ranks, deterministic given k and m) ====
+            # Main model cache: this iteration's forward appended k-1
+            # speculative positions (d_1..d_{k-1}). Trim back whatever
+            # wasn't actually committed. Committed count this iteration
+            # is m (accepted drafts) -- the bonus token is NOT yet in
+            # any cache (it's freshly sampled, fed as `y` next iter's
+            # forward input, same as the k=1 path's committed token).
+            _trim_n = (k - 1) - m
+            if _trim_n > 0:
+                for c in prompt_cache:
+                    if hasattr(c, "trim"):
+                        c.trim(_trim_n)
+            # MTP predictor cache: rank0's chain advanced its OWN cache
+            # by len(draft_ids) positions this iteration (computed
+            # independently from the main-model trim -- see module
+            # docstring). Trim back to m accepted positions.
+            if is_rank0 and mtp_predictor is not None and mtp_predictor.kv_cache is not None:
+                _mtp_drafted_this_iter = sum(1 for d in draft_ids if d >= 0)
+                _mtp_trim_n = _mtp_drafted_this_iter - m
+                if _mtp_trim_n > 0:
+                    mtp_predictor.kv_cache.trim(_mtp_trim_n)
+
+            # ==== Yield accepted tokens + bonus token ====
+            for tok_id in accepted_ids:
+                yield tok_id, mx.zeros(1)
+                n += 1
+                if n >= max_tokens:
+                    break
+            if n < max_tokens and bonus_token is not None:
+                yield bonus_token, mx.zeros(1)
+                y = mx.array([bonus_token])
+                n += 1
+            elif accepted_ids:
+                y = mx.array([accepted_ids[-1]])
+
+            _accepted_total += m
+
+    finally:
+        _configure_layers(spec_first, spec_last)
+        if is_rank0 and _real_lm_head is not None:
+            _lm_head_owner.lm_head = _real_lm_head  # type: ignore
+        if _drafted_total > 0:
+            logger.debug(
+                f"PP chained MTP: {_accepted_total}/{_drafted_total} "
+                f"drafted tokens accepted ({_accepted_total/_drafted_total*100:.0f}%), "
+                f"k={k}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Draft model loading
 # ---------------------------------------------------------------------------
 
