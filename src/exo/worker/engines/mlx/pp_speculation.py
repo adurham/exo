@@ -1363,6 +1363,7 @@ def pp_dspark_decode_loop(
     if os.environ.get("EXO_PP_DSPARK_WIDTH_SWEEP", "0") == "1":
         _sweep_widths = [1, 2, 3, 4, 5, 6]
         _sweep_results: dict[int, float] = {}
+        _sweep_lazy_results: dict[int, float] = {}
         for _w in _sweep_widths:
             _sweep_tok = mx.array([[int(y.item())] * _w], dtype=mx.int32)
             _t0 = time.perf_counter()
@@ -1371,6 +1372,17 @@ def pp_dspark_decode_loop(
                                   pp_send=True, state_list=None, hidden_idx=-1)
                 with mx.stream(generation_stream):
                     _sweep_logits = model(_sweep_tok, cache=prompt_cache)
+                    # LAZY-ONLY checkpoint (2026-07-18): time up to just
+                    # before mx.eval() isolates the pure Python/graph-
+                    # construction cost (tracing ~21 layers' worth of ops
+                    # into the lazy graph) from actual GPU dispatch+compute
+                    # -- per a second-opinion review of the fitted fixed-
+                    # overhead term (~14.5ms/rank0, ~17.7ms/rank1), this is
+                    # the 5-minute experiment that settles whether that
+                    # intercept is real bandwidth-bound compute (expected,
+                    # not shave-able) or avoidable Python-side overhead
+                    # (worth investigating further if it's not).
+                    _t_lazy = time.perf_counter() - _t0
                     mx.eval(_sweep_logits)
             elif is_last_rank:
                 _configure_layers(spec_first, spec_last,
@@ -1378,16 +1390,25 @@ def pp_dspark_decode_loop(
                                   state_list=None, hidden_idx=-1)
                 with mx.stream(generation_stream):
                     _sweep_out = model(_sweep_tok, cache=prompt_cache)
+                    _t_lazy = time.perf_counter() - _t0
                     mx.eval(_sweep_out)
+            else:
+                _t_lazy = 0.0
             _dt = time.perf_counter() - _t0
             _sweep_results[_w] = _dt
+            _sweep_lazy_results[_w] = _t_lazy
             for _c in prompt_cache:
                 if hasattr(_c, "trim"):
                     _c.trim(_w)
-            _log(f"width-sweep w={_w} dt={_dt*1000:.2f}ms rank={pp_rank}")
+            _log(f"width-sweep w={_w} dt={_dt*1000:.2f}ms "
+                 f"lazy={_t_lazy*1000:.2f}ms rank={pp_rank}")
         logger.info(
             f"[WIDTH SWEEP R{pp_rank}] " +
             ", ".join(f"w={w}:{dt*1000:.2f}ms" for w, dt in _sweep_results.items())
+        )
+        logger.info(
+            f"[WIDTH SWEEP LAZY-ONLY R{pp_rank}] " +
+            ", ".join(f"w={w}:{dt*1000:.2f}ms" for w, dt in _sweep_lazy_results.items())
         )
 
     try:
@@ -1403,12 +1424,18 @@ def pp_dspark_decode_loop(
             _toks, _corrected, _conf = _dspark.draft(
                 y.reshape(1), embed_tokens, model.lm_head, _dsc,
                 temperature=0.0, sample_fn=_dspark_sample_greedy,
+                width=vw - 1,
             )
             mx.eval(_toks)
             _draft_ids = [int(v) for v in _toks[0].tolist()]
+            # Trim by the ACTUAL width drafted this call (vw-1), not the
+            # full block_size -- draft() only wrote vw-1 positions of KV
+            # when width is passed (2026-07-18, see draft()'s width param
+            # in mlx-lm). Trimming by the old, wider `bs` here would try
+            # to roll back MORE positions than were ever written.
             for _c in _dsc:
-                _c.trim(bs)
-            _drafted_total += len(_draft_ids)
+                _c.trim(vw - 1)
+            _drafted_total += min(len(_draft_ids), vw - 1)
 
         while n < max_tokens:
             _cycle_t0 = time.perf_counter()
@@ -1551,15 +1578,28 @@ def pp_dspark_decode_loop(
                     _next_toks, _next_corrected, _next_conf = _dspark.draft(
                         mx.array([bonus_token]), embed_tokens, model.lm_head,
                         _dsc, temperature=0.0, sample_fn=_dspark_sample_greedy,
+                        width=vw - 1,
                     )
                     mx.eval(_next_toks)
                     _draft_ids = [int(v) for v in _next_toks[0].tolist()]
                     _corrected = _next_corrected
                     _t_after_draft = time.perf_counter()
                     _prof_draft += _t_after_draft - _t_after_verify
+                    # Trim by vw-1 (the actual width drafted), not bs --
+                    # see the matching comment at the cold-start draft
+                    # call above for why.
                     for _c in _dsc:
-                        _c.trim(bs)
-                    _drafted_total += len(_draft_ids)
+                        _c.trim(vw - 1)
+                    # BUG FIX (2026-07-18): this used to count DSpark's
+                    # full internal block_size (5) as "drafted" every
+                    # cycle, even though verify_width truncation (see
+                    # above) means only vw-1 of those positions are EVER
+                    # eligible to be checked/accepted. That inflated the
+                    # denominator of the accept-rate summary ~2.5x,
+                    # making a genuinely healthy 59-69% acceptance
+                    # (confirmed via the per-position histogram, which
+                    # doesn't have this bug) look like a concerning 23%.
+                    _drafted_total += min(len(_draft_ids), vw - 1)
 
             # ==== rank1 -> rank0: (n_accepted, accepted_ids padded to bs,
             # bonus_token) -- FIXED SHAPE regardless of n_accepted's value.
