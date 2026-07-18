@@ -1296,6 +1296,19 @@ def pp_dspark_decode_loop(
     # the model's prediction that 3 is close to the sweet spot. Still
     # overridable via EXO_PP_DSPARK_VERIFY_WIDTH for further tuning.
     vw = min(bs, int(os.environ.get("EXO_PP_DSPARK_VERIFY_WIDTH", "3")))
+    # DEFAULT OFF (2026-07-18): draft()-width truncation (vs main-model
+    # verify-width truncation above, which IS safe and stays default-on)
+    # found a real correctness bug during validation -- occasional silent
+    # BOS-token-spam degeneration, no crash, high reported accept rate
+    # (RotatingKVCache.trim() is documented as only valid pre-wraparound;
+    # suspected root cause, not yet confirmed). Opt-in only via
+    # EXO_PP_DSPARK_DRAFT_WIDTH_TRUNCATE=1 until root-caused and fixed --
+    # do NOT flip this default without first confirming the wrap
+    # diagnostic below never fires across a real validation pass.
+    _draft_width_truncate = (
+        os.environ.get("EXO_PP_DSPARK_DRAFT_WIDTH_TRUNCATE", "0") == "1"
+    )
+    _draft_width = (vw - 1) if _draft_width_truncate else None
     _dsc = _dspark.make_cache() if is_last_rank else None
 
     def _dspark_sample_greedy(step_logits: mx.array, _k: int) -> mx.array:
@@ -1424,17 +1437,17 @@ def pp_dspark_decode_loop(
             _toks, _corrected, _conf = _dspark.draft(
                 y.reshape(1), embed_tokens, model.lm_head, _dsc,
                 temperature=0.0, sample_fn=_dspark_sample_greedy,
-                width=vw - 1,
+                width=_draft_width,
             )
             mx.eval(_toks)
             _draft_ids = [int(v) for v in _toks[0].tolist()]
-            # Trim by the ACTUAL width drafted this call (vw-1), not the
-            # full block_size -- draft() only wrote vw-1 positions of KV
-            # when width is passed (2026-07-18, see draft()'s width param
-            # in mlx-lm). Trimming by the old, wider `bs` here would try
-            # to roll back MORE positions than were ever written.
+            # Trim by the ACTUAL width drafted this call: bs (full block)
+            # normally, or vw-1 when EXO_PP_DSPARK_DRAFT_WIDTH_TRUNCATE=1
+            # is opted in (currently default-off pending a correctness
+            # bug fix -- see _draft_width_truncate comment above).
+            _trim_this_draft = (vw - 1) if _draft_width_truncate else bs
             for _c in _dsc:
-                _c.trim(vw - 1)
+                _c.trim(_trim_this_draft)
             _drafted_total += min(len(_draft_ids), vw - 1)
 
         while n < max_tokens:
@@ -1578,18 +1591,42 @@ def pp_dspark_decode_loop(
                     _next_toks, _next_corrected, _next_conf = _dspark.draft(
                         mx.array([bonus_token]), embed_tokens, model.lm_head,
                         _dsc, temperature=0.0, sample_fn=_dspark_sample_greedy,
-                        width=vw - 1,
+                        width=_draft_width,
                     )
                     mx.eval(_next_toks)
                     _draft_ids = [int(v) for v in _next_toks[0].tolist()]
                     _corrected = _next_corrected
                     _t_after_draft = time.perf_counter()
                     _prof_draft += _t_after_draft - _t_after_verify
-                    # Trim by vw-1 (the actual width drafted), not bs --
-                    # see the matching comment at the cold-start draft
-                    # call above for why.
+                    # Trim by whatever width was actually drafted this
+                    # call -- vw-1 when opted in, bs (full block)
+                    # otherwise. See _draft_width_truncate comment above.
+                    _trim_this_draft = (vw - 1) if _draft_width_truncate else bs
                     for _c in _dsc:
-                        _c.trim(vw - 1)
+                        _c.trim(_trim_this_draft)
+                    # DIAGNOSTIC (2026-07-18): investigating a genuine
+                    # silent-degeneration bug found after this width
+                    # change (BOS-spam output, no crash, high reported
+                    # accept rate -- exactly the "corrupted shared cache,
+                    # verifier sees the same broken context so happily
+                    # accepts garbage" signature per a second-opinion
+                    # review). RotatingKVCache.trim()/is_trimmable() are
+                    # documented as only valid PRE-WRAP (offset <
+                    # max_size); this logs each cache's offset relative
+                    # to its max_size every cycle to determine whether
+                    # wraparound is actually being hit despite the
+                    # request being short (30 max_tokens).
+                    if _TRACE:
+                        for _ci, _c in enumerate(_dsc):
+                            _off = getattr(_c, "offset", None)
+                            _mx = getattr(_c, "max_size", None)
+                            if _off is not None and _mx is not None and _off >= _mx:
+                                logger.warning(
+                                    f"[PP DSpark CACHE WRAP] stage={_ci} "
+                                    f"offset={_off} max_size={_mx} -- "
+                                    f"RotatingKVCache.trim() is invalid "
+                                    f"post-wrap, corruption likely"
+                                )
                     # BUG FIX (2026-07-18): this used to count DSpark's
                     # full internal block_size (5) as "drafted" every
                     # cycle, even though verify_width truncation (see
