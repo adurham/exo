@@ -1313,6 +1313,29 @@ def pp_dspark_decode_loop(
                     mx.zeros(bs + 1, dtype=mx.int32),
                     pp_world_size - 1, group=pp_group,
                 )
+                # CRITICAL (2026-07-18, found via intermittent-deadlock
+                # investigation): mx.distributed ops are LAZY graph nodes
+                # with no tags/sequence numbers -- point-to-point messages
+                # on a group are matched purely by the ORDER both ranks
+                # actually EXECUTE them, not the order they're issued in
+                # Python. Without forcing this recv to materialize here,
+                # MLX's scheduler is free to defer it relative to the
+                # model(...) call below -- which ALSO does an internal
+                # send/recv on this SAME pp_group (SpecPipelineLastLayer's
+                # automatic hidden-state send). If rank0's recv here and
+                # rank1's corresponding operations end up interleaved
+                # differently than rank1 expects, both ranks can end up
+                # blocked waiting on messages the other believes it
+                # already sent/received -- a genuine, intermittent (not
+                # code-path-dependent, so not always-reproducing) circular
+                # wait. Confirmed empirically: ~1-in-3 runs of the
+                # IDENTICAL request stalled for 70+s with zero progress
+                # then cascaded into a peer-EOF crash; other runs of the
+                # same code completed cleanly. Forcing eval here pins this
+                # recv to complete before the model(...) call's own
+                # internal traffic on the same group can begin.
+                mx.eval(_wire_batch)
+                _log(f"n={n} dspark_batch_recv POST")
 
             # ==== rank0: forward the batch through its own layers ====
             if is_rank0:
