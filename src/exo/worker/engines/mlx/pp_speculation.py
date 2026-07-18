@@ -1063,6 +1063,22 @@ def pp_chained_decode_loop(
                         pp_world_size - 1, group=pp_group,
                     )
                     mx.eval(_mtp_seed_hidden)
+                    # BUG FIX (2026-07-18, found via live test showing 0%
+                    # MTP draft acceptance despite the working single-
+                    # token path getting 70-90% with the same predictor):
+                    # this cast-back was MISSING here. The working path's
+                    # equivalent hidden-exchange recv (pp_speculative_
+                    # decode_loop, `_mtp_hidden`) explicitly casts back
+                    # from the bf16 wire dtype to the model's real compute
+                    # dtype before ever feeding it to mtp_predictor.predict().
+                    # Without this, the MTP head was silently computing on
+                    # raw bf16 input (a lossy, wrong-precision reinterpret
+                    # relative to what its weights expect), producing
+                    # numerically wrong -- but not exception-raising --
+                    # predictions on every single call.
+                    if _mtp_seed_hidden.dtype != mx.float16:
+                        from exo.worker.engines.mlx.patches.qwen3_5_moe.common import COMPUTE_DTYPE
+                        _mtp_seed_hidden = _mtp_seed_hidden.astype(COMPUTE_DTYPE)
                     _log(f"n={n} chain_hidden_recv POST")
 
             # ==== KV ROLLBACK (both ranks, deterministic given k and m) ====
