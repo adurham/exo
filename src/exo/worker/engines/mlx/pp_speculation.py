@@ -1281,6 +1281,16 @@ def pp_dspark_decode_loop(
 
     _accepted_total = 0
     _drafted_total = 0
+    # Per-position acceptance histogram (2026-07-18, decisive diagnostic
+    # per Fable consult): discriminates "healthy speculative-decode
+    # degradation curve" (position 0 high, decaying positions 1-4) from
+    # "conditioning/append_ctx bug" (position 0 ITSELF low -- can't be
+    # explained by compounding error since position 0 sees the REAL
+    # anchor token, not a guessed one). _reached[i] counts cycles that
+    # got far enough to check position i; _accepted[i] counts how many
+    # of those actually matched.
+    _pos_reached = [0] * bs
+    _pos_accepted = [0] * bs
 
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
@@ -1396,8 +1406,10 @@ def pp_dspark_decode_loop(
                     mx.eval(all_next)
                     _all_next_list = [int(v) for v in all_next.tolist()]
                     for i in range(bs):
+                        _pos_reached[i] += 1
                         if _all_next_list[i] == _draft_ids[i]:
                             accepted_ids.append(_draft_ids[i])
+                            _pos_accepted[i] += 1
                             n_accepted += 1
                         else:
                             break
@@ -1553,6 +1565,14 @@ def pp_dspark_decode_loop(
                 f"drafted tokens accepted ({_accepted_total/_drafted_total*100:.0f}%), "
                 f"block_size={bs}"
             )
+        if is_last_rank and sum(_pos_reached) > 0:
+            _hist = ", ".join(
+                f"pos{i}={_pos_accepted[i]}/{_pos_reached[i]} "
+                f"({_pos_accepted[i]/_pos_reached[i]*100:.0f}%)"
+                if _pos_reached[i] > 0 else f"pos{i}=n/a"
+                for i in range(bs)
+            )
+            logger.debug(f"PP DSpark per-position accept histogram: {_hist}")
 
 
 # ---------------------------------------------------------------------------
