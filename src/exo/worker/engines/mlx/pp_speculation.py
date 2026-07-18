@@ -1316,6 +1316,53 @@ def pp_dspark_decode_loop(
     _log(f"dspark decode loop start: max_tokens={max_tokens}, "
          f"block_size={bs if is_last_rank else '?'}")
 
+    # ── ONE-SHOT width-scaling diagnostic (2026-07-18) ──────────────────
+    # Prior profiling assumed forward cost is FLAT across batch widths
+    # 1-6 (inferred from "cycle time didn't change much whether 1 or 4
+    # tokens got accepted") -- but that inference was never actually
+    # tested in isolation, and the user correctly pushed back on treating
+    # PP's ~20 tok/s as a hard ceiling without looking harder. If width
+    # scaling is NOT flat (real width-1 forwards are meaningfully cheaper
+    # than width-6), that reopens sequence-chunked pipelining as a lever:
+    # rank0 could send a SMALLER chunk first (cheap, fast), letting rank1
+    # start on it while rank0 keeps computing the rest -- genuine
+    # cross-rank overlap within a single cycle, unlike anything tried so
+    # far. Both ranks run MATCHING widths in lockstep (required -- a
+    # width mismatch between ranks would hang the pipeline-boundary
+    # send/recv), each width tested via a real forward through this
+    # rank's own layers, then mx.eval'd for accurate timing, then
+    # trim()'d back off the cache so the real decode cycle below is
+    # completely unaffected by this test.
+    if os.environ.get("EXO_PP_DSPARK_WIDTH_SWEEP", "0") == "1":
+        _sweep_widths = [1, 2, 3, 4, 5, 6]
+        _sweep_results: dict[int, float] = {}
+        for _w in _sweep_widths:
+            _sweep_tok = mx.array([[int(y.item())] * _w], dtype=mx.int32)
+            _t0 = time.perf_counter()
+            if is_rank0:
+                _configure_layers(spec_first, spec_last,
+                                  pp_send=True, state_list=None, hidden_idx=-1)
+                with mx.stream(generation_stream):
+                    _sweep_logits = model(_sweep_tok, cache=prompt_cache)
+                    mx.eval(_sweep_logits)
+            elif is_last_rank:
+                _configure_layers(spec_first, spec_last,
+                                  pp_recv=True, pp_decode=True,
+                                  state_list=None, hidden_idx=-1)
+                with mx.stream(generation_stream):
+                    _sweep_out = model(_sweep_tok, cache=prompt_cache)
+                    mx.eval(_sweep_out)
+            _dt = time.perf_counter() - _t0
+            _sweep_results[_w] = _dt
+            for _c in prompt_cache:
+                if hasattr(_c, "trim"):
+                    _c.trim(_w)
+            _log(f"width-sweep w={_w} dt={_dt*1000:.2f}ms rank={pp_rank}")
+        logger.info(
+            f"[WIDTH SWEEP R{pp_rank}] " +
+            ", ".join(f"w={w}:{dt*1000:.2f}ms" for w, dt in _sweep_results.items())
+        )
+
     try:
         n = 0
         # rank1 drafts ONCE up front (cold start -- no previous cycle's
