@@ -1698,6 +1698,7 @@ for NODE in "${NODES[@]}"; do
     # unset/1 keeps the proven single-token pp_speculative_decode_loop
     # path (default, unchanged behavior).
     [ -n "${EXO_PP_MTP_CHAIN_K:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_MTP_CHAIN_K=$EXO_PP_MTP_CHAIN_K"
+    echo "DEBUG: EXO_PP_MTP_CHAIN_K env var value = '${EXO_PP_MTP_CHAIN_K:-UNSET}', EXO_ENV now contains: $(echo "$EXO_ENV" | grep -o 'EXO_PP_MTP_CHAIN_K=[0-9]*' || echo 'NOT FOUND')" >&2
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5
