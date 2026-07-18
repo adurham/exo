@@ -1413,6 +1413,8 @@ def pp_dspark_decode_loop(
         while n < max_tokens:
             _cycle_t0 = time.perf_counter()
             _t_after_draft = _cycle_t0  # default for rank0 (never set on that branch)
+            _t_after_verify = _cycle_t0  # default for rank0 (outlier-log safety)
+            _recv_wait_this_cycle = 0.0  # default for rank0 (outlier-log safety)
             # ==== rank1 -> rank0: fixed-shape (bs+1)-token batch ====
             # world_size is always 2 for this module (is_rank0/is_last_rank
             # exhaustive, no middle-rank case -- see module docstring),
@@ -1627,7 +1629,45 @@ def pp_dspark_decode_loop(
                         c.trim(_trim_amount)
 
             _prof_cycle_n += 1
-            _prof_total += time.perf_counter() - _cycle_t0
+            _this_cycle_dt = time.perf_counter() - _cycle_t0
+            _prof_total += _this_cycle_dt
+
+            # ── immediate outlier log (2026-07-18) ──────────────────────
+            # User observed the exo dashboard showing one node near-idle
+            # while the other was fully busy for what looked like ~10s
+            # during a live run. Checked all cycle timing across the full
+            # 50K-500K suite afterward and found nothing above ~130ms --
+            # but that check only had the PERIODIC average (every 16
+            # cycles) to go on, which would silently absorb and hide a
+            # single genuinely slow outlier cycle into its mean (e.g. one
+            # 10s cycle among 15 normal ~100ms ones averages to well under
+            # 1s/cycle, invisible in the periodic log). This closes that
+            # blind spot: log immediately, UNCONDITIONALLY (not gated by
+            # _TRACE -- a real production stall needs to be visible even
+            # when tracing isn't explicitly enabled), the instant any
+            # single cycle exceeds a generous threshold, with the full
+            # phase breakdown so the SPECIFIC stalled phase (batch
+            # exchange, rank0 forward, rank1 verify wait/forward, draft,
+            # trim exchange) is immediately identifiable from the log
+            # alone next time, rather than needing to reproduce it live.
+            if _this_cycle_dt > 1.0:
+                _outlier_msg = (
+                    f"[PP DSpark OUTLIER R{pp_rank} n={n}] cycle took "
+                    f"{_this_cycle_dt*1000:.1f}ms (>1000ms threshold) -- "
+                    f"batch_xchg={(_t_after_batch_xchg-_cycle_t0)*1000:.1f}ms "
+                    f"r0_fwd={(_t_after_r0_fwd-_t_after_batch_xchg)*1000:.1f}ms"
+                )
+                if is_last_rank:
+                    _outlier_msg += (
+                        f" r1_verify_wait={_recv_wait_this_cycle*1000:.1f}ms "
+                        f"r1_verify_fwd={(_t_after_verify-_t_after_r0_fwd-_recv_wait_this_cycle)*1000:.1f}ms "
+                        f"draft={(_t_after_draft-_t_after_verify)*1000:.1f}ms"
+                    )
+                _outlier_msg += (
+                    f" trim_xchg={(_t_after_trim_xchg-(_t_after_draft if is_last_rank else _t_after_r0_fwd))*1000:.1f}ms"
+                )
+                logger.warning(_outlier_msg)
+
             if _TRACE and _prof_cycle_n % 16 == 0:
                 _pn = _prof_cycle_n
                 logger.info(
