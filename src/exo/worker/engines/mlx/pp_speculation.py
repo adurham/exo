@@ -1268,6 +1268,18 @@ def pp_dspark_decode_loop(
     _accepted_total = 0
     _drafted_total = 0
 
+    # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
+    # above) -- added 2026-07-18 to get real per-cycle timing before deciding
+    # how to restructure the wire protocol (collapse messages / overlap
+    # drafting). Do NOT guess bottleneck location from log timestamps alone.
+    _prof_cycle_n = 0
+    _prof_batch_xchg = 0.0     # rank1->rank0 batch send/recv (message 1)
+    _prof_r0_fwd = 0.0         # rank0's forward (includes its internal hidden send)
+    _prof_r1_verify_fwd = 0.0  # rank1's verify forward (includes internal hidden recv)
+    _prof_draft = 0.0          # rank1's DSpark draft() call for next cycle
+    _prof_trim_xchg = 0.0      # rank1->rank0 trim/accept send/recv (message 2)
+    _prof_total = 0.0
+
     _log(f"dspark decode loop start: max_tokens={max_tokens}, "
          f"block_size={bs if is_last_rank else '?'}")
 
@@ -1292,6 +1304,8 @@ def pp_dspark_decode_loop(
             _drafted_total += len(_draft_ids)
 
         while n < max_tokens:
+            _cycle_t0 = time.perf_counter()
+            _t_after_draft = _cycle_t0  # default for rank0 (never set on that branch)
             # ==== rank1 -> rank0: fixed-shape (bs+1)-token batch ====
             # world_size is always 2 for this module (is_rank0/is_last_rank
             # exhaustive, no middle-rank case -- see module docstring),
@@ -1337,6 +1351,9 @@ def pp_dspark_decode_loop(
                 mx.eval(_wire_batch)
                 _log(f"n={n} dspark_batch_recv POST")
 
+            _t_after_batch_xchg = time.perf_counter()
+            _prof_batch_xchg += _t_after_batch_xchg - _cycle_t0
+
             # ==== rank0: forward the batch through its own layers ====
             if is_rank0:
                 _configure_layers(spec_first, spec_last,
@@ -1344,6 +1361,8 @@ def pp_dspark_decode_loop(
                 _batch_tok = _wire_batch.reshape(1, -1)
                 with mx.stream(generation_stream):
                     model(_batch_tok, cache=prompt_cache)
+            _t_after_r0_fwd = time.perf_counter()
+            _prof_r0_fwd += _t_after_r0_fwd - _t_after_batch_xchg
 
             # ==== rank1: recv hidden batch (existing pipeline boundary,
             # unmodified -- shape-agnostic) + continue its own forward ====
@@ -1369,6 +1388,9 @@ def pp_dspark_decode_loop(
                     bonus_token = _all_next_list[n_accepted]
                     _accepted_total += n_accepted
 
+                    _t_after_verify = time.perf_counter()
+                    _prof_r1_verify_fwd += _t_after_verify - _t_after_r0_fwd
+
                     # Commit DSpark ctx for the accepted prefix (matches TP
                     # pattern exactly: get_dspark_ctx pulls the hc-mean
                     # hiddens captured as a side effect of THIS verify
@@ -1388,6 +1410,8 @@ def pp_dspark_decode_loop(
                     )
                     mx.eval(_next_toks)
                     _draft_ids = [int(v) for v in _next_toks[0].tolist()]
+                    _t_after_draft = time.perf_counter()
+                    _prof_draft += _t_after_draft - _t_after_verify
                     for _c in _dsc:
                         _c.trim(bs)
                     _drafted_total += len(_draft_ids)
@@ -1443,6 +1467,14 @@ def pp_dspark_decode_loop(
                 bonus_token = _wire2_list[1]
                 _accepted_ids = _wire2_list[2 : 2 + _n_accepted_wire]
 
+            _t_after_trim_xchg = time.perf_counter()
+            # rank0's baseline for this phase is _t_after_r0_fwd (it has no
+            # verify/draft phases); rank1's is _t_after_draft. Both are
+            # correct "end of previous phase" markers on their own rank.
+            _prof_trim_xchg += _t_after_trim_xchg - (
+                _t_after_draft if is_last_rank else _t_after_r0_fwd
+            )
+
             # ==== KV rollback (both ranks, deterministic given bs and
             # n_accepted) ====
             _trim_amount = bs - _n_accepted_wire
@@ -1450,6 +1482,27 @@ def pp_dspark_decode_loop(
                 for c in prompt_cache:
                     if hasattr(c, "trim"):
                         c.trim(_trim_amount)
+
+            _prof_cycle_n += 1
+            _prof_total += time.perf_counter() - _cycle_t0
+            if _TRACE and _prof_cycle_n % 16 == 0:
+                _pn = _prof_cycle_n
+                logger.info(
+                    f"[PROF dspark R{pp_rank} x{_pn}] "
+                    f"batch_xchg={_prof_batch_xchg/_pn*1000:.2f}ms "
+                    f"r0_fwd={_prof_r0_fwd/_pn*1000:.2f}ms "
+                    f"r1_verify_fwd={_prof_r1_verify_fwd/_pn*1000:.2f}ms "
+                    f"draft={_prof_draft/_pn*1000:.2f}ms "
+                    f"trim_xchg={_prof_trim_xchg/_pn*1000:.2f}ms "
+                    f"cycle_total={_prof_total/_pn*1000:.2f}ms"
+                )
+                _prof_batch_xchg = 0.0
+                _prof_r0_fwd = 0.0
+                _prof_r1_verify_fwd = 0.0
+                _prof_draft = 0.0
+                _prof_trim_xchg = 0.0
+                _prof_total = 0.0
+                _prof_cycle_n = 0
 
             # ==== yield accepted tokens + bonus token ====
             # Uses _accepted_ids (correctly populated on BOTH ranks now via
