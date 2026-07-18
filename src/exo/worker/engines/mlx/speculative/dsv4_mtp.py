@@ -868,6 +868,21 @@ class DSv4MTPPredictor:
             self._cache = self.mtp_module.make_cache()
         self._active_uids = ()
 
+    @property
+    def kv_cache(self) -> Optional[Any]:
+        """Public accessor for the MTP attention's KV cache, mirroring
+        mtp_module.MTPPredictor's public `.kv_cache` attribute (the
+        Qwen3.5-style predictor). DSv4MTPPredictor keeps this as a
+        private `._cache` internally (rebuilt on every
+        reset_cache()/activate_for_uids() call, unlike the Qwen3.5
+        predictor's stable KVCache instance), but callers outside this
+        module -- e.g. pp_speculation.py's single-stream (non-batched)
+        PP decode loop, which needs to trim(1) the MTP cache after a
+        rejected draft the same way it trims the target model's prompt
+        cache -- need a stable, class-parity name to call through.
+        """
+        return self._cache
+
     def _set_fence_async(self, arm: bool) -> None:
         """Set the "cache" arming key of the c=1 async decode fence.
 
