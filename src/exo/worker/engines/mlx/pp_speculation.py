@@ -43,6 +43,17 @@ logger: "loguru.Logger" = loguru.logger
 
 _TRACE = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
 
+# Real-compute-vs-wait profiling for pp_dspark_decode_loop's r1_verify_fwd
+# phase (2026-07-18): the naive wall-clock timing around model(...) on
+# rank1 conflates "blocked waiting for rank0's hidden send" with "actual
+# rank1 compute after receiving it" -- a second opinion flagged this as
+# likely inflating the apparent verify cost. This module-level accumulator
+# lets SpecPipelineFirstLayer.__call__ (where the actual blocking recv
+# happens) report just the wait portion back up to the decode loop, which
+# subtracts it to get real compute time.
+_PROF_DSPARK_RECV_WAIT = _TRACE and os.environ.get("EXO_PP_DSPARK_PROFILE_WAIT", "1") == "1"
+_DSPARK_RECV_WAIT_ACCUM = [0.0]
+
 
 def _log(msg: str) -> None:
     if _TRACE:
@@ -118,8 +129,11 @@ class SpecPipelineFirstLayer(PipelineFirstLayer):
             x_dtype = x.dtype
             x_bf16 = x.astype(mx.bfloat16) if x_dtype != mx.bfloat16 else x
             mx.eval(x_bf16)
+            _t_recv_wait0 = time.perf_counter() if _PROF_DSPARK_RECV_WAIT else 0.0
             x = mx.distributed.recv_like(x_bf16, (self.r - 1), group=self.group)
             mx.eval(x)
+            if _PROF_DSPARK_RECV_WAIT:
+                _DSPARK_RECV_WAIT_ACCUM[0] += time.perf_counter() - _t_recv_wait0
             if x_dtype != mx.bfloat16:
                 x = x.astype(x_dtype)
             return self.original_layer(x, *args, **kwargs)
@@ -1275,7 +1289,8 @@ def pp_dspark_decode_loop(
     _prof_cycle_n = 0
     _prof_batch_xchg = 0.0     # rank1->rank0 batch send/recv (message 1)
     _prof_r0_fwd = 0.0         # rank0's forward (includes its internal hidden send)
-    _prof_r1_verify_fwd = 0.0  # rank1's verify forward (includes internal hidden recv)
+    _prof_r1_verify_wait = 0.0  # rank1 blocked waiting for rank0's hidden send
+    _prof_r1_verify_fwd = 0.0  # rank1's ACTUAL compute (wait subtracted out)
     _prof_draft = 0.0          # rank1's DSpark draft() call for next cycle
     _prof_trim_xchg = 0.0      # rank1->rank0 trim/accept send/recv (message 2)
     _prof_total = 0.0
@@ -1373,6 +1388,7 @@ def pp_dspark_decode_loop(
                 _configure_layers(spec_first, spec_last,
                                   pp_recv=True, pp_decode=True,
                                   state_list=None, hidden_idx=-1)
+                _recv_wait_before = _DSPARK_RECV_WAIT_ACCUM[0]
                 with mx.stream(generation_stream):
                     _verify_input = mx.array([[int(y.item())] + _draft_ids])
                     out = model(_verify_input, cache=prompt_cache)
@@ -1389,7 +1405,13 @@ def pp_dspark_decode_loop(
                     _accepted_total += n_accepted
 
                     _t_after_verify = time.perf_counter()
-                    _prof_r1_verify_fwd += _t_after_verify - _t_after_r0_fwd
+                    _recv_wait_this_cycle = (
+                        _DSPARK_RECV_WAIT_ACCUM[0] - _recv_wait_before
+                    )
+                    _prof_r1_verify_wait += _recv_wait_this_cycle
+                    _prof_r1_verify_fwd += (
+                        _t_after_verify - _t_after_r0_fwd - _recv_wait_this_cycle
+                    )
 
                     # Commit DSpark ctx for the accepted prefix (matches TP
                     # pattern exactly: get_dspark_ctx pulls the hc-mean
@@ -1491,6 +1513,7 @@ def pp_dspark_decode_loop(
                     f"[PROF dspark R{pp_rank} x{_pn}] "
                     f"batch_xchg={_prof_batch_xchg/_pn*1000:.2f}ms "
                     f"r0_fwd={_prof_r0_fwd/_pn*1000:.2f}ms "
+                    f"r1_verify_wait={_prof_r1_verify_wait/_pn*1000:.2f}ms "
                     f"r1_verify_fwd={_prof_r1_verify_fwd/_pn*1000:.2f}ms "
                     f"draft={_prof_draft/_pn*1000:.2f}ms "
                     f"trim_xchg={_prof_trim_xchg/_pn*1000:.2f}ms "
@@ -1498,6 +1521,7 @@ def pp_dspark_decode_loop(
                 )
                 _prof_batch_xchg = 0.0
                 _prof_r0_fwd = 0.0
+                _prof_r1_verify_wait = 0.0
                 _prof_r1_verify_fwd = 0.0
                 _prof_draft = 0.0
                 _prof_trim_xchg = 0.0
