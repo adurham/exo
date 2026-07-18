@@ -107,6 +107,9 @@ class SpecPipelineFirstLayer(PipelineFirstLayer):
         self._pp_recv: bool = False
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        import sys as _canary_sys
+        _canary_sys.stderr.write(f"[CANARY] SpecPipelineFirstLayer.__call__ ENTERED r={self.r}\n")
+        _canary_sys.stderr.flush()
         if _TRACE:
             _log(f"SpecPipelineFirstLayer.__call__ r={self.r} _pp_recv={self._pp_recv} "
                  f"is_prefill={self.is_prefill}")
@@ -143,6 +146,9 @@ class SpecPipelineLastLayer(PipelineLastLayer):
         self._hidden_idx: int = -1
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        import sys as _canary_sys
+        _canary_sys.stderr.write(f"[CANARY] SpecPipelineLastLayer.__call__ ENTERED r={self.r} s={self.s}\n")
+        _canary_sys.stderr.flush()
         if _TRACE:
             _log(f"SpecPipelineLastLayer.__call__ r={self.r} s={self.s} "
                  f"_speculative={self._speculative} _pp_send={self._pp_send} "
