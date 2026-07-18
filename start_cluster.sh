@@ -1693,6 +1693,11 @@ for NODE in "${NODES[@]}"; do
     # /tmp/dsv4_mtp_trace_rank_${rank}_pid${pid}.log. Used to
     # localize cross-rank divergence at the c=2→c=1 transition.
     [ -n "${EXO_DSV4_MTP_TRANSITION_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TRANSITION_TRACE=$EXO_DSV4_MTP_TRANSITION_TRACE"
+    # Opt-in k-token chained MTP draft + batched verify for PP mode
+    # (pp_chained_decode_loop in pp_speculation.py). k>1 enables it;
+    # unset/1 keeps the proven single-token pp_speculative_decode_loop
+    # path (default, unchanged behavior).
+    [ -n "${EXO_PP_MTP_CHAIN_K:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_MTP_CHAIN_K=$EXO_PP_MTP_CHAIN_K"
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5
