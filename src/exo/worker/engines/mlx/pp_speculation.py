@@ -1291,6 +1291,14 @@ def pp_dspark_decode_loop(
     # of those actually matched.
     _pos_reached = [0] * bs
     _pos_accepted = [0] * bs
+    # Tree-verification feasibility: at each REJECTED position, did the
+    # draft head's own rank-2 (second-highest-logit) candidate match what
+    # the real model actually picked? High hit rate -> tree verify worth
+    # building. Low -> not worth it, the draft head's ranking doesn't
+    # correlate with ground truth when it's wrong.
+    _pos_rejected_reached = [0] * bs
+    _pos_rank2_would_hit = [0] * bs
+    _corrected: mx.array | None = None
 
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
@@ -1405,6 +1413,26 @@ def pp_dspark_decode_loop(
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
                     _all_next_list = [int(v) for v in all_next.tolist()]
+                    # Tree-verification feasibility diagnostic (2026-07-18):
+                    # cheap to check since DSpark's draft() already computes
+                    # per-position logits (`_corrected`, previously discarded
+                    # after only using its argmax via `_toks`) -- no extra
+                    # forward pass needed. At each REJECTED position, check
+                    # whether the draft head's RANK-2 candidate (its own
+                    # second-highest-logit token) would have matched the
+                    # real model's actual pick. If this hit rate is high,
+                    # a 2-candidate tree verify (same flat verify cost,
+                    # confirmed via profiling) could recover many of these
+                    # rejections "for free." If low, tree verification isn't
+                    # worth building -- the draft head's own ranking doesn't
+                    # correlate with what actually gets picked when it's
+                    # wrong, so widening the tree wouldn't help.
+                    if _corrected is not None:
+                        _top2 = mx.argsort(_corrected[0], axis=-1)[:, -2]
+                        mx.eval(_top2)
+                        _top2_list = [int(v) for v in _top2.tolist()]
+                    else:
+                        _top2_list = []
                     for i in range(bs):
                         _pos_reached[i] += 1
                         if _all_next_list[i] == _draft_ids[i]:
@@ -1412,6 +1440,9 @@ def pp_dspark_decode_loop(
                             _pos_accepted[i] += 1
                             n_accepted += 1
                         else:
+                            _pos_rejected_reached[i] += 1
+                            if _top2_list and _top2_list[i] == _all_next_list[i]:
+                                _pos_rank2_would_hit[i] += 1
                             break
                     bonus_token = _all_next_list[n_accepted]
                     _accepted_total += n_accepted
@@ -1444,6 +1475,7 @@ def pp_dspark_decode_loop(
                     )
                     mx.eval(_next_toks)
                     _draft_ids = [int(v) for v in _next_toks[0].tolist()]
+                    _corrected = _next_corrected
                     _t_after_draft = time.perf_counter()
                     _prof_draft += _t_after_draft - _t_after_verify
                     for _c in _dsc:
@@ -1573,6 +1605,17 @@ def pp_dspark_decode_loop(
                 for i in range(bs)
             )
             logger.debug(f"PP DSpark per-position accept histogram: {_hist}")
+        if is_last_rank and sum(_pos_rejected_reached) > 0:
+            _tree_hist = ", ".join(
+                f"pos{i}={_pos_rank2_would_hit[i]}/{_pos_rejected_reached[i]} "
+                f"({_pos_rank2_would_hit[i]/_pos_rejected_reached[i]*100:.0f}%)"
+                if _pos_rejected_reached[i] > 0 else f"pos{i}=n/a"
+                for i in range(bs)
+            )
+            logger.debug(
+                f"PP DSpark tree-verify feasibility (rank-2 hit rate at "
+                f"rejected positions): {_tree_hist}"
+            )
 
 
 # ---------------------------------------------------------------------------
