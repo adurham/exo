@@ -1269,6 +1269,26 @@ def pp_dspark_decode_loop(
             "needs its own copy's block_size to size the wire messages)"
         )
     bs = _dspark.block_size
+    # Verify-width truncation (2026-07-18, real lever found via the width-
+    # scaling sweep above): DSpark's draft() ALWAYS computes the full
+    # block_size internally regardless (fixed ~10.6ms cost either way,
+    # can't be reduced) -- but the SEPARATE main-model batch send/forward/
+    # verify only needs to cover however many of those draft positions we
+    # actually choose to verify. The width sweep proved forward cost
+    # scales ~linearly with width, NOT flat as earlier profiling wrongly
+    # inferred (rank0 ~7.1ms/token + ~14.5ms fixed, rank1 ~7.8ms/token +
+    # ~17.7ms fixed) -- so verifying fewer, lower-value tail positions
+    # (per-position accept histogram showed positions 3-4 contribute very
+    # little expected value: 43%/46% accept-if-reached, on top of already
+    # low reach probability) trades a small amount of expected-tokens for
+    # a real reduction in wall time per cycle. Projected from the fitted
+    # cost model + measured accept histogram: verify_width=2 (commit +
+    # only the single highest-value draft position 0) projects ~21.9
+    # tok/s vs the current width=6/full-block ~17.3 tok/s -- a ~26%
+    # improvement, NOT the ~9% tree-verification would have bought for
+    # far more implementation complexity. Default matches today's
+    # behavior (verify the whole block) unless explicitly overridden.
+    vw = min(bs, int(os.environ.get("EXO_PP_DSPARK_VERIFY_WIDTH", str(bs))))
     _dsc = _dspark.make_cache() if is_last_rank else None
 
     def _dspark_sample_greedy(step_logits: mx.array, _k: int) -> mx.array:
@@ -1314,7 +1334,7 @@ def pp_dspark_decode_loop(
     _prof_total = 0.0
 
     _log(f"dspark decode loop start: max_tokens={max_tokens}, "
-         f"block_size={bs if is_last_rank else '?'}")
+         f"block_size={bs if is_last_rank else '?'}, verify_width={vw}")
 
     # ── ONE-SHOT width-scaling diagnostic (2026-07-18) ──────────────────
     # Prior profiling assumed forward cost is FLAT across batch widths
@@ -1392,9 +1412,12 @@ def pp_dspark_decode_loop(
             # so _wire_batch/_trim_amount are always set on both branches
             # below despite the type-checker's inability to prove that
             # statically across an if/elif with no else.
-            _wire_batch: mx.array = mx.zeros(bs + 1, dtype=mx.int32)
+            _wire_batch: mx.array = mx.zeros(vw, dtype=mx.int32)
             if is_last_rank:
-                _batch_ids = [int(y.item())] + _draft_ids
+                # Truncate to the verify width -- only the first vw-1 of
+                # DSpark's bs drafted positions get sent/forwarded/
+                # verified this cycle (see verify-width comment above).
+                _batch_ids = [int(y.item())] + _draft_ids[: vw - 1]
                 _wire_batch = mx.array(_batch_ids, dtype=mx.int32)
                 mx.eval(_wire_batch)
                 _log(f"n={n} dspark_batch_send PRE (rank1->0)")
@@ -1404,7 +1427,7 @@ def pp_dspark_decode_loop(
             elif is_rank0:
                 _log(f"n={n} dspark_batch_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire_batch = mx.distributed.recv_like(
-                    mx.zeros(bs + 1, dtype=mx.int32),
+                    mx.zeros(vw, dtype=mx.int32),
                     pp_world_size - 1, group=pp_group,
                 )
                 # CRITICAL (2026-07-18, found via intermittent-deadlock
@@ -1455,7 +1478,7 @@ def pp_dspark_decode_loop(
                                   state_list=None, hidden_idx=-1)
                 _recv_wait_before = _DSPARK_RECV_WAIT_ACCUM[0]
                 with mx.stream(generation_stream):
-                    _verify_input = mx.array([[int(y.item())] + _draft_ids])
+                    _verify_input = mx.array([[int(y.item())] + _draft_ids[: vw - 1]])
                     out = model(_verify_input, cache=prompt_cache)
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
@@ -1480,7 +1503,7 @@ def pp_dspark_decode_loop(
                         _top2_list = [int(v) for v in _top2.tolist()]
                     else:
                         _top2_list = []
-                    for i in range(bs):
+                    for i in range(vw - 1):
                         _pos_reached[i] += 1
                         if _all_next_list[i] == _draft_ids[i]:
                             accepted_ids.append(_draft_ids[i])
@@ -1557,7 +1580,7 @@ def pp_dspark_decode_loop(
                 _accepted_ids = accepted_ids
                 _n_accepted_wire = n_accepted
                 _bonus_wire = bonus_token if bonus_token is not None else 0
-                _padded = _accepted_ids + [-1] * (bs - len(_accepted_ids))
+                _padded = _accepted_ids + [-1] * (vw - 1 - len(_accepted_ids))
                 _wire2 = mx.array(
                     [_n_accepted_wire, _bonus_wire] + _padded, dtype=mx.int32
                 )
@@ -1570,7 +1593,7 @@ def pp_dspark_decode_loop(
             elif is_rank0:
                 _log(f"n={n} dspark_trim_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire2 = mx.distributed.recv_like(
-                    mx.zeros(2 + bs, dtype=mx.int32),
+                    mx.zeros(2 + vw - 1, dtype=mx.int32),
                     pp_world_size - 1, group=pp_group,
                 )
                 mx.eval(_wire2)
@@ -1590,7 +1613,7 @@ def pp_dspark_decode_loop(
 
             # ==== KV rollback (both ranks, deterministic given bs and
             # n_accepted) ====
-            _trim_amount = bs - _n_accepted_wire
+            _trim_amount = (vw - 1) - _n_accepted_wire
             if _trim_amount > 0:
                 for c in prompt_cache:
                     if hasattr(c, "trim"):

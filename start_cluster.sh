@@ -1706,6 +1706,11 @@ for NODE in "${NODES[@]}"; do
     # One-shot forward-width scaling diagnostic (pp_dspark_decode_loop) --
     # opt-in, off by default, no effect on production decode.
     [ -n "${EXO_PP_DSPARK_WIDTH_SWEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_WIDTH_SWEEP=$EXO_PP_DSPARK_WIDTH_SWEEP"
+    # Verify-width truncation for pp_dspark_decode_loop -- real perf lever
+    # found via the width-scaling sweep above (forward cost scales
+    # ~linearly with width, not flat). Unset = verify the whole DSpark
+    # block (unchanged default behavior).
+    [ -n "${EXO_PP_DSPARK_VERIFY_WIDTH:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_WIDTH=$EXO_PP_DSPARK_VERIFY_WIDTH"
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5
