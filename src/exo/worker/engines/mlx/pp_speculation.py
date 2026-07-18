@@ -960,28 +960,59 @@ def pp_chained_decode_loop(
                     # speculative-decoding verify: accept the longest
                     # matching PREFIX, starting from i=0.
                     lp_all = out - mx.logsumexp(out, axis=-1, keepdims=True)
-                    for i in range(k - 1):
-                        if draft_ids[i] < 0:
-                            break  # sentinel: no real draft at this position
-                        pos_sampled = sampler(lp_all[:, i, :])
-                        mx.eval(pos_sampled)
-                        real_tok = int(pos_sampled.item())
-                        if real_tok == draft_ids[i]:
-                            accepted_ids.append(real_tok)
-                            m += 1
-                        else:
-                            # Reject: this position's REAL sampled token
-                            # becomes the bonus token (legitimate --
-                            # rank1 already computed real logits here).
-                            bonus_token = real_tok
-                            break
-                    else:
-                        # All k-1 drafts accepted -- bonus token comes
-                        # from position k-1 (the last real forward
-                        # position, predicting what follows d_{k-1}).
-                        _bonus_sampled = sampler(lp_all[:, k - 1, :])
+                    if draft_ids[0] < 0:
+                        # No real draft available at all (cold start --
+                        # _mtp_seed_hidden was None going into this
+                        # iteration, e.g. n=0 before rank0's first chain
+                        # has anything to seed from). Fall back to a
+                        # plain single-token forward-and-sample at
+                        # position 0 (predicting what follows `y`) so
+                        # this iteration still makes real progress
+                        # instead of silently producing zero accepted +
+                        # zero bonus tokens forever. BUG (2026-07-18,
+                        # found via live test): the original code just
+                        # `break`-ed here with bonus_token left at its
+                        # None default, m=0, accepted_ids=[] -- meaning
+                        # NOTHING was ever yielded and `n` never
+                        # advanced, an infinite no-progress loop on the
+                        # very first iteration every single time.
+                        _bonus_sampled = sampler(lp_all[:, 0, :])
                         mx.eval(_bonus_sampled)
                         bonus_token = int(_bonus_sampled.item())
+                    else:
+                        for i in range(k - 1):
+                            if draft_ids[i] < 0:
+                                # Chain ran short mid-way (rare: an
+                                # exception inside _mtp_chain_draft
+                                # truncated it below k-1). Position i's
+                                # logits are still real (the forward ran
+                                # over the full padded batch) -- sample
+                                # here rather than silently stopping with
+                                # no bonus token, same reasoning as the
+                                # n=0 cold-start case above.
+                                _bonus_sampled = sampler(lp_all[:, i, :])
+                                mx.eval(_bonus_sampled)
+                                bonus_token = int(_bonus_sampled.item())
+                                break
+                            pos_sampled = sampler(lp_all[:, i, :])
+                            mx.eval(pos_sampled)
+                            real_tok = int(pos_sampled.item())
+                            if real_tok == draft_ids[i]:
+                                accepted_ids.append(real_tok)
+                                m += 1
+                            else:
+                                # Reject: this position's REAL sampled token
+                                # becomes the bonus token (legitimate --
+                                # rank1 already computed real logits here).
+                                bonus_token = real_tok
+                                break
+                        else:
+                            # All k-1 drafts accepted -- bonus token comes
+                            # from position k-1 (the last real forward
+                            # position, predicting what follows d_{k-1}).
+                            _bonus_sampled = sampler(lp_all[:, k - 1, :])
+                            mx.eval(_bonus_sampled)
+                            bonus_token = int(_bonus_sampled.item())
                     _pn = _captured.get('pre_norm')
                     # Seed hidden for rank0's NEXT chain: the pre-norm
                     # hidden at whichever position corresponds to the
