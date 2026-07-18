@@ -1703,6 +1703,9 @@ for NODE in "${NODES[@]}"; do
     # this flag alone just selects it as the PP decode loop when both are
     # set. Highest priority in batch_generate.py's dispatch when available.
     [ -n "${EXO_PP_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK=$EXO_PP_DSPARK"
+    # One-shot forward-width scaling diagnostic (pp_dspark_decode_loop) --
+    # opt-in, off by default, no effect on production decode.
+    [ -n "${EXO_PP_DSPARK_WIDTH_SWEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_WIDTH_SWEEP=$EXO_PP_DSPARK_WIDTH_SWEEP"
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5
