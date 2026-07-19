@@ -225,17 +225,20 @@ class TestRadixTrieStorage:
         third = mx.array([50, 51, 52, 53, 54, 55, 56], dtype=mx.int32)
 
         id_interactive = cache.add_kv_cache(
-            interactive, _fake_kv_cache(num_layers=2, num_tokens=7),
+            interactive,
+            _fake_kv_cache(num_layers=2, num_tokens=7),
             low_priority=False,
         )
         id_background = cache.add_kv_cache(
-            background, _fake_kv_cache(num_layers=2, num_tokens=7),
+            background,
+            _fake_kv_cache(num_layers=2, num_tokens=7),
             low_priority=True,
         )
         # Adding a third leaf forces ONE eviction (cap=2). LRU alone would pick
         # the interactive leaf (oldest); priority must pick the background leaf.
         cache.add_kv_cache(
-            third, _fake_kv_cache(num_layers=2, num_tokens=7),
+            third,
+            _fake_kv_cache(num_layers=2, num_tokens=7),
             low_priority=False,
         )
 
@@ -275,8 +278,12 @@ class TestRadixTrieStorage:
         # Continue the same conversation but tagged low_priority this turn.
         conv2 = mx.array([1, 2, 3, 4, 5, 10, 11, 12, 13], dtype=mx.int32)
         cache.update_kv_cache(
-            leaf_id, conv2, _fake_kv_cache(num_layers=2, num_tokens=9),
-            snapshots=None, restore_pos=7, low_priority=True,
+            leaf_id,
+            conv2,
+            _fake_kv_cache(num_layers=2, num_tokens=9),
+            snapshots=None,
+            restore_pos=7,
+            low_priority=True,
         )
         assert cache._leaves[leaf_id].low_priority is True  # pyright: ignore[reportPrivateUsage]
 
@@ -294,16 +301,19 @@ class TestRadixTrieStorage:
         third = mx.array([50, 51, 52, 53, 54, 55, 56], dtype=mx.int32)
 
         id_protected = cache.add_kv_cache(
-            protected, _fake_kv_cache(num_layers=2, num_tokens=7),
+            protected,
+            _fake_kv_cache(num_layers=2, num_tokens=7),
             high_priority=True,
         )
         cache.add_kv_cache(
-            untagged, _fake_kv_cache(num_layers=2, num_tokens=7),
+            untagged,
+            _fake_kv_cache(num_layers=2, num_tokens=7),
         )
         # cap=2; adding a third forces ONE eviction. LRU alone would pick the
         # protected leaf (oldest); priority must pick the untagged normal leaf.
         cache.add_kv_cache(
-            third, _fake_kv_cache(num_layers=2, num_tokens=7),
+            third,
+            _fake_kv_cache(num_layers=2, num_tokens=7),
         )
 
         assert id_protected in cache.prompts, (
@@ -343,7 +353,9 @@ class TestRadixTrieStorage:
             mx.array([50, 51, 52, 53, 54, 55, 56], dtype=mx.int32),
             _fake_kv_cache(num_layers=2, num_tokens=7),
         )
-        assert id_normal not in cache.prompts, "normal should evict before high_priority"
+        assert id_normal not in cache.prompts, (
+            "normal should evict before high_priority"
+        )
         assert id_high in cache.prompts, "high_priority must survive longest"
 
     def test_high_priority_evicted_when_only_class_remaining(self):
@@ -373,8 +385,12 @@ class TestRadixTrieStorage:
         # Continue the same conversation, now tagged high_priority.
         conv2 = mx.array([1, 2, 3, 4, 5, 10, 11, 12, 13], dtype=mx.int32)
         cache.update_kv_cache(
-            leaf_id, conv2, _fake_kv_cache(num_layers=2, num_tokens=9),
-            snapshots=None, restore_pos=7, high_priority=True,
+            leaf_id,
+            conv2,
+            _fake_kv_cache(num_layers=2, num_tokens=9),
+            snapshots=None,
+            restore_pos=7,
+            high_priority=True,
         )
         assert cache._leaves[leaf_id].high_priority is True  # pyright: ignore[reportPrivateUsage]
 
@@ -410,9 +426,7 @@ class TestRadixTrieStorage:
         cache._active_leaf_id = leaf_id  # pyright: ignore[reportPrivateUsage]
 
         # Peg memory above threshold so the pressure loop wants to evict.
-        monkeypatch.setattr(
-            cache_mod, "get_memory_used_percentage", lambda: 0.99
-        )
+        monkeypatch.setattr(cache_mod, "get_memory_used_percentage", lambda: 0.99)
         # Also stub mx.clear_cache (no-op) so the test doesn't depend on real
         # Metal buffer reclamation changing the patched pressure value.
         monkeypatch.setattr(cache_mod.mx, "clear_cache", lambda: None)
@@ -444,9 +458,7 @@ class TestRadixTrieStorage:
 
         # Pressure stays high so the loop evicts until only the protected
         # active leaf remains, then stops (can't evict the active one).
-        monkeypatch.setattr(
-            cache_mod, "get_memory_used_percentage", lambda: 0.99
-        )
+        monkeypatch.setattr(cache_mod, "get_memory_used_percentage", lambda: 0.99)
         monkeypatch.setattr(cache_mod.mx, "clear_cache", lambda: None)
 
         cache._evict_if_needed(reserve_slot=False)  # pyright: ignore[reportPrivateUsage]
@@ -460,9 +472,7 @@ class TestRadixTrieStorage:
         the stale marker first."""
         cache = KVPrefixCache(None)
         tokens = mx.array([1, 2, 3, 4, 5, 6], dtype=mx.int32)
-        leaf_id = cache.add_kv_cache(
-            tokens, _fake_kv_cache(num_layers=2, num_tokens=6)
-        )
+        leaf_id = cache.add_kv_cache(tokens, _fake_kv_cache(num_layers=2, num_tokens=6))
         # add does not mark active.
         assert cache._active_leaf_id is None  # pyright: ignore[reportPrivateUsage]
         # A continuing-turn lookup that shares the prefix marks it active.
@@ -531,9 +541,7 @@ class TestRadixTrieStorage:
         """
         cache = KVPrefixCache(None)
         tokens_a = mx.array([1, 2, 3, 4, 5], dtype=mx.int32)
-        id_c = cache.add_kv_cache(
-            tokens_a, _fake_kv_cache(num_layers=2, num_tokens=5)
-        )
+        id_c = cache.add_kv_cache(tokens_a, _fake_kv_cache(num_layers=2, num_tokens=5))
         tokens_b = mx.array([9, 9, 9, 1, 2, 3], dtype=mx.int32)
         cache.update_kv_cache(
             leaf_id=id_c,
@@ -1195,7 +1203,7 @@ class TestSpacedSnapshotRetention:
         tips = [106670, 107556, 108246, 109787, 111631, 112354, 112639, 112873]
         out = _select_spaced_snapshots([_snap(t) for t in tips], keep=4)
         depths = [s.token_count for s in out]
-        assert depths[0] == 106670, depths   # shallowest always kept
+        assert depths[0] == 106670, depths  # shallowest always kept
         assert depths[-1] == 112873, depths  # deepest always kept
         assert len(depths) == 4
         assert depths == sorted(set(depths))
@@ -1230,7 +1238,7 @@ class TestSpacedSnapshotRetention:
         snaps = [_snap(t) for t in (1000, 1100, 1200, 20000, 20100)]
         out = _select_spaced_snapshots(snaps, keep=4)
         assert len(out) == 4
-        assert out[0].token_count == 1000   # shallowest
+        assert out[0].token_count == 1000  # shallowest
         assert out[-1].token_count == 20100  # deepest
 
     def test_keep_one_returns_deepest(self):
@@ -1292,9 +1300,7 @@ class TestStrictSnapshotRestore:
         )
 
         # A longer prompt sharing the first 6 tokens (chat-header-like).
-        new_prompt = mx.array(
-            donor_tokens[:6] + list(range(100, 163)), dtype=mx.int32
-        )
+        new_prompt = mx.array(donor_tokens[:6] + list(range(100, 163)), dtype=mx.int32)
         model = MagicMock()
         cache, remaining, leaf_id, is_exact = prefix_cache.get_kv_cache(
             model, new_prompt
@@ -1313,10 +1319,7 @@ class TestStrictSnapshotRestore:
         donor_tokens = list(range(1, 13))
         donor_cache = self._short_session_cache(len(donor_tokens))
         # Hand-build a snapshot WITH per-layer states at depth 6.
-        states = [
-            CacheList(self._rotating(6), PoolingCache(128))
-            for _ in donor_cache
-        ]
+        states = [CacheList(self._rotating(6), PoolingCache(128)) for _ in donor_cache]
         snap = CacheSnapshot(states=states, token_count=6)
         prefix_cache.add_kv_cache(
             mx.array(donor_tokens, dtype=mx.int32),
@@ -1324,9 +1327,7 @@ class TestStrictSnapshotRestore:
             ssm_snapshots=[snap],
         )
 
-        new_prompt = mx.array(
-            donor_tokens[:6] + list(range(100, 163)), dtype=mx.int32
-        )
+        new_prompt = mx.array(donor_tokens[:6] + list(range(100, 163)), dtype=mx.int32)
         model = MagicMock()
         cache, remaining, leaf_id, is_exact = prefix_cache.get_kv_cache(
             model, new_prompt
@@ -1338,3 +1339,91 @@ class TestStrictSnapshotRestore:
         for layer in cache:
             if isinstance(layer, CacheList):
                 assert layer.caches[0].offset == 6
+
+
+class TestEvictionTimingInstrumentation:
+    """EXO_CACHE_EVICT_TIMING_LOG=1: verifies the timing instrumentation
+    around _evict_if_needed / get_memory_used_percentage / add_kv_cache
+    accumulates correctly, emits the expected [CACHE_EVICT_TIMING] tags,
+    and stays silent when disabled.
+    """
+
+    @pytest.fixture
+    def caplog(self, caplog: pytest.LogCaptureFixture):
+        # cache.py logs via loguru, which does not propagate to stdlib
+        # `logging` (and therefore not to pytest's caplog) by default.
+        # This test module's directory isn't under exo.shared.tests, which
+        # is the only place that bridge is installed globally, so bridge it
+        # locally for this class -- same pattern as
+        # exo/shared/tests/conftest.py's caplog override.
+        from loguru import logger
+
+        handler_id = logger.add(
+            caplog.handler,
+            format="{message}",
+            level=0,
+            filter=lambda record: record["level"].no >= caplog.handler.level,
+        )
+        yield caplog
+        logger.remove(handler_id)
+
+    def _reload_cache_with_env(self, monkeypatch, **env):
+        import importlib
+
+        import exo.worker.engines.mlx.cache as cache_mod
+
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        return importlib.reload(cache_mod)
+
+    def test_disabled_by_default_no_log_lines(self, monkeypatch, caplog):
+        cache_mod = self._reload_cache_with_env(monkeypatch)
+        assert cache_mod._CACHE_EVICT_TIMING_LOG is False
+        c = cache_mod.KVPrefixCache(None, max_sessions=2)
+        with caplog.at_level("INFO"):
+            for i in range(3):
+                toks = mx.array([1, 2, 3, i + 10], dtype=mx.int32)
+                c.add_kv_cache(toks, _fake_kv_cache(num_layers=1, num_tokens=4))
+        assert not any("[CACHE_EVICT_TIMING]" in rec.message for rec in caplog.records)
+        assert c._evict_timing is None
+        self._reload_cache_with_env(monkeypatch)
+
+    def test_enabled_emits_evict_summary_and_add_kv_cache(self, monkeypatch, caplog):
+        cache_mod = self._reload_cache_with_env(
+            monkeypatch,
+            EXO_CACHE_EVICT_TIMING_LOG="1",
+            EXO_CACHE_EVICT_TIMING_MS="0",
+        )
+        assert cache_mod._CACHE_EVICT_TIMING_LOG is True
+        c = cache_mod.KVPrefixCache(None, max_sessions=2)
+        with caplog.at_level("INFO"):
+            for i in range(3):
+                toks = mx.array([1, 2, 3, i + 10], dtype=mx.int32)
+                c.add_kv_cache(toks, _fake_kv_cache(num_layers=1, num_tokens=4))
+        msgs = [r.message for r in caplog.records]
+        evict_summaries = [m for m in msgs if "[CACHE_EVICT_TIMING] evict_summary" in m]
+        add_lines = [m for m in msgs if "[CACHE_EVICT_TIMING] add_kv_cache" in m]
+        assert len(evict_summaries) >= 1, msgs
+        assert len(add_lines) >= 2, msgs
+        assert any("get_mem_calls=" in m for m in evict_summaries)
+        assert c._evict_timing is None
+        self._reload_cache_with_env(monkeypatch)
+
+    def test_get_mem_pct_accumulates_into_evict_ctx(self, monkeypatch):
+        cache_mod = self._reload_cache_with_env(
+            monkeypatch,
+            EXO_CACHE_EVICT_TIMING_LOG="1",
+            EXO_CACHE_EVICT_TIMING_MS="0",
+        )
+        c = cache_mod.KVPrefixCache(None)
+        ctx = cache_mod._EvictTimingCtx()
+        c._evict_timing = ctx
+        for _ in range(5):
+            _ = c.get_memory_used_percentage()
+        assert ctx.get_mem_calls == 5
+        assert ctx.get_mem_total_s >= 0.0
+        assert ctx.get_mem_local_total_s >= 0.0
+        # group=None path: allgather contributes zero.
+        assert ctx.get_mem_allgather_total_s == 0.0
+        c._evict_timing = None
+        self._reload_cache_with_env(monkeypatch)

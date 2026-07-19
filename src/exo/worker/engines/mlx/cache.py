@@ -1,5 +1,6 @@
 import gc
 import os
+import time
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -79,15 +80,67 @@ _PREFIX_CACHE_TRACE = bool(int(os.environ.get("EXO_PREFIX_CACHE_TRACE", "0")))
 # the immediately-preceding turn's, with O(1) memory.
 _LEAF_SNAPSHOT_RETENTION = int(os.environ.get("EXO_LEAF_SNAPSHOT_RETENTION", "4"))
 
+# ── Cache-eviction timing instrumentation ─────────────────────────────────────
+#
+# When 1, KVPrefixCache._evict_if_needed / get_memory_used_percentage /
+# add_kv_cache emit structured `[CACHE_EVICT_TIMING]` lines that pin down
+# where the multi-hundred-second stalls observed on the DSv4-Flash PP cluster
+# (2026-07-19) are actually spent. Off by default; when off the only per-call
+# overhead is a single dict lookup + `if False`.
+#
+# Emitted tags (all grep-able):
+#   [CACHE_EVICT_TIMING] get_mem_pct  — one line per slow call to
+#       KVPrefixCache.get_memory_used_percentage (>= EXO_CACHE_EVICT_TIMING_MS,
+#       default 50ms) so the local-psutil vs. all_gather split is visible.
+#   [CACHE_EVICT_TIMING] evict_summary — one line per _evict_if_needed call:
+#       total wall-time, # of get_memory_used_percentage calls, # of leaves
+#       evicted, leaves/total_bytes before and after, and time spent inside
+#       mx.clear_cache() + gc.collect() so we can tell whether the stall is
+#       the psutil poll, the all_gather rendezvous, the buffer-pool reclaim,
+#       or the eviction loop itself.
+#   [CACHE_EVICT_TIMING] add_kv_cache — one line per add_kv_cache call
+#       (only when the enclosed _evict_if_needed was slow) giving the total
+#       add_kv_cache wall-time and the prompt length, so cost can be
+#       correlated with cache scale.
+_CACHE_EVICT_TIMING_LOG = bool(int(os.environ.get("EXO_CACHE_EVICT_TIMING_LOG", "0")))
+_CACHE_EVICT_TIMING_MS = float(os.environ.get("EXO_CACHE_EVICT_TIMING_MS", "50"))
+
+
+class _EvictTimingCtx:
+    """Per-_evict_if_needed accumulator. Reset at method entry, read at exit.
+
+    Kept as a mutable instance attribute (rather than thread-local) because
+    KVPrefixCache calls are already serialized by the runner's request lock
+    and the surrounding batch-generator loop; a fresh context per call keeps
+    the accounting scope crisp.
+    """
+
+    __slots__ = (
+        "get_mem_calls",
+        "get_mem_total_s",
+        "get_mem_local_total_s",
+        "get_mem_allgather_total_s",
+        "clear_cache_total_s",
+        "gc_total_s",
+        "evictions",
+    )
+
+    def __init__(self) -> None:
+        self.get_mem_calls: int = 0
+        self.get_mem_total_s: float = 0.0
+        self.get_mem_local_total_s: float = 0.0
+        self.get_mem_allgather_total_s: float = 0.0
+        self.clear_cache_total_s: float = 0.0
+        self.gc_total_s: float = 0.0
+        self.evictions: int = 0
+
 
 class CacheSnapshot:
     """Snapshot of states at a known token position."""
 
     def __init__(
         self,
-        states: list[
-            RotatingKVCache | ArraysCache | CacheList | None
-        ],
+        states: list[RotatingKVCache | ArraysCache | CacheList | None],
         token_count: int,
     ):
         self.states = states
@@ -177,7 +230,9 @@ def _copy_pooling_cache(pc: "PoolingCache") -> "PoolingCache":
     copy.remainder = pc.remainder
     copy._pool_offset = pc._pool_offset
     copy._pending_offset_bump = getattr(pc, "_pending_offset_bump", 0)
-    copy._pool_storage = _detached_copy(pc._pool_storage) if pc._pool_storage is not None else None
+    copy._pool_storage = (
+        _detached_copy(pc._pool_storage) if pc._pool_storage is not None else None
+    )
     copy.buf_kv = _detached_copy(pc.buf_kv) if pc.buf_kv is not None else None
     copy.buf_gate = _detached_copy(pc.buf_gate) if pc.buf_gate is not None else None
     return copy
@@ -223,9 +278,7 @@ def copy_snapshot_entry(
 
 
 def snapshot_ssm_states(cache: KVCacheType) -> CacheSnapshot:
-    states: list[
-        RotatingKVCache | ArraysCache | CacheList | None
-    ] = []
+    states: list[RotatingKVCache | ArraysCache | CacheList | None] = []
     for c in cache:
         if isinstance(c, ArraysCache):
             states.append(_copy_arrays_cache(c))
@@ -597,6 +650,11 @@ class KVPrefixCache:
         # can opt in (positive int), opt out (0), or defer to the global env
         # (None) independently of siblings on the same process.
         self._kv_cache_bits = kv_cache_bits
+        # Populated only while an _evict_if_needed call is in flight (and only
+        # when EXO_CACHE_EVICT_TIMING_LOG=1). get_memory_used_percentage
+        # checks `is not None` to attribute its wall-time to the enclosing
+        # eviction call. See _EvictTimingCtx docstring.
+        self._evict_timing: _EvictTimingCtx | None = None
 
     def _trace(self, msg: str) -> None:
         if not _PREFIX_CACHE_TRACE:
@@ -654,7 +712,10 @@ class KVPrefixCache:
 
         Returns the newly assigned leaf id.
         """
+        timing_on = _CACHE_EVICT_TIMING_LOG
+        _t_add_start = time.perf_counter() if timing_on else 0.0
         self._evict_if_needed()
+        _t_after_evict = time.perf_counter() if timing_on else 0.0
 
         # Measure how much of this new session already exists in the trie so we
         # can see cross-session dedup in the logs.
@@ -702,6 +763,20 @@ class KVPrefixCache:
             f"[shared_prefix={shared_depth} tok ({share_pct}%), unique={unique} tok, "
             f"trie_leaves={len(self._leaves)}, trie_bytes={self._total_bytes()}]"
         )
+        if timing_on:
+            _t_add_end = time.perf_counter()
+            evict_ms = (_t_after_evict - _t_add_start) * 1000.0
+            total_ms = (_t_add_end - _t_add_start) * 1000.0
+            if total_ms >= _CACHE_EVICT_TIMING_MS:
+                logger.info(
+                    f"[CACHE_EVICT_TIMING] add_kv_cache "
+                    f"total_ms={total_ms:.1f} "
+                    f"evict_ms={evict_ms:.1f} "
+                    f"insert_ms={total_ms - evict_ms:.1f} "
+                    f"prompt_tokens={total_len} "
+                    f"trie_leaves={len(self._leaves)} "
+                    f"trie_bytes={self._total_bytes()}"
+                )
         return leaf_id
 
     def update_kv_cache(
@@ -1006,7 +1081,11 @@ class KVPrefixCache:
                 f"prompt={self._fingerprint(prompt_tokens)}"
             )
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
+                make_kv_cache(
+                    model,
+                    max_kv_size=self._max_kv_tokens,
+                    kv_cache_bits=self._kv_cache_bits,
+                ),
                 prompt_tokens,
                 None,
                 False,
@@ -1020,7 +1099,11 @@ class KVPrefixCache:
         if donor_leaf is None:
             # Shouldn't happen: every node has ref_count > 0 ⇒ at least one leaf.
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
+                make_kv_cache(
+                    model,
+                    max_kv_size=self._max_kv_tokens,
+                    kv_cache_bits=self._kv_cache_bits,
+                ),
                 prompt_tokens,
                 None,
                 False,
@@ -1042,7 +1125,11 @@ class KVPrefixCache:
         if has_non_sliceable and snapshot is None:
             # No usable snapshot for SSM/rotating layers — force a full prefill.
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
+                make_kv_cache(
+                    model,
+                    max_kv_size=self._max_kv_tokens,
+                    kv_cache_bits=self._kv_cache_bits,
+                ),
                 prompt_tokens,
                 None,
                 False,
@@ -1065,7 +1152,11 @@ class KVPrefixCache:
                 f"restore_pos={restore_pos}"
             )
             return (
-                make_kv_cache(model, max_kv_size=self._max_kv_tokens, kv_cache_bits=self._kv_cache_bits),
+                make_kv_cache(
+                    model,
+                    max_kv_size=self._max_kv_tokens,
+                    kv_cache_bits=self._kv_cache_bits,
+                ),
                 prompt_tokens,
                 None,
                 False,
@@ -1089,9 +1180,18 @@ class KVPrefixCache:
         return materialized, remaining, donor_leaf.leaf_id, is_exact
 
     def get_memory_used_percentage(self) -> float:
+        timing_on = _CACHE_EVICT_TIMING_LOG
+        _t0 = time.perf_counter() if timing_on else 0.0
         local_pressure: float = get_memory_used_percentage()
+        _t_local = time.perf_counter() if timing_on else 0.0
 
         if self._group is None:
+            if timing_on:
+                self._record_get_mem_timing(
+                    total_s=_t_local - _t0,
+                    local_s=_t_local - _t0,
+                    allgather_s=0.0,
+                )
             return local_pressure
 
         # Control-plane sync on the coord subgroup: keeps the model group's
@@ -1102,7 +1202,40 @@ class KVPrefixCache:
             group=get_coord_group(self._group),
         )
         max_pressure = float(mx.max(all_pressure).item())
+        if timing_on:
+            _t_end = time.perf_counter()
+            self._record_get_mem_timing(
+                total_s=_t_end - _t0,
+                local_s=_t_local - _t0,
+                allgather_s=_t_end - _t_local,
+            )
         return max_pressure
+
+    def _record_get_mem_timing(
+        self, *, total_s: float, local_s: float, allgather_s: float
+    ) -> None:
+        """Attribute one get_memory_used_percentage call to timing state.
+
+        Called only when EXO_CACHE_EVICT_TIMING_LOG=1. Accumulates into the
+        enclosing _evict_if_needed context (if any) AND emits a standalone
+        `[CACHE_EVICT_TIMING] get_mem_pct` line when the call itself exceeded
+        EXO_CACHE_EVICT_TIMING_MS (default 50ms) so callers OUTSIDE an
+        eviction (rare) are still visible.
+        """
+        ctx = self._evict_timing
+        if ctx is not None:
+            ctx.get_mem_calls += 1
+            ctx.get_mem_total_s += total_s
+            ctx.get_mem_local_total_s += local_s
+            ctx.get_mem_allgather_total_s += allgather_s
+        if total_s * 1000.0 >= _CACHE_EVICT_TIMING_MS:
+            logger.info(
+                f"[CACHE_EVICT_TIMING] get_mem_pct "
+                f"total_ms={total_s * 1000.0:.1f} "
+                f"local_psutil_ms={local_s * 1000.0:.1f} "
+                f"allgather_ms={allgather_s * 1000.0:.1f} "
+                f"in_evict={ctx is not None}"
+            )
 
     @staticmethod
     def _validate_media_match(
@@ -1582,36 +1715,96 @@ class KVPrefixCache:
         """
         if not self._leaves:
             return
-        evicted_any = False
-        # Memory-pressure eviction must reflect RESIDENT memory (model weights +
-        # cached KV), not the transient prefill working set. This method runs at
-        # the start of add_kv_cache, right after a prefill completed — so MLX's
-        # buffer pool is still holding that prefill's scratch (attention scores,
-        # index/topk buffers, MTP draft tensors) which is about to be freed.
-        # Measuring psutil total memory at that peak made us evict a leaf that
-        # fits fine once the scratch releases — the re-prefill loop. Reclaim the
-        # pool FIRST so get_memory_used_percentage() sees true resident pressure.
-        # (Previously this clear ran only AFTER eviction, i.e. too late.)
-        mx.clear_cache()
-        while self._leaves and self.get_memory_used_percentage() > _MEMORY_THRESHOLD:
-            if not self._evict_lru_once("memory pressure"):
-                break
-            evicted_any = True
-        if self._max_sessions is not None:
-            limit = self._max_sessions - (1 if reserve_slot else 0)
-            limit = max(limit, 0)
-            while len(self._leaves) > limit:
-                if not self._evict_lru_once(f"session cap {self._max_sessions}"):
+        timing_on = _CACHE_EVICT_TIMING_LOG
+        if timing_on:
+            ctx = _EvictTimingCtx()
+            self._evict_timing = ctx
+            _t_evict_start = time.perf_counter()
+            leaves_before = len(self._leaves)
+            bytes_before = self._total_bytes()
+        else:
+            ctx = None
+            _t_evict_start = 0.0
+            leaves_before = 0
+            bytes_before = 0
+        try:
+            evicted_any = False
+            # Memory-pressure eviction must reflect RESIDENT memory (model weights +
+            # cached KV), not the transient prefill working set. This method runs at
+            # the start of add_kv_cache, right after a prefill completed — so MLX's
+            # buffer pool is still holding that prefill's scratch (attention scores,
+            # index/topk buffers, MTP draft tensors) which is about to be freed.
+            # Measuring psutil total memory at that peak made us evict a leaf that
+            # fits fine once the scratch releases — the re-prefill loop. Reclaim the
+            # pool FIRST so get_memory_used_percentage() sees true resident pressure.
+            # (Previously this clear ran only AFTER eviction, i.e. too late.)
+            if timing_on:
+                _t_cc = time.perf_counter()
+                mx.clear_cache()
+                assert ctx is not None
+                ctx.clear_cache_total_s += time.perf_counter() - _t_cc
+            else:
+                mx.clear_cache()
+            while (
+                self._leaves and self.get_memory_used_percentage() > _MEMORY_THRESHOLD
+            ):
+                if not self._evict_lru_once("memory pressure"):
                     break
+                if ctx is not None:
+                    ctx.evictions += 1
                 evicted_any = True
-        if self._max_bytes is not None:
-            while self._leaves and self._total_bytes() > self._max_bytes:
-                if not self._evict_lru_once(f"byte cap {self._max_bytes}"):
-                    break
-                evicted_any = True
-        if evicted_any:
-            gc.collect()
-            mx.clear_cache()
+            if self._max_sessions is not None:
+                limit = self._max_sessions - (1 if reserve_slot else 0)
+                limit = max(limit, 0)
+                while len(self._leaves) > limit:
+                    if not self._evict_lru_once(f"session cap {self._max_sessions}"):
+                        break
+                    if ctx is not None:
+                        ctx.evictions += 1
+                    evicted_any = True
+            if self._max_bytes is not None:
+                while self._leaves and self._total_bytes() > self._max_bytes:
+                    if not self._evict_lru_once(f"byte cap {self._max_bytes}"):
+                        break
+                    if ctx is not None:
+                        ctx.evictions += 1
+                    evicted_any = True
+            if evicted_any:
+                if timing_on:
+                    assert ctx is not None
+                    _t_gc = time.perf_counter()
+                    gc.collect()
+                    ctx.gc_total_s += time.perf_counter() - _t_gc
+                    _t_cc = time.perf_counter()
+                    mx.clear_cache()
+                    ctx.clear_cache_total_s += time.perf_counter() - _t_cc
+                else:
+                    gc.collect()
+                    mx.clear_cache()
+        finally:
+            if timing_on:
+                assert ctx is not None
+                total_s = time.perf_counter() - _t_evict_start
+                # Emit the summary line only for calls that actually cost
+                # something; otherwise noise drowns the interesting stalls.
+                if total_s * 1000.0 >= _CACHE_EVICT_TIMING_MS:
+                    leaves_after = len(self._leaves)
+                    bytes_after = self._total_bytes()
+                    logger.info(
+                        f"[CACHE_EVICT_TIMING] evict_summary "
+                        f"total_ms={total_s * 1000.0:.1f} "
+                        f"get_mem_calls={ctx.get_mem_calls} "
+                        f"get_mem_total_ms={ctx.get_mem_total_s * 1000.0:.1f} "
+                        f"get_mem_local_ms={ctx.get_mem_local_total_s * 1000.0:.1f} "
+                        f"get_mem_allgather_ms={ctx.get_mem_allgather_total_s * 1000.0:.1f} "
+                        f"clear_cache_ms={ctx.clear_cache_total_s * 1000.0:.1f} "
+                        f"gc_collect_ms={ctx.gc_total_s * 1000.0:.1f} "
+                        f"evictions={ctx.evictions} "
+                        f"leaves_before={leaves_before} leaves_after={leaves_after} "
+                        f"bytes_before={bytes_before} bytes_after={bytes_after} "
+                        f"reserve_slot={reserve_slot}"
+                    )
+                self._evict_timing = None
 
 
 # ── Module-level helpers used by the trie ────────────────────────────────────
@@ -1905,11 +2098,7 @@ def encode_prompt(tokenizer: TokenizerWrapper, prompt: str) -> mx.array:
 
 
 def _entry_length(
-    c: KVCache
-    | RotatingKVCache
-    | QuantizedKVCache
-    | ArraysCache
-    | CacheList,
+    c: KVCache | RotatingKVCache | QuantizedKVCache | ArraysCache | CacheList,
 ) -> int:
     # Use .offset attribute which KVCache types have (len() not implemented in older QuantizedKVCache).
     if hasattr(c, "offset"):
