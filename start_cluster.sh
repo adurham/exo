@@ -1295,6 +1295,9 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_ROUTE_HIST_DECODE_ONLY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST_DECODE_ONLY=$EXO_DSV4_ROUTE_HIST_DECODE_ONLY"
     [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
     [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
+    # One-shot decode-step top-k overlap diagnostic (Indexer, deepseek_v4.py)
+    # -- opt-in, off by default, no effect on production decode.
+    [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
     # MTP-1 chained draft at c=1. DEFAULT ON 2026-07-12 — full ladder green:
