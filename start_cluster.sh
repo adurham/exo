@@ -1769,6 +1769,23 @@ for NODE in "${NODES[@]}"; do
     # forward) can be built. Watch [PP DSpark STEP2b DIAG] and the spec-tag
     # match/mismatch counters in the logs during this run.
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
+    # Draft-ahead STEP 3a (2026-07-19, default off, commit 0ed76f74):
+    # rank0 actually runs the speculative forward on the msg1b extension
+    # batch and buffers the hidden under a SpecId, but ALWAYS restores the
+    # pre-speculative KV snapshot and discards the buffer on both HIT and
+    # MISS -- so enabling this alone is a no-op for decode behavior/perf.
+    # Its only observable effect is that msg2's hit_miss_code slot carries
+    # the REAL verdict instead of always-NA. Requires DRAFT_AHEAD=1 above.
+    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=$EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE"
+    # Draft-ahead STEP 3b (2026-07-19, default off, commit cca679ed): the
+    # actual perf lever. On a HIT, rank0 KEEPS its speculative KV writes
+    # and parks the buffered hidden for a "consume cycle" -- next cycle
+    # skips msg1/msg1b/rank0's fresh forward entirely and rank0 sends the
+    # already-buffered hidden directly via a raw mx.distributed.send().
+    # Requires DRAFT_AHEAD_EXECUTE=1 above. NOT YET LIVE-VALIDATED as of
+    # 2026-07-19 -- see exo-cluster-development skill's
+    # pp-dspark-draft-ahead-overlap-design-2026-07-19.md before enabling.
+    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_YIELD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_YIELD=$EXO_PP_DSPARK_DRAFT_AHEAD_YIELD"
     # Cache-eviction timing instrumentation (2026-07-19, default off,
     # commit f1e23561): pins down whether the multi-hundred-second
     # cluster-wide stalls seen in ~/exo_stall_dumps/ are caused by
