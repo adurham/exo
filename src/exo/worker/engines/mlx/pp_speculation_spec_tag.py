@@ -453,3 +453,74 @@ def coerce_hit_miss(code: int) -> HitMissCode:
     if code == HIT_MISS_HIT:
         return HIT_MISS_HIT
     raise ValueError(f"unknown hit/miss code: {code}")
+
+
+# ---------------------------------------------------------------------------
+# STEP 2b: msg1 deep-draft extension wire helpers (diagnostic, bytes-only)
+# ---------------------------------------------------------------------------
+#
+# msg1 today carries `verify_width` int32s (anchor + `verify_width - 1`
+# drafted). STEP 2b piggybacks a companion int32 array of `verify_width - 1`
+# additional draft positions that DSpark's draft() already computed
+# internally (see deepseek_v4.py::draft's ``width`` docstring: draft ALWAYS
+# computes ``block_size`` positions unless the opt-in width truncation is
+# on; verify_width only trims what's SENT/verified). Total tokens on the
+# wire become `2 * verify_width - 1`, matching the design doc. Diagnostic
+# only in this commit -- rank 0 receives them, round-trip-checks the
+# shape, discards. STEP 3 will consume them for a speculative forward.
+
+
+def deep_draft_ext_len(verify_width: int) -> int:
+    """Number of extra draft tokens msg1b carries alongside msg1's
+    ``verify_width`` int32s. Returns ``0`` when ``verify_width <= 1``
+    (no extension positions exist), else ``verify_width - 1`` so the
+    combined msg1+msg1b payload is exactly ``2 * verify_width - 1``
+    tokens per the design doc.
+    """
+    if verify_width < 2:
+        return 0
+    return verify_width - 1
+
+
+def pack_deep_draft_ext(ext_tokens: list[int], verify_width: int) -> mx.array:
+    """Encode the extension tokens into a fixed-shape int32 array of
+    length ``deep_draft_ext_len(verify_width)``. Pads short inputs with
+    ``0`` (a legal token id; contents are diagnostic-only this commit,
+    never consumed) and rejects overlong ones -- a mismatch there means
+    the caller misread DSpark's draft() output shape and should fail
+    loudly rather than silently truncate.
+    """
+    expected_len = deep_draft_ext_len(verify_width)
+    if len(ext_tokens) > expected_len:
+        raise ValueError(
+            f"deep-draft extension has {len(ext_tokens)} tokens, "
+            f"expected at most {expected_len} for verify_width={verify_width}"
+        )
+    padded = list(ext_tokens) + [0] * (expected_len - len(ext_tokens))
+    return mx.array(padded, dtype=mx.int32)
+
+
+def unpack_deep_draft_ext(wire: mx.array, verify_width: int) -> list[int]:
+    """Inverse of :func:`pack_deep_draft_ext`. Raises ``ValueError`` if
+    the wire array's shape or dtype disagrees with the expected msg1b
+    payload for ``verify_width`` -- that's the exact desync signature
+    the diagnostic mode is watching for.
+    """
+    expected_len = deep_draft_ext_len(verify_width)
+    if wire.shape != (expected_len,):
+        raise ValueError(
+            f"deep-draft ext wire must have shape ({expected_len},), got {wire.shape!r}"
+        )
+    if wire.dtype != mx.int32:
+        raise ValueError(f"deep-draft ext wire must be int32, got {wire.dtype!r}")
+    raw = wire.tolist()
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"deep-draft ext wire.tolist() must be a list, got {type(raw)!r}"
+        )
+    values: list[int] = []
+    for v in raw:
+        if isinstance(v, list):
+            raise ValueError(f"deep-draft ext wire has nested list element: {v!r}")
+        values.append(int(v))
+    return values

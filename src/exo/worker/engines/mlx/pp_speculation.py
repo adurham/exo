@@ -43,7 +43,10 @@ from .pp_speculation_spec_tag import (
     SpecId,
     SpecTagValidator,
     coerce_hit_miss,
+    deep_draft_ext_len,
+    pack_deep_draft_ext,
     pack_spec_tag,
+    unpack_deep_draft_ext,
     unpack_spec_tag,
 )
 
@@ -1397,7 +1400,7 @@ def pp_dspark_decode_loop(
     # width=2 measured slightly slower (23.1 tok/s) than width=3, matching
     # the model's prediction that 3 is close to the sweet spot. Still
     # overridable via EXO_PP_DSPARK_VERIFY_WIDTH for further tuning.
-    vw = min(bs, int(os.environ.get("EXO_PP_DSPARK_VERIFY_WIDTH", "3")))
+    vw: int = min(bs, int(os.environ.get("EXO_PP_DSPARK_VERIFY_WIDTH", "3")))
     # DEFAULT OFF (2026-07-18): draft()-width truncation (vs main-model
     # verify-width truncation above, which IS safe and stays default-on)
     # found a real correctness bug during validation -- occasional silent
@@ -1463,6 +1466,32 @@ def pp_dspark_decode_loop(
     _spec_tag_validator = SpecTagValidator() if _draft_ahead_enabled else None
     _spec_tag_matches = 0
     _spec_tag_mismatches = 0
+
+    # STEP 2b msg1 deep-draft extension (2026-07-19, EXO_PP_DSPARK_DRAFT_AHEAD=1,
+    # default OFF -- same gate as the tag-exchange diagnostic above). Extends
+    # msg1 by piggybacking a companion int32 array of `vw-1` "extension"
+    # draft tokens -- the positions DSpark's draft() already computed for
+    # free (see the block_size-vs-verify_width comment in the draft() call
+    # site below and in deepseek_v4.py::draft) but that today's protocol
+    # never sends across the wire. Once received on rank0, these are
+    # purely BYTES ON THE WIRE for now: they're counted / round-trip
+    # equality-checked against what rank1 sent (via a fresh SpecTagValidator
+    # instance so counters are separate from the msg2 tag exchange), then
+    # discarded. NO rank0-side speculative forward is wired to consume
+    # them yet -- STEP 3 will. This mirrors the msg2-tag-exchange
+    # diagnostic's discipline: prove the wire mechanism itself is sound
+    # under real cross-rank timing before adding any decode-path branching.
+    #
+    # Only enabled when EXO_PP_DSPARK_DRAFT_WIDTH_TRUNCATE=0 (the default):
+    # if the drafter is opt-in-truncating to width vw-1 (the OTHER env var,
+    # currently off pending a wrap-related correctness bug), then DSpark's
+    # draft() returns only vw-1 tokens and there ARE no extra positions to
+    # send -- gracefully no-op in that case rather than build a second
+    # code path.
+    _da_msg1_ext_active = _draft_ahead_enabled and not _draft_width_truncate and vw >= 2
+    _da_msg1_ext_len = deep_draft_ext_len(int(vw)) if _da_msg1_ext_active else 0
+    _da_msg1_ext_matches = 0
+    _da_msg1_ext_mismatches = 0
 
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
@@ -1643,6 +1672,67 @@ def pp_dspark_decode_loop(
                 # internal traffic on the same group can begin.
                 mx.eval(_wire_batch)
                 _log(f"n={n} dspark_batch_recv POST")
+
+            # ==== STEP 2b msg1b: deep-draft extension (diagnostic, bytes-only) ====
+            # Sends the `vw-1` draft positions that DSpark's draft() already
+            # computed internally but that msg1 does NOT carry today (msg1 is
+            # truncated to `vw` = anchor + first vw-1 drafted). These are the
+            # tokens rank0 will (in STEP 3, not this commit) use to
+            # speculatively pre-forward the NEXT cycle's block during its
+            # otherwise-idle window. For now the extension ONLY rides the
+            # wire; rank0 discards it after a round-trip equality check.
+            # Same eval-pinning discipline as msg1 above (mx.distributed ops
+            # are lazy, must be materialized before the model(...) call's own
+            # internal pp_group traffic).
+            _da_msg1_ext_wire: mx.array = mx.zeros(
+                max(_da_msg1_ext_len, 1), dtype=mx.int32
+            )
+            if _da_msg1_ext_active:
+                if is_last_rank:
+                    # DSpark's draft() computed `bs` positions this cycle
+                    # (guarded by `not _draft_width_truncate` above); the
+                    # first vw-1 rode msg1, positions [vw-1 : 2*vw-2] are
+                    # the extension. pack_deep_draft_ext handles pad/reject.
+                    _ext_ids = _draft_ids[vw - 1 : (2 * vw) - 2]
+                    _da_msg1_ext_wire = pack_deep_draft_ext(_ext_ids, int(vw))
+                    mx.eval(_da_msg1_ext_wire)
+                    _ext_sent = mx.distributed.send(
+                        _da_msg1_ext_wire, 0, group=pp_group
+                    )
+                    mx.eval(_ext_sent)
+                elif is_rank0:
+                    _da_msg1_ext_wire = mx.distributed.recv_like(
+                        mx.zeros(_da_msg1_ext_len, dtype=mx.int32),
+                        pp_world_size - 1,
+                        group=pp_group,
+                    )
+                    mx.eval(_da_msg1_ext_wire)
+                    # Correctness of the round-trip is our only assertion
+                    # here: rank0 has NO way to independently reconstruct
+                    # what rank1 drafted for the extension positions (they
+                    # come from a rank1-only DSpark forward), so the check
+                    # is a self-consistency shape/length one -- confirm
+                    # exactly _da_msg1_ext_len int32s were received and
+                    # they materialized without exception. Anything more
+                    # requires the rank0-side draft(), which is ruled out
+                    # (see design doc's "Why rank0 can't just draft()"
+                    # section).
+                    try:
+                        _ = unpack_deep_draft_ext(_da_msg1_ext_wire, int(vw))
+                    except ValueError as _ext_err:
+                        _da_msg1_ext_mismatches += 1
+                        logger.warning(
+                            f"[PP DSpark STEP2b DIAG] msg1b ext wire "
+                            f"invalid at n={n}: {_ext_err}"
+                        )
+                    else:
+                        _da_msg1_ext_matches += 1
+                    if (_da_msg1_ext_matches + _da_msg1_ext_mismatches) % 32 == 0:
+                        logger.info(
+                            f"[PP DSpark STEP2b DIAG] msg1b ext round-trip "
+                            f"matches={_da_msg1_ext_matches} "
+                            f"mismatches={_da_msg1_ext_mismatches}"
+                        )
 
             _t_after_batch_xchg = time.perf_counter()
             _prof_batch_xchg += _t_after_batch_xchg - _cycle_t0

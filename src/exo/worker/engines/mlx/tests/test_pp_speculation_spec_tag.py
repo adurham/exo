@@ -551,5 +551,113 @@ def test_module_public_surface_stable() -> None:
         "HIT_MISS_HIT",
         "HIT_MISS_MISS",
         "coerce_hit_miss",
+        "deep_draft_ext_len",
+        "pack_deep_draft_ext",
+        "unpack_deep_draft_ext",
     ):
         assert hasattr(m, name), f"missing public symbol: {name}"
+
+
+# ---------------------------------------------------------------------------
+# STEP 2b: msg1 deep-draft extension (diagnostic wire-only)
+# ---------------------------------------------------------------------------
+
+
+def test_deep_draft_ext_len_matches_design_doc() -> None:
+    """Design doc: combined msg1+msg1b payload is exactly ``2*vw-1``
+    tokens (vw for msg1 + vw-1 for msg1b). vw<=1 has no extension."""
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        deep_draft_ext_len,
+    )
+
+    assert deep_draft_ext_len(0) == 0
+    assert deep_draft_ext_len(1) == 0
+    assert deep_draft_ext_len(2) == 1
+    assert deep_draft_ext_len(3) == 2
+    assert deep_draft_ext_len(5) == 4
+    # 2*vw-1 identity: total tokens on the wire (msg1 has vw entries:
+    # anchor + vw-1 drafted, msg1b adds vw-1 more).
+    for vw in (2, 3, 4, 5, 6):
+        assert vw + deep_draft_ext_len(vw) == 2 * vw - 1
+
+
+def test_deep_draft_ext_pack_unpack_round_trip() -> None:
+    """Full round-trip: pack vw-1 tokens, unpack, get identical ints."""
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        pack_deep_draft_ext,
+        unpack_deep_draft_ext,
+    )
+
+    for vw in (2, 3, 5):
+        expected_len = vw - 1
+        tokens = [1000 + i for i in range(expected_len)]
+        wire = pack_deep_draft_ext(tokens, vw)
+        assert wire.shape == (expected_len,)
+        assert wire.dtype == mx.int32
+        recovered = unpack_deep_draft_ext(wire, vw)
+        assert recovered == tokens
+
+
+def test_deep_draft_ext_pack_pads_short_input() -> None:
+    """Cold-start / short-draft safety: padded with zeros to expected
+    len, not silently truncated.
+
+    Zero is a legal token id but this data is diagnostic-only this
+    commit, never consumed by decode, so padding-with-zero is safe.
+    """
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        pack_deep_draft_ext,
+        unpack_deep_draft_ext,
+    )
+
+    wire = pack_deep_draft_ext([42], verify_width=3)
+    assert wire.shape == (2,)
+    assert unpack_deep_draft_ext(wire, 3) == [42, 0]
+
+
+def test_deep_draft_ext_pack_rejects_overlong_input() -> None:
+    """Overlong input means the caller misread DSpark's draft() output
+    shape -- fail loudly, not silently truncate."""
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        pack_deep_draft_ext,
+    )
+
+    with pytest.raises(ValueError, match=r"expected at most 2"):
+        _ = pack_deep_draft_ext([1, 2, 3], verify_width=3)
+
+
+def test_deep_draft_ext_unpack_rejects_wrong_shape() -> None:
+    """A shape mismatch on rank0's incoming msg1b is the exact desync
+    signature the STEP 2b diagnostic mode is watching for."""
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        unpack_deep_draft_ext,
+    )
+
+    wrong_shape = mx.array([1, 2, 3], dtype=mx.int32)
+    with pytest.raises(ValueError, match=r"shape \(2,\)"):
+        _ = unpack_deep_draft_ext(wrong_shape, verify_width=3)
+
+
+def test_deep_draft_ext_unpack_rejects_wrong_dtype() -> None:
+    """Wire dtype must be int32 -- anything else is a codec bug."""
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        unpack_deep_draft_ext,
+    )
+
+    wrong_dtype = mx.array([1.0, 2.0], dtype=mx.float32)
+    with pytest.raises(ValueError, match=r"int32"):
+        _ = unpack_deep_draft_ext(wrong_dtype, verify_width=3)
+
+
+def test_deep_draft_ext_total_wire_matches_design_target() -> None:
+    """Concrete assertion of the design doc's target: with vw=3 the
+    combined msg1+msg1b payload is exactly 5 (2*vw-1) int32 tokens --
+    3 for msg1 (anchor + 2 drafted) and 2 for msg1b."""
+    from exo.worker.engines.mlx.pp_speculation_spec_tag import (
+        deep_draft_ext_len,
+    )
+
+    vw = 3
+    msg1_len = vw  # anchor + verify_width - 1 drafted
+    msg1b_len = deep_draft_ext_len(vw)
+    assert msg1_len + msg1b_len == 2 * vw - 1 == 5
