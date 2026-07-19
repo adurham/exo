@@ -4,6 +4,7 @@ import queue
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from typing import BinaryIO
@@ -14,6 +15,7 @@ from exo.shared.constants import (
     ENABLE_DISAGGREGATION,
     EXO_BATCHED_PREFILL_RENDEZVOUS_MS,
     EXO_DSV4_BATCHED_PREFILL,
+    EXO_MAX_CONCURRENT_REQUESTS,
 )
 from exo.shared.types.chunks import Chunk
 from exo.shared.types.common import CommandId
@@ -137,6 +139,17 @@ class Runner:
             TaskId,
             GenerationTask,
         ] = {}
+        # Concurrency-limit overflow holding area (2026-07-19, root-caused the
+        # 2026-07-18 PP stream-never-closed hang -- see the admission-gate
+        # comment at the main dispatch loop for the full story). Held here,
+        # NOT re-queued onto self._work_queue: a task already marked into
+        # `self.seen` that got put back on _work_queue would hit the
+        # `item.task_id in self.seen` check on its next pop and be silently
+        # DROPPED with just a "repeat task" warning -- recreating a state-loss
+        # bug in the exact code meant to prevent one. A local deque also
+        # avoids a hot pop/requeue spin against _work_queue for however long
+        # the gate stays closed (potentially minutes under PP).
+        self._deferred_gen_tasks: deque[GenerationTask] = deque()
 
         self._prefill_server: PrefillServer | None = None
         self._prefill_server_port: int | None = None
@@ -481,6 +494,14 @@ class Runner:
         self.active_tasks[task.task_id] = task
         self.generator.submit(task)
 
+    def _dispatch_generation_task(self, item: GenerationTask) -> None:
+        """Acknowledge + submit a generation task that has cleared the
+        concurrency-limit admission gate. Factored out (2026-07-19) so both
+        the main dispatch loop and the deferred-task drain (after a slot
+        frees up) share identical acknowledge/submit ordering."""
+        self.acknowledge_task(item)
+        self.submit_generation(item)
+
     def handle_generation_tasks(self, starting_task: GenerationTask):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, Engine)
@@ -506,7 +527,15 @@ class Runner:
             rendezvous_deadline = (
                 time.monotonic() + EXO_BATCHED_PREFILL_RENDEZVOUS_MS / 1000.0
             )
-            from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS
+            # EXO_MAX_CONCURRENT_REQUESTS is now a top-level import (2026-07-19
+            # admission-gate fix) -- removed the redundant local import that
+            # used to live here. IMPORTANT: leaving a conditionally-executed
+            # local `from ... import EXO_MAX_CONCURRENT_REQUESTS` anywhere in
+            # this method makes Python treat the name as function-local for
+            # the ENTIRE method body (assignment-anywhere-in-scope rule), which
+            # would make the new admission-gate code further down in this same
+            # method raise UnboundLocalError whenever this `if` doesn't
+            # execute. Do not reintroduce a local import of this name here.
 
             extras_seen = 0
             while time.monotonic() < rendezvous_deadline and (
@@ -642,6 +671,21 @@ class Runner:
             for task_id in finished:
                 self.active_tasks.pop(task_id, None)
 
+            # Admit deferred tasks now that capacity may have opened up
+            # (2026-07-19 admission-gate fix -- see the dispatch-loop gate
+            # below for the full rationale). Checked right after popping
+            # `finished` so a just-completed task's slot is picked up on
+            # the VERY NEXT loop iteration rather than waiting for another
+            # work-queue poll cycle, which matters most for PP's
+            # EXO_MAX_CONCURRENT_REQUESTS=1 case (want the next request to
+            # start decoding immediately, not after an arbitrary queue-poll
+            # delay).
+            while (
+                self._deferred_gen_tasks
+                and len(self.active_tasks) < EXO_MAX_CONCURRENT_REQUESTS
+            ):
+                self._dispatch_generation_task(self._deferred_gen_tasks.popleft())
+
             # Liveness heartbeat. Under sustained c>=2, when a request is
             # admitted into a running batch the batched generator can decode
             # for many seconds (batch-size transition) WITHOUT yielding any
@@ -706,8 +750,31 @@ class Runner:
             self.seen.add(item.task_id)
             match item:
                 case TextGeneration() | ImageGeneration() | ImageEdits():
-                    self.acknowledge_task(item)
-                    self.submit_generation(item)
+                    # Admission gate (2026-07-19, root-caused the 2026-07-18
+                    # PP stream-never-closed hang -- see the deque comment
+                    # near self._deferred_gen_tasks' declaration for the
+                    # full story). PP mode's speculative decode path keeps
+                    # per-request state in singular ExoBatchGenerator
+                    # instance attributes; admitting a 2nd concurrent
+                    # generation task while one is active silently
+                    # corrupts/orphans the first. EXO_MAX_CONCURRENT_REQUESTS
+                    # is forced to 1 for Pipeline sharding in start_cluster.sh
+                    # specifically so this gate actually enforces "PP is
+                    # single-request-only" instead of that constraint being
+                    # documentation-only. Defer rather than reject: the task
+                    # is already ack'd into `self.seen` (dedup-safe) and
+                    # waits in `_deferred_gen_tasks` until a slot frees up
+                    # (drained right after `finished` tasks are popped,
+                    # above in this same loop).
+                    if len(self.active_tasks) < EXO_MAX_CONCURRENT_REQUESTS:
+                        self._dispatch_generation_task(item)
+                    else:
+                        logger.info(
+                            f"deferring task {item.task_id} -- at concurrency "
+                            f"limit ({len(self.active_tasks)}/"
+                            f"{EXO_MAX_CONCURRENT_REQUESTS} active)"
+                        )
+                        self._deferred_gen_tasks.append(item)
                 case Shutdown():
                     self.shutdown(item)
                     return ExitCode.Shutdown

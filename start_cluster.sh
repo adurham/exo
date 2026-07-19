@@ -1636,6 +1636,32 @@ for NODE in "${NODES[@]}"; do
     if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
         EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=1"
     fi
+    # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
+    # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
+    # path (pp_dspark_decode_loop and friends) stores its per-request
+    # generator/uid state in SINGULAR instance attributes on
+    # ExoBatchGenerator (self._pp_spec_gen, self._pp_spec_uid) with no
+    # per-task keying whatsoever. A second concurrent request silently
+    # OVERWRITES the first's in-flight generator reference -- the first
+    # request's task is orphaned forever (runner wedges at RunnerRunning
+    # permanently) and the second request's own output is corrupted
+    # (confirmed live: it inherited stale KV/pipeline state from the
+    # first request's already-advanced forward pass). EXO_PP_NO_COORD_
+    # COLLECTIVE=1 above has documented "PP is single-request-only" as a
+    # constraint for a long time, but nothing in the runner's dispatch
+    # path actually ENFORCED it -- EXO_MAX_CONCURRENT_REQUESTS defaults
+    # to 8 (shared/constants.py) and was never overridden here. Force it
+    # to 1 for Pipeline mode specifically; do NOT let a higher
+    # user-supplied value survive for this mode, since this is a data-
+    # corruption bug, not a throughput knob. Loud log line since this
+    # silently overrides whatever the caller passed in.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "1" ]; then
+            echo "  ⚠️  DSV4_SHARDING=Pipeline forces EXO_MAX_CONCURRENT_REQUESTS=1 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- PP's shared per-rank decode-loop state cannot survive >1 concurrent request without data corruption/wedging."
+        fi
+        EXO_MAX_CONCURRENT_REQUESTS=1
+    fi
+    [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=$EXO_MAX_CONCURRENT_REQUESTS"
     [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
     [ -n "${MLX_EVENT_WAIT_SPIN:-}" ]       && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_SPIN=$MLX_EVENT_WAIT_SPIN"
     # MLX_DIAG_HOLD_WEDGE: diagnostic only — hold a c>=2 wedge open (no
