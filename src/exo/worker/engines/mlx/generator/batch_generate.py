@@ -2132,7 +2132,28 @@ class ExoBatchGenerator:
         if hasattr(self, '_pp_first_token'):
             tok = self._pp_first_token
             del self._pp_first_token
-            is_eos = tok in self._pp_spec_eos
+            # int() normalization (2026-07-19). VERIFIED NOT THE BUG: traced
+            # both source sites in pp_speculation.py -- rank1's
+            # `bonus_token = _all_next_list[n_accepted]` and rank0's
+            # `bonus_token = _wire2_list[1]` are BOTH already plain Python
+            # ints (`[int(v) for v in ...tolist()]` casts happen at the
+            # source on both paths already). This int() call is therefore a
+            # no-op here, kept only as cheap defensive belt-and-suspenders in
+            # case a future edit reintroduces an mx-scalar leak -- it is NOT
+            # a fix for the reported stream-hang and should not be reported
+            # as one. The actual hang root cause is still open; see the
+            # handoff notes.
+            is_eos = int(tok) in self._pp_spec_eos
+            if is_eos:
+                # EOS on the very first token: the PP decode-loop generator
+                # was already created (and, for pp_dspark_decode_loop, has
+                # already done its cold-start draft() + cache mutation) but
+                # never entered its `while n < max_tokens:` body via next().
+                # Explicitly close it rather than relying on the later plain
+                # `self._pp_spec_gen = None` assignment in step() (2026-07-19
+                # hardening -- see the matching comment below for why bare
+                # refcount-drop finalization is not safe to depend on here).
+                self._close_pp_spec_gen()
             return [GenerationBatch.Response(
                 uid=uid, token=tok, logprobs=mx.zeros(1),
                 finish_reason="stop" if is_eos else None,
@@ -2143,7 +2164,32 @@ class ExoBatchGenerator:
         assert self._pp_spec_gen is not None
         try:
             tok_id, lp = next(self._pp_spec_gen)
-            is_eos = tok_id in self._pp_spec_eos
+            # int() normalization -- verified NOT the bug, kept as harmless
+            # defensive belt-and-suspenders. See the matching comment on the
+            # first-token branch above for the full trace.
+            is_eos = int(tok_id) in self._pp_spec_eos
+            if is_eos:
+                # BUG HARDENING (2026-07-19, investigating the stream-never-
+                # closed hang from last session): on EOS this used to just
+                # return finish_reason="stop" and leave self._pp_spec_gen
+                # ALIVE and suspended mid-`while` -- the only cleanup was a
+                # later bare `self._pp_spec_gen = None` in step() (search
+                # "Clean up spec state"), which finalizes the generator via
+                # CPython refcounting, NOT an explicit close(). That's fine
+                # IF the generator has zero reference cycles back to `self`
+                # (e.g. via the `_captured` hidden-state dict closure or the
+                # model/cache args bound into the frame) -- but if a cycle
+                # exists, finalization (and therefore the generator's
+                # `finally:` block, which resets `_configure_layers` pipeline
+                # send/recv state) is deferred to the next cyclic-GC pass
+                # instead of running deterministically right here. That is a
+                # plausible contributor to a wedged/stuck pipeline-layer
+                # config surviving into the runner's idle-transition path.
+                # Close explicitly and immediately instead of trusting GC
+                # timing; StopIteration/GeneratorExit from an already-primed
+                # but not-yet-iterated generator is expected and swallowed by
+                # close() itself, so no try/except is needed here.
+                self._close_pp_spec_gen()
             return [GenerationBatch.Response(
                 uid=uid, token=tok_id, logprobs=lp,
                 finish_reason="stop" if is_eos else None,
@@ -2152,14 +2198,33 @@ class ExoBatchGenerator:
             )]
         except StopIteration:
             # max_tokens reached
-            self._pp_spec_gen = None
-            self._pp_spec_uid = None
+            self._close_pp_spec_gen()
             return [GenerationBatch.Response(
                 uid=uid, token=0, logprobs=mx.zeros(1),
                 finish_reason="length",
                 current_state=None, match_sequence=None,
                 prompt_cache=None, all_tokens=None,
             )]
+
+    def _close_pp_spec_gen(self) -> None:
+        """Deterministically finalize the PP spec-decode generator.
+
+        Calls .close() explicitly (runs its `finally:` block synchronously,
+        right here) instead of just dropping the reference and hoping
+        CPython's refcounter (not cyclic GC) gets to it immediately. See the
+        EOS-path comment in _step_pp_spec for the full rationale -- this is
+        a defensive hardening pass, not a confirmed fix for the 2026-07-18
+        stream-never-closed hang (that needs live re-validation once the
+        cluster is reachable again).
+        """
+        gen = self._pp_spec_gen
+        self._pp_spec_gen = None
+        self._pp_spec_uid = None
+        if gen is not None:
+            try:
+                gen.close()
+            except Exception:
+                logger.debug("pp spec-decode generator close() raised", exc_info=True)
 
     def step(self) -> list[tuple[int, GenerationResponse]]:
         # EXO_DECODE_PROBE: measure wall + GPU time per step() call (= per token
@@ -2218,8 +2283,17 @@ class ExoBatchGenerator:
         _trace = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
         from exo.worker.engines.mlx.trace import request_trace
 
-        # Use PP speculation decode if active
-        if self._pp_spec_gen is not None:
+        # Use PP speculation decode if active. Captured as a local BEFORE
+        # calling _step_pp_spec() (2026-07-19): that call now deterministically
+        # clears self._pp_spec_gen/_pp_spec_uid on EOS/max_tokens (see
+        # _close_pp_spec_gen), not just on the pre-existing "Clean up spec
+        # state" branch further below in this same step() -- so re-reading
+        # self._pp_spec_gen after the call to decide which stats path this
+        # response belongs to would silently misclassify the FINAL response
+        # of every PP-spec completion. was_pp_spec_step is that decision,
+        # frozen at the top of this call.
+        was_pp_spec_step = self._pp_spec_gen is not None
+        if was_pp_spec_step:
             _step_tic = time.perf_counter()
             responses = self._step_pp_spec()
             _next_elapsed = time.perf_counter() - _step_tic
@@ -2497,16 +2571,22 @@ class ExoBatchGenerator:
             stats: GenerationStats | None = None
             usage: Usage | None = None
             if is_done:
-                if self._pp_spec_gen is not None or self._pp_spec_uid is not None:
+                if was_pp_spec_step:
+                    # was_pp_spec_step (captured at the top of step(), before
+                    # _step_pp_spec() ran) replaces the old
+                    # "self._pp_spec_gen is not None or self._pp_spec_uid is
+                    # not None" check here (2026-07-19) -- that check now
+                    # reads stale/cleared state, since _step_pp_spec's EOS and
+                    # StopIteration paths already deterministically null both
+                    # attributes via _close_pp_spec_gen() before we get here.
                     gen_elapsed = time.perf_counter() - state.generation_start_time
                     generation_tps = (
                         state.completion_tokens / gen_elapsed
                         if gen_elapsed > 0
                         else 0.0
                     )
-                    # Clean up spec state
-                    self._pp_spec_gen = None
-                    self._pp_spec_uid = None
+                    # Spec state is already cleared by _close_pp_spec_gen()
+                    # inside _step_pp_spec() -- nothing left to do here.
                 else:
                     gen_time_delta = (
                         _mlx_gen_elapsed_seconds(self._mlx_gen)
