@@ -1757,6 +1757,28 @@ for NODE in "${NODES[@]}"; do
     # full rationale and the Fable-consult numbers (~14% E2E speedup at a
     # 30% hit rate, ~22% at 50%, not worth building below ~15%).
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_LOG=$EXO_PP_DSPARK_DRAFT_AHEAD_LOG"
+    # Draft-ahead STEP 1+2b diagnostic plumbing (2026-07-19, default off,
+    # commits 6aff7a5f/e6e10927/fe7bbfcb): gates a msg2 spec-id tag exchange
+    # (rank1 builds a SpecId from the cycle's anchor/drafted/bonus tokens,
+    # rank0 independently reconstructs + validates a match) AND a msg1b
+    # deep-draft-extension send/recv (vw-1 extra tokens DSpark's draft()
+    # already computed for free, round-trip shape-validated on rank0).
+    # BOTH branches are diagnostic-only -- decode NEVER branches on the
+    # result yet, this only proves the wire/tagging mechanism is sound
+    # under real cross-rank timing before step 3 (the actual speculative
+    # forward) can be built. Watch [PP DSpark STEP2b DIAG] and the spec-tag
+    # match/mismatch counters in the logs during this run.
+    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
+    # Cache-eviction timing instrumentation (2026-07-19, default off,
+    # commit f1e23561): pins down whether the multi-hundred-second
+    # cluster-wide stalls seen in ~/exo_stall_dumps/ are caused by
+    # KVPrefixCache.get_memory_used_percentage()'s per-eviction-iteration
+    # cross-rank all-reduce. Emits [CACHE_EVICT_TIMING] evict_summary/
+    # get_mem_pct/add_kv_cache log lines when a call exceeds
+    # EXO_CACHE_EVICT_TIMING_MS (default 50ms). Diagnostic only, no
+    # behavior change.
+    [ -n "${EXO_CACHE_EVICT_TIMING_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_LOG=$EXO_CACHE_EVICT_TIMING_LOG"
+    [ -n "${EXO_CACHE_EVICT_TIMING_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_MS=$EXO_CACHE_EVICT_TIMING_MS"
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5
