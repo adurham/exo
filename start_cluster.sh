@@ -1574,6 +1574,13 @@ for NODE in "${NODES[@]}"; do
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
     [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
+    # PP-spec finish-decision diagnostic (2026-07-19, default off): logs
+    # [PP_SPEC_FINISH] lines (per-rank call_n + is_eos decision +
+    # runner status transitions) to investigate the stream-never-closed
+    # hang. Distinct from EXO_TRACING_ENABLED's much noisier per-cycle
+    # wire-protocol trace in pp_speculation.py. Set =1 only when actively
+    # chasing that bug -- see references/pp-chained-mtp-draft-and-dspark.md.
+    [ -n "${EXO_PP_SPEC_FINISH_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_SPEC_FINISH_LOG=$EXO_PP_SPEC_FINISH_LOG"
     # MLX_JACCL_CONFIRMED_BARRIER: reliable ack barrier over the TCP coordinator
     # instead of the UC ack exchange (which wedges on a lost completion).
     # Deterministic recv-side wedge PREVENTION for c>=2. Default off (adds a

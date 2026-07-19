@@ -2064,6 +2064,13 @@ class ExoBatchGenerator:
         # Falls back to the proven single-token path otherwise --
         # default (EXO_PP_MTP_CHAIN_K unset or =1) is UNCHANGED behavior.
         _chain_k = int(os.environ.get("EXO_PP_MTP_CHAIN_K", "1"))
+        # Stash pp_rank on self (2026-07-19) purely for diagnostic logging in
+        # _step_pp_spec/_close_pp_spec_gen -- the loop-building code above
+        # only has it as a local, but the stream-hang investigation needs
+        # rank context on every finish-decision log line to correlate the
+        # two ranks' independent EOS/max_tokens decisions against each
+        # other (see EXO_PP_SPEC_FINISH_LOG below).
+        self._pp_rank_for_log = pp_rank
         if _pp_dspark_enabled and _has_dspark:
             logger.info("PP speculation using DSpark (rank1-owned draft+verify)")
             self._pp_spec_gen = pp_dspark_decode_loop(
@@ -2128,6 +2135,44 @@ class ExoBatchGenerator:
         uid = self._pp_spec_uid
         assert uid is not None
 
+        # Diagnostic instrumentation (2026-07-19, EXO_PP_SPEC_FINISH_LOG=1,
+        # default off): investigating the 2026-07-18 stream-never-closed
+        # hang. Two distinct failure shapes are consistent with the
+        # reported symptom (decode completes server-side, GPUs idle,
+        # RunnerRunning never transitions):
+        #   (a) TRUE DEADLOCK -- one rank blocked inside an mx.distributed
+        #       send/recv waiting for a message its peer never sends. The
+        #       existing stall sampler (EXO_STALL_SAMPLER_SECONDS, ON by
+        #       default) already catches this: _step_beat stops advancing,
+        #       full thread stacks dump to ~/exo_stall_dumps after 10s.
+        #   (b) SILENT MISCOUNT -- both ranks keep calling step() and
+        #       returning normally (so the stall sampler NEVER fires --
+        #       _step_beat keeps refreshing), but one rank's finish
+        #       decision (EOS membership test, or `n >= max_tokens` inside
+        #       the inner generator) diverges from its peer's, so one rank
+        #       cleanly finishes+closes while the other's generator blocks
+        #       on the next cycle's wire recv forever. Nothing existing
+        #       today would catch this shape at all -- there is no log
+        #       line anywhere that records the actual is_eos/finish_reason
+        #       decision alongside a per-rank cycle counter, so a diverging
+        #       decision between ranks is invisible until you're staring at
+        #       a wedged runner with no causal trail.
+        # This block adds exactly that: a monotonic call counter (call_n)
+        # and, only on a finish decision, one log line with rank + call_n +
+        # token id + which branch fired. Gated behind its own env var
+        # (distinct from EXO_TRACING_ENABLED) so it can be enabled without
+        # also paying for the (much noisier) per-cycle wire-protocol trace
+        # in pp_speculation.py's _log(). Zero cost when unset -- the
+        # counter increment is one int add, and the env lookup is cached
+        # via getattr on first call.
+        _fin_log = getattr(self, "_pp_spec_finish_log_enabled", None)
+        if _fin_log is None:
+            _fin_log = os.environ.get("EXO_PP_SPEC_FINISH_LOG", "0") == "1"
+            self._pp_spec_finish_log_enabled = _fin_log
+        _call_n = getattr(self, "_pp_spec_call_n", 0) + 1
+        self._pp_spec_call_n = _call_n
+        _rank_for_log = getattr(self, "_pp_rank_for_log", "?")
+
         # Yield the first token if we haven't yet
         if hasattr(self, '_pp_first_token'):
             tok = self._pp_first_token
@@ -2144,6 +2189,11 @@ class ExoBatchGenerator:
             # as one. The actual hang root cause is still open; see the
             # handoff notes.
             is_eos = int(tok) in self._pp_spec_eos
+            if _fin_log:
+                logger.info(
+                    f"[PP_SPEC_FINISH] rank={_rank_for_log} call_n={_call_n} "
+                    f"branch=first_token tok={tok} is_eos={is_eos}"
+                )
             if is_eos:
                 # EOS on the very first token: the PP decode-loop generator
                 # was already created (and, for pp_dspark_decode_loop, has
@@ -2168,6 +2218,11 @@ class ExoBatchGenerator:
             # defensive belt-and-suspenders. See the matching comment on the
             # first-token branch above for the full trace.
             is_eos = int(tok_id) in self._pp_spec_eos
+            if _fin_log:
+                logger.info(
+                    f"[PP_SPEC_FINISH] rank={_rank_for_log} call_n={_call_n} "
+                    f"branch=steady_state tok={tok_id} is_eos={is_eos}"
+                )
             if is_eos:
                 # BUG HARDENING (2026-07-19, investigating the stream-never-
                 # closed hang from last session): on EOS this used to just
@@ -2198,6 +2253,11 @@ class ExoBatchGenerator:
             )]
         except StopIteration:
             # max_tokens reached
+            if _fin_log:
+                logger.info(
+                    f"[PP_SPEC_FINISH] rank={_rank_for_log} call_n={_call_n} "
+                    f"branch=stop_iteration (max_tokens reached)"
+                )
             self._close_pp_spec_gen()
             return [GenerationBatch.Response(
                 uid=uid, token=0, logprobs=mx.zeros(1),

@@ -269,6 +269,19 @@ class Runner:
             req.done.set()
 
     def update_status(self, status: RunnerStatus):
+        # Diagnostic logging (2026-07-19, EXO_PP_SPEC_FINISH_LOG=1): pairs
+        # with the [PP_SPEC_FINISH] lines in batch_generate.py's
+        # _step_pp_spec -- correlating "rank X decided is_eos=True at
+        # call_n=N" against "rank X's runner status transitioned to Ready at
+        # wall-clock T" (or never did) is the fastest way to confirm/refute
+        # the silent-miscount hang hypothesis without a py-spy dump. Kept
+        # off by default (same gate as the finish-decision log) since this
+        # fires on every status transition, not just PP-spec ones.
+        if os.environ.get("EXO_PP_SPEC_FINISH_LOG", "0") == "1":
+            logger.info(
+                f"[PP_SPEC_FINISH] rank={self.device_rank} "
+                f"status_transition -> {status.__class__.__name__}"
+            )
         self.current_status = status
         self.event_sender.send(
             RunnerStatusUpdated(
