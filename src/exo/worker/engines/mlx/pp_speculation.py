@@ -37,8 +37,18 @@ from .auto_parallel import (
     PipelineFirstLayer,
     PipelineLastLayer,
 )
+from .pp_speculation_spec_tag import (
+    HIT_MISS_NA,
+    SPEC_TAG_WIRE_LEN,
+    SpecId,
+    SpecTagValidator,
+    coerce_hit_miss,
+    pack_spec_tag,
+    unpack_spec_tag,
+)
 
 import loguru
+
 logger: "loguru.Logger" = loguru.logger
 
 _TRACE = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
@@ -51,7 +61,9 @@ _TRACE = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
 # lets SpecPipelineFirstLayer.__call__ (where the actual blocking recv
 # happens) report just the wait portion back up to the decode loop, which
 # subtracts it to get real compute time.
-_PROF_DSPARK_RECV_WAIT = _TRACE and os.environ.get("EXO_PP_DSPARK_PROFILE_WAIT", "1") == "1"
+_PROF_DSPARK_RECV_WAIT = (
+    _TRACE and os.environ.get("EXO_PP_DSPARK_PROFILE_WAIT", "1") == "1"
+)
 _DSPARK_RECV_WAIT_ACCUM = [0.0]
 
 
@@ -64,6 +76,7 @@ def _log(msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Pipeline info extraction
 # ---------------------------------------------------------------------------
+
 
 def get_pipeline_info(model: nn.Module) -> tuple[int, int, mx.distributed.Group] | None:
     """Extract (rank, world_size, group) from pipeline layer wrappers.
@@ -78,6 +91,7 @@ def get_pipeline_info(model: nn.Module) -> tuple[int, int, mx.distributed.Group]
 # ---------------------------------------------------------------------------
 # Cache snapshot / restore (for speculative rollback)
 # ---------------------------------------------------------------------------
+
 
 def _snapshot_cache(cache: list[Any]) -> list[Any]:
     """Lightweight snapshot: save offsets for KVCache, shallow-copy for ArraysCache."""
@@ -109,6 +123,7 @@ def _restore_cache(cache: list[Any], snap: list[Any]) -> None:
 # Speculative pipeline layer wrappers (subclass, not modify)
 # ---------------------------------------------------------------------------
 
+
 class SpecPipelineFirstLayer(PipelineFirstLayer):
     """PipelineFirstLayer with PP recv mode for overlapped hidden exchange."""
 
@@ -119,8 +134,10 @@ class SpecPipelineFirstLayer(PipelineFirstLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if _TRACE:
-            _log(f"SpecPipelineFirstLayer.__call__ r={self.r} _pp_recv={self._pp_recv} "
-                 f"is_prefill={self.is_prefill}")
+            _log(
+                f"SpecPipelineFirstLayer.__call__ r={self.r} _pp_recv={self._pp_recv} "
+                f"is_prefill={self.is_prefill}"
+            )
         if self._pp_recv and self.r != 0:
             # Recv hidden from previous rank (blocks until rank 0 sends)
             # JACCL/RDMA requires bf16 for transport
@@ -158,9 +175,11 @@ class SpecPipelineLastLayer(PipelineLastLayer):
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if _TRACE:
-            _log(f"SpecPipelineLastLayer.__call__ r={self.r} s={self.s} "
-                 f"_speculative={self._speculative} _pp_send={self._pp_send} "
-                 f"_pp_decode={self._pp_decode} is_prefill={self.is_prefill}")
+            _log(
+                f"SpecPipelineLastLayer.__call__ r={self.r} s={self.s} "
+                f"_speculative={self._speculative} _pp_send={self._pp_send} "
+                f"_pp_decode={self._pp_decode} is_prefill={self.is_prefill}"
+            )
         if self._speculative:
             # Speculative mode: compute, store, NO send (don't leak speculation to rank 1)
             output = self.original_layer(x, *args, **kwargs)
@@ -175,8 +194,14 @@ class SpecPipelineLastLayer(PipelineLastLayer):
             output = self.original_layer(x, *args, **kwargs)
             mx.eval(output)
             if self.r != self.s - 1:
-                out_bf16 = output.astype(mx.bfloat16) if output.dtype != mx.bfloat16 else output
-                sent = mx.distributed.send(out_bf16, (self.r + 1) % self.s, group=self.group)
+                out_bf16 = (
+                    output.astype(mx.bfloat16)
+                    if output.dtype != mx.bfloat16
+                    else output
+                )
+                sent = mx.distributed.send(
+                    out_bf16, (self.r + 1) % self.s, group=self.group
+                )
                 mx.eval(sent)
             if self._state_list is not None:
                 self._state_list[self._hidden_idx] = output
@@ -200,17 +225,24 @@ class SpecPipelineLastLayer(PipelineLastLayer):
 # Layer replacement (additive — wraps existing layers)
 # ---------------------------------------------------------------------------
 
-def _install_spec_layers(model: nn.Module) -> tuple[SpecPipelineFirstLayer | None, SpecPipelineLastLayer | None]:
+
+def _install_spec_layers(
+    model: nn.Module,
+) -> tuple[SpecPipelineFirstLayer | None, SpecPipelineLastLayer | None]:
     """Replace PipelineFirst/LastLayer with speculative versions. Returns refs."""
     layers = model.layers  # type: ignore
     spec_first: SpecPipelineFirstLayer | None = None
     spec_last: SpecPipelineLastLayer | None = None
 
     for i, layer in enumerate(layers):
-        if isinstance(layer, PipelineFirstLayer) and not isinstance(layer, SpecPipelineFirstLayer):
+        if isinstance(layer, PipelineFirstLayer) and not isinstance(
+            layer, SpecPipelineFirstLayer
+        ):
             spec_first = SpecPipelineFirstLayer(layer)
             layers[i] = spec_first
-        elif isinstance(layer, PipelineLastLayer) and not isinstance(layer, SpecPipelineLastLayer):
+        elif isinstance(layer, PipelineLastLayer) and not isinstance(
+            layer, SpecPipelineLastLayer
+        ):
             spec_last = SpecPipelineLastLayer(layer)
             layers[i] = spec_last
 
@@ -243,6 +275,7 @@ def _configure_layers(
 # Hidden state capture (for MTP integration)
 # ---------------------------------------------------------------------------
 
+
 class _CapturingNorm(nn.Module):
     """Wraps a final RMSNorm to record its input each forward pass.
 
@@ -263,7 +296,7 @@ class _CapturingNorm(nn.Module):
         self._captured = captured
 
     def __call__(self, x: mx.array) -> mx.array:
-        self._captured['pre_norm'] = x
+        self._captured["pre_norm"] = x
         return self._orig(x)
 
 
@@ -295,6 +328,7 @@ def _install_hidden_capture(model: nn.Module) -> dict[str, mx.array]:
 # ---------------------------------------------------------------------------
 # Core decode loop with PP idle-time speculation (overlapped)
 # ---------------------------------------------------------------------------
+
 
 def pp_speculative_decode_loop(
     model: nn.Module,
@@ -351,12 +385,14 @@ def pp_speculative_decode_loop(
             spec_last = layer
     if spec_first is None and spec_last is None:
         spec_first, spec_last = _install_spec_layers(inner_model)
-    _log(f"spec layers found: spec_first={'r='+str(spec_first.r) if spec_first else None} "
-         f"spec_last={'r='+str(spec_last.r)+' s='+str(spec_last.s) if spec_last else None} "
-         f"pp_rank={pp_rank} pp_world_size={pp_world_size}")
+    _log(
+        f"spec layers found: spec_first={'r=' + str(spec_first.r) if spec_first else None} "
+        f"spec_last={'r=' + str(spec_last.r) + ' s=' + str(spec_last.s) if spec_last else None} "
+        f"pp_rank={pp_rank} pp_world_size={pp_world_size}"
+    )
 
     # State list for hidden exchange
-    _cache_state = [c.state if hasattr(c, 'state') else c for c in prompt_cache]
+    _cache_state = [c.state if hasattr(c, "state") else c for c in prompt_cache]
     _hidden_idx = len(_cache_state)
     _cache_state.append(mx.zeros((1, 1, hidden_size), dtype=mx.bfloat16))
 
@@ -382,6 +418,7 @@ def pp_speculative_decode_loop(
     if is_rank0:
         _real_lm_head = getattr(_lm_head_owner, "lm_head", None)
         if _real_lm_head is not None:
+
             def _nop_lm_head(h: mx.array) -> mx.array:
                 # Same leading dims as a real lm_head output would have,
                 # zero-cost: no weight read, no matmul. Callers here
@@ -389,6 +426,7 @@ def pp_speculative_decode_loop(
                 # return value entirely, so correctness only requires
                 # this not raise -- shape/dtype fidelity is irrelevant.
                 return h
+
             _lm_head_owner.lm_head = _nop_lm_head  # type: ignore
 
     # Install hidden state capture on rank 1 (for MTP feedback)
@@ -414,8 +452,13 @@ def pp_speculative_decode_loop(
 
     def _rank0_compute(token: mx.array) -> None:
         """Rank 0: forward layers 0-29 in pp_send mode (sends hidden to rank 1)."""
-        _configure_layers(spec_first, spec_last,
-                          pp_send=True, state_list=_cache_state, hidden_idx=_hidden_idx)
+        _configure_layers(
+            spec_first,
+            spec_last,
+            pp_send=True,
+            state_list=_cache_state,
+            hidden_idx=_hidden_idx,
+        )
         with mx.stream(generation_stream):
             model(token[None], cache=prompt_cache)
 
@@ -432,9 +475,14 @@ def pp_speculative_decode_loop(
 
     def _rank1_compute(token: mx.array) -> tuple[mx.array, mx.array]:
         """Rank 1: recv hidden, forward layers 30-59, sample."""
-        _configure_layers(spec_first, spec_last,
-                          pp_recv=True, pp_decode=True,
-                          state_list=_cache_state, hidden_idx=_hidden_idx)
+        _configure_layers(
+            spec_first,
+            spec_last,
+            pp_recv=True,
+            pp_decode=True,
+            state_list=_cache_state,
+            hidden_idx=_hidden_idx,
+        )
         with mx.stream(generation_stream):
             out = model(token[None], cache=prompt_cache)
             out = out[:, -1, :]
@@ -442,7 +490,9 @@ def pp_speculative_decode_loop(
             sampled = sampler(lp)
             return sampled, lp.squeeze(0)
 
-    _log(f"decode loop start: max_tokens={max_tokens}, mtp={'yes' if mtp_predictor else 'no'}")
+    _log(
+        f"decode loop start: max_tokens={max_tokens}, mtp={'yes' if mtp_predictor else 'no'}"
+    )
 
     # ── profiling accumulators ──
     _prof_r0_compute = 0.0
@@ -473,8 +523,7 @@ def pp_speculative_decode_loop(
                         _to_send = _to_send.astype(mx.bfloat16)
                     _log(f"n={n} r0_hidden_send PRE (from cached speculative fwd)")
                     sent = mx.distributed.send(
-                        _to_send,
-                        (pp_rank + 1) % pp_world_size, group=pp_group
+                        _to_send, (pp_rank + 1) % pp_world_size, group=pp_group
                     )
                     mx.eval(sent)
                     _log(f"n={n} r0_hidden_send POST")
@@ -519,7 +568,9 @@ def pp_speculative_decode_loop(
             elif is_rank0:
                 _log(f"n={n} tok_recv PRE (rank0<-{pp_world_size - 1})")
                 final_token = mx.distributed.recv_like(
-                    mx.zeros(1, dtype=mx.int32), pp_world_size - 1, group=pp_group,
+                    mx.zeros(1, dtype=mx.int32),
+                    pp_world_size - 1,
+                    group=pp_group,
                 )
                 mx.eval(final_token)
                 _log(f"n={n} tok_recv POST")
@@ -566,24 +617,30 @@ def pp_speculative_decode_loop(
             _mtp_draft_input = _mtp_hidden
             _t0 = time.perf_counter()
             if mtp_predictor is not None:
-                if is_last_rank and 'pre_norm' in _captured:
-                    _pn = _captured['pre_norm'][:, -1:, :].astype(mx.bfloat16)
+                if is_last_rank and "pre_norm" in _captured:
+                    _pn = _captured["pre_norm"][:, -1:, :].astype(mx.bfloat16)
                     mx.eval(_pn)
                     _log(f"n={n} hidden_send PRE (rank{pp_rank}->0, MTP feedback)")
                     _sent = mx.distributed.send(_pn, 0, group=pp_group)
                     mx.eval(_sent)
                     _log(f"n={n} hidden_send POST")
                 elif is_rank0:
-                    _log(f"n={n} hidden_recv PRE (rank0<-{pp_world_size - 1}, MTP feedback)")
+                    _log(
+                        f"n={n} hidden_recv PRE (rank0<-{pp_world_size - 1}, MTP feedback)"
+                    )
                     _mtp_hidden = mx.distributed.recv_like(
                         mx.zeros((1, 1, hidden_size), dtype=mx.bfloat16),
-                        pp_world_size - 1, group=pp_group,
+                        pp_world_size - 1,
+                        group=pp_group,
                     )
                     mx.eval(_mtp_hidden)
                     _log(f"n={n} hidden_recv POST")
                     # Cast back to model's compute dtype after bf16 transport
                     if _mtp_hidden.dtype != mx.float16:
-                        from exo.worker.engines.mlx.patches.qwen3_5_moe.common import COMPUTE_DTYPE
+                        from exo.worker.engines.mlx.patches.qwen3_5_moe.common import (
+                            COMPUTE_DTYPE,
+                        )
+
                         _mtp_hidden = _mtp_hidden.astype(COMPUTE_DTYPE)
             _dt_hidden_xchg = time.perf_counter() - _t0
             _prof_hidden_exchange += _dt_hidden_xchg
@@ -601,13 +658,17 @@ def pp_speculative_decode_loop(
                 _used_mtp = False
                 try:
                     if mtp_predictor is not None and _mtp_draft_input is not None:
-                        logits = mtp_predictor.predict(_mtp_draft_input, mx.array([[y.item()]]))
+                        logits = mtp_predictor.predict(
+                            _mtp_draft_input, mx.array([[y.item()]])
+                        )
                         draft_tok = logits.argmax(axis=-1)
                         mx.eval(draft_tok)
                         _draft_token = int(draft_tok.item())
                         _used_mtp = True
                     elif mtp_predictor is None and draft_model is not None:
-                        draft_logits = draft_model(mx.array([[y.item()]]), cache=draft_cache)
+                        draft_logits = draft_model(
+                            mx.array([[y.item()]]), cache=draft_cache
+                        )
                         draft_tok = draft_logits[0, -1].argmax()
                         mx.eval(draft_tok)
                         _draft_token = int(draft_tok.item())
@@ -615,7 +676,9 @@ def pp_speculative_decode_loop(
                     if _draft_token is not None:
                         _spec_snap = _snapshot_cache(prompt_cache)
                         _rank0_speculative_fwd(_draft_token)
-                        _log(f"n={n} drafted={_draft_token} ({'mtp' if _used_mtp else 'draft'})")
+                        _log(
+                            f"n={n} drafted={_draft_token} ({'mtp' if _used_mtp else 'draft'})"
+                        )
                 except Exception as _draft_err:
                     _log(f"n={n} draft FAILED: {_draft_err}")
                     _draft_token = None
@@ -651,7 +714,9 @@ def pp_speculative_decode_loop(
                         draft_model(mx.array([[real_token]]), cache=draft_cache)
             elif is_rank0:
                 if mtp_predictor is None and draft_model is not None:
-                    draft_model(mx.array([[int(final_token.item())]]), cache=draft_cache)
+                    draft_model(
+                        mx.array([[int(final_token.item())]]), cache=draft_cache
+                    )
             _dt_verify = time.perf_counter() - _t0
             _prof_verify += _dt_verify
 
@@ -674,14 +739,14 @@ def pp_speculative_decode_loop(
             if _TRACE and _loop_dt > 0.025:
                 logger.info(
                     f"[PROF pp-spec OUTLIER R{pp_rank} n={n}] "
-                    f"loop={_loop_dt*1000:.1f}ms "
-                    f"r0_compute={_dt_r0_compute*1000:.1f}ms "
-                    f"r0_draft={_dt_r0_draft*1000:.1f}ms "
-                    f"r1_compute={_dt_r1_compute*1000:.1f}ms "
-                    f"tok_xchg={_dt_tok_xchg*1000:.1f}ms "
-                    f"hidden_xchg={_dt_hidden_xchg*1000:.1f}ms "
-                    f"verify={_dt_verify*1000:.1f}ms "
-                    f"clear_cache={_dt_clear_cache*1000:.1f}ms "
+                    f"loop={_loop_dt * 1000:.1f}ms "
+                    f"r0_compute={_dt_r0_compute * 1000:.1f}ms "
+                    f"r0_draft={_dt_r0_draft * 1000:.1f}ms "
+                    f"r1_compute={_dt_r1_compute * 1000:.1f}ms "
+                    f"tok_xchg={_dt_tok_xchg * 1000:.1f}ms "
+                    f"hidden_xchg={_dt_hidden_xchg * 1000:.1f}ms "
+                    f"verify={_dt_verify * 1000:.1f}ms "
+                    f"clear_cache={_dt_clear_cache * 1000:.1f}ms "
                     f"draft_accepted={'yes' if is_rank0 and _draft_token is not None else 'no'}"
                 )
 
@@ -690,14 +755,14 @@ def pp_speculative_decode_loop(
                 _n = 64
                 logger.info(
                     f"[PROF pp-spec R{pp_rank} x{_n}] "
-                    f"r0_compute={_prof_r0_compute/_n*1000:.2f}ms "
-                    f"r0_draft={_prof_r0_draft/_n*1000:.2f}ms "
-                    f"r1_compute={_prof_r1_compute/_n*1000:.2f}ms "
-                    f"tok_xchg={_prof_token_exchange/_n*1000:.2f}ms "
-                    f"hidden_xchg={_prof_hidden_exchange/_n*1000:.2f}ms "
-                    f"verify={_prof_verify/_n*1000:.2f}ms "
-                    f"clear_cache={_prof_clear_cache/_n*1000:.2f}ms "
-                    f"loop={_prof_total/_n*1000:.2f}ms"
+                    f"r0_compute={_prof_r0_compute / _n * 1000:.2f}ms "
+                    f"r0_draft={_prof_r0_draft / _n * 1000:.2f}ms "
+                    f"r1_compute={_prof_r1_compute / _n * 1000:.2f}ms "
+                    f"tok_xchg={_prof_token_exchange / _n * 1000:.2f}ms "
+                    f"hidden_xchg={_prof_hidden_exchange / _n * 1000:.2f}ms "
+                    f"verify={_prof_verify / _n * 1000:.2f}ms "
+                    f"clear_cache={_prof_clear_cache / _n * 1000:.2f}ms "
+                    f"loop={_prof_total / _n * 1000:.2f}ms"
                 )
                 _prof_r0_compute = 0.0
                 _prof_r0_draft = 0.0
@@ -736,11 +801,15 @@ def pp_speculative_decode_loop(
 
         total = _accepted + _rejected
         if total > 0:
-            logger.debug(f"PP speculation: {_accepted}/{total} accepted ({_accepted/total*100:.0f}%)")
+            logger.debug(
+                f"PP speculation: {_accepted}/{total} accepted ({_accepted / total * 100:.0f}%)"
+            )
         mtp_total = _mtp_accepted + _mtp_rejected
         if mtp_total > 0:
-            logger.debug(f"MTP: {_mtp_accepted}/{mtp_total} accepted ({_mtp_accepted/mtp_total*100:.0f}%), "
-                         f"draft-fallback: {total - mtp_total} steps")
+            logger.debug(
+                f"MTP: {_mtp_accepted}/{mtp_total} accepted ({_mtp_accepted / mtp_total * 100:.0f}%), "
+                f"draft-fallback: {total - mtp_total} steps"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -824,7 +893,9 @@ def _mtp_chain_draft(
     for _ in range(depth):
         try:
             logits, h = mtp_predictor.predict(
-                h, mx.array([[tok]]), return_hidden=True,
+                h,
+                mx.array([[tok]]),
+                return_hidden=True,
             )
             draft_tok = logits.argmax(axis=-1)
             mx.eval(draft_tok)
@@ -892,13 +963,17 @@ def pp_chained_decode_loop(
     if is_rank0:
         _real_lm_head = getattr(_lm_head_owner, "lm_head", None)
         if _real_lm_head is not None:
+
             def _nop_lm_head(h: mx.array) -> mx.array:
                 return h
+
             _lm_head_owner.lm_head = _nop_lm_head  # type: ignore
-            _log(f"lm_head nop check: mtp_predictor.lm_head is real_lm_head = "
-                 f"{getattr(mtp_predictor, 'lm_head', None) is _real_lm_head}, "
-                 f"mtp_predictor.lm_head is nop = "
-                 f"{getattr(mtp_predictor, 'lm_head', None) is _nop_lm_head}")
+            _log(
+                f"lm_head nop check: mtp_predictor.lm_head is real_lm_head = "
+                f"{getattr(mtp_predictor, 'lm_head', None) is _real_lm_head}, "
+                f"mtp_predictor.lm_head is nop = "
+                f"{getattr(mtp_predictor, 'lm_head', None) is _nop_lm_head}"
+            )
 
     y = first_y
     # first_logprobs unused here -- kept in the function signature only
@@ -925,7 +1000,10 @@ def pp_chained_decode_loop(
             draft_ids: list[int] = []
             if is_rank0 and _mtp_seed_hidden is not None:
                 draft_ids, _ = _mtp_chain_draft(
-                    mtp_predictor, _mtp_seed_hidden, int(y.item()), k - 1,
+                    mtp_predictor,
+                    _mtp_seed_hidden,
+                    int(y.item()),
+                    k - 1,
                 )
                 _drafted_total += len(draft_ids)
             # Pad with a sentinel that can never match a real sampled
@@ -941,10 +1019,12 @@ def pp_chained_decode_loop(
 
             # ==== RANK 0: ONE main-model forward over [y, d_1..d_{k-1}] ====
             if is_rank0:
-                _configure_layers(spec_first, spec_last,
-                                  pp_send=True, state_list=None, hidden_idx=-1)
+                _configure_layers(
+                    spec_first, spec_last, pp_send=True, state_list=None, hidden_idx=-1
+                )
                 _batch_ids = [int(y.item())] + [
-                    max(0, d) for d in draft_ids  # sentinel -1 -> 0 for the
+                    max(0, d)
+                    for d in draft_ids  # sentinel -1 -> 0 for the
                     # forward itself (never sampled/committed if rejected;
                     # using 0 keeps embed_tokens lookup in-bounds without
                     # affecting correctness, since verify will reject any
@@ -963,13 +1043,18 @@ def pp_chained_decode_loop(
             m = 0
             _next_seed_hidden: mx.array | None = None
             if is_last_rank:
-                _configure_layers(spec_first, spec_last,
-                                  pp_recv=True, pp_decode=True,
-                                  state_list=None, hidden_idx=-1)
+                _configure_layers(
+                    spec_first,
+                    spec_last,
+                    pp_recv=True,
+                    pp_decode=True,
+                    state_list=None,
+                    hidden_idx=-1,
+                )
                 with mx.stream(generation_stream):
-                    _batch_tok_r1 = mx.array([[int(y.item())] + [
-                        max(0, d) for d in draft_ids
-                    ]])
+                    _batch_tok_r1 = mx.array(
+                        [[int(y.item())] + [max(0, d) for d in draft_ids]]
+                    )
                     out = model(_batch_tok_r1, cache=prompt_cache)
                     # out: (1, k, vocab). Position i's logits predict the
                     # token AFTER input position i -- i.e. out[:, i, :]
@@ -1031,7 +1116,7 @@ def pp_chained_decode_loop(
                             _bonus_sampled = sampler(lp_all[:, k - 1, :])
                             mx.eval(_bonus_sampled)
                             bonus_token = int(_bonus_sampled.item())
-                    _pn = _captured.get('pre_norm')
+                    _pn = _captured.get("pre_norm")
                     # Seed hidden for rank0's NEXT chain: the pre-norm
                     # hidden at whichever position corresponds to the
                     # last COMMITTED token this iteration (index m, since
@@ -1039,21 +1124,28 @@ def pp_chained_decode_loop(
                     # logically at position m too).
                     _seed_idx = min(m, k - 1)
                     _next_seed_hidden = (
-                        _pn[:, _seed_idx:_seed_idx + 1, :].astype(mx.bfloat16)
-                        if _pn is not None else None
+                        _pn[:, _seed_idx : _seed_idx + 1, :].astype(mx.bfloat16)
+                        if _pn is not None
+                        else None
                     )
             # ==== FIXED-SHAPE WIRE: rank1 -> rank0, (m, bonus_token) ====
             if is_last_rank:
-                _wire = mx.array([m, bonus_token if bonus_token is not None else 0], dtype=mx.int32)
+                _wire = mx.array(
+                    [m, bonus_token if bonus_token is not None else 0], dtype=mx.int32
+                )
                 mx.eval(_wire)
-                _log(f"n={n} chain_verify_send PRE (rank1->0) m={m} bonus={bonus_token}")
+                _log(
+                    f"n={n} chain_verify_send PRE (rank1->0) m={m} bonus={bonus_token}"
+                )
                 _sent_wire = mx.distributed.send(_wire, 0, group=pp_group)
                 mx.eval(_sent_wire)
                 _log(f"n={n} chain_verify_send POST")
             elif is_rank0:
                 _log(f"n={n} chain_verify_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire = mx.distributed.recv_like(
-                    mx.zeros(2, dtype=mx.int32), pp_world_size - 1, group=pp_group,
+                    mx.zeros(2, dtype=mx.int32),
+                    pp_world_size - 1,
+                    group=pp_group,
                 )
                 mx.eval(_wire)
                 _log(f"n={n} chain_verify_recv POST")
@@ -1066,8 +1158,10 @@ def pp_chained_decode_loop(
             # ==== FIXED-SHAPE WIRE: rank1 -> rank0, next seed hidden ====
             if mtp_predictor is not None:
                 if is_last_rank:
-                    _hs = _next_seed_hidden if _next_seed_hidden is not None else mx.zeros(
-                        (1, 1, hidden_size), dtype=mx.bfloat16
+                    _hs = (
+                        _next_seed_hidden
+                        if _next_seed_hidden is not None
+                        else mx.zeros((1, 1, hidden_size), dtype=mx.bfloat16)
                     )
                     mx.eval(_hs)
                     _log(f"n={n} chain_hidden_send PRE (rank1->0)")
@@ -1078,7 +1172,8 @@ def pp_chained_decode_loop(
                     _log(f"n={n} chain_hidden_recv PRE (rank0<-{pp_world_size - 1})")
                     _mtp_seed_hidden = mx.distributed.recv_like(
                         mx.zeros((1, 1, hidden_size), dtype=mx.bfloat16),
-                        pp_world_size - 1, group=pp_group,
+                        pp_world_size - 1,
+                        group=pp_group,
                     )
                     mx.eval(_mtp_seed_hidden)
                     # BUG FIX (2026-07-18, found via live test showing 0%
@@ -1095,7 +1190,10 @@ def pp_chained_decode_loop(
                     # numerically wrong -- but not exception-raising --
                     # predictions on every single call.
                     if _mtp_seed_hidden.dtype != mx.float16:
-                        from exo.worker.engines.mlx.patches.qwen3_5_moe.common import COMPUTE_DTYPE
+                        from exo.worker.engines.mlx.patches.qwen3_5_moe.common import (
+                            COMPUTE_DTYPE,
+                        )
+
                         _mtp_seed_hidden = _mtp_seed_hidden.astype(COMPUTE_DTYPE)
                     _log(f"n={n} chain_hidden_recv POST")
 
@@ -1115,7 +1213,11 @@ def pp_chained_decode_loop(
             # by len(draft_ids) positions this iteration (computed
             # independently from the main-model trim -- see module
             # docstring). Trim back to m accepted positions.
-            if is_rank0 and mtp_predictor is not None and mtp_predictor.kv_cache is not None:
+            if (
+                is_rank0
+                and mtp_predictor is not None
+                and mtp_predictor.kv_cache is not None
+            ):
                 _mtp_drafted_this_iter = sum(1 for d in draft_ids if d >= 0)
                 _mtp_trim_n = _mtp_drafted_this_iter - m
                 if _mtp_trim_n > 0:
@@ -1143,7 +1245,7 @@ def pp_chained_decode_loop(
         if _drafted_total > 0:
             logger.debug(
                 f"PP chained MTP: {_accepted_total}/{_drafted_total} "
-                f"drafted tokens accepted ({_accepted_total/_drafted_total*100:.0f}%), "
+                f"drafted tokens accepted ({_accepted_total / _drafted_total * 100:.0f}%), "
                 f"k={k}"
             )
 
@@ -1345,21 +1447,40 @@ def pp_dspark_decode_loop(
     _da_full_accept = 0
     _da_would_hit = 0
 
+    # STEP 1 spec-tag diagnostic (2026-07-19, EXO_PP_DSPARK_DRAFT_AHEAD=1,
+    # default OFF, orthogonal to the pure-measurement _DRAFT_AHEAD_LOG
+    # switch above). Adds a fixed 5-slot int32 tag exchange after msg2
+    # so that spec_id packing/unpacking is exercised under real
+    # cross-rank timing BEFORE the speculative forward branch (STEP 3)
+    # is wired in. Rank1 constructs a SpecId capturing its view of
+    # this cycle's assumed prefix and sends it; rank0 unpacks and
+    # validates against the SpecId it would independently construct
+    # from _wire_batch (which encodes the exact same prefix). Any
+    # mismatch means the tag mechanism itself is not sound -- log
+    # loudly, but never branch on the result (diagnostic mode always
+    # falls through to the existing non-speculative path).
+    _draft_ahead_enabled = os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD", "0") == "1"
+    _spec_tag_validator = SpecTagValidator() if _draft_ahead_enabled else None
+    _spec_tag_matches = 0
+    _spec_tag_mismatches = 0
+
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
     # how to restructure the wire protocol (collapse messages / overlap
     # drafting). Do NOT guess bottleneck location from log timestamps alone.
     _prof_cycle_n = 0
-    _prof_batch_xchg = 0.0     # rank1->rank0 batch send/recv (message 1)
-    _prof_r0_fwd = 0.0         # rank0's forward (includes its internal hidden send)
+    _prof_batch_xchg = 0.0  # rank1->rank0 batch send/recv (message 1)
+    _prof_r0_fwd = 0.0  # rank0's forward (includes its internal hidden send)
     _prof_r1_verify_wait = 0.0  # rank1 blocked waiting for rank0's hidden send
     _prof_r1_verify_fwd = 0.0  # rank1's ACTUAL compute (wait subtracted out)
-    _prof_draft = 0.0          # rank1's DSpark draft() call for next cycle
-    _prof_trim_xchg = 0.0      # rank1->rank0 trim/accept send/recv (message 2)
+    _prof_draft = 0.0  # rank1's DSpark draft() call for next cycle
+    _prof_trim_xchg = 0.0  # rank1->rank0 trim/accept send/recv (message 2)
     _prof_total = 0.0
 
-    _log(f"dspark decode loop start: max_tokens={max_tokens}, "
-         f"block_size={bs if is_last_rank else '?'}, verify_width={vw}")
+    _log(
+        f"dspark decode loop start: max_tokens={max_tokens}, "
+        f"block_size={bs if is_last_rank else '?'}, verify_width={vw}"
+    )
 
     # ── ONE-SHOT width-scaling diagnostic (2026-07-18) ──────────────────
     # Prior profiling assumed forward cost is FLAT across batch widths
@@ -1386,8 +1507,9 @@ def pp_dspark_decode_loop(
             _sweep_tok = mx.array([[int(y.item())] * _w], dtype=mx.int32)
             _t0 = time.perf_counter()
             if is_rank0:
-                _configure_layers(spec_first, spec_last,
-                                  pp_send=True, state_list=None, hidden_idx=-1)
+                _configure_layers(
+                    spec_first, spec_last, pp_send=True, state_list=None, hidden_idx=-1
+                )
                 with mx.stream(generation_stream):
                     _sweep_logits = model(_sweep_tok, cache=prompt_cache)
                     # LAZY-ONLY checkpoint (2026-07-18): time up to just
@@ -1403,9 +1525,14 @@ def pp_dspark_decode_loop(
                     _t_lazy = time.perf_counter() - _t0
                     mx.eval(_sweep_logits)
             elif is_last_rank:
-                _configure_layers(spec_first, spec_last,
-                                  pp_recv=True, pp_decode=True,
-                                  state_list=None, hidden_idx=-1)
+                _configure_layers(
+                    spec_first,
+                    spec_last,
+                    pp_recv=True,
+                    pp_decode=True,
+                    state_list=None,
+                    hidden_idx=-1,
+                )
                 with mx.stream(generation_stream):
                     _sweep_out = model(_sweep_tok, cache=prompt_cache)
                     _t_lazy = time.perf_counter() - _t0
@@ -1418,15 +1545,19 @@ def pp_dspark_decode_loop(
             for _c in prompt_cache:
                 if hasattr(_c, "trim"):
                     _c.trim(_w)
-            _log(f"width-sweep w={_w} dt={_dt*1000:.2f}ms "
-                 f"lazy={_t_lazy*1000:.2f}ms rank={pp_rank}")
+            _log(
+                f"width-sweep w={_w} dt={_dt * 1000:.2f}ms "
+                f"lazy={_t_lazy * 1000:.2f}ms rank={pp_rank}"
+            )
         logger.info(
-            f"[WIDTH SWEEP R{pp_rank}] " +
-            ", ".join(f"w={w}:{dt*1000:.2f}ms" for w, dt in _sweep_results.items())
+            f"[WIDTH SWEEP R{pp_rank}] "
+            + ", ".join(f"w={w}:{dt * 1000:.2f}ms" for w, dt in _sweep_results.items())
         )
         logger.info(
-            f"[WIDTH SWEEP LAZY-ONLY R{pp_rank}] " +
-            ", ".join(f"w={w}:{dt*1000:.2f}ms" for w, dt in _sweep_lazy_results.items())
+            f"[WIDTH SWEEP LAZY-ONLY R{pp_rank}] "
+            + ", ".join(
+                f"w={w}:{dt * 1000:.2f}ms" for w, dt in _sweep_lazy_results.items()
+            )
         )
 
     try:
@@ -1440,8 +1571,12 @@ def pp_dspark_decode_loop(
         # path's own first-cycle behavior).
         if is_last_rank:
             _toks, _corrected, _conf = _dspark.draft(
-                y.reshape(1), embed_tokens, model.lm_head, _dsc,
-                temperature=0.0, sample_fn=_dspark_sample_greedy,
+                y.reshape(1),
+                embed_tokens,
+                model.lm_head,
+                _dsc,
+                temperature=0.0,
+                sample_fn=_dspark_sample_greedy,
                 width=_draft_width,
             )
             mx.eval(_toks)
@@ -1482,7 +1617,8 @@ def pp_dspark_decode_loop(
                 _log(f"n={n} dspark_batch_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire_batch = mx.distributed.recv_like(
                     mx.zeros(vw, dtype=mx.int32),
-                    pp_world_size - 1, group=pp_group,
+                    pp_world_size - 1,
+                    group=pp_group,
                 )
                 # CRITICAL (2026-07-18, found via intermittent-deadlock
                 # investigation): mx.distributed ops are LAZY graph nodes
@@ -1513,8 +1649,9 @@ def pp_dspark_decode_loop(
 
             # ==== rank0: forward the batch through its own layers ====
             if is_rank0:
-                _configure_layers(spec_first, spec_last,
-                                  pp_send=True, state_list=None, hidden_idx=-1)
+                _configure_layers(
+                    spec_first, spec_last, pp_send=True, state_list=None, hidden_idx=-1
+                )
                 _batch_tok = _wire_batch.reshape(1, -1)
                 with mx.stream(generation_stream):
                     model(_batch_tok, cache=prompt_cache)
@@ -1527,9 +1664,14 @@ def pp_dspark_decode_loop(
             bonus_token: int | None = None
             n_accepted = 0
             if is_last_rank:
-                _configure_layers(spec_first, spec_last,
-                                  pp_recv=True, pp_decode=True,
-                                  state_list=None, hidden_idx=-1)
+                _configure_layers(
+                    spec_first,
+                    spec_last,
+                    pp_recv=True,
+                    pp_decode=True,
+                    state_list=None,
+                    hidden_idx=-1,
+                )
                 _recv_wait_before = _DSPARK_RECV_WAIT_ACCUM[0]
                 with mx.stream(generation_stream):
                     _verify_input = mx.array([[int(y.item())] + _draft_ids[: vw - 1]])
@@ -1608,7 +1750,8 @@ def pp_dspark_decode_loop(
                         if _da_cycles % 20 == 0:
                             _of_fa_pct = (
                                 f"{_da_would_hit / _da_full_accept * 100:.1f}%"
-                                if _da_full_accept > 0 else "n/a"
+                                if _da_full_accept > 0
+                                else "n/a"
                             )
                             logger.info(
                                 f"[DRAFT_AHEAD_LOG] cycles={_da_cycles} "
@@ -1634,15 +1777,17 @@ def pp_dspark_decode_loop(
                     # GLOBAL layer index per the pipeline_start_idx fix).
                     _ctx_cat = get_dspark_ctx(_dspark.target_layer_ids)
                     if _ctx_cat is not None:
-                        _dspark.append_ctx(
-                            _ctx_cat[:, : n_accepted + 1], _dsc
-                        )
+                        _dspark.append_ctx(_ctx_cat[:, : n_accepted + 1], _dsc)
 
                     # Draft the NEXT cycle now (self-contained, rank1-only)
                     # using the bonus token as the new anchor.
                     _next_toks, _next_corrected, _next_conf = _dspark.draft(
-                        mx.array([bonus_token]), embed_tokens, model.lm_head,
-                        _dsc, temperature=0.0, sample_fn=_dspark_sample_greedy,
+                        mx.array([bonus_token]),
+                        embed_tokens,
+                        model.lm_head,
+                        _dsc,
+                        temperature=0.0,
+                        sample_fn=_dspark_sample_greedy,
                         width=_draft_width,
                     )
                     mx.eval(_next_toks)
@@ -1714,25 +1859,40 @@ def pp_dspark_decode_loop(
             _accepted_ids: list[int] = []
             _n_accepted_wire = 0
             _bonus_wire = 0
+            # msg2 layout (STEP 1 of draft-ahead, 2026-07-19): existing
+            # [n_accepted, bonus_token, padded accepted_ids...] extended by
+            # ONE int32 trailing slot for the hit/miss/na code. Adding the
+            # slot now (default HIT_MISS_NA) forces both ranks to speak the
+            # same wire protocol at commit time, so STEP 3 (actual
+            # speculative branch) can be enabled with a pure logic change
+            # and no further wire-shape churn. See
+            # pp_speculation_spec_tag.HitMissCode for the encoding.
+            _msg2_len = int(2 + (vw - 1) + 1)
+            _hit_miss_code = int(HIT_MISS_NA)  # diagnostic mode: never HIT/MISS yet
             if is_last_rank:
                 _accepted_ids = accepted_ids
                 _n_accepted_wire = n_accepted
                 _bonus_wire = bonus_token if bonus_token is not None else 0
                 _padded = _accepted_ids + [-1] * (vw - 1 - len(_accepted_ids))
                 _wire2 = mx.array(
-                    [_n_accepted_wire, _bonus_wire] + _padded, dtype=mx.int32
+                    [_n_accepted_wire, _bonus_wire] + _padded + [_hit_miss_code],
+                    dtype=mx.int32,
                 )
                 mx.eval(_wire2)
-                _log(f"n={n} dspark_trim_send PRE (rank1->0) "
-                     f"n_accepted={_n_accepted_wire} bonus={_bonus_wire}")
+                _log(
+                    f"n={n} dspark_trim_send PRE (rank1->0) "
+                    f"n_accepted={_n_accepted_wire} bonus={_bonus_wire} "
+                    f"hit_miss={_hit_miss_code}"
+                )
                 _sent2 = mx.distributed.send(_wire2, 0, group=pp_group)
                 mx.eval(_sent2)
                 _log(f"n={n} dspark_trim_send POST")
             elif is_rank0:
                 _log(f"n={n} dspark_trim_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire2 = mx.distributed.recv_like(
-                    mx.zeros(2 + vw - 1, dtype=mx.int32),
-                    pp_world_size - 1, group=pp_group,
+                    mx.zeros(_msg2_len, dtype=mx.int32),
+                    pp_world_size - 1,
+                    group=pp_group,
                 )
                 mx.eval(_wire2)
                 _log(f"n={n} dspark_trim_recv POST")
@@ -1740,6 +1900,20 @@ def pp_dspark_decode_loop(
                 _n_accepted_wire = _wire2_list[0]
                 bonus_token = _wire2_list[1]
                 _accepted_ids = _wire2_list[2 : 2 + _n_accepted_wire]
+                # coerce_hit_miss narrows into HitMissCode; unknown values
+                # raise, so any garbage on the wire fails loudly rather
+                # than silently corrupting the KV state.
+                _hit_miss_code = int(coerce_hit_miss(_wire2_list[-1]))
+                if _hit_miss_code != HIT_MISS_NA:
+                    # In diagnostic mode this branch is unreachable (rank1
+                    # never sends anything other than NA). If we ever see
+                    # it, that IS the desync we're guarding against --
+                    # log loudly, do NOT act on it.
+                    logger.warning(
+                        f"[PP DSpark STEP1 DIAG] unexpected hit_miss code "
+                        f"{_hit_miss_code} in diagnostic mode; ignoring "
+                        f"(should be {int(HIT_MISS_NA)})"
+                    )
 
             _t_after_trim_xchg = time.perf_counter()
             # rank0's baseline for this phase is _t_after_r0_fwd (it has no
@@ -1756,6 +1930,86 @@ def pp_dspark_decode_loop(
                 for c in prompt_cache:
                     if hasattr(c, "trim"):
                         c.trim(_trim_amount)
+
+            # ==== STEP 1 diagnostic spec-tag exchange (draft-ahead)  ====
+            # Gated by EXO_PP_DSPARK_DRAFT_AHEAD=1 (default OFF). Fixed
+            # SPEC_TAG_WIRE_LEN int32 slots. Both ranks now know:
+            #   anchor        = _wire_batch[0]  (also y at cycle start)
+            #   drafted_ids   = _wire_batch[1..vw]
+            #   n_accepted    = _n_accepted_wire  (0..vw-1)
+            #   accepted_ids  = _accepted_ids (populated on BOTH ranks)
+            #   bonus_token   = bonus_token
+            # so both can independently construct the SAME SpecId for
+            # this cycle. If the packed<->unpacked round-trip disagrees,
+            # that's the tag-mechanism-itself failing under real
+            # cross-rank timing. Diagnostic-only: never branches decode.
+            if _draft_ahead_enabled and _spec_tag_validator is not None:
+                _wire_batch_raw = _wire_batch.tolist()
+                if not isinstance(_wire_batch_raw, list):
+                    raise RuntimeError(
+                        f"_wire_batch.tolist() must be a list, got {type(_wire_batch_raw)!r}"
+                    )
+                _wire_batch_list: list[int] = []
+                for _v in _wire_batch_raw:
+                    if isinstance(_v, list):
+                        raise RuntimeError(
+                            f"_wire_batch has nested list element: {_v!r}"
+                        )
+                    _wire_batch_list.append(int(_v))
+                _anchor_this_cycle = _wire_batch_list[0]
+                _drafted_this_cycle = tuple(_wire_batch_list[1:vw])
+                _bonus_for_tag = bonus_token if bonus_token is not None else 0
+                # Assumed-prefix for a hypothetical draft-ahead this cycle:
+                # (anchor, drafted..., assumed_bonus). Both ranks have all
+                # three components after msg2 completes.
+                _assumed_prefix = (
+                    _anchor_this_cycle,
+                    *_drafted_this_cycle,
+                    _bonus_for_tag,
+                )
+                _local_spec_id = SpecId.build(
+                    spec_kind="draft_ahead",
+                    cycle_n=n,
+                    prefix=_assumed_prefix,
+                )
+                if is_last_rank:
+                    _tag_wire = pack_spec_tag(_local_spec_id)
+                    mx.eval(_tag_wire)
+                    _tag_sent = mx.distributed.send(_tag_wire, 0, group=pp_group)
+                    mx.eval(_tag_sent)
+                elif is_rank0:
+                    _tag_wire = mx.distributed.recv_like(
+                        mx.zeros(SPEC_TAG_WIRE_LEN, dtype=mx.int32),
+                        pp_world_size - 1,
+                        group=pp_group,
+                    )
+                    mx.eval(_tag_wire)
+                    try:
+                        _incoming_spec_id = unpack_spec_tag(_tag_wire)
+                    except ValueError as e:
+                        logger.warning(
+                            f"[PP DSpark STEP1 DIAG] spec-tag unpack failed "
+                            f"at n={n}: {e}"
+                        )
+                    else:
+                        _result = _spec_tag_validator.validate(
+                            incoming=_incoming_spec_id,
+                            expected=_local_spec_id,
+                        )
+                        if _result.ok:
+                            _spec_tag_matches += 1
+                        else:
+                            _spec_tag_mismatches += 1
+                            logger.warning(
+                                f"[PP DSpark STEP1 DIAG] spec-tag mismatch "
+                                f"at n={n}: {_result.reason}"
+                            )
+                        if (_spec_tag_matches + _spec_tag_mismatches) % 32 == 0:
+                            logger.info(
+                                f"[PP DSpark STEP1 DIAG] spec-tag round-trip "
+                                f"matches={_spec_tag_matches} "
+                                f"mismatches={_spec_tag_mismatches}"
+                            )
 
             _prof_cycle_n += 1
             _this_cycle_dt = time.perf_counter() - _cycle_t0
@@ -1782,32 +2036,30 @@ def pp_dspark_decode_loop(
             if _this_cycle_dt > 1.0:
                 _outlier_msg = (
                     f"[PP DSpark OUTLIER R{pp_rank} n={n}] cycle took "
-                    f"{_this_cycle_dt*1000:.1f}ms (>1000ms threshold) -- "
-                    f"batch_xchg={(_t_after_batch_xchg-_cycle_t0)*1000:.1f}ms "
-                    f"r0_fwd={(_t_after_r0_fwd-_t_after_batch_xchg)*1000:.1f}ms"
+                    f"{_this_cycle_dt * 1000:.1f}ms (>1000ms threshold) -- "
+                    f"batch_xchg={(_t_after_batch_xchg - _cycle_t0) * 1000:.1f}ms "
+                    f"r0_fwd={(_t_after_r0_fwd - _t_after_batch_xchg) * 1000:.1f}ms"
                 )
                 if is_last_rank:
                     _outlier_msg += (
-                        f" r1_verify_wait={_recv_wait_this_cycle*1000:.1f}ms "
-                        f"r1_verify_fwd={(_t_after_verify-_t_after_r0_fwd-_recv_wait_this_cycle)*1000:.1f}ms "
-                        f"draft={(_t_after_draft-_t_after_verify)*1000:.1f}ms"
+                        f" r1_verify_wait={_recv_wait_this_cycle * 1000:.1f}ms "
+                        f"r1_verify_fwd={(_t_after_verify - _t_after_r0_fwd - _recv_wait_this_cycle) * 1000:.1f}ms "
+                        f"draft={(_t_after_draft - _t_after_verify) * 1000:.1f}ms"
                     )
-                _outlier_msg += (
-                    f" trim_xchg={(_t_after_trim_xchg-(_t_after_draft if is_last_rank else _t_after_r0_fwd))*1000:.1f}ms"
-                )
+                _outlier_msg += f" trim_xchg={(_t_after_trim_xchg - (_t_after_draft if is_last_rank else _t_after_r0_fwd)) * 1000:.1f}ms"
                 logger.warning(_outlier_msg)
 
             if _TRACE and _prof_cycle_n % 16 == 0:
                 _pn = _prof_cycle_n
                 logger.info(
                     f"[PROF dspark R{pp_rank} x{_pn}] "
-                    f"batch_xchg={_prof_batch_xchg/_pn*1000:.2f}ms "
-                    f"r0_fwd={_prof_r0_fwd/_pn*1000:.2f}ms "
-                    f"r1_verify_wait={_prof_r1_verify_wait/_pn*1000:.2f}ms "
-                    f"r1_verify_fwd={_prof_r1_verify_fwd/_pn*1000:.2f}ms "
-                    f"draft={_prof_draft/_pn*1000:.2f}ms "
-                    f"trim_xchg={_prof_trim_xchg/_pn*1000:.2f}ms "
-                    f"cycle_total={_prof_total/_pn*1000:.2f}ms"
+                    f"batch_xchg={_prof_batch_xchg / _pn * 1000:.2f}ms "
+                    f"r0_fwd={_prof_r0_fwd / _pn * 1000:.2f}ms "
+                    f"r1_verify_wait={_prof_r1_verify_wait / _pn * 1000:.2f}ms "
+                    f"r1_verify_fwd={_prof_r1_verify_fwd / _pn * 1000:.2f}ms "
+                    f"draft={_prof_draft / _pn * 1000:.2f}ms "
+                    f"trim_xchg={_prof_trim_xchg / _pn * 1000:.2f}ms "
+                    f"cycle_total={_prof_total / _pn * 1000:.2f}ms"
                 )
                 _prof_batch_xchg = 0.0
                 _prof_r0_fwd = 0.0
@@ -1840,22 +2092,24 @@ def pp_dspark_decode_loop(
         if _drafted_total > 0:
             logger.debug(
                 f"PP DSpark: {_accepted_total}/{_drafted_total} "
-                f"drafted tokens accepted ({_accepted_total/_drafted_total*100:.0f}%), "
+                f"drafted tokens accepted ({_accepted_total / _drafted_total * 100:.0f}%), "
                 f"block_size={bs}"
             )
         if is_last_rank and sum(_pos_reached) > 0:
             _hist = ", ".join(
                 f"pos{i}={_pos_accepted[i]}/{_pos_reached[i]} "
-                f"({_pos_accepted[i]/_pos_reached[i]*100:.0f}%)"
-                if _pos_reached[i] > 0 else f"pos{i}=n/a"
+                f"({_pos_accepted[i] / _pos_reached[i] * 100:.0f}%)"
+                if _pos_reached[i] > 0
+                else f"pos{i}=n/a"
                 for i in range(bs)
             )
             logger.debug(f"PP DSpark per-position accept histogram: {_hist}")
         if is_last_rank and sum(_pos_rejected_reached) > 0:
             _tree_hist = ", ".join(
                 f"pos{i}={_pos_rank2_would_hit[i]}/{_pos_rejected_reached[i]} "
-                f"({_pos_rank2_would_hit[i]/_pos_rejected_reached[i]*100:.0f}%)"
-                if _pos_rejected_reached[i] > 0 else f"pos{i}=n/a"
+                f"({_pos_rank2_would_hit[i] / _pos_rejected_reached[i] * 100:.0f}%)"
+                if _pos_rejected_reached[i] > 0
+                else f"pos{i}=n/a"
                 for i in range(bs)
             )
             logger.debug(
