@@ -1512,6 +1512,24 @@ def pp_dspark_decode_loop(
         and _da_msg1_ext_len > 0
         and os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE", "0") == "1"
     )
+    # STEP 3b YIELD substitution gate (2026-07-19,
+    # EXO_PP_DSPARK_DRAFT_AHEAD_YIELD=1, default OFF). Orthogonal *third*
+    # env var layered on top of STEP 3a's EXECUTE gate. When unset/0 the
+    # code path is byte-identical to STEP 3a's shipped behaviour (rank 0
+    # restores the KV snapshot and discards the buffered hidden on both
+    # HIT and MISS, wall-time-neutral). When set to 1, on a HIT rank 0
+    # KEEPS its speculative KV writes AND parks the buffered hidden for
+    # the NEXT cycle, which becomes a "consume cycle": no msg1/msg1b
+    # exchange, no fresh rank 0 forward, rank 0 just sends the buffered
+    # hidden and rank 1 verifies the (vw-1)-position extension batch
+    # rank 0 already forwarded. Per the design doc's failure-mode
+    # discipline, we deliberately do NOT chain: a consume cycle NEVER
+    # attempts a fresh speculative forward of its own, so at most one
+    # consecutive HIT is consumed before we fall back to the normal
+    # cycle structure.
+    _draft_ahead_yield = _draft_ahead_execute and (
+        os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD_YIELD", "0") == "1"
+    )
     # Cross-cycle state driven by the previous cycle's hit/miss outcome:
     #   * ``_pending_hit_extension`` -- on BOTH ranks: the extension token
     #     list (length ``vw-1``) that rank 0 speculatively forwarded and
@@ -1532,6 +1550,30 @@ def pp_dspark_decode_loop(
     )
     _pending_hit_extension: list[int] | None = None
     _pending_hit_spec_id: SpecId | None = None
+    # STEP 3b cross-cycle carry for the YIELD path (both ranks). Written
+    # at the tail of a HIT cycle when _draft_ahead_yield is on, read at
+    # the top of the very next cycle to activate consume mode. Always
+    # cleared after being read so an isolated HIT never leaks state into
+    # a later cycle by accident.
+    #   * ``_consume_active_next``  -- BOTH ranks. True iff the NEXT cycle
+    #     is a consume cycle (skip msg1/msg1b/rank0-fwd, rank 0 sends
+    #     buffered hidden, rank 1 verifies the extension batch).
+    #   * ``_consume_ext_ids_next`` -- RANK 1 only. The (vw-1)-token
+    #     extension batch [bonus_N, ext_N[1:vw-1]] rank 1 will verify.
+    #     Snapshot BEFORE the redraft overwrites _draft_ids.
+    #   * ``_consume_spec_id_next`` -- RANK 0 only. The SpecId whose
+    #     buffered hidden must be released (not discarded) at the top of
+    #     the next cycle. Belt-and-braces beyond world_size==2.
+    _consume_active_next: bool = False
+    _consume_ext_ids_next: list[int] | None = None
+    _consume_spec_id_next: SpecId | None = None
+    # STEP 3b consume-cycle counters (default off; only meaningful when
+    # _draft_ahead_yield is on). Cheap counters used to log the real
+    # consume-cycle rate and per-consume-cycle token yield, so live
+    # cluster runs can measure whether the wall-time win predicted by
+    # the design doc actually materialises.
+    _consume_cycles = 0
+    _consume_tokens_yielded = 0
 
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
@@ -1664,14 +1706,71 @@ def pp_dspark_decode_loop(
             _t_after_draft = _cycle_t0  # default for rank0 (never set on that branch)
             _t_after_verify = _cycle_t0  # default for rank0 (outlier-log safety)
             _recv_wait_this_cycle = 0.0  # default for rank0 (outlier-log safety)
+            # ==== STEP 3b: consume-cycle activation (top of cycle) ====
+            # If the previous cycle was a HIT and _draft_ahead_yield is
+            # on, activate consume mode for THIS cycle: skip the normal
+            # msg1/msg1b/rank0-fwd/spec-fwd phases; rank 0 sends the
+            # already-buffered hidden, rank 1 verifies the extension
+            # batch rank 0 already forwarded last cycle. Always clear
+            # the carry state after reading it -- consume mode never
+            # chains, one HIT yields at most one consume cycle, then
+            # the very next iteration is a normal cycle with a fresh
+            # spec-forward attempt of its own (design-doc-compatible;
+            # explicitly NOT multi-cycle lookahead, which the task
+            # guidance calls out as out-of-scope).
+            _consume_this_cycle = _consume_active_next
+            _consume_ext_ids_this_cycle: list[int] | None = _consume_ext_ids_next
+            _consume_spec_id_this_cycle: SpecId | None = _consume_spec_id_next
+            _consume_active_next = False
+            _consume_ext_ids_next = None
+            _consume_spec_id_next = None
+            if _consume_this_cycle:
+                # Belt-and-braces: on rank 0, the buffered hidden the
+                # previous HIT cycle deliberately DID NOT discard must
+                # still be present under its SpecId. Fail loudly if
+                # it's gone -- that would mean the carry state and the
+                # buffer disagree, which is the exact desync class the
+                # SpecId matching mechanism exists to detect.
+                if (
+                    is_rank0
+                    and _spec_hidden_buffer is not None
+                    and _consume_spec_id_this_cycle is not None
+                ):
+                    _pending_keys = _spec_hidden_buffer.peek_keys()
+                    _wanted_key = (
+                        _consume_spec_id_this_cycle.cycle_n,
+                        _consume_spec_id_this_cycle.prefix_hash,
+                        _consume_spec_id_this_cycle.prefix_len,
+                    )
+                    if _wanted_key not in _pending_keys:
+                        raise RuntimeError(
+                            f"STEP 3b consume: buffered hidden missing on rank 0 "
+                            f"for spec_id={_consume_spec_id_this_cycle!r}; "
+                            f"pending={_pending_keys}"
+                        )
+                _consume_cycles += 1
+                if _TRACE:
+                    _log(
+                        f"n={n} STEP3b consume-cycle ENTER "
+                        f"ext_len={len(_consume_ext_ids_this_cycle) if _consume_ext_ids_this_cycle else 0}"
+                    )
             # ==== rank1 -> rank0: fixed-shape (bs+1)-token batch ====
             # world_size is always 2 for this module (is_rank0/is_last_rank
             # exhaustive, no middle-rank case -- see module docstring),
             # so _wire_batch/_trim_amount are always set on both branches
             # below despite the type-checker's inability to prove that
             # statically across an if/elif with no else.
+            # STEP 3b: on a consume cycle both sides skip the msg1 wire
+            # exchange (see explicit skip inside each branch below) --
+            # rank 1 has no new drafts to send (its extension batch is
+            # the one rank 0 already forwarded speculatively last cycle)
+            # and rank 0 has no new batch to receive. _wire_batch stays
+            # at zeros; downstream spec-tag / spec-fwd paths that would
+            # consume it are ALSO guarded on ``not _consume_this_cycle``,
+            # so the zero value is never read as if it were a real
+            # batch.
             _wire_batch: mx.array = mx.zeros(vw, dtype=mx.int32)
-            if is_last_rank:
+            if is_last_rank and not _consume_this_cycle:
                 # Truncate to the verify width -- only the first vw-1 of
                 # DSpark's bs drafted positions get sent/forwarded/
                 # verified this cycle (see verify-width comment above).
@@ -1682,7 +1781,7 @@ def pp_dspark_decode_loop(
                 _sent = mx.distributed.send(_wire_batch, 0, group=pp_group)
                 mx.eval(_sent)
                 _log(f"n={n} dspark_batch_send POST")
-            elif is_rank0:
+            elif is_rank0 and not _consume_this_cycle:
                 _log(f"n={n} dspark_batch_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire_batch = mx.distributed.recv_like(
                     mx.zeros(vw, dtype=mx.int32),
@@ -1724,10 +1823,19 @@ def pp_dspark_decode_loop(
             # Same eval-pinning discipline as msg1 above (mx.distributed ops
             # are lazy, must be materialized before the model(...) call's own
             # internal pp_group traffic).
+            # STEP 3b: also snapshot the extension token list on rank 1
+            # HERE (while _draft_ids still reflects this cycle's draft)
+            # so the post-msg2 HIT arming can use it -- by the time
+            # cleanup runs below, rank 1's redraft has already
+            # overwritten _draft_ids. Only relevant on YIELD, but cheap
+            # to always capture on the diagnostic path.
+            _ext_ids_this_cycle_r1: list[int] = []
+            if _da_msg1_ext_active and not _consume_this_cycle and is_last_rank:
+                _ext_ids_this_cycle_r1 = list(_draft_ids[vw - 1 : (2 * vw) - 2])
             _da_msg1_ext_wire: mx.array = mx.zeros(
                 max(_da_msg1_ext_len, 1), dtype=mx.int32
             )
-            if _da_msg1_ext_active:
+            if _da_msg1_ext_active and not _consume_this_cycle:
                 if is_last_rank:
                     # DSpark's draft() computed `bs` positions this cycle
                     # (guarded by `not _draft_width_truncate` above); the
@@ -1778,13 +1886,51 @@ def pp_dspark_decode_loop(
             _prof_batch_xchg += _t_after_batch_xchg - _cycle_t0
 
             # ==== rank0: forward the batch through its own layers ====
-            if is_rank0:
+            # STEP 3b consume cycle: skip the fresh rank 0 forward
+            # entirely. Instead, rank 0 sends the ALREADY-BUFFERED
+            # speculative hidden from last cycle straight to rank 1
+            # over the same pp_group boundary the normal
+            # SpecPipelineLastLayer.pp_send path uses -- rank 1's
+            # SpecPipelineFirstLayer recv (configured below via
+            # pp_recv=True) sees an ordinary bf16 hidden with no
+            # visible difference from a fresh forward's output.
+            if is_rank0 and not _consume_this_cycle:
                 _configure_layers(
                     spec_first, spec_last, pp_send=True, state_list=None, hidden_idx=-1
                 )
                 _batch_tok = _wire_batch.reshape(1, -1)
                 with mx.stream(generation_stream):
                     model(_batch_tok, cache=prompt_cache)
+            elif is_rank0 and _consume_this_cycle:
+                # Pull the buffered hidden back out (release, not
+                # discard -- this is the whole point of the yield
+                # path). The buffer entry was stashed last cycle with
+                # eval_sentinel set so its KV writes are already
+                # materialised; we just need to forward the tensor.
+                if _spec_hidden_buffer is None or _consume_spec_id_this_cycle is None:
+                    raise RuntimeError(
+                        "STEP 3b consume: rank 0 entered consume mode with "
+                        "no buffer / no spec_id -- invariant violated"
+                    )
+                _buffered = _spec_hidden_buffer.release(_consume_spec_id_this_cycle)
+                _hidden_to_send = _buffered.hidden
+                # JACCL/RDMA transport is bf16; mirror
+                # SpecPipelineLastLayer._pp_send exactly for wire
+                # compatibility with rank 1's existing recv path.
+                if _hidden_to_send.dtype != mx.bfloat16:
+                    _hidden_to_send = _hidden_to_send.astype(mx.bfloat16)
+                mx.eval(_hidden_to_send)
+                _log(
+                    f"n={n} STEP3b consume: rank0 hidden_send PRE "
+                    f"(shape={_hidden_to_send.shape})"
+                )
+                _consume_sent = mx.distributed.send(
+                    _hidden_to_send,
+                    (pp_rank + 1) % pp_world_size,
+                    group=pp_group,
+                )
+                mx.eval(_consume_sent)
+                _log(f"n={n} STEP3b consume: rank0 hidden_send POST")
             _t_after_r0_fwd = time.perf_counter()
             _prof_r0_fwd += _t_after_r0_fwd - _t_after_batch_xchg
 
@@ -1817,7 +1963,7 @@ def pp_dspark_decode_loop(
             _spec_fwd_ran_this_cycle = False
             _spec_snapshot: list[Any] | None = None
             _spec_id_this_cycle: SpecId | None = None
-            if _draft_ahead_execute and is_rank0:
+            if _draft_ahead_execute and is_rank0 and not _consume_this_cycle:
                 # msg1b's extension tokens are what rank1 would verify
                 # NEXT cycle if this cycle fully accepts. Rank0 has just
                 # them from _da_msg1_ext_wire above -- pull, sanity-check
@@ -1933,6 +2079,7 @@ def pp_dspark_decode_loop(
             bonus_token: int | None = None
             n_accepted = 0
             _assumed_bonus_this_cycle: int | None = None
+            _consume_drafts: list[int] = []
             if is_last_rank:
                 _configure_layers(
                     spec_first,
@@ -1944,7 +2091,36 @@ def pp_dspark_decode_loop(
                 )
                 _recv_wait_before = _DSPARK_RECV_WAIT_ACCUM[0]
                 with mx.stream(generation_stream):
-                    _verify_input = mx.array([[int(y.item())] + _draft_ids[: vw - 1]])
+                    # STEP 3b consume cycle: verify batch is the (vw-1)
+                    # extension tokens saved from last HIT cycle's msg1b,
+                    # NOT the current-cycle msg1 payload. Batch layout:
+                    #   [assumed_bonus, ext[1], ..., ext[vw-2]]
+                    # Position 0 (assumed_bonus) predicts what should
+                    # appear at position 1 (i.e. verifies ext[1]); the
+                    # last position's logit becomes the new bonus. So
+                    # this cycle can accept at most vw-2 draft tokens
+                    # plus 1 bonus = vw-1 tokens (design doc / Fable
+                    # consult, 2026-07-19). `y` is already assumed_bonus
+                    # from last cycle's yield loop; consistent with the
+                    # normal path's use of y as the batch anchor.
+                    if _consume_this_cycle:
+                        if _consume_ext_ids_this_cycle is None:
+                            raise RuntimeError(
+                                "STEP 3b consume: rank 1 in consume mode "
+                                "with no _consume_ext_ids_this_cycle"
+                            )
+                        # ext[0] is assumed_bonus == int(y.item()); use
+                        # it explicitly rather than trusting y so a
+                        # mismatch fails loudly.
+                        _consume_anchor = int(_consume_ext_ids_this_cycle[0])
+                        _consume_drafts = _consume_ext_ids_this_cycle[1:]
+                        _verify_input = mx.array([[_consume_anchor] + _consume_drafts])
+                        _consume_verify_positions = len(_consume_drafts)
+                    else:
+                        _verify_input = mx.array(
+                            [[int(y.item())] + _draft_ids[: vw - 1]]
+                        )
+                        _consume_verify_positions = vw - 1
                     out = model(_verify_input, cache=prompt_cache)
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
@@ -1963,16 +2139,34 @@ def pp_dspark_decode_loop(
                     # worth building -- the draft head's own ranking doesn't
                     # correlate with what actually gets picked when it's
                     # wrong, so widening the tree wouldn't help.
-                    if _corrected is not None:
+                    if _corrected is not None and not _consume_this_cycle:
                         _top2 = mx.argsort(_corrected[0], axis=-1)[:, -2]
                         mx.eval(_top2)
                         _top2_list = [int(v) for v in _top2.tolist()]
                     else:
+                        # Consume cycle: `_corrected` was produced by the
+                        # PREVIOUS cycle's draft (conditioned on
+                        # bonus_token_{N-1}) and does NOT correspond to
+                        # the extension positions we're verifying now.
+                        # Skip the tree-verify diagnostic rather than
+                        # index into unrelated logits.
                         _top2_list = []
-                    for i in range(vw - 1):
+                    # STEP 3b: on a consume cycle the "drafts" being
+                    # verified are the (vw-2) extension tokens saved
+                    # from last cycle's msg1b (ext[1..vw-2]), not
+                    # `_draft_ids`. Same accept/reject shape; different
+                    # source array. `_pos_reached/_pos_accepted` share
+                    # the histogram since positions have the same
+                    # semantic meaning ("position i in the verify batch
+                    # after the anchor").
+                    if _consume_this_cycle:
+                        _verify_drafts = _consume_drafts
+                    else:
+                        _verify_drafts = _draft_ids[: vw - 1]
+                    for i in range(len(_verify_drafts)):
                         _pos_reached[i] += 1
-                        if _all_next_list[i] == _draft_ids[i]:
-                            accepted_ids.append(_draft_ids[i])
+                        if _all_next_list[i] == _verify_drafts[i]:
+                            accepted_ids.append(_verify_drafts[i])
                             _pos_accepted[i] += 1
                             n_accepted += 1
                         else:
@@ -1990,8 +2184,23 @@ def pp_dspark_decode_loop(
                     # redraft further down, _draft_ids has been
                     # overwritten and the hit code silently lies about
                     # what rank 0 actually did.
+                    # STEP 3b: on a consume cycle no NEW spec-fwd ran
+                    # this cycle (we're consuming last cycle's spec-fwd
+                    # instead), so there IS no assumed_bonus for THIS
+                    # cycle's msg2 hit codec -- leaving this at None
+                    # keeps the msg2 hit_miss code at HIT_MISS_NA, which
+                    # is the correct signal on the wire ("no speculative
+                    # forward this cycle to hit or miss against"). This
+                    # is completely independent of last cycle's hit
+                    # code, which already drove the consume-mode entry.
                     _assumed_bonus_this_cycle = (
-                        int(_draft_ids[vw - 1]) if len(_draft_ids) > vw - 1 else None
+                        None
+                        if _consume_this_cycle
+                        else (
+                            int(_draft_ids[vw - 1])
+                            if len(_draft_ids) > vw - 1
+                            else None
+                        )
                     )
 
                     # DRAFT-AHEAD HIT-RATE INSTRUMENTATION (2026-07-19, zero
@@ -2021,7 +2230,10 @@ def pp_dspark_decode_loop(
                     # EXO_PP_DSPARK_DRAFT_WIDTH_TRUNCATE=1 (opt-in, default
                     # off) would make draft() produce only vw-1 tokens,
                     # putting index vw-1 out of range.
-                    if os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD_LOG", "0") == "1":
+                    if (
+                        os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD_LOG", "0") == "1"
+                        and not _consume_this_cycle
+                    ):
                         _full_accept = n_accepted == vw - 1
                         _da_cycles += 1
                         if _full_accept and len(_draft_ids) > vw - 1:
@@ -2219,30 +2431,84 @@ def pp_dspark_decode_loop(
                     )
 
             # ==== STEP 3 rank0 post-msg2 cleanup ====
-            # Restore the pre-speculative KV snapshot and discard the
-            # buffered speculative hidden regardless of hit/miss. In the
-            # safe-increment first cut nothing consumes the buffered
-            # hidden -- restoring in BOTH cases keeps rank0's observable
-            # KV state bit-identical to today's code, isolating the
-            # correctness question (does the spec fwd + snapshot/restore
-            # round-trip reproduce today's state exactly?) from the
-            # HIT-path yield-substitution work that follows in a later
-            # commit. Failure mode #1 (KV desync via stale speculative
-            # writes) is defended here by ALWAYS trimming rank 0's spec
-            # writes; failure mode #3 (eval ordering) by having already
-            # forced eval on the buffered hidden above, so the KV writes
-            # are guaranteed committed before we trim them.
+            # STEP 3b (YIELD gate on): on a HIT, KEEP rank 0's spec KV
+            # writes (do NOT restore snapshot) and DEFER discard of the
+            # buffered hidden -- it will be released next cycle by the
+            # consume-mode branch above. On a MISS (or with YIELD off),
+            # behaviour is exactly STEP 3a's: restore snapshot, discard
+            # buffered hidden.
+            #
+            # Cross-cycle carry (both ranks): a HIT arms the next cycle
+            # as a consume cycle by populating _consume_active_next.
+            # Rank 1 additionally saves the extension token list under
+            # _consume_ext_ids_next BEFORE its redraft below overwrites
+            # _draft_ids -- msg1b's extension positions live at
+            # _draft_ids[vw-1 : 2*vw-2] and disappear once _dspark.draft
+            # runs for the next cycle. This is the exact defence
+            # against failure mode #2 (double-counting / dropping
+            # tokens): the extension IDs are captured here, once, from
+            # a stable source, and consumed exactly once next cycle.
             _hm_narrowed = coerce_hit_miss(_hit_miss_code)
+            _yield_hit_this_cycle = (
+                _draft_ahead_yield
+                and _hm_narrowed == HIT_MISS_HIT
+                and not _consume_this_cycle
+            )
             if is_rank0 and _spec_fwd_ran_this_cycle:
-                if _spec_snapshot is not None:
-                    _restore_cache(prompt_cache, _spec_snapshot)
-                if _spec_hidden_buffer is not None and _spec_id_this_cycle is not None:
-                    _spec_hidden_buffer.discard(_spec_id_this_cycle)
+                if _yield_hit_this_cycle:
+                    # HIT + YIELD on: do NOT restore snapshot, do NOT
+                    # discard buffered hidden. Both stay live for the
+                    # next cycle's consume phase.
+                    _consume_active_next = True
+                    _consume_spec_id_next = _spec_id_this_cycle
+                    if _TRACE:
+                        _log(
+                            f"n={n} STEP3b HIT-yield: keeping spec KV writes "
+                            f"and buffered hidden for next-cycle consume "
+                            f"(spec_id={_spec_id_this_cycle!r})"
+                        )
+                else:
+                    if _spec_snapshot is not None:
+                        _restore_cache(prompt_cache, _spec_snapshot)
+                    if (
+                        _spec_hidden_buffer is not None
+                        and _spec_id_this_cycle is not None
+                    ):
+                        _spec_hidden_buffer.discard(_spec_id_this_cycle)
+                    if _TRACE:
+                        _log(
+                            f"n={n} STEP3 spec-fwd cleanup: hit_miss="
+                            f"{_hm_narrowed} restored_snapshot="
+                            f"{_spec_snapshot is not None}"
+                        )
+            # Rank-1 side of the carry: capture extension IDs for next
+            # cycle's verify BEFORE _draft_ids gets overwritten by the
+            # redraft below. Do this unconditionally on the YIELD path
+            # + HIT + last_rank (rank 1); mirrors the rank-0 side.
+            if _yield_hit_this_cycle and is_last_rank:
+                # The extension tokens rank 1 sent in msg1b THIS cycle
+                # were snapshotted into _ext_ids_this_cycle_r1 BEFORE
+                # rank 1's next-cycle redraft overwrote _draft_ids. On
+                # a HIT these are exactly what rank 0 speculatively
+                # forwarded, and what we must verify next cycle.
+                _ext_slice = _ext_ids_this_cycle_r1
+                # Sanity: on a HIT we must have vw-1 extension tokens.
+                # If not, the msg1b path was somehow silently truncated;
+                # fail loudly rather than proceed into consume mode
+                # with a short batch (which would corrupt token
+                # accounting per failure mode #2).
+                if len(_ext_slice) != vw - 1:
+                    raise RuntimeError(
+                        f"STEP 3b HIT-yield: expected {vw - 1} extension "
+                        f"tokens, got {len(_ext_slice)} at n={n} -- refusing "
+                        f"to enter consume mode with an incomplete batch"
+                    )
+                _consume_active_next = True
+                _consume_ext_ids_next = list(_ext_slice)
                 if _TRACE:
                     _log(
-                        f"n={n} STEP3 spec-fwd cleanup: hit_miss="
-                        f"{_hm_narrowed} restored_snapshot="
-                        f"{_spec_snapshot is not None}"
+                        f"n={n} STEP3b HIT-yield: rank1 armed consume cycle "
+                        f"with ext_ids={_consume_ext_ids_next}"
                     )
 
             _t_after_trim_xchg = time.perf_counter()
@@ -2255,7 +2521,15 @@ def pp_dspark_decode_loop(
 
             # ==== KV rollback (both ranks, deterministic given bs and
             # n_accepted) ====
-            _trim_amount = (vw - 1) - _n_accepted_wire
+            # STEP 3b: on a consume cycle both ranks appended vw-1 KV
+            # positions this cycle (rank 0 via last cycle's spec-fwd
+            # that was KEPT; rank 1 via this cycle's verify forward),
+            # so the trim baseline is vw-1 rather than the normal
+            # cycle's vw. Both ranks compute the SAME _trim_amount from
+            # the same wire-recovered _n_accepted_wire, so no
+            # cross-rank consistency issue.
+            _cycle_forward_len = (vw - 1) if _consume_this_cycle else vw
+            _trim_amount = (_cycle_forward_len - 1) - _n_accepted_wire
             if _trim_amount > 0:
                 for c in prompt_cache:
                     if hasattr(c, "trim"):
@@ -2273,7 +2547,11 @@ def pp_dspark_decode_loop(
             # this cycle. If the packed<->unpacked round-trip disagrees,
             # that's the tag-mechanism-itself failing under real
             # cross-rank timing. Diagnostic-only: never branches decode.
-            if _draft_ahead_enabled and _spec_tag_validator is not None:
+            if (
+                _draft_ahead_enabled
+                and _spec_tag_validator is not None
+                and not _consume_this_cycle
+            ):
                 _wire_batch_raw = _wire_batch.tolist()
                 if not isinstance(_wire_batch_raw, list):
                     raise RuntimeError(
@@ -2405,17 +2683,34 @@ def pp_dspark_decode_loop(
             # the wire message fix above), NOT the stale `accepted_ids`
             # local (which stayed empty on rank0 -- see bug-fix comment
             # above the wire2 message construction).
+            _tokens_yielded_this_cycle = 0
             for tok_id in _accepted_ids:
                 yield tok_id, mx.zeros(1)
                 n += 1
+                _tokens_yielded_this_cycle += 1
                 if n >= max_tokens:
                     break
             if n < max_tokens and bonus_token is not None:
                 yield bonus_token, mx.zeros(1)
                 y = mx.array([bonus_token])
                 n += 1
+                _tokens_yielded_this_cycle += 1
             elif _accepted_ids:
                 y = mx.array([_accepted_ids[-1]])
+            if _consume_this_cycle:
+                _consume_tokens_yielded += _tokens_yielded_this_cycle
+                if (
+                    _draft_ahead_yield
+                    and _consume_cycles % 20 == 0
+                    and _consume_cycles > 0
+                ):
+                    _avg_tok = _consume_tokens_yielded / _consume_cycles
+                    logger.info(
+                        f"[PP DSpark STEP3b YIELD] consume_cycles={_consume_cycles} "
+                        f"tokens_yielded={_consume_tokens_yielded} "
+                        f"avg_tok_per_consume={_avg_tok:.2f} "
+                        f"(theoretical max = vw-1 = {vw - 1})"
+                    )
 
     finally:
         _configure_layers(spec_first, spec_last)
