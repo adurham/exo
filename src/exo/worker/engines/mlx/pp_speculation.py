@@ -38,8 +38,11 @@ from .auto_parallel import (
     PipelineLastLayer,
 )
 from .pp_speculation_spec_tag import (
+    HIT_MISS_HIT,
+    HIT_MISS_MISS,
     HIT_MISS_NA,
     SPEC_TAG_WIRE_LEN,
+    SpecHiddenBuffer,
     SpecId,
     SpecTagValidator,
     coerce_hit_miss,
@@ -1493,6 +1496,43 @@ def pp_dspark_decode_loop(
     _da_msg1_ext_matches = 0
     _da_msg1_ext_mismatches = 0
 
+    # STEP 3 draft-ahead execution gate (2026-07-19,
+    # EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=1, default OFF). Orthogonal to the
+    # STEP 1/2b diagnostic gate above (EXO_PP_DSPARK_DRAFT_AHEAD): when
+    # EXECUTE is unset/0, decode is byte-identical to the diagnostic-only
+    # behaviour (which itself is byte-identical to the pre-STEP-1 loop
+    # apart from the harmless diagnostic tag/ext round-trips). Only when
+    # EXECUTE=1 does rank 0 actually perform the speculative forward and
+    # do rank 1 skip work on HIT. Requires the diagnostic gate to also be
+    # on (the msg1b extension must ride the wire so rank 0 has a batch to
+    # speculatively forward, and the msg2 hit/miss slot must be present).
+    _draft_ahead_execute = (
+        _draft_ahead_enabled
+        and _da_msg1_ext_active
+        and _da_msg1_ext_len > 0
+        and os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE", "0") == "1"
+    )
+    # Cross-cycle state driven by the previous cycle's hit/miss outcome:
+    #   * ``_pending_hit_extension`` -- on BOTH ranks: the extension token
+    #     list (length ``vw-1``) that rank 0 speculatively forwarded and
+    #     rank 1 must now consume as the CURRENT cycle's batch. ``None``
+    #     means the previous cycle was a MISS (or draft-ahead-execute was
+    #     off), so the normal msg1/msg1b/rank0-fwd flow runs.
+    #   * ``_pending_spec_hidden`` -- on rank 0 only: the buffered hidden
+    #     produced by the previous cycle's speculative forward, waiting
+    #     to be sent to rank 1 in place of the skipped fwd. ``None``
+    #     otherwise. Held on the module-scope buffer via SpecHiddenBuffer
+    #     as belt-and-braces (design doc: buffer-until-confirmed) even
+    #     though at ``pp_world_size == 2`` a single-slot handle is
+    #     equivalent -- keeps SpecId matching in the loop so the same
+    #     desync protection the tag exchange gives us is also present
+    #     for the hidden itself.
+    _spec_hidden_buffer: SpecHiddenBuffer | None = (
+        SpecHiddenBuffer() if _draft_ahead_execute else None
+    )
+    _pending_hit_extension: list[int] | None = None
+    _pending_hit_spec_id: SpecId | None = None
+
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
     # how to restructure the wire protocol (collapse messages / overlap
@@ -1748,11 +1788,151 @@ def pp_dspark_decode_loop(
             _t_after_r0_fwd = time.perf_counter()
             _prof_r0_fwd += _t_after_r0_fwd - _t_after_batch_xchg
 
+            # ==== STEP 3 rank0: speculative forward on the msg1b extension
+            # tokens during rank0's ~50ms idle window (2026-07-19,
+            # EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=1, default OFF). This is
+            # the "safe increment" first-cut per the design doc's failure-
+            # mode discipline: rank0 actually runs the forward, buffers
+            # the hidden, tags it with a SpecId, and captures a KV
+            # snapshot -- but the HIT-path *consumer* (rank1 skipping its
+            # own next-cycle fwd and rank0 sending the buffered hidden
+            # instead) is deliberately NOT wired yet. Instead, on EVERY
+            # cycle end (regardless of hit/miss), rank0 restores the KV
+            # snapshot and discards the buffered hidden -- so rank0's
+            # observable KV state after each cycle is bit-identical to
+            # the non-STEP-3 path. That deliberately foregoes the
+            # ~50ms/cycle wall-time win in exchange for isolating the
+            # correctness-critical primitive (spec fwd + snapshot/restore
+            # + tagging) from the wall-time-critical HIT-path state
+            # machine, so a live cluster run can validate this primitive
+            # (does spec-fwd corrupt KV / does snapshot/restore reproduce
+            # today's state) independently of any yield-path change.
+            #
+            # Rank 1 still computes and sends the REAL hit_miss code in
+            # msg2 (below), which lets us log the actual hit rate under
+            # spec-fwd-enabled execution -- the empirical answer to
+            # failure mode #2 (stale conditioning on the extension block:
+            # HIT-cycle acceptance may be measurably lower than the
+            # would_hit estimate the pure-diagnostic mode reported).
+            _spec_fwd_ran_this_cycle = False
+            _spec_snapshot: list[Any] | None = None
+            _spec_id_this_cycle: SpecId | None = None
+            if _draft_ahead_execute and is_rank0:
+                # msg1b's extension tokens are what rank1 would verify
+                # NEXT cycle if this cycle fully accepts. Rank0 has just
+                # them from _da_msg1_ext_wire above -- pull, sanity-check
+                # length, forward through its own layers with the
+                # SpecPipelineLastLayer in speculative mode (no auto-send
+                # to rank1). Any pack/unpack failure was already logged
+                # above; here we re-parse locally rather than plumb the
+                # list through, keeping the diagnostic and executive
+                # paths textually independent.
+                try:
+                    _ext_ids_r0 = unpack_deep_draft_ext(_da_msg1_ext_wire, int(vw))
+                except ValueError as _spec_ext_err:
+                    logger.warning(
+                        f"[PP DSpark STEP3] msg1b ext unpack failed on rank0 "
+                        f"at n={n}: {_spec_ext_err} -- skipping speculative fwd"
+                    )
+                    _ext_ids_r0 = []
+                if len(_ext_ids_r0) == _da_msg1_ext_len and _da_msg1_ext_len > 0:
+                    # Failure mode #3 defence: snapshot BEFORE the
+                    # speculative forward runs so the restore path can
+                    # deterministically reproduce today's KV state on
+                    # both HIT and MISS (in this "safe increment" build,
+                    # we restore in both cases -- see block-level comment
+                    # above). Snapshot must materialize before the
+                    # forward's own KV writes get scheduled or the
+                    # KVCache offsets we captured could theoretically be
+                    # torn by MLX's lazy graph (defensive; today's
+                    # snapshot code reads plain-Python offset ints so
+                    # this is a belt on top of braces).
+                    _spec_snapshot = _snapshot_cache(prompt_cache)
+                    # Build the assumed-prefix SpecId for this
+                    # speculative branch: anchor = _wire_batch[0], then
+                    # the vw-1 drafts already verified this cycle, then
+                    # the assumed bonus token (= extension token 0).
+                    # This mirrors the STEP 1 diagnostic tag exchange
+                    # exactly, so the same failure-mode-#1 protection
+                    # (explicit SpecId matching, no implicit ordering
+                    # assumptions) also covers the buffered hidden.
+                    _wire_batch_raw_r0 = _wire_batch.tolist()
+                    if not isinstance(_wire_batch_raw_r0, list):
+                        raise RuntimeError(
+                            f"_wire_batch.tolist() must be a list, "
+                            f"got {type(_wire_batch_raw_r0)!r}"
+                        )
+                    _wb_ints: list[int] = []
+                    for _wv in _wire_batch_raw_r0:
+                        if isinstance(_wv, list):
+                            raise RuntimeError(
+                                f"_wire_batch has nested list element: {_wv!r}"
+                            )
+                        _wb_ints.append(int(_wv))
+                    _anchor_r0 = _wb_ints[0]
+                    _drafts_r0 = tuple(_wb_ints[1:vw])
+                    _assumed_bonus_r0 = int(_ext_ids_r0[0])
+                    _spec_id_this_cycle = SpecId.build(
+                        spec_kind="draft_ahead",
+                        cycle_n=n,
+                        prefix=(_anchor_r0, *_drafts_r0, _assumed_bonus_r0),
+                    )
+                    # Extension batch shape: rank1's would-be next-cycle
+                    # verify batch is (assumed_bonus, ext[1:vw-1]) --
+                    # length vw-1. When vw >= 2 and _da_msg1_ext_len ==
+                    # vw-1 this is a well-formed batch. (For vw == 2 the
+                    # batch degenerates to length 1, which is a valid
+                    # single-token forward.)
+                    _spec_batch_ids = [_assumed_bonus_r0] + list(_ext_ids_r0[1:])
+                    _spec_batch_tok = mx.array([_spec_batch_ids], dtype=mx.int32)
+                    # Configure spec_last in *speculative* mode: computes
+                    # KV writes into prompt_cache but does NOT send the
+                    # hidden across the pp boundary automatically. That
+                    # would otherwise be the exact "unsolicited spec
+                    # hidden arriving untagged" desync vector called out
+                    # in the design doc's wire-protocol section.
+                    _spec_state_list: list[mx.array] = [mx.zeros(1)]
+                    _configure_layers(
+                        spec_first,
+                        spec_last,
+                        speculative=True,
+                        state_list=_spec_state_list,
+                        hidden_idx=0,
+                    )
+                    with mx.stream(generation_stream):
+                        model(_spec_batch_tok, cache=prompt_cache)
+                    # Failure mode #3: force materialisation NOW so the
+                    # forward's KV writes and the buffered hidden are
+                    # committed on the timeline before we enter the
+                    # msg2 recv branch. Without this, MLX is free to
+                    # defer both to whichever downstream op forces
+                    # eval, which could interleave with msg2 traffic on
+                    # this same pp_group -- same class of intermittent
+                    # deadlock the existing mx.eval(_wire_batch) above
+                    # was added to prevent.
+                    _spec_hidden = _spec_state_list[0]
+                    mx.eval(_spec_hidden)
+                    if _spec_hidden_buffer is not None:
+                        _spec_hidden_buffer.stash(
+                            _spec_id_this_cycle,
+                            _spec_hidden,
+                            eval_sentinel=_spec_hidden,
+                        )
+                    _spec_fwd_ran_this_cycle = True
+                    # Restore the layer config to today's default (no
+                    # pp_send / pp_decode / speculative flags set) so
+                    # any code path that touches the layers between
+                    # here and the next cycle sees the unspeculative
+                    # state.
+                    _configure_layers(spec_first, spec_last)
+            _t_after_spec_fwd = time.perf_counter()
+
             # ==== rank1: recv hidden batch (existing pipeline boundary,
             # unmodified -- shape-agnostic) + continue its own forward ====
             accepted_ids: list[int] = []
             bonus_token: int | None = None
             n_accepted = 0
+            _assumed_bonus_this_cycle: int | None = None
             if is_last_rank:
                 _configure_layers(
                     spec_first,
@@ -1802,6 +1982,17 @@ def pp_dspark_decode_loop(
                             break
                     bonus_token = _all_next_list[n_accepted]
                     _accepted_total += n_accepted
+                    # Snapshot the pre-redraft view of the assumed-bonus
+                    # position (extension token 0 == _draft_ids[vw-1]) so
+                    # the msg2 hit/miss decision below reads the SAME
+                    # value rank 0 used when building its speculative
+                    # forward -- if we read it after the next-cycle
+                    # redraft further down, _draft_ids has been
+                    # overwritten and the hit code silently lies about
+                    # what rank 0 actually did.
+                    _assumed_bonus_this_cycle = (
+                        int(_draft_ids[vw - 1]) if len(_draft_ids) > vw - 1 else None
+                    )
 
                     # DRAFT-AHEAD HIT-RATE INSTRUMENTATION (2026-07-19, zero
                     # wire/KV cost -- gated by EXO_PP_DSPARK_DRAFT_AHEAD_LOG).
@@ -1958,7 +2149,29 @@ def pp_dspark_decode_loop(
             # and no further wire-shape churn. See
             # pp_speculation_spec_tag.HitMissCode for the encoding.
             _msg2_len = int(2 + (vw - 1) + 1)
-            _hit_miss_code = int(HIT_MISS_NA)  # diagnostic mode: never HIT/MISS yet
+            _hit_miss_code = int(HIT_MISS_NA)
+            # When EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=1, rank 1 computes and
+            # sends the REAL hit/miss verdict for rank 0's speculative
+            # forward: HIT iff full acceptance (n_accepted == vw-1) AND
+            # the assumed bonus token (extension token 0 == _draft_ids[vw-1])
+            # matched what verify actually produced. In the safe-increment
+            # first cut the code is diagnostic (rank 0 restores the KV
+            # snapshot regardless), but shipping the REAL codec now lets
+            # live-cluster runs measure the hit rate under actual
+            # spec-fwd-enabled execution -- the answer to failure mode #2
+            # (stale conditioning on the extension block possibly lowering
+            # HIT-cycle acceptance below the pure-diagnostic estimate).
+            if (
+                _draft_ahead_execute
+                and is_last_rank
+                and bonus_token is not None
+                and _assumed_bonus_this_cycle is not None
+            ):
+                _full_accept_exec = n_accepted == vw - 1
+                if _full_accept_exec and _assumed_bonus_this_cycle == bonus_token:
+                    _hit_miss_code = int(HIT_MISS_HIT)
+                else:
+                    _hit_miss_code = int(HIT_MISS_MISS)
             if is_last_rank:
                 _accepted_ids = accepted_ids
                 _n_accepted_wire = n_accepted
@@ -1994,15 +2207,42 @@ def pp_dspark_decode_loop(
                 # raise, so any garbage on the wire fails loudly rather
                 # than silently corrupting the KV state.
                 _hit_miss_code = int(coerce_hit_miss(_wire2_list[-1]))
-                if _hit_miss_code != HIT_MISS_NA:
-                    # In diagnostic mode this branch is unreachable (rank1
-                    # never sends anything other than NA). If we ever see
-                    # it, that IS the desync we're guarding against --
-                    # log loudly, do NOT act on it.
+                if _hit_miss_code != HIT_MISS_NA and not _draft_ahead_execute:
+                    # When execute is OFF the diagnostic protocol reserves
+                    # this slot to always-NA; any other code is the exact
+                    # desync we're guarding against. Log loudly, do NOT
+                    # act on it.
                     logger.warning(
                         f"[PP DSpark STEP1 DIAG] unexpected hit_miss code "
                         f"{_hit_miss_code} in diagnostic mode; ignoring "
                         f"(should be {int(HIT_MISS_NA)})"
+                    )
+
+            # ==== STEP 3 rank0 post-msg2 cleanup ====
+            # Restore the pre-speculative KV snapshot and discard the
+            # buffered speculative hidden regardless of hit/miss. In the
+            # safe-increment first cut nothing consumes the buffered
+            # hidden -- restoring in BOTH cases keeps rank0's observable
+            # KV state bit-identical to today's code, isolating the
+            # correctness question (does the spec fwd + snapshot/restore
+            # round-trip reproduce today's state exactly?) from the
+            # HIT-path yield-substitution work that follows in a later
+            # commit. Failure mode #1 (KV desync via stale speculative
+            # writes) is defended here by ALWAYS trimming rank 0's spec
+            # writes; failure mode #3 (eval ordering) by having already
+            # forced eval on the buffered hidden above, so the KV writes
+            # are guaranteed committed before we trim them.
+            _hm_narrowed = coerce_hit_miss(_hit_miss_code)
+            if is_rank0 and _spec_fwd_ran_this_cycle:
+                if _spec_snapshot is not None:
+                    _restore_cache(prompt_cache, _spec_snapshot)
+                if _spec_hidden_buffer is not None and _spec_id_this_cycle is not None:
+                    _spec_hidden_buffer.discard(_spec_id_this_cycle)
+                if _TRACE:
+                    _log(
+                        f"n={n} STEP3 spec-fwd cleanup: hit_miss="
+                        f"{_hm_narrowed} restored_snapshot="
+                        f"{_spec_snapshot is not None}"
                     )
 
             _t_after_trim_xchg = time.perf_counter()
