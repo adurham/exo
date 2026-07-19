@@ -1747,6 +1747,16 @@ for NODE in "${NODES[@]}"; do
     # ~linearly with width, not flat). Unset = verify the whole DSpark
     # block (unchanged default behavior).
     [ -n "${EXO_PP_DSPARK_VERIFY_WIDTH:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_WIDTH=$EXO_PP_DSPARK_VERIFY_WIDTH"
+    # Draft-ahead hit-rate diagnostic (2026-07-19, default off): logs how
+    # often a hypothetical one-block-ahead speculative forward on rank0
+    # (assuming full acceptance of the current verify block) would have
+    # hit -- pure measurement, zero wire/KV changes, scoping whether the
+    # "optimistic overlap" architecture (rank0 speculatively computes the
+    # NEXT block during its otherwise-idle ~61.6ms/cycle window) is worth
+    # building. See pp_speculation.py's DRAFT_AHEAD_LOG comment for the
+    # full rationale and the Fable-consult numbers (~14% E2E speedup at a
+    # 30% hit rate, ~22% at 50%, not worth building below ~15%).
+    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_LOG=$EXO_PP_DSPARK_DRAFT_AHEAD_LOG"
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5

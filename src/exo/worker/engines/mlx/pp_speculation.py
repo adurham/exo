@@ -1339,6 +1339,11 @@ def pp_dspark_decode_loop(
     _pos_rejected_reached = [0] * bs
     _pos_rank2_would_hit = [0] * bs
     _corrected: mx.array | None = None
+    # Draft-ahead hit-rate counters (2026-07-19, EXO_PP_DSPARK_DRAFT_AHEAD_LOG
+    # -- see the usage site below for full rationale).
+    _da_cycles = 0
+    _da_full_accept = 0
+    _da_would_hit = 0
 
     # ── profiling (gated by _TRACE, same pattern as pp_speculative_decode_loop
     # above) -- added 2026-07-18 to get real per-cycle timing before deciding
@@ -1565,6 +1570,53 @@ def pp_dspark_decode_loop(
                             break
                     bonus_token = _all_next_list[n_accepted]
                     _accepted_total += n_accepted
+
+                    # DRAFT-AHEAD HIT-RATE INSTRUMENTATION (2026-07-19, zero
+                    # wire/KV cost -- gated by EXO_PP_DSPARK_DRAFT_AHEAD_LOG).
+                    # Scoping the "optimistic overlap" architecture (rank0
+                    # speculatively forwards the NEXT block during its
+                    # otherwise-idle ~61.6ms/cycle window, assuming full
+                    # acceptance) per a Fable consult, 2026-07-19: DSpark's
+                    # draft() ALWAYS computes the full block_size internally
+                    # regardless of verify_width truncation (fixed ~10.6ms
+                    # cost either way -- see the verify-width comment above),
+                    # so _draft_ids[vw-1] -- the token that WOULD become the
+                    # next cycle's anchor if this cycle fully accepts -- is
+                    # already sitting here, unused, on every single cycle.
+                    # Checking whether it matches the REAL bonus_token this
+                    # cycle actually produced is the exact "would a
+                    # speculative one-block-ahead forward have hit" question,
+                    # with NO new forward pass, NO wire changes, NO KV
+                    # mutation -- pure post-hoc comparison of values already
+                    # computed. This is deliberately a measurement-only step
+                    # BEFORE committing to building the real draft-ahead
+                    # protocol (extra wire message, spec_id-tagged hidden
+                    # buffering on rank0, hit/miss bit in msg2, rollback path)
+                    # -- Fable's own numbers: ~14% E2E speedup at a 30% hit
+                    # rate, ~22% at 50%; below ~15% the protocol complexity
+                    # isn't worth it. Guarded by len(_draft_ids) > vw-1 since
+                    # EXO_PP_DSPARK_DRAFT_WIDTH_TRUNCATE=1 (opt-in, default
+                    # off) would make draft() produce only vw-1 tokens,
+                    # putting index vw-1 out of range.
+                    if os.environ.get("EXO_PP_DSPARK_DRAFT_AHEAD_LOG", "0") == "1":
+                        _full_accept = n_accepted == vw - 1
+                        _da_cycles += 1
+                        if _full_accept and len(_draft_ids) > vw - 1:
+                            _da_full_accept += 1
+                            if _draft_ids[vw - 1] == bonus_token:
+                                _da_would_hit += 1
+                        if _da_cycles % 20 == 0:
+                            _of_fa_pct = (
+                                f"{_da_would_hit / _da_full_accept * 100:.1f}%"
+                                if _da_full_accept > 0 else "n/a"
+                            )
+                            logger.info(
+                                f"[DRAFT_AHEAD_LOG] cycles={_da_cycles} "
+                                f"full_accept={_da_full_accept} "
+                                f"({_da_full_accept / _da_cycles * 100:.1f}%) "
+                                f"would_hit={_da_would_hit} "
+                                f"(of_full_accept={_of_fa_pct})"
+                            )
 
                     _t_after_verify = time.perf_counter()
                     _recv_wait_this_cycle = (
