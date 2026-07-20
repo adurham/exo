@@ -73,6 +73,23 @@ _PROF_DSPARK_RECV_WAIT = (
 )
 _DSPARK_RECV_WAIT_ACCUM = [0.0]
 
+# Cached MLX memory limit, read lazily via the set/restore round-trip
+# trick (mx.core has no get_memory_limit() binding in this build --
+# only set_memory_limit(), which returns the PREVIOUS limit, so calling
+# it once with the same value both reads and restores it side-effect-
+# free). Cached at module scope so the hot decode-loop outlier log
+# doesn't pay this round-trip cost every cycle -- read once, reused.
+_CACHED_MEMORY_LIMIT_BYTES: list[int | None] = [None]
+
+
+def _get_memory_limit_bytes() -> int:
+    if _CACHED_MEMORY_LIMIT_BYTES[0] is None:
+        current = mx.get_active_memory()
+        prev = mx.set_memory_limit(current)
+        mx.set_memory_limit(prev)
+        _CACHED_MEMORY_LIMIT_BYTES[0] = prev
+    return _CACHED_MEMORY_LIMIT_BYTES[0]
+
 
 def _log(msg: str) -> None:
     if _TRACE:
@@ -2053,6 +2070,16 @@ def pp_dspark_decode_loop(
             _spec_fwd_ran_this_cycle = False
             _spec_snapshot: list[Any] | None = None
             _spec_id_this_cycle: SpecId | None = None
+            # Memory instrumentation defaults (2026-07-19) -- initialized
+            # here, unconditionally, so the outlier log below can read
+            # them regardless of which branch below actually runs (outer
+            # _draft_ahead_execute gate false, OR the inner ext-unpack
+            # length check false). See the inline comment at the actual
+            # measurement site (_snapshot_cache call, ~15 lines down) for
+            # why this instrumentation exists.
+            _mem_before_snapshot = mx.get_active_memory()
+            _mem_after_snapshot = _mem_before_snapshot
+            _mem_after_spec_fwd = _mem_before_snapshot
             if _draft_ahead_execute and is_rank0 and not _consume_this_cycle:
                 # msg1b's extension tokens are what rank1 would verify
                 # NEXT cycle if this cycle fully accepts. Rank0 has just
@@ -2083,7 +2110,22 @@ def pp_dspark_decode_loop(
                     # torn by MLX's lazy graph (defensive; today's
                     # snapshot code reads plain-Python offset ints so
                     # this is a belt on top of braces).
+                    # Memory instrumentation (2026-07-19, added while
+                    # investigating the confirmed EXECUTE=1-specific
+                    # GPU stall -- decisive live A/B showed EXECUTE=1
+                    # causes 100%-residency/near-zero-throughput stalls
+                    # that EXECUTE=0 never hits on identical prompts.
+                    # transforms.cpp's eval_impl has a memory-limit
+                    # backpressure loop (scheduler::wait_for_one() in a
+                    # while get_active_memory() > get_memory_limit()
+                    # loop) whose stuck frame EXACTLY matches the sample
+                    # profiler's captured stall stack -- this reading
+                    # tests candidate #1 (the snapshot copy itself
+                    # pushing active memory over the limit).
+                    _mem_before_snapshot = mx.get_active_memory()
                     _spec_snapshot = _snapshot_cache(prompt_cache)
+                    mx.eval(_spec_snapshot)
+                    _mem_after_snapshot = mx.get_active_memory()
                     # Build the assumed-prefix SpecId for this
                     # speculative branch: anchor = _wire_batch[0], then
                     # the vw-1 drafts already verified this cycle, then
@@ -2148,6 +2190,7 @@ def pp_dspark_decode_loop(
                     # was added to prevent.
                     _spec_hidden = _spec_state_list[0]
                     mx.eval(_spec_hidden)
+                    _mem_after_spec_fwd = mx.get_active_memory()
                     if _spec_hidden_buffer is not None:
                         _spec_hidden_buffer.stash(
                             _spec_id_this_cycle,
@@ -2786,6 +2829,28 @@ def pp_dspark_decode_loop(
                         f" spec_fwd={(_t_after_spec_fwd - _t_after_r0_fwd) * 1000:.1f}ms "
                         f"msg2_recv_wait={(_t_after_msg2_recv - _t_before_msg2_recv) * 1000:.1f}ms "
                         f"msg2_post={(_t_after_trim_xchg - _t_after_msg2_recv) * 1000:.1f}ms"
+                    )
+                    # Memory-limit attribution (2026-07-19, added after
+                    # the decisive EXECUTE=1-vs-0 A/B confirmed this
+                    # stall class is EXECUTE=1-specific, and MLX's own
+                    # eval_impl backpressure loop -- while
+                    # get_active_memory() > get_memory_limit():
+                    # scheduler::wait_for_one() -- was found to exactly
+                    # match the sample-profiler-captured stuck frame.
+                    # These three readings test the leading candidate
+                    # (the per-cycle KV snapshot copy pushing active
+                    # memory over the limit): if mem_snapshot_delta_mb is
+                    # large AND mem_after_snapshot_mb is close to/over
+                    # mem_limit_mb on a stalled cycle, that is direct,
+                    # decisive evidence the snapshot copy itself is the
+                    # trigger, not just a temporal coincidence with
+                    # whichever forward call happens to be running.
+                    _mem_limit_mb = _get_memory_limit_bytes() / (1024.0 * 1024.0)
+                    _outlier_msg += (
+                        f" mem_before_snapshot_mb={_mem_before_snapshot / (1024.0 * 1024.0):.1f} "
+                        f"mem_snapshot_delta_mb={(_mem_after_snapshot - _mem_before_snapshot) / (1024.0 * 1024.0):.1f} "
+                        f"mem_after_spec_fwd_mb={_mem_after_spec_fwd / (1024.0 * 1024.0):.1f} "
+                        f"mem_limit_mb={_mem_limit_mb:.1f}"
                     )
                 _outlier_msg += f" trim_xchg={(_t_after_trim_xchg - (_t_after_draft if is_last_rank else _t_after_r0_fwd)) * 1000:.1f}ms"
                 logger.warning(_outlier_msg)
