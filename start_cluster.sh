@@ -1777,13 +1777,6 @@ for NODE in "${NODES[@]}"; do
     # Its only observable effect is that msg2's hit_miss_code slot carries
     # the REAL verdict instead of always-NA. Requires DRAFT_AHEAD=1 above.
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=$EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE"
-    # TEMPORARY diagnostic (2026-07-19, not a permanent knob -- see the
-    # inline comment at its one call site in pp_speculation.py): forces a
-    # clean generation_stream drain right before the speculative forward
-    # starts, to test the queue-backlog hypothesis for the confirmed
-    # EXECUTE=1-specific Event::wait() stall. Remove once that question
-    # is settled either way.
-    [ -n "${EXO_PP_DSPARK_DEBUG_PRESYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DEBUG_PRESYNC=$EXO_PP_DSPARK_DEBUG_PRESYNC"
     # Draft-ahead STEP 3b (2026-07-19, default off, commit cca679ed): the
     # actual perf lever. On a HIT, rank0 KEEPS its speculative KV writes
     # and parks the buffered hidden for a "consume cycle" -- next cycle
