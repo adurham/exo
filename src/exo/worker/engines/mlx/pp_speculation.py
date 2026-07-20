@@ -2442,6 +2442,13 @@ def pp_dspark_decode_loop(
             _accepted_ids: list[int] = []
             _n_accepted_wire = 0
             _bonus_wire = 0
+            # Default for the outlier-log sub-phase timers below (only
+            # actually measured on rank0's `elif is_rank0:` branch a few
+            # lines down) -- keeps the outlier message's arithmetic
+            # well-defined on rank1 too (where they're always 0.0, since
+            # the else-branch that reads them only fires `not is_last_rank`).
+            _t_before_msg2_recv = _t_after_r0_fwd
+            _t_after_msg2_recv = _t_after_r0_fwd
             # msg2 layout (STEP 1 of draft-ahead, 2026-07-19): existing
             # [n_accepted, bonus_token, padded accepted_ids...] extended by
             # ONE int32 trailing slot for the hit/miss/na code. Adding the
@@ -2493,6 +2500,7 @@ def pp_dspark_decode_loop(
                 mx.eval(_sent2)
                 _log(f"n={n} dspark_trim_send POST")
             elif is_rank0:
+                _t_before_msg2_recv = time.perf_counter()
                 _log(f"n={n} dspark_trim_recv PRE (rank0<-{pp_world_size - 1})")
                 _wire2 = mx.distributed.recv_like(
                     mx.zeros(_msg2_len, dtype=mx.int32),
@@ -2500,6 +2508,7 @@ def pp_dspark_decode_loop(
                     group=pp_group,
                 )
                 mx.eval(_wire2)
+                _t_after_msg2_recv = time.perf_counter()
                 _log(f"n={n} dspark_trim_recv POST")
                 _wire2_list = [int(v) for v in _wire2.tolist()]
                 _n_accepted_wire = _wire2_list[0]
@@ -2545,6 +2554,7 @@ def pp_dspark_decode_loop(
                 and not _consume_this_cycle
             )
             if is_rank0 and _spec_fwd_ran_this_cycle:
+                _t_before_restore = time.perf_counter()
                 if _yield_hit_this_cycle:
                     # HIT + YIELD on: do NOT restore snapshot, do NOT
                     # discard buffered hidden. Both stay live for the
@@ -2571,6 +2581,23 @@ def pp_dspark_decode_loop(
                             f"{_hm_narrowed} restored_snapshot="
                             f"{_spec_snapshot is not None}"
                         )
+                _t_after_restore = time.perf_counter()
+                _prof_restore_cache_ms = (_t_after_restore - _t_before_restore) * 1000
+                # Sub-phase outlier attribution (2026-07-19, added while
+                # investigating the 47s trim_xchg stall found live-
+                # testing EXECUTE=1 -- the outlier log below only had a
+                # single opaque "trim_xchg" bucket spanning spec-fwd +
+                # msg2 recv + restore combined; this makes each piece
+                # separately visible so a FUTURE stall of this class can
+                # be attributed to exactly one of them instead of
+                # "somewhere in trim_xchg". Cheap (a few perf_counter
+                # calls), unconditional like the outlier log itself.
+                if _prof_restore_cache_ms > 500.0:
+                    logger.warning(
+                        f"[PP DSpark RESTORE-CACHE OUTLIER R0 n={n}] "
+                        f"_restore_cache took {_prof_restore_cache_ms:.1f}ms "
+                        f"(>500ms threshold, yield_hit={_yield_hit_this_cycle})"
+                    )
             # Rank-1 side of the carry: capture extension IDs for next
             # cycle's verify BEFORE _draft_ids gets overwritten by the
             # redraft below. Do this unconditionally on the YIELD path
@@ -2743,6 +2770,22 @@ def pp_dspark_decode_loop(
                         f" r1_verify_wait={_recv_wait_this_cycle * 1000:.1f}ms "
                         f"r1_verify_fwd={(_t_after_verify - _t_after_r0_fwd - _recv_wait_this_cycle) * 1000:.1f}ms "
                         f"draft={(_t_after_draft - _t_after_verify) * 1000:.1f}ms"
+                    )
+                else:
+                    # rank0 sub-phase attribution (2026-07-19, added while
+                    # investigating the 47s trim_xchg stall found live-
+                    # testing EXECUTE=1 -- splits the previously-opaque
+                    # "trim_xchg" bucket into its three real components:
+                    # the speculative forward itself (spec_fwd, only
+                    # nonzero when EXECUTE=1 and this cycle ran one),
+                    # the msg2 recv wait (msg2_recv_wait -- this is the
+                    # actual cross-rank wire wait, comparable to rank1's
+                    # r1_verify_wait), and everything after (msg2 decode +
+                    # restore_cache + bookkeeping, msg2_post).
+                    _outlier_msg += (
+                        f" spec_fwd={(_t_after_spec_fwd - _t_after_r0_fwd) * 1000:.1f}ms "
+                        f"msg2_recv_wait={(_t_after_msg2_recv - _t_before_msg2_recv) * 1000:.1f}ms "
+                        f"msg2_post={(_t_after_trim_xchg - _t_after_msg2_recv) * 1000:.1f}ms"
                     )
                 _outlier_msg += f" trim_xchg={(_t_after_trim_xchg - (_t_after_draft if is_last_rank else _t_after_r0_fwd)) * 1000:.1f}ms"
                 logger.warning(_outlier_msg)
