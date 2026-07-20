@@ -2092,6 +2092,8 @@ def pp_dspark_decode_loop(
             # the outlier log's arithmetic is well-defined even when this
             # branch doesn't run this cycle.
             _t_after_model_call = _t_after_r0_fwd
+            _t_before_cache_preflight = _t_after_r0_fwd
+            _t_after_cache_preflight = _t_after_r0_fwd
             _t_after_spec_eval = _t_after_r0_fwd
             if _draft_ahead_execute and is_rank0 and not _consume_this_cycle:
                 # msg1b's extension tokens are what rank1 would verify
@@ -2190,6 +2192,21 @@ def pp_dspark_decode_loop(
                         state_list=_spec_state_list,
                         hidden_idx=0,
                     )
+                    # Cache pre-flight eval (2026-07-20, added to test
+                    # whether prompt_cache carries a large unevaluated
+                    # lazy graph INTO model() despite _snapshot_cache's
+                    # own eval moments earlier -- e.g. if the snapshot
+                    # evaluates copies rather than the live cache arrays,
+                    # or a rotation/trim path rebuilds cache state lazily
+                    # after the snapshot. If this call itself is what's
+                    # slow, the cache (not the model forward) is
+                    # implicated; if this is fast and spec_model_call is
+                    # still slow, the cache's stored arrays are
+                    # exonerated. mx.compile already ruled out via a
+                    # live MLX_DISABLE_COMPILE=1 A/B (stall unchanged).
+                    _t_before_cache_preflight = time.perf_counter()
+                    mx.eval(prompt_cache)
+                    _t_after_cache_preflight = time.perf_counter()
                     with mx.stream(generation_stream):
                         model(_spec_batch_tok, cache=prompt_cache)
                     _t_after_model_call = time.perf_counter()
@@ -2842,7 +2859,8 @@ def pp_dspark_decode_loop(
                     # restore_cache + bookkeeping, msg2_post).
                     _outlier_msg += (
                         f" spec_fwd={(_t_after_spec_fwd - _t_after_r0_fwd) * 1000:.1f}ms "
-                        f"spec_model_call={(_t_after_model_call - _t_after_r0_fwd) * 1000:.1f}ms "
+                        f"cache_preflight={(_t_after_cache_preflight - _t_before_cache_preflight) * 1000:.1f}ms "
+                        f"spec_model_call={(_t_after_model_call - _t_after_cache_preflight) * 1000:.1f}ms "
                         f"spec_eval={(_t_after_spec_eval - _t_after_model_call) * 1000:.1f}ms "
                         f"msg2_recv_wait={(_t_after_msg2_recv - _t_before_msg2_recv) * 1000:.1f}ms "
                         f"msg2_post={(_t_after_trim_xchg - _t_after_msg2_recv) * 1000:.1f}ms"
