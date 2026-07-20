@@ -30,7 +30,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_map
 from mlx_lm.generate import generation_stream
-from mlx_lm.models.cache import CacheList
+from mlx_lm.models.cache import BatchPoolingCache, CacheList, PoolingCache
 from mlx_lm.sample_utils import make_sampler
 
 from .auto_parallel import (
@@ -180,24 +180,64 @@ def _snapshot_one(c: Any) -> Any:  # pyright: ignore[reportAny]
        not aliased views -- required because ring-buffer writes mutate
        in place, so a bare reference would "restore" to the
        already-corrupted post-write state). Prefer this via ``hasattr``.
-    2. ``CacheList`` (used for DSv4's sparse/compressed attention
+    2. ``PoolingCache``/``BatchPoolingCache`` are checked NEXT via
+       ``isinstance`` (NOT via a ``save_spec_state`` hasattr/duck-type --
+       see the SECOND ROOT CAUSE below for why that would be actively
+       WRONG) and use their OWN ``save_meta()``/``restore_meta()`` pair.
+    3. ``CacheList`` (used for DSv4's sparse/compressed attention
        layers, wrapping a RotatingKVCache + one or two PoolingCache
        instances) has no state-capture of its own -- recurse into
        ``.caches`` (bare-attribute access, matching the existing
        ``hasattr(cache, "caches")`` convention in auto_parallel.py's
        PipelineLastLayer -- the .pyi stub doesn't declare this attribute
        even though the real mlx-lm source does, hence the ignore).
-    3. Everything else (``PoolingCache``, bare ``KVCache``,
-       ``ArraysCache``, ``QuantizedKVCache``, ...) falls back to the
-       generic ``_BaseCache.state``/``.meta_state`` protocol every cache
+    4. Everything else (bare ``KVCache``, ``ArraysCache``,
+       ``QuantizedKVCache``, ...) falls back to the generic
+       ``_BaseCache.state``/``.meta_state`` protocol every cache
        type implements, with an explicit ``tree_map(mx.array, ...)``
        deep-copy -- MLX array assignment/``__setitem__`` mutates in
        place, so capturing ``.state`` without copying would alias the
        live buffer exactly like the original bug, just one level later.
+
+    SECOND ROOT CAUSE (2026-07-20, ELEVENTH UPDATE PoolingCache
+    growth-path crash at ~500K context, `[broadcast_shapes] Shapes
+    (1,125011,512) and (1,125012,512) cannot be broadcast`): PoolingCache
+    has no ``save_spec_state`` of its own, so it fell through to the
+    GENERIC ``.state``/``.meta_state`` branch above. That generic
+    protocol's ``pooled`` PROPERTY SETTER (invoked by ``c.state = v``)
+    unconditionally reallocates ``_pool_storage`` and does NOT round-trip
+    ``_pending_offset_bump`` -- a bare attribute used by the W4
+    deferred-update path (``update_and_fetch_deferred`` stages a bump;
+    ``commit_pending()`` applies it on the NEXT call) that is not part of
+    ``.state``/``.meta_state`` at all. A snapshot taken mid-verify while a
+    bump was staged, restored after a rejection, left
+    ``_pending_offset_bump`` STALE (belonging to the discarded forward).
+    The next ``commit_pending()`` (called unconditionally at the top of
+    every ``Compressor.__call__``) applied that orphaned bump onto the
+    freshly-restored (smaller) ``_pool_offset`` with NO corresponding
+    storage resize, inflating ``_pool_offset`` past
+    ``_pool_storage.shape[1]`` -- the next deferred write's growth branch
+    then sliced ``old[:, :self._pool_offset]`` against a too-small
+    ``old``, producing the crash. ``save_meta``/``restore_meta`` (already
+    used correctly for this exact class by the MTP accept/reject path in
+    dsv4_mtp.py) DOES round-trip the pending bump, closing this gap.
+
+    IMPORTANT: this is dispatched via ``isinstance``, NOT by adding a
+    ``save_spec_state``/``restore_spec_state`` alias onto PoolingCache
+    itself. dsv4_mtp.py's OWN rollback path does
+    ``hasattr(sub, "save_spec_state")`` to collect ring-LIKE caches
+    specifically (expecting ``rollback_spec_write``, which PoolingCache
+    does not have) -- giving PoolingCache a ``save_spec_state`` method
+    would get it swept into that unrelated ring-cache collection too and
+    crash with ``AttributeError: 'PoolingCache' object has no attribute
+    'rollback_spec_write'`` the next time that path runs. isinstance
+    keeps this fix scoped to pp_speculation.py's own dispatcher only.
     """
     if hasattr(c, "save_spec_state"):  # pyright: ignore[reportAny]
         save_fn: Callable[[], Any] = c.save_spec_state  # pyright: ignore[reportAny]
         return ("spec", save_fn())  # pyright: ignore[reportAny]
+    if isinstance(c, (PoolingCache, BatchPoolingCache)):
+        return ("pool_meta", c.save_meta())  # pyright: ignore[reportAny]
     if isinstance(c, CacheList):
         sub_caches: tuple[Any, ...] = c.caches  # type: ignore[attr-defined]
         return ("list", [_snapshot_one(sub) for sub in sub_caches])  # pyright: ignore[reportAny]
@@ -225,6 +265,8 @@ def _restore_one(c: Any, snap: Any) -> None:  # pyright: ignore[reportAny]
     if kind == "spec":
         restore_fn: Callable[[Any], None] = c.restore_spec_state  # pyright: ignore[reportAny]
         restore_fn(payload)
+    elif kind == "pool_meta":
+        c.restore_meta(payload)  # pyright: ignore[reportAny]
     elif kind == "list":
         sub_caches: tuple[Any, ...] = c.caches  # type: ignore[attr-defined]
         for sub_c, sub_snap in zip(  # pyright: ignore[reportAny]

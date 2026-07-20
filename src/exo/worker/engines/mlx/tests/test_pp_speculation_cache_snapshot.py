@@ -26,6 +26,7 @@ from __future__ import annotations
 import mlx.core as mx
 from mlx_lm.models.cache import (
     ArraysCache,
+    BatchPoolingCache,  # pyright: ignore
     CacheList,
     KVCache,
     PoolingCache,  # pyright: ignore
@@ -336,4 +337,173 @@ def test_pooling_cache_with_partial_remainder_round_trips() -> None:
 
     assert cache.remainder == 2, "restore must undo the speculative accumulate"
     assert cache.pooled is None  # pyright: ignore
+
+
+# ---------------------------------------------------------------------------
+# PoolingCache growth-path corruption bug (2026-07-20, ELEVENTH UPDATE).
+#
+# ROOT CAUSE: PoolingCache previously had no save_spec_state, so
+# _snapshot_one fell through to the generic .state/.meta_state protocol.
+# That protocol's `pooled` property setter unconditionally reallocates
+# `_pool_storage` and does NOT round-trip `_pending_offset_bump` (a bare
+# attribute used by the W4 deferred-update path, update_and_fetch_deferred /
+# commit_pending -- not part of `.state`/`.meta_state` at all). A snapshot
+# taken while a bump was staged, then restored after a rejection, left a
+# STALE bump on the live object. The next commit_pending() (called
+# unconditionally at the top of every Compressor.__call__) applied that
+# orphaned bump on top of the freshly-restored (smaller) _pool_offset with
+# no corresponding storage resize, corrupting _pool_offset past
+# _pool_storage.shape[1]. The following deferred write's growth branch then
+# sliced `old[:, :self._pool_offset]` against a too-small `old`, producing
+# a `[broadcast_shapes]` crash on the very first decode cycle after a
+# large-context growth event (observed live at ~500K context).
+#
+# FIX: PoolingCache/BatchPoolingCache now expose save_spec_state/
+# restore_spec_state (aliasing the already-correct save_meta/restore_meta,
+# which DOES round-trip the pending bump), so _snapshot_one's
+# hasattr(c, "save_spec_state") branch picks up the purpose-built rollback
+# instead of falling through to the generic protocol.
+# ---------------------------------------------------------------------------
+
+
+def test_pooling_cache_snapshot_uses_pool_meta_not_generic_fallback() -> None:
+    """After the fix, PoolingCache must dispatch through the dedicated
+    'pool_meta' branch (isinstance-checked save_meta/restore_meta), not
+    the generic .state/.meta_state fallback, so _pending_offset_bump is
+    round-tripped. Regression guard: if this ever starts returning a
+    "generic" snapshot kind again, the growth-path bug below is silently
+    reopened.
+
+    NOTE: this is dispatched via isinstance, NOT via a save_spec_state
+    duck-type -- adding save_spec_state to PoolingCache would collide
+    with dsv4_mtp.py's OWN hasattr(sub, "save_spec_state") ring-cache
+    collection (which expects rollback_spec_write, absent on
+    PoolingCache) and crash that unrelated path. Confirm no such
+    attribute leaked onto PoolingCache by this fix."""
+    cache = PoolingCache(ratio=4)  # pyright: ignore
+    assert not hasattr(cache, "save_spec_state"), (
+        "PoolingCache must NOT gain save_spec_state -- that would get it "
+        "swept into dsv4_mtp.py's ring-cache rollback collection "
+        "(hasattr(sub, 'save_spec_state')) and crash with "
+        "AttributeError: 'PoolingCache' object has no attribute "
+        "'rollback_spec_write'"
+    )
+
+    snap = _snapshot_cache([cache])
+    assert snap[0][0] == "pool_meta", (
+        "PoolingCache must snapshot via the dedicated 'pool_meta' branch, "
+        "not 'generic' -- the generic .state/.meta_state protocol does not "
+        "round-trip _pending_offset_bump and reintroduces the growth-path "
+        "corruption bug"
+    )
+
+
+def test_pooling_cache_growth_after_reject_does_not_corrupt_offset() -> None:
+    """Direct repro of the ELEVENTH UPDATE crash: snapshot mid-verify while
+    a deferred bump is staged, simulate more speculative draft steps that
+    grow pool storage, reject (restore), then push the real committed
+    continuation through. Before the fix this corrupted _pool_offset past
+    _pool_storage.shape[1] and crashed on the next deferred write with
+    [broadcast_shapes]; after the fix, _pool_offset must never exceed
+    _pool_storage.shape[1] and the write must succeed."""
+    cache = PoolingCache(ratio=4)  # pyright: ignore
+    cache.step = 8  # small step so growth boundaries are reachable cheaply
+
+    # Build a committed baseline near a storage boundary (P=7, storage=8).
+    cache.update_and_fetch_deferred(mx.ones((1, 7, 4)))  # pyright: ignore[reportUnknownMemberType]
+    cache.commit_pending()
+    assert cache._pool_offset == 7  # pyright: ignore
+    assert cache._pool_storage.shape[1] == 8  # pyright: ignore
+
+    snap = _snapshot_cache([cache])
+
+    # Simulate a speculative verify forward: stage a large deferred write
+    # that would force growth once committed (offset 7 -> 12, past storage=8).
+    cache.commit_pending()
+    cache.update_and_fetch_deferred(mx.ones((1, 5, 4)) * 9)  # pyright: ignore[reportUnknownMemberType]
+    assert cache._pool_storage.shape[1] == 16  # pyright: ignore # grew for the speculative write
+
+    # REJECTED: restore from snapshot (the EXECUTE=1 rollback path).
+    _restore_cache([cache], snap)
+
+    # The next Compressor.__call__ always calls commit_pending() first.
+    cache.commit_pending()
+
+    assert cache._pool_offset <= cache._pool_storage.shape[1], (  # pyright: ignore
+        f"_pool_offset ({cache._pool_offset}) exceeds "  # pyright: ignore
+        f"_pool_storage.shape[1] ({cache._pool_storage.shape[1]}) after "  # pyright: ignore
+        f"restore+commit -- this is the exact corrupted state that crashed "
+        f"the next deferred write with [broadcast_shapes] at ~500K context"
+    )
+    assert cache._pool_offset == 7, "restore must fully undo the rejected draft's staged bump"  # pyright: ignore
+
+    # The real committed continuation must write cleanly (this is the
+    # exact call that crashed live before the fix).
+    result = cache.update_and_fetch_deferred(mx.ones((1, 1, 4)) * 99)  # pyright: ignore[reportUnknownMemberType]
+    mx.eval(result)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_pooling_cache_not_swept_into_dsv4_mtp_ring_cache_collection() -> None:
+    """dsv4_mtp.py's OWN speculative-rollback path (separate from
+    pp_speculation.py's EXECUTE=1 path tested above) collects "ring-like"
+    caches via `hasattr(sub, "save_spec_state")` and calls
+    `rollback_spec_write` on every cache it collects that way (see
+    dsv4_mtp.py ~line 3583 and ~line 4218). If PoolingCache were given a
+    save_spec_state method (the WRONG fix, rejected during review), it
+    would get swept into that collection too and crash with
+    AttributeError the next time dsv4_mtp's rollback runs, since
+    PoolingCache has no rollback_spec_write. This test guards against
+    that regression directly."""
+    cache = PoolingCache(ratio=4)  # pyright: ignore
+    assert not hasattr(cache, "save_spec_state")
+    assert not hasattr(cache, "restore_spec_state")
+    # PoolingCache correctly lacks rollback_spec_write -- if a future
+    # change added save_spec_state without also adding this, dsv4_mtp's
+    # ring-cache rollback would crash on the first PoolingCache it swept up.
+    assert not hasattr(cache, "rollback_spec_write")
+
+
+def test_batch_pooling_cache_snapshot_preserves_pending_bumps() -> None:
+    """BatchPoolingCache twin of the PoolingCache growth-corruption test:
+    confirms the 'pool_meta' dispatch branch also covers the batched
+    (c>=2) pool path, whose staged state is a PER-STREAM ``_pending_bumps``
+    list rather than a single ``_pending_offset_bump`` int, but has the
+    identical generic-.state/.meta_state-fallback gap before the fix
+    (that protocol doesn't round-trip ``_pending_bumps`` either).
+
+    Drives ``_pool_lengths``/``_pending_bumps`` directly rather than via
+    the full ``accumulate_windows``/``update_and_fetch_deferred``
+    production call sequence (which additionally requires ``prepare()``-
+    supplied per-stream ``_lengths``/``_processed`` bookkeeping unrelated
+    to this bug) -- this isolates exactly the state this fix is
+    responsible for round-tripping.
+    """
+    cache = BatchPoolingCache(ratio=4, left_padding=[0])  # pyright: ignore
+
+    # Simulate committed state: one stream at pool length 7.
+    cache._pool_lengths = [7]  # pyright: ignore
+    assert not hasattr(cache, "save_spec_state"), (
+        "BatchPoolingCache must NOT gain save_spec_state either -- same "
+        "ring-cache-collection collision risk as PoolingCache"
+    )
+
+    snap = _snapshot_cache([cache])
+    assert snap[0][0] == "pool_meta", (
+        "BatchPoolingCache must also dispatch via the dedicated "
+        "'pool_meta' branch, not the generic fallback"
+    )
+
+    # Simulate a speculative draft step staging a per-stream bump.
+    cache._pending_bumps = [3]  # pyright: ignore
+
+    # REJECTED: restore from the pre-bump snapshot.
+    _restore_cache([cache], snap)
+
+    assert cache._pending_bumps == [0], (  # pyright: ignore
+        "restore must clear the per-stream staged bumps, not leave the "
+        "rejected draft's bump stale on the live object -- a stale bump "
+        "here is the exact corruption mechanism that crashed the single-"
+        "stream PoolingCache path at ~500K context"
+    )
+    assert cache._pool_lengths == [7]  # pyright: ignore
 
