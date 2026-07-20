@@ -28,8 +28,9 @@ from typing import Any, Callable, Generator
 
 import mlx.core as mx
 import mlx.nn as nn
+from mlx.utils import tree_map
 from mlx_lm.generate import generation_stream
-from mlx_lm.models.cache import ArraysCache, KVCache
+from mlx_lm.models.cache import CacheList
 from mlx_lm.sample_utils import make_sampler
 
 from .auto_parallel import (
@@ -99,30 +100,92 @@ def get_pipeline_info(model: nn.Module) -> tuple[int, int, mx.distributed.Group]
 # ---------------------------------------------------------------------------
 
 
+def _snapshot_one(c: Any) -> Any:  # pyright: ignore[reportAny]
+    """Snapshot a single cache entry, recursing through CacheList.
+
+    ROOT CAUSE (2026-07-19, found live-debugging step 3a's degeneration +
+    jaccl transport fault): the ORIGINAL version of this function only
+    recognized bare ``ArraysCache``/``KVCache`` via isinstance and fell
+    through to ``None`` (= "no-op, do nothing on restore") for every
+    other cache type -- including ``RotatingKVCache``, ``CacheList``, and
+    ``PoolingCache``. DeepseekV4Model.make_cache() (mlx-lm) returns
+    EXACTLY those three types for every layer, NEVER bare KVCache or
+    ArraysCache, so the "snapshot before speculative forward, restore on
+    both HIT and MISS" invariant this file's docstrings and commit
+    messages claimed was a COMPLETE NO-OP on this model: the speculative
+    forward's real KV writes were never rolled back on any layer,
+    corrupting subsequent decode (observed live: a "Paris.</think>
+    Paris.</think>..." repeat loop, plus a jaccl transport fault from
+    ranks diverging after the corruption).
+
+    FIX: use each cache type's OWN state-capture primitive rather than a
+    hand-rolled isinstance allowlist, so the speculative-rollback
+    behavior tracks whatever cache types the model actually uses
+    instead of drifting out of sync with them:
+    1. ``RotatingKVCache`` has a PURPOSE-BUILT ``save_spec_state()`` for
+       exactly this (materializes ``mx.array()`` copies of keys/values,
+       not aliased views -- required because ring-buffer writes mutate
+       in place, so a bare reference would "restore" to the
+       already-corrupted post-write state). Prefer this via ``hasattr``.
+    2. ``CacheList`` (used for DSv4's sparse/compressed attention
+       layers, wrapping a RotatingKVCache + one or two PoolingCache
+       instances) has no state-capture of its own -- recurse into
+       ``.caches`` (bare-attribute access, matching the existing
+       ``hasattr(cache, "caches")`` convention in auto_parallel.py's
+       PipelineLastLayer -- the .pyi stub doesn't declare this attribute
+       even though the real mlx-lm source does, hence the ignore).
+    3. Everything else (``PoolingCache``, bare ``KVCache``,
+       ``ArraysCache``, ``QuantizedKVCache``, ...) falls back to the
+       generic ``_BaseCache.state``/``.meta_state`` protocol every cache
+       type implements, with an explicit ``tree_map(mx.array, ...)``
+       deep-copy -- MLX array assignment/``__setitem__`` mutates in
+       place, so capturing ``.state`` without copying would alias the
+       live buffer exactly like the original bug, just one level later.
+    """
+    if hasattr(c, "save_spec_state"):  # pyright: ignore[reportAny]
+        save_fn: Callable[[], Any] = c.save_spec_state  # pyright: ignore[reportAny]
+        return ("spec", save_fn())  # pyright: ignore[reportAny]
+    if isinstance(c, CacheList):
+        sub_caches: tuple[Any, ...] = c.caches  # type: ignore[attr-defined]
+        return ("list", [_snapshot_one(sub) for sub in sub_caches])  # pyright: ignore[reportAny]
+    state: Any = getattr(c, "state", None)  # pyright: ignore[reportAny]
+    meta: Any = getattr(c, "meta_state", None)  # pyright: ignore[reportAny]
+    return ("generic", tree_map(mx.array, state), meta)  # pyright: ignore[reportAny]
+
+
+def _restore_one(c: Any, snap: Any) -> None:  # pyright: ignore[reportAny]
+    """Restore a single cache entry from `_snapshot_one`'s output."""
+    if snap is None:
+        return
+    kind: str = snap[0]  # pyright: ignore[reportAny]
+    payload: Any = snap[1]  # pyright: ignore[reportAny]
+    if kind == "spec":
+        restore_fn: Callable[[Any], None] = c.restore_spec_state  # pyright: ignore[reportAny]
+        restore_fn(payload)
+    elif kind == "list":
+        sub_caches: tuple[Any, ...] = c.caches  # type: ignore[attr-defined]
+        for sub_c, sub_snap in zip(  # pyright: ignore[reportAny]
+            sub_caches, payload, strict=True
+        ):
+            _restore_one(sub_c, sub_snap)
+    elif kind == "generic":
+        state_snap: Any = snap[1]  # pyright: ignore[reportAny]
+        meta_snap: Any = snap[2]  # pyright: ignore[reportAny]
+        if state_snap is not None:
+            c.state = state_snap
+        if meta_snap is not None:
+            c.meta_state = meta_snap
+
+
 def _snapshot_cache(cache: list[Any]) -> list[Any]:
-    """Lightweight snapshot: save offsets for KVCache, shallow-copy for ArraysCache."""
-    snap: list[Any] = []
-    for c in cache:
-        if isinstance(c, ArraysCache):
-            snap.append(list(c.cache))
-        elif isinstance(c, KVCache):
-            snap.append(c.offset)
-        else:
-            snap.append(None)
-    return snap
+    """Snapshot every cache entry for speculative rollback. See _snapshot_one."""
+    return [_snapshot_one(c) for c in cache]
 
 
 def _restore_cache(cache: list[Any], snap: list[Any]) -> None:
-    """Restore cache from snapshot. KVCache trims keys/values; ArraysCache restores list."""
+    """Restore cache from a `_snapshot_cache` snapshot. See _restore_one."""
     for c, s in zip(cache, snap):
-        if s is None:
-            continue
-        if isinstance(c, ArraysCache):
-            c.cache = s
-        elif isinstance(c, KVCache) and c.offset > s:
-            c.keys = c.keys[:, :, :s, :]
-            c.values = c.values[:, :, :s, :]
-            c.offset = s
+        _restore_one(c, s)
 
 
 # ---------------------------------------------------------------------------
