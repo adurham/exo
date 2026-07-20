@@ -24,7 +24,13 @@ original bug before it ever touched hardware.
 from __future__ import annotations
 
 import mlx.core as mx
-from mlx_lm.models.cache import ArraysCache, CacheList, KVCache, RotatingKVCache
+from mlx_lm.models.cache import (
+    ArraysCache,
+    CacheList,
+    KVCache,
+    PoolingCache,  # pyright: ignore
+    RotatingKVCache,
+)
 
 from exo.worker.engines.mlx.pp_speculation import _restore_cache, _snapshot_cache
 
@@ -276,3 +282,58 @@ def test_restored_cache_is_indistinguishable_from_a_cache_that_never_ran_spec_fw
     assert executed.offset == baseline.offset
     assert bool(mx.array_equal(_keys(executed)[0, 0, :6, :], _keys(baseline)[0, 0, :6, :]))
     assert bool(mx.array_equal(_values(executed)[0, 0, :6, :], _values(baseline)[0, 0, :6, :]))
+
+
+# ---------------------------------------------------------------------------
+# PoolingCache -- the generic-fallback type whose .state legitimately
+# contains None leaves. Second bug found (2026-07-19, same session as
+# the isinstance-fallthrough root cause): the FIRST fix attempt's
+# tree_map(mx.array, state) crashed both runners on the first live
+# request with "Invoked with types: mlx.core.array, NoneType", because
+# a fresh/untouched PoolingCache's .state is (None, None, None). This
+# reproduces that exact crash directly, with no cluster needed.
+# ---------------------------------------------------------------------------
+
+
+def test_pooling_cache_with_untouched_buffers_does_not_crash_snapshot() -> None:
+    """DeepseekV4Model.make_cache() wraps EVERY sparse/compressed layer's
+    CacheList with one or two PoolingCache instances. A freshly
+    constructed PoolingCache (buf_kv/buf_gate/pooled all still None,
+    before any accumulate_windows() call -- exactly the state a cache
+    is in for the first several decode steps of any request) must
+    snapshot and restore without crashing."""
+    cache = PoolingCache(ratio=4)  # pyright: ignore
+    assert cache.state == (None, None, None)  # pyright: ignore
+
+    snap = _snapshot_cache([cache])  # must NOT raise
+
+    _restore_cache([cache], snap)  # must NOT raise either
+
+    assert cache.state == (None, None, None)  # pyright: ignore
+
+
+def test_pooling_cache_with_partial_remainder_round_trips() -> None:
+    """Once accumulate_windows() has run at least once (buf_kv/buf_gate
+    allocated, possibly still ratio-unfilled so pooled stays None),
+    confirm the generic fallback still round-trips real array data
+    correctly alongside the None `pooled` leaf."""
+    cache = PoolingCache(ratio=4)  # pyright: ignore
+    kv = mx.zeros((1, 2, 4), dtype=mx.float32)
+    gate = mx.zeros((1, 2, 1), dtype=mx.float32)
+    mx.eval(kv, gate)
+    cache.accumulate_windows(kv, gate, offset=2)  # pyright: ignore[reportUnknownMemberType]
+    assert cache.remainder == 2  # pyright: ignore
+    assert cache.pooled is None  # ratio=4 not yet reached -- still None  # pyright: ignore
+
+    snap = _snapshot_cache([cache])
+
+    kv2 = mx.ones((1, 2, 4), dtype=mx.float32)
+    gate2 = mx.ones((1, 2, 1), dtype=mx.float32)
+    mx.eval(kv2, gate2)
+    cache.accumulate_windows(kv2, gate2, offset=4)  # pyright: ignore[reportUnknownMemberType]
+
+    _restore_cache([cache], snap)
+
+    assert cache.remainder == 2, "restore must undo the speculative accumulate"
+    assert cache.pooled is None  # pyright: ignore
+

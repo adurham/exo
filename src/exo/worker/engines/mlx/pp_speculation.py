@@ -100,6 +100,23 @@ def get_pipeline_info(model: nn.Module) -> tuple[int, int, mx.distributed.Group]
 # ---------------------------------------------------------------------------
 
 
+def _copy_leaf(x: Any) -> Any:  # pyright: ignore[reportAny]
+    """Copy a single tree_map leaf, passing None through unchanged.
+
+    ``tree_map``'s "else" branch (any non-list/tuple/dict node, including
+    ``None``) calls ``fn`` directly on the leaf -- so a bare ``mx.array``
+    used as ``fn`` crashes on any ``None`` leaf with "Invoked with types:
+    mlx.core.array, NoneType". PoolingCache.state legitimately returns
+    None leaves (its buf_kv/buf_gate start as None and are only
+    allocated on the first accumulate_windows() call), so this is a
+    real, reachable case, not a defensive-only guard -- confirmed by a
+    live runner crash the first time this fix ran against real traffic.
+    """
+    if x is None:
+        return None
+    return mx.array(x)  # pyright: ignore[reportAny]
+
+
 def _snapshot_one(c: Any) -> Any:  # pyright: ignore[reportAny]
     """Snapshot a single cache entry, recursing through CacheList.
 
@@ -150,7 +167,17 @@ def _snapshot_one(c: Any) -> Any:  # pyright: ignore[reportAny]
         return ("list", [_snapshot_one(sub) for sub in sub_caches])  # pyright: ignore[reportAny]
     state: Any = getattr(c, "state", None)  # pyright: ignore[reportAny]
     meta: Any = getattr(c, "meta_state", None)  # pyright: ignore[reportAny]
-    return ("generic", tree_map(mx.array, state), meta)  # pyright: ignore[reportAny]
+    # SECOND BUG found live-testing THIS fix (2026-07-19, same session):
+    # PoolingCache.state can return a tuple containing None leaves (e.g.
+    # (None, None, self.pooled) when its remainder buffer hasn't been
+    # touched yet -- buf_kv/buf_gate start as None and only get allocated
+    # on the first accumulate_windows() call). A bare `tree_map(mx.array,
+    # state)` calls `mx.array(None)` on those leaves and crashes with
+    # "Invoked with types: mlx.core.array, NoneType" -- reproduced live,
+    # crashed both runners on the very first request after this file's
+    # first fix attempt. `_copy_leaf` passes None straight through
+    # instead of trying to construct an mx.array from it.
+    return ("generic", tree_map(_copy_leaf, state), meta)  # pyright: ignore[reportAny]
 
 
 def _restore_one(c: Any, snap: Any) -> None:  # pyright: ignore[reportAny]
