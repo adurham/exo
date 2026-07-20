@@ -2095,6 +2095,19 @@ def pp_dspark_decode_loop(
             _t_before_cache_preflight = _t_after_r0_fwd
             _t_after_cache_preflight = _t_after_r0_fwd
             _t_after_spec_eval = _t_after_r0_fwd
+            # Snapshot-eval timing defaults (2026-07-20, added after
+            # discovering an ~8s gap unaccounted for by
+            # cache_preflight/spec_model_call/spec_eval alone -- those
+            # three summed to ~812ms while spec_fwd itself measured
+            # ~8885ms on the same cycle. The only untimed phase between
+            # _t_after_r0_fwd and cache_preflight's own timer is
+            # _snapshot_cache(prompt_cache) + its mx.eval() call -- this
+            # brackets that specific phase to test whether the KV
+            # snapshot COPY's own materialization (not the pre-flight
+            # eval of the live cache, which is a separate call) is where
+            # the real delay lives.
+            _t_before_snapshot_eval = _t_after_r0_fwd
+            _t_after_snapshot_eval = _t_after_r0_fwd
             if _draft_ahead_execute and is_rank0 and not _consume_this_cycle:
                 # msg1b's extension tokens are what rank1 would verify
                 # NEXT cycle if this cycle fully accepts. Rank0 has just
@@ -2138,8 +2151,10 @@ def pp_dspark_decode_loop(
                     # tests candidate #1 (the snapshot copy itself
                     # pushing active memory over the limit).
                     _mem_before_snapshot = mx.get_active_memory()
+                    _t_before_snapshot_eval = time.perf_counter()
                     _spec_snapshot = _snapshot_cache(prompt_cache)
                     mx.eval(_spec_snapshot)
+                    _t_after_snapshot_eval = time.perf_counter()
                     _mem_after_snapshot = mx.get_active_memory()
                     # Build the assumed-prefix SpecId for this
                     # speculative branch: anchor = _wire_batch[0], then
@@ -2859,6 +2874,8 @@ def pp_dspark_decode_loop(
                     # restore_cache + bookkeeping, msg2_post).
                     _outlier_msg += (
                         f" spec_fwd={(_t_after_spec_fwd - _t_after_r0_fwd) * 1000:.1f}ms "
+                        f"snapshot_eval={(_t_after_snapshot_eval - _t_before_snapshot_eval) * 1000:.1f}ms "
+                        f"pre_cache_bookkeeping={(_t_before_cache_preflight - _t_after_snapshot_eval) * 1000:.1f}ms "
                         f"cache_preflight={(_t_after_cache_preflight - _t_before_cache_preflight) * 1000:.1f}ms "
                         f"spec_model_call={(_t_after_model_call - _t_after_cache_preflight) * 1000:.1f}ms "
                         f"spec_eval={(_t_after_spec_eval - _t_after_model_call) * 1000:.1f}ms "
