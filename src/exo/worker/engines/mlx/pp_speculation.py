@@ -2080,6 +2080,19 @@ def pp_dspark_decode_loop(
             _mem_before_snapshot = mx.get_active_memory()
             _mem_after_snapshot = _mem_before_snapshot
             _mem_after_spec_fwd = _mem_before_snapshot
+            # Sub-phase timing defaults for the model()-call vs
+            # mx.eval()-call split within spec_fwd (2026-07-20, added to
+            # test whether the stall is inside the (lazy, should-be-
+            # instant) model() graph construction itself vs the eval()
+            # call that actually forces materialization -- distinguishes
+            # "the forward's OWN compute is slow" from "something the
+            # forward's cache reads depends on (e.g. unresolved
+            # cross-rank ancestry in prompt_cache) is what eval() ends up
+            # waiting on transitively". Set to _t_after_r0_fwd here so
+            # the outlier log's arithmetic is well-defined even when this
+            # branch doesn't run this cycle.
+            _t_after_model_call = _t_after_r0_fwd
+            _t_after_spec_eval = _t_after_r0_fwd
             if _draft_ahead_execute and is_rank0 and not _consume_this_cycle:
                 # msg1b's extension tokens are what rank1 would verify
                 # NEXT cycle if this cycle fully accepts. Rank0 has just
@@ -2179,6 +2192,7 @@ def pp_dspark_decode_loop(
                     )
                     with mx.stream(generation_stream):
                         model(_spec_batch_tok, cache=prompt_cache)
+                    _t_after_model_call = time.perf_counter()
                     # Failure mode #3: force materialisation NOW so the
                     # forward's KV writes and the buffered hidden are
                     # committed on the timeline before we enter the
@@ -2190,6 +2204,7 @@ def pp_dspark_decode_loop(
                     # was added to prevent.
                     _spec_hidden = _spec_state_list[0]
                     mx.eval(_spec_hidden)
+                    _t_after_spec_eval = time.perf_counter()
                     _mem_after_spec_fwd = mx.get_active_memory()
                     if _spec_hidden_buffer is not None:
                         _spec_hidden_buffer.stash(
@@ -2827,6 +2842,8 @@ def pp_dspark_decode_loop(
                     # restore_cache + bookkeeping, msg2_post).
                     _outlier_msg += (
                         f" spec_fwd={(_t_after_spec_fwd - _t_after_r0_fwd) * 1000:.1f}ms "
+                        f"spec_model_call={(_t_after_model_call - _t_after_r0_fwd) * 1000:.1f}ms "
+                        f"spec_eval={(_t_after_spec_eval - _t_after_model_call) * 1000:.1f}ms "
                         f"msg2_recv_wait={(_t_after_msg2_recv - _t_before_msg2_recv) * 1000:.1f}ms "
                         f"msg2_post={(_t_after_trim_xchg - _t_after_msg2_recv) * 1000:.1f}ms"
                     )
