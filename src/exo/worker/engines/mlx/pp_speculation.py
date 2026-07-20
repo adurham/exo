@@ -2099,6 +2099,15 @@ def pp_dspark_decode_loop(
                     )
                     _ext_ids_r0 = []
                 if len(_ext_ids_r0) == _da_msg1_ext_len and _da_msg1_ext_len > 0:
+                    # TEMPORARY DIAGNOSTIC (2026-07-19, NOT a permanent fix --
+                    # forcing a full sync every cycle would defeat the whole
+                    # point of the overlap architecture this file implements).
+                    # Testing whether a clean stream-drain right before the
+                    # speculative forward starts changes the observed 8-25s
+                    # Event::wait() stall behavior (queue-backlog hypothesis).
+                    # REMOVE before merging regardless of outcome.
+                    if os.environ.get("EXO_PP_DSPARK_DEBUG_PRESYNC") == "1":
+                        mx.synchronize(generation_stream)
                     # Failure mode #3 defence: snapshot BEFORE the
                     # speculative forward runs so the restore path can
                     # deterministically reproduce today's KV state on
