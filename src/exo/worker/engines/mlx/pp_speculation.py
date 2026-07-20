@@ -2161,8 +2161,22 @@ def pp_dspark_decode_loop(
                     # cache trim/rollback ops)". If this pre-barrier absorbs
                     # the multi-second delay and the actual snapshot copy
                     # becomes fast, the copy itself is innocent.
+                    # CORRECTION (2026-07-20, same day): mx.eval() on
+                    # already-materialized arrays returns immediately -- it
+                    # is NOT a device-wide fence, it only waits for THOSE
+                    # specific arrays. A first live test with
+                    # mx.eval(prompt_cache) here measured prebarrier=0.0ms
+                    # while snapshot_eval was still 8.1s, which does NOT
+                    # prove "no pending work" -- it only proves prompt_cache's
+                    # own arrays were already done. Switched to
+                    # mx.synchronize() (a TRUE device-wide fence covering ALL
+                    # queued work, not just prompt_cache's arrays) to
+                    # directly test whether the snapshot is genuinely stuck
+                    # behind OTHER in-flight work on the stream (e.g.
+                    # concurrent prefill/decode from another thread/task)
+                    # rather than being slow in its own right.
                     _t_before_prebarrier = time.perf_counter()
-                    mx.eval(prompt_cache)
+                    mx.synchronize()
                     _t_after_prebarrier = time.perf_counter()
                     _t_before_snapshot_eval = time.perf_counter()
                     _spec_snapshot = _snapshot_cache(prompt_cache)
