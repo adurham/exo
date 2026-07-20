@@ -28,7 +28,7 @@ from typing import Any, Callable, Generator
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx.utils import tree_map
+from mlx.utils import tree_flatten, tree_map
 from mlx_lm.generate import generation_stream
 from mlx_lm.models.cache import CacheList
 from mlx_lm.sample_utils import make_sampler
@@ -221,9 +221,97 @@ def _restore_one(c: Any, snap: Any) -> None:  # pyright: ignore[reportAny]
             c.meta_state = meta_snap
 
 
+def _snapshot_bytes(snap: Any) -> int:  # pyright: ignore[reportAny]
+    """Best-effort byte count for a _snapshot_one() result, for the
+    per-layer timing diagnostic below. Handles all three snap "kind"
+    tags (spec/list/generic) recursively. Returns 0 rather than raising
+    on any unexpected shape -- this is diagnostic-only, must never be
+    able to crash the actual snapshot/restore path.
+    """
+    if snap is None:
+        return 0
+    try:
+        kind: str = snap[0]  # pyright: ignore[reportAny]
+        payload: Any = snap[1]  # pyright: ignore[reportAny]
+        if kind == "spec":
+            # (keys, values, offset, _idx) from RotatingKVCache.save_spec_state
+            total = 0
+            for leaf in payload[:2]:  # pyright: ignore[reportAny]
+                if leaf is not None:
+                    total += int(leaf.nbytes)  # pyright: ignore[reportAny]
+            return total
+        if kind == "list":
+            return sum(_snapshot_bytes(sub) for sub in payload)  # pyright: ignore[reportAny]
+        if kind == "generic":
+            total = 0
+            leaves = tree_flatten(payload)
+            for leaf in leaves:
+                _, v = leaf  # pyright: ignore[reportAny]
+                _nbytes: Any = getattr(v, "nbytes", None)
+                if _nbytes is not None:
+                    total += int(_nbytes)  # pyright: ignore[reportAny]
+            return total
+    except Exception:  # noqa: BLE001 -- diagnostic-only, never crash the real path
+        return 0
+    return 0
+
+
 def _snapshot_cache(cache: list[Any]) -> list[Any]:
-    """Snapshot every cache entry for speculative rollback. See _snapshot_one."""
-    return [_snapshot_one(c) for c in cache]
+    """Snapshot every cache entry for speculative rollback. See _snapshot_one.
+
+    Per-layer EVAL timing (2026-07-20): added while investigating the
+    confirmed EXECUTE=1-specific stall isolated to this function's
+    caller's mx.eval(_spec_snapshot) call (see references/
+    pp-dspark-snapshot-eval-stall-2026-07-20.md in the
+    exo-cluster-development skill). Prior diagnostics measured
+    PoolingCache's `.pooled` buffer directly (0.2-0.5MB, trivially
+    small -- rules out a large-copy/bandwidth explanation) but never
+    measured RotatingKVCache's own `mx.array(keys)`/`mx.array(values)`
+    copies (the `hasattr(c, "save_spec_state")` fast path, used for the
+    MAJORITY of layers), nor whether the cost is one single slow layer
+    vs many small, individually-invisible per-layer costs that only sum
+    to something large in aggregate.
+
+    IMPORTANT: MLX is lazy -- _snapshot_one() itself only builds graph
+    nodes, it does NOT evaluate anything, so timing _snapshot_one()
+    calls alone (an earlier draft of this function did exactly that)
+    would only measure trivial graph construction and miss the real
+    cost entirely, which only manifests when something forces
+    materialization. This builds every layer's (cheap, lazy) snapshot
+    FIRST, then calls `mx.eval()` on EACH layer's snapshot INDIVIDUALLY
+    (not the whole batch at once, as the caller's own
+    mx.eval(_spec_snapshot) does) so a per-layer eval-time breakdown can
+    be logged whenever the total exceeds 0.5s -- this directly localizes
+    whether one specific layer/cache-type is slow, or the cost is spread
+    evenly across all of them.
+    """
+    _t_snapshot_start = time.perf_counter()
+    result: list[Any] = [_snapshot_one(c) for c in cache]  # pyright: ignore[reportAny]
+    _t_after_lazy_snapshot = time.perf_counter()
+    _per_layer: list[tuple[int, float, str, int]] = []
+    for _i, snap in enumerate(result):  # pyright: ignore[reportAny]
+        if snap is None:
+            continue
+        _t0 = time.perf_counter()
+        mx.eval(snap)  # pyright: ignore[reportAny]
+        _elapsed = time.perf_counter() - _t0
+        _kind: str = snap[0]  # pyright: ignore[reportAny]
+        _per_layer.append((_i, _elapsed, _kind, _snapshot_bytes(snap)))
+    _total_eval_elapsed = time.perf_counter() - _t_after_lazy_snapshot
+    if _total_eval_elapsed > 0.5:
+        _lazy_build_ms = (_t_after_lazy_snapshot - _t_snapshot_start) * 1000
+        _per_layer.sort(key=lambda x: x[1], reverse=True)
+        _top = _per_layer[:10]
+        _sum_bytes = sum(x[3] for x in _per_layer)
+        logger.warning(
+            f"[PP DSpark SNAPSHOT PER-LAYER DIAG] lazy_build={_lazy_build_ms:.1f}ms "
+            f"total_per_layer_eval={_total_eval_elapsed * 1000:.1f}ms "
+            f"n_layers={len(_per_layer)} "
+            f"total_bytes={_sum_bytes} ({_sum_bytes / 1e6:.2f}MB) "
+            f"top10_slowest="
+            f"{[(i, f'{e * 1000:.1f}ms', k, b) for i, e, k, b in _top]}"
+        )
+    return result
 
 
 def _restore_cache(cache: list[Any], snap: list[Any]) -> None:
