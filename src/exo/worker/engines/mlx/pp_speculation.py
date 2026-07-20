@@ -97,6 +97,25 @@ def _log(msg: str) -> None:
         sys.stderr.flush()
 
 
+# EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL (2026-07-20): A/B toggle for the
+# EXECUTE=1 stall investigation. Set to "1" to restore the ORIGINAL
+# single mx.eval(_spec_snapshot) batched-eval behavior in
+# _snapshot_cache, for a controlled comparison against the per-layer
+# eval split -- both arms get an identical process restart so a
+# restart-clears-some-pathology confound can be ruled out. Default
+# (unset/"0") uses the per-layer eval split. See references/
+# pp-dspark-snapshot-eval-stall-2026-07-20.md in the
+# exo-cluster-development skill for the full investigation.
+_BATCHED_SNAPSHOT_EVAL_ENABLED: list[bool | None] = [None]
+
+
+def _batched_snapshot_eval_enabled() -> bool:
+    if _BATCHED_SNAPSHOT_EVAL_ENABLED[0] is None:
+        v = os.environ.get("EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL", "")
+        _BATCHED_SNAPSHOT_EVAL_ENABLED[0] = v == "1"
+    return _BATCHED_SNAPSHOT_EVAL_ENABLED[0]
+
+
 # ---------------------------------------------------------------------------
 # Pipeline info extraction
 # ---------------------------------------------------------------------------
@@ -279,24 +298,43 @@ def _snapshot_cache(cache: list[Any]) -> list[Any]:
     cost entirely, which only manifests when something forces
     materialization. This builds every layer's (cheap, lazy) snapshot
     FIRST, then calls `mx.eval()` on EACH layer's snapshot INDIVIDUALLY
-    (not the whole batch at once, as the caller's own
-    mx.eval(_spec_snapshot) does) so a per-layer eval-time breakdown can
+    (not the whole batch at once, as the caller's OLD
+    mx.eval(_spec_snapshot) did) so a per-layer eval-time breakdown can
     be logged whenever the total exceeds 0.5s -- this directly localizes
     whether one specific layer/cache-type is slow, or the cost is spread
     evenly across all of them.
+
+    A/B TOGGLE (2026-07-20, same day): after deploying this, 19
+    consecutive live decode requests showed ZERO stalls (vs the
+    previous ~1-in-3-to-5 rate), suggesting the per-layer-vs-batched
+    eval split itself might be a genuine fix, not just a diagnostic.
+    Per second-opinion review, this needs a controlled A/B where BOTH
+    arms get an identical restart (to rule out "any fresh restart
+    clears a memory-pressure/fragmentation pathology" as a confound
+    unrelated to this code change) -- EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL=1
+    forces the ORIGINAL single-batch mx.eval(_spec_snapshot) behavior
+    for exactly this comparison, without reverting the diagnostic
+    infrastructure itself.
     """
     _t_snapshot_start = time.perf_counter()
     result: list[Any] = [_snapshot_one(c) for c in cache]  # pyright: ignore[reportAny]
     _t_after_lazy_snapshot = time.perf_counter()
     _per_layer: list[tuple[int, float, str, int]] = []
-    for _i, snap in enumerate(result):  # pyright: ignore[reportAny]
-        if snap is None:
-            continue
+    if _batched_snapshot_eval_enabled():
+        # A/B control arm: original behavior, one eval() on the whole list.
         _t0 = time.perf_counter()
-        mx.eval(snap)  # pyright: ignore[reportAny]
+        mx.eval(result)
         _elapsed = time.perf_counter() - _t0
-        _kind: str = snap[0]  # pyright: ignore[reportAny]
-        _per_layer.append((_i, _elapsed, _kind, _snapshot_bytes(snap)))
+        _per_layer.append((-1, _elapsed, "batched-all", 0))
+    else:
+        for _i, snap in enumerate(result):  # pyright: ignore[reportAny]
+            if snap is None:
+                continue
+            _t0 = time.perf_counter()
+            mx.eval(snap)  # pyright: ignore[reportAny]
+            _elapsed = time.perf_counter() - _t0
+            _kind: str = snap[0]  # pyright: ignore[reportAny]
+            _per_layer.append((_i, _elapsed, _kind, _snapshot_bytes(snap)))
     _total_eval_elapsed = time.perf_counter() - _t_after_lazy_snapshot
     if _total_eval_elapsed > 0.5:
         _lazy_build_ms = (_t_after_lazy_snapshot - _t_snapshot_start) * 1000

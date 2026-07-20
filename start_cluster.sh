@@ -1796,6 +1796,7 @@ for NODE in "${NODES[@]}"; do
     # behavior change.
     [ -n "${EXO_CACHE_EVICT_TIMING_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_LOG=$EXO_CACHE_EVICT_TIMING_LOG"
     [ -n "${EXO_CACHE_EVICT_TIMING_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_MS=$EXO_CACHE_EVICT_TIMING_MS"
+    [ -n "${EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL=$EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL"
 
     # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
     # these three vars is read anywhere in exo or mlx source, and macOS 26.5
