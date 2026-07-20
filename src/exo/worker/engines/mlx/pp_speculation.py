@@ -2108,6 +2108,8 @@ def pp_dspark_decode_loop(
             # the real delay lives.
             _t_before_snapshot_eval = _t_after_r0_fwd
             _t_after_snapshot_eval = _t_after_r0_fwd
+            _t_before_prebarrier = _t_after_r0_fwd
+            _t_after_prebarrier = _t_after_r0_fwd
             if _draft_ahead_execute and is_rank0 and not _consume_this_cycle:
                 # msg1b's extension tokens are what rank1 would verify
                 # NEXT cycle if this cycle fully accepts. Rank0 has just
@@ -2151,11 +2153,55 @@ def pp_dspark_decode_loop(
                     # tests candidate #1 (the snapshot copy itself
                     # pushing active memory over the limit).
                     _mem_before_snapshot = mx.get_active_memory()
+                    # Pre-barrier eval (2026-07-20, added per second-opinion
+                    # guidance to distinguish "the snapshot COPY itself is
+                    # slow" from "the snapshot's mx.eval() is just the first
+                    # barrier that happens to absorb deferred lazy work left
+                    # pending from the PREVIOUS cycle's tail (prior forward,
+                    # cache trim/rollback ops)". If this pre-barrier absorbs
+                    # the multi-second delay and the actual snapshot copy
+                    # becomes fast, the copy itself is innocent.
+                    _t_before_prebarrier = time.perf_counter()
+                    mx.eval(prompt_cache)
+                    _t_after_prebarrier = time.perf_counter()
                     _t_before_snapshot_eval = time.perf_counter()
                     _spec_snapshot = _snapshot_cache(prompt_cache)
                     mx.eval(_spec_snapshot)
                     _t_after_snapshot_eval = time.perf_counter()
                     _mem_after_snapshot = mx.get_active_memory()
+                    # Pool-size diagnostic (2026-07-20): only compute/log
+                    # when the snapshot itself was slow, to keep this
+                    # exactly zero-cost on the (overwhelmingly common)
+                    # fast path. Measures the actual bytes being copied by
+                    # _copy_leaf's mx.array() calls on PoolingCache state
+                    # (the growing compressed-token pool for DSv4's
+                    # sparse/compressed attention layers) so the observed
+                    # stall duration can be checked against real memcpy
+                    # bandwidth rather than assumed proportional to it.
+                    if (_t_after_snapshot_eval - _t_before_snapshot_eval) > 1.0:
+                        _pool_bytes_total: int = 0
+                        _pool_shapes: list[str] = []
+                        for _c in prompt_cache:  # pyright: ignore[reportAny]
+                            _sub_caches: tuple[Any, ...] = (  # pyright: ignore[reportUnknownVariableType]
+                                _c.caches  # type: ignore[attr-defined]
+                                if isinstance(_c, CacheList)
+                                else (_c,)
+                            )
+                            for _sc in _sub_caches:  # pyright: ignore[reportUnknownVariableType]
+                                _sc_any: Any = _sc  # pyright: ignore
+                                _pooled: Any = getattr(_sc_any, "pooled", None)  # pyright: ignore
+                                if _pooled is not None:
+                                    _pool_bytes_total += int(_pooled.nbytes)  # pyright: ignore[reportAny]
+                                    _pool_shapes.append(str(_pooled.shape))  # pyright: ignore[reportAny]
+                        logger.warning(
+                            f"[PP DSpark POOL-SIZE DIAG] slow snapshot_eval="
+                            f"{(_t_after_snapshot_eval - _t_before_snapshot_eval) * 1000:.1f}ms "
+                            f"total_pool_bytes={_pool_bytes_total} "
+                            f"({_pool_bytes_total / 1e6:.1f}MB) "
+                            f"implied_bandwidth_MBps="
+                            f"{(_pool_bytes_total / 1e6) / max(_t_after_snapshot_eval - _t_before_snapshot_eval, 1e-6):.1f} "
+                            f"shapes={_pool_shapes}"
+                        )
                     # Build the assumed-prefix SpecId for this
                     # speculative branch: anchor = _wire_batch[0], then
                     # the vw-1 drafts already verified this cycle, then
@@ -2874,6 +2920,7 @@ def pp_dspark_decode_loop(
                     # restore_cache + bookkeeping, msg2_post).
                     _outlier_msg += (
                         f" spec_fwd={(_t_after_spec_fwd - _t_after_r0_fwd) * 1000:.1f}ms "
+                        f"prebarrier={(_t_after_prebarrier - _t_before_prebarrier) * 1000:.1f}ms "
                         f"snapshot_eval={(_t_after_snapshot_eval - _t_before_snapshot_eval) * 1000:.1f}ms "
                         f"pre_cache_bookkeeping={(_t_before_cache_preflight - _t_after_snapshot_eval) * 1000:.1f}ms "
                         f"cache_preflight={(_t_after_cache_preflight - _t_before_cache_preflight) * 1000:.1f}ms "
