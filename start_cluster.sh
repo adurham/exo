@@ -1707,6 +1707,15 @@ for NODE in "${NODES[@]}"; do
     # via getenv() inside the mlx C++ library itself, not something
     # bootstrap.py gates, so plain forwarding is the correct mechanism).
     [ -n "${EXO_CMDBUF_RING_DIAG:-}" ]                 && EXO_ENV="$EXO_ENV EXO_CMDBUF_RING_DIAG=$EXO_CMDBUF_RING_DIAG"
+    # EXO_SPEC_STATE_SPLIT_DIAG: splits RotatingKVCache.save_spec_state's
+    # keys-copy vs values-copy timing (see mlx-lm's cache.py). Part of the
+    # PP+DSpark snapshot_eval stall investigation -- the per-layer
+    # SNAPSHOT PER-LAYER DIAG (pp_speculation.py, always-on above 0.5s)
+    # already isolated the stall to one deterministic layer index; this
+    # splits that one layer's cost further into keys vs values. Read via
+    # plain os.environ.get() in Python, same forwarding pattern as
+    # EXO_CMDBUF_RING_DIAG above. Diagnostic only; ZERO overhead when unset.
+    [ -n "${EXO_SPEC_STATE_SPLIT_DIAG:-}" ]            && EXO_ENV="$EXO_ENV EXO_SPEC_STATE_SPLIT_DIAG=$EXO_SPEC_STATE_SPLIT_DIAG"
     # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
     # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
     # node directly, over SSH) instead of an env var -- an earlier
