@@ -465,6 +465,55 @@ class SpecPipelineLastLayer(PipelineLastLayer):
             # Speculative mode: compute, store, NO send (don't leak speculation to rank 1)
             output = self.original_layer(x, *args, **kwargs)
             mx.eval(output)
+            # exo-stall-diag (2026-07-21): EXO_MOE_EXPERT_HIST_DIAG consumer.
+            # Runs immediately after the mx.eval(output) above, which is the
+            # ONE real materialization point for this entire forward pass
+            # (confirmed live via faulthandler: this exact line is where a
+            # real 45+ second r0_fwd/spec_fwd stall sits, stuck waiting on
+            # this eval to drain the whole lazily-built graph). Reading the
+            # captured MoE inds arrays HERE means they're already
+            # materialized as a side effect of the eval above -- no new
+            # sync point is added, so the lazy-graph fusion/scheduling being
+            # investigated is untouched (unlike the deepseek_v4.py FIRST
+            # VERSION of this diagnostic, which wrapped switch_mlp in its
+            # own mx.synchronize() calls and never fired despite a real
+            # stall reproducing -- almost certainly because per-layer sync
+            # broke the very fusion pattern that causes the stall).
+            if os.environ.get("EXO_MOE_EXPERT_HIST_DIAG") == "1":
+                try:
+                    from mlx_lm.models import deepseek_v4 as _dsv4_mod
+
+                    _captured = _dsv4_mod._MOE_HIST_CAPTURE
+                    if _captured:
+                        for _layer_idx, _inds in _captured:
+                            _inds_raw = _inds.reshape(-1).tolist()
+                            _inds_list = (
+                                [int(_v) for _v in _inds_raw]
+                                if isinstance(_inds_raw, list)
+                                else [int(_inds_raw)]
+                            )
+                            _counts: dict[int, int] = {}
+                            for _e_int in _inds_list:
+                                _counts[_e_int] = _counts.get(_e_int, 0) + 1
+                            _sorted_counts = sorted(
+                                _counts.values(), reverse=True
+                            )
+                            _n_tokens = len(_inds_list)
+                            _n_experts_hit = len(_counts)
+                            _max_count = (
+                                _sorted_counts[0] if _sorted_counts else 0
+                            )
+                            _top5 = _sorted_counts[:5]
+                            _log(
+                                f"[MOE_EXPERT_HIST_DIAG] layer={_layer_idx} "
+                                f"n_tokens={_n_tokens} "
+                                f"n_experts_hit={_n_experts_hit} "
+                                f"max_count={_max_count} "
+                                f"top5_counts={_top5}"
+                            )
+                        _captured.clear()
+                except Exception as _e_hist:  # noqa: BLE001 -- diag-only
+                    _log(f"[MOE_EXPERT_HIST_DIAG] failed: {_e_hist!r}")
             if self._state_list is not None:
                 self._state_list[self._hidden_idx] = output
             return output
