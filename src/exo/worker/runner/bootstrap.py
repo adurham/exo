@@ -236,12 +236,21 @@ def entrypoint(
     # needing the GIL, so it still works even while the main thread is parked
     # inside a C++ nanosleep loop (confirmed by a second-opinion consult during
     # this investigation -- py-spy needs sudo on macOS and doesn't support
-    # --native there either, so this is the more portable option). Gated
-    # behind EXO_RUNNER_FAULTHANDLER=1 (opt-in, zero cost when unset) since
-    # `signal.register` installs a real signal handler for the life of the
-    # process. Dumps to a per-PID file to avoid interleaving both ranks'
-    # output if triggered on both simultaneously.
-    if os.environ.get("EXO_RUNNER_FAULTHANDLER") == "1":
+    # --native there either, so this is the more portable option).
+    #
+    # Gated behind a MARKER FILE (/tmp/exo_faulthandler_enabled), not an env
+    # var: an earlier attempt at EXO_RUNNER_FAULTHANDLER=1 forwarded through
+    # start_cluster.sh's env allowlist silently never reached the runner
+    # subprocess despite the forwarding line being structurally identical to
+    # a working one (root cause never pinned down). A marker file can be
+    # `touch`ed directly on each node's filesystem over SSH at any time,
+    # completely sidestepping the launcher's env plumbing -- no relaunch
+    # needed to arm/disarm it on a FUTURE runner start, though the CURRENT
+    # process only reads this once at entrypoint() time, so a runner that's
+    # already running needs one restart to pick this specific check up. An
+    # armed-but-unfired SIGUSR1 handler costs ~nothing until triggered, so
+    # checking this near-unconditionally on every runner start is safe.
+    if os.path.exists("/tmp/exo_faulthandler_enabled"):
         import faulthandler
 
         _fh_path = f"/tmp/faulthandler_dump_{os.getpid()}.txt"

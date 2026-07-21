@@ -1692,14 +1692,14 @@ for NODE in "${NODES[@]}"; do
     # (decode-time signal lands at the tail of a deep command buffer).
     # Diagnostic only; ZERO overhead when unset.
     [ -n "${MLX_SIGNAL_PROBE:-}" ]                    && EXO_ENV="$EXO_ENV MLX_SIGNAL_PROBE=$MLX_SIGNAL_PROBE"
-    # EXO_RUNNER_FAULTHANDLER: registers faulthandler.dump_traceback on
-    # SIGUSR1 in the runner subprocess (see worker/runner/bootstrap.py).
-    # Dumps every Python thread's real call stack, unlike `sample`'s
-    # native-only C stack, and works even while a thread is parked in a
-    # C++ polling loop (walks thread states without needing the GIL).
-    # Added 2026-07-21 for the PP+DSpark decode-loop stall investigation.
-    # Diagnostic only; ZERO overhead when unset (no handler registered).
-    [ -n "${EXO_RUNNER_FAULTHANDLER:-}" ]              && EXO_ENV="$EXO_ENV EXO_RUNNER_FAULTHANDLER=$EXO_RUNNER_FAULTHANDLER"
+    # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
+    # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
+    # node directly, over SSH) instead of an env var -- an earlier
+    # EXO_RUNNER_FAULTHANDLER=1 env-var forwarding attempt here silently
+    # never reached the runner subprocess despite looking structurally
+    # identical to the working MLX_SIGNAL_PROBE line above, so this launcher
+    # no longer participates in arming it at all. See bootstrap.py's comment
+    # at the marker-file check for the full rationale.
     # MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE: when set to 1, mlx will
     # force-commit the producing GPU stream's pending command buffer
     # before a CPU primitive (e.g. AllReduce) waits on its event.
