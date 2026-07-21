@@ -2353,8 +2353,30 @@ def pp_dspark_decode_loop(
                     mx.synchronize()
                     _t_after_prebarrier = time.perf_counter()
                     _t_before_snapshot_eval = time.perf_counter()
+                    # NOTE (2026-07-21): removed a redundant outer
+                    # mx.eval(_spec_snapshot) here. _snapshot_cache()
+                    # ALREADY forces materialization of every layer's
+                    # snapshot internally (either via one batched
+                    # mx.eval() or, on the default path, one mx.eval()
+                    # per layer -- see _snapshot_cache's own docstring).
+                    # Live tracing (2026-07-21 session) showed this
+                    # OUTER timer (spanning both _snapshot_cache() and
+                    # this call) attributing 20-60s+ stalls to this
+                    # region while _snapshot_cache's OWN internal
+                    # per-layer diagnostic (which only logs when its
+                    # internal total exceeds 0.5s) stayed silent on the
+                    # same cycles -- meaning the inner per-layer loop
+                    # was fast and the redundant second eval() call was
+                    # where the time was actually going. This is a
+                    # SEPARATE exposure to the same still-not-fully-
+                    # root-caused snapshot-eval stall class (see
+                    # exo-cluster-development skill's
+                    # references/pp-dspark-snapshot-eval-stall-2026-07-20.md,
+                    # 9 mechanisms already ruled out for the underlying
+                    # mechanism) -- removing this redundant call doesn't
+                    # claim to fix that underlying mechanism, only to
+                    # stop paying for it twice per cycle.
                     _spec_snapshot = _snapshot_cache(prompt_cache)
-                    mx.eval(_spec_snapshot)
                     _t_after_snapshot_eval = time.perf_counter()
                     _mem_after_snapshot = mx.get_active_memory()
                     # Pool-size diagnostic (2026-07-20): only compute/log
