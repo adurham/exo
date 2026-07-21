@@ -2137,9 +2137,9 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
         for i in {1..600}; do
             READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" '
                 . as $root
-                | $root.instances | to_entries[]
-                | select(.value.MlxJacclInstance.shardAssignments.modelId == $m or .value.MlxRingInstance.shardAssignments.modelId == $m)
-                | (.value.MlxJacclInstance.shardAssignments.runnerToShard // .value.MlxRingInstance.shardAssignments.runnerToShard) | keys[] ) as $rids
+                | ($root.instances | to_entries[]
+                   | select(.value.MlxJacclInstance.shardAssignments.modelId == $m or .value.MlxRingInstance.shardAssignments.modelId == $m)
+                   | (.value.MlxJacclInstance.shardAssignments.runnerToShard // .value.MlxRingInstance.shardAssignments.runnerToShard) | keys) as $rids
                 | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
             ' 2>/dev/null)
             if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
