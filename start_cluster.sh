@@ -1692,6 +1692,21 @@ for NODE in "${NODES[@]}"; do
     # (decode-time signal lands at the tail of a deep command buffer).
     # Diagnostic only; ZERO overhead when unset.
     [ -n "${MLX_SIGNAL_PROBE:-}" ]                    && EXO_ENV="$EXO_ENV MLX_SIGNAL_PROBE=$MLX_SIGNAL_PROBE"
+    # EXO_CMDBUF_RING_DIAG: command-buffer commit/schedule/completion ring
+    # buffer diagnostic (see mlx/backend/metal/device.cpp +
+    # backend/metal/event.cpp). Dumps recent MTLCommandBuffer status +
+    # timestamps to stderr whenever Event::wait()'s existing slow-wait
+    # diagnostic fires (3+s stuck wait) -- answers whether the awaited
+    # event's command buffer was ever committed, and if so whether it's
+    # stuck at Committed (Metal driver never scheduled it), Scheduled (has
+    # it, GPU hasn't started), or genuinely mid-execution. Added 2026-07-21
+    # for the PP+DSpark decode-loop GPU-idle-stall investigation.
+    # Diagnostic only; ZERO overhead when unset (matches MLX_SIGNAL_PROBE's
+    # pattern one line above -- do NOT repeat the EXO_RUNNER_FAULTHANDLER
+    # marker-file lesson here; this one genuinely is a plain env var read
+    # via getenv() inside the mlx C++ library itself, not something
+    # bootstrap.py gates, so plain forwarding is the correct mechanism).
+    [ -n "${EXO_CMDBUF_RING_DIAG:-}" ]                 && EXO_ENV="$EXO_ENV EXO_CMDBUF_RING_DIAG=$EXO_CMDBUF_RING_DIAG"
     # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
     # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
     # node directly, over SSH) instead of an env var -- an earlier
