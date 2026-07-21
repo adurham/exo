@@ -2119,17 +2119,21 @@ def pp_dspark_decode_loop(
                     _ext_ids = _draft_ids[vw - 1 : (2 * vw) - 2]
                     _da_msg1_ext_wire = pack_deep_draft_ext(_ext_ids, int(vw))
                     mx.eval(_da_msg1_ext_wire)
+                    _log(f"n={n} msg1b_ext_send PRE (rank1->0)")
                     _ext_sent = mx.distributed.send(
                         _da_msg1_ext_wire, 0, group=pp_group
                     )
                     mx.eval(_ext_sent)
+                    _log(f"n={n} msg1b_ext_send POST")
                 elif is_rank0:
+                    _log(f"n={n} msg1b_ext_recv PRE (rank0<-{pp_world_size - 1})")
                     _da_msg1_ext_wire = mx.distributed.recv_like(
                         mx.zeros(_da_msg1_ext_len, dtype=mx.int32),
                         pp_world_size - 1,
                         group=pp_group,
                     )
                     mx.eval(_da_msg1_ext_wire)
+                    _log(f"n={n} msg1b_ext_recv POST")
                     # Correctness of the round-trip is our only assertion
                     # here: rank0 has NO way to independently reconstruct
                     # what rank1 drafted for the extension positions (they
@@ -2174,8 +2178,10 @@ def pp_dspark_decode_loop(
                     spec_first, spec_last, pp_send=True, state_list=None, hidden_idx=-1
                 )
                 _batch_tok = _wire_batch.reshape(1, -1)
+                _log(f"n={n} r0_forward_model_call PRE (internal pp_send)")
                 with mx.stream(generation_stream):
                     model(_batch_tok, cache=prompt_cache)
+                _log(f"n={n} r0_forward_model_call POST")
             elif is_rank0 and _consume_this_cycle:
                 # Pull the buffered hidden back out (release, not
                 # discard -- this is the whole point of the yield
@@ -2450,9 +2456,11 @@ def pp_dspark_decode_loop(
                     _t_before_cache_preflight = time.perf_counter()
                     mx.eval(prompt_cache)
                     _t_after_cache_preflight = time.perf_counter()
+                    _log(f"n={n} r0_spec_forward_model_call PRE (speculative, no auto-send)")
                     with mx.stream(generation_stream):
                         model(_spec_batch_tok, cache=prompt_cache)
                     _t_after_model_call = time.perf_counter()
+                    _log(f"n={n} r0_spec_forward_model_call POST")
                     # Failure mode #3: force materialisation NOW so the
                     # forward's KV writes and the buffered hidden are
                     # committed on the timeline before we enter the
@@ -2530,6 +2538,8 @@ def pp_dspark_decode_loop(
                         )
                         _consume_verify_positions = vw - 1
                     out = model(_verify_input, cache=prompt_cache)
+                    mx.eval(out)
+                    _log(f"n={n} r1_verify_model_call POST (consume={_consume_this_cycle})")
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
                     _all_next_list = [int(v) for v in all_next.tolist()]
