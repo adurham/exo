@@ -1716,6 +1716,11 @@ for NODE in "${NODES[@]}"; do
     # plain os.environ.get() in Python, same forwarding pattern as
     # EXO_CMDBUF_RING_DIAG above. Diagnostic only; ZERO overhead when unset.
     [ -n "${EXO_SPEC_STATE_SPLIT_DIAG:-}" ]            && EXO_ENV="$EXO_ENV EXO_SPEC_STATE_SPLIT_DIAG=$EXO_SPEC_STATE_SPLIT_DIAG"
+    # EXO_MOE_EXPERT_HIST_DIAG: logs the per-token MoE expert-assignment
+    # histogram whenever switch_mlp (GatherQMM) exceeds 300ms. Tests the
+    # skewed-expert-routing hypothesis for the r0_fwd/spec_fwd GPU stall.
+    # Plain os.environ.get() in Python (deepseek_v4.py); zero cost when unset.
+    [ -n "${EXO_MOE_EXPERT_HIST_DIAG:-}" ]              && EXO_ENV="$EXO_ENV EXO_MOE_EXPERT_HIST_DIAG=$EXO_MOE_EXPERT_HIST_DIAG"
     # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
     # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
     # node directly, over SSH) instead of an env var -- an earlier
