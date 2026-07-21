@@ -227,6 +227,39 @@ def entrypoint(
         # or signals unavailable — non-fatal; fall back to default disposition.
         logger.warning("Could not install SIGTERM handler in runner entrypoint.")
 
+    # Live Python-stack dumper for the PP+DSpark decode-loop stall investigation
+    # (2026-07-21). `sample <pid>` only shows the native C stack (mostly opaque
+    # core.cpython-313-darwin.so frames) once execution is inside MLX's C++
+    # eval()/Event::wait() -- it can't show WHICH Python call chain got there
+    # or which array/spec-cycle is being awaited. faulthandler.dump_traceback
+    # walks Python thread states directly via the signal handler WITHOUT
+    # needing the GIL, so it still works even while the main thread is parked
+    # inside a C++ nanosleep loop (confirmed by a second-opinion consult during
+    # this investigation -- py-spy needs sudo on macOS and doesn't support
+    # --native there either, so this is the more portable option). Gated
+    # behind EXO_RUNNER_FAULTHANDLER=1 (opt-in, zero cost when unset) since
+    # `signal.register` installs a real signal handler for the life of the
+    # process. Dumps to a per-PID file to avoid interleaving both ranks'
+    # output if triggered on both simultaneously.
+    if os.environ.get("EXO_RUNNER_FAULTHANDLER") == "1":
+        import faulthandler
+
+        _fh_path = f"/tmp/faulthandler_dump_{os.getpid()}.txt"
+        try:
+            # File must stay open for the life of the process -- faulthandler
+            # writes to it later, asynchronously, on receipt of SIGUSR1. A
+            # `with` block would close it immediately after this line.
+            _fh_file = open(_fh_path, "a")  # noqa: SIM115
+            faulthandler.register(
+                signal.SIGUSR1, file=_fh_file, all_threads=True, chain=False
+            )
+            logger.info(
+                f"faulthandler registered on SIGUSR1 (dumps to {_fh_path}) "
+                "for live stall Python-stack capture."
+            )
+        except (ValueError, OSError) as e:
+            logger.warning(f"Could not register faulthandler on SIGUSR1: {e}")
+
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (min(max(soft, 2048), hard), hard))
 
