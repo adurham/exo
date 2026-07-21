@@ -1964,6 +1964,7 @@ class ExoBatchGenerator:
         from exo.worker.engines.mlx.trace import T, request_trace
 
         from ..pp_speculation import (
+            _configure_layers,
             _install_spec_layers,
             get_pipeline_info,
             pp_chained_decode_loop,
@@ -2001,7 +2002,36 @@ class ExoBatchGenerator:
             # this mutates the actual persistent `.layers` list.
             inner = getattr(self.model, "language_model", self.model)
             inner_model = getattr(inner, "model", inner)
-            _install_spec_layers(inner_model)
+            _spec_first, _spec_last = _install_spec_layers(inner_model)
+            # DEFENSIVE RESET (2026-07-20, jaccl transport-fault root
+            # cause): _spec_first/_spec_last are the SAME persistent
+            # layer OBJECTS across every request once installed
+            # (_install_spec_layers' isinstance guard never re-wraps
+            # them) -- their _pp_recv/_pp_send/_speculative mode flags
+            # are mutable instance state that can OUTLIVE the PREVIOUS
+            # request's decode-loop generator if that generator's
+            # `finally: _configure_layers(...)` reset never ran (e.g. a
+            # client disconnect / exception path that bypasses
+            # _close_pp_spec_gen(), or a race between one rank's
+            # generator being suspended mid-recv and its close() call).
+            # Live-traced 2026-07-20: the plain (non-speculative)
+            # first-token stream_generate() call immediately below ran
+            # with rank1's SpecPipelineFirstLayer still armed
+            # _pp_recv=True from a PRIOR request's decode loop, taking
+            # the speculative recv branch during plain prefill while
+            # rank0's corresponding layer correctly showed
+            # _pp_send=False (FALLTHROUGH TO BASE) -- an asymmetric
+            # mode mismatch that left rank1 blocked on a recv rank0
+            # never sends, eventually tripping jaccl's 15s drain
+            # deadline (`[jaccl] recv() deadline in drain — clean
+            # re-place`). Reset unconditionally here, BEFORE the
+            # plain-PP first-token call below, so this entry point's
+            # correctness never depends on any OTHER code path's
+            # cleanup having succeeded on every rank. Cheap (attribute
+            # writes only, no wire traffic) -- safe to call even when
+            # spec_first/spec_last end up unused this request (e.g. a
+            # non-DSpark PP path is about to be taken instead).
+            _configure_layers(_spec_first, _spec_last)
 
         _pp_draft = getattr(self.model, "_pp_draft_model", None)
         _pp_draft_cache = getattr(self.model, "_pp_draft_cache", None)
