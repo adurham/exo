@@ -1834,22 +1834,39 @@ for NODE in "${NODES[@]}"; do
     # forward) can be built. Watch [PP DSpark STEP2b DIAG] and the spec-tag
     # match/mismatch counters in the logs during this run.
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
-    # Draft-ahead STEP 3a (2026-07-19, default off, commit 0ed76f74):
-    # rank0 actually runs the speculative forward on the msg1b extension
-    # batch and buffers the hidden under a SpecId, but ALWAYS restores the
-    # pre-speculative KV snapshot and discards the buffer on both HIT and
-    # MISS -- so enabling this alone is a no-op for decode behavior/perf.
-    # Its only observable effect is that msg2's hit_miss_code slot carries
-    # the REAL verdict instead of always-NA. Requires DRAFT_AHEAD=1 above.
-    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=$EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE"
-    # Draft-ahead STEP 3b (2026-07-19, default off, commit cca679ed): the
-    # actual perf lever. On a HIT, rank0 KEEPS its speculative KV writes
-    # and parks the buffered hidden for a "consume cycle" -- next cycle
-    # skips msg1/msg1b/rank0's fresh forward entirely and rank0 sends the
-    # already-buffered hidden directly via a raw mx.distributed.send().
-    # Requires DRAFT_AHEAD_EXECUTE=1 above. NOT YET LIVE-VALIDATED as of
-    # 2026-07-19 -- see exo-cluster-development skill's
-    # pp-dspark-draft-ahead-overlap-design-2026-07-19.md before enabling.
+    # Draft-ahead STEP 3a (2026-07-19, commit 0ed76f74; CONFIRMED BROKEN
+    # 2026-07-22 -- see exo-stall-faulthandler-breakthrough-2026-07-21
+    # skill, update 14): rank0 actually runs a real speculative forward
+    # on the msg1b extension batch against the LIVE shared KV cache, then
+    # restores the pre-speculative snapshot / discards the buffer on a
+    # miss. This "speculate against live shared state, then roll back"
+    # design is confirmed via clean 2-for-2 A/B to cause severe (15-70s)
+    # GPU-confirmed-busy stalls -- a ~25-40x throughput regression --
+    # whenever enabled, vs. zero stalls with DRAFT_AHEAD alone (EXECUTE
+    # unset). Root cause not yet isolated as of 2026-07-22: the stall
+    # shows up in BOTH EXECUTE's own added forward call AND the
+    # unrelated, textually-unchanged shared forward call, pointing at
+    # state pollution (KV cache / allocator pool) rather than a single
+    # slow line -- likely needs a redesign (e.g. speculate against an
+    # isolated cache copy, not the live one) rather than a point fix.
+    # DEFAULT OFF, INTENTIONALLY NOT WIRED TO THE ENV VAR BELOW: set
+    # EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE_I_KNOW_THIS_IS_BROKEN=1 (exact
+    # value "1", any other value is silently ignored) to force it on for
+    # deliberate root-cause/redesign debugging ONLY. Do not enable for
+    # any real workload until re-validated.
+    if [ "${EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE_I_KNOW_THIS_IS_BROKEN:-}" = "1" ]; then
+        echo "  ⚠️  EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE force-enabled via the"
+        echo "      _I_KNOW_THIS_IS_BROKEN override -- confirmed broken"
+        echo "      2026-07-22 (severe GPU-confirmed-busy stalls, ~25-40x"
+        echo "      throughput regression). Debugging/redesign use only."
+        EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=1"
+    fi
+    # Draft-ahead STEP 3b (2026-07-19, commit cca679ed): the actual perf
+    # lever, requires DRAFT_AHEAD_EXECUTE=1 above -- inherits the same
+    # confirmed-broken status and the same override gate (EXECUTE must
+    # be force-enabled via _I_KNOW_THIS_IS_BROKEN above for YIELD to do
+    # anything; YIELD itself is not separately gated since it's a no-op
+    # without EXECUTE).
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_YIELD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_YIELD=$EXO_PP_DSPARK_DRAFT_AHEAD_YIELD"
     # Cache-eviction timing instrumentation (2026-07-19, default off,
     # commit f1e23561): pins down whether the multi-hundred-second
