@@ -1727,6 +1727,19 @@ for NODE in "${NODES[@]}"; do
     # debug instrumentation), unlike the other zero-cost diagnostics --
     # deploy with a short test first, watch for jaccl distress.
     [ -n "${EXO_MOE_GPUTRACE_DIAG:-}" ]                  && EXO_ENV="$EXO_ENV EXO_MOE_GPUTRACE_DIAG=$EXO_MOE_GPUTRACE_DIAG"
+    # MLX_JACCL_RECV_RETRY_DEADLINE_SECS: raises jaccl's TCP recv retry
+    # deadline above its 60s default (see mlx/distributed/jaccl/lib/jaccl/
+    # tcp.cpp). Added 2026-07-21 as a safety buffer for profiling-adjacent
+    # diagnostics (EXO_MOE_GPUTRACE_DIAG, any live xctrace/Instruments
+    # attach) whose overhead can push a stalled recv past the default
+    # deadline and trigger "no progress for Ns, retry deadline 60s
+    # exceeded" -- confirmed to have caused one real cluster crash and one
+    # self-recovered jaccl transport fault this investigation BEFORE this
+    # forwarding line existed (the env var was set in the launcher's shell
+    # but never reached the runner subprocess, so the raise silently had
+    # no effect). Plain std::getenv() in jaccl's C++ tcp.cpp; ZERO
+    # overhead when unset (falls back to the 60.0 default).
+    [ -n "${MLX_JACCL_RECV_RETRY_DEADLINE_SECS:-}" ]     && EXO_ENV="$EXO_ENV MLX_JACCL_RECV_RETRY_DEADLINE_SECS=$MLX_JACCL_RECV_RETRY_DEADLINE_SECS"
     # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
     # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
     # node directly, over SSH) instead of an env var -- an earlier
