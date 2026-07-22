@@ -2528,10 +2528,70 @@ def pp_dspark_decode_loop(
                     mx.eval(prompt_cache)
                     _t_after_cache_preflight = time.perf_counter()
                     _log(f"n={n} r0_spec_forward_model_call PRE (speculative, no auto-send)")
+                    # exo-stall-diag (2026-07-21): gated by
+                    # EXO_MOE_GPUTRACE_DIAG=1. Wraps this exact call --
+                    # the confirmed site of the r0_fwd/spec_fwd stall,
+                    # verified via faulthandler to be stuck inside
+                    # SpecPipelineLastLayer.__call__'s mx.eval(output),
+                    # itself invoked from deep inside this model() call --
+                    # in an mx.metal start_capture/stop_capture pair. This
+                    # produces a real Xcode .gputrace with the actual GPU
+                    # kernel dispatch timeline, viewable via `open
+                    # <path>.gputrace` in Xcode. Chosen over `xcrun
+                    # xctrace record --attach` (tried first this session)
+                    # because: (a) xctrace's --time-limit is unreliable on
+                    # this system -- it overran twice, once causing a real
+                    # cluster crash via a jaccl 60s recv deadline violation
+                    # from profiling overhead; (b) this in-process capture
+                    # has a precisely bounded scope (exactly one decode
+                    # cycle's model() call, not a wall-clock window), so it
+                    # can't outlive its own natural completion the way an
+                    # external attached recorder can.
+                    # Captures are written to /tmp/gputrace_n<N>.gputrace
+                    # and DELETED unless this call took >2s (to avoid
+                    # filling disk with routine fast-cycle captures) --
+                    # only the slow/stalled cycles are worth keeping.
+                    _gputrace_enabled = (
+                        os.environ.get("EXO_MOE_GPUTRACE_DIAG") == "1"
+                    )
+                    _gputrace_path = f"/tmp/gputrace_n{n}.gputrace"
+                    if _gputrace_enabled:
+                        try:
+                            mx.metal.start_capture(_gputrace_path)
+                        except Exception as _e_cap_start:  # noqa: BLE001
+                            _log(
+                                f"n={n} EXO_MOE_GPUTRACE_DIAG start_capture "
+                                f"failed: {_e_cap_start!r}"
+                            )
+                            _gputrace_enabled = False
                     with mx.stream(generation_stream):
                         model(_spec_batch_tok, cache=prompt_cache)
+                    if _gputrace_enabled:
+                        try:
+                            mx.metal.stop_capture()
+                        except Exception as _e_cap_stop:  # noqa: BLE001
+                            _log(
+                                f"n={n} EXO_MOE_GPUTRACE_DIAG stop_capture "
+                                f"failed: {_e_cap_stop!r}"
+                            )
                     _t_after_model_call = time.perf_counter()
                     _log(f"n={n} r0_spec_forward_model_call POST")
+                    if _gputrace_enabled:
+                        _model_call_ms = (
+                            _t_after_model_call - _t_after_cache_preflight
+                        ) * 1000
+                        if _model_call_ms > 2000:
+                            _log(
+                                f"n={n} EXO_MOE_GPUTRACE_DIAG KEEPING "
+                                f"{_gputrace_path} (model_call_ms="
+                                f"{_model_call_ms:.1f})"
+                            )
+                        else:
+                            import shutil as _shutil_gputrace
+
+                            _shutil_gputrace.rmtree(
+                                _gputrace_path, ignore_errors=True
+                            )
                     # Failure mode #3: force materialisation NOW so the
                     # forward's KV writes and the buffered hidden are
                     # committed on the timeline before we enter the
