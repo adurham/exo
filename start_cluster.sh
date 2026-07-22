@@ -1727,6 +1727,15 @@ for NODE in "${NODES[@]}"; do
     # debug instrumentation), unlike the other zero-cost diagnostics --
     # deploy with a short test first, watch for jaccl distress.
     [ -n "${EXO_MOE_GPUTRACE_DIAG:-}" ]                  && EXO_ENV="$EXO_ENV EXO_MOE_GPUTRACE_DIAG=$EXO_MOE_GPUTRACE_DIAG"
+    # MTL_CAPTURE_ENABLED: Apple's own gate for MTLCaptureManager /
+    # mx.metal.start_capture(). MUST be set in the process environment
+    # BEFORE Metal initializes -- confirmed live 2026-07-21: without it,
+    # every EXO_MOE_GPUTRACE_DIAG start_capture() call fails cleanly
+    # (caught by the diagnostic's own try/except) with "[metal::
+    # start_capture] Failed to start: Capture layer is not inserted." --
+    # no crash, just silently produces zero .gputrace files. Required
+    # alongside EXO_MOE_GPUTRACE_DIAG for that diagnostic to do anything.
+    [ -n "${MTL_CAPTURE_ENABLED:-}" ]                    && EXO_ENV="$EXO_ENV MTL_CAPTURE_ENABLED=$MTL_CAPTURE_ENABLED"
     # MLX_JACCL_RECV_RETRY_DEADLINE_SECS: raises jaccl's TCP recv retry
     # deadline above its 60s default (see mlx/distributed/jaccl/lib/jaccl/
     # tcp.cpp). Added 2026-07-21 as a safety buffer for profiling-adjacent
