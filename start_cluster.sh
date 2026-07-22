@@ -1721,6 +1721,12 @@ for NODE in "${NODES[@]}"; do
     # skewed-expert-routing hypothesis for the r0_fwd/spec_fwd GPU stall.
     # Plain os.environ.get() in Python (deepseek_v4.py); zero cost when unset.
     [ -n "${EXO_MOE_EXPERT_HIST_DIAG:-}" ]              && EXO_ENV="$EXO_ENV EXO_MOE_EXPERT_HIST_DIAG=$EXO_MOE_EXPERT_HIST_DIAG"
+    # EXO_MOE_GPUTRACE_DIAG: wraps the confirmed-stuck model() call in
+    # mx.metal start_capture/stop_capture, keeping only slow (>2s)
+    # cycles' .gputrace files. CAUTION: real per-call overhead (Metal
+    # debug instrumentation), unlike the other zero-cost diagnostics --
+    # deploy with a short test first, watch for jaccl distress.
+    [ -n "${EXO_MOE_GPUTRACE_DIAG:-}" ]                  && EXO_ENV="$EXO_ENV EXO_MOE_GPUTRACE_DIAG=$EXO_MOE_GPUTRACE_DIAG"
     # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
     # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
     # node directly, over SSH) instead of an env var -- an earlier
