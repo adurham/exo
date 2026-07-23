@@ -50,8 +50,20 @@ try:
 except Exception as e:
     print('  STATE CHECK FAILED:', e)
 " | tee -a "$LOG"
+    # `top`'s PhysMem wired/unused split is a noisy proxy: macOS can
+    # transiently reclassify large Metal/IOSurface-backed GPU allocations
+    # between wired/purgeable/compressed during driver-internal housekeeping
+    # with no process-level event behind it, so a single `top -l 1` sample
+    # can catch mid-transition and show a multi-GB "drop" that isn't real
+    # (observed 2026-07-23: node2 wired read 84G -> 2.8G -> 63G across three
+    # consecutive health checks with zero corresponding runner restart/OOM/
+    # log signature). Keep it for a coarse system-level view, but treat exo's
+    # own [MEM] active= line -- read directly from MLX's actual allocator,
+    # logged at the end of every prefill -- as the authoritative number.
     ssh "$NODE1" "top -l 1 -n 0 | grep -E 'PhysMem'" 2>&1 | sed 's/^/  node1 /' | tee -a "$LOG"
     ssh "$NODE2" "top -l 1 -n 0 | grep -E 'PhysMem'" 2>&1 | sed 's/^/  node2 /' | tee -a "$LOG"
+    ssh "$NODE1" "grep '\[MEM\]' ~/exo.log 2>/dev/null | tail -1" 2>&1 | sed 's/^/  node1 exo-active /' | tee -a "$LOG"
+    ssh "$NODE2" "grep '\[MEM\]' ~/exo.log 2>/dev/null | tail -1" 2>&1 | sed 's/^/  node2 exo-active /' | tee -a "$LOG"
 }
 
 check_log_signatures() {
