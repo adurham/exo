@@ -2237,7 +2237,6 @@ class ExoBatchGenerator:
             return [GenerationBatch.Response(
                 uid=uid, token=tok, logprobs=mx.zeros(1),
                 finish_reason="stop" if is_eos else None,
-                current_state=None, match_sequence=None,
                 prompt_cache=None, all_tokens=None,
             )]
 
@@ -2278,7 +2277,6 @@ class ExoBatchGenerator:
             return [GenerationBatch.Response(
                 uid=uid, token=tok_id, logprobs=lp,
                 finish_reason="stop" if is_eos else None,
-                current_state=None, match_sequence=None,
                 prompt_cache=None, all_tokens=None,
             )]
         except StopIteration:
@@ -2292,7 +2290,6 @@ class ExoBatchGenerator:
             return [GenerationBatch.Response(
                 uid=uid, token=0, logprobs=mx.zeros(1),
                 finish_reason="length",
-                current_state=None, match_sequence=None,
                 prompt_cache=None, all_tokens=None,
             )]
 

@@ -411,7 +411,7 @@ class MTPBatchGenerator(BatchGenerator):
         ``GenerationBatch.next()`` would discard them.
         """
         gen_batch = self._generation_batch
-        state_machine = gen_batch.state_machines[idx]
+        stop_matcher = gen_batch.stop_matchers[idx]
         max_tokens_limit = gen_batch.max_tokens[idx]
 
         responses: list[GenerationBatch.Response] = []
@@ -421,12 +421,20 @@ class MTPBatchGenerator(BatchGenerator):
             if gen_batch._num_tokens[idx] >= max_tokens_limit:
                 finish_reason = "length"
 
-            (
+            # mlx-lm upstream (2026-07, "Text-based state machine for
+            # tool/reasoning parsing") replaced the old state-machine stop
+            # matcher (which returned a 3-tuple of
+            # (new_state, match_sequence, current_state)) with a trie-based
+            # StopSequenceMatcher.match(state, trie, token) -> (new_state,
+            # matched: bool). GenerationBatch.Response no longer carries
+            # current_state/match_sequence fields at all -- mirror upstream's
+            # own GenerationBatch.next() exactly here.
+            gen_batch._matcher_states[idx], matched = stop_matcher.match(
                 gen_batch._matcher_states[idx],
-                match_sequence,
-                current_state,
-            ) = state_machine.match(gen_batch._matcher_states[idx], token_int)
-            if match_sequence is not None and current_state is None:
+                stop_matcher._trie,
+                token_int,
+            )
+            if matched:
                 finish_reason = "stop"
 
             gen_batch.tokens[idx].append(token_int)
@@ -443,8 +451,6 @@ class MTPBatchGenerator(BatchGenerator):
                     token=token_int,
                     logprobs=logprob,
                     finish_reason=finish_reason,
-                    current_state=current_state,
-                    match_sequence=match_sequence,
                     prompt_cache=prompt_cache,
                     all_tokens=all_tokens_full,
                 )
