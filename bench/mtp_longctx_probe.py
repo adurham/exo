@@ -104,9 +104,27 @@ def run_once(base_url, model, prompt, max_tokens):
     n = 0
     content_pieces: list[str] = []
     all_pieces: list[str] = []
+    prefill_tps = None
     with urllib.request.urlopen(req, timeout=3600) as resp:
         for raw in resp:
             line = raw.decode().strip()
+            # Server-measured generation_stats arrives as an SSE COMMENT
+            # (": generation_stats {...}", not "data: ...") right when the
+            # turn finishes -- see chat_completions.py's
+            # `chunk.stats.model_dump_json()` emission. This is the
+            # authoritative server-side prompt_tps (GenerationStats.prompt_tps
+            # in api/types/api.py), not a client-side estimate -- prefer it
+            # over anything derivable from streamed chunk timing alone,
+            # since the client never sees the prefill phase's own chunks
+            # (no tokens stream out until decode starts).
+            if line.startswith(": generation_stats"):
+                stats_json = line[len(": generation_stats"):].strip()
+                try:
+                    stats = json.loads(stats_json)
+                    prefill_tps = stats.get("prompt_tps")
+                except json.JSONDecodeError:
+                    pass
+                continue
             if not line.startswith("data:"):
                 continue
             data = line[5:].strip()
@@ -135,6 +153,7 @@ def run_once(base_url, model, prompt, max_tokens):
     content = "".join(content_pieces)
     return {
         "ttft": ttft, "decode_tps": decode_tps, "n_tokens": n,
+        "prefill_tps": prefill_tps,
         "content": content, "full": full,
     }
 
@@ -176,7 +195,7 @@ def main():
     prompt, needle = build_prompt(args.target_tokens, args.needle_frac, args.chars_per_token)
     print(f"[{args.label}] prompt chars={len(prompt)} (~{args.target_tokens} tok target), needle={needle}")
 
-    rates, ttfts = [], []
+    rates, ttfts, prefill_rates = [], [], []
     needle_hits = 0
     spam_hits = 0
     sample = ""
@@ -185,17 +204,26 @@ def main():
         rates.append(r["decode_tps"])
         if r["ttft"]:
             ttfts.append(r["ttft"])
+        if r["prefill_tps"]:
+            prefill_rates.append(r["prefill_tps"])
         found = needle in r["full"]
         spam = any(m in r["full"] for m in SPECIAL_TOKEN_MARKERS)
         needle_hits += int(found)
         spam_hits += int(spam)
         if i == 0:
             sample = r["content"][:200] or r["full"][:200]
-        print(f"[{args.label}] iter {i+1}: decode={r['decode_tps']:6.2f} tok/s  "
+        print(f"[{args.label}] iter {i+1}: prefill={r['prefill_tps'] or 0:8.2f} tok/s  "
+              f"decode={r['decode_tps']:6.2f} tok/s  "
               f"ttft={r['ttft'] or 0:.1f}s  ntok={r['n_tokens']}  "
               f"needle={'OK' if found else 'MISS'}  spam={'YES' if spam else 'no'}")
 
     print(f"\n=== {args.label} SUMMARY ({args.iters} iters @ ~{args.target_tokens} tok) ===")
+    if prefill_rates:
+        print(f"  prefill mean   {statistics.mean(prefill_rates):.2f} tok/s")
+        print(f"  prefill median {statistics.median(prefill_rates):.2f} tok/s")
+        print(f"  prefill min/max {min(prefill_rates):.2f} / {max(prefill_rates):.2f}")
+        if len(prefill_rates) > 1:
+            print(f"  prefill stddev {statistics.pstdev(prefill_rates):.3f}")
     print(f"  decode mean   {statistics.mean(rates):.2f} tok/s")
     print(f"  decode median {statistics.median(rates):.2f} tok/s")
     print(f"  decode min/max {min(rates):.2f} / {max(rates):.2f}")
