@@ -2699,10 +2699,31 @@
   // Pick optimal placement from previews (frontend logic)
   // Rules: 1-node → Pipeline/Ring, multi-node with RDMA → Tensor/Jaccl (most nodes),
   //         multi-node without RDMA → 1-node Pipeline/Ring
+  // EXCEPTION (2026-07-23): DeepSeek V4 Flash always prefers Pipeline+MlxJaccl
+  // (most nodes) over Tensor, regardless of the general multi-node rule above —
+  // Pipeline + PP DSpark speculative decode is the validated production config
+  // for this specific model (see start_cluster.sh's DSV4_SHARDING default and
+  // its comment), so a dashboard-triggered reload of DeepSeek V4 must land on
+  // the same config a plain ./start_cluster.sh launch would produce, not on
+  // Tensor sharding (unvalidated recently, and DIFFERENT decode-path behavior).
   function pickOptimalPlacement(
     previews: PlacementPreview[],
   ): PlacementPreview | null {
     const valid = previews.filter((p) => p.instance && !p.error);
+
+    const isDeepSeekV4 = valid.some((p) =>
+      p.model_id.toLowerCase().includes("deepseek-v4"),
+    );
+    if (isDeepSeekV4) {
+      const pipelineJaccl = valid
+        .filter(
+          (p) => p.instance_meta === "MlxJaccl" && p.sharding === "Pipeline",
+        )
+        .sort((a, b) => getPreviewNodeCount(b) - getPreviewNodeCount(a));
+      if (pipelineJaccl.length > 0) return pipelineJaccl[0];
+      // Fall through to the general rules below only if no Pipeline+Jaccl
+      // preview is available at all (e.g. only one node currently up).
+    }
 
     // Check if any valid placement uses multiple nodes (indicates multi-node cluster)
     const hasMultiNode = valid.some((p) => getPreviewNodeCount(p) > 1);

@@ -259,6 +259,21 @@ fi
 # YARN. The cluster's primary model. Set DSV4_ENABLED=0 to skip.
 : "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash}"
 : "${DSV4_ENABLED:=1}"
+# DEFAULT ON 2026-07-23: Pipeline sharding + PP DSpark speculative decode is
+# now the validated production config (see refs/pp-dspark-required-flags-
+# and-poolingcache-fix-2026-07-20.md, FIFTEENTH-SIXTEENTH UPDATE) — clean
+# 5-level context stress sweep (2K-250K tokens, 11 requests back-to-back),
+# zero stalls/crashes/OOM, 100% needle-recall, 27-33 tok/s decode. This
+# replaces Tensor sharding as the launch default so a plain `./start_cluster.sh`
+# and a dashboard-triggered reload both reproduce the proven-good config
+# without any manual env vars. Trade-off (see the same doc): Pipeline mode
+# is SINGLE-REQUEST-ONLY (no concurrent requests, no mid-decode
+# cancellation) — start_cluster.sh already force-sets
+# EXO_MAX_CONCURRENT_REQUESTS=1 whenever DSV4_SHARDING=Pipeline (line
+# ~1658) so this is enforced automatically, not just documented. Override
+# DSV4_SHARDING=Tensor to go back to the old concurrent-but-unvalidated-
+# recently mode.
+: "${DSV4_SHARDING:=Pipeline}"
 # Speculative decoding uses EXO_PP_DRAFT_MODEL (Qwen3.5 0.8B) as the draft;
 # its tokenizer is incompatible with DSv4's, so drafted tokens come back as
 # gibberish when verified through DSv4 logits. Force speculation off whenever
@@ -1799,10 +1814,15 @@ for NODE in "${NODES[@]}"; do
     # unset/1 keeps the proven single-token pp_speculative_decode_loop
     # path (default, unchanged behavior).
     [ -n "${EXO_PP_MTP_CHAIN_K:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_MTP_CHAIN_K=$EXO_PP_MTP_CHAIN_K"
-    # Opt-in PP + DSpark (rank1-owned draft+verify, pp_dspark_decode_loop).
+    # PP + DSpark (rank1-owned draft+verify, pp_dspark_decode_loop).
     # Requires EXO_DSV4_DSPARK=1 (DSpark head attached at model load) --
     # this flag alone just selects it as the PP decode loop when both are
     # set. Highest priority in batch_generate.py's dispatch when available.
+    # DEFAULT ON 2026-07-23 alongside DSV4_SHARDING=Pipeline above (see
+    # that comment) -- only takes effect in Pipeline mode anyway (Tensor
+    # mode's decode path never reads this), so leaving it on by default
+    # is harmless when DSV4_SHARDING=Tensor is overridden back in.
+    : "${EXO_PP_DSPARK:=1}"
     [ -n "${EXO_PP_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK=$EXO_PP_DSPARK"
     # One-shot forward-width scaling diagnostic (pp_dspark_decode_loop) --
     # opt-in, off by default, no effect on production decode.
@@ -1822,17 +1842,20 @@ for NODE in "${NODES[@]}"; do
     # full rationale and the Fable-consult numbers (~14% E2E speedup at a
     # 30% hit rate, ~22% at 50%, not worth building below ~15%).
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_LOG=$EXO_PP_DSPARK_DRAFT_AHEAD_LOG"
-    # Draft-ahead STEP 1+2b diagnostic plumbing (2026-07-19, default off,
-    # commits 6aff7a5f/e6e10927/fe7bbfcb): gates a msg2 spec-id tag exchange
-    # (rank1 builds a SpecId from the cycle's anchor/drafted/bonus tokens,
-    # rank0 independently reconstructs + validates a match) AND a msg1b
-    # deep-draft-extension send/recv (vw-1 extra tokens DSpark's draft()
-    # already computed for free, round-trip shape-validated on rank0).
-    # BOTH branches are diagnostic-only -- decode NEVER branches on the
-    # result yet, this only proves the wire/tagging mechanism is sound
-    # under real cross-rank timing before step 3 (the actual speculative
-    # forward) can be built. Watch [PP DSpark STEP2b DIAG] and the spec-tag
-    # match/mismatch counters in the logs during this run.
+    # Draft-ahead STEP 1+2b diagnostic plumbing (2026-07-19, originally
+    # default off, commits 6aff7a5f/e6e10927/fe7bbfcb): gates a msg2
+    # spec-id tag exchange (rank1 builds a SpecId from the cycle's
+    # anchor/drafted/bonus tokens, rank0 independently reconstructs +
+    # validates a match) AND a msg1b deep-draft-extension send/recv (vw-1
+    # extra tokens DSpark's draft() already computed for free, round-trip
+    # shape-validated on rank0). BOTH branches are diagnostic-only --
+    # decode NEVER branches on the result, this only proves the
+    # wire/tagging mechanism is sound under real cross-rank timing. NOT
+    # the broken EXECUTE/YIELD speculative-forward mechanism below --
+    # this is just DRAFT_AHEAD's own diagnostic tagging, safe and part of
+    # the validated 2026-07-22 stress-sweep config. DEFAULT ON 2026-07-23
+    # alongside DSV4_SHARDING=Pipeline / EXO_PP_DSPARK above.
+    : "${EXO_PP_DSPARK_DRAFT_AHEAD:=1}"
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
     # Draft-ahead STEP 3a (2026-07-19, commit 0ed76f74; CONFIRMED BROKEN
     # 2026-07-22 -- see exo-stall-faulthandler-breakthrough-2026-07-21
