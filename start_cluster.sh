@@ -1409,6 +1409,10 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MTP_DEDICATED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DEDICATED=$EXO_DSV4_MTP_DEDICATED"
     [ -n "${EXO_LEAF_SNAPSHOT_RETENTION:-}" ] && EXO_ENV="$EXO_ENV EXO_LEAF_SNAPSHOT_RETENTION=$EXO_LEAF_SNAPSHOT_RETENTION"
     [ -n "${EXO_ARRAYSCACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_ARRAYSCACHE_DIAG=$EXO_ARRAYSCACHE_DIAG"
+    # Diagnostic-only (2026-07-23): root-causing rank 1's always-cold
+    # KV-prefix-cache lookup under PP mode. See cache.py's get_kv_cache
+    # for the log points. Remove once root-caused.
+    [ -n "${EXO_PREFIX_CACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_DIAG=$EXO_PREFIX_CACHE_DIAG"
     # Eagle soft-embedding for chained MTP draft (Phase 14 Plan B.2).
     # Default OFF (0): mlx-lm's DeepseekV4MTPModule.__call__ uses the
     # hard-argmax embed_tokens() lookup — bit-exact with prior behavior.

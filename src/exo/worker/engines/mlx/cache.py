@@ -1077,6 +1077,19 @@ class KVPrefixCache:
         max_length = int(prompt_tokens.shape[0])
         query_regions = media_regions or []
 
+        # Diagnostic: root-causing why rank 1 (PP mode) never reports a local
+        # hit-length while rank 0 does, on an exact-repeat prompt (2026-07-23
+        # investigation). Gated on EXO_PREFIX_CACHE_DIAG=1 -- prints exactly
+        # once per get_kv_cache call, rank-tagged, cheap (no snapshot copies).
+        # Remove once root-caused.
+        _diag = os.environ.get("EXO_PREFIX_CACHE_DIAG") == "1"
+        _diag_rank = self._group.rank() if self._group is not None else 0
+        if _diag:
+            logger.info(
+                f"[PREFIX_DIAG rank={_diag_rank}] get_kv_cache ENTRY "
+                f"leaves={len(self._leaves)} max_length={max_length}"
+            )
+
         # New turn's lookup: drop any stale active marker from the previous
         # turn. It is re-set below on a hit, and re-pointed by the subsequent
         # add/update. Between a turn's add and the next get, the marker still
@@ -1087,6 +1100,11 @@ class KVPrefixCache:
         match_node, match_length = self._longest_prefix_match(
             prompt_tokens, query_regions
         )
+        if _diag:
+            logger.info(
+                f"[PREFIX_DIAG rank={_diag_rank}] match_length={match_length} "
+                f"(max_length={max_length})"
+            )
         if match_length == 0:
             self._trace(
                 f"get_kv_cache MISS leaves={len(self._leaves)} "
@@ -1111,6 +1129,11 @@ class KVPrefixCache:
         donor_leaf = self._pick_leaf_under(match_node)
         if donor_leaf is None:
             # Shouldn't happen: every node has ref_count > 0 ⇒ at least one leaf.
+            if _diag:
+                logger.info(
+                    f"[PREFIX_DIAG rank={_diag_rank}] donor_leaf is None "
+                    "(unexpected -- every node should have ref_count > 0)"
+                )
             return (
                 make_kv_cache(
                     model,
@@ -1128,6 +1151,17 @@ class KVPrefixCache:
         # is constrained by snapshot availability.
         sliceable_mask = donor_leaf.leaf_layer_caches
         has_non_sliceable = any(c is not None for c in sliceable_mask)
+        if _diag:
+            _snap_counts = (
+                [s.token_count for s in donor_leaf.leaf_snapshots]
+                if donor_leaf.leaf_snapshots
+                else []
+            )
+            logger.info(
+                f"[PREFIX_DIAG rank={_diag_rank}] donor_leaf={donor_leaf.leaf_id} "
+                f"is_exact={is_exact} has_non_sliceable={has_non_sliceable} "
+                f"n_snapshots={len(_snap_counts)} snapshot_token_counts={_snap_counts}"
+            )
         target = (
             (max_length - 1) if is_exact and not has_non_sliceable else match_length
         )
