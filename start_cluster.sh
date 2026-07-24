@@ -444,10 +444,19 @@ fi
 # dequantize+array-mask slow path, which made BS=2 verify 168ms vs 43ms
 # at bf16). Override to a positive int only for memory-pressed deploys.
 : "${DSV4_KV_CACHE_BITS:=0}"
-# Sampling defaults — official DeepSeek V4 Flash card recommends
-# temperature=1.0, top_p=1.0 for local deployment.
+# Sampling defaults. DeepSeek's official card recommends temperature=1.0,
+# top_p=1.0 for local deployment, but the model card
+# (mlx-community--DeepSeek-V4-Flash.toml) has since tightened top_p to 0.95
+# (commit 283a0fed) + added min_p=0.05 (commit 736ab04e) as guardrails against
+# DSv4 corrupting long tool-call bodies at the fully-open top_p=1.0 tail.
+# DSV4_TOP_P is left UNSET (like DSV4_TOP_K/DSV4_MIN_P below) so the card's
+# value is authoritative — resolve_sampling() resolves request > instance >
+# card > cluster-env > hardcoded, and an instance-level default here would
+# silently override the card and defeat any future card-level sampling fix,
+# exactly as happened 2026-06-16 to 2026-07-24: this var was pinned to 1.0,
+# so the card's 0.95 fix was never actually live despite being "deployed".
 : "${DSV4_TEMPERATURE:=1.0}"
-: "${DSV4_TOP_P:=1.0}"
+: "${DSV4_TOP_P:=}"
 : "${DSV4_TOP_K:=}"
 : "${DSV4_MIN_P:=}"
 : "${DSV4_PRESENCE_PENALTY:=}"
