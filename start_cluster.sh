@@ -482,12 +482,31 @@ fi
 # penalized geometrically per step while a token appearing once is unchanged
 # (count==1 -> factor==penalty, bit-identical to the old behaviour). This makes
 # a modest repetition_penalty actually able to break the loops that 1.05
-# previously could not. Set to 1.1 (Ollama's proven universal default;
-# count==1 collateral is a gentle ÷1.1, loop tokens get ÷1.1**count). Tune with
-# a real long-context quality probe (needle-in-haystack 100K+, long structured
-# generation, long reasoning) — NOT a short "paris" prompt. The kill-switch
-# remains the deterministic backstop.
-: "${DSV4_REPETITION_PENALTY:=1.1}"
+# previously could not. Set to 1.1 at the time ("Ollama's proven universal
+# default" -- turned out to be WRONG: Ollama's newer Go-native sampler
+# (ollamarunner path, used for larger/newer models) silently ignores
+# repeat_penalty/frequency_penalty/presence_penalty entirely -- confirmed
+# live 2026-07-24 by sending repeat_penalty=1.0 vs 1.9 to Ollama Cloud's
+# DeepSeek-V4-Flash and getting byte-identical output both times. So "1.1
+# matches Ollama" was never actually true).
+#
+# UPDATE 2026-07-24: reverted to 1.0 (no-op). count==1 collateral from a
+# nonzero penalty was directly implicated in a NEW real bug: DSv4 silently
+# dropping/mangling whole words from moderately-long strings it must copy
+# verbatim into tool-call arguments (e.g. writing a file path built from its
+# own system prompt's "Current working directory: ..." line) -- because
+# repetition_penalty punishes ANY token that already appeared in context,
+# including the exact tokens a verbatim-copy task needs to reproduce. Verified
+# via a controlled n=30-per-condition test on the real production request
+# payload with realistic project-style paths: 1.1 -> 23.3% silent-wrong-path
+# failure rate, 1.0 -> 6.7% (roughly a 3.5x reduction). Re-verified the
+# ORIGINAL degeneration-loop repro (long repetitive markdown table, the
+# 2026-06-15 "8-bit-8-bit-8-bit" pattern) does NOT recur at 1.0 x5 clean
+# trials -- the top_p 1.0->0.95 + min_p=0.05 card fix (finally made live
+# 2026-07-24, see DSV4_TOP_P above) is what actually prevents that class now,
+# not this penalty. The kill-switch (EXO_LOOP_DETECT_ACTION, default "error")
+# remains the deterministic backstop regardless of this value.
+: "${DSV4_REPETITION_PENALTY:=1.0}"
 
 # Qwen3.6-35B-A3B (MoE, ~17.5GB/rank at 8-bit across a 2-node TP shard). Small
 # enough to run ALONGSIDE DeepSeek-V4-Flash (~74GB/rank): 74 + 17.5 = ~91.5GB
