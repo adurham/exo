@@ -398,12 +398,35 @@ def _snapshot_nbytes(snap: CacheSnapshot) -> int:
 def is_non_trimmable_cache_entry(c: object) -> bool:
     """A cache entry is non-trimmable if `trim(n)` can't roll back its full
     state — meaning the prefill +2 rollback must snapshot+restore it instead.
+
+    CacheList is treated as unconditionally non-trimmable (structural, by
+    TYPE) rather than checking its current momentary `is_trimmable()`
+    state. ROOT CAUSE this fixes (2026-07-23, found via live rank-tagged
+    diagnostic logging on a 2-node PP cluster): the old state-based check
+    (`not c.is_trimmable()`) is evaluated on a cache that was JUST
+    constructed by `make_kv_cache()`, before any forward pass has run —
+    a fresh `RotatingKVCache.offset` is always 0 (< max_size, so
+    trimmable) and a fresh `PoolingCache.pooled` is always None (so
+    trimmable), meaning `CacheList.is_trimmable()` == `all(...)` is
+    ALWAYS True at that call site regardless of the model's real
+    architecture, so the state check could never actually detect a
+    non-trimmable CacheList composition. For DeepSeek-V4-Flash sharded
+    Pipeline-Parallel across 2 ranks, one rank's shard happened to have
+    zero bare RotatingKVCache/ArraysCache layers (every layer wrapped in
+    CacheList) — that rank's `has_non_kv_caches()` deterministically
+    returned False on every request, so it never captured KV-prefix-cache
+    snapshots, so its `get_kv_cache()` restore path always fell back to a
+    cold prefill (never a correctness issue, just permanently disabled
+    prefix-cache reuse on that rank specifically). This mirrors
+    `_sliceable_layer_mask`'s existing, already-proven-correct treatment
+    of CacheList: that function ALREADY marks every CacheList entry as
+    non-sliceable unconditionally (never checks momentary state) — this
+    makes `has_ssm`/snapshot-capture agree with that existing invariant
+    instead of silently disagreeing with it. See
+    references/cache-list-structural-vs-state-non-trimmable-2026-07-23.md
+    (exo-cluster-development skill) for the full investigation.
     """
-    if isinstance(c, (ArraysCache, RotatingKVCache)):
-        return True
-    if isinstance(c, CacheList):
-        return not bool(c.is_trimmable())  # type: ignore[reportUnknownMemberType]
-    return False
+    return isinstance(c, (ArraysCache, RotatingKVCache, CacheList))
 
 
 def has_non_kv_caches(cache: KVCacheType) -> bool:

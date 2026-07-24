@@ -18,6 +18,8 @@ from exo.worker.engines.mlx.cache import (
     cache_length,
     encode_prompt,
     get_prefix_length,
+    has_non_kv_caches,
+    is_non_trimmable_cache_entry,
     make_kv_cache,
 )
 from exo.worker.engines.mlx.generator.generate import mlx_generate, prefill
@@ -1427,3 +1429,60 @@ class TestEvictionTimingInstrumentation:
         assert ctx.get_mem_allgather_total_s == 0.0
         c._evict_timing = None
         self._reload_cache_with_env(monkeypatch)
+
+
+class TestCacheListStructuralNonTrimmable:
+    """Regression tests for the 2026-07-23 rank-1-always-cold bug.
+
+    Root cause: is_non_trimmable_cache_entry's CacheList branch used to
+    check MOMENTARY state (`not c.is_trimmable()`), evaluated on a
+    just-constructed, empty cache where every sub-cache's is_trimmable()
+    is trivially True (fresh RotatingKVCache.offset=0 < max_size, fresh
+    PoolingCache.pooled=None) -- so the check could never actually fire,
+    regardless of the model's real architecture. A DeepSeek-V4-Flash PP
+    shard whose ENTIRE layer range was CacheList-wrapped (no bare
+    RotatingKVCache/ArraysCache layers) got has_non_kv_caches()=False on
+    every single request, so it never captured KV-prefix-cache snapshots,
+    permanently disabling prefix-cache reuse on that rank. Fixed by
+    treating CacheList as unconditionally non-trimmable (structural, by
+    TYPE), matching _sliceable_layer_mask's existing treatment.
+    """
+
+    def test_fresh_cachelist_of_rotating_and_pooling_is_non_trimmable(self):
+        # The exact composition that triggered the bug: a CacheList whose
+        # sub-caches are ALL trivially trimmable when fresh/empty.
+        cl = CacheList(RotatingKVCache(max_size=128), PoolingCache(4))
+        assert is_non_trimmable_cache_entry(cl) is True
+
+    def test_fresh_bare_rotating_kv_cache_is_non_trimmable(self):
+        assert is_non_trimmable_cache_entry(RotatingKVCache(max_size=128)) is True
+
+    def test_plain_kv_cache_is_trimmable(self):
+        assert is_non_trimmable_cache_entry(KVCache()) is False
+
+    def test_has_non_kv_caches_true_for_cachelist_only_shard(self):
+        # Simulates rank 1's shard: every layer is a fresh CacheList, zero
+        # bare RotatingKVCache/ArraysCache entries anywhere in the list --
+        # exactly the composition that made has_non_kv_caches() silently
+        # return False before this fix.
+        cache = [
+            CacheList(RotatingKVCache(max_size=128), PoolingCache(4))
+            for _ in range(21)
+        ]
+        assert has_non_kv_caches(cache) is True
+
+    def test_has_non_kv_caches_true_for_mixed_shard(self):
+        # Simulates rank 0's shard: a mix of bare RotatingKVCache (ratio-0
+        # layers) and CacheList (ratio-4/128 layers). Was already True
+        # before this fix (unconditional bare-type check) -- must stay True.
+        cache = [
+            RotatingKVCache(max_size=128),
+            CacheList(RotatingKVCache(max_size=128), PoolingCache(4)),
+        ]
+        assert has_non_kv_caches(cache) is True
+
+    def test_has_non_kv_caches_false_for_plain_kv_cache_only(self):
+        # Models with no SSM/rotating/pooled layers at all must be
+        # unaffected -- has_ssm should stay False, no snapshot overhead.
+        cache = [KVCache(), KVCache(), KVCache()]
+        assert has_non_kv_caches(cache) is False
