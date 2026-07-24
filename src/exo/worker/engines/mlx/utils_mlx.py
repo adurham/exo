@@ -1471,6 +1471,115 @@ def get_coord_group(
     return sub
 
 
+def pipeline_agree_prefix_hit_length(
+    local_hit_length: int,
+    group: mx.distributed.Group | None,
+    request_tag: int,
+) -> int:
+    """Agree on a single KV-prefix-cache hit-length across all PP ranks.
+
+    PP mode (EXO_PP_NO_COORD_COLLECTIVE=1) has no coord-collective channel
+    (see ``get_coord_group``'s docstring) — a coord all_sum queued behind a
+    blocked p2p recv on the shared transport can deadlock. This function
+    does NOT use mx_any/mx_min_int/get_coord_group; instead it does a plain
+    linear reduce (leaves → rank 0) + broadcast (rank 0 → leaves) over the
+    SAME raw ``group`` object PipelineFirstLayer/PipelineLastLayer already
+    use for the per-layer hidden-state handoff, using the identical
+    send/recv_like + mx.eval discipline already proven in production for
+    PP+MTP's token/tag exchange (pp_speculation.py) — not a new transport
+    pattern.
+
+    MUST be called as a discrete pre-step strictly before any prefill chunk
+    sends begin for the request identified by ``request_tag``, so there is
+    no in-flight p2p traffic this could queue behind or be paired with by
+    mistake. Every rank must call this exactly once per request, in the
+    same order, with the same ``request_tag`` — a per-process monotonic
+    counter incremented once per ``submit()`` call works because PP mode
+    processes exactly one request at a time in lockstep across ranks
+    (EXO_MAX_CONCURRENT_REQUESTS=1 is enforced under Pipeline sharding).
+
+    Each rank's independently-maintained ``KVPrefixCache`` SHOULD reach an
+    identical local hit-length for the same request in the common case:
+    every rank processes the same sequence of add/update calls with
+    identical token boundaries every turn, so their tries/snapshots stay
+    naturally in lockstep. This function verifies that with a cheap
+    min+max reduce rather than assuming it, and returns 0 (forcing a
+    uniform cold prefill on every rank) whenever the ranks disagree —
+    e.g. one rank evicted a leaf the other didn't, or a crash/reconnect
+    left one rank's cache cold. Reconciling a MISMATCH by trimming a
+    rank's already-materialized non-sliceable-layer state (RotatingKVCache/
+    ArraysCache — sliding-window/SSM-style caches) down to some smaller
+    agreed depth isn't generally safe: those layers can only be restored
+    to a depth where a snapshot actually exists, and forcing an arbitrary
+    target can silently fall back further than the OTHER rank's, exactly
+    the class of asymmetric-hit-length bug this exists to prevent (see
+    references/jaccl-reconnect-crash-loop-and-git-reset-trap.md bug #3).
+    "Unanimous or cold" is the only safe-by-construction rule here — a rare
+    disagreement costs one extra cold prefill, never a desync.
+
+    Wire format: fixed-shape ``(3,)`` int32 array
+    ``[request_tag, running_min, running_max]`` in both directions — int32,
+    NOT bf16 (bf16's 8-bit mantissa silently rounds integers above 256, and
+    hit-lengths here run into the tens of thousands). A tag mismatch on
+    receipt raises immediately (protocol invariant violated — p2p channel
+    desync between ranks) rather than silently pairing with a stale or
+    foreign message; the caller should NOT treat that as a locally
+    recoverable condition, same as any other p2p fault.
+
+    Returns the agreed hit-length: the unanimous local value if every rank
+    reported the same one, else 0.
+    """
+    if group is None or group.size() <= 1:
+        return local_hit_length
+
+    rank = group.rank()
+    world_size = group.size()
+
+    def _send(min_v: int, max_v: int, dst: int) -> None:
+        wire = mx.array([request_tag, min_v, max_v], dtype=mx.int32)
+        mx.eval(wire)
+        sent = mx.distributed.send(wire, dst, group=group)
+        mx.eval(sent)
+
+    def _recv(src: int) -> tuple[int, int]:
+        wire = mx.distributed.recv_like(
+            mx.zeros(3, dtype=mx.int32), src, group=group
+        )
+        mx.eval(wire)
+        raw = cast(list[int], wire.tolist())
+        tag, min_v, max_v = (int(v) for v in raw)
+        if tag != request_tag:
+            raise RuntimeError(
+                f"pipeline_agree_prefix_hit_length: tag mismatch on rank "
+                f"{rank} (expected {request_tag}, got {tag}) — p2p channel "
+                "desync between ranks; treating as a hard fault rather "
+                "than silently proceeding with a possibly-mispaired value."
+            )
+        return min_v, max_v
+
+    # Phase 1: linear reduce, leaves -> rank 0.
+    running_min = local_hit_length
+    running_max = local_hit_length
+    if rank != world_size - 1:
+        peer_min, peer_max = _recv(rank + 1)
+        running_min = min(running_min, peer_min)
+        running_max = max(running_max, peer_max)
+    if rank != 0:
+        _send(running_min, running_max, rank - 1)
+
+    # Phase 2: broadcast the agreed (min, max) back down, rank 0 -> leaves.
+    if rank == 0:
+        agreed_min, agreed_max = running_min, running_max
+        if world_size > 1:
+            _send(agreed_min, agreed_max, 1)
+    else:
+        agreed_min, agreed_max = _recv(rank - 1)
+        if rank != world_size - 1:
+            _send(agreed_min, agreed_max, rank + 1)
+
+    return agreed_min if agreed_min == agreed_max else 0
+
+
 def prewarm_coord_group(group: mx.distributed.Group | None) -> None:
     """Eagerly create the coord subgroup at a known lockstep sync point
     (typically end of runner warmup) so both ranks call split() in

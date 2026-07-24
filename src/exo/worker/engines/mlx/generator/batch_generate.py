@@ -61,6 +61,7 @@ from exo.worker.engines.mlx.utils_mlx import (
     fix_unmatched_think_end_tokens,
     get_coord_group,
     mx_any,
+    pipeline_agree_prefix_hit_length,
     system_prompt_token_count,
 )
 from exo.worker.engines.mlx.vision import (
@@ -417,6 +418,11 @@ class ExoBatchGenerator:
     _pp_spec_uid: int | None = field(init=False, default=None)
     _pp_spec_eos: set[int] = field(init=False, default_factory=set)
     _uid_counter: int = field(init=False, default=0)
+    # Monotonic per-process counter, incremented once per submit() call,
+    # used to tag the pipeline_agree_prefix_hit_length() exchange so a
+    # tag mismatch on receipt is detectable (protocol-invariant check,
+    # not a real request id — never sent anywhere else).
+    _prefix_hit_agree_tag: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         use_speculative = os.environ.get("EXO_SPECULATIVE", "0") == "1"
@@ -1199,25 +1205,29 @@ class ExoBatchGenerator:
 
         # Multi-rank Pipeline-Parallel serving with coord collectives disabled
         # (EXO_PP_NO_COORD_COLLECTIVE=1, the standard PP launch config) has no
-        # channel left to make the prefix-cache hit/miss DECISION collective:
-        # get_coord_group() deliberately returns None in this mode specifically
-        # to keep mx_any/mx_min_int off the shared p2p transport (a coord
-        # all_sum queued behind a blocked p2p recv can deadlock -- see
-        # get_coord_group()'s docstring). Without that agreement step, each
-        # rank's independent, per-process kv_prefix_cache can reach a
-        # DIFFERENT hit/miss verdict for the identical logical request (rank A
-        # hits, rank B misses), and since PP's prefill pipeline is a lockstep
-        # handoff protocol keyed on token count, a hit-length mismatch desyncs
-        # the two ranks' iteration counts -- the short-prefill rank finishes
-        # and moves on while its peer is still mid-prefill waiting on
-        # handoffs that never arrive, which eventually trips the jaccl
-        # drain-loop deadline ("[jaccl] recv() deadline in drain") and the
-        # request is lost. Force a cold prefill (hit_length=0, identical on
-        # every rank by construction, no collective needed) whenever this
-        # exact no-agreement-possible condition holds. Real fix is to
-        # propagate rank 0's hit-length decision downstream piggybacked on
-        # the existing p2p handoff (dataflow-ordered, no new deadlock risk)
-        # instead of suppressing the cache -- out of scope for today.
+        # channel left to make the prefix-cache hit/miss DECISION collective
+        # via the usual mx_any/mx_min_int/get_coord_group path (that path is
+        # deliberately unavailable in this mode -- see get_coord_group()'s
+        # docstring: a coord all_sum queued behind a blocked p2p recv on the
+        # shared transport can deadlock). Each rank's independent,
+        # per-process kv_prefix_cache computes its own local hit-length
+        # first; pipeline_agree_prefix_hit_length() then makes that
+        # agreement WITHOUT a coord collective, by reusing the same raw p2p
+        # send/recv_like primitives (and mx.eval discipline) already used
+        # for the per-layer hidden-state handoff and for PP+MTP's
+        # token/tag exchange -- run as a discrete pre-step strictly before
+        # any prefill chunk sends begin, so it can't queue behind or pair
+        # with in-flight prefill traffic. "Unanimous or cold": if every
+        # rank's local hit-length agrees, use it; on ANY mismatch (a rank
+        # evicted a leaf the other didn't, a crash/reconnect left one rank
+        # cold, etc.) fall back to hit_length=0 on every rank, identically,
+        # rather than trying to reconcile to some smaller shared depth --
+        # reconciling risks the exact asymmetric non-sliceable-layer
+        # (RotatingKVCache/ArraysCache) restore mismatch this whole
+        # subsystem exists to avoid (see references/
+        # jaccl-reconnect-crash-loop-and-git-reset-trap.md bug #3). See
+        # pipeline_agree_prefix_hit_length()'s docstring for the full
+        # protocol (linear reduce + broadcast, int32 wire, tag-checked).
         pp_no_coord_collective = (
             os.environ.get("EXO_PP_NO_COORD_COLLECTIVE") == "1"
             and self.group is not None
@@ -1230,34 +1240,61 @@ class ExoBatchGenerator:
         prompt_tokens = all_prompt_tokens
 
         with T("submit.kv_prefix_cache_lookup"):
-            if (
-                self.kv_prefix_cache is not None
-                and not is_bench
-                and not pp_no_coord_collective
-            ):
+            if self.kv_prefix_cache is not None and not is_bench:
                 cache, remaining_tokens, matched_index, is_exact_hit = (
                     self.kv_prefix_cache.get_kv_cache(
                         self.model, all_prompt_tokens, media_regions=media_regions
                     )
                 )
-                prefix_hit_length = len(all_prompt_tokens) - len(remaining_tokens)
-                if prefix_hit_length > 0:
-                    logger.info(
-                        f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens "
-                        f"cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
-                    )
-                    prompt_tokens = remaining_tokens
+                local_hit_length = len(all_prompt_tokens) - len(remaining_tokens)
+
+                if pp_no_coord_collective:
+                    self._prefix_hit_agree_tag += 1
+                    with T("submit.pp_prefix_hit_agreement"):
+                        prefix_hit_length = pipeline_agree_prefix_hit_length(
+                            local_hit_length,
+                            self.group,
+                            self._prefix_hit_agree_tag,
+                        )
+                    if prefix_hit_length != local_hit_length:
+                        # This rank's local match was rejected by cross-rank
+                        # agreement (mismatch, or another rank forced 0)
+                        # -- release the eviction guard on the leaf we
+                        # matched (if any) and fall through to a cold
+                        # prefill built fresh below, identically to every
+                        # other rank.
+                        if local_hit_length > 0:
+                            logger.debug(
+                                "PP prefix-cache hit REJECTED by cross-rank "
+                                f"agreement: local={local_hit_length} "
+                                f"agreed={prefix_hit_length} -- falling back "
+                                "to cold prefill on every rank."
+                            )
+                            self.kv_prefix_cache.release_active_leaf()
+                        prompt_tokens = all_prompt_tokens
+                        matched_index = None
+                        is_exact_hit = False
+                        cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                    elif prefix_hit_length > 0:
+                        logger.info(
+                            f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} "
+                            f"tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%) "
+                            "[PP cross-rank agreed]"
+                        )
+                        prompt_tokens = remaining_tokens
+                    else:
+                        cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
                 else:
-                    cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                    prefix_hit_length = local_hit_length
+                    if prefix_hit_length > 0:
+                        logger.info(
+                            f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens "
+                            f"cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
+                        )
+                        prompt_tokens = remaining_tokens
+                    else:
+                        cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
             else:
-                if pp_no_coord_collective and self.kv_prefix_cache is not None:
-                    logger.debug(
-                        "Suppressing prefix-cache hit check: PP mode with "
-                        "coord collectives disabled has no cross-rank "
-                        "agreement channel for the hit/miss decision -- "
-                        "forcing a cold prefill on every rank to avoid a "
-                        "rank-asymmetric pipeline handoff desync."
-                    )
                 cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
 
         seed = task_params.seed if task_params.seed is not None else 42

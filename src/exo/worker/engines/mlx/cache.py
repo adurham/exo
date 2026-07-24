@@ -691,6 +691,19 @@ class KVPrefixCache:
         if leaf is not None:
             leaf.pinned = True
 
+    def release_active_leaf(self) -> None:
+        """Clear the in-flight-session eviction guard without an add/update.
+
+        Used when a local ``get_kv_cache`` hit is subsequently REJECTED by
+        cross-rank prefix-hit-length agreement (this rank's local match
+        differed from a peer's, so the whole cluster falls back to a cold
+        prefill for this turn). Without this, ``_active_leaf_id`` would
+        stay pointed at a leaf this turn never actually continues via
+        add/update, permanently protecting it from eviction it should
+        otherwise be eligible for.
+        """
+        self._active_leaf_id = None
+
     def clear(self) -> None:
         self._leaves.clear()
         self._root.children.clear()
