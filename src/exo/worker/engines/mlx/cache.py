@@ -277,7 +277,43 @@ def copy_snapshot_entry(
             return _copy_cache_list(entry)
 
 
-def snapshot_ssm_states(cache: KVCacheType) -> CacheSnapshot:
+def snapshot_ssm_states(cache: KVCacheType, token_count: int) -> CacheSnapshot:
+    """Snapshot non-sliceable layer states at the caller-supplied real
+    prefill token position.
+
+    ``token_count`` MUST be the caller's own authoritative count of real
+    tokens processed so far (e.g. ``processed`` from prefill()'s progress
+    loop, or a disaggregated-prefill final_offset) -- NOT derived from the
+    cache object itself. ROOT CAUSE this fixes (2026-07-23, found via live
+    rank-tagged diagnostic logging immediately after fixing the sibling
+    CacheList-structural-non-trimmable bug): the old implementation used
+    ``cache_length(cache) = max(_entry_length(c) for c in cache)``, and
+    ``_entry_length`` falls back to ``c.size()`` for CacheList entries.
+    ``CacheList.size() = max(sub.size() for sub in caches)`` -- but
+    ``RotatingKVCache.size()`` is WINDOW-CAPPED residency count
+    (``min(offset, max_size)``, e.g. capped at 128 for DeepSeek-V4's
+    sliding-window layers) and ``PoolingCache.size()`` is a POOLED-SLOT
+    count (``pooled.shape[1]``, roughly ``real_tokens / compress_ratio``)
+    -- NEITHER represents "real tokens processed" once context exceeds the
+    window/compression boundary. For a PP rank whose ENTIRE shard is
+    CacheList-wrapped (compress_ratio 4 or 128, no bare RotatingKVCache
+    layers), this made every captured snapshot's token_count come back
+    ~4x too small vs the real prefill depth (confirmed live: 2062 real
+    tokens -> token_count=512; 20045 -> 4864; 150022 -> 37376, consistent
+    ~4.0-4.1x ratio matching compress_ratio=4). That systematically wrong,
+    rank-specific token_count then broke _find_nearest_snapshot's
+    target-vs-token_count comparison, which fed the PP cross-rank
+    prefix-hit-length agreement (pipeline_agree_prefix_hit_length) --
+    "unanimous or cold" correctly protected against ever using the wrong
+    value (no correctness risk), but real cache reuse on that rank stayed
+    broken for this SEPARATE reason even after the sibling CacheList fix.
+    cache_length()/`.size()` are intentionally per-type-semantic (window
+    residency, pooled slots) for cache-management purposes elsewhere in
+    this file and in disaggregated/serve.py -- NOT redefined here; this
+    function alone now takes its token position from the caller instead.
+    See references/cache-list-structural-vs-state-non-trimmable-2026-07-23.md
+    (exo-cluster-development skill) for the full investigation.
+    """
     states: list[RotatingKVCache | ArraysCache | CacheList | None] = []
     for c in cache:
         if isinstance(c, ArraysCache):
@@ -288,7 +324,6 @@ def snapshot_ssm_states(cache: KVCacheType) -> CacheSnapshot:
             states.append(_copy_cache_list(c))
         else:
             states.append(None)
-    token_count = cache_length(cache)
     return CacheSnapshot(states=states, token_count=token_count)
 
 

@@ -59,7 +59,13 @@ def run_prefill_for_request(
 
     if kv_prefix_cache is not None:
         try:
-            cache_snapshots = [snapshot_ssm_states(cache)]
+            # target_offset is the real absolute token position this cache
+            # holds after the prefill call above (prefix_hit_length carried
+            # over + new_tokens just prefilled) -- the authoritative count,
+            # not a cache-internal .size() derivation (see
+            # snapshot_ssm_states' docstring for why that used to be wrong
+            # for CacheList-composed non-sliceable layers).
+            cache_snapshots = [snapshot_ssm_states(cache, target_offset)]
             hit_ratio = prefix_hit_length / n_tokens if n_tokens > 0 else 0.0
             if matched_index is not None and hit_ratio >= 0.5:
                 kv_prefix_cache.update_kv_cache(

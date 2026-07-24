@@ -601,7 +601,7 @@ def prefill(
             # For DSv4 chunk_size=256 that's ~1.8K tokens of partial-
             # hit coverage from a leaf's tail. Multi-turn Hermes flows
             # where each turn extends by <1.8K tokens hit cleanly.
-            snapshots.append(snapshot_ssm_states(cache))
+            snapshots.append(snapshot_ssm_states(cache, processed))
             if _diag:
                 logger.info(
                     f"[PREFIX_DIAG rank={_diag_rank}] snapshot appended "

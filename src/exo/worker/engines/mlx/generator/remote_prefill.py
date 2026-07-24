@@ -69,4 +69,8 @@ def remote_prefill(
         f"transfer={(t_received - t0) * 1000:.0f}ms, "
         f"inject={(t_done - t_received) * 1000:.0f}ms"
     )
-    return tps, num_tokens, [snapshot_ssm_states(cache)]
+    # final_offset is the real absolute token position after ingest -- the
+    # authoritative count (see snapshot_ssm_states' docstring for why a
+    # cache-internal .size() derivation is wrong for CacheList-composed
+    # non-sliceable layers).
+    return tps, num_tokens, [snapshot_ssm_states(cache, final_offset)]

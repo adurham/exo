@@ -21,6 +21,7 @@ from exo.worker.engines.mlx.cache import (
     has_non_kv_caches,
     is_non_trimmable_cache_entry,
     make_kv_cache,
+    snapshot_ssm_states,
 )
 from exo.worker.engines.mlx.generator.generate import mlx_generate, prefill
 from exo.worker.engines.mlx.types import Model
@@ -1146,7 +1147,7 @@ class TestMultiTurnSnapshotLeak:
         leaf_id = cache.add_kv_cache(
             mx.array(base, dtype=mx.int32),
             c0,
-            ssm_snapshots=[snapshot_ssm_states(c0)],
+            ssm_snapshots=[snapshot_ssm_states(c0, len(base))],
         )
 
         pooling_trace: list[int] = []
@@ -1159,7 +1160,7 @@ class TestMultiTurnSnapshotLeak:
                 leaf_id,
                 mx.array(prompt, dtype=mx.int32),
                 new_cache,
-                [snapshot_ssm_states(new_cache)],
+                [snapshot_ssm_states(new_cache, len(prompt))],
                 restore_pos=restore_pos,
             )
             pooling_trace.append(self._count_live_pooling())
@@ -1293,7 +1294,7 @@ class TestStrictSnapshotRestore:
         donor_cache = self._short_session_cache(len(donor_tokens))
         # Capture exactly as production does: trimmable CacheList => None
         # states.
-        snap = snapshot_ssm_states(donor_cache)
+        snap = snapshot_ssm_states(donor_cache, len(donor_tokens))
         assert all(s is None for s in snap.states)
         prefix_cache.add_kv_cache(
             mx.array(donor_tokens, dtype=mx.int32),
@@ -1486,3 +1487,48 @@ class TestCacheListStructuralNonTrimmable:
         # unaffected -- has_ssm should stay False, no snapshot overhead.
         cache = [KVCache(), KVCache(), KVCache()]
         assert has_non_kv_caches(cache) is False
+
+
+class TestSnapshotTokenCountCallerSupplied:
+    """Regression tests for the 2026-07-23 rank-1-token-count-4x-too-small
+    bug, found immediately after fixing the sibling CacheList-structural-
+    non-trimmable bug above.
+
+    Root cause: snapshot_ssm_states used to derive token_count via
+    cache_length(cache) = max(_entry_length(c) for c in cache), which for
+    CacheList entries falls back to c.size(). CacheList.size() = max of
+    each sub-cache's size() -- but RotatingKVCache.size() is WINDOW-CAPPED
+    residency (min(offset, max_size)) and PoolingCache.size() is a
+    POOLED-SLOT count (~real_tokens/compress_ratio), neither of which is
+    "real tokens processed" once context exceeds the window/compression
+    boundary. For a PP rank whose entire shard is CacheList-wrapped
+    (compress_ratio 4), this made every snapshot's token_count come back
+    ~4x too small. Fixed by requiring the caller to pass the real,
+    authoritative token position instead of deriving it from the cache.
+    """
+
+    def test_token_count_uses_caller_value_not_cache_derived_value(self):
+        # A CacheList composed entirely of window-capped/pooled sub-caches
+        # -- exactly the composition that produced a ~4x-too-small
+        # cache-derived token_count. The real prefill depth (2062) is far
+        # beyond both the RotatingKVCache window (128) and what
+        # PoolingCache.size() (pooled-slot count) would report.
+        cache = [CacheList(RotatingKVCache(max_size=128), PoolingCache(4))]
+        snap = snapshot_ssm_states(cache, 2062)
+        assert snap.token_count == 2062
+
+    def test_token_count_matches_real_tokens_for_bare_rotating_cache(self):
+        # Sanity check on the "used to accidentally work" composition
+        # (bare RotatingKVCache, no CacheList wrapping) -- must still
+        # report the real caller-supplied value, not a window-capped one.
+        cache = [RotatingKVCache(max_size=128)]
+        snap = snapshot_ssm_states(cache, 2062)
+        assert snap.token_count == 2062
+
+    def test_token_count_is_exactly_the_caller_supplied_value(self):
+        # snapshot_ssm_states must not silently recompute or clamp the
+        # supplied token_count against anything cache-internal.
+        cache = [KVCache()]
+        for real_tokens in (0, 1, 512, 4864, 37376, 249981):
+            snap = snapshot_ssm_states(cache, real_tokens)
+            assert snap.token_count == real_tokens
