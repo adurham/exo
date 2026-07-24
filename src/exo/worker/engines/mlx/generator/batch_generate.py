@@ -2999,6 +2999,14 @@ class ExoBatchGenerator:
         if self.kv_prefix_cache is None:
             return
 
+        if os.environ.get("EXO_PREFIX_CACHE_DIAG") == "1":
+            _diag_rank = self.group.rank() if self.group is not None else 0
+            logger.info(
+                f"[PREFIX_DIAG rank={_diag_rank}] _save_prefix_cache ENTRY "
+                f"cache_snapshots={'None' if cache_snapshots is None else len(cache_snapshots)} "
+                f"prefix_hit_length={prefix_hit_length} matched_index={matched_index}"
+            )
+
         try:
             hit_ratio = (
                 prefix_hit_length / len(all_prompt_tokens)

@@ -572,6 +572,13 @@ def prefill(
     start_time = time.perf_counter()
     has_ssm = has_non_kv_caches(cache)
     snapshots: list[CacheSnapshot] = []
+    _diag = os.environ.get("EXO_PREFIX_CACHE_DIAG") == "1"
+    _diag_rank = group.rank() if group is not None else 0
+    if _diag:
+        logger.info(
+            f"[PREFIX_DIAG rank={_diag_rank}] prefill() ENTRY num_tokens={num_tokens} "
+            f"has_ssm={has_ssm}"
+        )
 
     # TODO(evan): kill the callbacks/runner refactor
     def progress_callback(processed: int, total: int) -> None:
@@ -595,6 +602,11 @@ def prefill(
             # hit coverage from a leaf's tail. Multi-turn Hermes flows
             # where each turn extends by <1.8K tokens hit cleanly.
             snapshots.append(snapshot_ssm_states(cache))
+            if _diag:
+                logger.info(
+                    f"[PREFIX_DIAG rank={_diag_rank}] snapshot appended "
+                    f"processed={processed}/{total} len(snapshots)={len(snapshots)}"
+                )
             if len(snapshots) > _SNAPSHOT_RETENTION:
                 snapshots.pop(0)
 
@@ -729,7 +741,14 @@ def prefill(
         except Exception:
             pass
     # Exclude the last snapshot
-    return tokens_per_sec, num_tokens, snapshots[:-1] if snapshots else []
+    _final_snapshots = snapshots[:-1] if snapshots else []
+    if _diag:
+        logger.info(
+            f"[PREFIX_DIAG rank={_diag_rank}] prefill() RETURN "
+            f"len(snapshots) before trim={len(snapshots)} "
+            f"len(returned)={len(_final_snapshots)}"
+        )
+    return tokens_per_sec, num_tokens, _final_snapshots
 
 
 def prefill_batched(
