@@ -286,11 +286,26 @@ fi
 # DSv4 is the active model. Re-enable later if a DSv4-compatible draft (or
 # MTP weights) becomes available.
 if [ "${DSV4_ENABLED}" = "1" ]; then
-    # MTP self-spec at γ=2 with per-stream cache + compaction beats
-    # the non-MTP baseline at both c=1 (+49%) and c=2 (+10%) on
-    # cluster, with bit-identical outputs at temp=0 (rejection-sampling
-    # guarantee). See dsv4_mtp_session_2026_05_03_v2 memory.
-    : "${EXO_SPECULATIVE:=1}"
+    # DEFAULT FLIPPED TO OFF 2026-07-26: DSpark (this cluster's ONLY
+    # intended MTP mechanism -- there is no reason to keep plain single-
+    # token MTP as a separate fallback once DSpark exists) was CONFIRMED
+    # BUGGY via a clean A/B/A live test: the exact same temp=0 prompt
+    # reliably loops into a self-doubt reasoning spiral (burns the entire
+    # token budget, never answers) with DSpark active, and produces a
+    # correct, clean, repeatable answer with speculation genuinely off
+    # (verified via absence of the "PP speculation enabled" log line --
+    # a prior "off" test was invalidated by the EXO_SPECULATIVE gating
+    # bug fixed the same session, see the EXO_PP_SPEC_DISABLE removal
+    # commit). Ruled out as the mechanism so far: verify_width truncation
+    # (tested at full block width, loop persisted), KV-cache wraparound
+    # in the draft cache trim (traced live, zero wraparound events across
+    # a full failing run), and the draft-ahead-yield "consume cycle" path
+    # (confirmed dead in production config). Leading remaining suspect:
+    # numerics divergence between DSpark's parallel/batched verify
+    # forward and plain sequential decode -- not yet confirmed at the
+    # logit level. Set to 1 to re-enable once the actual bug is fixed and
+    # re-validated with a fresh A/B/A.
+    : "${EXO_SPECULATIVE:=0}"
     # DSv4 FUSION/COMPILE PATHS — DISABLED 2026-06-18 (correctness > ~3-4% perf).
     # All three batch-mis-specialize at batch_size>1: with any of them ON, a
     # concurrent (BS>1) MTP verify forward produces repetition-biased logits,
@@ -354,18 +369,28 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # eliminating the stalls. Measured: B=2 aggregate 317 t/s (was 144 t/s).
     : "${MLX_MAX_MB_PER_BUFFER:=200}"
     : "${MLX_MAX_OPS_PER_BUFFER:=200}"
-    # MTP self-spec gate. ON by default — activates when (a) the
+    # MTP self-spec gate. DEFAULT FLIPPED TO OFF 2026-07-26 alongside
+    # EXO_SPECULATIVE above -- with speculation itself off by default,
+    # there is no reason to spend load time/memory attaching heads that
+    # will never be used at decode time. Activates when (a) the
     # checkpoint contains mtp.* weights (mlx-community variants strip
     # them; use scripts/patch_dsv4_mtp.py to add them back from
-    # upstream) AND (b) EXO_DSV4_MTP is non-zero. Set to 0 to fall back
-    # to non-MTP decode.
-    : "${EXO_DSV4_MTP:=1}"
+    # upstream) AND (b) EXO_DSV4_MTP is non-zero. Set to 1 (with
+    # EXO_SPECULATIVE=1) to re-enable plain single-token MTP -- though
+    # per the plan for this cluster, DSpark below is the ONLY intended
+    # MTP mechanism; there's no real reason to run plain MTP instead of
+    # DSpark once DSpark's bug (see EXO_SPECULATIVE comment above) is
+    # fixed, so this existing separately in the first place is itself
+    # legacy redundancy worth revisiting.
+    : "${EXO_DSV4_MTP:=0}"
     # Use the dedicated mlx-community/DeepSeek-V4-Flash-MTP-bf16 head instead of
-    # the checkpoint-bundled MTP weights. DEFAULT ON (2026-06-07): measured
+    # the checkpoint-bundled MTP weights. Only matters if EXO_DSV4_MTP=1
+    # (see above -- default OFF alongside it 2026-07-26). Measured
     # ~68% single-stream speedup (18.8 → 31.6 t/s) from better draft acceptance
-    # (the dedicated repo's quant/packing suits the draft path). Overlaid onto
-    # mtp[0] before sharding in utils_mlx._overlay_dsv4_dedicated_mtp. Set =0 to
-    # fall back to the native checkpoint-bundled MTP head.
+    # (the dedicated repo's quant/packing suits the draft path) when MTP
+    # IS in use. Overlaid onto mtp[0] before sharding in
+    # utils_mlx._overlay_dsv4_dedicated_mtp. Set =0 to fall back to the
+    # native checkpoint-bundled MTP head instead.
     : "${EXO_DSV4_MTP_DEDICATED:=1}"
 else
     : "${EXO_SPECULATIVE:=1}"
@@ -1347,16 +1372,22 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
-    # MTP-1 chained draft at c=1. DEFAULT ON 2026-07-12 — full ladder green:
-    # identity gate 3/3 (byte-lossless at temp=0), DSML battery clean
-    # (4K/64K/120K), degen probe 4/4 clean, c=1 29.0 t/s vs MTP-1's 27.4
-    # (+6%; tokens/cycle 2.4-2.8 vs 1.84 — the remaining gap to ~40 t/s is
-    # verify cost, see the batched-bitwise-verify campaign, task #23).
-    # Confidence pruning via EXO_DSV4_DSPARK_CONF_TAU (default 0.5; 0
-    # disables). Requires the converted local head dir on every node
+    # MTP-1 chained draft at c=1. DEFAULT FLIPPED TO OFF 2026-07-26:
+    # CONFIRMED BUGGY via a clean A/B/A live test (see EXO_SPECULATIVE
+    # comment near the top of this file for the full elimination table --
+    # verify_width truncation, KV-cache wraparound, and the consume-cycle
+    # path were all ruled out; a self-doubt reasoning loop that burns the
+    # entire token budget without ever answering reliably occurs with
+    # DSpark active and disappears with speculation genuinely off).
+    # DSpark is this cluster's intended sole MTP mechanism (no reason to
+    # keep plain single-token MTP as a separate fallback once DSpark
+    # exists), so disabling it here is the correct default until the bug
+    # is actually fixed -- not "turn on plain MTP instead." Confidence
+    # pruning via EXO_DSV4_DSPARK_CONF_TAU (default 0.5; 0 disables).
+    # Requires the converted local head dir on every node
     # (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a missing dir
     # fails rank-consistently back to MTP-1. EXO_DSV4_DSPARK_DIR overrides.
-    : "${EXO_DSV4_DSPARK:=1}"
+    : "${EXO_DSV4_DSPARK:=0}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
     # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
