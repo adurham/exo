@@ -869,10 +869,30 @@ def parse_thinking_models(
 
     Swallows think tag tokens, sets is_thinking on all others.
     Always yields tokens with finish_reason to avoid hanging the chunk stream.
+
+    Reasoning delimiters are control tokens and must NEVER appear verbatim in
+    either `content` or `reasoning_content`, regardless of state. DeepSeek-V4
+    has been observed re-entering a reflective / self-correction burst mid-
+    answer in plain prose (no fresh <think> token) and then closing it with a
+    bare </think> -- since the parser was already is_thinking=False and only
+    watched for <think> to change state, that bare </think> (and, in the
+    strict two-state design, any delimiter that doesn't match the direction
+    expected for the current state) fell through to the default content path
+    and leaked verbatim (confirmed live 2026-07-25 on hard_eval code_lru_cache
+    / code_segment_tree: content contained a bare </think> mid-string with no
+    preceding <think>, reproduced in isolation via a standalone unit repro).
+    The fix: track BOTH delimiters at all times. The one matching the current
+    state ("own") flips is_thinking as before. The other ("foreign") is a
+    stray/out-of-band delimiter -- swallowed silently (never emitted, state
+    NOT flipped, since there's no reliable way to retroactively know how much
+    already-emitted text was actually a reasoning burst) rather than leaking.
+    A per-turn counter logs how often this fires so real frequency can be
+    tracked without silently masking the underlying model behavior.
     """
     is_thinking = starts_in_thinking
     accumulated = ""
     pending_buffer: list[GenerationResponse] = []
+    stray_delimiter_swallows = 0
 
     def drain_pending(_is_thinking: bool):
         for buffered in pending_buffer:
@@ -889,18 +909,31 @@ def parse_thinking_models(
         if response.finish_reason is not None:
             yield from drain_pending(is_thinking)
             yield response.model_copy(update={"is_thinking": False})
+            if stray_delimiter_swallows:
+                logger.warning(
+                    "parse_thinking_models: swallowed "
+                    f"{stray_delimiter_swallows} stray reasoning delimiter(s) "
+                    "this turn (model re-entered thinking-like prose without "
+                    "emitting a fresh open delimiter first)"
+                )
             continue
+
+        own = think_end if is_thinking else think_start
+        foreign = think_start if is_thinking else think_end
 
         # Fast path: the delimiter arrives as its own clean chunk (or the
         # accumulation is exactly the delimiter). Preserved verbatim so the
         # existing clean-token behavior and its regression tests are untouched.
-        if accumulated == think_start and not is_thinking:
-            is_thinking = True
+        if own and accumulated == own:
+            is_thinking = not is_thinking
             accumulated = ""
             pending_buffer.clear()
             continue
-        if accumulated == think_end and is_thinking:
-            is_thinking = False
+        # Stray/foreign delimiter arriving as a clean chunk on its own --
+        # e.g. a bare </think> while already not-thinking. Swallow it; do
+        # not flip state, do not emit.
+        if foreign and accumulated == foreign:
+            stray_delimiter_swallows += 1
             accumulated = ""
             pending_buffer.clear()
             continue
@@ -914,11 +947,13 @@ def parse_thinking_models(
         # spans chunks (e.g. "</" then "think>def" -> "</think>def"). The
         # exact-equality checks above miss both cases, which previously leaked
         # the delimiter + the post-delimiter answer into the wrong stream
-        # (reasoning text + code dumped into `content`). Detect the currently
-        # active delimiter as a SUBSTRING and split around it. Loop so multiple
-        # delimiters fused into one chunk are all handled.
-        active = think_end if is_thinking else think_start
-        if active and active in accumulated:
+        # (reasoning text + code dumped into `content`). Detect EITHER
+        # delimiter as a SUBSTRING (own flips state, foreign is swallowed) and
+        # split around whichever occurs first. Loop so multiple delimiters
+        # fused into one chunk are all handled in order.
+        own_idx = accumulated.find(own) if own else -1
+        foreign_idx = accumulated.find(foreign) if foreign else -1
+        if own_idx >= 0 or foreign_idx >= 0:
             # Any prefix-buffered tokens are mirrored in `accumulated` (both are
             # appended in lockstep), so their text is already represented in the
             # split below. Discard the parallel copy rather than draining it, to
@@ -926,27 +961,40 @@ def parse_thinking_models(
             # clean prefix (e.g. "</" then "think>answer").
             pending_buffer.clear()
             while True:
-                active = think_end if is_thinking else think_start
-                if not active or active not in accumulated:
+                own = think_end if is_thinking else think_start
+                foreign = think_start if is_thinking else think_end
+                own_idx = accumulated.find(own) if own else -1
+                foreign_idx = accumulated.find(foreign) if foreign else -1
+                if own_idx < 0 and foreign_idx < 0:
                     break
-                idx = accumulated.index(active)
+                # Whichever delimiter occurs earliest in the buffer wins;
+                # own takes priority on a tie (own and foreign can't overlap
+                # at the same index for distinct non-empty delimiter strings
+                # in practice, but prefer the real state-flip on ambiguity).
+                own_first = own_idx >= 0 and (foreign_idx < 0 or own_idx <= foreign_idx)
+                idx = own_idx if own_first else foreign_idx
+                delim = (own if own_first else foreign) or ""
                 pre = accumulated[:idx]
                 if pre:
                     yield response.model_copy(
                         update={"text": pre, "is_thinking": is_thinking}
                     )
-                # Swallow the delimiter and flip the thinking state.
-                is_thinking = not is_thinking
-                accumulated = accumulated[idx + len(active):]
+                if own_first:
+                    is_thinking = not is_thinking
+                else:
+                    stray_delimiter_swallows += 1
+                accumulated = accumulated[idx + len(delim):]
             # Handle the remainder after the last delimiter. If it is a clean
-            # (incomplete) prefix of the next possible delimiter, keep it
+            # (incomplete) prefix of EITHER possible next delimiter, keep it
             # buffered and wait for more; otherwise emit it with the new flag.
             if accumulated:
-                nxt = think_end if is_thinking else think_start
                 is_clean_prefix = bool(
-                    nxt
-                    and len(accumulated) < len(nxt)
-                    and accumulated == nxt[: len(accumulated)]
+                    (think_start
+                     and len(accumulated) < len(think_start)
+                     and accumulated == think_start[: len(accumulated)])
+                    or (think_end
+                        and len(accumulated) < len(think_end)
+                        and accumulated == think_end[: len(accumulated)])
                 )
                 if is_clean_prefix:
                     pending_buffer.append(

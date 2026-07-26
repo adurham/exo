@@ -1005,6 +1005,111 @@ class TestMultiTurnThinkingPrompt:
             )
 
 
+class TestE2EStrayThinkDelimiterLeak:
+    """Regression: DSv4 sometimes re-enters a reflective/self-correction
+    burst mid-answer in plain prose (e.g. "Wait, this has a bug, let me
+    reconsider") WITHOUT emitting a fresh <think> to open a new thinking
+    block, then closes that burst with a bare </think>. Confirmed live
+    2026-07-25 via hard_eval.py against the exo cluster (tasks
+    code_lru_cache / code_segment_tree): the bare </think> leaked verbatim
+    into the `content` field because parse_thinking_models was a strict
+    two-state toggle only listening for <think> once is_thinking=False.
+    Root-caused independent of MTP/DSpark (A/B with speculative decoding
+    fully disabled reproduced the identical leak on other tasks — this is
+    a stream-parser gap, not a decode-corruption bug).
+    """
+
+    def test_bare_close_delimiter_without_reopen_is_swallowed(self):
+        """The exact live failure pattern: close, answer, reflect in prose,
+        bare </think>, final answer. The stray </think> must never reach
+        content or reasoning_content."""
+        model_tokens = [
+            THINKING_START,
+            "Let me work through this.",
+            THINKING_END,
+            "```python\nclass Foo: pass\n```\n\n",
+            "Wait, this has a bug. Let me reconsider and fix it.",
+            THINKING_END,
+            "```python\nclass Foo:\n    def __init__(self): pass\n```",
+        ]
+        results = list(_parse_deepseek_with_thinking(_simulate_tokens(model_tokens)))
+        gen_results = [r for r in results if isinstance(r, GenerationResponse)]
+
+        content = "".join(r.text for r in gen_results if not r.is_thinking)
+        reasoning = "".join(r.text for r in gen_results if r.is_thinking)
+
+        assert THINKING_END not in content, (
+            f"bare </think> leaked into content: {content!r}"
+        )
+        assert THINKING_START not in content
+        assert THINKING_END not in reasoning
+        assert THINKING_START not in reasoning
+        # The real code (both versions) must still be present in content —
+        # we swallow the delimiter, not the surrounding text.
+        assert "class Foo:" in content
+        assert "def __init__" in content
+
+    def test_bare_close_delimiter_split_across_chunks_is_swallowed(self):
+        """Same failure, but the stray </think> arrives split across two
+        streaming chunks (</thi + nk>) — must not leak either half."""
+        model_tokens = [
+            THINKING_START,
+            "Thinking.",
+            THINKING_END,
+            "First attempt.\n\n",
+            "Actually wait, reconsidering.",
+            "</thi",
+            "nk>",
+            "Final answer.",
+        ]
+        results = list(_parse_deepseek_with_thinking(_simulate_tokens(model_tokens)))
+        gen_results = [r for r in results if isinstance(r, GenerationResponse)]
+        content = "".join(r.text for r in gen_results if not r.is_thinking)
+
+        assert "</think>" not in content
+        assert "<think>" not in content
+        assert "Final answer." in content
+
+    def test_bare_open_delimiter_while_already_thinking_is_swallowed(self):
+        """Symmetric case: a stray <think> arriving while already
+        is_thinking=True must also be swallowed, not leaked into
+        reasoning_content."""
+        model_tokens = [
+            THINKING_START,
+            "First thought. ",
+            THINKING_START,  # stray — already thinking
+            "More thought.",
+            THINKING_END,
+            "Answer.",
+        ]
+        results = list(_parse_deepseek_with_thinking(_simulate_tokens(model_tokens)))
+        gen_results = [r for r in results if isinstance(r, GenerationResponse)]
+        reasoning = "".join(r.text for r in gen_results if r.is_thinking)
+        content = "".join(r.text for r in gen_results if not r.is_thinking)
+
+        assert THINKING_START not in reasoning
+        assert "First thought." in reasoning
+        assert "More thought." in reasoning
+        assert content == "Answer."
+
+    def test_normal_single_think_block_unaffected(self):
+        """Sanity: the common, well-formed case (one think block, no
+        stray delimiters) must be completely unchanged by this fix."""
+        model_tokens = [
+            THINKING_START,
+            "Reasoning here.",
+            THINKING_END,
+            "The final answer is 42.",
+        ]
+        results = list(_parse_deepseek_with_thinking(_simulate_tokens(model_tokens)))
+        gen_results = [r for r in results if isinstance(r, GenerationResponse)]
+        reasoning = "".join(r.text for r in gen_results if r.is_thinking)
+        content = "".join(r.text for r in gen_results if not r.is_thinking)
+
+        assert reasoning == "Reasoning here."
+        assert content == "The final answer is 42."
+
+
 class TestApplyChatTemplateWithToolCalls:
     def test_dsml_encoding_with_tool_calls_in_history(self):
         from exo.shared.types.text_generation import (
