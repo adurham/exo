@@ -60,6 +60,7 @@ from exo.worker.engines.mlx.patches.opt_batch_gen import (
 from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
+    detect_thinking_prompt_suffix,
     fix_unmatched_think_end_tokens,
     get_coord_group,
     mx_any,
@@ -1474,6 +1475,10 @@ class ExoBatchGenerator:
                     think_start_id=safe_think_token_id(self.tokenizer, "think_start_id"),
                     think_end_id=safe_think_token_id(self.tokenizer, "think_end_id"),
                     budget_tokens=int(max_tokens * _REASONING_BUDGET_FRACTION),
+                    starts_in_thinking=detect_thinking_prompt_suffix(
+                        prompt, self.tokenizer
+                    ),
+                    prompt_token_count=int(all_prompt_tokens.size),
                 )
                 if _reasoning_budget is not None:
                     logits_processors = logits_processors + [_reasoning_budget]

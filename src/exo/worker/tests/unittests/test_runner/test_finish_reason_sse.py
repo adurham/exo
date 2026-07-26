@@ -191,6 +191,15 @@ class TestDeepSeekV32FinishReason:
 
 class TestThinkingModelsFinishReason:
     def test_finish_reason_during_thinking(self):
+        """Regression (2026-07-26): if generation is cut off (finish_reason
+        set) while still mid-reasoning (no </think> ever seen), the final
+        chunk must carry the TRUE is_thinking state (True here), not a
+        hardcoded False. The old hardcoded-False behavior silently routed
+        the cutoff token into `content` instead of `reasoning_content` --
+        which, for a genuinely degenerate cutoff token (e.g. a stray BOS
+        token during a self-doubt loop), made every such failure display as
+        bogus content instead of the true "still reasoning, content empty"
+        shape."""
         tokens = [
             _make_response("<think>", 0),
             _make_response("reasoning here", 1),
@@ -211,7 +220,7 @@ class TestThinkingModelsFinishReason:
             if isinstance(r, GenerationResponse) and r.finish_reason is not None
         ]
         assert len(last_gen) == 1
-        assert last_gen[0].is_thinking is False
+        assert last_gen[0].is_thinking is True
 
     def test_finish_reason_after_thinking(self):
         tokens = [

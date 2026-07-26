@@ -132,6 +132,102 @@ class TestReasoningBudgetLimiterBehavior:
         assert not _is_forced_to_think_end(out)
 
 
+class TestReasoningBudgetLimiterPromptBakedInThinking:
+    """Regression for the 2026-07-26 no-op bug: DeepSeek-V4's chat template
+    appends a literal <think> suffix to the PROMPT itself -- the model
+    never generates an opening <think> token of its own, so a scan of only
+    the GENERATED history never finds think_start_id and the limiter
+    silently never engaged (confirmed live: an 8192-token request ran its
+    entire budget on a self-doubt loop with the fix never firing).
+    starts_in_thinking + prompt_token_count are the fix: they mirror the
+    same signal the existing stream parser (parse_thinking_models) already
+    receives via detect_thinking_prompt_suffix()."""
+
+    def test_starts_in_thinking_with_no_explicit_open_token_still_forces_close(self):
+        """The exact production scenario: prompt ends with <think>, no
+        think_start_id ever appears in the generated stream, budget must
+        still be enforced from the start of GENERATION."""
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10,
+            starts_in_thinking=True, prompt_token_count=5,
+        )
+        assert proc is not None
+        # 5 prompt tokens (no THINK_START among them -- it's implicit/not
+        # literally present) + 15 generated tokens, still no think_end.
+        history = mx.array([100, 101, 102, 103, 104] + [5] * 15)
+        out = proc(history, _logits())
+        assert _is_forced_to_think_end(out)
+
+    def test_starts_in_thinking_under_budget_is_noop(self):
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10,
+            starts_in_thinking=True, prompt_token_count=5,
+        )
+        assert proc is not None
+        history = mx.array([100, 101, 102, 103, 104] + [5, 6, 7])
+        out = proc(history, _logits())
+        assert not _is_forced_to_think_end(out)
+
+    def test_starts_in_thinking_prompt_length_does_not_eat_the_budget(self):
+        """A long prompt must not count against the reasoning budget --
+        the window anchors to the start of GENERATION, not token 0."""
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10,
+            starts_in_thinking=True, prompt_token_count=500,
+        )
+        assert proc is not None
+        # 500 prompt tokens + only 3 generated tokens: nowhere near budget.
+        history = mx.array(list(range(500)) + [5, 6, 7])
+        out = proc(history, _logits())
+        assert not _is_forced_to_think_end(out)
+
+    def test_starts_in_thinking_but_explicit_close_seen_is_noop(self):
+        """If the model DOES eventually emit a real think_end (even with no
+        explicit think_start), that must still correctly close reasoning."""
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10,
+            starts_in_thinking=True, prompt_token_count=5,
+        )
+        assert proc is not None
+        history = mx.array(
+            [100, 101, 102, 103, 104] + [5, 6] + [THINK_END] + [7] * 500
+        )
+        out = proc(history, _logits())
+        assert not _is_forced_to_think_end(out)
+
+    def test_starts_in_thinking_false_with_no_open_token_is_still_noop(self):
+        """Sanity: starts_in_thinking=False (the default / non-prompt-baked
+        case) must behave exactly as before -- no explicit <think> seen
+        means genuinely never entered thinking."""
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10,
+            starts_in_thinking=False, prompt_token_count=5,
+        )
+        assert proc is not None
+        history = mx.array([100, 101, 102, 103, 104] + [5] * 50)
+        out = proc(history, _logits())
+        assert not _is_forced_to_think_end(out)
+
+    def test_explicit_think_start_takes_priority_over_starts_in_thinking(self):
+        """If an explicit think_start_id IS found in the stream, use that as
+        the anchor (existing behavior), not the prompt_token_count fallback
+        -- covers a model that both starts pre-opened AND later legitimately
+        re-opens a second explicit block."""
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10,
+            starts_in_thinking=True, prompt_token_count=5,
+        )
+        assert proc is not None
+        # Explicit close then explicit re-open, well past prompt_token_count.
+        history = mx.array(
+            [100, 101, 102, 103, 104] + [1, 2] + [THINK_END]
+            + [9] * 200
+            + [THINK_START] + [4] * 15
+        )
+        out = proc(history, _logits())
+        assert _is_forced_to_think_end(out)
+
+
 class TestSafeThinkTokenId:
     class _RaisingTokenizer:
         @property

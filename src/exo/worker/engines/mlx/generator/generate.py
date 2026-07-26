@@ -1163,6 +1163,8 @@ def make_reasoning_budget_limiter(
     think_start_id: int | None,
     think_end_id: int | None,
     budget_tokens: int,
+    starts_in_thinking: bool = False,
+    prompt_token_count: int = 0,
 ) -> Callable[[mx.array, mx.array], mx.array] | None:
     """Force a clean end-of-thinking transition once a reasoning block has run
     for ``budget_tokens`` tokens without closing on its own.
@@ -1174,12 +1176,13 @@ def make_reasoning_budget_limiter(
     got X? Actually I got X? Let's recheck...") that re-derives the same
     result verbatim (with wording drift each cycle) indefinitely, consuming
     the entire max_tokens budget on reasoning_content and leaving `content`
-    empty. Confirmed NOT a decode-path artifact (identical at temp=0 greedy
-    AND temp=1.0/top_p=0.95 real sampling; identical with MTP/DSpark
-    speculative decoding fully on or off) -- a genuine model attractor state,
-    not caught by the existing short-cycle degeneration kill-switch
-    (EXO_LOOP_DETECT_MAX_PERIOD=8 tokens; this loop's period is 60-400+
-    tokens with paraphrase drift each cycle, not an exact repeat).
+    empty. Confirmed NOT a decode-path artifact: reproduces identically on
+    the fully non-speculative decode path (EXO_SPECULATIVE=0, no MTP, no
+    DSpark, real temp=0 sampling engaged, no jaccl/transport issues) --
+    a genuine model attractor state, not caught by the existing short-cycle
+    degeneration kill-switch (EXO_LOOP_DETECT_MAX_PERIOD=8 tokens; this
+    loop's period is 60-400+ tokens with paraphrase drift each cycle, not an
+    exact repeat).
 
     Deliberately NOT a pattern-matcher for the self-doubt loop shape itself
     (that would be overfit to one observed prompt). Instead enforces an
@@ -1189,17 +1192,42 @@ def make_reasoning_budget_limiter(
     model reaches the correct answer well before the loop starts, so forcing
     an early close salvages a correct response instead of an empty one.
 
+    CRITICAL (found 2026-07-26 after this shipped as a no-op): DeepSeek-V4's
+    chat template appends a literal <think> suffix to the PROMPT itself --
+    the model is never expected to (and does not) generate an opening
+    <think> token of its own. A naive "scan generated history for
+    think_start_id" never finds one, so this processor silently never
+    engaged. This mirrors exactly what the existing stream parser
+    (parse_thinking_models) already handles via its own starts_in_thinking
+    parameter, computed once via detect_thinking_prompt_suffix(prompt,
+    tokenizer) before generation starts -- callers of THIS function must
+    thread the same signal through, since a stateless (history, logits) ->
+    logits function has no access to the original prompt text on its own.
+
     Args:
         think_start_id: vocab id of the model's think-open delimiter (e.g.
             TokenizerWrapper.think_start_id), or None if the model/tokenizer
             doesn't expose one (no-op).
         think_end_id: vocab id of the think-close delimiter, or None (no-op).
         budget_tokens: once this many tokens have elapsed since the most
-            recent (still-open) think_start_id, force think_end_id as the
-            only viable next token. Must be > 0 for the processor to do
-            anything; <= 0 is treated as "no budget" (no-op, matching the
-            existing convention of collapsing disabled knobs to None before
-            they reach make_logits_processors-style call sites).
+            recent (still-open) think_start_id -- or since generation start,
+            when starts_in_thinking=True and no explicit open token exists
+            in the stream -- force think_end_id as the only viable next
+            token. Must be > 0 for the processor to do anything; <= 0 is
+            treated as "no budget" (no-op, matching the existing convention
+            of collapsing disabled knobs to None before they reach
+            make_logits_processors-style call sites).
+        starts_in_thinking: True when the prompt itself already ends with
+            the opening think delimiter (detect_thinking_prompt_suffix()),
+            so the model will never generate one. When True and no
+            think_start_id is ever found in the stream, thinking is treated
+            as open starting at prompt_token_count (the first generated
+            token) rather than never-entered.
+        prompt_token_count: number of prompt tokens in ``history`` before
+            generation begins. Only used when starts_in_thinking=True and no
+            explicit think_start_id is found -- anchors the budget window to
+            the start of GENERATION, not the start of the prompt (a long
+            prompt must not eat into the reasoning budget).
 
     Returns:
         A logits processor, or None if thinking isn't supported by this
@@ -1223,11 +1251,14 @@ def make_reasoning_budget_limiter(
                 start_idx = i
                 break
         if start_idx < 0:
-            return logits  # never entered thinking (or tokenizer starts
-            # in-thinking with no literal <think> token to find -- callers
-            # with starts_in_thinking=True should treat generation start as
-            # the implicit start_idx; left as a documented limitation since
-            # DSv4's chat template always emits a literal <think>).
+            if not starts_in_thinking:
+                return logits  # never entered thinking, and the prompt
+                # didn't imply an implicit open either -- genuine no-op.
+            # Prompt-implied thinking (no literal <think> token exists in
+            # the stream to find): anchor the window to the first
+            # GENERATED token, not token 0 of the whole prompt+completion
+            # sequence, so a long prompt doesn't eat into the budget.
+            start_idx = max(prompt_token_count - 1, -1)
         if think_end_id in ids[start_idx + 1:]:
             return logits  # already closed after that open -- no-op
         elapsed = (len(ids) - 1) - start_idx

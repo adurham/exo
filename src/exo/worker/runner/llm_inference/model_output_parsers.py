@@ -907,8 +907,20 @@ def parse_thinking_models(
         accumulated += response.text
 
         if response.finish_reason is not None:
+            # BUGFIX (found 2026-07-26 investigating the reasoning-budget
+            # limiter no-op): this MUST use the CURRENT is_thinking state,
+            # not hardcode False. If generation is cut off (e.g. max_tokens)
+            # while still mid-reasoning, the final chunk's text is whatever
+            # token the model was mid-emitting -- sometimes itself a
+            # degenerate token (observed live: a stray BOS token during a
+            # self-doubt loop). Hardcoding is_thinking=False here routed
+            # that final token into `content` instead of
+            # `reasoning_content`, making every one of these failures
+            # display as "content: <BOS token literal>" instead of the true
+            # "reasoning ran out of budget, content is empty" shape. Drain
+            # pending with the CURRENT state too, for the same reason.
             yield from drain_pending(is_thinking)
-            yield response.model_copy(update={"is_thinking": False})
+            yield response.model_copy(update={"is_thinking": is_thinking})
             if stray_delimiter_swallows:
                 logger.warning(
                     "parse_thinking_models: swallowed "
