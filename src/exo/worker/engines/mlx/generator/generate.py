@@ -1139,6 +1139,111 @@ def ban_token_ids(token_ids: list[int]) -> Callable[[mx.array, mx.array], mx.arr
     return proc
 
 
+def safe_think_token_id(tokenizer: TokenizerWrapper, attr: str) -> int | None:
+    """Read tokenizer.think_start_id / tokenizer.think_end_id defensively.
+
+    Both properties raise ValueError (not AttributeError) when the model's
+    think delimiter tokenizes to MORE than one vocab token, so a plain
+    getattr(tokenizer, attr, None) does NOT catch that case -- it only
+    catches the attribute not existing at all. Callers that want "no
+    reasoning-budget limiting for this tokenizer" as the safe fallback
+    (rather than an unhandled crash) should go through this helper instead
+    of touching the property directly.
+    """
+    try:
+        value = getattr(tokenizer, attr, None)
+    except Exception:  # noqa: BLE001 - deliberately broad; any failure to
+        # resolve a think-token id must degrade to "disable the reasoning
+        # budget limiter", never crash generation.
+        return None
+    return cast(int, value) if value is not None else None
+
+
+def make_reasoning_budget_limiter(
+    think_start_id: int | None,
+    think_end_id: int | None,
+    budget_tokens: int,
+) -> Callable[[mx.array, mx.array], mx.array] | None:
+    """Force a clean end-of-thinking transition once a reasoning block has run
+    for ``budget_tokens`` tokens without closing on its own.
+
+    Root cause this addresses (confirmed live 2026-07-26, hard_eval.py against
+    the exo cluster, tasks math_digit_sum / math_largest_prime_factor /
+    math_binom_mod): DeepSeek-V4-Flash sometimes reaches a correct answer
+    inside its reasoning, then falls into a self-doubt loop ("But earlier I
+    got X? Actually I got X? Let's recheck...") that re-derives the same
+    result verbatim (with wording drift each cycle) indefinitely, consuming
+    the entire max_tokens budget on reasoning_content and leaving `content`
+    empty. Confirmed NOT a decode-path artifact (identical at temp=0 greedy
+    AND temp=1.0/top_p=0.95 real sampling; identical with MTP/DSpark
+    speculative decoding fully on or off) -- a genuine model attractor state,
+    not caught by the existing short-cycle degeneration kill-switch
+    (EXO_LOOP_DETECT_MAX_PERIOD=8 tokens; this loop's period is 60-400+
+    tokens with paraphrase drift each cycle, not an exact repeat).
+
+    Deliberately NOT a pattern-matcher for the self-doubt loop shape itself
+    (that would be overfit to one observed prompt). Instead enforces an
+    invariant that holds regardless of *why* reasoning is running long:
+    reasoning must not be allowed to consume the entire generation budget
+    and leave the answer channel empty. In the confirmed failure case the
+    model reaches the correct answer well before the loop starts, so forcing
+    an early close salvages a correct response instead of an empty one.
+
+    Args:
+        think_start_id: vocab id of the model's think-open delimiter (e.g.
+            TokenizerWrapper.think_start_id), or None if the model/tokenizer
+            doesn't expose one (no-op).
+        think_end_id: vocab id of the think-close delimiter, or None (no-op).
+        budget_tokens: once this many tokens have elapsed since the most
+            recent (still-open) think_start_id, force think_end_id as the
+            only viable next token. Must be > 0 for the processor to do
+            anything; <= 0 is treated as "no budget" (no-op, matching the
+            existing convention of collapsing disabled knobs to None before
+            they reach make_logits_processors-style call sites).
+
+    Returns:
+        A logits processor, or None if thinking isn't supported by this
+        tokenizer/model or budget_tokens <= 0 (so callers can skip adding it
+        to the processor list entirely -- zero cost when inapplicable, same
+        pattern as repetition_penalty==1.0 collapsing to None).
+    """
+    if think_start_id is None or think_end_id is None or budget_tokens <= 0:
+        return None
+
+    def proc(history: mx.array, logits: mx.array) -> mx.array:
+        # history is the full token sequence generated so far for this
+        # stream (prompt + completion). Find the most recent think_start;
+        # if a think_end occurs AFTER it, thinking has already closed and
+        # this is a no-op (covers the normal single-block case AND the
+        # legitimate re-entry case where the model reopens <think> itself).
+        ids: list[int] = [int(t) for t in history.reshape(-1).tolist()]  # type: ignore
+        start_idx = -1
+        for i in range(len(ids) - 1, -1, -1):
+            if ids[i] == think_start_id:
+                start_idx = i
+                break
+        if start_idx < 0:
+            return logits  # never entered thinking (or tokenizer starts
+            # in-thinking with no literal <think> token to find -- callers
+            # with starts_in_thinking=True should treat generation start as
+            # the implicit start_idx; left as a documented limitation since
+            # DSv4's chat template always emits a literal <think>).
+        if think_end_id in ids[start_idx + 1:]:
+            return logits  # already closed after that open -- no-op
+        elapsed = (len(ids) - 1) - start_idx
+        if elapsed < budget_tokens:
+            return logits
+        # Over budget and still open: force think_end_id as the only viable
+        # token. Ban everything else rather than just boosting think_end_id,
+        # so this is a hard guarantee, not a strong nudge a determined
+        # sampler could still route around.
+        forced = mx.full(logits.shape, -1e9, dtype=logits.dtype)
+        forced[..., think_end_id] = 1e9
+        return forced
+
+    return proc
+
+
 def eos_ids_from_tokenizer(tokenizer: TokenizerWrapper) -> list[int]:
     eos: list[int] | None = getattr(tokenizer, "eos_token_ids", None)
     if eos is None:

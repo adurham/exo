@@ -46,9 +46,11 @@ from exo.worker.engines.mlx.generator.generate import (
     ban_token_ids,
     eos_ids_from_tokenizer,
     extract_top_logprobs,
+    make_reasoning_budget_limiter,
     patch_embed_tokens,
     prefill,
     prefill_batched,
+    safe_think_token_id,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.patches.opt_batch_gen import (
@@ -147,6 +149,32 @@ _DEGENERATION_ERROR_TEXT = (
     "Generation terminated: repetition-loop degeneration detected "
     "(the model collapsed into a repeating token cycle). Failing the turn "
     "cleanly so it can be retried."
+)
+
+# Reasoning-budget cap: force a clean end-of-thinking transition once
+# reasoning has run for this FRACTION of the request's max_output_tokens,
+# if it hasn't closed on its own. Confirmed 2026-07-26 (hard_eval.py against
+# the exo cluster, tasks math_digit_sum / math_largest_prime_factor /
+# math_binom_mod): DeepSeek-V4-Flash can reach a correct answer inside
+# reasoning, then fall into a self-doubt loop ("But earlier I got X? Actually
+# I got X? Let's recheck...") that re-derives the same result verbatim (with
+# wording drift each cycle) indefinitely, consuming the ENTIRE max_tokens
+# budget on reasoning_content and leaving `content` empty (client falls back
+# to a bare BOS token). Confirmed NOT a decode-path artifact -- identical at
+# temp=0 greedy AND temp=1.0/top_p=0.95 real sampling; identical with
+# MTP/DSpark speculative decoding fully on or off. NOT caught by the
+# degeneration kill-switch above: that detector is period<=8 exact-repeat,
+# this loop's period is 60-400+ tokens with paraphrase drift each cycle.
+# Deliberately an INVARIANT (reasoning must not consume the whole budget and
+# leave the answer empty), not a pattern-match on the self-doubt loop shape
+# itself -- see make_reasoning_budget_limiter's docstring for the full
+# rationale. 0.75 chosen from the one confirmed failure reaching its correct
+# answer at ~55% of budget before looping -- gives real headroom for
+# legitimately long reasoning while still guaranteeing some budget remains
+# for the answer. Set EXO_REASONING_BUDGET_FRACTION<=0 to disable (no-op,
+# same convention as repetition_penalty==1.0 collapsing to None).
+_REASONING_BUDGET_FRACTION = float(
+    os.environ.get("EXO_REASONING_BUDGET_FRACTION", "0.75")
 )
 
 # Periodic macOS malloc_zone_pressure_relief() to force freed-but-cached
@@ -1415,6 +1443,8 @@ class ExoBatchGenerator:
 
         last_tokens = prompt_tokens[-2:]
 
+        max_tokens = task_params.max_output_tokens or MAX_TOKENS
+
         with T("submit.make_logits_processors"):
             # 1.0 is a no-op for repetition_penalty — collapse to None so mlx-lm
             # skips the processor instead of running per-token mul-by-1 work.
@@ -1432,11 +1462,24 @@ class ExoBatchGenerator:
                     frequency_penalty=_resolved["frequency_penalty"],
                 )
             )
+            # Bench mode (/bench/chat/completions) deliberately bans EOS to
+            # force exactly max_tokens of output for consistent throughput
+            # timing (see bench/METHODOLOGY.md) and does not grade output
+            # correctness at all -- the reasoning-budget limiter has nothing
+            # to protect there and forcing an early think_end would only
+            # perturb the very decode-length/timing profile bench mode
+            # exists to measure. Skip it for bench requests.
+            if not is_bench:
+                _reasoning_budget = make_reasoning_budget_limiter(
+                    think_start_id=safe_think_token_id(self.tokenizer, "think_start_id"),
+                    think_end_id=safe_think_token_id(self.tokenizer, "think_end_id"),
+                    budget_tokens=int(max_tokens * _REASONING_BUDGET_FRACTION),
+                )
+                if _reasoning_budget is not None:
+                    logits_processors = logits_processors + [_reasoning_budget]
             if is_bench:
                 eos_ids = eos_ids_from_tokenizer(self.tokenizer)
                 logits_processors = [ban_token_ids(eos_ids)] + logits_processors
-
-        max_tokens = task_params.max_output_tokens or MAX_TOKENS
 
         if self._pp_spec_active:
             with T("submit.pp_spec_setup"):
