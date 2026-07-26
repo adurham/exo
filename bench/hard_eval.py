@@ -955,7 +955,8 @@ add_instruction(
 # Endpoint call (OpenAI /v1/chat/completions). Thinking-model aware.
 # ============================================================================
 def call_chat_completion(base_url: str, model: str, prompt: str, max_tokens: int,
-                         temperature: float, timeout: float) -> dict[str, Any]:
+                         temperature: float, timeout: float,
+                         api_key: str = "") -> dict[str, Any]:
     url = base_url.rstrip("/") + "/v1/chat/completions"
     payload = {
         "model": model,
@@ -964,17 +965,19 @@ def call_chat_completion(base_url: str, model: str, prompt: str, max_tokens: int
         "temperature": temperature,
         "stream": False,
     }
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     t0 = time.time()
     if _HAS_HTTPX:
         with httpx.Client(timeout=timeout) as client:
-            r = client.post(url, json=payload)
+            r = client.post(url, json=payload, headers=headers)
             r.raise_for_status()
             data = r.json()
     else:
         import urllib.request
         req = urllib.request.Request(
-            url, data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"})
+            url, data=json.dumps(payload).encode(), headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode())
     latency_ms = (time.time() - t0) * 1000.0
@@ -1137,7 +1140,8 @@ def live_run(args: argparse.Namespace) -> int:
             try:
                 resp = call_chat_completion(
                     args.base_url, args.model, task.prompt,
-                    args.max_tokens, args.temperature, timeout=args.http_timeout)
+                    args.max_tokens, args.temperature, timeout=args.http_timeout,
+                    api_key=args.api_key)
             except Exception as e:
                 trials.append({
                     "task_id": task.task_id, "category": task.category,
@@ -1177,6 +1181,8 @@ def main() -> int:
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--http-timeout", type=float, default=600.0)
     ap.add_argument("--out", default="", help="path to JSON dump")
+    ap.add_argument("--api-key", default=os.environ.get("HARD_EVAL_API_KEY", ""),
+                    help="Bearer token (e.g. for Ollama Cloud); can also be set via HARD_EVAL_API_KEY env var")
     ap.add_argument("--dry-run", action="store_true",
                     help="validate graders offline; no endpoint contact")
     args = ap.parse_args()
