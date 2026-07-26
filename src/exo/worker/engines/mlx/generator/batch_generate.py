@@ -573,9 +573,24 @@ class ExoBatchGenerator:
                 f"(interval={_MEM_PROFILE_INTERVAL} steps)"
             )
 
-        # Enable PP speculation if draft model is configured and we're in PP mode
+        # Enable PP speculation if draft model is configured and we're in PP
+        # mode. EXO_SPECULATIVE is the intended master kill-switch for ALL
+        # speculative decoding (Tensor-mode MTP AND PP-mode speculation of
+        # every kind -- DSpark, native MTP, chained MTP, classic draft-model)
+        # -- previously it only gated whether DSv4's OWN native MTP head got
+        # loaded ON TOP of an already-active PP-spec session, while
+        # EXO_PP_DRAFT_MODEL's mere non-emptiness (default: a real path)
+        # silently kept _pp_spec_active True regardless. That mismatch bit a
+        # 2026-07-26 investigation: a test run set EXO_SPECULATIVE=0 assuming
+        # it fully disabled speculation, but PP-mode classic draft-model
+        # speculation (and therefore, transitively, DSpark -- see the
+        # _pp_spec_active gate at this method's submit() call site) was
+        # still active the whole time. Fixed by making EXO_SPECULATIVE a
+        # real master switch here, which also makes the old EXO_PP_SPEC_
+        # DISABLE flag (removed from start_cluster.sh the same day) genuinely
+        # redundant rather than "removed but still needed via a workaround".
         draft_path = os.environ.get("EXO_PP_DRAFT_MODEL", "")
-        if draft_path and self.group is not None and self.group.size() > 1:
+        if use_speculative and draft_path and self.group is not None and self.group.size() > 1:
             try:
                 from ..pp_speculation import get_pipeline_info
                 if get_pipeline_info(self.model) is not None:
@@ -2155,20 +2170,32 @@ class ExoBatchGenerator:
 
         # Create the spec decode generator
         request_trace.mark("pp_spec.decode_loop_start")
-        # DSpark (opt-in, EXO_PP_DSPARK=1) -- highest priority when available:
-        # a dedicated 3-stage semi-autoregressive draft head, strictly more
-        # capable than either the plain single-MTP-head chained path below
-        # or the original single-token MTP path. See pp_speculation.py's
-        # module-level comment above pp_dspark_decode_loop for the full
-        # rank1-owned draft+verify design and why DSpark's context-
-        # conditioning taps + lm_head being rank1-resident inverts the
-        # rank0-drafts-during-idle-time assumption the other two paths use.
+        # DSpark -- highest priority when available: a dedicated 3-stage
+        # semi-autoregressive draft head, strictly more capable than either
+        # the plain single-MTP-head chained path below or the original
+        # single-token MTP path. See pp_speculation.py's module-level
+        # comment above pp_dspark_decode_loop for the full rank1-owned
+        # draft+verify design and why DSpark's context-conditioning taps +
+        # lm_head being rank1-resident inverts the rank0-drafts-during-
+        # idle-time assumption the other two paths use.
+        #
+        # Gating: attach-at-load (EXO_DSV4_DSPARK=1, utils_mlx.py) is the
+        # ONLY control surface -- there used to be a second, redundant
+        # EXO_PP_DSPARK flag gating "use it as the PP decode loop", but the
+        # two were never toggled independently in practice (EXO_PP_DSPARK
+        # requiring EXO_DSV4_DSPARK=1 to do anything was called out as a
+        # hard dependency in start_cluster.sh's own comments) and having
+        # both was just confusing (2026-07-26). _has_dspark below is the
+        # correct single source of truth: it reflects the actual post-load
+        # runtime state, including the rank-consistency guard that can
+        # detach DSpark group-wide if any rank's overlay failed -- so this
+        # naturally falls back correctly even when the load-time flag was
+        # set but attachment didn't actually succeed.
         _inner_pp_for_dspark = getattr(self.model, "model", None)
         _has_dspark = (
             _inner_pp_for_dspark is not None
             and getattr(_inner_pp_for_dspark, "dspark", None) is not None
         )
-        _pp_dspark_enabled = os.environ.get("EXO_PP_DSPARK", "0") == "1"
         # Opt-in k-token chained MTP draft + batched verify (see
         # pp_speculation.py's module-level comment above _PP_MTP_CHAIN_K
         # for the full design). Only reachable when: (a) explicitly
@@ -2186,7 +2213,7 @@ class ExoBatchGenerator:
         # two ranks' independent EOS/max_tokens decisions against each
         # other (see EXO_PP_SPEC_FINISH_LOG below).
         self._pp_rank_for_log = pp_rank
-        if _pp_dspark_enabled and _has_dspark:
+        if _has_dspark:
             logger.info("PP speculation using DSpark (rank1-owned draft+verify)")
             self._pp_spec_gen = pp_dspark_decode_loop(
                 model=self.model,

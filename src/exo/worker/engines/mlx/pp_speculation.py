@@ -1581,7 +1581,9 @@ def pp_chained_decode_loop(
 
 
 # ---------------------------------------------------------------------------
-# PP + DSpark (opt-in, EXO_PP_DSPARK=1): rank1-owned draft+verify cycle
+# PP + DSpark (opt-in via EXO_DSV4_DSPARK=1 at model load; used automatically
+# in PP mode whenever the head is present -- see the _has_dspark gating in
+# batch_generate.py's _submit_pp_spec): rank1-owned draft+verify cycle
 # ---------------------------------------------------------------------------
 #
 # DSpark (arXiv:2607.05147) is a dedicated 3-stage semi-autoregressive draft
@@ -1647,7 +1649,6 @@ def pp_chained_decode_loop(
 # this was validated tonight -- temp>0 needs the TP path's categorical-
 # sampling + rejection-sampling machinery (accept_ratios/uniforms), not
 # ported here yet.
-_PP_DSPARK_ENABLED = os.environ.get("EXO_PP_DSPARK", "0") == "1"
 
 
 def pp_dspark_decode_loop(
@@ -1661,13 +1662,16 @@ def pp_dspark_decode_loop(
 ) -> Generator[tuple[int, mx.array], None, None]:
     """PP decode loop with DSpark draft+verify entirely owned by rank1.
 
-    Opt-in via EXO_PP_DSPARK=1. Requires model.model.dspark to already be
-    attached (via _overlay_dsv4_dspark, gated on EXO_DSV4_DSPARK=1 at model
-    load time) AND the pipeline_start_idx PP-tap-capture fix (auto_parallel.py
-    + deepseek_v4.py, 2026-07-18) to be present, or DSpark's context
-    conditioning silently never populates under PP (get_dspark_ctx returns
-    None every cycle -- draft() still runs, just without ctx conditioning,
-    degrading quality/acceptance rather than crashing).
+    Selected automatically in PP mode whenever model.model.dspark is
+    attached (EXO_DSV4_DSPARK=1 at model load time -- the ONLY control
+    surface; a formerly-separate EXO_PP_DSPARK "use it as PP decode loop"
+    flag was removed 2026-07-26 as redundant, since it was never toggled
+    independently of the load-time flag in practice). Requires the
+    pipeline_start_idx PP-tap-capture fix (auto_parallel.py + deepseek_v4.py,
+    2026-07-18) to be present, or DSpark's context conditioning silently
+    never populates under PP (get_dspark_ctx returns None every cycle --
+    draft() still runs, just without ctx conditioning, degrading
+    quality/acceptance rather than crashing).
     """
     from mlx_lm.models.deepseek_v4 import get_dspark_ctx
 

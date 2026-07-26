@@ -35,12 +35,18 @@
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
 : "${EXO_PP_DRAFT_MODEL=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
-# Allow explicit empty to disable PP speculation (the := below re-assigns
-# empty to the default; EXO_PP_SPEC_DISABLE=1 short-circuits the path).
-if [ "${EXO_PP_SPEC_DISABLE:-0}" = "1" ]; then
-    EXO_PP_DRAFT_MODEL=""
-    EXO_SPECULATIVE=0
-fi
+# To fully disable ALL speculative decoding (PP-mode DSpark/MTP/chained-MTP/
+# classic-draft-model, AND Tensor-mode MTP), set EXO_SPECULATIVE=0. This
+# used to require a SEPARATE EXO_PP_SPEC_DISABLE=1 flag (which emptied
+# EXO_PP_DRAFT_MODEL and set EXO_SPECULATIVE=0 together) because
+# EXO_SPECULATIVE=0 alone did NOT actually disable PP-mode speculation --
+# it only gated whether DSv4's own native MTP head got loaded ON TOP of an
+# already-active PP-spec session; PP_spec_active itself was driven purely
+# by EXO_PP_DRAFT_MODEL being non-empty (its default), independent of
+# EXO_SPECULATIVE. Removed 2026-07-26: EXO_SPECULATIVE is now a real
+# master switch (batch_generate.py's __post_init__ gates _pp_spec_active
+# on `use_speculative and draft_path`, not draft_path alone), so the
+# separate disable flag was pure redundancy once that bug was fixed.
 # DSv4-Flash sweet spot is 256 (251 tok/s vs 152 at 4096) per
 # dsv4_prefill_chunk_size_curve memory. Smaller chunks also produce
 # more chunk-boundary cache snapshots, which is what the prefix-cache
@@ -1139,10 +1145,8 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
-    if [ "${EXO_PP_SPEC_DISABLE:-0}" != "1" ]; then
-        : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
-        EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
-    fi
+    : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
+    EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
     # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
     [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
     [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
@@ -1846,16 +1850,16 @@ for NODE in "${NODES[@]}"; do
     # unset/1 keeps the proven single-token pp_speculative_decode_loop
     # path (default, unchanged behavior).
     [ -n "${EXO_PP_MTP_CHAIN_K:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_MTP_CHAIN_K=$EXO_PP_MTP_CHAIN_K"
-    # PP + DSpark (rank1-owned draft+verify, pp_dspark_decode_loop).
-    # Requires EXO_DSV4_DSPARK=1 (DSpark head attached at model load) --
-    # this flag alone just selects it as the PP decode loop when both are
-    # set. Highest priority in batch_generate.py's dispatch when available.
-    # DEFAULT ON 2026-07-23 alongside DSV4_SHARDING=Pipeline above (see
-    # that comment) -- only takes effect in Pipeline mode anyway (Tensor
-    # mode's decode path never reads this), so leaving it on by default
-    # is harmless when DSV4_SHARDING=Tensor is overridden back in.
-    : "${EXO_PP_DSPARK:=1}"
-    [ -n "${EXO_PP_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK=$EXO_PP_DSPARK"
+    # PP + DSpark (rank1-owned draft+verify, pp_dspark_decode_loop) is
+    # SELECTED AUTOMATICALLY in Pipeline mode whenever DSpark is attached
+    # at model load (EXO_DSV4_DSPARK=1, set above) -- highest priority in
+    # batch_generate.py's dispatch when available. There used to be a
+    # second EXO_PP_DSPARK flag gating "use it as the PP decode loop", but
+    # it was never toggled independently of EXO_DSV4_DSPARK in practice
+    # (this comment used to say so itself), so it was removed 2026-07-26 as
+    # pure redundancy. If you need to attach DSpark but NOT have it
+    # selected for PP decode, that's not currently a supported combination
+    # -- open an issue if you have a real use case for it.
     # One-shot forward-width scaling diagnostic (pp_dspark_decode_loop) --
     # opt-in, off by default, no effect on production decode.
     [ -n "${EXO_PP_DSPARK_WIDTH_SWEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_WIDTH_SWEEP=$EXO_PP_DSPARK_WIDTH_SWEEP"
@@ -1886,7 +1890,7 @@ for NODE in "${NODES[@]}"; do
     # the broken EXECUTE/YIELD speculative-forward mechanism below --
     # this is just DRAFT_AHEAD's own diagnostic tagging, safe and part of
     # the validated 2026-07-22 stress-sweep config. DEFAULT ON 2026-07-23
-    # alongside DSV4_SHARDING=Pipeline / EXO_PP_DSPARK above.
+    # alongside DSV4_SHARDING=Pipeline / DSpark auto-selection above.
     : "${EXO_PP_DSPARK_DRAFT_AHEAD:=1}"
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
     # Draft-ahead STEP 3a (2026-07-19, commit 0ed76f74; CONFIRMED BROKEN
@@ -2238,7 +2242,7 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
         echo "      with the p2p send/recv. This means:"
         echo "        - NO concurrent requests (c>=2 will deadlock — no task-set agreement)"
         echo "        - NO mid-decode cancellation (rank 1 blocks on recv forever)"
-        echo "      MTP speculation is also disabled (EXO_PP_SPEC_DISABLE=1)."
+        echo "      MTP speculation is also disabled (EXO_SPECULATIVE=0)."
         echo "      Event::wait timeout raised to 300s for pipeline-drain skew at high context."
         echo ""
     fi
