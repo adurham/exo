@@ -414,6 +414,52 @@ def _is_orphan_toolcall_tail(text: str) -> bool:
     return _ORPHAN_TOOLCALL_TAIL.search(text) is not None
 
 
+# Substrings that make buffered content signature-RELEVANT for the detectors
+# above (_is_sentinelless_tool_call / _is_orphan_toolcall_tail): the tag
+# openers/closers both signatures are built from, plus the ｜DSML｜ sentinel
+# (whose presence makes both detectors bail, so it must stay visible to them).
+# ``<tool_call`` also covers ``<tool_calls`` / ``<tool_called`` as a substring.
+_SENTINELLESS_WATCH_MARKERS = (
+    "<invoke",
+    "<tool_call",
+    "<parameter",
+    "</parameter",
+    "</invoke",
+    "｜DSML｜",
+)
+_MAX_WATCH_MARKER_LEN = max(len(marker) for marker in _SENTINELLESS_WATCH_MARKERS)
+
+
+def _sentinelless_hold_start(text: str) -> tuple[int, bool]:
+    """Split ``text`` into a provably-safe prefix and a suspicious tail.
+
+    Returns ``(hold_start, pinned)``: every character before ``hold_start``
+    can be streamed out immediately because it cannot participate in any
+    sentinel-less tool-call or orphan-tail signature — it contains no watch
+    marker and does not end in a partial prefix of one (a marker still
+    assembling across token boundaries). ``pinned`` is True when a FULL watch
+    marker already occurs in the retained tail; from that point the hold can
+    never release before the terminal decision (both signatures allow
+    arbitrary text between their tags), so callers can skip recomputing.
+    """
+    hold_start = len(text)
+    pinned = False
+    for marker in _SENTINELLESS_WATCH_MARKERS:
+        index = text.find(marker)
+        if index != -1:
+            pinned = True
+            hold_start = min(hold_start, index)
+    # A marker may still be assembling at the very end of the text (markers
+    # span multiple tokens — the whole point of buffering). Only the last
+    # (marker_len - 1) characters can be such a partial prefix.
+    window_start = max(len(text) - _MAX_WATCH_MARKER_LEN + 1, 0)
+    for index in range(window_start, hold_start):
+        suffix = text[index:]
+        if any(marker.startswith(suffix) for marker in _SENTINELLESS_WATCH_MARKERS):
+            return index, pinned
+    return hold_start, pinned
+
+
 def _is_sentinelless_tool_call(text: str) -> bool:
     """True when text contains a sentinel-less tool-call block (a tool-call
     opener + a ``<parameter …>`` tag, no ｜DSML｜ sentinel).
@@ -460,43 +506,73 @@ def _recover_or_fail_sentinelless_tool_call(
       * unparseable -> clean-fail the turn (finish_reason="error" -> 500 ->
         hermes retries), the pre-recovery behavior for a truly corrupt block.
     If the signature never confirms, the buffered content is flushed verbatim so
-    legitimate prose is never held back or dropped.
+    legitimate prose is never held back or dropped. Content that provably
+    cannot be part of a signature is streamed out incrementally (see the safe-
+    prefix flush below), so ordinary prose is never held until the terminal
+    chunk.
     """
     buffer: list[GenerationResponse] = []
     buffered_text = ""
     triggered = False
+    # True once buffered_text contains a full watch marker — from then on the
+    # whole buffer is held until the terminal decision (see
+    # _sentinelless_hold_start), so the safe-prefix computation is skipped.
+    buffer_pinned = False
 
     for item in stream:
-        # Reasoning tokens and non-GenerationResponse items are never tool
-        # calls — pass through, but first flush any pending content buffer to
-        # preserve ordering. This deliberately includes a thinking-flagged
-        # TERMINAL item: thinking content was never tool-call XML, so the
-        # tool-call decision logic below must not fire on it (a still-held
-        # triggered buffer is then dropped by the end-of-stream guard, never
-        # leaked as content).
+        # A bare ``None`` is the runner drain-loop's backpressure placeholder:
+        # ``GeneratorQueue.gen()`` (batch_generator.py) yields None whenever
+        # its deque is empty, and the engine's ``step()`` pushes ONE
+        # GenerationResponse then drains this parser pipeline until a None
+        # emerges — so a None arrives between EVERY pair of real tokens
+        # (verified live 2026-07-27 on macstudio-m4-1: 2717 Nones for 2715
+        # real tokens in a single turn). It must be forwarded promptly —
+        # swallowing it would make this loop pull again from the
+        # never-blocking queue and spin forever — but it carries ZERO
+        # information about the content stream, so it must NOT flush or reset
+        # the detection buffer. Treating it as a flush boundary (the previous
+        # behavior) capped buffered_text at a single token and blinded every
+        # multi-token signature — i.e. ALL of them: ``<invoke name="…">``,
+        # ``</parameter>``, ``</invoke>`` each span several tokens — making
+        # the sentinel-less recovery AND the orphan-tail clean-fail dead code
+        # in production while the per-token flush kept the content itself
+        # flowing (which is why the leak was invisible to output diffing).
+        if item is None:
+            yield item
+            continue
+
+        # Reasoning tokens and ToolCallResponses are never part of a
+        # sentinel-less block — pass through, but first flush any pending
+        # content buffer to preserve ordering. This deliberately includes a
+        # thinking-flagged TERMINAL item: thinking content was never tool-call
+        # XML, so the tool-call decision logic below must not fire on it (a
+        # still-held triggered buffer is then dropped by the end-of-stream
+        # guard, never leaked as content).
         if not isinstance(item, GenerationResponse) or item.is_thinking:
             if buffer and not triggered:
                 yield from buffer
                 buffer = []
                 buffered_text = ""
+                buffer_pinned = False
             yield item
             continue
 
-        # Empty-text NON-terminal chunks carry no tool-call signal — pass
-        # through like any other non-content item. Terminal chunks must NOT
-        # take this shortcut: in the real production stream finish_reason
-        # arrives on a SEPARATE, empty-text terminal chunk (verified against
-        # a live SSE capture, 2026-07-26 — the last content token comes one
-        # chunk earlier with finish_reason=None). Routing that terminal chunk
+        # Empty-text NON-terminal chunks carry no tool-call signal — but,
+        # like the None placeholder, they carry no "this ISN'T a tool call
+        # forming" signal either: the streaming detokenizer emits them
+        # mid-content while assembling multi-byte glyphs (5 observed
+        # mid-content in the 2026-07-27 live capture), so flushing on them
+        # wiped a forming pattern exactly like the None bug. Pass through
+        # WITHOUT touching the buffer. Terminal chunks must NOT take this
+        # shortcut: in the real production stream finish_reason arrives on a
+        # SEPARATE, empty-text terminal chunk (verified against a live SSE
+        # capture, 2026-07-26 — the last content token comes one chunk
+        # earlier with finish_reason=None). Routing that terminal chunk
         # through this pass-through used to flush the whole buffer as
         # ordinary content and skip every decision below, making BOTH the
         # orphan-tail clean-fail AND the sentinel-less recovery dead code in
         # production.
         if not item.text and item.finish_reason is None:
-            if buffer and not triggered:
-                yield from buffer
-                buffer = []
-                buffered_text = ""
             yield item
             continue
 
@@ -644,7 +720,41 @@ def _recover_or_fail_sentinelless_tool_call(
             buffer = []
             buffered_text = ""
             triggered = False
+            buffer_pinned = False
             continue
+
+        # ── Safe-prefix streaming flush (non-terminal content) ─────────────
+        # With None/empty items no longer treated as flush boundaries, the
+        # buffer would otherwise hold the ENTIRE non-thinking content until
+        # the terminal chunk — real turns run to thousands of content tokens
+        # (2508 in the 2026-07-27 live capture), which would stall streaming
+        # for the whole generation. Stream out the prefix that provably
+        # cannot participate in any signature: everything before the first
+        # watch-marker occurrence or trailing partial marker prefix. The
+        # suspicious tail stays buffered, so detection keeps full multi-token
+        # context while ordinary prose streams with at most a marker-length
+        # delay. Once a full marker occurs (buffer_pinned) — or the signature
+        # has confirmed (triggered) — everything from it onward is held for
+        # the terminal decision, so raw tags are never shown as content.
+        if triggered or buffer_pinned:
+            continue
+        hold_start, buffer_pinned = _sentinelless_hold_start(buffered_text)
+        if hold_start == 0:
+            continue
+        flushed_text_len = 0
+        flushed_item_count = 0
+        for buffered_item in buffer:
+            item_text_len = len(buffered_item.text)
+            # Never split an item's text: an item straddling the safe/held
+            # boundary stays held in full.
+            if flushed_text_len + item_text_len > hold_start:
+                break
+            yield buffered_item
+            flushed_text_len += item_text_len
+            flushed_item_count += 1
+        if flushed_item_count:
+            buffer = buffer[flushed_item_count:]
+            buffered_text = buffered_text[flushed_text_len:]
 
     # Stream ended with no terminal response while buffering.
     if buffer and not triggered:

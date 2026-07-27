@@ -84,7 +84,8 @@ def _simulate_tokens(
     texts: list[str],
     finish_on_last: bool = True,
     separate_terminal_chunk: bool = True,
-) -> Generator[GenerationResponse]:
+    interleave_none: bool = True,
+) -> Generator[GenerationResponse | None]:
     """Simulate a model producing tokens from a list of text strings.
 
     By default (``separate_terminal_chunk=True``) the terminal finish_reason
@@ -97,6 +98,19 @@ def _simulate_tokens(
     while being dead code in production. Set
     ``separate_terminal_chunk=False`` to simulate finish_reason landing on a
     text-bearing chunk (a shape the parser must also tolerate).
+
+    By default (``interleave_none=True``) a bare ``None`` is yielded after
+    EVERY chunk — also the real production shape: ``GeneratorQueue.gen()``
+    (batch_generator.py) yields ``None`` whenever its deque is empty, and the
+    engine's ``step()`` pushes ONE response then drains the parser pipeline
+    until a ``None`` emerges, so one ``None`` arrives between every pair of
+    real tokens (verified live 2026-07-27, /tmp/orphan_chunk_debug.log on
+    macstudio-m4-1: 2717 Nones for 2715 real tokens in a single turn). The
+    old fixture never yielded ``None``, which let a flush-on-None bug cap the
+    sentinel-less detection buffer at one token in production while every
+    test stayed green — the second time an unrealistic fixture shape masked
+    a real production bug. ``interleave_none=False`` keeps the old
+    contiguous shape (which parsers must also tolerate).
     """
     for i, text in enumerate(texts):
         is_last = i == len(texts) - 1
@@ -107,6 +121,8 @@ def _simulate_tokens(
             finish_reason="stop" if attach_finish else None,
             usage=None,
         )
+        if interleave_none:
+            yield None
     if finish_on_last and separate_terminal_chunk:
         yield GenerationResponse(
             text="",
@@ -1475,12 +1491,14 @@ def _simulate_tokens_with_special(
     special_id: int,
     finish_on_last: bool = True,
     separate_terminal_chunk: bool = True,
-) -> Generator[GenerationResponse]:
+    interleave_none: bool = True,
+) -> Generator[GenerationResponse | None]:
     """Like ``_simulate_tokens`` but assigns ``special_id`` to any chunk whose
     text equals ``special_text`` (mirroring a real special vocab token), and a
     plain sequential id to everything else (ordinary BPE text). Like
     ``_simulate_tokens``, finish_reason arrives by default on a separate
-    empty-text terminal chunk — the real production stream shape."""
+    empty-text terminal chunk and a bare ``None`` follows every chunk — the
+    real production stream shape (see ``_simulate_tokens``)."""
     for i, text in enumerate(texts):
         is_last = i == len(texts) - 1
         attach_finish = is_last and finish_on_last and not separate_terminal_chunk
@@ -1490,6 +1508,8 @@ def _simulate_tokens_with_special(
             finish_reason="stop" if attach_finish else None,
             usage=None,
         )
+        if interleave_none:
+            yield None
     if finish_on_last and separate_terminal_chunk:
         yield GenerationResponse(
             text="",
@@ -2346,3 +2366,204 @@ class TestE2EDeepseekV4StructuralTagGarbleRepair:
         args = json.loads(tool_results[0].tool_calls[0].arguments)  # pyright: ignore[reportAny]
         assert args["command"] == 'curl -s "https://wttr.in/Paris"'
         assert args["timeout"] == 15
+
+
+# ── Test: interleaved-None stream shape (the real drain-loop protocol) ────────
+
+
+def _drive_production_drain(
+    pushes: list[GenerationResponse],
+) -> list[list[GenerationResponse | ToolCallResponse]]:
+    """Drive ``parse_deepseek_v4`` exactly the way the production engine does.
+
+    Mirrors ``GeneratorQueue.gen()`` + the ``step()`` drain loop in
+    batch_generator.py: the source yields ``None`` whenever its deque is
+    empty; the driver pushes ONE response, then pulls parsed output until a
+    ``None`` emerges (``next(gen, None)`` — a yielded None and generator
+    exhaustion are indistinguishable to the drain loop, as in production).
+    Returns the parsed items collected per push. Fails loudly if the parser
+    ever swallows the drain ``None`` (which would spin the production loop
+    forever on the never-blocking queue).
+    """
+    from collections import deque
+
+    queue: deque[GenerationResponse] = deque()
+
+    def source() -> Generator[GenerationResponse | None]:
+        while True:
+            yield queue.popleft() if queue else None
+
+    parsed = parse_deepseek_v4(source())
+    per_push: list[list[GenerationResponse | ToolCallResponse]] = []
+    for response in pushes:
+        queue.append(response)
+        collected: list[GenerationResponse | ToolCallResponse] = []
+        pulls = 0
+        while (item := next(parsed, None)) is not None:
+            collected.append(item)
+            pulls += 1
+            assert pulls <= 100, (
+                "parser failed to forward the drain None promptly — the "
+                "production step() loop would spin forever"
+            )
+        per_push.append(collected)
+    return per_push
+
+
+class TestE2EDeepseekV4InterleavedNoneStream:
+    """The REAL runner stream interleaves a bare ``None`` between every pair
+    of real tokens (GeneratorQueue backpressure — captured live 2026-07-27 on
+    macstudio-m4-1, /tmp/orphan_chunk_debug.log: one None per real token).
+
+    ``_recover_or_fail_sentinelless_tool_call`` used to treat every non-
+    GenerationResponse item as a flush boundary, so each interleaved None
+    flushed and RESET the detection buffer: ``buffered_text`` never held more
+    than one token while untriggered, blinding both
+    ``_is_sentinelless_tool_call`` and ``_is_orphan_toolcall_tail`` to every
+    multi-token pattern — i.e. ALL of them. Content still streamed fine
+    (each token was flushed through), which is why the leak never showed up
+    in output diffing: only the DETECTION was dead. These tests reproduce the
+    captured shape token-by-token and fail against the pre-fix loop.
+    """
+
+    def test_multitoken_sentinelless_invoke_recovered_across_nones(self):
+        """A sentinel-less <invoke> tool call built from realistic multi-token
+        chunks WITH a None after every token (the captured production shape)
+        must be recovered into a real ToolCallResponse — under the old loop
+        the Nones wiped the buffer each token, the signature never confirmed,
+        and the raw tags flushed into user-visible content."""
+        model_tokens = [
+            "<", "invoke", ' name="', "memory", '">', "\n",
+            "<", "parameter", ' name="', "action", '" string="', "true", '">',
+            "add", "</", "parameter", ">", "\n",
+            "</", "invoke", ">",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(tool_results) == 1, f"expected recovered call, got {results!r}"
+        call = tool_results[0].tool_calls[0]
+        assert call.name == "memory"
+        assert json.loads(call.arguments) == {"action": "add"}
+        # The raw tags must never leak as content.
+        assert "<invoke" not in non_error_text
+        assert "<parameter" not in non_error_text
+        assert "</invoke>" not in non_error_text
+
+    def test_multitoken_orphan_tail_clean_fails_across_nones(self):
+        """A multi-token orphan tool-call tail (bare ``</parameter>`` …
+        ``</invoke>`` closers, opener lost upstream) with interleaved Nones
+        must clean-fail — under the old loop the closers flushed verbatim and
+        painted as the final answer (the 2026-07-26 hard_eval leak, which
+        83d71af7 alone did NOT fix in production because of the Nones)."""
+        model_tokens = [
+            "        return", " self", ".cache", "[key]", "\n",
+            "</", "parameter", ">", "\n",
+            "</", "invoke", ">", "\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</invoke>" not in non_error_text
+        assert "</parameter>" not in non_error_text
+
+    def test_nones_are_forwarded_not_swallowed(self):
+        """Every interleaved None must come back out of the pipeline: it is
+        the drain-loop's stop signal (GeneratorQueue never blocks — a parser
+        that swallows Nones and pulls again would spin step() forever)."""
+        model_tokens = ["Plain", " prose", " answer", "."]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        assert results.count(None) == len(model_tokens)
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert "".join(r.text for r in text_results) == "".join(model_tokens)
+
+    def test_empty_text_chunk_does_not_wipe_detection_buffer(self):
+        """Empty-text NON-terminal chunks occur mid-content in the real stream
+        (detokenizer assembling multi-byte glyphs; 5 observed in the same live
+        capture). Like the Nones, they carry no signal and must not wipe a
+        forming pattern — here one lands mid-``</parameter>``."""
+        model_tokens = [
+            "        return", " x", "\n",
+            "</", "param",
+            "",  # empty-text detokenizer chunk mid-pattern
+            "eter", ">", "\n",
+            "</", "invoke", ">", "\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert "</invoke>" not in non_error_text
+
+    def test_prose_streams_incrementally_under_drain_protocol(self):
+        """Driven exactly like production (push one token, drain until None):
+        ordinary prose must stream out DURING generation, not be held until
+        the terminal chunk — the safe-prefix flush keeps detection context
+        without stalling streaming for thousands of tokens."""
+        pushes = [
+            GenerationResponse(text="The answer", token=0, finish_reason=None, usage=None),
+            GenerationResponse(text=" is", token=1, finish_reason=None, usage=None),
+            GenerationResponse(text=" 42.", token=2, finish_reason=None, usage=None),
+            GenerationResponse(text="", token=3, finish_reason="stop", usage=None),
+        ]
+        per_push = _drive_production_drain(pushes)
+        # Each prose token must be emitted in the step it was pushed (no
+        # marker-suspicious tail to hold) — NOT bunched at the terminal.
+        pre_terminal_text = "".join(
+            item.text
+            for step in per_push[:-1]
+            for item in step
+            if isinstance(item, GenerationResponse)
+        )
+        assert pre_terminal_text == "The answer is 42."
+        terminal_items = [
+            item for item in per_push[-1] if isinstance(item, GenerationResponse)
+        ]
+        assert terminal_items and terminal_items[-1].finish_reason == "stop"
+
+    def test_orphan_tail_clean_fails_under_drain_protocol(self):
+        """End-to-end under the production drain protocol: the code body
+        streams, the suspicious closers are held, and the terminal push
+        clean-fails the turn — never painting the closers as content."""
+        texts = [
+            "        node = self._Node(key, value)\n",
+            "        self.cache[key] = node\n",
+            "</parameter>", "\n",
+            "</invoke>", "\n",
+        ]
+        pushes = [
+            GenerationResponse(text=t, token=i, finish_reason=None, usage=None)
+            for i, t in enumerate(texts)
+        ]
+        pushes.append(
+            GenerationResponse(text="", token=len(texts), finish_reason="stop", usage=None)
+        )
+        per_push = _drive_production_drain(pushes)
+        all_items = [item for step in per_push for item in step]
+        gen_items = [i for i in all_items if isinstance(i, GenerationResponse)]
+        error_responses = [i for i in gen_items if i.finish_reason == "error"]
+        non_error_text = "".join(
+            i.text for i in gen_items if i.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {all_items!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</parameter>" not in non_error_text
+        assert "</invoke>" not in non_error_text
+        # The safe code body still streamed before the terminal decision.
+        assert "self._Node(key, value)" in "".join(
+            i.text
+            for step in per_push[:-1]
+            for i in step
+            if isinstance(i, GenerationResponse)
+        )
