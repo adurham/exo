@@ -996,7 +996,7 @@ class API:
 
     async def chat_completions(
         self, payload: ChatCompletionRequest
-    ) -> ChatCompletionResponse | StreamingResponse:
+    ) -> ChatCompletionResponse | StreamingResponse | Response:
         """OpenAI Chat Completions API - adapter."""
         task_params = await chat_request_to_text_generation(payload)
         validated_model = await self._validate_model_has_instance(task_params.model)
@@ -1020,13 +1020,33 @@ class API:
                 },
             )
         else:
-            return StreamingResponse(
-                collect_chat_response(
-                    command.command_id,
-                    self._token_chunk_stream(command.command_id),
-                ),
-                media_type="application/json",
-            )
+            # BUGFIX (2026-07-26): this used to wrap the single-yield
+            # collect_chat_response generator in a StreamingResponse. Once
+            # a StreamingResponse starts (status 200 + headers already
+            # sent), an exception raised later inside the generator
+            # (collect_chat_response raises ValueError on an ErrorChunk --
+            # e.g. from the degeneration kill-switch) can no longer change
+            # the status code: the client got a "successful" HTTP 200 with
+            # a completely empty body, no error signal at all. Confirmed
+            # live investigating a degeneration-loop fix: an intentional
+            # kill-switch termination silently vanished into an empty 200
+            # instead of surfacing as an error. Fix: consume the (always
+            # single-item) generator fully HERE, before any response
+            # object is constructed, so a raised error can still become a
+            # real HTTPException/500 -- routed through the SAME centralized
+            # http_exception_handler (formats exc.detail into the standard
+            # ErrorResponse/ErrorInfo shape) every other error path here
+            # already uses, rather than building that shape twice.
+            try:
+                response_json = [
+                    part async for part in collect_chat_response(
+                        command.command_id,
+                        self._token_chunk_stream(command.command_id),
+                    )
+                ][0]
+            except ValueError as e:
+                raise HTTPException(status_code=500, detail=str(e)) from e
+            return Response(content=response_json, media_type="application/json")
 
     async def bench_chat_completions(
         self, payload: BenchChatCompletionRequest
