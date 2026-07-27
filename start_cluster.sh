@@ -486,7 +486,13 @@ fi
 # silently override the card and defeat any future card-level sampling fix,
 # exactly as happened 2026-06-16 to 2026-07-24: this var was pinned to 1.0,
 # so the card's 0.95 fix was never actually live despite being "deployed".
-: "${DSV4_TEMPERATURE:=1.0}"
+# DSV4_TEMPERATURE joined the unset list 2026-07-27 for the same reason: the
+# card moved to Ollama-parity sampling (temp 0.8 / top_p 0.9 / top_k 40 /
+# min_p 0 — matching what Ollama Cloud actually serves this model with, per
+# the 2026-07-26 hermes hard_eval A/B where Ollama scored 100% vs exo 78.8%
+# on the same weights), and a pinned 1.0 here would have silently kept the
+# old temperature live. Override via env only for experiments.
+: "${DSV4_TEMPERATURE:=}"
 : "${DSV4_TOP_P:=}"
 : "${DSV4_TOP_K:=}"
 : "${DSV4_MIN_P:=}"
