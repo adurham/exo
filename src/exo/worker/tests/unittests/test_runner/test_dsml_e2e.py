@@ -1858,6 +1858,86 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         assert all(r.finish_reason != "error" for r in text_results)
 
 
+class TestE2EDeepseekV4OrphanToolCallTail:
+    """The TAIL of a tool call whose opener never reached the content stream.
+
+    Reproduces the 2026-07-26 hermes hard_eval leak (code_lru_cache t1/t2/t3,
+    code_dijkstra t1/t2, code_segment_tree t2): the final visible content was a
+    write_file `content` argument (a whole Python file) ending in bare
+    ``</parameter>\\n</invoke>`` closers — sometimes with a trailing complete
+    ``<parameter name="path" string="true">…</parameter>`` block before the
+    ``</invoke>`` — with the OPENING tags lost upstream. With no opener,
+    ``_is_sentinelless_tool_call`` can't confirm its signature, so the raw tail
+    flushed verbatim and painted as the user-visible final answer. New
+    contract: clean-fail (finish_reason="error") so the turn is retried; the
+    tags never leak as content.
+    """
+
+    def test_orphan_tail_clean_fails_not_leaks(self):
+        """The exact code_lru_cache t1 shape: code body + bare closers."""
+        model_tokens = [
+            "        node = self._Node(key, value)\n",
+            "        self.cache[key] = node\n",
+            "        self._add_to_front(node)\n",
+            "</parameter>\n",
+            "</invoke>\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</invoke>" not in non_error_text
+        assert "</parameter>" not in non_error_text
+
+    def test_orphan_tail_with_trailing_path_parameter_block(self):
+        """The code_lru_cache t3 / code_dijkstra t1 shape: body closer, then a
+        complete typed path parameter block, then </invoke>."""
+        model_tokens = [
+            "        del self._cache[lru.key]\n",
+            "</parameter>\n",
+            '<parameter name="path" string="true">/tmp/x/lru_cache.py</parameter>\n',
+            "</invoke>\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert "</invoke>" not in non_error_text
+        assert "<parameter name=" not in non_error_text
+
+    def test_prose_mentioning_closers_mid_text_passes_through(self):
+        """Closers NOT at the very end of the turn are prose (e.g. the model
+        explaining tag syntax) — must pass through verbatim, no error."""
+        model_tokens = [
+            "The closing sequence looks like </parameter> then </invoke> ",
+            "and that's how the dialect terminates a call.",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert all(r.finish_reason != "error" for r in text_results)
+        full_text = "".join(r.text for r in text_results)
+        assert "</parameter>" in full_text
+
+    def test_plain_code_answer_unaffected(self):
+        """A normal inline-code final answer must flush verbatim."""
+        model_tokens = [
+            "```python\n",
+            "def f(x):\n    return x + 1\n",
+            "```\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert all(r.finish_reason != "error" for r in text_results)
+        assert "".join(r.text for r in text_results) == "".join(model_tokens)
+
+
 # ── Test: DSML structural-tag garble repair (invinvoke etc.) ──────────────────
 
 
