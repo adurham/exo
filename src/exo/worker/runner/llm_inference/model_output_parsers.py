@@ -467,18 +467,6 @@ def _recover_or_fail_sentinelless_tool_call(
     triggered = False
 
     for item in stream:
-        try:
-            with open("/tmp/orphan_chunk_debug.log", "a") as _dbg:
-                _dbg.write(
-                    f"type={type(item).__name__} "
-                    f"text={getattr(item, 'text', None)!r} "
-                    f"is_thinking={getattr(item, 'is_thinking', None)!r} "
-                    f"finish_reason={getattr(item, 'finish_reason', None)!r} "
-                    f"triggered={triggered!r} "
-                    f"buffered_text_tail={buffered_text[-120:]!r}\n"
-                )
-        except Exception:
-            pass
         # Reasoning tokens and non-GenerationResponse items are never tool
         # calls — pass through, but first flush any pending content buffer to
         # preserve ordering. This deliberately includes a thinking-flagged
