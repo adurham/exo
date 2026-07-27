@@ -83,14 +83,35 @@ _WEATHER_TOOLS: list[dict[str, Any]] = [
 def _simulate_tokens(
     texts: list[str],
     finish_on_last: bool = True,
+    separate_terminal_chunk: bool = True,
 ) -> Generator[GenerationResponse]:
-    """Simulate a model producing tokens from a list of text strings."""
+    """Simulate a model producing tokens from a list of text strings.
+
+    By default (``separate_terminal_chunk=True``) the terminal finish_reason
+    arrives on a SEPARATE, EMPTY-text chunk after the last content chunk —
+    the shape the production stream actually has (verified against a live SSE
+    capture 2026-07-26: the terminal chunk carries an empty delta together
+    with finish_reason, one chunk after the last content token). The old
+    default — attaching finish_reason to the last TEXT chunk — never occurs
+    in real streams and let the parsers' terminal decision logic pass tests
+    while being dead code in production. Set
+    ``separate_terminal_chunk=False`` to simulate finish_reason landing on a
+    text-bearing chunk (a shape the parser must also tolerate).
+    """
     for i, text in enumerate(texts):
         is_last = i == len(texts) - 1
+        attach_finish = is_last and finish_on_last and not separate_terminal_chunk
         yield GenerationResponse(
             text=text,
             token=i,
-            finish_reason="stop" if (is_last and finish_on_last) else None,
+            finish_reason="stop" if attach_finish else None,
+            usage=None,
+        )
+    if finish_on_last and separate_terminal_chunk:
+        yield GenerationResponse(
+            text="",
+            token=len(texts),
+            finish_reason="stop",
             usage=None,
         )
 
@@ -132,10 +153,13 @@ class TestE2EStandardResponse:
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
 
         assert len(tool_results) == 0
-        assert len(gen_results) == 6
+        # 6 content chunks + the separate empty-text terminal chunk (the real
+        # production stream shape).
+        assert len(gen_results) == 7
         full_text = "".join(r.text for r in gen_results)
         assert full_text == "The weather in NYC is 72°F and sunny."
         assert gen_results[-1].finish_reason == "stop"
+        assert gen_results[-1].text == ""
 
 
 # ── Test: Tool call response ─────────────────────────────────────
@@ -563,13 +587,15 @@ class TestE2EEdgeCases:
         assert "<x, y>" in full_text
 
     def test_empty_model_response(self):
-        """Model produces only EOS (empty response)."""
+        """Model produces only EOS (empty response): one empty content chunk
+        followed by the separate empty-text terminal chunk."""
         model_tokens = [""]
         results = list(parse_deepseek_v32(_simulate_tokens(model_tokens)))
         gen_results = [r for r in results if isinstance(r, GenerationResponse)]
-        assert len(gen_results) == 1
-        assert gen_results[0].text == ""
-        assert gen_results[0].finish_reason == "stop"
+        assert len(gen_results) == 2
+        assert all(r.text == "" for r in gen_results)
+        assert gen_results[0].finish_reason is None
+        assert gen_results[-1].finish_reason == "stop"
 
 
 # ── Test: Full EPDP spec round-trip ──────────────────────────────
@@ -1448,16 +1474,27 @@ def _simulate_tokens_with_special(
     special_text: str,
     special_id: int,
     finish_on_last: bool = True,
+    separate_terminal_chunk: bool = True,
 ) -> Generator[GenerationResponse]:
     """Like ``_simulate_tokens`` but assigns ``special_id`` to any chunk whose
     text equals ``special_text`` (mirroring a real special vocab token), and a
-    plain sequential id to everything else (ordinary BPE text)."""
+    plain sequential id to everything else (ordinary BPE text). Like
+    ``_simulate_tokens``, finish_reason arrives by default on a separate
+    empty-text terminal chunk — the real production stream shape."""
     for i, text in enumerate(texts):
         is_last = i == len(texts) - 1
+        attach_finish = is_last and finish_on_last and not separate_terminal_chunk
         yield GenerationResponse(
             text=text,
             token=special_id if text == special_text else i,
-            finish_reason="stop" if (is_last and finish_on_last) else None,
+            finish_reason="stop" if attach_finish else None,
+            usage=None,
+        )
+    if finish_on_last and separate_terminal_chunk:
+        yield GenerationResponse(
+            text="",
+            token=len(texts),
+            finish_reason="stop",
             usage=None,
         )
 
@@ -1936,6 +1973,170 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         assert all(r.finish_reason != "error" for r in text_results)
         assert "".join(r.text for r in text_results) == "".join(model_tokens)
+
+
+# ── Test: terminal finish_reason on a SEPARATE empty chunk (real shape) ───────
+
+
+class TestE2EDeepseekV4SeparateTerminalChunk:
+    """The REAL production stream shape: finish_reason arrives on a separate,
+    EMPTY-text terminal chunk AFTER the last content token (verified against a
+    live SSE capture 2026-07-26 — the terminal chunk was
+    ``"delta":{"content":""},"finish_reason":"stop"``, one chunk after the
+    final content delta, which had finish_reason=null).
+
+    ``_recover_or_fail_sentinelless_tool_call`` used to route ANY empty-text
+    item through its pass-through branch — flushing the whole buffer as
+    ordinary successful content and skipping the terminal decision logic
+    entirely. That made BOTH the orphan-tail clean-fail AND the sentinel-less
+    tool-call recovery dead code in production, while every test (built on the
+    fixture's old attach-finish_reason-to-last-text-chunk shape) stayed green.
+    These tests pin the real shape explicitly and would fail against the old
+    loop structure.
+    """
+
+    def test_orphan_tail_clean_fails_with_separate_terminal_chunk(self):
+        """The core repro: content chunks build up a bare closing-tag tail,
+        then a SEPARATE empty-text finish_reason="stop" chunk arrives. The
+        turn must clean-fail — under the old loop the empty terminal chunk
+        flushed the tail verbatim as the user-visible final answer."""
+        model_tokens = [
+            "        node = self._Node(key, value)\n",
+            "        self.cache[key] = node\n",
+            "</parameter>\n",
+            "</invoke>\n",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens(model_tokens, separate_terminal_chunk=True)
+            )
+        )
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</invoke>" not in non_error_text
+        assert "</parameter>" not in non_error_text
+
+    def test_orphan_tail_clean_fails_with_finish_on_text_chunk(self):
+        """A terminal chunk may in principle carry trailing text AND
+        finish_reason together — the decision logic must include that text in
+        the buffered view and still clean-fail."""
+        model_tokens = [
+            "        node = self._Node(key, value)\n",
+            "</parameter>\n",
+            "</invoke>\n",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens(model_tokens, separate_terminal_chunk=False)
+            )
+        )
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert "</invoke>" not in non_error_text
+
+    def test_clean_multichunk_response_passes_through(self):
+        """No regression: a normal multi-chunk answer with the real terminal
+        shape flushes verbatim, in order, with the terminal chunk's
+        finish_reason preserved."""
+        model_tokens = [
+            "The capital of France",
+            " is Paris",
+            ".",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens(model_tokens, separate_terminal_chunk=True)
+            )
+        )
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert all(r.finish_reason != "error" for r in text_results)
+        assert not any(isinstance(r, ToolCallResponse) for r in results)
+        assert "".join(r.text for r in text_results) == "".join(model_tokens)
+        assert text_results[-1].finish_reason == "stop"
+        assert text_results[-1].text == ""
+
+    def test_sentinelless_recovery_with_separate_terminal_chunk(self):
+        """The PRE-EXISTING sentinel-less recovery path — a full
+        <invoke>…</invoke> block split across chunks — must actually recover
+        into a real ToolCallResponse when finish_reason arrives on a separate
+        empty terminal chunk. This path was ALSO dead in production under the
+        old loop (the empty terminal chunk flushed the raw tags as content)."""
+        model_tokens = [
+            "<tool_calls>\n",
+            '<invoke name="memory">\n',
+            '<parameter name="action" string="true">add</parameter>\n',
+            '<parameter name="content" string="true">never pre-load context</parameter>\n',
+            "</invoke>\n</tool_calls>",
+        ]
+        results = list(
+            parse_deepseek_v4(
+                _simulate_tokens(model_tokens, separate_terminal_chunk=True)
+            )
+        )
+        tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(tool_results) == 1, f"expected recovered call, got {results!r}"
+        call = tool_results[0].tool_calls[0]
+        assert call.name == "memory"
+        assert json.loads(call.arguments) == {
+            "action": "add",
+            "content": "never pre-load context",
+        }
+        assert "<invoke name=" not in non_error_text
+        assert "<parameter name=" not in non_error_text
+
+    def test_immediate_terminal_with_no_content(self):
+        """Edge case: the stream is ONLY the empty terminal chunk (e.g. an
+        immediate stop with no content generated). The terminal logic must not
+        crash or misbehave on an empty buffer — the chunk passes through with
+        its finish_reason intact."""
+        results = list(parse_deepseek_v4(_simulate_tokens([])))
+        gen_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert len(gen_results) == 1
+        assert gen_results[0].text == ""
+        assert gen_results[0].finish_reason == "stop"
+        assert gen_results[0].finish_reason != "error"
+
+    def test_thinking_terminal_does_not_trigger_recovery(self):
+        """A thinking-flagged terminal item must NOT trigger tool-call
+        recovery — thinking content was never tool-call XML. Buffered
+        (non-triggered) content flushes and the terminal item passes through
+        untouched."""
+        from exo.worker.runner.llm_inference.model_output_parsers import (
+            _recover_or_fail_sentinelless_tool_call,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        def _stream() -> Generator[GenerationResponse | ToolCallResponse | None]:
+            yield GenerationResponse(
+                text="some prose", token=0, finish_reason=None, usage=None
+            )
+            yield GenerationResponse(
+                text="",
+                token=1,
+                finish_reason="stop",
+                usage=None,
+                is_thinking=True,
+            )
+
+        results = list(_recover_or_fail_sentinelless_tool_call(_stream()))
+        assert len(results) == 2
+        assert all(isinstance(r, GenerationResponse) for r in results)
+        gen_results = cast(list[GenerationResponse], results)
+        assert gen_results[0].text == "some prose"
+        assert gen_results[1].finish_reason == "stop"
+        assert all(r.finish_reason != "error" for r in gen_results)
 
 
 # ── Test: DSML structural-tag garble repair (invinvoke etc.) ──────────────────

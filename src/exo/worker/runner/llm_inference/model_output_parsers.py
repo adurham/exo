@@ -467,9 +467,14 @@ def _recover_or_fail_sentinelless_tool_call(
     triggered = False
 
     for item in stream:
-        # Reasoning tokens and non-text items are never tool calls — pass through,
-        # but first flush any pending content buffer to preserve ordering.
-        if not isinstance(item, GenerationResponse) or item.is_thinking or not item.text:
+        # Reasoning tokens and non-GenerationResponse items are never tool
+        # calls — pass through, but first flush any pending content buffer to
+        # preserve ordering. This deliberately includes a thinking-flagged
+        # TERMINAL item: thinking content was never tool-call XML, so the
+        # tool-call decision logic below must not fire on it (a still-held
+        # triggered buffer is then dropped by the end-of-stream guard, never
+        # leaked as content).
+        if not isinstance(item, GenerationResponse) or item.is_thinking:
             if buffer and not triggered:
                 yield from buffer
                 buffer = []
@@ -477,6 +482,28 @@ def _recover_or_fail_sentinelless_tool_call(
             yield item
             continue
 
+        # Empty-text NON-terminal chunks carry no tool-call signal — pass
+        # through like any other non-content item. Terminal chunks must NOT
+        # take this shortcut: in the real production stream finish_reason
+        # arrives on a SEPARATE, empty-text terminal chunk (verified against
+        # a live SSE capture, 2026-07-26 — the last content token comes one
+        # chunk earlier with finish_reason=None). Routing that terminal chunk
+        # through this pass-through used to flush the whole buffer as
+        # ordinary content and skip every decision below, making BOTH the
+        # orphan-tail clean-fail AND the sentinel-less recovery dead code in
+        # production.
+        if not item.text and item.finish_reason is None:
+            if buffer and not triggered:
+                yield from buffer
+                buffer = []
+                buffered_text = ""
+            yield item
+            continue
+
+        # A terminal chunk may in principle carry trailing text AND
+        # finish_reason together — append first (empty text is a no-op for
+        # buffered_text but keeps the terminal item in the buffer so a plain
+        # flush still emits its finish_reason downstream), then decide.
         buffer.append(item)
         buffered_text += item.text
         if not triggered and _is_sentinelless_tool_call(buffered_text):
