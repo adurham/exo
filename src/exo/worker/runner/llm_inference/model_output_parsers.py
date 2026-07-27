@@ -373,6 +373,45 @@ _SENTINELLESS_INVOKE_BLOCK = re.compile(
 _SENTINELLESS_OPENER = re.compile(
     r"<(?:invoke\s+name=\"[^\"]+\"\s*>|tool_calls?\b|tool_called\b)"
 )
+# The TAIL of a tool call whose opener never reached the content stream: the
+# parameter body ends, then bare closing tags (optionally with further complete
+# <parameter …>…</parameter> blocks in between), then </invoke> at the very end
+# of the turn's content. Observed live 2026-07-26 on hermes hard_eval coding
+# tasks (code_lru_cache t1/t2/t3, code_dijkstra t1/t2, code_segment_tree t2):
+# the final visible content was a write_file `content` argument (a whole Python
+# file) ending in `…\n</parameter>\n</invoke>\n`, sometimes with a trailing
+# `<parameter name="path" string="true">…</parameter>` block before the
+# </invoke>. The opening tags were lost upstream (routed into the reasoning
+# stream by the thinking parser, or sentinel-bearing and stripped by
+# _strip_orphan_dsml_from_content while the model degenerated to bare closers —
+# the exact mixed-dialect corruption 283a0fed documents). With no opener,
+# neither _is_sentinelless_tool_call (requires an opener) nor hermes's
+# client-side recovery (requires a full <invoke>…</invoke> block) can fire, so
+# the raw tail painted as the user-visible final answer.
+_ORPHAN_TOOLCALL_TAIL = re.compile(
+    r"</parameter>\s*"
+    r"(?:<parameter\s+name=\"[^\"]+\"[^>]*>.*?</parameter>\s*)*"
+    r"</invoke>\s*$",
+    re.DOTALL,
+)
+
+
+def _is_orphan_toolcall_tail(text: str) -> bool:
+    """True when content is the tail of a tool call whose opener was lost.
+
+    Signature (deliberately tight, prose-unlikely): the content ENDS with a bare
+    ``</parameter>`` … ``</invoke>`` closing sequence, contains NO ``<invoke``
+    opener anywhere (an opener means the sentinel-less recovery path owns it),
+    and carries no ``｜DSML｜`` sentinel (a sentinel-bearing block is the DSML
+    parser's job). The call is unrecoverable — the tool name lives in the lost
+    opener — so the caller clean-fails the turn for a retry rather than letting
+    the raw tail leak as the user-visible answer.
+    """
+    if "｜DSML｜" in text:
+        return False
+    if "<invoke" in text:
+        return False
+    return _ORPHAN_TOOLCALL_TAIL.search(text) is not None
 
 
 def _is_sentinelless_tool_call(text: str) -> bool:
@@ -444,9 +483,56 @@ def _recover_or_fail_sentinelless_tool_call(
             triggered = True
 
         # On the terminal response, decide: recover (parseable) -> emit a real
-        # tool call; else clean-fail (confirmed signature but unparseable); else
-        # flush (signature never confirmed).
+        # tool call; clean-fail an orphan tool-call TAIL (closers with the
+        # opener lost upstream — unrecoverable, so retry); else clean-fail
+        # (confirmed signature but unparseable); else flush (signature never
+        # confirmed).
         if item.finish_reason is not None:
+            if not triggered and _is_orphan_toolcall_tail(buffered_text):
+                # See _is_orphan_toolcall_tail: the buffered content is the
+                # body+closing tags of a tool call whose opening tags never
+                # made it into the content stream. The tool name is gone with
+                # the opener, so the call cannot be reconstructed — and
+                # flushing would paint a raw `…</parameter>\n</invoke>` tail
+                # (typically a whole write_file body) as the user-visible
+                # final answer, which is exactly the 2026-07-26 hard_eval
+                # leak. Fail the turn cleanly (retryable 500) instead, the
+                # same treatment as an unterminated/unparseable block.
+                try:
+                    from exo.worker.engines.mlx.speculative.dsv4_mtp import (
+                        _DEGEN_PROBE_ENABLED,  # pyright: ignore[reportPrivateUsage]
+                        _degen_probe_write,  # pyright: ignore[reportPrivateUsage]
+                    )
+                    if _DEGEN_PROBE_ENABLED:
+                        import time as _t
+                        _degen_probe_write({
+                            "event": "malformed_toolcall_cleanfail",
+                            "shape": "orphan_toolcall_tail",
+                            "buffered_tail": buffered_text[-200:],
+                            "wall_ns": _t.perf_counter_ns(),
+                        })
+                except Exception:
+                    pass
+                logger.warning(
+                    "Orphan tool-call tail leaked into content (opener lost "
+                    "upstream); clean-failing the turn. tail=%r",
+                    buffered_text[-160:],
+                )
+                yield item.model_copy(
+                    update={
+                        "text": (
+                            "DSv4 emitted the tail of a tool call (bare "
+                            "</parameter>/</invoke> closers) whose opening tags "
+                            "were lost — the call cannot be recovered. Failing "
+                            "the turn so it can be retried."
+                        ),
+                        "finish_reason": "error",
+                        "tool_call_parse_failure_kind": "sentinelless",
+                    }
+                )
+                buffer = []
+                buffered_text = ""
+                continue
             if triggered:
                 # ── DEGEN PROBE: a sentinel-less / garbled tool-call leak is a
                 # DEGENERATION SHAPE (the model garbling its own structure —
