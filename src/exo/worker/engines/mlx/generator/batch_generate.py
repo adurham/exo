@@ -117,9 +117,27 @@ _GC_COLLECT_INTERVAL = int(os.environ.get("EXO_GC_COLLECT_INTERVAL", "0"))
 # On by default (cheap: a small deque scan per token). Disable with
 # EXO_LOOP_DETECT=0. Tunables: window = how many recent token ids to inspect;
 # min_repeats = how many back-to-back cycle repetitions trigger the warning.
+#
+# max_period/window WIDENED 2026-07-26: confirmed live (hard_eval.py,
+# math_largest_prime_factor / math_binom_mod, all-MTP-off decode) that this
+# kill-switch was structurally blind to a real, severe degeneration class --
+# a sentence-level arithmetic-verification loop with an exact 14-TOKEN
+# period (e.g. " So N = 1,234,567,891,011." tokenizes to 14 ids on DSv4's
+# tokenizer), repeating 100+ times back-to-back, burning the entire
+# max_tokens budget. The old max_period=8 cap made this mathematically
+# impossible to detect -- not a tuning-too-conservative issue, a hard
+# ceiling below the real failure's period. 24 covers this with real margin
+# (confirmed period was 14) while the false-positive risk stays low: 6
+# EXACT back-to-back repeats of a run(=1..24)-token cycle is already strong
+# evidence of degeneration regardless of period length (legitimate
+# intentionally-repetitive content -- "write X 5 times", boilerplate rows --
+# essentially never repeats byte-for-byte AND stays perfectly periodic for
+# 6+ contiguous cycles; real instances differ by at least one token per
+# repeat). Window widened to comfortably exceed max_period*min_repeats
+# (24*6=144) with slack for detection alignment.
 _LOOP_DETECT_ENABLED = os.environ.get("EXO_LOOP_DETECT", "1") != "0"
-_LOOP_DETECT_WINDOW = int(os.environ.get("EXO_LOOP_DETECT_WINDOW", "64"))
-_LOOP_DETECT_MAX_PERIOD = int(os.environ.get("EXO_LOOP_DETECT_MAX_PERIOD", "8"))
+_LOOP_DETECT_WINDOW = int(os.environ.get("EXO_LOOP_DETECT_WINDOW", "160"))
+_LOOP_DETECT_MAX_PERIOD = int(os.environ.get("EXO_LOOP_DETECT_MAX_PERIOD", "24"))
 _LOOP_DETECT_MIN_REPEATS = int(os.environ.get("EXO_LOOP_DETECT_MIN_REPEATS", "6"))
 # What to DO when a repetition loop is detected:
 #   "error" (default) — fail the turn cleanly with finish_reason="error"

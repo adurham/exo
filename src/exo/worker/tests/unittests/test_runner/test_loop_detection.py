@@ -86,6 +86,31 @@ class TestDetectTokenLoop:
         # The tail is now [..., 2, 99]; no period-1/2 cycle ends at 99.
         assert _detect_token_loop(ids) is None
 
+    def test_real_confirmed_14_token_degeneration_cycle(self):
+        """Regression (2026-07-26): live hard_eval run against DSv4-Flash
+        with all speculative decoding off (math_largest_prime_factor task)
+        produced a genuine degeneration loop -- the model got stuck
+        re-verifying the same multi-digit multiplication ("So N =
+        1,234,567,891,011.") over 100 times back-to-back, burning the
+        entire 8192-token budget. This exact phrase tokenizes to a 14-TOKEN
+        cycle on DSv4's tokenizer (confirmed via direct encode) -- which
+        the OLD max_period=8 default made mathematically impossible to
+        detect (not a tuning-too-conservative issue, a hard ceiling below
+        the real failure's period). max_period/window were widened
+        specifically so this class is caught."""
+        # The actual confirmed token ids for " So N = 1,234,567,891,011."
+        cycle = [3016, 471, 438, 223, 19, 14, 14456, 14, 25601, 14, 31444, 14, 13407, 16]
+        ids = cycle * 20
+        result = _detect_token_loop(ids)
+        assert result is not None, (
+            "the real confirmed degeneration cycle must be detected with "
+            "current defaults -- if this fails, max_period/window were "
+            "narrowed back below the real failure's period"
+        )
+        period, repeats = result
+        assert period == 14
+        assert repeats >= _LOOP_DETECT_MIN_REPEATS
+
 
 class TestLoopDetectAction:
     def test_default_action_is_error(self):
