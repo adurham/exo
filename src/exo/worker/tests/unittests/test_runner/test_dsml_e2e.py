@@ -2057,6 +2057,54 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         assert full_text.count("```") == 2, full_text[-80:]
         assert full_text.rstrip().endswith("```"), full_text[-80:]
 
+    def test_bare_tail_followed_by_models_own_closing_fence(self):
+        """The residual leak variant caught live 2026-07-28 (hard_eval
+        code_segment_tree t2, verify5): the model slips into bare closers at
+        the end of its inline answer and THEN still closes its code fence —
+        content ended '…return res\\n</parameter>\\n</invoke>\\n\\n```\\n'.
+        The trailing fence pushed end-of-string past the old '</invoke>…$'
+        anchor, so the tail dodged both the delivery and the clean-fail and
+        flushed verbatim (no parser event logged for that turn — verified in
+        the exo log). The fence is part of the tail: strip it with the
+        closers and let the fence-parity fixup re-balance."""
+        model_tokens = [
+            "```python\n",
+            "class SegTree:\n",
+            "    def query(self, l: int, r: int) -> int:\n",
+            "        return res\n",
+            "</parameter>\n",
+            "</invoke>\n",
+            "\n```\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "class SegTree:" in full_text
+        assert "</invoke>" not in full_text
+        assert "</parameter>" not in full_text
+        assert full_text.count("```") == 2, full_text[-80:]
+        assert full_text.rstrip().endswith("```"), full_text[-80:]
+
+    def test_bare_tail_with_wrapper_closer_and_trailing_fence(self):
+        """Same shape with a wrapper closer between </invoke> and the fence."""
+        model_tokens = [
+            "```python\n",
+            "x = 1\n",
+            "</parameter>\n",
+            "</invoke>\n",
+            "</tool_calls>\n",
+            "```",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        full_text = "".join(r.text for r in text_results)
+        assert all(r.finish_reason != "error" for r in text_results)
+        assert "x = 1" in full_text
+        assert "</tool_calls>" not in full_text
+        assert full_text.count("```") == 2, full_text
+
     def test_bare_tail_after_closed_fence_gets_no_spurious_fence(self):
         """When the turn's fences are already balanced, the delivery must not
         append a spurious closing fence."""

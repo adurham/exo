@@ -401,7 +401,16 @@ _ORPHAN_TOOLCALL_TAIL = re.compile(
     # content and leaked. The wrapper set mirrors _SENTINELLESS_OPENER's
     # dialect variants (tool_call/tool_calls/tool_called) plus the V3.2
     # function_calls wrapper.
-    r"(?:</(?:tool_calls?|tool_called|function_calls?)>\s*)*$",
+    r"(?:</(?:tool_calls?|tool_called|function_calls?)>\s*)*"
+    # Optional trailing markdown fence: after slipping into closers at the
+    # end of an INLINE answer, the model sometimes still closes its code
+    # fence AFTER them (caught live 2026-07-28, hard_eval code_segment_tree
+    # t2: content ended '…return res\n</parameter>\n</invoke>\n\n```\n') —
+    # which pushed end-of-string past the old anchor, so the tail dodged
+    # BOTH the delivery and the clean-fail and flushed verbatim. The fence
+    # is part of the tail; the delivery path re-balances fences itself
+    # (fence-parity fixup), so stripping it is safe.
+    r"(?:```[ \t]*\n?)?\s*$",
     re.DOTALL,
 )
 
