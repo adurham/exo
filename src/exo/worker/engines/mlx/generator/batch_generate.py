@@ -1359,6 +1359,10 @@ class ExoBatchGenerator:
             else:
                 cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
 
+        # API-admitted requests always carry a resolved seed (random when the
+        # client sent none — api/main.py resolves it at admission so every PP
+        # rank seeds identically). The 42 fallback below is only reachable for
+        # engine-internal/bench constructions that bypass the API.
         seed = task_params.seed if task_params.seed is not None else 42
         mx.random.seed(seed)
 
@@ -1809,6 +1813,8 @@ class ExoBatchGenerator:
             cache_list.append(list(cache))
             prompt_tokens_list.append(tokens)
 
+            # See submit(): API-admitted requests arrive with a resolved
+            # seed; the 42 fallback is engine-internal/bench only.
             seed = task_params.seed if task_params.seed is not None else 42
             mx.random.seed(seed)
 

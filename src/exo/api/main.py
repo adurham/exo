@@ -949,6 +949,29 @@ class API:
         self, task_params: TextGenerationTaskParams
     ) -> TextGeneration:
         task_params = task_params.with_card_sampling_defaults()
+        # Resolve the sampling seed at ADMISSION, exactly like _ensure_seed
+        # does for image generation ("for distributed consistency"). The
+        # engine's per-task fallback (batch_generate.py / generate.py) seeds
+        # the global MLX PRNG with a FIXED 42 whenever seed is None — which
+        # made every seedless request fully deterministic: byte-identical
+        # completions for byte-identical requests (verified live 2026-07-27,
+        # two identical seedless /v1/chat/completions calls at temp 0.8
+        # returned identical tokens). That silently broke every client-side
+        # retry-for-diversity strategy: a retry of a degenerate draw replayed
+        # the SAME degenerate draw with probability 1 (the hard_eval
+        # empty-content failure loop), and it diverges from OpenAI/Ollama
+        # semantics where determinism is opt-IN via an explicit `seed`.
+        # Resolving a random seed HERE keeps pipeline-parallel ranks in
+        # lockstep (the seed rides inside task_params, identical on every
+        # rank — rank-local entropy would desync sampling, which must be
+        # byte-identical across ranks), preserves explicit-seed determinism
+        # for clients that ask for it, and leaves engine-internal/bench
+        # constructions (which bypass this API path) on their reproducible
+        # fixed seed.
+        if task_params.seed is None:
+            task_params = task_params.model_copy(
+                update={"seed": random.randint(0, 2**32 - 1)}
+            )
         images = task_params.images
         if not images:
             command = TextGeneration(task_params=task_params)

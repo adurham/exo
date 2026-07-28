@@ -1355,8 +1355,14 @@ def mlx_generate(
 ) -> Generator[GenerationResponse]:
     # Ensure that generation stats only contains peak memory for this generation
     mx.reset_peak_memory()
-    # TODO: Randomise task seed and set in taskparams, instead of hard coding as 42.
-    seed = task.seed or 42
+    # API-admitted requests always arrive with a resolved seed (random when
+    # the client sent none — see _send_text_generation_with_images in
+    # api/main.py, mirroring _ensure_seed's "distributed consistency"
+    # contract for images). The fixed 42 below is only reachable for
+    # engine-internal/bench constructions that bypass the API, where
+    # reproducibility is desirable. `is not None` (not `or`): an explicit
+    # seed of 0 is a valid client choice and must not silently become 42.
+    seed = task.seed if task.seed is not None else 42
     mx.random.seed(seed)
 
     # Encode prompt once at the top and fix unmatched think tags
