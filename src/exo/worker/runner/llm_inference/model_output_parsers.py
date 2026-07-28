@@ -406,8 +406,10 @@ _ORPHAN_TOOLCALL_TAIL = re.compile(
 )
 
 
-def _is_orphan_toolcall_tail(text: str) -> bool:
-    """True when content is the tail of a tool call whose opener was lost.
+
+
+def _orphan_toolcall_tail_match(text: str) -> re.Match[str] | None:
+    """Match the orphan tool-call tail signature; None when it doesn't apply.
 
     Signature (deliberately tight, prose-unlikely): the content ENDS with a bare
     ``</parameter>`` … ``</invoke>`` closing sequence — optionally followed by
@@ -415,15 +417,24 @@ def _is_orphan_toolcall_tail(text: str) -> bool:
     2026-07-27; see _ORPHAN_TOOLCALL_TAIL) — contains NO ``<invoke``
     opener anywhere (an opener means the sentinel-less recovery path owns it),
     and carries no ``｜DSML｜`` sentinel (a sentinel-bearing block is the DSML
-    parser's job). The call is unrecoverable — the tool name lives in the lost
-    opener — so the caller clean-fails the turn for a retry rather than letting
-    the raw tail leak as the user-visible answer.
+    parser's job).
+
+    The caller inspects the MATCH to pick the treatment (see the terminal
+    decision in _recover_or_fail_sentinelless_tool_call): a tail carrying a
+    ``<parameter …>`` block is a genuinely lost tool CALL (tool name gone with
+    the opener — clean-fail for a retry); a BARE closer tail after real
+    content is the model ending an INLINE answer with tool-call closers
+    instead of its code fence (replayed live 2026-07-28, lru t3 final turn:
+    'All tests pass. Here's the implementation:\\n\\n```python\\n<complete
+    class>' then bare closers, twice on fresh seeds) — there the content IS
+    the answer, so it is delivered with the tail stripped instead of thrown
+    away on a retry that re-degenerates at the same context depth.
     """
     if "｜DSML｜" in text:
-        return False
+        return None
     if "<invoke" in text:
-        return False
-    return _ORPHAN_TOOLCALL_TAIL.search(text) is not None
+        return None
+    return _ORPHAN_TOOLCALL_TAIL.search(text)
 
 
 # Substrings that make buffered content signature-RELEVANT for the detectors
@@ -531,6 +542,28 @@ def _recover_or_fail_sentinelless_tool_call(
     # _sentinelless_hold_start), so the safe-prefix computation is skipped.
     buffer_pinned = False
 
+    # ── Turn-content tracking for the bare-tail delivery decision ────────
+    # Counts markdown fences ("```") and total length across every content
+    # chunk this generator emits, so the terminal decision can (a) tell that
+    # real content preceded a bare orphan tail (deliver, don't clean-fail)
+    # and (b) close a fence the model left open when its inline answer
+    # slipped into tool-call closers (the grader/client cannot recover a
+    # prose+unclosed-fence answer otherwise — verified against hard_eval's
+    # extract_python). A 2-char carry makes the fence count robust to "```"
+    # splitting across token-boundary chunks.
+    content_emitted_length = 0
+    fence_count = 0
+    fence_carry = ""
+
+    def _note_emitted_content(text: str) -> None:
+        nonlocal content_emitted_length, fence_count, fence_carry
+        if not text:
+            return
+        content_emitted_length += len(text)
+        joined = fence_carry + text
+        fence_count += joined.count("```") - fence_carry.count("```")
+        fence_carry = joined[-2:]
+
     for item in stream:
         # A bare ``None`` is the runner drain-loop's backpressure placeholder:
         # ``GeneratorQueue.gen()`` (batch_generator.py) yields None whenever
@@ -562,6 +595,7 @@ def _recover_or_fail_sentinelless_tool_call(
         # guard, never leaked as content).
         if not isinstance(item, GenerationResponse) or item.is_thinking:
             if buffer and not triggered:
+                _note_emitted_content(buffered_text)
                 yield from buffer
                 buffer = []
                 buffered_text = ""
@@ -598,13 +632,71 @@ def _recover_or_fail_sentinelless_tool_call(
             triggered = True
 
         # On the terminal response, decide: recover (parseable) -> emit a real
-        # tool call; clean-fail an orphan tool-call TAIL (closers with the
-        # opener lost upstream — unrecoverable, so retry); else clean-fail
-        # (confirmed signature but unparseable); else flush (signature never
-        # confirmed).
+        # tool call; handle an orphan tool-call TAIL (deliver-stripped when it
+        # is a bare-closer slip after an inline answer, clean-fail when a real
+        # call was lost); else clean-fail (confirmed signature but
+        # unparseable); else flush (signature never confirmed).
         if item.finish_reason is not None:
-            if not triggered and _is_orphan_toolcall_tail(buffered_text):
-                # See _is_orphan_toolcall_tail: the buffered content is the
+            tail_match = (
+                _orphan_toolcall_tail_match(buffered_text) if not triggered else None
+            )
+            if tail_match is not None:
+                tail_text = tail_match.group(0)
+                kept_text = buffered_text[: tail_match.start()]
+                # ── Bare-closer tail after real content: DELIVER, don't fail ──
+                # Replayed live (2026-07-28, lru_cache t3 final turn, twice on
+                # fresh seeds): after a long tool-heavy context the model
+                # produces a complete, correct INLINE answer ("All tests pass.
+                # Here's the implementation:\n\n```python\n<class>…") and then
+                # slips into bare tool-call closers instead of closing its
+                # code fence — pattern-completion from the many prior
+                # `…</parameter>\n</invoke>\n</tool_calls>` blocks in its
+                # context. There is no lost call (no opener was ever emitted,
+                # no <parameter …> block in the tail): the streamed content IS
+                # the final answer. Clean-failing threw that answer away and
+                # forced a retry that re-degenerated the same way on every
+                # fresh draw (observed 3/3 live + 2/2 replayed), burning the
+                # whole retry budget to deliver nothing. Strip the closers,
+                # close a fence the slip left open, and finish the turn
+                # normally. A tail that DOES carry a <parameter …> block is a
+                # genuinely lost tool call (write_file path arg etc.) and
+                # keeps the clean-fail/retry treatment below.
+                bare_tail = "<parameter" not in tail_text
+                has_answer_content = bool(
+                    content_emitted_length + len(kept_text.strip())
+                )
+                if bare_tail and has_answer_content:
+                    _note_emitted_content(kept_text)
+                    fence_fixup = "\n```" if fence_count % 2 == 1 else ""
+                    try:
+                        from exo.worker.engines.mlx.speculative.dsv4_mtp import (
+                            _DEGEN_PROBE_ENABLED,  # pyright: ignore[reportPrivateUsage]
+                            _degen_probe_write,  # pyright: ignore[reportPrivateUsage]
+                        )
+                        if _DEGEN_PROBE_ENABLED:
+                            import time as _t
+                            _degen_probe_write({
+                                "event": "orphan_tail_stripped_delivered",
+                                "shape": "bare_closer_tail",
+                                "stripped_tail": tail_text[-200:],
+                                "fence_fixup": bool(fence_fixup),
+                                "wall_ns": _t.perf_counter_ns(),
+                            })
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "Bare orphan tool-call closer tail after inline "
+                        "content; stripped and delivered (fence_fixup="
+                        f"{bool(fence_fixup)}). tail={tail_text[-160:]!r}"
+                    )
+                    yield item.model_copy(
+                        update={"text": kept_text + fence_fixup}
+                    )
+                    buffer = []
+                    buffered_text = ""
+                    buffer_pinned = False
+                    continue
+                # ── Parameter-bearing tail (or no content at all): the
                 # body+closing tags of a tool call whose opening tags never
                 # made it into the content stream. The tool name is gone with
                 # the opener, so the call cannot be reconstructed — and
@@ -732,6 +824,7 @@ def _recover_or_fail_sentinelless_tool_call(
                         }
                     )
             else:
+                _note_emitted_content(buffered_text)
                 yield from buffer
             buffer = []
             buffered_text = ""
@@ -765,6 +858,7 @@ def _recover_or_fail_sentinelless_tool_call(
             # boundary stays held in full.
             if flushed_text_len + item_text_len > hold_start:
                 break
+            _note_emitted_content(buffered_item.text)
             yield buffered_item
             flushed_text_len += item_text_len
             flushed_item_count += 1

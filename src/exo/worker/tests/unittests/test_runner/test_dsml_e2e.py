@@ -1930,8 +1930,16 @@ class TestE2EDeepseekV4OrphanToolCallTail:
     tags never leak as content.
     """
 
-    def test_orphan_tail_clean_fails_not_leaks(self):
-        """The exact code_lru_cache t1 shape: code body + bare closers."""
+    def test_bare_orphan_tail_strips_and_delivers(self):
+        """The exact code_lru_cache t1 shape: code body + bare closers.
+
+        Contract UPDATED 2026-07-28 after the live replay of lru t3's final
+        turn: a BARE closer tail (no <parameter …> block) after real content
+        is the model ending an INLINE answer with tool-call closers instead
+        of its fence — the content IS the answer. Clean-failing threw it away
+        and every fresh-seed retry re-degenerated identically (3/3 live, 2/2
+        replayed), so the turn must DELIVER the content with the closers
+        stripped, not error."""
         model_tokens = [
             "        node = self._Node(key, value)\n",
             "        self.cache[key] = node\n",
@@ -1942,13 +1950,12 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         error_responses = [r for r in text_results if r.finish_reason == "error"]
-        non_error_text = "".join(
-            r.text for r in text_results if r.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
-        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
-        assert "</invoke>" not in non_error_text
-        assert "</parameter>" not in non_error_text
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "self._add_to_front(node)" in full_text
+        assert "</invoke>" not in full_text
+        assert "</parameter>" not in full_text
+        assert text_results[-1].finish_reason == "stop"
 
     def test_orphan_tail_with_trailing_path_parameter_block(self):
         """The code_lru_cache t3 / code_dijkstra t1 shape: body closer, then a
@@ -1978,7 +1985,9 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         ``'</parameter>\\n</invoke>\\n</tool_calls>'`` — the old
         ``</invoke>\\s*$`` anchor never matched (orphan_tail=False in the
         capture), so the tail flushed verbatim and painted as the final
-        answer. Must clean-fail like the anchor-matching shapes."""
+        answer. The tail must be recognized — and (contract updated
+        2026-07-28) since it is a BARE tail after real content, the content
+        is delivered with the closers stripped."""
         model_tokens = [
             "    return", " -1", "\n",
             "</", "parameter", ">", "\n",
@@ -1988,20 +1997,19 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         error_responses = [r for r in text_results if r.finish_reason == "error"]
-        non_error_text = "".join(
-            r.text for r in text_results if r.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
-        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
-        assert "</invoke>" not in non_error_text
-        assert "</parameter>" not in non_error_text
-        assert "</tool_calls>" not in non_error_text
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "return -1" in full_text
+        assert "</invoke>" not in full_text
+        assert "</parameter>" not in full_text
+        assert "</tool_calls>" not in full_text
 
     def test_orphan_tail_with_trailing_wrapper_closer_dialect_variants(self):
         """The wrapper closer varies with the model's degenerate dialect just
         like the OPENER does (_SENTINELLESS_OPENER): singular ``</tool_call>``,
         ``</tool_called>``, and the V3.2 ``</function_calls>`` must all be
-        tolerated after ``</invoke>``."""
+        recognized after ``</invoke>`` (and, as bare tails after real content,
+        stripped from the delivered answer)."""
         for closer in ("</tool_call>", "</tool_called>", "</function_calls>"):
             model_tokens = [
                 "        return x\n",
@@ -2014,13 +2022,93 @@ class TestE2EDeepseekV4OrphanToolCallTail:
             error_responses = [
                 r for r in text_results if r.finish_reason == "error"
             ]
-            non_error_text = "".join(
-                r.text for r in text_results if r.finish_reason != "error"
+            full_text = "".join(r.text for r in text_results)
+            assert not error_responses, (
+                f"expected delivery for trailing {closer!r}, got {results!r}"
             )
-            assert len(error_responses) >= 1, (
-                f"expected clean-fail for trailing {closer!r}, got {results!r}"
-            )
-            assert "</invoke>" not in non_error_text, closer
+            assert "return x" in full_text, closer
+            assert "</invoke>" not in full_text, closer
+            assert closer not in full_text, closer
+
+    def test_bare_tail_after_inline_answer_closes_open_fence(self):
+        """The exact live replay shape (2026-07-28, lru t3 final turn): prose,
+        an OPEN ```python fence, a complete class, then bare closers instead
+        of the closing fence. The delivered content must strip the closers
+        AND close the fence — hard_eval's extract_python cannot recover a
+        prose+unclosed-fence answer (verified: 'Here's' in the prose is a
+        SyntaxError once the un-fenced prose reaches the battery)."""
+        model_tokens = [
+            "All tests pass. Here's the implementation:\n\n",
+            "```python\n",
+            "class LRUCache:\n",
+            "    def get(self, key: int) -> int:\n",
+            "        return -1\n",
+            "</parameter>\n",
+            "</invoke>\n",
+            "</tool_calls>",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "class LRUCache:" in full_text
+        assert "</invoke>" not in full_text
+        assert full_text.count("```") == 2, full_text[-80:]
+        assert full_text.rstrip().endswith("```"), full_text[-80:]
+
+    def test_bare_tail_after_closed_fence_gets_no_spurious_fence(self):
+        """When the turn's fences are already balanced, the delivery must not
+        append a spurious closing fence."""
+        model_tokens = [
+            "```python\n",
+            "def f(): return 1\n",
+            "```\n\nDone.\n",
+            "</parameter>\n",
+            "</invoke>\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert full_text.count("```") == 2, full_text
+        assert "</invoke>" not in full_text
+
+    def test_fence_counting_survives_token_split_fences(self):
+        """A fence split across token-boundary chunks ("``" + "`python") must
+        still count — the fixup decision depends on fence parity."""
+        model_tokens = [
+            "Answer:\n",
+            "``", "`python\n",
+            "x = 1\n",
+            "</parameter>\n",
+            "</invoke>\n",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        full_text = "".join(r.text for r in text_results)
+        assert all(r.finish_reason != "error" for r in text_results)
+        assert full_text.count("```") == 2, full_text
+        assert full_text.rstrip().endswith("```"), full_text[-60:]
+
+    def test_bare_tail_with_no_content_still_clean_fails(self):
+        """Closers with NOTHING streamed before them: there is no answer to
+        deliver, so the turn must still clean-fail for a retry."""
+        model_tokens = [
+            "</parameter>\n",
+            "</invoke>\n",
+            "</tool_calls>",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</invoke>" not in non_error_text
 
     def test_trailing_wrapper_closer_alone_is_not_a_tail(self):
         """A bare ``</tool_calls>`` at end of turn WITHOUT the preceding
@@ -2083,11 +2171,14 @@ class TestE2EDeepseekV4SeparateTerminalChunk:
     loop structure.
     """
 
-    def test_orphan_tail_clean_fails_with_separate_terminal_chunk(self):
+    def test_orphan_tail_detected_on_separate_terminal_chunk(self):
         """The core repro: content chunks build up a bare closing-tag tail,
         then a SEPARATE empty-text finish_reason="stop" chunk arrives. The
-        turn must clean-fail — under the old loop the empty terminal chunk
-        flushed the tail verbatim as the user-visible final answer."""
+        decision logic must run on that terminal chunk and recognize the
+        tail — under the old loop the empty terminal chunk flushed the tail
+        verbatim as the user-visible final answer. (Contract updated
+        2026-07-28: a BARE tail after real content is stripped and the
+        content delivered, not clean-failed.)"""
         model_tokens = [
             "        node = self._Node(key, value)\n",
             "        self.cache[key] = node\n",
@@ -2101,18 +2192,18 @@ class TestE2EDeepseekV4SeparateTerminalChunk:
         )
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         error_responses = [r for r in text_results if r.finish_reason == "error"]
-        non_error_text = "".join(
-            r.text for r in text_results if r.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
-        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
-        assert "</invoke>" not in non_error_text
-        assert "</parameter>" not in non_error_text
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "self.cache[key] = node" in full_text
+        assert "</invoke>" not in full_text
+        assert "</parameter>" not in full_text
+        assert text_results[-1].finish_reason == "stop"
 
-    def test_orphan_tail_clean_fails_with_finish_on_text_chunk(self):
+    def test_orphan_tail_detected_with_finish_on_text_chunk(self):
         """A terminal chunk may in principle carry trailing text AND
         finish_reason together — the decision logic must include that text in
-        the buffered view and still clean-fail."""
+        the buffered view and still recognize the tail (delivered stripped,
+        per the 2026-07-28 bare-tail contract)."""
         model_tokens = [
             "        node = self._Node(key, value)\n",
             "</parameter>\n",
@@ -2125,11 +2216,10 @@ class TestE2EDeepseekV4SeparateTerminalChunk:
         )
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         error_responses = [r for r in text_results if r.finish_reason == "error"]
-        non_error_text = "".join(
-            r.text for r in text_results if r.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
-        assert "</invoke>" not in non_error_text
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "node = self._Node(key, value)" in full_text
+        assert "</invoke>" not in full_text
 
     def test_clean_multichunk_response_passes_through(self):
         """No regression: a normal multi-chunk answer with the real terminal
@@ -2487,7 +2577,7 @@ class TestE2EDeepseekV4InterleavedNoneStream:
     GenerationResponse item as a flush boundary, so each interleaved None
     flushed and RESET the detection buffer: ``buffered_text`` never held more
     than one token while untriggered, blinding both
-    ``_is_sentinelless_tool_call`` and ``_is_orphan_toolcall_tail`` to every
+    ``_is_sentinelless_tool_call`` and ``_orphan_toolcall_tail_match`` to every
     multi-token pattern — i.e. ALL of them. Content still streamed fine
     (each token was flushed through), which is why the leak never showed up
     in output diffing: only the DETECTION was dead. These tests reproduce the
@@ -2521,12 +2611,14 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         assert "<parameter" not in non_error_text
         assert "</invoke>" not in non_error_text
 
-    def test_multitoken_orphan_tail_clean_fails_across_nones(self):
+    def test_multitoken_orphan_tail_detected_across_nones(self):
         """A multi-token orphan tool-call tail (bare ``</parameter>`` …
         ``</invoke>`` closers, opener lost upstream) with interleaved Nones
-        must clean-fail — under the old loop the closers flushed verbatim and
-        painted as the final answer (the 2026-07-26 hard_eval leak, which
-        83d71af7 alone did NOT fix in production because of the Nones)."""
+        must be RECOGNIZED — under the old loop the closers flushed verbatim
+        and painted as the final answer (the 2026-07-26 hard_eval leak, which
+        83d71af7 alone did NOT fix in production because of the Nones).
+        Contract updated 2026-07-28: as a bare tail after real content it is
+        stripped and the content delivered."""
         model_tokens = [
             "        return", " self", ".cache", "[key]", "\n",
             "</", "parameter", ">", "\n",
@@ -2535,13 +2627,11 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         error_responses = [r for r in text_results if r.finish_reason == "error"]
-        non_error_text = "".join(
-            r.text for r in text_results if r.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
-        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
-        assert "</invoke>" not in non_error_text
-        assert "</parameter>" not in non_error_text
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "return self.cache[key]" in full_text
+        assert "</invoke>" not in full_text
+        assert "</parameter>" not in full_text
 
     def test_nones_are_forwarded_not_swallowed(self):
         """Every interleaved None must come back out of the pipeline: it is
@@ -2568,11 +2658,10 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         error_responses = [r for r in text_results if r.finish_reason == "error"]
-        non_error_text = "".join(
-            r.text for r in text_results if r.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
-        assert "</invoke>" not in non_error_text
+        full_text = "".join(r.text for r in text_results)
+        assert not error_responses, f"expected delivery, got {results!r}"
+        assert "return x" in full_text
+        assert "</invoke>" not in full_text
 
     def test_prose_streams_incrementally_under_drain_protocol(self):
         """Driven exactly like production (push one token, drain until None):
@@ -2600,11 +2689,12 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         ]
         assert terminal_items and terminal_items[-1].finish_reason == "stop"
 
-    def test_orphan_tail_with_wrapper_closer_clean_fails_under_drain_protocol(self):
+    def test_orphan_tail_with_wrapper_closer_stripped_under_drain_protocol(self):
         """The 2026-07-27 live leak shape (trailing ``</tool_calls>`` wrapper
         closer — req 1b29f5d0) driven exactly like production: push one token,
-        drain until None. Must clean-fail at the terminal push, never painting
-        any closer as content."""
+        drain until None. The tail must be recognized at the terminal push and
+        never painted as content — delivered stripped per the 2026-07-28
+        bare-tail contract."""
         texts = [
             "    return -1\n",
             "</parameter>", "\n",
@@ -2622,18 +2712,17 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         all_items = [item for step in per_push for item in step]
         gen_items = [i for i in all_items if isinstance(i, GenerationResponse)]
         error_responses = [i for i in gen_items if i.finish_reason == "error"]
-        non_error_text = "".join(
-            i.text for i in gen_items if i.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {all_items!r}"
-        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
-        assert "</invoke>" not in non_error_text
-        assert "</tool_calls>" not in non_error_text
+        full_text = "".join(i.text for i in gen_items)
+        assert not error_responses, f"expected delivery, got {all_items!r}"
+        assert "return -1" in full_text
+        assert "</invoke>" not in full_text
+        assert "</tool_calls>" not in full_text
 
-    def test_orphan_tail_clean_fails_under_drain_protocol(self):
+    def test_orphan_tail_stripped_and_delivered_under_drain_protocol(self):
         """End-to-end under the production drain protocol: the code body
         streams, the suspicious closers are held, and the terminal push
-        clean-fails the turn — never painting the closers as content."""
+        recognizes the bare tail — delivering the streamed answer with the
+        closers stripped, never painting them as content."""
         texts = [
             "        node = self._Node(key, value)\n",
             "        self.cache[key] = node\n",
@@ -2651,13 +2740,10 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         all_items = [item for step in per_push for item in step]
         gen_items = [i for i in all_items if isinstance(i, GenerationResponse)]
         error_responses = [i for i in gen_items if i.finish_reason == "error"]
-        non_error_text = "".join(
-            i.text for i in gen_items if i.finish_reason != "error"
-        )
-        assert len(error_responses) >= 1, f"expected clean-fail, got {all_items!r}"
-        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
-        assert "</parameter>" not in non_error_text
-        assert "</invoke>" not in non_error_text
+        full_text = "".join(i.text for i in gen_items)
+        assert not error_responses, f"expected delivery, got {all_items!r}"
+        assert "</parameter>" not in full_text
+        assert "</invoke>" not in full_text
         # The safe code body still streamed before the terminal decision.
         assert "self._Node(key, value)" in "".join(
             i.text
