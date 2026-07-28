@@ -1,0 +1,55 @@
+# NATIVE DeepSeek checkpoint (fp8 e4m3 / ue8m0 block scales + mxfp4 experts +
+# bf16 embed/lm_head), replacing mlx-community/DeepSeek-V4-Flash (uniform
+# affine 8-bit requant). Proven 2026-07-26/27 to load losslessly through the
+# EXISTING fork code with zero loader changes: config.json's
+# quantization_config {quant_method="fp8"} routes through mlx-lm utils.py's
+# fp8 branch -> deepseek_v4.make_quantization_config() -> nn.quantize
+# class_predicate, and sanitize() handles the native key layout (hc_* renames,
+# fp8 scale->scales expansion, mtp.* strip under EXO_DSV4_MTP=0). The routed
+# experts were verified bit-identical between the two repos; this card exists
+# to recover the ~0.7%-relative-error requantization loss on the bf16
+# embed/lm_head and fp8 attention/shared-expert layers. Same architecture,
+# same footprint class (~156 GB loaded after the MTP strip vs 155 GB).
+#
+# storage_size = metadata.total_size from the repo's
+# model.safetensors.index.json (same derivation as fetch_safetensors_size(),
+# which is how card storage sizes are defined). Fetched 2026-07-28:
+# 159,609,485,896 bytes. NOTE: this INCLUDES the mtp.* tensors (isolated in
+# one 3.59 GB shard) which are on disk but stripped at load time when
+# EXO_DSV4_MTP=0 (the production default), so true loaded weight RAM is
+# ~156.0 GB (~78 GB/rank across 2 nodes) — storage_size is ~1.8 GB/node
+# conservative as a placement RAM estimate, which is the safe direction.
+model_id = "deepseek-ai/DeepSeek-V4-Flash"
+n_layers = 43
+hidden_size = 4096
+num_key_value_heads = 1
+supports_tensor = true
+tasks = ["TextGeneration"]
+family = "deepseek"
+quantization = "fp8"
+base_model = "DeepSeek V4 Flash"
+capabilities = ["text", "thinking", "thinking_toggle"]
+reasoning_dialect = "tool_conditional"
+
+context_length = 1048576
+backends = ["MlxMetal", "MlxCuda", "MlxCpu"]
+[storage_size]
+in_bytes = 159609485896
+
+# Sampling parity with Ollama Cloud (2026-07-27) — copied EXACTLY from
+# mlx-community--DeepSeek-V4-Flash.toml and MUST stay in lockstep with it.
+# History (full detail in that card): DSv4 at the official rec (temp=1.0)
+# corrupted long structured tool-call bodies; a hermes-driven hard_eval A/B on
+# the same weights scored Ollama 100% vs exo 78.8%, and Ollama's Modelfile
+# sets NO parameters, so it serves at Ollama's runtime defaults: temp 0.8,
+# top_p 0.9, top_k 40, min_p 0. Match it exactly so the same weights behave
+# the same. min_p is pinned to 0.0 (not omitted) because an absent card value
+# falls through to exo's hardcoded min_p 0.05 — top_k 40 already clips the
+# tail far harder than that floor did. Do NOT retune these as part of the
+# native-checkpoint swap: the swap is a precision cleanup, and changing
+# sampling at the same time would confound any before/after comparison.
+[sampling_defaults]
+temperature = 0.8
+top_p = 0.9
+top_k = 40
+min_p = 0.0
