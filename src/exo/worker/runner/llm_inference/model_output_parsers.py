@@ -391,7 +391,17 @@ _SENTINELLESS_OPENER = re.compile(
 _ORPHAN_TOOLCALL_TAIL = re.compile(
     r"</parameter>\s*"
     r"(?:<parameter\s+name=\"[^\"]+\"[^>]*>.*?</parameter>\s*)*"
-    r"</invoke>\s*$",
+    r"</invoke>\s*"
+    # Optional trailing sentinel-less WRAPPER closer(s): the model closes the
+    # whole block with `</tool_calls>` (or a dialect variant) after the final
+    # `</invoke>`. Caught live 2026-07-27 (hard_eval code_dijkstra req
+    # 1b29f5d0 / e4028007 on macstudio-m4-1): buffered_text at the terminal
+    # decision was exactly `'</parameter>\n</invoke>\n</tool_calls>'` — the
+    # old `</invoke>\s*$` anchor never matched, so the tail flushed as
+    # content and leaked. The wrapper set mirrors _SENTINELLESS_OPENER's
+    # dialect variants (tool_call/tool_calls/tool_called) plus the V3.2
+    # function_calls wrapper.
+    r"(?:</(?:tool_calls?|tool_called|function_calls?)>\s*)*$",
     re.DOTALL,
 )
 
@@ -400,7 +410,9 @@ def _is_orphan_toolcall_tail(text: str) -> bool:
     """True when content is the tail of a tool call whose opener was lost.
 
     Signature (deliberately tight, prose-unlikely): the content ENDS with a bare
-    ``</parameter>`` … ``</invoke>`` closing sequence, contains NO ``<invoke``
+    ``</parameter>`` … ``</invoke>`` closing sequence — optionally followed by
+    sentinel-less wrapper closer(s) like ``</tool_calls>`` (observed live
+    2026-07-27; see _ORPHAN_TOOLCALL_TAIL) — contains NO ``<invoke``
     opener anywhere (an opener means the sentinel-less recovery path owns it),
     and carries no ``｜DSML｜`` sentinel (a sentinel-bearing block is the DSML
     parser's job). The call is unrecoverable — the tool name lives in the lost

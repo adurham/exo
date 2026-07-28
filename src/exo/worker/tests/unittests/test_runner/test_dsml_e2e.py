@@ -1969,6 +1969,74 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         assert "</invoke>" not in non_error_text
         assert "<parameter name=" not in non_error_text
 
+    def test_orphan_tail_with_trailing_tool_calls_wrapper_closer(self):
+        """The residual leak variant caught live 2026-07-27 (code_dijkstra
+        reqs 1b29f5d0 / e4028007, /tmp/orphan_chunk_debug.log on
+        macstudio-m4-1): the model closes the whole block with a sentinel-less
+        ``</tool_calls>`` WRAPPER closer after the final ``</invoke>``.
+        buffered_text at the terminal decision was exactly
+        ``'</parameter>\\n</invoke>\\n</tool_calls>'`` — the old
+        ``</invoke>\\s*$`` anchor never matched (orphan_tail=False in the
+        capture), so the tail flushed verbatim and painted as the final
+        answer. Must clean-fail like the anchor-matching shapes."""
+        model_tokens = [
+            "    return", " -1", "\n",
+            "</", "parameter", ">", "\n",
+            "</", "invoke", ">", "\n",
+            "</", "tool", "_calls", ">",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        error_responses = [r for r in text_results if r.finish_reason == "error"]
+        non_error_text = "".join(
+            r.text for r in text_results if r.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {results!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</invoke>" not in non_error_text
+        assert "</parameter>" not in non_error_text
+        assert "</tool_calls>" not in non_error_text
+
+    def test_orphan_tail_with_trailing_wrapper_closer_dialect_variants(self):
+        """The wrapper closer varies with the model's degenerate dialect just
+        like the OPENER does (_SENTINELLESS_OPENER): singular ``</tool_call>``,
+        ``</tool_called>``, and the V3.2 ``</function_calls>`` must all be
+        tolerated after ``</invoke>``."""
+        for closer in ("</tool_call>", "</tool_called>", "</function_calls>"):
+            model_tokens = [
+                "        return x\n",
+                "</parameter>\n",
+                "</invoke>\n",
+                closer,
+            ]
+            results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+            text_results = [r for r in results if isinstance(r, GenerationResponse)]
+            error_responses = [
+                r for r in text_results if r.finish_reason == "error"
+            ]
+            non_error_text = "".join(
+                r.text for r in text_results if r.finish_reason != "error"
+            )
+            assert len(error_responses) >= 1, (
+                f"expected clean-fail for trailing {closer!r}, got {results!r}"
+            )
+            assert "</invoke>" not in non_error_text, closer
+
+    def test_trailing_wrapper_closer_alone_is_not_a_tail(self):
+        """A bare ``</tool_calls>`` at end of turn WITHOUT the preceding
+        ``</parameter>``…``</invoke>`` sequence is not the orphan-tail
+        signature — guards the widened regex against overreach (hermes's
+        client-side think-scrubber already strips lone wrapper closers)."""
+        model_tokens = [
+            "Here is the answer: 42.\n",
+            "</tool_calls>",
+        ]
+        results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
+        text_results = [r for r in results if isinstance(r, GenerationResponse)]
+        assert all(r.finish_reason != "error" for r in text_results)
+        full_text = "".join(r.text for r in text_results)
+        assert "Here is the answer: 42." in full_text
+
     def test_prose_mentioning_closers_mid_text_passes_through(self):
         """Closers NOT at the very end of the turn are prose (e.g. the model
         explaining tag syntax) — must pass through verbatim, no error."""
@@ -2531,6 +2599,36 @@ class TestE2EDeepseekV4InterleavedNoneStream:
             item for item in per_push[-1] if isinstance(item, GenerationResponse)
         ]
         assert terminal_items and terminal_items[-1].finish_reason == "stop"
+
+    def test_orphan_tail_with_wrapper_closer_clean_fails_under_drain_protocol(self):
+        """The 2026-07-27 live leak shape (trailing ``</tool_calls>`` wrapper
+        closer — req 1b29f5d0) driven exactly like production: push one token,
+        drain until None. Must clean-fail at the terminal push, never painting
+        any closer as content."""
+        texts = [
+            "    return -1\n",
+            "</parameter>", "\n",
+            "</invoke>", "\n",
+            "</tool_calls>",
+        ]
+        pushes = [
+            GenerationResponse(text=t, token=i, finish_reason=None, usage=None)
+            for i, t in enumerate(texts)
+        ]
+        pushes.append(
+            GenerationResponse(text="", token=len(texts), finish_reason="stop", usage=None)
+        )
+        per_push = _drive_production_drain(pushes)
+        all_items = [item for step in per_push for item in step]
+        gen_items = [i for i in all_items if isinstance(i, GenerationResponse)]
+        error_responses = [i for i in gen_items if i.finish_reason == "error"]
+        non_error_text = "".join(
+            i.text for i in gen_items if i.finish_reason != "error"
+        )
+        assert len(error_responses) >= 1, f"expected clean-fail, got {all_items!r}"
+        assert error_responses[0].tool_call_parse_failure_kind == "sentinelless"
+        assert "</invoke>" not in non_error_text
+        assert "</tool_calls>" not in non_error_text
 
     def test_orphan_tail_clean_fails_under_drain_protocol(self):
         """End-to-end under the production drain protocol: the code body
