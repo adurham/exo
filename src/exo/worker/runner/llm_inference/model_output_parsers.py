@@ -519,44 +519,7 @@ def _recover_or_fail_sentinelless_tool_call(
     # _sentinelless_hold_start), so the safe-prefix computation is skipped.
     buffer_pinned = False
 
-    # ── TEMPORARY DEBUG INSTRUMENTATION (to be reverted) ──────────────────
-    import os as _dbg_os
-    import uuid as _dbg_uuid
-    _dbg_req = _dbg_uuid.uuid4().hex[:8]
-    _dbg_none_count = 0
-
-    def _dbg(msg: str) -> None:
-        try:
-            with open("/tmp/orphan_chunk_debug.log", "a") as _f:
-                _f.write(f"req={_dbg_req} pid={_dbg_os.getpid()} {msg}\n")
-        except Exception:
-            pass
-
-    _dbg("=== generator start ===")
-
-    def _dbg_flush_nones() -> None:
-        nonlocal _dbg_none_count
-        if _dbg_none_count:
-            _dbg(f"item=None x{_dbg_none_count}")
-            _dbg_none_count = 0
-    # ── END TEMPORARY DEBUG ────────────────────────────────────────────────
-
     for item in stream:
-        # ── TEMPORARY DEBUG ──
-        if item is None:
-            _dbg_none_count += 1
-        else:
-            _dbg_flush_nones()
-            _dbg(
-                f"item type={type(item).__name__} "
-                f"text={getattr(item, 'text', None)!r} "
-                f"is_thinking={getattr(item, 'is_thinking', None)!r} "
-                f"finish_reason={getattr(item, 'finish_reason', None)!r} "
-                f"triggered={triggered!r} buffer_pinned={buffer_pinned!r} "
-                f"buffer_len={len(buffer)} "
-                f"buffered_text_tail={buffered_text[-160:]!r}"
-            )
-        # ── END TEMPORARY DEBUG ──
         # A bare ``None`` is the runner drain-loop's backpressure placeholder:
         # ``GeneratorQueue.gen()`` (batch_generator.py) yields None whenever
         # its deque is empty, and the engine's ``step()`` pushes ONE
@@ -586,14 +549,6 @@ def _recover_or_fail_sentinelless_tool_call(
         # still-held triggered buffer is then dropped by the end-of-stream
         # guard, never leaked as content).
         if not isinstance(item, GenerationResponse) or item.is_thinking:
-            # ── TEMPORARY DEBUG ──
-            _dbg(
-                f"branch=thinking_or_toolcall_passthrough "
-                f"flushing_buffer={bool(buffer and not triggered)!r} "
-                f"buffer_len={len(buffer)} "
-                f"buffered_text_tail={buffered_text[-160:]!r}"
-            )
-            # ── END TEMPORARY DEBUG ──
             if buffer and not triggered:
                 yield from buffer
                 buffer = []
@@ -636,14 +591,6 @@ def _recover_or_fail_sentinelless_tool_call(
         # (confirmed signature but unparseable); else flush (signature never
         # confirmed).
         if item.finish_reason is not None:
-            # ── TEMPORARY DEBUG ──
-            _dbg(
-                f"branch=terminal_decision triggered={triggered!r} "
-                f"orphan_tail={_is_orphan_toolcall_tail(buffered_text)!r} "
-                f"buffer_len={len(buffer)} "
-                f"buffered_text={buffered_text!r}"
-            )
-            # ── END TEMPORARY DEBUG ──
             if not triggered and _is_orphan_toolcall_tail(buffered_text):
                 # See _is_orphan_toolcall_tail: the buffered content is the
                 # body+closing tags of a tool call whose opening tags never
@@ -792,13 +739,6 @@ def _recover_or_fail_sentinelless_tool_call(
         if triggered or buffer_pinned:
             continue
         hold_start, buffer_pinned = _sentinelless_hold_start(buffered_text)
-        # ── TEMPORARY DEBUG ──
-        _dbg(
-            f"branch=safe_prefix hold_start={hold_start} "
-            f"pinned={buffer_pinned!r} buffered_len={len(buffered_text)} "
-            f"held_tail={buffered_text[hold_start:][:120]!r}"
-        )
-        # ── END TEMPORARY DEBUG ──
         if hold_start == 0:
             continue
         flushed_text_len = 0
@@ -817,13 +757,6 @@ def _recover_or_fail_sentinelless_tool_call(
             buffered_text = buffered_text[flushed_text_len:]
 
     # Stream ended with no terminal response while buffering.
-    # ── TEMPORARY DEBUG ──
-    _dbg_flush_nones()
-    _dbg(
-        f"branch=end_of_stream triggered={triggered!r} buffer_len={len(buffer)} "
-        f"buffered_text_tail={buffered_text[-200:]!r}"
-    )
-    # ── END TEMPORARY DEBUG ──
     if buffer and not triggered:
         yield from buffer
 
