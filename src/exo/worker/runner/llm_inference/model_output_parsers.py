@@ -628,10 +628,13 @@ def _recover_or_fail_sentinelless_tool_call(
                         })
                 except Exception:
                     pass
+                # NOTE: loguru formats positional args with str.format(), not
+                # %-style — the old "tail=%r" rendered literally in production
+                # logs (observed 2026-07-27), hiding the leak shape exactly
+                # when it was needed for diagnosis. Use an f-string.
                 logger.warning(
                     "Orphan tool-call tail leaked into content (opener lost "
-                    "upstream); clean-failing the turn. tail=%r",
-                    buffered_text[-160:],
+                    f"upstream); clean-failing the turn. tail={buffered_text[-160:]!r}"
                 )
                 yield item.model_copy(
                     update={
@@ -703,11 +706,12 @@ def _recover_or_fail_sentinelless_tool_call(
                 # behavior for a truly corrupt block.
                 recovered = parse_sentinelless_tool_call(buffered_text)
                 if recovered is not None:
+                    # f-string, not %-style: loguru never substitutes %d/%s
+                    # (see the orphan-tail warning above).
                     logger.info(
-                        "Recovered sentinel-less tool call "
-                        "(%d call(s)) from wrong-dialect output: %s",
-                        len(recovered),
-                        [tc.name for tc in recovered],
+                        f"Recovered sentinel-less tool call "
+                        f"({len(recovered)} call(s)) from wrong-dialect "
+                        f"output: {[tc.name for tc in recovered]}"
                     )
                     yield ToolCallResponse(
                         tool_calls=recovered,
