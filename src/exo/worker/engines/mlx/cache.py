@@ -1243,6 +1243,44 @@ class KVPrefixCache:
                 False,
             )
 
+        # LIVE INTEGRITY CHECK (2026-07-28, cross-request contamination
+        # investigation round 2): verify the donor leaf's OWN stored tokens
+        # actually agree with the query up to match_length. This is the
+        # invariant the 2026-07-28 _longest_prefix_match fix (mid-edge donor
+        # scope) was supposed to guarantee -- checking it directly, in
+        # production, on every hit, instead of trusting the trie logic is
+        # airtight. Cheap: one numpy compare over match_length int32s.
+        # Left permanently on (not gated behind EXO_PREFIX_CACHE_DIAG) --
+        # the contamination bug this catches is a correctness bug, not a
+        # perf one, and the cost here is negligible next to a prefill.
+        _donor_tokens_np = _tokens_to_np(donor_leaf.full_tokens)
+        _query_np = _tokens_to_np(prompt_tokens)
+        _donor_len = int(_donor_tokens_np.shape[0])
+        if _donor_len < match_length or not np.array_equal(
+            _donor_tokens_np[:match_length], _query_np[:match_length]
+        ):
+            _mismatch_pos = -1
+            if _donor_len >= match_length:
+                _cmp = _donor_tokens_np[:match_length] == _query_np[:match_length]
+                _mismatch_pos = (
+                    int(np.argmin(_cmp)) if not bool(_cmp.all()) else -1
+                )
+            logger.error(
+                f"[PREFIX_CACHE_INTEGRITY_VIOLATION] donor leaf "
+                f"{donor_leaf.leaf_id} does NOT actually share the query's "
+                f"prefix up to match_length={match_length}! "
+                f"donor_full_tokens_len={_donor_len} query_len={max_length} "
+                f"first_mismatch_pos={_mismatch_pos} "
+                f"match_node_depth={match_node.depth} "
+                f"match_node_is_root={match_node is self._root} "
+                f"match_node_num_children={len(match_node.children)} "
+                f"donor_node_depth={donor_leaf.node.depth} "
+                f"donor_last_used={donor_leaf.last_used} "
+                f"access_counter={self._access_counter} "
+                f"query_fingerprint={self._fingerprint(prompt_tokens)} "
+                f"donor_fingerprint={self._fingerprint(donor_leaf.full_tokens)}"
+            )
+
         is_exact = match_length >= max_length - 1
         # For exact hits on non-SSM models we keep the last token out so the
         # generator always has ≥1 token to feed. For non-sliceable layers this
