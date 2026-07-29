@@ -1733,3 +1733,160 @@ class TestLongestPrefixMatchDonorScope:
             f"return the node whose edge the query actually partially "
             f"matched, not its parent."
         )
+
+
+class TestPrefillSnapshotOffset:
+    """Regression test for the ACTUAL 2026-07-28 cross-request contamination
+    bug, round 3: ``prefill()`` (the local/serial prefill path) captured
+    chunk-boundary SSM/PoolingCache snapshots with a ``token_count`` relative
+    to the LOCAL call's ``prompt_tokens`` (which, on a partial prefix-cache
+    hit, is only the REMAINING post-hit suffix -- starting at index 0),
+    instead of the ABSOLUTE position in the full prompt.
+
+    This bug survived the earlier ``_longest_prefix_match`` donor-scope fix
+    (2026-07-28, commit ef579c37) because it lives entirely downstream of
+    donor selection: the picked donor leaf genuinely DOES share the query's
+    prefix (so the donor-integrity assertion in ``get_kv_cache`` never
+    fires) -- the corruption is in WHICH SNAPSHOT gets chosen and restored
+    for that leaf's non-sliceable layers. A snapshot mis-stamped with too
+    small a ``token_count`` can get selected by
+    ``_find_nearest_snapshot``/``_resolve_restore_position`` for a LATER,
+    completely different request whose ``match_length`` happens to
+    coincide with that wrong count -- restoring non-sliceable layer state
+    that actually reflects a much deeper position in a PRIOR, unrelated
+    request's own generation (well past the shared boilerplate boundary,
+    into that other task's unique content). This produces the observed
+    symptom: a request effectively resumes decoding from inside an
+    unrelated earlier request's own answer, yielding a coherent, complete,
+    correctly-formatted response to the WRONG task.
+
+    The sibling ``remote_prefill()`` path already computed and applied this
+    offset correctly (via its own ``start_pos`` parameter feeding
+    ``final_offset``) -- this asymmetry between the two prefill paths is
+    exactly what let this bug through the earlier fix's testing.
+
+    Fix: ``prefill()`` gained a ``snapshot_offset`` parameter, threaded in
+    by both call sites (``generate.py``'s ``mlx_generate`` and
+    ``batch_generate.py``'s ``ExoBatchGenerator.submit``) as
+    ``prefix_hit_length`` -- the exact number of tokens already served from
+    cache before this call's local ``prompt_tokens`` begins. Every
+    snapshot's ``token_count`` is now ``snapshot_offset + processed``,
+    matching ``remote_prefill``'s existing (correct) absolute-position
+    contract.
+
+    This test exercises the underlying arithmetic directly via a fake
+    model (no real MLX inference) by monkeypatching ``stream_generate``
+    to drive ``prompt_progress_callback`` at known chunk boundaries,
+    matching the pattern of ``TestMultiTurnSnapshotLeak`` above.
+    """
+
+    @staticmethod
+    def _pooling_cache(p_len: int, ratio: int = 4) -> PoolingCache:
+        pc = PoolingCache(ratio)
+        pc._pool_storage = mx.zeros((1, max(p_len, 1), 8), dtype=mx.bfloat16)
+        pc._pool_offset = p_len
+        pc.buf_kv = mx.zeros((1, ratio, 8), dtype=mx.bfloat16)
+        pc.buf_gate = mx.zeros((1, ratio, 8), dtype=mx.bfloat16)
+        return pc
+
+    @staticmethod
+    def _rotating(num_tokens: int) -> RotatingKVCache:
+        r = RotatingKVCache(max_size=4096)
+        r.keys = mx.zeros((1, 2, max(num_tokens, 1), 4), dtype=mx.bfloat16)
+        r.values = mx.zeros((1, 2, max(num_tokens, 1), 4), dtype=mx.bfloat16)
+        r.offset = num_tokens
+        r._idx = num_tokens
+        return r
+
+    def _dsv4_like_cache(self, num_tokens: int) -> list[CacheList]:
+        return [CacheList(self._rotating(num_tokens), self._pooling_cache(1))]
+
+    def test_snapshot_token_count_is_absolute_not_local_to_remaining_suffix(
+        self, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+
+        import exo.worker.engines.mlx.generator.generate as generate_mod
+
+        # A partial-hit call: the trie already served the first
+        # PREFIX_HIT_LENGTH tokens, so `prompt_tokens` passed to prefill()
+        # here is only the REMAINING suffix (starting at local index 0).
+        prefix_hit_length = 18226  # matches production's shared boilerplate length
+        remaining_len = 300
+        chunk_size = 100
+
+        remaining_tokens = mx.arange(remaining_len, dtype=mx.int32)
+        cache = self._dsv4_like_cache(0)
+
+        captured_processed: list[int] = []
+
+        def fake_stream_generate(**kwargs):
+            callback = kwargs["prompt_progress_callback"]
+            prompt = kwargs["prompt"]
+            total = int(prompt.shape[0])
+            processed = 0
+            while processed < total:
+                step = min(chunk_size, total - processed)
+                processed += step
+                captured_processed.append(processed)
+                callback(processed, total)
+            # Yield exactly one token, matching stream_generate's real
+            # contract for `for _ in _sg: break`.
+            yield MagicMock(text="x", token=0)
+
+        monkeypatch.setattr(
+            generate_mod, "stream_generate", fake_stream_generate
+        )
+        monkeypatch.setattr(
+            generate_mod, "_has_pipeline_communication_layer", lambda model: False
+        )
+        monkeypatch.setattr(
+            generate_mod, "set_pipeline_prefill", lambda model, is_prefill: None
+        )
+        monkeypatch.setattr(
+            generate_mod,
+            "set_pipeline_queue_sends",
+            lambda model, queue_sends: None,
+        )
+
+        model = MagicMock()
+
+        _, _, snapshots = prefill(
+            model,
+            tokenizer=MagicMock(),
+            sampler=MagicMock(),
+            prompt_tokens=remaining_tokens,
+            cache=cache,
+            group=None,
+            on_prefill_progress=None,
+            distributed_prompt_progress_callback=None,
+            prefill_step_size=10_000,  # keep it on the stream_generate path
+            snapshot_offset=prefix_hit_length,
+        )
+
+        assert captured_processed, "fake stream_generate never called back"
+        assert snapshots, "no snapshots captured"
+
+        # Every captured snapshot's token_count must be the ABSOLUTE
+        # position in the full prompt (offset + local progress), never
+        # just the local progress through the remaining suffix alone.
+        captured_local = set(captured_processed)
+        for snap in snapshots:
+            local_equivalent = snap.token_count - prefix_hit_length
+            assert local_equivalent in captured_local, (
+                f"snapshot token_count={snap.token_count} does not decode "
+                f"to a real local processed value once the offset "
+                f"({prefix_hit_length}) is subtracted -- got "
+                f"local_equivalent={local_equivalent}, expected one of "
+                f"{captured_local}"
+            )
+            # The specific regression: token_count must NOT equal the bare
+            # local processed count (that was the bug -- offset dropped).
+            assert snap.token_count not in captured_local or prefix_hit_length == 0, (
+                f"snapshot token_count={snap.token_count} matches a LOCAL "
+                f"processed value directly -- this is the bug: the "
+                f"snapshot_offset ({prefix_hit_length}) was not applied, "
+                f"so this snapshot's token_count is wrong by exactly "
+                f"{prefix_hit_length} relative to the trie's absolute "
+                f"token positions."
+            )

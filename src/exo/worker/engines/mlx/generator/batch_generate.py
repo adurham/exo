@@ -1436,6 +1436,13 @@ class ExoBatchGenerator:
             if not remote_prefilled:
                 # Keep prefill_step_size kwarg for our DSv4-Flash tuning
                 # (DSV4_PREFILL_STEP_SIZE=256 per memory).
+                # snapshot_offset=prefix_hit_length: see prefill()'s docstring
+                # (2026-07-28 cross-request contamination bug, round 3) --
+                # without this, a partial-hit prefill's snapshots are stamped
+                # with a token_count relative to this call's local (post-hit)
+                # prompt_tokens instead of the absolute prompt position,
+                # letting a later unrelated request's match_length coincide
+                # with and restore a stale, wrong-task snapshot.
                 _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
                     self.model,
                     self.tokenizer,
@@ -1446,6 +1453,7 @@ class ExoBatchGenerator:
                     on_prefill_progress,
                     distributed_prompt_progress_callback,
                     prefill_step_size=self.prefill_step_size,
+                    snapshot_offset=prefix_hit_length,
                 )
 
         # We need to clamp rotating kv caches to max size so that mlx lm's _merge_caches behaves

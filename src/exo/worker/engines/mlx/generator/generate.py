@@ -529,11 +529,47 @@ def prefill(
     on_prefill_progress: Callable[[int, int], None] | None,
     distributed_prompt_progress_callback: Callable[[], None] | None,
     prefill_step_size: int | None = None,
+    snapshot_offset: int = 0,
 ) -> tuple[float, int, list[CacheSnapshot]]:
     """Prefill the KV cache with prompt tokens.
 
     This runs the model over the prompt tokens to populate the cache,
     then trims off the extra generated token.
+
+    ``snapshot_offset``: callers on a KV-prefix-cache HIT pass in only the
+    REMAINING (post-hit) suffix of the prompt as ``prompt_tokens`` -- the
+    already-cached prefix is never re-run through the model. Internally,
+    each chunk-boundary snapshot is captured with
+    ``snapshot_ssm_states(cache, processed)``, where ``processed`` counts
+    progress through THIS CALL's local ``prompt_tokens`` starting at 0.
+    Without ``snapshot_offset``, a partial-hit prefill's snapshots are
+    stamped with a ``token_count`` that is wrong by exactly
+    ``prefix_hit_length`` -- too small, relative to the trie's absolute
+    token positions.
+
+    CROSS-REQUEST CONTAMINATION BUG (2026-07-28, round 3): this offset was
+    missing entirely on the local/serial prefill path (this function),
+    while the remote-prefill sibling path (``remote_prefill.py``) already
+    computed and applied it correctly via its own ``start_pos`` parameter
+    (see ``remote_prefill``'s ``final_offset = ingest_into_mlx_cache(...,
+    start_pos=start_pos)`` then ``snapshot_ssm_states(cache, final_offset)``
+    -- an absolute position). The asymmetry meant every LOCAL partial-hit
+    prefill silently mis-stamped its snapshots' token_count too low. A
+    later, unrelated request whose OWN match_length happened to coincide
+    with that wrong (too-small) token_count could then have
+    ``_find_nearest_snapshot``/``_resolve_restore_position`` pick and
+    restore a snapshot that actually encodes a much deeper position in a
+    PRIOR, unrelated request's own generation -- non-sliceable
+    (SSM/PoolingCache) layer state well past the shared boilerplate
+    boundary, from a completely different task's unique content -- while
+    the trie's sliceable-layer bookkeeping (which only ever tracks
+    genuinely shared prefix bytes) stayed correct. This produced the
+    observed symptom: a request effectively resuming generation from deep
+    inside an unrelated earlier request's own answer, yielding a coherent,
+    complete, CORRECTLY-FORMATTED response to the WRONG task. Fixed by
+    threading the real ``prefix_hit_length`` through as ``snapshot_offset``
+    so every snapshot's token_count is always an absolute prompt position,
+    matching remote_prefill's existing (correct) contract.
 
     Returns:
         (tokens_per_sec, num_tokens, snapshots)
@@ -601,11 +637,13 @@ def prefill(
             # For DSv4 chunk_size=256 that's ~1.8K tokens of partial-
             # hit coverage from a leaf's tail. Multi-turn Hermes flows
             # where each turn extends by <1.8K tokens hit cleanly.
-            snapshots.append(snapshot_ssm_states(cache, processed))
+            snapshots.append(snapshot_ssm_states(cache, snapshot_offset + processed))
             if _diag:
                 logger.info(
                     f"[PREFIX_DIAG rank={_diag_rank}] snapshot appended "
-                    f"processed={processed}/{total} len(snapshots)={len(snapshots)}"
+                    f"processed={processed}/{total} "
+                    f"absolute_token_count={snapshot_offset + processed} "
+                    f"len(snapshots)={len(snapshots)}"
                 )
             if len(snapshots) > _SNAPSHOT_RETENTION:
                 snapshots.pop(0)
@@ -1524,6 +1562,7 @@ def mlx_generate(
                 on_prefill_progress,
                 distributed_prompt_progress_callback,
                 prefill_step_size=prefill_step_size,
+                snapshot_offset=prefix_hit_length,
             )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
