@@ -222,19 +222,59 @@ def _copy_pooling_cache(pc: "PoolingCache") -> "PoolingCache":
     set per sparse layer per turn (verified via gc heap census: holder =
     PoolingCache in a list, count climbing monotonically; ~0.2-0.4 GB/turn).
 
-    Mirror the RotatingKVCache / ArraysCache copy helpers: build a fresh
-    PoolingCache and COW-alias (``_detached_copy``) its arrays. No deepcopy,
-    no memo graph, so the old copy is freed when its last real reference drops.
+    THE CONTAMINATION FIX (2026-07-28): the original leak fix assumed
+    ``_detached_copy`` (a plain ``mx.array(a)`` COW alias) was sufficient
+    because standard MLX in-place writes always fork a fresh backing buffer
+    on the FIRST write after an alias exists, leaving the alias's old data
+    intact — see ``_detached_copy``'s docstring. That assumption does not
+    hold for ``PoolingCache.update_and_fetch_deferred`` in mlx-lm: once
+    ``self._pool_storage`` exceeds ``_POOL_DEFER_COPY_MAX_BYTES`` (default
+    32MiB — i.e. once a conversation runs long enough that the compressed
+    pool grows past a few thousand tokens), that method's "LARGE pools" path
+    explicitly holds NO pre-write reference and DONATES the buffer: it
+    slice-writes new tokens directly into the SAME backing storage our
+    ``_detached_copy`` alias points at, with no COW fork at all (deliberate,
+    for the O(1) in-place perf win — see that method's docstring). Any
+    snapshot holding one of these COW aliases therefore silently mutates
+    underneath the radix-trie prefix cache as later, UNRELATED requests
+    continue writing into the live PoolingCache — confirmed live via a
+    hard_eval run and a targeted reproduction: a later request sharing the
+    cached boilerplate-prompt prefix restored a "frozen" snapshot whose
+    sparse-attention (PoolingCache) layers had been overwritten by an
+    entirely different task's decode tokens, producing coherent answers to
+    the WRONG task (e.g. a Dijkstra's-algorithm request returning an
+    unrelated earlier LRU-cache implementation). This is a correctness bug,
+    not a perf one — a stale-buffer read is far worse than the leak this
+    helper was written to fix.
+
+    Fix: use ``_detached_copy_numpy`` (the same real independent-storage
+    helper ``copy_rotating_kv_cache`` already uses for the identical class
+    of buffer-donation hazard) for the three PoolingCache buffers, and force
+    materialization with ``mx.eval`` before returning so the copy is fully
+    realized before the live cache's next donating write can race it.
     """
     copy = PoolingCache(pc.ratio)
     copy.remainder = pc.remainder
     copy._pool_offset = pc._pool_offset
     copy._pending_offset_bump = getattr(pc, "_pending_offset_bump", 0)
     copy._pool_storage = (
-        _detached_copy(pc._pool_storage) if pc._pool_storage is not None else None
+        _detached_copy_numpy(pc._pool_storage)
+        if pc._pool_storage is not None
+        else None
     )
-    copy.buf_kv = _detached_copy(pc.buf_kv) if pc.buf_kv is not None else None
-    copy.buf_gate = _detached_copy(pc.buf_gate) if pc.buf_gate is not None else None
+    copy.buf_kv = (
+        _detached_copy_numpy(pc.buf_kv) if pc.buf_kv is not None else None
+    )
+    copy.buf_gate = (
+        _detached_copy_numpy(pc.buf_gate) if pc.buf_gate is not None else None
+    )
+    mx.eval(
+        *(
+            a
+            for a in (copy._pool_storage, copy.buf_kv, copy.buf_gate)
+            if a is not None
+        )
+    )
     return copy
 
 
@@ -1573,7 +1613,31 @@ class KVPrefixCache:
                     return node, cached_r.start_pos
 
             if edge_match < child.edge_length:
-                return node, new_matched
+                # CROSS-REQUEST CONTAMINATION FIX (2026-07-28): must anchor the
+                # donor search at `child`, not `node` (its parent). `node` is
+                # the last FULLY-consumed ancestor and may have MULTIPLE
+                # children (e.g. the root, or any branching point where
+                # unrelated sessions diverge) — `_pick_leaf_under` walks
+                # `_is_ancestor(match_node, leaf.node)` over EVERY leaf in the
+                # cache, so returning `node` here made every leaf reachable
+                # from that branch point (including totally unrelated leaves
+                # sharing zero tokens with this query beyond `node`'s own
+                # depth) eligible to be picked as the non-sliceable-layer
+                # donor by recency alone. `child`'s subtree is the correct,
+                # minimal scope: every leaf under `child` shares the FULL
+                # `child.edge_tokens` prefix (a strict superset of the tokens
+                # actually matched, since `edge_match < child.edge_length`),
+                # so restricting to `child`'s descendants guarantees the
+                # donor's own path agrees with the query up to `new_matched`.
+                # Reproduced synthetically (two unrelated sessions sharing a
+                # long real prefix, one recently-touched unrelated session):
+                # the old code picked the wrong, unrelated donor's PoolingCache
+                # state 100% of the time once it was the cache's most-recently-
+                # used leaf — this matches the observed live symptom (a later
+                # eval trial getting a complete, coherent answer to an EARLIER,
+                # unrelated task in the same run, worse in later trials as more
+                # unrelated leaves accumulate in the trie).
+                return child, new_matched
 
             node = child
             matched = new_matched

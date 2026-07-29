@@ -13,6 +13,7 @@ from exo.shared.types.text_generation import InputMessage, TextGenerationTaskPar
 from exo.worker.engines.mlx.cache import (
     CacheSnapshot,
     KVPrefixCache,
+    _copy_pooling_cache,
     _find_nearest_snapshot,
     _select_spaced_snapshots,
     cache_length,
@@ -1532,3 +1533,203 @@ class TestSnapshotTokenCountCallerSupplied:
         for real_tokens in (0, 1, 512, 4864, 37376, 249981):
             snap = snapshot_ssm_states(cache, real_tokens)
             assert snap.token_count == real_tokens
+
+
+class TestPoolingCacheSnapshotDetachment:
+    """Regression tests for the 2026-07-28 cross-request contamination bug.
+
+    Found via a live hard_eval run against exo's DeepSeek-V4-Flash: several
+    trials returned coherent, complete answers to a COMPLETELY DIFFERENT
+    task than what was asked (e.g. a request for Dijkstra's algorithm
+    returned an unrelated earlier task's LRU-cache implementation). Root
+    cause: ``_copy_pooling_cache`` used ``_detached_copy`` (a cheap
+    ``mx.array(a)`` COW alias) for a PoolingCache's buffers when snapshotting
+    it into the prefix-cache radix trie. That alias is safe against ordinary
+    in-place writes, but NOT against
+    ``PoolingCache.update_and_fetch_deferred``'s "large pool" path: once
+    ``_pool_storage`` exceeds ``_POOL_DEFER_COPY_MAX_BYTES`` (32MiB default),
+    that method holds no pre-write reference and DONATES the buffer --
+    writing new tokens directly into the SAME backing storage the snapshot's
+    alias points at, with no COW fork at all. A "frozen" snapshot captured
+    for one request therefore silently absorbs decode tokens written by a
+    completely unrelated LATER request once that live cache's pool crosses
+    the large-pool threshold -- and any subsequent request that shares the
+    cached prefix (e.g. the same long boilerplate system prompt) can restore
+    that corrupted snapshot and generate the wrong task's answer.
+
+    Fix: use ``_detached_copy_numpy`` (already used by
+    ``copy_rotating_kv_cache`` for the identical class of hazard) instead of
+    ``_detached_copy`` for PoolingCache's three buffers, with ``mx.eval`` to
+    force materialization before the live cache's next donating write can
+    race the copy.
+    """
+
+    def test_pooling_cache_snapshot_not_corrupted_by_later_large_pool_write(self):
+        """Force the donation path directly (bypassing the need for a real
+        model / >32MiB of real KV data) by monkeypatching the defer
+        threshold down to zero, so this stays fast and model-free.
+        """
+        import mlx_lm.models.cache as mlx_cache_mod
+
+        ratio = 4
+        pc = PoolingCache(ratio)
+
+        # Force the "large pool, donate the buffer" path on every write by
+        # making the defer-copy threshold effectively zero.
+        original_threshold = mlx_cache_mod._POOL_DEFER_COPY_MAX_BYTES
+        mlx_cache_mod._POOL_DEFER_COPY_MAX_BYTES = 0
+        try:
+            # First write: allocates storage and writes an initial "token".
+            first_px = mx.ones((1, 1, 8), dtype=mx.float32)
+            pc.update_and_fetch_deferred(first_px)
+            pc.commit_pending()
+            mx.eval(pc._pool_storage)
+
+            # Snapshot the cache the way the prefix-cache radix trie does.
+            snapshot = _copy_pooling_cache(pc)
+            mx.eval(snapshot._pool_storage)
+            snapshot_value_before = snapshot._pool_storage[
+                :, : snapshot._pool_offset
+            ].tolist()
+
+            # Simulate a LATER, UNRELATED request continuing to write into
+            # the SAME live PoolingCache (this is what happens in
+            # production: the leaf's live cache keeps evolving across
+            # requests while old snapshots are expected to stay frozen).
+            other_px = mx.full((1, 1, 8), 999.0, dtype=mx.float32)
+            pc.update_and_fetch_deferred(other_px)
+            pc.commit_pending()
+            mx.eval(pc._pool_storage)
+
+            # The EARLIER snapshot must be unaffected by the later write.
+            snapshot_value_after = snapshot._pool_storage[
+                :, : snapshot._pool_offset
+            ].tolist()
+            assert snapshot_value_after == snapshot_value_before, (
+                "PoolingCache snapshot was mutated by a later, unrelated "
+                "write -- this is the cross-request contamination bug "
+                "(_copy_pooling_cache must use _detached_copy_numpy, not "
+                "_detached_copy, for buffers PoolingCache.update_and_fetch_"
+                "deferred can donate-write into)."
+            )
+            # And it must still reflect the FIRST write's actual values,
+            # not e.g. all-zero uninitialized memory. Shape is
+            # (batch, seq, dim); flatten fully before comparing scalars.
+            flat_before = [
+                v for batch in snapshot_value_before for seq in batch for v in seq
+            ]
+            assert all(v == 1.0 for v in flat_before), (
+                "Snapshot did not capture the expected first-write value."
+            )
+        finally:
+            mlx_cache_mod._POOL_DEFER_COPY_MAX_BYTES = original_threshold
+
+
+class TestLongestPrefixMatchDonorScope:
+    """Regression test for the ACTUAL 2026-07-28 cross-request contamination
+    bug: ``_longest_prefix_match`` returning the wrong node as the "matched
+    node" on a mid-edge partial match.
+
+    This is a pure trie-logic bug with NO dependency on MLX buffer/COW
+    semantics -- it reproduces deterministically with plain Python state.
+    (The ``_copy_pooling_cache`` fix above addresses a real but separate,
+    synthetically-unreproducible hazard; this is the confirmed root cause
+    of the live symptom: a later request receiving a coherent, complete
+    answer belonging to an earlier, UNRELATED request in the same run.)
+
+    Root cause: when a query's prompt matches partway into an edge
+    (``edge_match < child.edge_length``, i.e. the query diverges from an
+    existing session's continuation before the end of that edge), the old
+    code returned ``node`` -- the last FULLY-consumed ancestor -- as the
+    "matched node" instead of ``child``, the node the walk actually reached.
+    ``get_kv_cache`` then calls ``_pick_leaf_under(match_node)``, which
+    picks the most-recently-used leaf anywhere in ``match_node``'s ENTIRE
+    subtree by walking ``_is_ancestor``. When ``node`` has multiple
+    children (any branch point -- including the root, which is guaranteed
+    to have multiple children once 2+ unrelated sessions exist), this
+    scope was far too wide: a totally unrelated session sharing ZERO
+    tokens with the query beyond ``node``'s own depth could be picked as
+    the donor for restoring non-sliceable (SSM/PoolingCache) layer state,
+    purely because it happened to be the most recently touched leaf
+    anywhere under that branch point.
+
+    Fix: return ``child`` (the node whose ``edge_tokens`` the query
+    actually partially matched) instead of ``node``. Every leaf reachable
+    under ``child`` shares the full ``child.edge_tokens`` prefix by trie
+    construction, which is a strict superset of the query's actual matched
+    tokens -- so restricting the donor search to ``child``'s subtree
+    guarantees the donor's own path agrees with the query up to the match
+    point.
+    """
+
+    def test_donor_leaf_must_share_query_prefix_not_just_a_common_ancestor(self):
+        from unittest.mock import MagicMock
+
+        cache = KVPrefixCache(None)
+        model = MagicMock()
+        model.layers = [None, None, None]
+
+        def make_layered_cache(num_tokens_kv: int, pool_tag: float):
+            layers: list[object] = []
+            for i in range(2):
+                c = KVCache()
+                k = mx.broadcast_to(
+                    mx.arange(num_tokens_kv, dtype=mx.float32).reshape(
+                        1, 1, num_tokens_kv, 1
+                    ),
+                    (1, 2, num_tokens_kv, 4),
+                )
+                c.keys = mx.array(k + i)
+                c.values = mx.array(k + i + 0.5)
+                c.offset = num_tokens_kv
+                layers.append(c)
+            pc = PoolingCache(ratio=4)
+            pc._pool_storage = mx.full((1, 50, 8), pool_tag, dtype=mx.float32)
+            pc._pool_offset = 50
+            layers.append(CacheList(pc))
+            return layers
+
+        shared_len = 200
+
+        # Task A: shares a long prefix with the upcoming query, tagged 111.
+        prompt_a = mx.array(
+            list(range(shared_len)) + list(range(9000, 9000 + 50)), dtype=mx.int32
+        )
+        cache_a = make_layered_cache(shared_len + 50, pool_tag=111.0)
+        snap_a = snapshot_ssm_states(cache_a, token_count=shared_len)
+        cache.add_kv_cache(prompt_a, cache_a, ssm_snapshots=[snap_a])
+
+        # Task C: UNRELATED, shares zero tokens with the query, tagged 999.
+        # Inserted last so it is the most-recently-used leaf in the whole
+        # cache -- the condition that triggered the bug.
+        prompt_c = mx.array(list(range(50000, 50000 + 30)), dtype=mx.int32)
+        cache_c = make_layered_cache(30, pool_tag=999.0)
+        snap_c = snapshot_ssm_states(cache_c, token_count=30)
+        cache.add_kv_cache(prompt_c, cache_c, ssm_snapshots=[snap_c])
+
+        # Query: a NEW task B, sharing the prefix with A, sharing nothing with C.
+        prompt_b = mx.array(
+            list(range(shared_len)) + list(range(7000, 7000 + 30)), dtype=mx.int32
+        )
+        result_cache, _remaining, _matched_leaf_id, _is_exact = cache.get_kv_cache(
+            model, prompt_b
+        )
+
+        restored_layer = result_cache[2]
+        inner = (
+            restored_layer[0]
+            if isinstance(restored_layer, CacheList)
+            else restored_layer
+        )
+        assert inner is not None and inner._pool_storage is not None
+        tag = float(inner._pool_storage[0, 0, 0].item())
+
+        assert tag == 111.0, (
+            f"Donor leaf's non-sliceable state came from the wrong session "
+            f"(tag={tag}). Expected 111.0 (task A, which actually shares "
+            f"the query's prefix), not 999.0 (task C, an unrelated session "
+            f"that merely happened to be most-recently-used) -- this is the "
+            f"cross-request contamination bug: _longest_prefix_match must "
+            f"return the node whose edge the query actually partially "
+            f"matched, not its parent."
+        )
