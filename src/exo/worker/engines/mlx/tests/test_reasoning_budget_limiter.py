@@ -228,6 +228,121 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
         assert _is_forced_to_think_end(out)
 
 
+class TestReasoningBudgetLimiterMaxSeconds:
+    """Regression coverage for the 2026-07-31 fix: budget_tokens alone could
+    not bound wall-clock time when max_output_tokens resolved to a large
+    default (no explicit client value), letting the token-only trigger take
+    15-30+ minutes to fire. max_seconds is an INDEPENDENT second trigger --
+    whichever of budget_tokens or max_seconds fires first forces the close.
+    """
+
+    def test_none_when_both_budget_and_time_disabled(self):
+        # budget_tokens<=0 AND max_seconds disabled -> no processor at all
+        # (same "zero cost when inapplicable" contract as the token-only path).
+        assert (
+            make_reasoning_budget_limiter(THINK_START, THINK_END, 0, max_seconds=None)
+            is None
+        )
+        assert (
+            make_reasoning_budget_limiter(THINK_START, THINK_END, 0, max_seconds=0)
+            is None
+        )
+        assert (
+            make_reasoning_budget_limiter(THINK_START, THINK_END, -5, max_seconds=-1)
+            is None
+        )
+
+    def test_active_with_only_time_trigger_enabled(self):
+        # budget_tokens<=0 but max_seconds>0: must still construct (time-only
+        # mode), not collapse to None just because the token trigger is off.
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=0, max_seconds=60
+        )
+        assert proc is not None
+
+    def test_time_trigger_fires_after_max_seconds_elapsed(self, monkeypatch):
+        fake_time = [1000.0]
+        monkeypatch.setattr(
+            "exo.worker.engines.mlx.generator.generate.time.monotonic",
+            lambda: fake_time[0],
+        )
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END,
+            budget_tokens=10_000,  # token trigger far out of reach
+            max_seconds=5,
+        )
+        assert proc is not None
+        history = mx.array([THINK_START] + [5] * 3)
+        # First call: starts the clock, well under budget/time -- no-op.
+        out = proc(history, _logits())
+        assert not _is_forced_to_think_end(out)
+        # Advance wall clock past max_seconds without adding many tokens
+        # (simulates a slow/degraded cluster: few tokens generated, lots of
+        # real time elapsed -- exactly the gap this fix closes).
+        fake_time[0] += 6.0
+        history2 = mx.array([THINK_START] + [5] * 4)
+        out2 = proc(history2, _logits())
+        assert _is_forced_to_think_end(out2)
+
+    def test_time_trigger_does_not_fire_before_max_seconds(self, monkeypatch):
+        fake_time = [2000.0]
+        monkeypatch.setattr(
+            "exo.worker.engines.mlx.generator.generate.time.monotonic",
+            lambda: fake_time[0],
+        )
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10_000, max_seconds=60
+        )
+        assert proc is not None
+        history = mx.array([THINK_START] + [5] * 3)
+        proc(history, _logits())  # starts the clock
+        fake_time[0] += 30.0  # well under the 60s cap
+        out = proc(history, _logits())
+        assert not _is_forced_to_think_end(out)
+
+    def test_token_trigger_still_fires_before_time_trigger_when_faster(self):
+        # The two triggers are independent -- whichever fires FIRST wins.
+        # Here the token budget is tiny and time is generous, so the token
+        # trigger must fire without needing any wall-clock to elapse.
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=5, max_seconds=3600
+        )
+        assert proc is not None
+        history = mx.array([THINK_START] + [5] * 10)
+        out = proc(history, _logits())
+        assert _is_forced_to_think_end(out)
+
+    def test_clock_resets_on_close_for_reopened_thinking_block(self, monkeypatch):
+        fake_time = [3000.0]
+        monkeypatch.setattr(
+            "exo.worker.engines.mlx.generator.generate.time.monotonic",
+            lambda: fake_time[0],
+        )
+        proc = make_reasoning_budget_limiter(
+            THINK_START, THINK_END, budget_tokens=10_000, max_seconds=5
+        )
+        assert proc is not None
+        # First thinking block: starts clock, closes cleanly before firing.
+        history_open = mx.array([THINK_START] + [1, 2, 3])
+        proc(history_open, _logits())
+        fake_time[0] += 2.0
+        history_closed = mx.array([THINK_START] + [1, 2, 3] + [THINK_END] + [9] * 5)
+        out_closed = proc(history_closed, _logits())
+        assert not _is_forced_to_think_end(out_closed)
+        # A SECOND thinking block re-opens well after the first block's
+        # clock would have expired (2s + more elapsed > 5s), but since it's
+        # a fresh block the clock must have reset on close -- must NOT fire
+        # immediately just because stale elapsed time from the first block
+        # would have exceeded max_seconds.
+        fake_time[0] += 4.0
+        history_reopened = mx.array(
+            [THINK_START] + [1, 2, 3] + [THINK_END] + [9] * 5
+            + [THINK_START] + [4]
+        )
+        out_reopened = proc(history_reopened, _logits())
+        assert not _is_forced_to_think_end(out_reopened)
+
+
 class TestSafeThinkTokenId:
     class _RaisingTokenizer:
         @property

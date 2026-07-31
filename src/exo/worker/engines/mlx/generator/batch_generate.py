@@ -193,23 +193,44 @@ _DEGENERATION_ERROR_TEXT = (
 # for the answer. Set EXO_REASONING_BUDGET_FRACTION<=0 to disable (no-op,
 # same convention as repetition_penalty==1.0 collapsing to None).
 #
-# KNOWN GAP (found 2026-07-31, not yet fixed -- flagging, not fixing here to
-# keep this change scoped): budget_tokens = max_output_tokens * this fraction.
-# When a client sends no explicit max_output_tokens (e.g. hermes-agent's exo
-# provider does not by default), it falls through to MAX_TOKENS=32168
-# (constants.py) -> budget ~24,126 tokens. At this cluster's realistic decode
-# throughput (~15-20 tok/s), exhausting that takes ~20-27 minutes -- this
-# mechanism WOULD have eventually intervened on the 2026-07-31 incident
-# below, just far too slowly to be useful protection. The fraction-of-
-# max_tokens design means protection latency scales with whatever ceiling
-# the client's request implies, not with actual evidence of looping. An
-# absolute cap (e.g. min(0.75 * max_tokens, ABSOLUTE_TOKEN_CAP) or a
-# wall-clock-based trigger) would fix this properly; out of scope for the
-# long-period detector below, which exists precisely to give FAST bounded
-# protection for the exact-repeat subset of this failure class regardless of
-# what this budget/fraction resolves to.
+# FIXED 2026-07-31 (was flagged as a known gap here, now closed): originally
+# budget_tokens = max_output_tokens * this fraction with no ceiling. When a
+# client sends no explicit max_output_tokens (e.g. hermes-agent's exo
+# provider does not by default), it fell through to MAX_TOKENS=32168
+# (constants.py) -> budget ~24,126 tokens. At this cluster's realistic
+# decode throughput (~15-30 tok/s, sometimes slower under an unrelated known
+# PP throughput-variance issue), exhausting that could take 15-30+ minutes
+# -- this mechanism WAS engaged and WOULD have eventually intervened on the
+# 2026-07-31 20+-minute incident, just far too slowly to be useful
+# protection. Fixed with TWO independent additions (both applied at the
+# call site in submit(), not here -- this fraction is unchanged):
+# (1) _REASONING_BUDGET_MAX_TOKENS: an absolute ceiling so budget_tokens
+#     never exceeds this regardless of how large max_output_tokens resolves
+#     to (budget_tokens = min(fraction * max_tokens, this_cap)). Default
+#     16384 -- comfortably above the ~13-14K tokens the one confirmed
+#     self-doubt-loop failure needed to reach its correct answer before
+#     looping (~55% of the OLD ~24,126 budget), so legitimate long reasoning
+#     isn't clipped, while still meaningfully improving the worst case.
+# (2) _REASONING_BUDGET_MAX_SECONDS: an INDEPENDENT wall-clock backstop
+#     (make_reasoning_budget_limiter's new max_seconds parameter) -- a token
+#     count alone cannot bound wall-clock time across a throughput range
+#     that varies 2x, plus the separate known PP degradation case. Default
+#     360s (6 min). Deliberately a BACKSTOP, not the primary trigger --
+#     making the whole mechanism purely time-based would make reasoning
+#     depth a function of transient cluster load (same prompt cut off at a
+#     different token count depending on how busy the cluster is), hurting
+#     eval reproducibility. The token cap still governs the common case;
+#     time only fires if something is unusually slow.
+# See make_reasoning_budget_limiter's docstring in generate.py for the full
+# mechanism-level rationale of both triggers.
 _REASONING_BUDGET_FRACTION = float(
     os.environ.get("EXO_REASONING_BUDGET_FRACTION", "0.75")
+)
+_REASONING_BUDGET_MAX_TOKENS = int(
+    os.environ.get("EXO_REASONING_BUDGET_MAX_TOKENS", "16384")
+)
+_REASONING_BUDGET_MAX_SECONDS = float(
+    os.environ.get("EXO_REASONING_BUDGET_MAX_SECONDS", "360")
 )
 
 # ── Long-period (multi-sentence) degeneration detection ──
@@ -1664,7 +1685,11 @@ class ExoBatchGenerator:
                 _reasoning_budget = make_reasoning_budget_limiter(
                     think_start_id=safe_think_token_id(self.tokenizer, "think_start_id"),
                     think_end_id=safe_think_token_id(self.tokenizer, "think_end_id"),
-                    budget_tokens=int(max_tokens * _REASONING_BUDGET_FRACTION),
+                    budget_tokens=min(
+                        int(max_tokens * _REASONING_BUDGET_FRACTION),
+                        _REASONING_BUDGET_MAX_TOKENS,
+                    ),
+                    max_seconds=_REASONING_BUDGET_MAX_SECONDS,
                     starts_in_thinking=detect_thinking_prompt_suffix(
                         prompt, self.tokenizer
                     ),

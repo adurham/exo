@@ -1203,9 +1203,11 @@ def make_reasoning_budget_limiter(
     budget_tokens: int,
     starts_in_thinking: bool = False,
     prompt_token_count: int = 0,
+    max_seconds: float | None = None,
 ) -> Callable[[mx.array, mx.array], mx.array] | None:
     """Force a clean end-of-thinking transition once a reasoning block has run
-    for ``budget_tokens`` tokens without closing on its own.
+    for ``budget_tokens`` tokens -- OR ``max_seconds`` of wall-clock time --
+    without closing on its own, whichever fires first.
 
     Root cause this addresses (confirmed live 2026-07-26, hard_eval.py against
     the exo cluster, tasks math_digit_sum / math_largest_prime_factor /
@@ -1229,6 +1231,32 @@ def make_reasoning_budget_limiter(
     and leave the answer channel empty. In the confirmed failure case the
     model reaches the correct answer well before the loop starts, so forcing
     an early close salvages a correct response instead of an empty one.
+
+    ``max_seconds`` (added 2026-07-31): the token-only trigger has a real
+    gap -- ``budget_tokens`` is typically ``max_output_tokens * FRACTION``
+    (see ``_REASONING_BUDGET_FRACTION`` / ``_REASONING_BUDGET_MAX_TOKENS`` in
+    batch_generate.py), and when a client sends no explicit
+    ``max_output_tokens`` this falls through to the engine's hardcoded
+    default (32168), yielding a ~24K-token budget. At this cluster's
+    realistic decode throughput (~15-30 tok/s, occasionally slower under an
+    unrelated known PP throughput-variance issue), exhausting a token-only
+    budget that large can take 15-30+ minutes wall-clock -- confirmed via a
+    real 20+ minute incident (2026-07-31) where this mechanism WAS engaged
+    and WOULD have eventually intervened, just far too slowly to be useful
+    protection. A token count alone cannot bound wall-clock time across a
+    throughput range that varies this much (plus the separate known
+    degradation case), so ``max_seconds`` is an INDEPENDENT second trigger
+    checked on the same per-token callback (near-zero added cost): whichever
+    of budget_tokens or max_seconds is reached first forces the close. This
+    keeps the token cap as the primary, cheap, deterministic-given-token-
+    count mechanism (good for reproducibility/eval consistency -- the same
+    prompt gets the same reasoning depth under normal load) while adding a
+    real ceiling on worst-case intervention latency regardless of transient
+    cluster slowness. Do NOT make the whole mechanism purely time-based --
+    reasoning depth becoming a function of transient load (same prompt cut
+    off at a different token count depending on how busy the cluster is)
+    would hurt eval reproducibility; time is a backstop, not the primary
+    trigger.
 
     CRITICAL (found 2026-07-26 after this shipped as a no-op): DeepSeek-V4's
     chat template appends a literal <think> suffix to the PROMPT itself --
@@ -1266,15 +1294,28 @@ def make_reasoning_budget_limiter(
             explicit think_start_id is found -- anchors the budget window to
             the start of GENERATION, not the start of the prompt (a long
             prompt must not eat into the reasoning budget).
+        max_seconds: wall-clock ceiling on how long thinking may stay open,
+            independent of budget_tokens -- see rationale above. None or
+            <= 0 disables the time-based trigger (token-only, matching the
+            pre-2026-07-31 behavior). The clock starts on the processor's
+            FIRST invocation for this generation (not construction time),
+            so it measures actual decode wall-clock, not queueing/setup
+            time before the first token.
 
     Returns:
         A logits processor, or None if thinking isn't supported by this
-        tokenizer/model or budget_tokens <= 0 (so callers can skip adding it
-        to the processor list entirely -- zero cost when inapplicable, same
-        pattern as repetition_penalty==1.0 collapsing to None).
+        tokenizer/model or budget_tokens <= 0 AND max_seconds is disabled
+        (so callers can skip adding it to the processor list entirely --
+        zero cost when both triggers are inapplicable, same pattern as
+        repetition_penalty==1.0 collapsing to None).
     """
-    if think_start_id is None or think_end_id is None or budget_tokens <= 0:
+    if think_start_id is None or think_end_id is None:
         return None
+    _time_enabled = max_seconds is not None and max_seconds > 0
+    if budget_tokens <= 0 and not _time_enabled:
+        return None
+
+    _start_wall: list[float] = []  # single-element mutable cell (closure)
 
     def proc(history: mx.array, logits: mx.array) -> mx.array:
         # history is the full token sequence generated so far for this
@@ -1298,14 +1339,23 @@ def make_reasoning_budget_limiter(
             # sequence, so a long prompt doesn't eat into the budget.
             start_idx = max(prompt_token_count - 1, -1)
         if think_end_id in ids[start_idx + 1:]:
+            _start_wall.clear()  # closed -- reset clock for any re-entry
             return logits  # already closed after that open -- no-op
         elapsed = (len(ids) - 1) - start_idx
-        if elapsed < budget_tokens:
+        over_token_budget = budget_tokens > 0 and elapsed >= budget_tokens
+        over_time_budget = False
+        if _time_enabled:
+            now = time.monotonic()
+            if not _start_wall:
+                _start_wall.append(now)
+            elif (now - _start_wall[0]) >= cast(float, max_seconds):
+                over_time_budget = True
+        if not over_token_budget and not over_time_budget:
             return logits
-        # Over budget and still open: force think_end_id as the only viable
-        # token. Ban everything else rather than just boosting think_end_id,
-        # so this is a hard guarantee, not a strong nudge a determined
-        # sampler could still route around.
+        # Over budget (token or time) and still open: force think_end_id as
+        # the only viable token. Ban everything else rather than just
+        # boosting think_end_id, so this is a hard guarantee, not a strong
+        # nudge a determined sampler could still route around.
         forced = mx.full(logits.shape, -1e9, dtype=logits.dtype)
         forced[..., think_end_id] = 1e9
         return forced
