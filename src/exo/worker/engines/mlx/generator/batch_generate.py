@@ -562,6 +562,25 @@ def _detect_long_period_loop(
     return None
 
 
+class PPSpecAlreadyActiveError(RuntimeError):
+    """Raised when a second PP speculative-decode task is submitted while
+    one is already in flight on this rank's ExoBatchGenerator.
+
+    See the long comment on ExoBatchGenerator._pp_spec_gen_by_uid (2026-07-31)
+    for the full rationale: PP's shared SpecPipelineFirstLayer/
+    SpecPipelineLastLayer mode-flag state represents the ONE physical
+    rank0<->rank1 wire link, so genuinely concurrent PP-spec decoding isn't
+    safe with today's architecture -- this replaces a prior silent-clobber
+    data-corruption bug (second submit() overwrote the first request's
+    generator reference, orphaning its task forever) with an explicit,
+    immediately-visible rejection instead. A plain RuntimeError subclass
+    (not BaseException, unlike PrefillCancelled in generate.py) so it's
+    caught by the runner's existing `except Exception` handling around
+    generation-task dispatch and surfaces as a clean task failure the
+    caller can retry, not an uncaught crash.
+    """
+
+
 @dataclass
 class _EngineTask:
     uid: int
@@ -627,8 +646,39 @@ class ExoBatchGenerator:
     _mlx_gen: MlxBatchGenerator = field(init=False)
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
     _pp_spec_active: bool = field(init=False, default=False)
-    _pp_spec_gen: Generator[tuple[int, mx.array], None, None] | None = field(init=False, default=None)
-    _pp_spec_uid: int | None = field(init=False, default=None)
+    # PER-TASK KEYED, not a singular attribute (fixed 2026-07-31 -- see
+    # PPSpecAlreadyActiveError below and the entry guard in
+    # _submit_pp_spec). Historically these were bare `Generator | None` /
+    # `int | None` instance attributes, clobbered wholesale by a second
+    # submit() before the first request's generator was exhausted: the
+    # first request's task orphaned forever (its generator reference lost,
+    # nothing ever resumes it, the runner wedges waiting on a response
+    # that never comes) and the second request silently inherited
+    # whatever mid-flight state the overwrite left behind. Keying by uid
+    # makes that contract explicit and, combined with the entry guard,
+    # converts the failure mode from silent data corruption into a loud,
+    # immediately-visible rejection.
+    #
+    # IMPORTANT -- this is a SAFETY fix, not a concurrency feature. PP's
+    # SpecPipelineFirstLayer/SpecPipelineLastLayer (pp_speculation.py) are
+    # singular objects installed ONCE onto the model's real, persistent
+    # layer list; their _pp_recv/_pp_send/_speculative flags represent
+    # the state of the ONE physical rank0<->rank1 wire link this step,
+    # reconfigured via _configure_layers() at the start of every request
+    # and reset in the generator's `finally:`. Two PP-spec generators
+    # genuinely interleaved via step() would each reconfigure that SAME
+    # shared link with no atomicity between "configure" and "use it" --
+    # exactly the stale-mode-flag bug a 2026-07-20 fix already patched
+    # for the disconnect/exception-path case, except as the NORMAL path
+    # instead of a rare edge case. True concurrent PP-spec decoding needs
+    # either per-request wire-protocol multiplexing or a real scheduler
+    # over the shared layer objects -- separate, larger architectural
+    # work, not this fix. EXO_MAX_CONCURRENT_REQUESTS stays capped at 1
+    # for Pipeline mode; this dict never holds more than one entry in
+    # today's architecture, by design (the entry guard enforces it).
+    _pp_spec_gen_by_uid: dict[
+        int, Generator[tuple[int, mx.array], None, None]
+    ] = field(default_factory=dict, init=False)
     _pp_spec_eos: set[int] = field(init=False, default_factory=set)
     _uid_counter: int = field(init=False, default=0)
     # Monotonic per-process counter, incremented once per submit() call,
@@ -1355,7 +1405,7 @@ class ExoBatchGenerator:
             bool(self._active_tasks)
             or has_unprocessed
             or has_generation
-            or self._pp_spec_gen is not None
+            or bool(self._pp_spec_gen_by_uid)
         )
 
     def _set_fence_async_engine(self, arm: bool) -> None:
@@ -2263,6 +2313,27 @@ class ExoBatchGenerator:
         prefill_tps: float,
     ) -> int:
         """Set up PP speculative decode for this task."""
+        # Entry guard (2026-07-31): reject a second concurrent PP-spec
+        # submission explicitly instead of silently clobbering the first
+        # request's generator. See PPSpecAlreadyActiveError's docstring and
+        # the long comment on _pp_spec_gen_by_uid for the full rationale --
+        # PP's shared wire-link state genuinely can't run two of these at
+        # once yet; this converts what used to be silent data corruption
+        # into a loud, immediately-visible rejection. Checked FIRST, before
+        # any shared layer state (_install_spec_layers/_configure_layers
+        # below) is touched, so a rejected second request has zero side
+        # effects on the first request's in-flight decode.
+        if self._pp_spec_gen_by_uid:
+            _active_uid = next(iter(self._pp_spec_gen_by_uid))
+            raise PPSpecAlreadyActiveError(
+                f"PP speculative decode already active for uid={_active_uid}; "
+                "a second concurrent PP-spec request is not supported by "
+                "today's architecture (shared rank0<->rank1 wire-link state "
+                "in SpecPipelineFirstLayer/SpecPipelineLastLayer -- see "
+                "PPSpecAlreadyActiveError's docstring). Reject and let the "
+                "caller retry once the active request completes, rather "
+                "than silently corrupting either request's state."
+            )
         from exo.worker.engines.mlx.trace import T, request_trace
 
         from ..pp_speculation import (
@@ -2417,7 +2488,7 @@ class ExoBatchGenerator:
         self._pp_rank_for_log = pp_rank
         if _has_dspark:
             logger.info("PP speculation using DSpark (rank1-owned draft+verify)")
-            self._pp_spec_gen = pp_dspark_decode_loop(
+            _pp_spec_gen = pp_dspark_decode_loop(
                 model=self.model,
                 prompt_cache=cache,
                 first_y=first_y,
@@ -2427,7 +2498,7 @@ class ExoBatchGenerator:
             )
         elif _chain_k > 1 and _pp_mtp is not None and hasattr(_pp_mtp, "predict"):
             logger.info(f"PP speculation using chained MTP draft, k={_chain_k}")
-            self._pp_spec_gen = pp_chained_decode_loop(
+            _pp_spec_gen = pp_chained_decode_loop(
                 model=self.model,
                 prompt_cache=cache,
                 sampler=sampler,
@@ -2439,7 +2510,7 @@ class ExoBatchGenerator:
                 chain_k=_chain_k,
             )
         else:
-            self._pp_spec_gen = pp_speculative_decode_loop(
+            _pp_spec_gen = pp_speculative_decode_loop(
                 model=self.model, draft_model=_pp_draft,  # type: ignore
                 prompt_cache=cache, draft_cache=_pp_draft_cache,  # type: ignore
                 sampler=sampler, logits_processors=logits_processors,
@@ -2452,7 +2523,11 @@ class ExoBatchGenerator:
 
         self._uid_counter += 1
         uid = self._uid_counter
-        self._pp_spec_uid = uid
+        # Dict write (2026-07-31, see _pp_spec_gen_by_uid's class-level
+        # comment): the entry guard at the top of this method already
+        # ensures the dict is empty here, so this is always a fresh
+        # single-entry insert, never an overwrite.
+        self._pp_spec_gen_by_uid[uid] = _pp_spec_gen
 
         # Store first token to yield on first step()
         self._pp_first_token = _first_out.token
@@ -2476,8 +2551,10 @@ class ExoBatchGenerator:
 
     def _step_pp_spec(self) -> list[GenerationBatch.Response]:
         """Get next token from PP speculative decode loop."""
-        uid = self._pp_spec_uid
-        assert uid is not None
+        # Single active entry, guaranteed by _submit_pp_spec's entry guard
+        # (see _pp_spec_gen_by_uid's class-level comment) -- this dict
+        # never holds more than one uid in today's architecture.
+        uid = next(iter(self._pp_spec_gen_by_uid))
 
         # Diagnostic instrumentation (2026-07-19, EXO_PP_SPEC_FINISH_LOG=1,
         # default off): investigating the 2026-07-18 stream-never-closed
@@ -2547,16 +2624,16 @@ class ExoBatchGenerator:
                 # `self._pp_spec_gen = None` assignment in step() (2026-07-19
                 # hardening -- see the matching comment below for why bare
                 # refcount-drop finalization is not safe to depend on here).
-                self._close_pp_spec_gen()
+                self._close_pp_spec_gen(uid)
             return [GenerationBatch.Response(
                 uid=uid, token=tok, logprobs=mx.zeros(1),
                 finish_reason="stop" if is_eos else None,
                 prompt_cache=None, all_tokens=None,
             )]
 
-        assert self._pp_spec_gen is not None
+        _pp_spec_gen = self._pp_spec_gen_by_uid[uid]
         try:
-            tok_id, lp = next(self._pp_spec_gen)
+            tok_id, lp = next(_pp_spec_gen)
             # int() normalization -- verified NOT the bug, kept as harmless
             # defensive belt-and-suspenders. See the matching comment on the
             # first-token branch above for the full trace.
@@ -2587,7 +2664,7 @@ class ExoBatchGenerator:
                 # timing; StopIteration/GeneratorExit from an already-primed
                 # but not-yet-iterated generator is expected and swallowed by
                 # close() itself, so no try/except is needed here.
-                self._close_pp_spec_gen()
+                self._close_pp_spec_gen(uid)
             return [GenerationBatch.Response(
                 uid=uid, token=tok_id, logprobs=lp,
                 finish_reason="stop" if is_eos else None,
@@ -2600,15 +2677,15 @@ class ExoBatchGenerator:
                     f"[PP_SPEC_FINISH] rank={_rank_for_log} call_n={_call_n} "
                     f"branch=stop_iteration (max_tokens reached)"
                 )
-            self._close_pp_spec_gen()
+            self._close_pp_spec_gen(uid)
             return [GenerationBatch.Response(
                 uid=uid, token=0, logprobs=mx.zeros(1),
                 finish_reason="length",
                 prompt_cache=None, all_tokens=None,
             )]
 
-    def _close_pp_spec_gen(self) -> None:
-        """Deterministically finalize the PP spec-decode generator.
+    def _close_pp_spec_gen(self, uid: int) -> None:
+        """Deterministically finalize the PP spec-decode generator for ``uid``.
 
         Calls .close() explicitly (runs its `finally:` block synchronously,
         right here) instead of just dropping the reference and hoping
@@ -2617,10 +2694,13 @@ class ExoBatchGenerator:
         a defensive hardening pass, not a confirmed fix for the 2026-07-18
         stream-never-closed hang (that needs live re-validation once the
         cluster is reachable again).
+
+        Takes an explicit uid (2026-07-31, see _pp_spec_gen_by_uid's
+        class-level comment) rather than reading a singular instance
+        attribute -- pops exactly the entry this call site is finishing,
+        so it can never accidentally clear a DIFFERENT uid's state.
         """
-        gen = self._pp_spec_gen
-        self._pp_spec_gen = None
-        self._pp_spec_uid = None
+        gen = self._pp_spec_gen_by_uid.pop(uid, None)
         if gen is not None:
             try:
                 gen.close()
@@ -2686,14 +2766,14 @@ class ExoBatchGenerator:
 
         # Use PP speculation decode if active. Captured as a local BEFORE
         # calling _step_pp_spec() (2026-07-19): that call now deterministically
-        # clears self._pp_spec_gen/_pp_spec_uid on EOS/max_tokens (see
-        # _close_pp_spec_gen), not just on the pre-existing "Clean up spec
+        # pops the uid's entry from self._pp_spec_gen_by_uid on EOS/max_tokens
+        # (see _close_pp_spec_gen), not just on the pre-existing "Clean up spec
         # state" branch further below in this same step() -- so re-reading
-        # self._pp_spec_gen after the call to decide which stats path this
-        # response belongs to would silently misclassify the FINAL response
-        # of every PP-spec completion. was_pp_spec_step is that decision,
-        # frozen at the top of this call.
-        was_pp_spec_step = self._pp_spec_gen is not None
+        # self._pp_spec_gen_by_uid after the call to decide which stats path
+        # this response belongs to would silently misclassify the FINAL
+        # response of every PP-spec completion. was_pp_spec_step is that
+        # decision, frozen at the top of this call.
+        was_pp_spec_step = bool(self._pp_spec_gen_by_uid)
         if was_pp_spec_step:
             _step_tic = time.perf_counter()
             responses = self._step_pp_spec()
@@ -3056,8 +3136,9 @@ class ExoBatchGenerator:
                     # "self._pp_spec_gen is not None or self._pp_spec_uid is
                     # not None" check here (2026-07-19) -- that check now
                     # reads stale/cleared state, since _step_pp_spec's EOS and
-                    # StopIteration paths already deterministically null both
-                    # attributes via _close_pp_spec_gen() before we get here.
+                    # StopIteration paths already deterministically pop the
+                    # uid's entry from self._pp_spec_gen_by_uid via
+                    # _close_pp_spec_gen() before we get here.
                     gen_elapsed = time.perf_counter() - state.generation_start_time
                     generation_tps = (
                         state.completion_tokens / gen_elapsed
