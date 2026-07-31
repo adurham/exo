@@ -12,6 +12,99 @@ File map:
 | KV cache config → runtime | [kv-cache-architecture.md](./kv-cache-architecture.md) |
 | Upstream PR/issue tracker | [upstream-prs.md](./upstream-prs.md) |
 
+## PP vs TP: concurrency tradeoff (2026-07-31)
+
+**This is a real, permanent architectural tradeoff between the cluster's two
+sharding modes — not a bug, not a config oversight. Documented here after a
+live investigation (2026-07-31 session) confirmed it's structural on both
+this fork AND upstream `exo-explore/exo`.**
+
+| | Pipeline (PP, `DSV4_SHARDING=Pipeline`) | Tensor (TP, `DSV4_SHARDING=Tensor`) |
+|---|---|---|
+| Single-request throughput | **Faster** — 27-33 tok/s with DSpark speculative decode (validated 2026-07-23 sweep); currently running plain (DSpark off, ~15-20 tok/s) pending a separate re-validation | Slower per-request baseline (~15-20 tok/s, no PP-specific speedup path) |
+| Concurrent requests | **Genuinely impossible today** — `EXO_MAX_CONCURRENT_REQUESTS` is hard-forced to `1` in `start_cluster.sh` whenever `DSV4_SHARDING=Pipeline` | Supported — TP's collective layers (`ShardedMoE`, sharded attention) are stateless per-request, so `EXO_MAX_CONCURRENT_REQUESTS` can be raised normally |
+| Mid-decode cancellation | Not supported (rank 1 blocks on recv forever if cancelled mid-flight) | Supported |
+
+### Why PP can't do concurrent requests (root cause, not a workaround)
+
+PP's pipeline layers (`PipelineFirstLayer`/`PipelineLastLayer` in
+`auto_parallel.py`, and their speculative-decode counterparts
+`SpecPipelineFirstLayer`/`SpecPipelineLastLayer` in `pp_speculation.py`,
+fork-only) hold **mutable per-request sequencing state as singular instance
+attributes**: `is_prefill`, `queue_sends` (base layers) and `_pp_recv`,
+`_pp_send`, `_speculative` (spec layers). These flags represent which phase
+of the asymmetric rank0↔rank1 send/recv handoff the ONE physical wire link
+is currently in — toggled via `set_pipeline_prefill()`/
+`set_pipeline_queue_sends()`/`_configure_layers()` at the start/end of every
+request.
+
+Two requests genuinely interleaved through `step()` would each reconfigure
+that SAME shared link with no atomicity between "configure" and "use it" —
+one request's setup call could flip the mode flags out from under another
+request's in-flight forward pass. This traces all the way down to
+`mx.distributed.send`/`recv` themselves (checked directly in
+`mlx/mlx/distributed/distributed.cpp`): they take only `dst`/`src` rank and
+a stream — **no request tag** — so even with perfect Python-side state
+management, two concurrent requests' messages on the same rank pair would be
+wire-indistinguishable.
+
+Contrast with TP: `ShardedMoE.__call__` and friends set `sharding_group`
+once at model load and never touch it again per-request; `all_sum`/
+`all_gather` are pure, self-contained collective calls with zero cross-call
+memory. That statelessness is exactly what concurrent requests need, and
+exactly what PP's design doesn't have.
+
+### Confirmed NOT unique to this fork
+
+Checked `exo-explore/exo` upstream directly (`git fetch
+https://github.com/exo-explore/exo.git main`, 2026-07-31): their
+`PipelineFirstLayer`/`PipelineLastLayer` have the **identical** singular
+mutable-attribute design (`is_prefill`/`queue_sends`, same
+`set_pipeline_prefill()` pattern), their `EXO_MAX_CONCURRENT_REQUESTS`
+default (8) applies uniformly with **no Pipeline-mode carve-out** visible
+anywhere in their code, and there's no concurrent-PP test coverage in their
+suite either. Pipeline is upstream's *default* sharding mode
+(`Sharding: Sharding = Sharding.Pipeline` in `api/types/api.py`), so this
+isn't some abandoned/experimental path — either upstream has this same
+latent bug and hasn't hit/reported it, or their typical usage pattern
+doesn't trigger the interleaving that exposes it. Either way: **no evidence
+anywhere in the exo/mlx ecosystem that real PP concurrency has been solved.**
+DSpark and the entire `pp_speculation.py` speculative-decode path are
+fork-only (not in upstream at all), so that half of the tradeoff (PP's
+speed advantage) is also fork-specific.
+
+### What real PP concurrency would require (not started, scoped only)
+
+Two viable paths, both genuine new engineering — not a quick fix, not
+something to fold into an unrelated session:
+
+1. **Wire-level request multiplexing.** Add a request-tag to
+   `mx.distributed.send`/`recv` (MLX C++ change) so multiple in-flight
+   requests can interleave on the wire without ambiguity, paired with
+   making `PipelineFirstLayer`/`PipelineLastLayer`'s state per-request-keyed
+   instead of singular (same shape of fix as the 2026-07-31
+   `_pp_spec_gen_by_uid` dict-keying fix below, but for the base pipeline
+   layers' send/recv scheduling, which is the harder, transport-level half).
+2. **Cross-request micro-batching.** Batch multiple requests' tokens into a
+   single forward pass at each pipeline stage (mirrors TP's `batch_size>1`
+   decode). Sidesteps the wire-tagging problem entirely — one send/recv per
+   *batch*, not per request — but needs real batching/padding/scheduling
+   logic PP doesn't have today.
+
+Until one of these lands, `EXO_MAX_CONCURRENT_REQUESTS=1` for Pipeline mode
+is correct, permanent behavior — not a stopgap waiting on a small fix.
+
+### Related fix shipped this session (safety, not concurrency)
+
+2026-07-31 also shipped `_pp_spec_gen_by_uid` (dict-keyed, was a bare
+singular attribute) + `PPSpecAlreadyActiveError` in `batch_generate.py`
+(commit `360390a9e`) — this converts a *silent data-corruption* bug (a
+second concurrent PP-spec submission clobbering the first request's
+generator reference, orphaning its task) into a *loud, explicit rejection*.
+It is explicitly **not** a step toward concurrency — see the exception's own
+docstring and the long comment on the dict field for the full rationale.
+`EXO_MAX_CONCURRENT_REQUESTS` stays at 1 for Pipeline mode, unchanged.
+
 ## adurham/mlx-lm main
 
 Pinned (as of exo `31ac5da4`, 2026-04-27): `main@2a1dcf653e3e95181c381d4d6329c2c0a92ce032`. `:main` is now the canonical fork branch — the rltakashige graft has been reverted, the cluster's Blaizzy-derived `deepseek_v4.py` is consolidated onto `:main`, and `:dsv4-perf-bisect` is retired (still exists on `origin` for history but unused).
