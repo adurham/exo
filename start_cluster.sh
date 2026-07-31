@@ -1715,14 +1715,33 @@ for NODE in "${NODES[@]}"; do
         MLX_EVENT_WAIT_TIMEOUT_MS=1800000
     fi
     [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
-    # PP mode: disable coord collectives (mx_any / agree_on_*). Under MlxRing
-    # (TCP backend), group.split() throws, so coord collectives share the full
-    # PP group's TCP socket with the p2p send/recv. The mx_any gate is an
-    # unnecessary rendezvous for PP (both ranks serve the same request; the p2p
-    # handoff already synchronizes them). Removing it eliminates one ~20s
-    # skew point; the 120s timeout above covers the remaining one (p2p recv).
+    # PP mode: disable coord collectives (mx_any / agree_on_*) by default. Under
+    # MlxRing (TCP backend), group.split() throws, so coord collectives would
+    # share the full PP group's TCP socket with the p2p send/recv. The mx_any
+    # gate is an unnecessary rendezvous for single-request PP (both ranks
+    # serve the same request; the p2p handoff already synchronizes them).
+    # Removing it eliminates one ~20s skew point; the 120s timeout above
+    # covers the remaining one (p2p recv).
+    #
+    # OVERRIDABLE 2026-07-31 (was unconditionally forced to 1): confirmed via
+    # direct source read that jaccl's group.split() is fully implemented
+    # (mlx/mlx/distributed/jaccl/lib/jaccl/mesh.cpp MeshGroup::split(), real
+    # QP allocation -- NOT a stub) -- only MlxRing's split() throws, contrary
+    # to what this comment originally implied about jaccl too. The cluster's
+    # DEFAULT transport (DSV4_INSTANCE_META unset -> MlxJaccl, see line 2297)
+    # is real RDMA, not the TCP fallback this gating was reasoned about for.
+    # Also confirmed the historical jaccl+PP p2p stall ("[jaccl] recv
+    # STALLED... UC completion lost") that would have made testing this
+    # dangerous was root-caused (UC send-before-recv-posted race) and fixed
+    # in mlx commit c168e2f4b, already deployed. Prerequisite work for
+    # supporting EXO_MAX_CONCURRENT_REQUESTS>1 under PP needs agree_on_tasks/
+    # agree_on_cancellations to actually run across ranks -- testing that
+    # requires the ability to turn this gate back on. Set
+    # EXO_PP_NO_COORD_COLLECTIVE=0 explicitly to test; unset/anything else
+    # keeps the safe default (1) for Pipeline mode.
     if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=1"
+        : "${EXO_PP_NO_COORD_COLLECTIVE:=1}"
+        EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=$EXO_PP_NO_COORD_COLLECTIVE"
     fi
     # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
     # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
