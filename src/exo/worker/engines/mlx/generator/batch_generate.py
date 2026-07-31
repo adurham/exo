@@ -192,8 +192,99 @@ _DEGENERATION_ERROR_TEXT = (
 # legitimately long reasoning while still guaranteeing some budget remains
 # for the answer. Set EXO_REASONING_BUDGET_FRACTION<=0 to disable (no-op,
 # same convention as repetition_penalty==1.0 collapsing to None).
+#
+# KNOWN GAP (found 2026-07-31, not yet fixed -- flagging, not fixing here to
+# keep this change scoped): budget_tokens = max_output_tokens * this fraction.
+# When a client sends no explicit max_output_tokens (e.g. hermes-agent's exo
+# provider does not by default), it falls through to MAX_TOKENS=32168
+# (constants.py) -> budget ~24,126 tokens. At this cluster's realistic decode
+# throughput (~15-20 tok/s), exhausting that takes ~20-27 minutes -- this
+# mechanism WOULD have eventually intervened on the 2026-07-31 incident
+# below, just far too slowly to be useful protection. The fraction-of-
+# max_tokens design means protection latency scales with whatever ceiling
+# the client's request implies, not with actual evidence of looping. An
+# absolute cap (e.g. min(0.75 * max_tokens, ABSOLUTE_TOKEN_CAP) or a
+# wall-clock-based trigger) would fix this properly; out of scope for the
+# long-period detector below, which exists precisely to give FAST bounded
+# protection for the exact-repeat subset of this failure class regardless of
+# what this budget/fraction resolves to.
 _REASONING_BUDGET_FRACTION = float(
     os.environ.get("EXO_REASONING_BUDGET_FRACTION", "0.75")
+)
+
+# ── Long-period (multi-sentence) degeneration detection ──
+# _detect_token_loop above catches TIGHT exact-token cycles (period<=24,
+# e.g. "the user is on 1. the user is on 1."). It is structurally blind to a
+# DIFFERENT collapse shape observed 2026-07-31: DSv4's reasoning_content
+# stuck for 20+ minutes cycling the same handful of full sentences
+# WORD-FOR-WORD IDENTICAL each repeat (not paraphrased -- confirmed from the
+# raw stream), just with a period far longer than 24 tokens (each cycle was
+# ~150-300+ tokens, several full sentences). Raising _LOOP_DETECT_MAX_PERIOD
+# to cover that directly would blow up the existing detector's cost (it scans
+# EVERY candidate period 1..max_period on EVERY token -- O(max_period*window)
+# per token; going from 24 to ~300 is a ~12x per-token cost increase forever,
+# on the hot path, to catch a comparatively rare failure mode).
+#
+# This is DELIBERATELY a second, separate mechanism from
+# make_reasoning_budget_limiter above, not a replacement -- that limiter
+# targets PARAPHRASE-DRIFT self-doubt loops (period 60-400+ tokens, wording
+# differs each cycle) by salvaging an early answer once a real one was
+# already found; this detector targets EXACT-repeat long-period loops (the
+# repeated content is byte-identical, a stronger "genuinely stuck, zero
+# forward progress" signal) by terminating fast regardless of what
+# max_output_tokens/budget_tokens happens to resolve to for a given request.
+# They cover non-overlapping failure signatures and can both be active on
+# the same request; whichever fires first wins.
+#
+# Instead: chunk the token stream into fixed-size non-overlapping blocks
+# (_LOOP_DETECT_LONG_BLOCK tokens each), hash each block once as it completes,
+# and run the SAME period-scan algorithm as _detect_token_loop but over the
+# short deque of BLOCK HASHES rather than raw token ids. This only runs once
+# per block (not once per token) and the periodicity scan itself is over a
+# short list of small ints, so total added cost is negligible -- strictly
+# cheaper per-token than the existing tight-loop detector -- while covering
+# periods up to _LOOP_DETECT_LONG_MAX_PERIOD * _LOOP_DETECT_LONG_BLOCK tokens
+# (default 12*24 = 288, comfortably above the observed ~150-300 token cycles).
+#
+# Deliberately does NOT use fuzzy/similarity matching (e.g. SimHash) even
+# though the observed loop involved slightly different reasoning en route
+# to each repeated sentence -- the REPEATED sentences themselves were
+# byte-identical, so an exact block-hash match already catches this class
+# without the false-positive risk of a similarity threshold. On a hash match,
+# the underlying raw token blocks are compared exactly (not just hashes)
+# before terminating, eliminating hash-collision risk entirely -- this
+# verification only runs on the rare detection path, so it's free.
+#
+# Explicitly NOT a repetition_penalty / sampling-side fix: repetition_penalty
+# was tried project-wide and reverted (2026-07-24, commit 4b4309d56) after a
+# controlled test found it caused a 23.3% SILENT tool-call corruption rate
+# (penalizing tokens a verbatim-copy task needs to reproduce exactly, e.g.
+# building a file path from context). This detector never touches sampling;
+# it is a pure kill-switch, same guarantee model as _detect_token_loop --
+# terminating (action="error"/"stop", same EXO_LOOP_DETECT_ACTION knob), not
+# salvaging like make_reasoning_budget_limiter, because an exact repeated
+# cycle is a stronger "stuck" signal than paraphrase drift: the tokens
+# leading into a confirmed EXACT cycle are already degenerate too (same
+# reasoning as the tight-loop detector's own action="error" default above),
+# so forcing an early answer out of that reasoning risks a confident-but-
+# wrong response rather than a clean retryable failure.
+_LOOP_DETECT_LONG_ENABLED = os.environ.get("EXO_LOOP_DETECT_LONG", "1") != "0"
+_LOOP_DETECT_LONG_BLOCK = int(os.environ.get("EXO_LOOP_DETECT_LONG_BLOCK", "24"))
+_LOOP_DETECT_LONG_MAX_PERIOD = int(
+    os.environ.get("EXO_LOOP_DETECT_LONG_MAX_PERIOD", "12")
+)
+# Lower than the tight-loop detector's min_repeats=6: each "period" here is
+# already ~150-300+ raw tokens (several full sentences), so waiting for 6
+# full repeats before terminating would burn proportionally far more
+# wall-clock than the exact-token case before intervening -- exactly the
+# thing that made the real incident run 20+ minutes with no other signal.
+_LOOP_DETECT_LONG_MIN_REPEATS = int(
+    os.environ.get("EXO_LOOP_DETECT_LONG_MIN_REPEATS", "3")
+)
+# Block-hash deque only needs to hold enough blocks to see
+# max_period * min_repeats back; a little slack for scan alignment.
+_LOOP_DETECT_LONG_WINDOW_BLOCKS = (
+    _LOOP_DETECT_LONG_MAX_PERIOD * _LOOP_DETECT_LONG_MIN_REPEATS + 2
 )
 
 # Periodic macOS malloc_zone_pressure_relief() to force freed-but-cached
@@ -409,6 +500,47 @@ def _detect_token_loop(
     return None
 
 
+def _detect_long_period_loop(
+    block_hashes: list[int],
+    max_period: int = _LOOP_DETECT_LONG_MAX_PERIOD,
+    min_repeats: int = _LOOP_DETECT_LONG_MIN_REPEATS,
+) -> tuple[int, int] | None:
+    """Detect a repeating BLOCK-hash cycle at the tail of ``block_hashes``.
+
+    Same shortest-period-first back-to-back-repeat algorithm as
+    ``_detect_token_loop``, but operating over a short list of block hashes
+    (one entry per ``_LOOP_DETECT_LONG_BLOCK`` raw tokens) instead of raw
+    token ids. This is what lets it reach periods of hundreds of raw tokens
+    (period * block_size) without the O(max_period * window) per-TOKEN cost
+    the tight-loop detector would pay for the same reach. See the
+    "Long-period (multi-sentence) degeneration detection" comment block
+    above for the full rationale (why block hashing, why exact match not
+    fuzzy, why this doesn't touch sampling).
+
+    Returns ``(period_in_blocks, repeats)`` on a match, else ``None``.
+    Caller is responsible for re-verifying the raw token blocks match
+    exactly before terminating (hash collisions are astronomically
+    unlikely with a 64-bit hash over ~24-token blocks, but the raw
+    comparison is free on this rare detection-only path, so there is no
+    reason not to make the guarantee airtight).
+    """
+    n = len(block_hashes)
+    if n < min_repeats:
+        return None
+    for period in range(1, max_period + 1):
+        if n < period * min_repeats:
+            break
+        cycle = block_hashes[n - period:]
+        repeats = 1
+        pos = n - period
+        while pos - period >= 0 and block_hashes[pos - period:pos] == cycle:
+            repeats += 1
+            pos -= period
+        if repeats >= min_repeats:
+            return period, repeats
+    return None
+
+
 @dataclass
 class _EngineTask:
     uid: int
@@ -433,6 +565,19 @@ class _EngineTask:
     # observability: never alters sampling/output. See _detect_token_loop.
     recent_token_ids: list[int] = field(default_factory=list)
     degeneration_warned: bool = False
+    # ── long-period (multi-sentence) degeneration detection ──
+    # Raw tokens accumulating toward the next _LOOP_DETECT_LONG_BLOCK-sized
+    # block (cleared once the block completes and is hashed). Kept as raw
+    # tokens (not just the running hash) so the terminating path can
+    # re-verify a hash match against actual token equality before firing.
+    long_loop_pending_tokens: list[int] = field(default_factory=list)
+    # Completed blocks: parallel lists of (hash, raw tokens) so a hash-match
+    # candidate can be verified exactly. Bounded to
+    # _LOOP_DETECT_LONG_WINDOW_BLOCKS by the caller (deque semantics via
+    # manual trim, kept as plain lists to match recent_token_ids' style).
+    long_loop_block_hashes: list[int] = field(default_factory=list)
+    long_loop_block_tokens: list[list[int]] = field(default_factory=list)
+    long_loop_degeneration_warned: bool = False
     media_regions: list[MediaRegion] = field(default_factory=list)
     # Whether the radix-trie returned an exact-match (full prompt
     # already cached). Distinguishes "exact" from "partial" hits when
@@ -2713,6 +2858,84 @@ class ExoBatchGenerator:
                         f"gen_engine={type(self._mlx_gen).__name__} "
                         f"| degen_probe: {_degen_transition}"
                     )
+
+            # ── long-period (multi-sentence) degeneration detection ──
+            # See the "Long-period (multi-sentence) degeneration detection"
+            # comment block near _LOOP_DETECT_LONG_ENABLED for the full
+            # rationale. Runs independently of the tight-loop detector above
+            # (different window, different granularity) and can terminate on
+            # its own even if the tight-loop detector never fires — this is
+            # exactly the case it exists for (long word-for-word-identical
+            # sentence cycles the tight detector's max_period can't reach).
+            if (
+                not degeneration_terminate
+                and _LOOP_DETECT_LONG_ENABLED
+                and response.finish_reason != "stop"
+                and not state.long_loop_degeneration_warned
+            ):
+                pending = state.long_loop_pending_tokens
+                pending.append(int(response.token))
+                if len(pending) >= _LOOP_DETECT_LONG_BLOCK:
+                    block_tokens = pending[:_LOOP_DETECT_LONG_BLOCK]
+                    state.long_loop_pending_tokens = pending[_LOOP_DETECT_LONG_BLOCK:]
+                    block_hash = hash(tuple(block_tokens))
+                    hashes = state.long_loop_block_hashes
+                    blocks = state.long_loop_block_tokens
+                    hashes.append(block_hash)
+                    blocks.append(block_tokens)
+                    if len(hashes) > _LOOP_DETECT_LONG_WINDOW_BLOCKS:
+                        overflow = len(hashes) - _LOOP_DETECT_LONG_WINDOW_BLOCKS
+                        del hashes[:overflow]
+                        del blocks[:overflow]
+
+                    long_loop = _detect_long_period_loop(hashes)
+                    if long_loop is not None:
+                        long_period, long_repeats = long_loop
+                        # Re-verify the raw token blocks match exactly before
+                        # trusting a hash match — cheap here since this only
+                        # runs on the rare detection path (see
+                        # _detect_long_period_loop's docstring).
+                        tail_blocks = blocks[len(blocks) - long_period:]
+                        verify_pos = len(blocks) - long_period
+                        verified_repeats = 1
+                        while (
+                            verify_pos - long_period >= 0
+                            and blocks[verify_pos - long_period:verify_pos]
+                            == tail_blocks
+                        ):
+                            verified_repeats += 1
+                            verify_pos -= long_period
+                        if verified_repeats >= _LOOP_DETECT_LONG_MIN_REPEATS:
+                            state.long_loop_degeneration_warned = True
+                            degeneration_terminate = _LOOP_DETECT_ACTION in (
+                                "stop",
+                                "error",
+                            )
+                            cycle_tokens = [
+                                t for blk in tail_blocks for t in blk
+                            ]
+                            try:
+                                cycle_text = self.tokenizer.decode(cycle_tokens)
+                            except Exception:
+                                cycle_text = "<decode-failed>"
+                            tp = state.task_params
+                            logger.warning(
+                                f"LONG-PERIOD DEGENERATION DETECTED "
+                                f"uid={response.uid} "
+                                f"at completion_token={state.completion_tokens}: "
+                                f"block cycle period={long_period} "
+                                f"({long_period * _LOOP_DETECT_LONG_BLOCK} raw "
+                                f"tokens) repeated>={verified_repeats}x. "
+                                f"action={_LOOP_DETECT_ACTION} "
+                                f"cycle_text={cycle_text!r} "
+                                f"in_thinking={state.in_thinking} | sampling: "
+                                f"temp={tp.temperature} top_p={tp.top_p} "
+                                f"top_k={tp.top_k} min_p={tp.min_p} "
+                                f"rep_pen={tp.repetition_penalty} "
+                                f"prompt_tokens~{int(state.all_prompt_tokens.size)} "
+                                f"prefix_hit={state.prefix_hit_length} "
+                                f"gen_engine={type(self._mlx_gen).__name__}"
+                            )
 
             think_start = self.tokenizer.think_start
             think_end = self.tokenizer.think_end
