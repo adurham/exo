@@ -3055,6 +3055,50 @@ def pp_dspark_decode_loop(
                     # assignment) -- asserts narrow the Optional type for the
                     # static checker; genuinely unreachable at runtime.
                     assert _verify_input is not None and out is not None
+                    # CRITICAL: reconfigure spec layers before the audit's
+                    # sequential forwards (2026-07-31, second fix -- see the
+                    # long comment above explaining why v2's deferred-to-
+                    # after-send placement STILL deadlocked).
+                    #
+                    # ROOT CAUSE #1: SpecPipelineFirstLayer._pp_recv is still
+                    # True here -- set at the top of THIS cycle via
+                    # _configure_layers(..., pp_recv=True, ...) for the REAL
+                    # decode-mode forward passes, never reset before this
+                    # audit code runs. SpecPipelineFirstLayer.__call__ checks
+                    # `if self._pp_recv and self.r != 0:` and BLOCKS on
+                    # mx.distributed.recv_like() when true -- every one of
+                    # the audit's extra model() calls on rank1 (r=1) was
+                    # ALSO trying to receive a hidden state from rank0 that
+                    # rank0 was never told to send, deadlocking immediately.
+                    #
+                    # ROOT CAUSE #2 (found auditing the FIX for #1): setting
+                    # ALL SpecPipelineLastLayer flags False does NOT give a
+                    # plain no-comms forward -- it falls through to the BASE
+                    # PipelineLastLayer.__call__ (auto_parallel.py), which
+                    # independently checks `if not self.is_prefill:` (True
+                    # during decode -- is_prefill is a SEPARATE attribute,
+                    # untouched by _configure_layers) and `self.r == self.s
+                    # - 1` (True for rank1 at world_size=2) -- i.e. the base
+                    # layer would ALSO try mx.distributed.send() to rank0 for
+                    # every audit forward. Must set pp_decode=True (routes to
+                    # SpecPipelineLastLayer's dedicated "Decode mode (rank
+                    # 1): compute, store, no comms" branch instead) to avoid
+                    # this second wire op.
+                    #
+                    # Both together confirmed: zero NUMERICS AUDIT log lines
+                    # ever appeared before this fix -- the loop never got
+                    # past iteration 0's model() call, and the fault fired
+                    # at EXACTLY the hardcoded 15s jaccl deadline after the
+                    # send. Genuine bugs in the audit's own scoping, not an
+                    # architectural wall -- rank1's audit forwards are
+                    # entirely local computation (matching how sequential
+                    # decode actually runs on a single rank), they just
+                    # needed the layers told not to expect/perform any wire
+                    # traffic for them.
+                    _configure_layers(
+                        spec_first, spec_last, pp_recv=False, pp_decode=True,
+                        state_list=None, hidden_idx=-1,
+                    )
                     _restore_cache(prompt_cache, _audit_pre_snap)
                     _verify_ids = [int(v) for v in _verify_input[0].tolist()]
                     _seq_argmax: list[int] = []
@@ -3064,6 +3108,15 @@ def pp_dspark_decode_loop(
                         mx.eval(_seq_out)
                         _seq_next = int(mx.argmax(_seq_out[0, 0], axis=-1).item())
                         _seq_argmax.append(_seq_next)
+                    # Restore the REAL cycle's pp_recv=True (set at the top
+                    # of this cycle for decode-mode forwards) before
+                    # returning to the main loop -- otherwise the NEXT
+                    # cycle's real forward calls would themselves be
+                    # misconfigured.
+                    _configure_layers(
+                        spec_first, spec_last, pp_recv=True, pp_decode=True,
+                        state_list=None, hidden_idx=-1,
+                    )
                     _restore_cache(prompt_cache, _audit_post_batched_snap)
                     _batched_argmax = [
                         int(v) for v in mx.argmax(out[0], axis=-1).tolist()
