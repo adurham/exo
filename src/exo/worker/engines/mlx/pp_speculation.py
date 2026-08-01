@@ -2631,20 +2631,6 @@ def pp_dspark_decode_loop(
             n_accepted = 0
             _assumed_bonus_this_cycle: int | None = None
             _consume_drafts: list[int] = []
-            # NUMERICS AUDIT per-cycle state (2026-07-31): initialized here,
-            # outside the `if is_last_rank:` block below, purely so a static
-            # checker (and any future refactor) can see these are always
-            # defined before the deferred audit-execution block further down
-            # reads them -- both `if is_last_rank:` blocks share the exact
-            # same fixed-per-process boolean so this is always genuinely
-            # set-before-read at runtime, but the two blocks aren't
-            # correlated at the type level. See the _numerics_audit setup
-            # site (inside the block below) for the full rationale.
-            _numerics_audit = False
-            _audit_pre_snap: list[Any] | None = None
-            _audit_post_batched_snap: list[Any] | None = None
-            _verify_input: mx.array | None = None
-            out: mx.array | None = None
             if is_last_rank:
                 _configure_layers(
                     spec_first,
@@ -2686,75 +2672,56 @@ def pp_dspark_decode_loop(
                             [[int(y.item())] + _draft_ids[: vw - 1]]
                         )
                         _consume_verify_positions = vw - 1
-                    # NUMERICS AUDIT setup (2026-07-31, EXO_PP_DSPARK_NUMERICS_AUDIT=1,
-                    # default OFF): direct test of the leading root-cause
-                    # theory for the confirmed self-doubt infinite-loop bug
-                    # (fact 1131 -- DSpark genuinely never converges on
-                    # bench/hard_eval.py's math_digit_sum at temp=0, 8000
-                    # tokens, vs. clean 629-token resolution with speculation
-                    # off; static code review already ruled out the
-                    # documented BOS-spam/cache-wraparound mechanism -- zero
-                    # wrap events across the whole failing run).
-                    #
-                    # Theory: DSpark's BATCHED verify forward (this call --
-                    # all `vw` positions of _verify_input processed in ONE
-                    # model() call, sharing one KV-cache write) produces a
-                    # different argmax at some position than a SEQUENTIAL
-                    # single-token-at-a-time forward would -- i.e. genuine
-                    # numerics divergence from batching, not just "close
-                    # margin, fp rounding" (a large, sustained divergence
-                    # would explain WHY the model gets stuck relitigating
-                    # the same arithmetic: the "self-check" path is
-                    # comparing against a subtly different forward's output
-                    # every single verify cycle, so it never finds internal
-                    # agreement).
-                    #
-                    # DEFERRED TO AFTER THE WIRE2 SEND (2026-07-31 fix, same
-                    # day as the original synchronous version): the first cut
-                    # ran the sequential re-verify HERE, synchronously, before
-                    # rank1 sends its verify results to rank0 -- adding real
-                    # per-cycle latency (vw extra sequential forward passes)
-                    # on the wire-send critical path. Rank0 was blocked
-                    # waiting on that send and hit jaccl's HARDCODED 15s RDMA
-                    # drain deadline (mesh_impl.h's `_deadline_us = 15000000`,
-                    # NOT configurable via any env var, NOT the same as
-                    # MLX_EVENT_WAIT_TIMEOUT_MS which only governs a
-                    # different, higher-level MLX event wait) -- confirmed
-                    # live: "[jaccl] recv() deadline in drain" fault + forced
-                    # reconnect, request Failed, even at max_tokens=100 (3-4
-                    # verify cycles). Fix: only snapshot cache state HERE
-                    # (cheap, lazy, no extra forward pass -- see
-                    # _snapshot_cache's own docstring on why the lazy build
-                    # itself is trivial and only materialization is
-                    # expensive), defer the actual sequential re-verify +
-                    # restore + diff to AFTER the wire2 send below (confirmed
-                    # safe: no model() call or prompt_cache mutation happens
-                    # between the batched verify and the send, so deferring
-                    # doesn't change what gets sent or what state decode
-                    # continues from). Rank1's send now happens at the same
-                    # time as audit-off; the audit's extra latency only
-                    # delays rank1's OWN next draft() call, which rank0 isn't
-                    # waiting on synchronously the same way.
-                    _numerics_audit = (
-                        os.environ.get("EXO_PP_DSPARK_NUMERICS_AUDIT", "0") == "1"
-                    )
-                    _audit_pre_snap = (
-                        _snapshot_cache(prompt_cache) if _numerics_audit else None
-                    )
                     out = model(_verify_input, cache=prompt_cache)
                     mx.eval(out)
                     _log(f"n={n} r1_verify_model_call POST (consume={_consume_this_cycle})")
-                    _audit_post_batched_snap = (
-                        _snapshot_cache(prompt_cache) if _numerics_audit else None
-                    )
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
                     _all_next_list = [int(v) for v in all_next.tolist()]
+                    # VERIFY-MARGIN DIAGNOSTIC (2026-07-31,
+                    # EXO_PP_DSPARK_VERIFY_MARGIN_LOG=1, default OFF):
+                    # cheaper, safer replacement for the abandoned inline
+                    # numerics-audit approach (3 broken iterations --
+                    # fault, fault, unrecovered hang -- see fact 1134;
+                    # per second-opinion review, inline extra-forward-pass
+                    # instrumentation on the live jaccl/RDMA critical path
+                    # is too fragile in a timing-sensitive spec-decode
+                    # system to be worth the risk of Heisenbugging the
+                    # very thing being investigated).
+                    #
+                    # This reads values ALREADY COMPUTED by the real verify
+                    # call above (`out`, the exact same tensor decode uses)
+                    # -- zero extra forward passes, zero cache snapshot/
+                    # restore, zero spec-layer reconfiguration, so it
+                    # cannot introduce the deadlock/latency risk the audit
+                    # did. Logs the top1-vs-top2 LOGIT MARGIN at every
+                    # verify position (not just the argmax token) --
+                    # directly tests whether the confirmed self-doubt loop
+                    # (fact 1131) correlates with LOW-CONFIDENCE (near-tied
+                    # top1/top2) verify decisions, which would support the
+                    # numerics-divergence theory (batched-vs-sequential fp
+                    # rounding flipping a close call) without needing an
+                    # actual sequential reference forward. A HIGH margin
+                    # at the divergence point would argue AGAINST pure
+                    # numerics noise and toward a different mechanism
+                    # (e.g. genuinely correct-but-repetitive reasoning
+                    # content, or a context/conditioning bug upstream of
+                    # the argmax decision).
+                    if os.environ.get("EXO_PP_DSPARK_VERIFY_MARGIN_LOG", "0") == "1":
+                        _top2_logits = mx.sort(out[0], axis=-1)[:, -2:]
+                        mx.eval(_top2_logits)
+                        _margins = [
+                            float(_top2_logits[_i, 1] - _top2_logits[_i, 0])
+                            for _i in range(_top2_logits.shape[0])
+                        ]
+                        logger.info(
+                            f"[PP DSpark VERIFY MARGIN] n={n} "
+                            f"tokens={_all_next_list} margins={[f'{m:.3f}' for m in _margins]}"
+                        )
                     # Tree-verification feasibility diagnostic (2026-07-18):
                     # cheap to check since DSpark's draft() already computes
                     # per-position logits (`_corrected`, previously discarded
                     # after only using its argmax via `_toks`) -- no extra
-
                     # forward pass needed. At each REJECTED position, check
                     # whether the draft head's RANK-2 candidate (its own
                     # second-highest-logit token) would have matched the
@@ -2764,7 +2731,6 @@ def pp_dspark_decode_loop(
                     # rejections "for free." If low, tree verification isn't
                     # worth building -- the draft head's own ranking doesn't
                     # correlate with what actually gets picked when it's
-
                     # wrong, so widening the tree wouldn't help.
                     if _corrected is not None and not _consume_this_cycle:
                         _top2 = mx.argsort(_corrected[0], axis=-1)[:, -2]
@@ -3036,110 +3002,6 @@ def pp_dspark_decode_loop(
                 _sent2 = mx.distributed.send(_wire2, 0, group=pp_group)
                 mx.eval(_sent2)
                 _log(f"n={n} dspark_trim_send POST")
-                # NUMERICS AUDIT execution (2026-07-31, deferred here from
-                # the verify call above -- see the long comment at the
-                # _numerics_audit setup site for the full rationale/history
-                # of why running this BEFORE the send caused a live jaccl
-                # "recv() deadline in drain" fault). Runs only after rank1's
-                # real send has already gone out, so it can never delay the
-                # message rank0 is waiting on. Restores real post-batched-
-                # verify cache state before returning so decode continues
-                # exactly as if the audit were off.
-                if (
-                    _numerics_audit
-                    and _audit_pre_snap is not None
-                    and _audit_post_batched_snap is not None
-                ):
-                    # Both always set together above whenever _numerics_audit
-                    # is True (same is_last_rank branch, unconditional
-                    # assignment) -- asserts narrow the Optional type for the
-                    # static checker; genuinely unreachable at runtime.
-                    assert _verify_input is not None and out is not None
-                    # CRITICAL: reconfigure spec layers before the audit's
-                    # sequential forwards (2026-07-31, second fix -- see the
-                    # long comment above explaining why v2's deferred-to-
-                    # after-send placement STILL deadlocked).
-                    #
-                    # ROOT CAUSE #1: SpecPipelineFirstLayer._pp_recv is still
-                    # True here -- set at the top of THIS cycle via
-                    # _configure_layers(..., pp_recv=True, ...) for the REAL
-                    # decode-mode forward passes, never reset before this
-                    # audit code runs. SpecPipelineFirstLayer.__call__ checks
-                    # `if self._pp_recv and self.r != 0:` and BLOCKS on
-                    # mx.distributed.recv_like() when true -- every one of
-                    # the audit's extra model() calls on rank1 (r=1) was
-                    # ALSO trying to receive a hidden state from rank0 that
-                    # rank0 was never told to send, deadlocking immediately.
-                    #
-                    # ROOT CAUSE #2 (found auditing the FIX for #1): setting
-                    # ALL SpecPipelineLastLayer flags False does NOT give a
-                    # plain no-comms forward -- it falls through to the BASE
-                    # PipelineLastLayer.__call__ (auto_parallel.py), which
-                    # independently checks `if not self.is_prefill:` (True
-                    # during decode -- is_prefill is a SEPARATE attribute,
-                    # untouched by _configure_layers) and `self.r == self.s
-                    # - 1` (True for rank1 at world_size=2) -- i.e. the base
-                    # layer would ALSO try mx.distributed.send() to rank0 for
-                    # every audit forward. Must set pp_decode=True (routes to
-                    # SpecPipelineLastLayer's dedicated "Decode mode (rank
-                    # 1): compute, store, no comms" branch instead) to avoid
-                    # this second wire op.
-                    #
-                    # Both together confirmed: zero NUMERICS AUDIT log lines
-                    # ever appeared before this fix -- the loop never got
-                    # past iteration 0's model() call, and the fault fired
-                    # at EXACTLY the hardcoded 15s jaccl deadline after the
-                    # send. Genuine bugs in the audit's own scoping, not an
-                    # architectural wall -- rank1's audit forwards are
-                    # entirely local computation (matching how sequential
-                    # decode actually runs on a single rank), they just
-                    # needed the layers told not to expect/perform any wire
-                    # traffic for them.
-                    _configure_layers(
-                        spec_first, spec_last, pp_recv=False, pp_decode=True,
-                        state_list=None, hidden_idx=-1,
-                    )
-                    _restore_cache(prompt_cache, _audit_pre_snap)
-                    _verify_ids = [int(v) for v in _verify_input[0].tolist()]
-                    _seq_argmax: list[int] = []
-                    for _seq_i in range(len(_verify_ids)):
-                        _seq_tok = mx.array([[_verify_ids[_seq_i]]])
-                        _seq_out = model(_seq_tok, cache=prompt_cache)
-                        mx.eval(_seq_out)
-                        _seq_next = int(mx.argmax(_seq_out[0, 0], axis=-1).item())
-                        _seq_argmax.append(_seq_next)
-                    # Restore the REAL cycle's pp_recv=True (set at the top
-                    # of this cycle for decode-mode forwards) before
-                    # returning to the main loop -- otherwise the NEXT
-                    # cycle's real forward calls would themselves be
-                    # misconfigured.
-                    _configure_layers(
-                        spec_first, spec_last, pp_recv=True, pp_decode=True,
-                        state_list=None, hidden_idx=-1,
-                    )
-                    _restore_cache(prompt_cache, _audit_post_batched_snap)
-                    _batched_argmax = [
-                        int(v) for v in mx.argmax(out[0], axis=-1).tolist()
-                    ]
-                    _divergences = [
-                        (i, b, s)
-                        for i, (b, s) in enumerate(zip(_batched_argmax, _seq_argmax))
-                        if b != s
-                    ]
-                    if _divergences:
-                        logger.warning(
-                            f"[PP DSpark NUMERICS AUDIT] n={n} DIVERGENCE "
-                            f"found at position(s) {[d[0] for d in _divergences]} "
-                            f"-- batched={[d[1] for d in _divergences]} "
-                            f"sequential={[d[2] for d in _divergences]} "
-                            f"(verify_ids={_verify_ids})"
-                        )
-                    else:
-                        logger.info(
-                            f"[PP DSpark NUMERICS AUDIT] n={n} no divergence "
-                            f"across {len(_verify_ids)} positions "
-                            f"(batched == sequential argmax at every position)"
-                        )
             elif is_rank0:
                 _t_before_msg2_recv = time.perf_counter()
                 _log(f"n={n} dspark_trim_recv PRE (rank0<-{pp_world_size - 1})")

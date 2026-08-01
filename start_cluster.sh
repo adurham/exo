@@ -1934,17 +1934,22 @@ for NODE in "${NODES[@]}"; do
     # full rationale and the Fable-consult numbers (~14% E2E speedup at a
     # 30% hit rate, ~22% at 50%, not worth building below ~15%).
     [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_LOG=$EXO_PP_DSPARK_DRAFT_AHEAD_LOG"
-    # Numerics audit (2026-07-31, EXO_PP_DSPARK_NUMERICS_AUDIT=1, default
-    # OFF): direct root-cause test for the confirmed self-doubt infinite-
-    # loop bug (fact 1131 -- DSpark never converges on math_digit_sum at
-    # temp=0/8000 tokens, vs clean 629-token resolution with speculation
-    # off). Re-runs each verify batch's positions SEQUENTIALLY (one token
-    # at a time) after the real batched verify, diffs the two argmax
-    # sequences, logs any divergence, then restores the real post-batched
-    # state so decode is byte-identical to audit-off. Read-only
-    # investigation, never branches decode. See pp_speculation.py's
-    # _numerics_audit block for the full rationale.
-    [ -n "${EXO_PP_DSPARK_NUMERICS_AUDIT:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_NUMERICS_AUDIT=$EXO_PP_DSPARK_NUMERICS_AUDIT"
+    # Verify-margin diagnostic (2026-07-31, EXO_PP_DSPARK_VERIFY_MARGIN_LOG=1,
+    # default OFF): direct, LOW-RISK root-cause test for the confirmed
+    # self-doubt infinite-loop bug (fact 1131 -- DSpark never converges
+    # on math_digit_sum at temp=0/8000 tokens, vs clean 629-token
+    # resolution with speculation off). Replaces the abandoned inline
+    # numerics-audit approach (EXO_PP_DSPARK_NUMERICS_AUDIT, 3 broken
+    # iterations -- fault, fault, unrecovered hang -- see fact 1134;
+    # extra forward passes on the live jaccl/RDMA critical path proved
+    # too fragile). This diagnostic reads values ALREADY COMPUTED by the
+    # real verify forward -- zero extra forward passes, zero cache
+    # snapshot/restore, zero spec-layer reconfiguration -- logging the
+    # top1-vs-top2 logit margin at every verify position. Tests whether
+    # the self-doubt loop correlates with low-confidence (near-tied)
+    # verify decisions. See pp_speculation.py's VERIFY-MARGIN DIAGNOSTIC
+    # comment for the full rationale.
+    [ -n "${EXO_PP_DSPARK_VERIFY_MARGIN_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_MARGIN_LOG=$EXO_PP_DSPARK_VERIFY_MARGIN_LOG"
     # Draft-ahead STEP 1+2b diagnostic plumbing (2026-07-19, originally
     # default off, commits 6aff7a5f/e6e10927/fe7bbfcb): gates a msg2
     # spec-id tag exchange (rank1 builds a SpecId from the cycle's
