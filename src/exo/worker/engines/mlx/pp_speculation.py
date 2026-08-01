@@ -2672,9 +2672,87 @@ def pp_dspark_decode_loop(
                             [[int(y.item())] + _draft_ids[: vw - 1]]
                         )
                         _consume_verify_positions = vw - 1
+                    # NUMERICS AUDIT (2026-07-31, EXO_PP_DSPARK_NUMERICS_AUDIT=1,
+                    # default OFF): direct test of the leading root-cause
+                    # theory for the confirmed self-doubt infinite-loop bug
+                    # (fact 1131 -- DSpark genuinely never converges on
+                    # bench/hard_eval.py's math_digit_sum at temp=0, 8000
+                    # tokens, vs. clean 629-token resolution with speculation
+                    # off; static code review already ruled out the
+                    # documented BOS-spam/cache-wraparound mechanism -- zero
+                    # wrap events across the whole failing run).
+                    #
+                    # Theory: DSpark's BATCHED verify forward (this call --
+                    # all `vw` positions of _verify_input processed in ONE
+                    # model() call, sharing one KV-cache write) produces a
+                    # different argmax at some position than a SEQUENTIAL
+                    # single-token-at-a-time forward would -- i.e. genuine
+                    # numerics divergence from batching, not just "close
+                    # margin, fp rounding" (a large, sustained divergence
+                    # would explain WHY the model gets stuck relitigating
+                    # the same arithmetic: the "self-check" path is
+                    # comparing against a subtly different forward's output
+                    # every single verify cycle, so it never finds internal
+                    # agreement).
+                    #
+                    # Test: snapshot cache before the batched call (already
+                    # about to run), let the REAL batched verify happen
+                    # unchanged (production behavior never altered by this
+                    # audit), snapshot the resulting REAL post-verify state,
+                    # then roll back and re-run the SAME _verify_input
+                    # sequentially (one token at a time, matching how plain
+                    # non-speculative decode would process it) to get a
+                    # second, independent argmax sequence over the exact
+                    # same positions. Diff the two. Always restore the REAL
+                    # post-batched-verify state afterward so decode
+                    # correctness is byte-identical to audit-off -- this is
+                    # pure read-only investigation, exactly the existing
+                    # discipline used elsewhere in this file for diagnostic
+                    # gates (draft-ahead tag exchange, width sweep, etc.):
+                    # never branch decode on audit results.
+                    _numerics_audit = (
+                        os.environ.get("EXO_PP_DSPARK_NUMERICS_AUDIT", "0") == "1"
+                    )
+                    _audit_pre_snap = (
+                        _snapshot_cache(prompt_cache) if _numerics_audit else None
+                    )
                     out = model(_verify_input, cache=prompt_cache)
                     mx.eval(out)
                     _log(f"n={n} r1_verify_model_call POST (consume={_consume_this_cycle})")
+                    if _numerics_audit and _audit_pre_snap is not None:
+                        _audit_post_batched_snap = _snapshot_cache(prompt_cache)
+                        _restore_cache(prompt_cache, _audit_pre_snap)
+                        _verify_ids = [int(v) for v in _verify_input[0].tolist()]
+                        _seq_argmax: list[int] = []
+                        for _seq_i in range(len(_verify_ids)):
+                            _seq_tok = mx.array([[_verify_ids[_seq_i]]])
+                            _seq_out = model(_seq_tok, cache=prompt_cache)
+                            mx.eval(_seq_out)
+                            _seq_next = int(mx.argmax(_seq_out[0, 0], axis=-1).item())
+                            _seq_argmax.append(_seq_next)
+                        _restore_cache(prompt_cache, _audit_post_batched_snap)
+                        _batched_argmax = [
+                            int(v) for v in mx.argmax(out[0], axis=-1).tolist()
+                        ]
+                        _divergences = [
+                            (i, b, s)
+                            for i, (b, s) in enumerate(zip(_batched_argmax, _seq_argmax))
+                            if b != s
+                        ]
+                        if _divergences:
+                            logger.warning(
+                                f"[PP DSpark NUMERICS AUDIT] n={n} DIVERGENCE "
+                                f"found at position(s) {[d[0] for d in _divergences]} "
+                                f"-- batched={[d[1] for d in _divergences]} "
+                                f"sequential={[d[2] for d in _divergences]} "
+                                f"(verify_ids={_verify_ids})"
+                            )
+                        else:
+                            logger.info(
+                                f"[PP DSpark NUMERICS AUDIT] n={n} no divergence "
+                                f"across {len(_verify_ids)} positions "
+                                f"(batched == sequential argmax at every position)"
+                            )
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
                     _all_next_list = [int(v) for v in all_next.tolist()]
@@ -2682,6 +2760,7 @@ def pp_dspark_decode_loop(
                     # cheap to check since DSpark's draft() already computes
                     # per-position logits (`_corrected`, previously discarded
                     # after only using its argmax via `_toks`) -- no extra
+
                     # forward pass needed. At each REJECTED position, check
                     # whether the draft head's RANK-2 candidate (its own
                     # second-highest-logit token) would have matched the
