@@ -230,8 +230,22 @@ fi
 # The ~5% c=1 decode cost noted above is absorbed by the vec win
 # (33.7 vs 29.5 net). Set =0 only with EXO_DSV4_VERIFY_ROWSEQ_VEC=0.
 : "${MLX_STEEL_BATCH_INVARIANT:=1}"
-: "${EXO_DSV4_ROWSEQ_FULLBLOCK:=0}"
-: "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=0}"
+# EXO_DSV4_ROWSEQ_FULLBLOCK / _MOE: DEFAULT RE-ENABLED 2026-08-02 -- CONFIRMED
+# FIX for the DSpark self-doubt-loop bug (see the EXO_SPECULATIVE comment
+# below for the full root-cause writeup). Together with the already-default
+# EXO_DSV4_VERIFY_ROWSEQ, these make DSpark's (and MTP's) L>1 verify forward
+# bitwise-equivalent to L sequential decode steps, closing the numerics
+# drift that was letting the model see a subtly different view of its own
+# context at self-verification decision points. Confirmed live: 2x
+# identical temp=0 reruns of the failing math_digit_sum repro converged
+# cleanly (finish_reason=stop, correct answer) at both attempts, vs the
+# prior 18-24x repetition that never terminated. Cost: ~24 tok/s vs the
+# documented 27-33 tok/s ceiling -- real but modest, not a regression to
+# plain sequential decode speed. Set both to 0 to revert to the
+# faster-but-buggy pre-fix behavior (NOT recommended for correctness-
+# sensitive workloads).
+: "${EXO_DSV4_ROWSEQ_FULLBLOCK:=1}"
+: "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=1}"
 : "${EXO_DSV4_MOE_PARTS_ROWSEQ:=}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
@@ -280,32 +294,42 @@ fi
 # DSV4_SHARDING=Tensor to go back to the old concurrent-but-unvalidated-
 # recently mode.
 : "${DSV4_SHARDING:=Pipeline}"
-# Speculative decoding uses EXO_PP_DRAFT_MODEL (Qwen3.5 0.8B) as the draft;
-# its tokenizer is incompatible with DSv4's, so drafted tokens come back as
-# gibberish when verified through DSv4 logits. Force speculation off whenever
-# DSv4 is the active model. Re-enable later if a DSv4-compatible draft (or
-# MTP weights) becomes available.
+# The classic small-draft-model speculation path (EXO_PP_DRAFT_MODEL,
+# Qwen3.5 0.8B) has an incompatible tokenizer with DSv4 -- drafted tokens
+# come back as gibberish when verified through DSv4 logits, so it's never
+# used as DSv4's speculation mechanism (see pp_speculation.py's
+# _has_dspark gate). DSpark (below) is DSv4's own native draft head and
+# is unaffected by this -- it's the mechanism EXO_SPECULATIVE=1 actually
+# enables for DSv4.
 if [ "${DSV4_ENABLED}" = "1" ]; then
-    # DEFAULT FLIPPED TO OFF 2026-07-26: DSpark (this cluster's ONLY
-    # intended MTP mechanism -- there is no reason to keep plain single-
-    # token MTP as a separate fallback once DSpark exists) was CONFIRMED
-    # BUGGY via a clean A/B/A live test: the exact same temp=0 prompt
-    # reliably loops into a self-doubt reasoning spiral (burns the entire
-    # token budget, never answers) with DSpark active, and produces a
-    # correct, clean, repeatable answer with speculation genuinely off
-    # (verified via absence of the "PP speculation enabled" log line --
-    # a prior "off" test was invalidated by the EXO_SPECULATIVE gating
-    # bug fixed the same session, see the EXO_PP_SPEC_DISABLE removal
-    # commit). Ruled out as the mechanism so far: verify_width truncation
-    # (tested at full block width, loop persisted), KV-cache wraparound
-    # in the draft cache trim (traced live, zero wraparound events across
-    # a full failing run), and the draft-ahead-yield "consume cycle" path
-    # (confirmed dead in production config). Leading remaining suspect:
-    # numerics divergence between DSpark's parallel/batched verify
-    # forward and plain sequential decode -- not yet confirmed at the
-    # logit level. Set to 1 to re-enable once the actual bug is fixed and
-    # re-validated with a fresh A/B/A.
-    : "${EXO_SPECULATIVE:=0}"
+    # DEFAULT RE-ENABLED 2026-08-02: DSpark's self-doubt-loop bug (found
+    # 2026-07-26, disabled since) is FIXED and re-validated. Root cause
+    # confirmed via a systematic elimination sweep (2026-07-31/08-02
+    # session): NOT the documented BOS-spam/cache-wraparound bug (ruled
+    # out -- zero wrap events across a full failing run), NOT numerics-
+    # divergence/near-tie (ruled out -- live logit-margin capture showed
+    # a confident mean ~9 logits at every self-doubt transition point,
+    # nowhere close to a tie), NOT unique to DSpark specifically (the
+    # SAME loop reproduced under classic draft-model spec AND plain
+    # chained-MTP, both without DSpark's context-conditioning side
+    # channel) -- it was DeepseekV4's well-known "L>1 batched verify !=
+    # L sequential decode steps" numerics-drift class (see
+    # EXO_DSV4_VERIFY_ROWSEQ's comment in deepseek_v4.py -- the SAME
+    # mechanism previously root-caused for MTP's tool-call-corruption
+    # bug at long context). EXO_DSV4_VERIFY_ROWSEQ alone (already
+    # default-on) fixes the attention-layer piece but is insufficient on
+    # its own for the self-doubt loop; EXO_DSV4_ROWSEQ_FULLBLOCK +
+    # EXO_DSV4_ROWSEQ_FULLBLOCK_MOE (below, now also default-on) close
+    # the remaining hc-adjacent-ops and MoE divergence, making DSpark's
+    # verify forward bitwise-equivalent to sequential decode. Confirmed
+    # live via 2x identical temp=0 reruns of the original failing prompt
+    # (math_digit_sum, 8000-token budget): clean convergence both times
+    # (finish_reason=stop, correct boxed answer, vs the prior 18-24x
+    # "sum is X?" repetition that never terminated), ~24 tok/s (within
+    # the documented 27-33 tok/s DSpark range -- FULLBLOCK's per-row
+    # overhead is real but modest, not a regression to plain decode
+    # speed). Set to 0 to fall back to sequential-only decode.
+    : "${EXO_SPECULATIVE:=1}"
     # DSv4 FUSION/COMPILE PATHS — DISABLED 2026-06-18 (correctness > ~3-4% perf).
     # All three batch-mis-specialize at batch_size>1: with any of them ON, a
     # concurrent (BS>1) MTP verify forward produces repetition-biased logits,
@@ -1378,22 +1402,20 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
-    # MTP-1 chained draft at c=1. DEFAULT FLIPPED TO OFF 2026-07-26:
-    # CONFIRMED BUGGY via a clean A/B/A live test (see EXO_SPECULATIVE
-    # comment near the top of this file for the full elimination table --
-    # verify_width truncation, KV-cache wraparound, and the consume-cycle
-    # path were all ruled out; a self-doubt reasoning loop that burns the
-    # entire token budget without ever answering reliably occurs with
-    # DSpark active and disappears with speculation genuinely off).
-    # DSpark is this cluster's intended sole MTP mechanism (no reason to
-    # keep plain single-token MTP as a separate fallback once DSpark
-    # exists), so disabling it here is the correct default until the bug
-    # is actually fixed -- not "turn on plain MTP instead." Confidence
-    # pruning via EXO_DSV4_DSPARK_CONF_TAU (default 0.5; 0 disables).
-    # Requires the converted local head dir on every node
-    # (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a missing dir
-    # fails rank-consistently back to MTP-1. EXO_DSV4_DSPARK_DIR overrides.
-    : "${EXO_DSV4_DSPARK:=0}"
+    # MTP-1 chained draft at c=1. DEFAULT RE-ENABLED 2026-08-02: the
+    # self-doubt-loop bug (found 2026-07-26) is FIXED and re-validated --
+    # see the EXO_SPECULATIVE comment near the top of this file for the
+    # full root-cause/fix writeup (EXO_DSV4_ROWSEQ_FULLBLOCK +
+    # EXO_DSV4_ROWSEQ_FULLBLOCK_MOE, both also default-on now, close the
+    # L>1-batched-verify-vs-sequential-decode numerics drift that was
+    # causing it). DSpark is this cluster's intended sole MTP mechanism
+    # (no reason to keep plain single-token MTP as a separate fallback
+    # once DSpark exists). Confidence pruning via EXO_DSV4_DSPARK_CONF_TAU
+    # (default 0.5; 0 disables). Requires the converted local head dir on
+    # every node (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a
+    # missing dir fails rank-consistently back to MTP-1.
+    # EXO_DSV4_DSPARK_DIR overrides.
+    : "${EXO_DSV4_DSPARK:=1}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
     # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
@@ -2314,13 +2336,16 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
         echo "      with the p2p send/recv. This means:"
         echo "        - NO concurrent requests (c>=2 will deadlock — no task-set agreement)"
         echo "        - NO mid-decode cancellation (rank 1 blocks on recv forever)"
-        echo "      MTP speculation is also disabled (EXO_SPECULATIVE=0)."
+        echo "      DSpark speculation is ON by default (EXO_SPECULATIVE=1,"
+        echo "      EXO_DSV4_DSPARK=1) -- self-doubt-loop bug FIXED 2026-08-02 via"
+        echo "      EXO_DSV4_ROWSEQ_FULLBLOCK + _MOE (see EXO_SPECULATIVE's comment"
+        echo "      earlier in this file for the full root-cause writeup)."
         echo "      Event::wait timeout raised to 300s for pipeline-drain skew at high context."
         echo ""
         echo "      REAL PP-vs-TP TRADEOFF (2026-07-31, confirmed against both this fork"
         echo "      and upstream exo-explore/exo -- see docs/fork-notes.md 'PP vs TP:"
         echo "      concurrency tradeoff' for the full investigation): PP = single request"
-        echo "      faster (27-33 tok/s w/ DSpark once re-enabled, vs TP's ~15-20 tok/s"
+        echo "      faster (~24-33 tok/s w/ DSpark, vs TP's ~15-20 tok/s"
         echo "      baseline) but genuinely ONE AT A TIME. TP = supports real concurrent"
         echo "      requests but is slower per-request. This is NOT a bug to fix -- PP's"
         echo "      pipeline layers hold mutable per-request sequencing state"
