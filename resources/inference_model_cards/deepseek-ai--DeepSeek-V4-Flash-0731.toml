@@ -1,0 +1,53 @@
+# Official release checkpoint, superseding the preview deepseek-ai/DeepSeek-V4-Flash
+# (see sibling deepseek-ai--DeepSeek-V4-Flash.toml). Same architecture/size
+# (284B total / 13B active, DeepseekV4ForCausalLM, native fp8 e4m3 + ue8m0 block
+# scales + mxfp4 experts), re-post-trained for agentic tasks, now ships with a
+# DSpark 3-stage speculative-decoding draft head attached (dspark_block_size=5,
+# dspark_target_layer_ids=[40,41,42], dspark_markov_rank=256 — same fields the
+# fork's DeepseekV4DSparkModule / _overlay_dsv4_dspark already expect, see
+# src/exo/worker/engines/mlx/utils_mlx.py). config.json is layout-identical to
+# the preview's (same field names/types; compress_ratios ships 46 entries vs
+# num_hidden_layers=43 — harmless, mlx-lm's ModelArgs.__post_init__ truncates
+# to n layers). Not yet verified end-to-end on-cluster (weights downloading
+# 2026-08-02; card added ahead of that to prep placement/download flow) —
+# same "zero loader changes" precedent as the preview's native-checkpoint card
+# gives high confidence it loads, but TREAT AS UNVERIFIED until a real
+# inference smoke test passes post-download.
+#
+# storage_size = model.safetensors.index.json metadata.total_size, fetched
+# 2026-08-02: 166,878,536,440 bytes (166.9 GB per HF's own model page figure).
+# Includes on-disk mtp.*/dspark head tensors; true loaded RAM after any
+# strip-if-unused gate will be somewhat lower, same margin-of-safety
+# reasoning as the preview card (storage_size is a conservative placement
+# estimate, not exact loaded footprint).
+model_id = "deepseek-ai/DeepSeek-V4-Flash-0731"
+n_layers = 43
+hidden_size = 4096
+num_key_value_heads = 1
+supports_tensor = true
+tasks = ["TextGeneration"]
+family = "deepseek"
+quantization = "fp8"
+base_model = "DeepSeek V4 Flash 0731"
+capabilities = ["text", "thinking", "thinking_toggle"]
+reasoning_dialect = "tool_conditional"
+
+context_length = 1048576
+backends = ["MlxMetal", "MlxCuda", "MlxCpu"]
+[storage_size]
+in_bytes = 166878536440
+
+# Sampling parity carried forward from the preview card (see
+# deepseek-ai--DeepSeek-V4-Flash.toml and mlx-community--DeepSeek-V4-Flash.toml
+# for the full A/B history). NOT yet re-validated against -0731's own
+# re-post-trained weights — the preview's hard_eval A/B (Ollama 100% vs exo
+# 78.8% at DeepSeek's official temp=1.0 rec) is the reason these values exist,
+# but that eval was run on the PREVIEW checkpoint. Re-run before trusting this
+# blindly if -0731 behaves differently (its README also independently
+# recommends temp=1.0/top_p=0.95 agentic, top_p=1.0 otherwise — worth an A/B
+# once the weights are actually in and a runner is up).
+[sampling_defaults]
+temperature = 0.8
+top_p = 0.9
+top_k = 40
+min_p = 0.0
