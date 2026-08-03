@@ -734,6 +734,28 @@ class ExoBatchGenerator:
                     logger.info(
                         f"DSv4 MTP speculative decoding enabled (γ={gamma}, T={temp})"
                     )
+                elif inner is not None and type(inner).__name__ == "DeepseekV4Model":
+                    # DeepSeek-V4 models NEVER use the Qwen-style separate MTP
+                    # weights file mechanism (below) -- they either use the
+                    # checkpoint-bundled classic MTP head (is_dsv4_with_mtp
+                    # branch above, gated by EXO_DSV4_MTP=1) or DSpark, which
+                    # is dispatched entirely separately at generate-time via
+                    # pp_dspark_decode_loop (see the PP-spec request path
+                    # further down this file) -- this __post_init__ runs
+                    # unconditionally at generator construction, before PP
+                    # vs non-PP is even decided, so it never sees DSpark.
+                    # Skipping straight to the non-speculative fallback here
+                    # avoids a doomed _resolve_mtp_weights() HF-repo lookup
+                    # that can never succeed for DSv4 and previously logged a
+                    # misleading "could not find MTP weights" warning on
+                    # every DSv4 launch (2026-08-03, DeepSeek-V4-Flash-0731
+                    # deploy -- looked like a real problem, was actually a
+                    # guaranteed-to-fail probe for an irrelevant code path).
+                    self._mlx_gen = MlxBatchGenerator(
+                        model=self.model,
+                        stop_tokens=stop_tokens_seq,
+                        prefill_step_size=prefill_step_size,
+                    )
                 else:
                     # Qwen3.5-style path: separate MTP weights file.
                     from exo.worker.engines.mlx.speculative.mtp_batch_generator import (
