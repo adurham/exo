@@ -433,37 +433,149 @@ overhead. More likely candidates, NOT yet tested:
 
 ### Concrete next steps (supersedes the "Concrete next steps" section above)
 
-1. **Rule in/out the crash-recovery-state hypothesis (candidate 1/2
-   above) first — cheapest test.** Deliberately crash/reload the runners
-   (or just relaunch cleanly), then IMMEDIATELY send a handful of
-   requests at ~2800 tokens before sending anything else, and watch
-   whether the outlier burst appears on the first few post-reload
-   requests specifically, regardless of exact token count. If confirmed,
-   this reframes the entire investigation: it's a runner-warmup/
-   crash-recovery cost, not a context-scaling cliff, and the practical
-   fix is very different (e.g., a proper warmup pass after any
-   runner reload, not an architectural rework of `FULLBLOCK`).
-2. **If ruled out, chase candidate 3 (buffer-resize boundary)** by
-   testing several depths tightly clustered around 2700-2900 with a FRESH
-   runner each time (no post-crash confound) to see if the anomaly is
-   reproducible independent of runner lifecycle.
-3. **Either way, retract the "15.9x collapse, context-scaling cliff" framing
+1. ~~Rule in/out the crash-recovery-state hypothesis~~ **RULED OUT for the
+   specific occurrence tested.** Ran a control test: 3 identical
+   requests at prompt_tokens=2825 against a runner that had been warm and
+   idle-free for the whole preceding 10+ minutes (no crash, no reload,
+   confirmed via `grep 'API request'` showing only successive
+   `POST /v1/chat/completions` calls with zero `LoadModel`/crash lines
+   between them). Result: run 1 = 18.03 tok/s, run 2 = 16.88 tok/s, run 3
+   = **1.28 tok/s** (same outlier signature as before). Since no runner
+   reload happened between these three requests, "just-reloaded-runner
+   warmup cost" is ruled out as the explanation for THIS occurrence — the
+   anomaly recurs on an already-fully-warm runner.
+   A SECOND control test (5x repeated identical requests, ~9 minutes
+   later, same warm runner, no reload in between) came back clean on all
+   5 (16.36–16.81 tok/s, zero OUTLIER log lines) — consistent with a RARE,
+   intermittent trigger (roughly 1-in-8 requests hit it across all trials
+   so far: 2 slow out of 3+3+5 = 11 total requests at this depth this
+   session) rather than a reliably reproducible one.
+2. **New observation supporting a transient-resource-contention
+   explanation over an architectural one:** during the outlier bursts,
+   BOTH ranks show simultaneously elevated per-cycle cost — rank1's
+   `r1_verify_fwd` (~1.4s, the verify forward itself) AND rank0's
+   `r0_fwd` (~700ms) + `msg2_recv_wait` (~800ms, waiting on rank1) are
+   ALL elevated together for the same run of cycles, and clear together.
+   This is the signature of the whole cross-rank pipeline slowing down in
+   lockstep (consistent with e.g. thermal throttling, GPU/CPU contention
+   from another process, or a transient RDMA/jaccl stall affecting every
+   op) rather than one specific compute path (e.g. "the Indexer search")
+   being the sole bottleneck — a single-op bottleneck would show ONE
+   rank's ONE sub-timing spiking while the other rank's corresponding
+   wait grows to match, not BOTH ranks' actual compute times growing
+   simultaneously.
+3. **Not yet tested: live thermal/resource-pressure capture DURING an
+   occurrence.** `powermetrics --samplers smc` (CPU/GPU die temp) and
+   `vm_stat`/`sysctl vm.swapusage` checked well AFTER the fact (this
+   session) showed nothing abnormal — but that's retroactive and
+   unhelpful; the fix is to run a lightweight background sampler
+   (`powermetrics -i 1000 --samplers smc,cpu_power,gpu_power >
+   /tmp/thermal_sample.log &`) BEFORE the next reproduction attempt, so a
+   future occurrence can be correlated against real thermal/power data at
+   the exact moment, not inferred after the process has moved on.
+4. Chase candidate 3 from above (buffer-resize boundary near ~2800
+   tokens specifically) only if the resource-contention theory is ruled
+   out by the thermal sampler test — currently deprioritized given the
+   whole-pipeline-slowdown evidence above.
+5. **Either way, retract the "15.9x collapse, context-scaling cliff" framing
    from any downstream consumer of this doc** (the `exo-perf-tuning` and
    `exo-speculative-decode-correctness` skills both currently state this
    as a confirmed, severe, context-scaling bug — both need a correction
    pass pointing back to this section) until the real mechanism is
    understood. In the meantime, the practical, verified-true statement is
    narrower: "DSpark+FULLBLOCK's verify-forward cost is NOT reliably
-   context-scaling; it CAN spike ~10-20x on a subset of requests for a
-   currently-unknown reason, independent of context depth" — a real
-   reliability/tail-latency concern, just not the mechanism originally
-   claimed.
-4. **`EXO_DSV4_DSPARK` default in `start_cluster.sh`:** the original
+   context-scaling; it CAN spike ~10-20x on roughly 1-in-8 requests at a
+   depth around 2800 tokens (untested whether this rate holds at OTHER
+   depths — only this one depth has been repeat-tested), for a currently
+   unconfirmed reason that looks more like transient system-level
+   resource contention than an architectural DSv4/DSpark code path" — a
+   real reliability/tail-latency concern, just not the mechanism
+   originally claimed.
+6. **`EXO_DSV4_DSPARK` default in `start_cluster.sh`:** the original
    doc's recommendation to keep DSpark off by default is STILL reasonable
    given a confirmed (if rarer/less predictable than first thought) risk
    of a ~10-20x tail-latency spike, but the previously-stated reasoning
    ("gets worse the longer the conversation runs") is no longer
    supported and should not be cited as the justification going forward.
+
+## DECISIVE FINDING (2026-08-04, same evening session) — the GPU is IDLE during the collapse, not computing. This is a STALL, not an expensive compute path.
+
+Ran `powermetrics -i 1000 --samplers thermal,cpu_power,gpu_power` as a
+background sampler on BOTH nodes, then deliberately reproduced the
+~2800-token anomaly live (hit on the 3rd of 10 identical repeated
+requests, prompt_tokens=2825, decode window 16:13:52–16:17:47, 235s for
+301 tokens = 1.28 tok/s, same OUTLIER signature as every prior
+occurrence). Correlated the exact collapse window against the thermal
+sampler's per-second GPU power readings on rank1 (the verify-forward
+owner — `adams-mac-studio-m4-2`, the node running `r1_verify_fwd`):
+
+- **Immediately before the collapse** (prompt still prefilling / early
+  decode, normal speed): GPU Power ≈ 6,700–10,600 mW — the expected range
+  for active DSv4 compute.
+- **Throughout the ENTIRE 235-second collapse window** (sampled at
+  multiple points: start, ~2min in, ~3min in, ~4min in, end): GPU Power
+  stayed consistently in the **200–650 mW range** — roughly 15-30x LOWER
+  than normal active compute, and comparable to genuinely idle GPU power.
+
+**This directly contradicts every compute-cost hypothesis considered so
+far** (Indexer top-k search scaling, per-row FULLBLOCK duplication,
+MoE expert-weight bandwidth, or any other "the model is doing more FLOPs"
+explanation) — if the GPU were doing 10-20x more compute work, GPU power
+would be HIGH throughout the collapse, not low. Instead the GPU sits
+nearly idle for the entire 235 seconds while the wall-clock request takes
+15-20x longer than normal. **The bottleneck is somewhere the GPU is
+NOT the active resource** — i.e., something is stalling/blocking
+(waiting on a lock, a synchronous host-side Python operation, an RDMA/
+jaccl round-trip stall, a memory-allocator syscall, page fault, or
+similar), not a genuinely more-expensive forward pass.
+
+This reframes the investigation completely, superseding items 3-4 in the
+numbered list above (chasing thermal throttling or a buffer-resize
+compute-cost boundary is now off the table — the low GPU power directly
+rules out "the compute got expensive," including the thermal-throttling
+variant of the resource-contention theory, since throttling would still
+show elevated power at a lower clock, not near-idle power).
+
+### Revised next steps
+
+1. ~~Capture what the CPU/host is doing during the exact same 235s
+   window on rank1~~ **CHECKED — inconclusive, no obvious host-CPU
+   smoking gun.** Compared `powermetrics` CPU-cluster active-residency
+   data immediately before the collapse vs. deep inside the collapse
+   window on rank1: the E-cluster (efficiency cores 0-3) sits at roughly
+   the same ~65-67% active residency in BOTH windows — no CPU core jumps
+   to a sustained 100%-busy state during the stall the way a genuine
+   host-side compute/GIL bottleneck would show. This doesn't rule out a
+   brief, sub-second blocking call (a 1s-granularity sampler can't see a
+   short block within one interval), but there's no sustained-CPU-bound
+   signature. Combined with the low-GPU-power finding, the stall doesn't
+   look like it's consuming EITHER resource heavily — consistent with a
+   genuine wait/blocking-I/O condition (network round-trip, lock,
+   syscall) rather than any kind of compute-bound bottleneck, GPU or CPU.
+2. **Not yet done — the most promising remaining lead: jaccl/RDMA-level
+   diagnostics during a live occurrence.** The existing `[jaccl-v2]
+   ENTER/EXIT` diagnostic lines already logged in `~/.exo/exo_log/exo.log`
+   (visible via `Runner stderr:` echoes) show call-by-call RDMA
+   round-trip info (`total_bytes`, `num_chunks`, `rounds`) for every
+   collective op. A future reproduction attempt should grep this
+   diagnostic specifically during a captured collapse window for
+   anomalies (unusually high `rounds`, repeated `ENTER` without a
+   matching `EXIT` suggesting a stuck/retried transfer, or a large gap
+   between consecutive `ENTER` timestamps indicating the runner was
+   blocked on something ELSE before even reaching the next RDMA call).
+   This is the single most promising untested lead given both GPU AND
+   sustained-CPU compute are now ruled out as the site of the stall.
+3. **Also not yet done: per-second `vm_stat`/page-fault polling DURING
+   a live occurrence** (not after-the-fact) to rule in/out a memory
+   allocator stall or page-fault storm as an alternative "GPU-idle,
+   CPU-not-obviously-pegged" explanation.
+4. **Given how much investigation this specific occurrence has already
+   consumed this session** (multiple cluster reproductions, a live
+   thermal/power capture, a CPU-activity check — all producing real,
+   documented negative/positive results but no root cause yet), the
+   next attempt should be scoped as its own focused session with the
+   jaccl-diagnostic-correlation plan (item 2) as the starting hypothesis
+   to test FIRST, rather than open-ended further probing.
 
 ### Where to find this correction's evidence
 
