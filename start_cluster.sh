@@ -230,23 +230,50 @@ fi
 # The ~5% c=1 decode cost noted above is absorbed by the vec win
 # (33.7 vs 29.5 net). Set =0 only with EXO_DSV4_VERIFY_ROWSEQ_VEC=0.
 : "${MLX_STEEL_BATCH_INVARIANT:=1}"
-# EXO_DSV4_ROWSEQ_FULLBLOCK / _MOE: DEFAULT RE-ENABLED 2026-08-02 -- CONFIRMED
-# FIX for the DSpark self-doubt-loop bug (see the EXO_SPECULATIVE comment
-# below for the full root-cause writeup). Together with the already-default
-# EXO_DSV4_VERIFY_ROWSEQ, these make DSpark's (and MTP's) L>1 verify forward
-# bitwise-equivalent to L sequential decode steps, closing the numerics
-# drift that was letting the model see a subtly different view of its own
-# context at self-verification decision points. Confirmed live: 2x
-# identical temp=0 reruns of the failing math_digit_sum repro converged
-# cleanly (finish_reason=stop, correct answer) at both attempts, vs the
-# prior 18-24x repetition that never terminated. Cost: ~24 tok/s vs the
-# documented 27-33 tok/s ceiling -- real but modest, not a regression to
-# plain sequential decode speed. Set both to 0 to revert to the
-# faster-but-buggy pre-fix behavior (NOT recommended for correctness-
-# sensitive workloads).
+# EXO_DSV4_ROWSEQ_FULLBLOCK / _MOE_PARTS_ROWSEQ: DEFAULT RE-ENABLED
+# 2026-08-02 -- CONFIRMED FIX for the DSpark self-doubt-loop bug (see the
+# EXO_SPECULATIVE comment below for the full root-cause writeup). Together
+# with the already-default EXO_DSV4_VERIFY_ROWSEQ, these make DSpark's (and
+# MTP's) L>1 verify forward bitwise-equivalent to L sequential decode
+# steps, closing the numerics drift that was letting the model see a
+# subtly different view of its own context at self-verification decision
+# points. Confirmed live: 2x identical temp=0 reruns of the failing
+# math_digit_sum repro converged cleanly (finish_reason=stop, correct
+# answer) at both attempts, vs the prior 18-24x repetition that never
+# terminated.
+#
+# 2026-08-04 UPDATE: EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=1 (per-rowing the ENTIRE
+# MoE ffn -- gate+switch+shared+combine) was the original fix but its cost
+# is real: forcing the expensive expert-gather (switch_mlp) per-row instead
+# of batched scales verify-step cost with block_size, capping DSpark's
+# throughput at parity with plain sequential decode regardless of draft
+# quality (confirmed: raising draft acceptance from ~64% to 85-97% via the
+# DSpark native-head fix produced ZERO throughput gain under FULLBLOCK_MOE
+# -- see exo-perf-tuning skill). An offline bisect (4300 real captured
+# verify-block activations across both nodes, EXO_DSV4_MOE_ISOLATION_DUMP)
+# found the numerics divergence lives ONLY in shared_experts -- gate and
+# combine are innocent (same ~15.6% divergence rate as fully-batched), and
+# critically switch_mlp (the expensive expert-gather) is ALSO innocent (same
+# divergence rate batched or not). EXO_DSV4_MOE_PARTS_ROWSEQ=shared alone
+# reduces the divergence rate to 0.023% (1/4300, noise-floor) vs 0% for the
+# full per-row fix -- confirmed correctness-clean live (math_digit_sum
+# repro: finish_reason=stop, correct answer, 0 repetitions; tool-calling
+# smoke test: clean). NOTE: this is NOT literally bitwise-lossless like
+# FULLBLOCK_MOE=1 was (a 1-in-4300 residual divergence remains, vs 0) --
+# if the self-doubt loop or any other verify-drift symptom EVER reappears
+# in production, that residual is the first thing to re-audit (bisect
+# further within shared_experts' own sub-ops, or fall back to
+# FULLBLOCK_MOE=1). Throughput: 27.48 tok/s mean vs FULLBLOCK_MOE's 24.54
+# (+12%) and vs DSpark-off's 24.68 baseline (+11%) -- DSpark now beats
+# sequential decode for the first time on this fork. shared_experts is a
+# small dense MLP (no expert-weight bandwidth cost per row), so per-rowing
+# it is nearly free while switch_mlp stays batched at its full efficiency.
+# NEW DEFAULT: FULLBLOCK_MOE=0 + MOE_PARTS_ROWSEQ=shared. Set
+# MOE_PARTS_ROWSEQ=gate,switch,shared,combine (or FULLBLOCK_MOE=1) to
+# revert to the fully-lossless-but-slower prior default if ever needed.
 : "${EXO_DSV4_ROWSEQ_FULLBLOCK:=1}"
-: "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=1}"
-: "${EXO_DSV4_MOE_PARTS_ROWSEQ:=}"
+: "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:=0}"
+: "${EXO_DSV4_MOE_PARTS_ROWSEQ:=shared}"
 # Long-ctx verify losslessness (2026-07-10, supersedes the 07-09 MTP_MAX_CTX
 # =65536 + TIE_REVERIFY stopgap). Root cause of the DSML tool-call corruption
 # (</｜DSML｜inv> class): an L>1 batched verify forward is NOT equivalent to
