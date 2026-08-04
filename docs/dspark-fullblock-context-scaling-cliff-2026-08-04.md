@@ -1,6 +1,8 @@
 # DSpark FULLBLOCK context-scaling cliff — handoff — 2026-08-04
 
-**STATUS: BUG FOUND AND CONFIRMED. NOT ROOT-CAUSED. NOT FIXED.**
+**STATUS: BUG FOUND AND CONFIRMED. NOT ROOT-CAUSED (mechanism narrowed to
+a specific, falsifiable hypothesis via code read — see the 2026-08-04
+UPDATE section below — but NOT yet confirmed live). NOT FIXED.**
 Cluster is currently live on **DSpark OFF** (`EXO_SPECULATIVE=0
 EXO_DSV4_DSPARK=0`) as a deliberate, temporary safety choice — DSpark's
 `FULLBLOCK` attention path is actively worse than no speculation at any
@@ -86,6 +88,77 @@ inside the per-row loop breaking lazy graph fusion.
 **None of these candidates has been confirmed. This is the actual next
 step if resuming.**
 
+## UPDATE 2026-08-04 (later, same day, code-only follow-up — no cluster time spent)
+
+Read `SparseCompressedAttention.__call__` and `Indexer.__call__` in full
+(`mlx-lm/mlx_lm/models/deepseek_v4.py`) plus `ModelArgs.__post_init__`
+(compress_ratios) and found a concrete, quantitative refinement of the
+Indexer hypothesis above — narrows it from "the Indexer's cost scales with
+context" to a specific, falsifiable mechanism with a predicted knee point.
+
+**The config:** `compress_ratios` alternates `4` and `128` across the ~21
+sparse layers (`__post_init__`, `[4 if i % 2 else 128 for i in
+range(...)]` — roughly half each). `Indexer.index_topk` defaults to `512`.
+
+**The branch (`SparseCompressedAttention.__call__`, ~line 4107-4133):**
+pool size `P = context // compress_ratio` for that layer. If `P <= 512`
+(the `"compressed attention"` branch): ONE dense `scaled_dot_product_attention`
+over the whole (small) pool, no indexer top-k gather. If `P > 512` (the
+`"sparse compressed attention"` branch): the FULL `Indexer` machinery runs —
+a `(B,L,D)@(B,D,P)` score GEMM reading the entire pooled tensor, an O(P)
+pmask apply, an O(P) top-k search — followed by a gathered SDPA over just
+the selected k=512 entries.
+
+**The knee this predicts:** for a `compress_ratio=4` layer, `P=512` is
+crossed at **context ≈ 2048 tokens**. For `compress_ratio=128` layers, the
+same crossing happens at context ≈ 65,536 tokens — outside both of today's
+sweep points (500, 14253).
+
+**Why this produces exactly the observed shape:** at depth≈500, every
+layer is still under its P=512 threshold (even the ratio=4 ones, P≈125) —
+the whole model runs the cheap dense branch, so FULLBLOCK's 5x-per-row
+loop is nearly free everywhere → 27.56 tok/s, no cliff. At depth≈14,253,
+the ratio=4 layers (~half the sparse layers, P≈3,563) have flipped into
+the expensive sparse/indexer branch — FULLBLOCK now forces that branch's
+O(P)-scaling work (the score GEMM's full read of the `(D,P)` pooled
+tensor, the pmask apply, the top-k search) to run **5 separate times per
+verify cycle** (once per drafted row, unbatched) instead of once. That's
+a genuine ~5x memory-bandwidth multiplier on an O(context)-scaling op,
+concentrated in only half the sparse layers, and ONLY past the 2048-token
+knee — which plausibly compounds with the other O(P) per-row-duplicated
+ops (pmask, gather) to produce something steeper than a flat 5x, matching
+the observed 15.9x.
+
+**Falsifiable prediction for next session:** add a 3rd sweep point at
+~1500-3000 tokens (straddling the predicted 2048-token knee for
+compress_ratio=4 layers). If this hypothesis is right, throughput should
+show a SHARP drop right around there, not a smooth/gradual decline — a
+much cheaper single-point test than a full bisect, and it would confirm
+or kill this specific mechanism before investing in the harder fix.
+
+**Why a naive fix ("just batch the indexer call across the 5 rows") is
+NOT safe, so don't reach for it without more care:** within one 5-row
+FULLBLOCK verify block, `PoolingCache.accumulate_windows`'s remainder
+buffer can genuinely advance mid-block — for `compress_ratio=4`, a new
+pooled entry lands roughly every 4th token, i.e. plausibly once inside a
+5-row block. That means the pooled tensor is NOT bit-identical across all
+5 rows of one verify cycle; a correctness-preserving fix has to account
+for the (at most 1-entry) pool growth mid-block, not assume it's static.
+This is the same class of subtlety FULLBLOCK itself was built to handle
+correctly (see `exo-speculative-decode-correctness` skill) — treat any
+"just batch it back" fix with the same bisect rigor as the MoE-side fix
+(`EXO_DSV4_MOE_ISOLATION_DUMP`/`EXO_DSV4_MOE_PARTS_ROWSEQ` precedent), not
+a quick patch.
+
+**Where to find this:** `SparseCompressedAttention.__call__` branch dispatch
+at deepseek_v4.py ~line 4105-4133 (`if pooled.shape[1] == 0: ... elif
+pooled.shape[1] <= self.indexer.index_topk: ... else:` — the sparse
+branch); `Indexer.__call__` ~line 3326-3524 (the score GEMM at
+`_indexer_score`, ~line 3159-3224, and the top-k search ~line 3432-3493);
+`ModelArgs.__post_init__` ~line 825-841 (compress_ratios default pattern);
+`PoolingCache.accumulate_windows` (`mlx-lm/mlx_lm/models/cache.py`
+~line 1342) for the mid-block pool-growth subtlety above.
+
 ## Reproduction (verified, deterministic)
 
 Cluster config: `DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731
@@ -154,6 +227,17 @@ tokens this should take ~11s at healthy throughput; it took 174s.
 
 ## Concrete next steps if resuming
 
+0. **Cheapest first: test the predicted knee.** The 2026-08-04 code-read
+   update above predicts a SHARP throughput drop at context≈2048 tokens
+   (where `compress_ratio=4` layers cross `P=index_topk=512` and flip from
+   the cheap dense attention branch to the expensive per-row-duplicated
+   Indexer/sparse branch). Add one sweep point at ~1500-3000 tokens using
+   the existing sweep methodology (see below) — a single request, no new
+   code. If throughput drops sharply right there (not gradually), that
+   confirms this specific mechanism and focuses the bisect (below) on the
+   `SparseCompressedAttention` sparse branch specifically, not the whole
+   attention block. If it doesn't, this hypothesis is wrong and the
+   Indexer-cost theory needs to be dropped in favor of another candidate.
 1. **Apply the same bisect methodology that fixed the MoE-side cost this
    morning** (see commit `b9921962e`'s message and warm memory fact
    `1169` for the full writeup): capture real per-cycle attention inputs
@@ -162,7 +246,10 @@ tokens this should take ~11s at healthy throughput; it took 174s.
    in `deepseek_v4.py`), then offline-test candidate configs (is the
    Indexer topk search the actual cost driver? does batching JUST the
    indexer search while keeping the rest of attention per-row preserve
-   correctness? use the exact same key/shape-match + bit-exact-sanity-gate
+   correctness — note `PoolingCache` can advance mid-block for
+   `compress_ratio=4`, see the code-read update above, so this needs the
+   same rigor as the MoE-side bisect, not a naive batch-it-back patch?
+   use the exact same key/shape-match + bit-exact-sanity-gate
    pattern from this morning's bisect — do NOT trust any subset's result
    until a "fully per-row, must equal ground truth" sanity check passes
    bit-exact).
