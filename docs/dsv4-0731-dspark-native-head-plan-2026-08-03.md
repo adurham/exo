@@ -1,13 +1,60 @@
-# DSpark Native Head for DeepSeek-V4-Flash-0731 (2026-08-03)
+# DSpark Native Head for DeepSeek-V4-Flash-0731 (2026-08-03, implemented 2026-08-04)
 
-**STATUS: NOT STARTED. Planning only.** This doc is the handoff for the next
-session — everything here is grounded in actual code reads, not guesses, but
-zero implementation has happened yet.
+**STATUS: IMPLEMENTED, validated standalone, NOT YET LIVE-A/B'd.**
+`_overlay_dsv4_dspark_native()` (utils_mlx.py) + `Model.sanitize()`'s new
+`n_mtp_override` param (mlx-lm submodule, adurham/mlx-lm@e101803) are
+committed and pushed to exo's `main` (commit `99f5cda51`). Gated behind
+`EXO_DSV4_DSPARK_NATIVE=1` (default off — existing local-head overlay
+behavior unchanged unless explicitly opted in). Validated end-to-end
+standalone (key/shape match, quantization, load_weights, real forward
+pass — see that commit's message for exact numbers). NOT yet wired into
+a live cluster relaunch or A/B'd for throughput — that's the next step,
+see the bottom of this doc.
 
-## TL;DR for whoever picks this up
+The implementation turned out SIMPLER than this doc's original plan
+predicted: `Model.sanitize()` already had generic, working logic for the
+fp8-dequant, hyper-connection rename, and expert-weight-stacking steps
+this doc assumed would need to be hand-rolled fresh (see "What actually
+happened" section below) — it just needed one new parameter to bypass its
+`num_nextn_predict_layers`-derived stage-count gate.
 
-`deepseek-ai/DeepSeek-V4-Flash-0731` is deployed and live on the cluster
-(correctness verified, throughput verified). DSpark speculative decoding is
+## What actually happened (read this first, then treat the rest of this
+## doc as historical planning context, superseded where it disagrees)
+
+1. Live code inspection found `DeepseekV4Model.sanitize()` (actually on the
+   outer `Model` class, not `DeepseekV4Model` — this doc had the wrong
+   class name) already implements ALL FOUR of: fp8 e4m3→mxfp8 uint32-repack
+   (generic, any `.scale`-suffixed key), flat→nested hc rename (generic
+   string substitution), per-stage expert-weight stacking (already loops
+   over `("model.layers", n_layers)` AND `("model.mtp", n_mtp)`), and wo_a
+   2D→3D reshape (same dual-prefix loop). It was NOT hand-rolled — reused
+   via a new `n_mtp_override: Optional[int]` sanitize() param that bypasses
+   the `EXO_DSV4_MTP`-gated `num_nextn_predict_layers` stage count (which is
+   1 on -0731, wrong for DSpark's 3 stages) entirely.
+2. A real, separate latent bug was found and fixed along the way: `ModelArgs`
+   never declared `dspark_block_size`/`dspark_target_layer_ids`/etc as
+   dataclass fields, so `BaseModelArgs.from_dict()`'s allow-list filter
+   silently dropped them from config.json — every DSpark checkpoint was
+   relying on `DeepseekV4DSparkModule`'s `getattr(config, ..., default)`
+   fallbacks happening to match. Harmless on -0731 (values match defaults)
+   but would have silently misconfigured any future checkpoint with
+   different DSpark params. Now declared explicitly.
+3. Standalone validation (no live cluster) on mac-studio-m4-1 against
+   -0731's real 3 mtp.* shards confirmed: exact key/shape match (0
+   missing/0 extra of 81 params), correct per-layer quant scheme inference
+   (25 mxfp8 + 9 mxfp4), successful quantize+load+eval, and a real
+   `mod.draft()` forward pass with correctly-shaped output.
+4. NEXT SESSION: relaunch the cluster with `EXO_DSV4_DSPARK_NATIVE=1` (in
+   addition to existing `EXO_DSV4_DSPARK=1`), re-run the controlled A/B
+   from the 2026-08-03 session (list-of-100-primes throughput test:
+   native-head-on vs local-head-on vs DSpark-off, 3-6 runs each), and check
+   draft acceptance rate via `exo.log`'s "drafted tokens accepted" line
+   (baseline to beat: ~64% with the mismatched preview-vintage head).
+
+---
+
+## Original planning doc below (2026-08-03, pre-implementation)
+
 currently **disabled** (`EXO_SPECULATIVE=0 EXO_DSV4_DSPARK=0`, a manual
 runtime override — `start_cluster.sh`'s own defaults are still
 `EXO_SPECULATIVE=1 EXO_DSV4_DSPARK=1`, so a plain relaunch reverts to DSpark
