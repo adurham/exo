@@ -771,3 +771,130 @@ see the "Reproduction" section's methodology which was reused unmodified).
 Outlier log lines cross-referenced directly via
 `ssh <node> "grep 'DSpark OUTLIER' ~/.exo/exo_log/exo.log"` on both nodes
 for the 2026-08-04 15:40-16:03 window.
+
+## LEAD (2026-08-04, same evening, code-only, no cluster time) — a PRE-EXISTING general PP stall mechanism MAY explain DSpark's exposure, but this is a HYPOTHESIS, not a converging conclusion — see caveats below before treating it as more than that
+
+**IMPORTANT FRAMING: this section chains three separate historical
+findings (a code comment pointing at a memory fact, an analogous
+compounding-probability SHAPE from an unrelated bug, and a rough static
+`mx.eval()` grep count) into a hypothesis that reads more confident than
+it actually is. Read the CAVEATS subsection below before treating
+anything in this section as more than "the cheapest lead to test next,"
+not "probably what's happening."**
+
+Read `SpecPipelineFirstLayer`/`SpecPipelineLastLayer` (candidate 2 from
+the REASONING PIVOT section) and found a code comment (line ~468-481,
+`pp_speculation.py`) explicitly referencing a PRIOR, SEPARATE
+investigation: *"a real 45+ second r0_fwd/spec_fwd stall... confirmed
+live via faulthandler"* at the exact `mx.eval(output)` call site inside
+`SpecPipelineLastLayer.__call__`. This led to warm memory fact `1108`
+(2026-07-31, category `exo-pp`, NOT specific to DSpark) — a **general PP
+stall investigation**, narrowed via `EXO_STALL_SAMPLER_SECONDS` live
+Python-stack-trace capture during a real production hangup: **both ranks
+were simultaneously blocked at the IDENTICAL line —
+`auto_parallel.py:245`, `mx.eval(output)` inside `PipelineLastLayer.
+__call__`** (the BASE class `SpecPipelineLastLayer` wraps) — which is
+**local GPU layer-compute eval, NOT a network send/recv call**. This
+ruled out the jaccl ack/credit-stall hypothesis for THAT investigation
+and pointed at **Metal command-buffer completion-signal delivery lag**
+(a CPU dispatch-queue scheduling delay between a GPU kernel finishing and
+the completion-handler callback that arms the cross-rank `Event`) as its
+leading — but, critically, **NEVER CONFIRMED** — hypothesis. That
+investigation stopped before flipping on its own two purpose-built,
+already-wired, zero-overhead-when-off diagnostics
+(`EXO_CMDBUF_RING_DIAG=1`, command-buffer commit/schedule/completion
+timing; `MLX_SIGNAL_PROBE=1`, per-`Event::signal` timing) because doing
+so needed a cluster restart at the time. Both confirmed still present and
+wired into `start_cluster.sh` (~line 1854-1924) this session.
+
+**Speculative synthesis (NOT established — see CAVEATS):** DSpark's
+decode loop exercises far more `mx.eval()`/send/recv calls per cycle than
+plain sequential decode's per-step path (rough static grep count: ~50
+`mx.eval(` occurrences, including comments, across `pp_speculation.py` vs
+11 in `batch_generate.py`'s step path — NOT a rigorous per-cycle dynamic
+count, see caveat below). IF the completion-signal-delivery-lag mechanism
+has some small fixed per-sync-point failure probability, higher sync
+density COULD compound that into DSpark's observed ~18-20% rate while
+plain decode stays near-zero — echoing (only as a SHAPE, not as evidence
+this bug behaves the same way) fact `243`'s unrelated, already-resolved
+MTP γ=2 bistability investigation, which measured an explicit compounding
+form for a DIFFERENT stall: "per-collective tail-stall prob ~0.8%...
+P(stall in depth-K chain)=1-(1-p)^K."
+
+**This framing is ATTRACTIVE because it would explain several observations
+at once (DSpark-specific rate without a DSpark-specific bug; GPU-idle-
+during-stall, since a stuck-signal-for-already-finished-work delivers
+exactly that symptom; not fixed by disabling DRAFT_AHEAD, since ~25-30+
+other sync points remain; RDMA/jaccl transport being fine, since the block
+is local GPU eval not a network call) — but "explains multiple
+observations" is not the same as "confirmed." All of this remains
+consistent with several DIFFERENT explanations too.**
+
+### CAVEATS (read before acting on this section)
+
+1. **The foundational mechanism (completion-signal delivery lag) was
+   NEVER CONFIRMED in the original 2026-07-31 investigation** — it was
+   that investigation's leading hypothesis at the point it stopped, not
+   an established fact. This section's synthesis is a hypothesis built on
+   top of an unconfirmed hypothesis. Both ranks blocking at `mx.eval`
+   confirms WHERE the block happens, not WHY.
+2. **A fixed per-sync-point probability predicts roughly PROPORTIONAL
+   scaling with sync count, which is in tension with the actual A/B data.**
+   If DSpark stalls ~18-20% at roughly 3x the sync density of plain
+   decode, a naive proportional model predicts plain decode should stall
+   at something like 6-7% per trial — and observing 0/20 has a non-trivial
+   probability (~25%) under that specific model, so it's not strongly
+   contradicted, but the data does NOT positively support pure density-
+   compounding either. This tension should be resolved with real
+   diagnostic data, not assumed away.
+3. **The sync-point counts (50 vs 11) are STATIC grep counts of `mx.eval(`
+   occurrences in source files, including ones inside comments, and are
+   NOT a rigorous measurement of actual DYNAMIC sync calls executed per
+   unit of decode progress** (a DSpark "cycle" and a plain-decode "step"
+   may not correspond 1:1 in tokens-of-progress either). Treat this as a
+   rough directional signal only, not a quantitative comparison to build
+   further conclusions on without re-measuring properly (e.g. actually
+   instrumenting and counting real calls during a live run of each
+   config).
+4. **A live structural alternative this synthesis does NOT rule out:**
+   DSpark may be exposed to this class of bug not because of raw sync
+   COUNT but because of sync STRUCTURE — its interleaved send/recv/eval
+   pattern could create a cross-rank ordering dependency that can wedge in
+   a way plain sequential decode's simpler pattern structurally cannot,
+   regardless of how many total sync points either has. This would still
+   point at DSpark-specific code (contradicting the "not DSpark-specific
+   in root cause" framing above) and needs to stay live as an alternative
+   until ruled out by real data.
+
+### Concrete next step for a resuming session (requires a cluster restart, needs its own explicit approval per standing rule)
+
+Relaunch with the DSpark-on repro config PLUS `EXO_CMDBUF_RING_DIAG=1
+MLX_SIGNAL_PROBE=1`, reproduce the ~2800-token stall (expect a live
+occurrence within roughly 5-15 trials given the ~18-20% observed rate),
+and read the command-buffer ring + signal-probe output for the exact
+window. This is the cheapest available way to move from hypothesis to
+data: it would either directly CONFIRM the completion-signal-delivery-lag
+mechanism (closing out both this investigation AND, retroactively, fact
+1108's still-open question), cleanly RULE IT OUT (in which case pivot to
+candidate 3 — `PoolingCache`'s deferred-update mechanism — or the
+sync-structure alternative in caveat 4), or produce genuinely new,
+unexpected data. Do NOT skip straight to "the fix is X" without running
+this — nothing in this section should be treated as confirmed without it.
+
+### Where to find this lead's evidence
+
+Comment citing the prior stall investigation: `pp_speculation.py` ~line
+468-481. Prior investigation's full findings: warm memory fact `1108`
+(`memory(action='recall', query='Event::wait slow-wait stall command
+buffer completion signal')`), category `exo-pp` — READ THE FULL FACT,
+note it explicitly says "NEXT STEP... requires cluster restart" and was
+never followed up. Diagnostic wiring: `start_cluster.sh` ~line 1854-1924
+(`MLX_SIGNAL_PROBE`, `EXO_CMDBUF_RING_DIAG`). Analogous compounding-
+probability SHAPE (not evidence) precedent: warm memory fact `243`
+(2026-05-17 MTP γ=2 bistability fix, an unrelated already-resolved bug —
+cited only for the mathematical pattern, not as evidence this bug behaves
+the same way). Static sync-point counts: `grep -c 'mx\.eval(' src/exo/
+worker/engines/mlx/pp_speculation.py` (50, includes comments) vs
+`src/exo/worker/engines/mlx/generator/batch_generate.py` (11) in the
+`exo` repo at commit `965559b02` — re-measure dynamically before trusting
+this comparison further.
