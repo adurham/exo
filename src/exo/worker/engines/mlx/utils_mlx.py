@@ -371,10 +371,23 @@ def shard_and_load(
     # tensor sharding so its DeepseekV4MoE ffns shard exactly like the native
     # mtp head's. Draft-phase swap in dsv4_mtp is separately gated on the
     # module being present.
+    #
+    # EXO_DSV4_DSPARK_NATIVE=1 (2026-08-04) selects the checkpoint's OWN
+    # bundled mtp.0/1/2.* DSpark head instead of the separately-converted
+    # local head (EXO_DSV4_DSPARK_DIR) — use this for checkpoints (e.g.
+    # deepseek-ai/DeepSeek-V4-Flash-0731) that ship their own trained draft
+    # weights, so verify runs against a head actually trained on THIS
+    # checkpoint's hidden-state distribution rather than a different
+    # (e.g. preview) checkpoint's. Falls back to the local-head overlay if
+    # unset, preserving prior behavior.
     if os.environ.get("EXO_DSV4_DSPARK", "0") == "1":
         _dspark_ok = 1
+        _use_native = os.environ.get("EXO_DSV4_DSPARK_NATIVE", "0") == "1"
         try:
-            _overlay_dsv4_dspark(model)
+            if _use_native:
+                _overlay_dsv4_dspark_native(model, model_path)
+            else:
+                _overlay_dsv4_dspark(model)
         except Exception as e:
             _dspark_ok = 0
             logger.warning(
@@ -734,6 +747,152 @@ def _overlay_dsv4_dspark(model: Any) -> None:
     logger.info(
         f"DSpark draft head attached from {head_dir} "
         f"({len(weights)} tensors, {len(mod.stages)} stages, "
+        f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
+    )
+
+
+def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
+    """Attach + load the checkpoint's OWN bundled 3-stage DSpark head.
+
+    Unlike ``_overlay_dsv4_dspark`` (which overlays a separately-converted
+    head built from a DIFFERENT checkpoint's mtp.* shards, e.g. the preview
+    checkpoint's weights onto -0731), this reads ``mtp.0/1/2.*`` directly
+    from the currently-loading checkpoint's own safetensors shards — the
+    draft head actually trained alongside these exact target weights.
+
+    Reuses ``Model.sanitize()``'s existing generic transform pipeline
+    (fp8->mxfp8 dequant/repack, flat->nested hyper-connection rename,
+    per-stage expert-weight stacking, wo_a 2D->3D reshape) via its new
+    ``n_mtp_override`` param — bypasses the EXO_DSV4_MTP-gated
+    num_nextn_predict_layers stage count entirely, since DSpark's 3 draft
+    stages are a structurally separate concept from MTP-1 self-chaining
+    even though both live under the checkpoint's ``mtp.`` key prefix.
+
+    Validated standalone (2026-08-04, see docs/dsv4-0731-dspark-native-head-plan
+    handoff + warm memory) against deepseek-ai/DeepSeek-V4-Flash-0731's real
+    shards: sanitize(n_mtp_override=3) + this remap produces an EXACT key/shape
+    match against DeepseekV4DSparkModule's param tree (0 missing, 0 extra),
+    nn.quantize infers 25 mxfp8 + 9 mxfp4 layers correctly from on-disk
+    .scales dtype/shape, load_weights(strict=True) succeeds, and a real
+    forward pass (mod.draft()) produces correctly-shaped output.
+    """
+    import json as _json
+    import re as _re
+
+    import mlx.core as mx
+    import mlx.nn as nn
+    from mlx_lm.models.deepseek_v4 import (
+        DeepseekV4DSparkModule,
+        set_dspark_taps,
+    )
+    from mlx_lm.models.deepseek_v4 import (
+        Model as _DSv4Model,
+    )
+
+    inner = getattr(model, "model", None)
+    if inner is None or not hasattr(inner, "args"):
+        raise RuntimeError("model has no inner DSv4 model/args")
+
+    n_stages = int(getattr(inner.args, "n_mtp_layers", 3))
+
+    # Load only the mtp.* keys from the checkpoint's own shards. Scan the
+    # safetensors index for shards that actually contain an "mtp." key
+    # rather than mx.load()-ing the whole ~167GB checkpoint a second time.
+    index_path = model_path / "model.safetensors.index.json"
+    if not index_path.exists():
+        raise RuntimeError(f"no model.safetensors.index.json at {model_path}")
+    weight_map = _json.loads(index_path.read_text())["weight_map"]
+    mtp_shards = sorted(
+        {v for k, v in weight_map.items() if k.startswith("mtp.")}
+    )
+    if not mtp_shards:
+        raise RuntimeError(
+            f"checkpoint at {model_path} has no mtp.* weights — "
+            "cannot attach native DSpark head"
+        )
+
+    raw: dict[str, mx.array] = {}
+    for shard in mtp_shards:
+        raw.update(mx.load(str(model_path / shard)))
+    mtp_only = {k: v for k, v in raw.items() if k.startswith("mtp.")}
+
+    # Reuse Model.sanitize()'s generic transform pipeline. sanitize() only
+    # ever reads self.args (not self.model/self.lm_head), so a lightweight
+    # stand-in avoids allocating a second full model.
+    class _SanitizeSelf:
+        def __init__(self, args: Any) -> None:
+            self.args = args
+
+    sanitized = _DSv4Model.sanitize(
+        _SanitizeSelf(inner.args), mtp_only, n_mtp_override=n_stages
+    )
+    mtp_sanitized = {
+        k: v for k, v in sanitized.items() if k.startswith("model.mtp.")
+    }
+
+    _specials = {
+        "main_proj": "main_proj",
+        "main_norm": "main_norm",
+        "norm": "norm",
+        "hc_head": "hc_head",
+        "markov_head.markov_w1": "markov_w1",
+        "markov_head.markov_w2": "markov_w2",
+        "confidence_head.proj": "confidence_proj",
+    }
+
+    def _remap(k: str) -> str:
+        m = _re.match(r"model\.mtp\.(\d+)\.(.*)", k)
+        st, rest = m.group(1), m.group(2)
+        for pre, dst in _specials.items():
+            if rest == pre or rest.startswith(pre + "."):
+                return dst + rest[len(pre):]
+        return f"stages.{st}.{rest}"
+
+    weights = {_remap(k): v for k, v in mtp_sanitized.items()}
+
+    mod = DeepseekV4DSparkModule(inner.args)
+
+    # Per-layer scheme inference — identical convention to the other two
+    # overlays: uint8 scales with no biases -> mxfp; bits from the u32
+    # packing ratio at group 32. sanitize() already repacked the checkpoint's
+    # native fp8 e4m3 into this mxfp8 uint32-packed form (its generic
+    # ".scale"-suffix dequant/repack branch), so the SAME inference logic
+    # that reads the dedicated-head overlays' on-disk mxfp packing applies
+    # unchanged here — sanitize()'s output format is the common target.
+    schemes: dict[str, dict[str, Any]] = {}
+    for k, v in weights.items():
+        if not k.endswith(".scales"):
+            continue
+        base = k[: -len(".scales")]
+        w = weights[base + ".weight"]
+        in_packed = int(w.shape[-1])
+        n_groups = int(v.shape[-1])
+        for cand_bits in (4, 8):
+            in_features = in_packed * (32 // cand_bits)
+            if n_groups and in_features % n_groups == 0 and in_features // n_groups == 32:
+                schemes[base] = {
+                    "group_size": 32,
+                    "bits": cand_bits,
+                    "mode": "mxfp4" if cand_bits == 4 else "mxfp8",
+                }
+                break
+        else:
+            raise RuntimeError(f"cannot infer quant scheme for {base}")
+
+    def _qpred(path: str, m: Any) -> Any:
+        if not (hasattr(m, "to_quantized") and path in schemes):
+            return False
+        return schemes[path]
+
+    nn.quantize(mod, group_size=32, bits=8, class_predicate=_qpred)
+    mod.load_weights(list(weights.items()), strict=True)
+    mx.eval(mod.parameters())
+
+    inner.dspark = mod
+    set_dspark_taps(mod.target_layer_ids)
+    logger.info(
+        f"DSpark draft head attached from {model_path} (NATIVE checkpoint-"
+        f"bundled head, {len(weights)} tensors, {len(mod.stages)} stages, "
         f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
     )
 

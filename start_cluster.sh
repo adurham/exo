@@ -1418,6 +1418,16 @@ for NODE in "${NODES[@]}"; do
     : "${EXO_DSV4_DSPARK:=1}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
+    # EXO_DSV4_DSPARK_NATIVE=1 (2026-08-04): use the checkpoint's OWN
+    # bundled mtp.0/1/2.* DSpark head (trained alongside these exact target
+    # weights) instead of the separately-converted local head above. Use
+    # for checkpoints like deepseek-ai/DeepSeek-V4-Flash-0731 whose draft
+    # head wasn't trained on the SAME checkpoint as EXO_DSV4_DSPARK_DIR's
+    # local conversion (that dir was converted from the PREVIEW checkpoint's
+    # mtp shards). Default off -- opt in per-checkpoint. See
+    # docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md for the full
+    # background/validation writeup.
+    [ -n "${EXO_DSV4_DSPARK_NATIVE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_NATIVE=$EXO_DSV4_DSPARK_NATIVE"
     # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
     # with EXO_DSV4_VERIFY_ROWSEQ_VEC=1 + MLX_STEEL_BATCH_INVARIANT=1 —
     # the vec+tau0 config from the task #23/#24 campaigns).
