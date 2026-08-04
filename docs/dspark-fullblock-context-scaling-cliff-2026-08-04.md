@@ -15,10 +15,13 @@ and because the ~2800-token anomaly itself is real and still unexplained
 — just NOT the sustained, context-scaling cliff originally claimed.
 A direct A/B control (see "DSPARK-SPECIFICITY CONTROL" section near the
 end) confirms the severe (~15-18x) form of this anomaly IS DSpark-specific
-at the tested sample size (0/20 DSpark-off vs 2/11 DSpark-on) — though a
-much milder (~2x) baseline variance exists even with DSpark off, and the
-sample sizes are too small to fully rule out a rarer DSpark-off
-occurrence of the severe form.**
+at the tested sample size (0/20 DSpark-off vs 2/11 DSpark-on) — that is
+an **~18% per-request failure rate at this depth, NOT a rare event**
+(an earlier pass through this doc wrongly called it "rare"/"1-in-8" —
+corrected). A much milder (~2x) baseline variance exists even with
+DSpark off (1/20), and the sample sizes are too small to fully rule out
+a rarer DSpark-off occurrence of the severe form, but 18% is a serious,
+frequent, DSpark-specific failure mode as measured, not a tail risk.**
 Cluster is currently live on **DSpark OFF** (`EXO_SPECULATIVE=0
 EXO_DSV4_DSPARK=0`) as a deliberate, temporary safety choice — DSpark's
 `FULLBLOCK` attention path is actively worse than no speculation at any
@@ -452,10 +455,11 @@ overhead. More likely candidates, NOT yet tested:
    anomaly recurs on an already-fully-warm runner.
    A SECOND control test (5x repeated identical requests, ~9 minutes
    later, same warm runner, no reload in between) came back clean on all
-   5 (16.36–16.81 tok/s, zero OUTLIER log lines) — consistent with a RARE,
-   intermittent trigger (roughly 1-in-8 requests hit it across all trials
-   so far: 2 slow out of 3+3+5 = 11 total requests at this depth this
-   session) rather than a reliably reproducible one.
+   5 (16.36–16.81 tok/s, zero OUTLIER log lines) — see the SEVERITY
+   CORRECTION below: across all trials this session the true rate is
+   2/11 ≈ 18%, NOT "rare" (an earlier pass through this doc badly
+   understated this as "roughly 1-in-8" and repeatedly called it "rare" —
+   corrected throughout, see the correction section near the end).
 2. **New observation supporting a transient-resource-contention
    explanation over an architectural one:** during the outlier bursts,
    BOTH ranks show simultaneously elevated per-cycle cost — rank1's
@@ -490,17 +494,19 @@ overhead. More likely candidates, NOT yet tested:
    pass pointing back to this section) until the real mechanism is
    understood. In the meantime, the practical, verified-true statement is
    narrower: "DSpark+FULLBLOCK's verify-forward cost is NOT reliably
-   context-scaling; it CAN spike ~10-20x on roughly 1-in-8 requests at a
-   depth around 2800 tokens (untested whether this rate holds at OTHER
-   depths — only this one depth has been repeat-tested), for a currently
-   unconfirmed reason that looks more like transient system-level
-   resource contention than an architectural DSv4/DSpark code path" — a
-   real reliability/tail-latency concern, just not the mechanism
-   originally claimed.
+   context-scaling; it CAN spike ~10-20x on roughly 18% of requests
+   (2/11 trials this session, NOT a rare tail event — see SEVERITY
+   CORRECTION below) at a depth around 2800 tokens (untested whether this
+   rate holds at OTHER depths — only this one depth has been repeat-
+   tested), for a currently unconfirmed reason that looks more like
+   transient system-level resource contention than an architectural
+   DSv4/DSpark code path" — a serious, frequent reliability concern (not
+   a rare edge case), just not the mechanism originally claimed.
 6. **`EXO_DSV4_DSPARK` default in `start_cluster.sh`:** the original
-   doc's recommendation to keep DSpark off by default is STILL reasonable
-   given a confirmed (if rarer/less predictable than first thought) risk
-   of a ~10-20x tail-latency spike, but the previously-stated reasoning
+   doc's recommendation to keep DSpark off by default is STILL correct
+   and even more clearly justified now — an ~18% chance per request of a
+   ~10-20x tail-latency spike at this depth is not a marginal risk, it is
+   a frequent, user-visible failure mode. The previously-stated reasoning
    ("gets worse the longer the conversation runs") is no longer
    supported and should not be cited as the justification going forward.
 
@@ -588,12 +594,12 @@ show elevated power at a lower clock, not near-idle power).
 User directly asked whether the confirmed ~2800-token collapse is
 DSpark-specific or a general cluster/hardware issue that DSpark's tight
 per-cycle OUTLIER logging just happens to expose (sequential decode has
-no equivalent unconditional per-step timing log to catch an equally rare
-event). This had NOT been tested — every occurrence and every repeated-
-request probe up to this point ran with DSpark ON. Ran the direct control:
-relaunched the cluster with `EXO_SPECULATIVE=0 EXO_DSV4_DSPARK=0`
-(confirmed via `ps eww` on both nodes), then ran the IDENTICAL repeated-
-request probe (prompt_tokens≈2825, temp=0, same seed) 20 times.
+no equivalent unconditional per-step timing log). This had NOT been
+tested — every occurrence and every repeated-request probe up to this
+point ran with DSpark ON. Ran the direct control: relaunched the cluster
+with `EXO_SPECULATIVE=0 EXO_DSV4_DSPARK=0` (confirmed via `ps eww` on
+both nodes), then ran the IDENTICAL repeated-request probe
+(prompt_tokens≈2825, temp=0, same seed) 20 times.
 
 **Result: 19/20 requests clean at 23.9–25.4 tok/s (very tight, consistent
 range). 1/20 showed a real but much milder dip — 10.98 tok/s, ~2.3x
@@ -606,29 +612,40 @@ differs):
 
 | Config | Total requests (this session) | Catastrophic hits (~15-18x) | Mild dips (~2x) |
 |---|---|---|---|
-| DSpark ON | 11 (3+3+5 across 3 separate probes) | 2 | 0 recorded separately (folded into the "clean" bucket at the time) |
+| DSpark ON | 11 (3+3+5 across 3 separate probes) | **2 (18%)** | 0 recorded separately (folded into the "clean" bucket at the time) |
 | DSpark OFF | 20 (this control) | 0 | 1 (10.98 tok/s) |
 
-**Conclusion: the severe collapse (15-18x, GPU-idle-for-minutes) is real
-and appears DSpark-specific at this sample size** — it did not reproduce
-even once in 20 tries with DSpark off, despite reproducing twice in 11
-tries with DSpark on. A SEPARATE, much smaller, non-catastrophic variance
+**SEVERITY CORRECTION (immediately after first writing this section):
+an earlier pass through this doc, and my own initial summary to the
+user, mischaracterized the DSpark-on hit rate as "rare" / "1-in-8" —
+the user directly and correctly called this out. The actual measured
+rate is 2/11 ≈ 18%, i.e. roughly one in FIVE to six requests at this
+depth, not a rare tail event. "1-in-8" understated it and "rare" was
+simply the wrong word for an ~18% catastrophic-failure rate. This has
+been corrected throughout this doc; do not repeat the "rare" framing.**
+
+**Conclusion: the severe collapse (15-18x, GPU-idle-for-minutes) is real,
+appears DSpark-specific at this sample size, AND occurs at a frequency
+(~18% of requests at this depth) that makes DSpark unsuitable for any
+production use until root-caused** — it did not reproduce even once in
+20 tries with DSpark off, despite reproducing twice in 11 tries (18%)
+with DSpark on. A SEPARATE, much smaller, non-catastrophic variance
 (~2x) does exist in the DSpark-off baseline too, so the cluster/hardware
 is not perfectly deterministic even without DSpark — but that baseline
-variance is a different, far less severe phenomenon than the DSpark-on
-collapse and should not be conflated with it.
+variance is a different, far less severe, and far less frequent
+phenomenon than the DSpark-on collapse and should not be conflated
+with it.
 
 **Caveat on sample size:** 11 vs 20 trials is not a rigorous statistical
-sample, especially for an event this rare (roughly 1-in-8 to 1-in-11 in
-the DSpark-on trials). It remains POSSIBLE that the DSpark-off path can
-also hit the same catastrophic failure mode at a much lower rate that
-simply wasn't sampled in 20 tries — this is a real caveat, not fully
-ruled out, just not observed. If resuming, more DSpark-off trials (50+)
-at the same depth would tighten this bound. But as measured, DSpark
-clearly makes the collapse dramatically MORE likely, whatever the
-underlying mechanism turns out to be (stall/wait, per the GPU-idle
-finding above) — DSpark should stay OFF as the safer default until the
-mechanism is understood, and any future root-cause investigation should
+sample. It remains POSSIBLE that the DSpark-off path can also hit the
+same catastrophic failure mode at a much lower rate that simply wasn't
+sampled in 20 tries — this is a real caveat, not fully ruled out, just
+not observed. If resuming, more DSpark-off trials (50+) at the same
+depth would tighten this bound. But as measured, DSpark clearly makes
+the collapse dramatically MORE likely, whatever the underlying mechanism
+turns out to be (stall/wait, per the GPU-idle finding above) — DSpark
+should stay OFF as the safer default until the mechanism is understood,
+and any future root-cause investigation should
 treat "why does DSpark trigger this stall so much more often than
 sequential decode" as part of the core question, not assume the two
 paths are equally affected.
@@ -640,6 +657,65 @@ twice in a row with the cluster in `EXO_DSV4_DSPARK=0` state. Raw output
 in `/tmp/dspark_off_control_2800_out.log` and `_out2.log` (not committed,
 short, rewrite if needed — see the sweep script's methodology, reused
 from the "Reproduction" section above).
+
+## REASONING PIVOT (2026-08-04, same evening, immediately after the A/B control) — the RDMA/jaccl lead is now DEPRIORITIZED, not the top lead
+
+The "Revised next steps" section above (under "DECISIVE FINDING") named
+generic jaccl/RDMA-level diagnostic correlation as the single most
+promising untested lead. The user immediately pointed out a logical
+problem with that, right after the A/B control confirmed DSpark-
+specificity: **plain sequential PP decode (DSpark off) exercises the
+IDENTICAL RDMA/jaccl transport for its own rank0↔rank1 pipeline handoff
+on every single decode step — not just under DSpark — and it essentially
+never stalls catastrophically (0/20 in the control above, one mild ~2.3x
+blip).** If the RDMA link or the jaccl transport layer itself were
+periodically flaky/stalling, the DSpark-off path would very likely show
+the same failure rate, since it rides the exact same physical wire and
+the exact same low-level transport code (`MeshGroup::send()`/`recv()`,
+etc.). It doesn't. **This means the underlying RDMA hardware and the
+shared jaccl transport code are very likely FINE** — the bug search
+should not start there.
+
+**Revised leading hypothesis:** the bug lives in code that is UNIQUE to
+DSpark's decode loop, layered ON TOP OF the shared PP/jaccl transport
+that both configs use identically. Candidates, in order of how directly
+they touch the DSpark-only per-cycle handshake:
+
+1. `pp_dspark_decode_loop`'s own draft+verify message exchange —
+   fields visible in the OUTLIER log that have NO equivalent in plain
+   sequential decode's timing: `batch_xchg`, `r1_verify_wait`,
+   `trim_xchg`, `msg2_recv_wait` (rank0's wait specifically on rank1's
+   verify result, not a generic RDMA wait). These are DSpark-loop-level
+   synchronization points, not raw jaccl calls.
+2. `SpecPipelineFirstLayer`/`SpecPipelineLastLayer` — the DSpark-specific
+   subclasses that reconfigure wire-mode flags (`_pp_recv`, `_pp_decode`,
+   etc.) EVERY cycle for the draft+verify handoff, unlike plain PP's
+   pipeline layers which don't do this per-cycle reconfiguration. Already
+   flagged elsewhere in this fork's own docs
+   (`exo-speculative-decode-correctness` skill's "INLINE VERSION IS
+   DANGEROUS" section) as an easy-to-misconfigure, state-carrying pair of
+   classes — worth re-reading that section's exact mechanics with this
+   specific stall in mind, even though that section was about a DIFFERENT
+   (already-fixed, inline-audit-related) bug.
+3. `PoolingCache`'s deferred-update/commit_pending mechanism
+   (`update_and_fetch_deferred`, `commit_pending`) — DSpark's FULLBLOCK
+   per-row loop interacts with this cache differently than plain
+   sequential decode's single-row-per-step calls; a race or a
+   grow-triggered reallocation stall here would show as a genuine wait
+   with the GPU idle, matching the observed signature, and would NOT
+   occur under DSpark-off (single row, no FULLBLOCK loop, no elevated
+   grow-frequency).
+
+**Concrete next step, superseding "jaccl-diagnostic-correlation" as the
+top lead:** read `pp_dspark_decode_loop` end to end (already partially
+read this session, but not with this specific lens) focusing on exactly
+what happens between one cycle's `r1_verify_fwd` completing and the next
+cycle's `r1_verify_fwd` starting — i.e., what DSpark-unique code sits in
+that gap that ISN'T present in plain sequential decode's per-step loop.
+The jaccl-level diagnostic correlation (checking `[jaccl-v2]
+ENTER/EXIT`) is still a reasonable secondary check if the DSpark-loop-
+level read doesn't turn up an obvious candidate, but should no longer be
+the FIRST thing tried.
 
 ### Where to find this correction's evidence
 
