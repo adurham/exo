@@ -1,8 +1,18 @@
 # DSpark FULLBLOCK context-scaling cliff — handoff — 2026-08-04
 
-**STATUS: BUG FOUND AND CONFIRMED. NOT ROOT-CAUSED (mechanism narrowed to
-a specific, falsifiable hypothesis via code read — see the 2026-08-04
-UPDATE section below — but NOT yet confirmed live). NOT FIXED.**
+**STATUS (2026-08-04, evening UPDATE — CORRECTS THIS DOC'S CORE CLAIM):
+the original "15.9x collapse that gets progressively worse with context"
+finding does NOT reproduce and is very likely WRONG as originally framed.
+A live re-test (same commits, same weights, fresh relaunch) found the
+slow-cycle behavior is confined to a narrow, one-off band around
+prompt_tokens≈2800 — it reproduces THERE, deterministically, across 3
+repeated identical requests — but completely clears up by 3000 tokens and
+stays clean (16-22 tok/s, zero diagnostic outliers) all the way out to
+15,030 prompt tokens, comparable to the original "1.73 tok/s" data point.
+See the "MAJOR CORRECTION" section below before trusting anything above
+this line. The doc is kept largely intact below for the historical trail
+and because the ~2800-token anomaly itself is real and still unexplained
+— just NOT the sustained, context-scaling cliff originally claimed.**
 Cluster is currently live on **DSpark OFF** (`EXO_SPECULATIVE=0
 EXO_DSV4_DSPARK=0`) as a deliberate, temporary safety choice — DSpark's
 `FULLBLOCK` attention path is actively worse than no speculation at any
@@ -303,3 +313,163 @@ EXO_SPECULATIVE=0 EXO_DSV4_DSPARK=0` (DSpark fully off — deliberate safety
 choice, not the `start_cluster.sh` script default). Correctness verified
 (plain chat smoke test clean, `finish_reason=stop`). Both repos
 (`exo`, `mlx-lm`) clean working trees, in sync with their remotes.
+
+## MAJOR CORRECTION (2026-08-04, evening session) — the original collapse claim does NOT reproduce
+
+**TL;DR: relaunched the cluster fresh (same exo commit `880f4b3a0`, same
+mlx-lm commit `55401ac`, same weights, same repro config
+`EXO_DSV4_DSPARK=1 EXO_DSV4_DSPARK_NATIVE=1 EXO_DSV4_ROWSEQ_FULLBLOCK=1
+EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=0 EXO_DSV4_MOE_PARTS_ROWSEQ=shared`) intending
+to test the "sharp knee at ~2048 tokens" prediction from the UPDATE section
+above. Instead found the original "15.9x collapse, gets worse with
+context" story does not hold up. Slow verify cycles (1.4-1.6s each,
+magnitude matching the original finding) DO occur, deterministically, but
+ONLY in a narrow band around prompt_tokens≈2800 — and NOT at any larger
+context tested, including 15,030 tokens (comparable to the original's
+"1.73 tok/s" data point at depth≈14253, which today measured a clean
+17.31 tok/s, back in the normal 16-22 tok/s range).**
+
+### What was actually measured (finer sweep, corrected methodology)
+
+A finer context sweep (prompt_tokens, decode_tok/s, all measured via the
+proper methodology below): 580→27.63, 1348→22.61, 1794→23.06, 2002→20.61,
+then a burst of degradation around 2254-2825 (see below — the ORIGINAL
+first pass through this sweep mismeasured this window due to a script bug,
+corrected on retest), then clean again: 3371→18.40, 4408→17.52,
+6612→17.53, 10028→16.33, 12242→20.84, 13863→17.04, **15031→17.31**.
+
+The 15,031-token point is the critical one: it is comparable in depth to
+the original doc's "confirmed" depth≈14253 → 1.73 tok/s collapse, and
+today it measured a completely normal 17.31 tok/s with ZERO diagnostic
+OUTLIER log lines anywhere near that request. The originally-claimed
+sustained, context-scaling 15.9x collapse simply is not present in this
+re-test.
+
+### The ~2800-token anomaly IS real (unlike the sustained-cliff claim) — reproduced 3x
+
+Sending the IDENTICAL deterministic request (same seed, same prompt
+content, `prompt_tokens=2825`, temp=0) three times in a row against the
+warm, idle cluster gave: run 1 = 18.03 tok/s (clean), run 2 = 16.88 tok/s
+(clean), **run 3 = 1.28 tok/s** (235s wall time for 301 tokens — a real
+collapse, same rough magnitude as the original "1.73 tok/s" claim).
+Cross-checked against the raw per-cycle OUTLIER diagnostic (fires
+automatically >1000ms, zero sampling, so this is not a measurement
+artifact): run 3's decode window contains ~50 outlier cycles at
+1.4-1.6s/cycle (`r1_verify_fwd` on rank1, `r0_fwd`+`msg2_recv_wait` on
+rank0) — the SAME per-cycle cost signature as the original finding.
+
+**This means the underlying slow-path IS real and reachable — DSpark's
+verify forward genuinely can cost ~1.5s/cycle instead of the normal
+~80-150ms — but it is NOT a monotonic function of context depth.** It
+triggered on the 1st and 3rd identical requests at ~2800 tokens in this
+session's timeline but not deterministically on every request at that
+depth (run 2 was clean), and did not trigger at all at any depth from
+3000 to 15,031 tokens across this whole re-test session.
+
+### What this rules out from the original write-up
+
+- **The "sharp knee at compress_ratio=4's P=512 threshold, context≈2048"
+  hypothesis (added earlier today, see UPDATE above) is FALSIFIED as a
+  complete explanation.** If it were the true mechanism, EVERY context
+  above ~2048 tokens should show the expensive branch's cost, scaling
+  further as more layers cross their own P=512 threshold. Instead the
+  cost appeared only in a narrow band, then vanished for 3000-15,031
+  tokens where far more layers should be well past that threshold.
+- **The original "27.56 tok/s at depth≈500 → 1.73 tok/s at depth≈14253,
+  15.9x collapse" framing is not a stable, reproducible property of this
+  config.** Today's fresh measurement at a comparable depth (15,031
+  tokens) was 17.31 tok/s — roughly in line with the "normal" numbers
+  from elsewhere in this sweep, not collapsed.
+- **The original session's methodology (verified correct in isolation —
+  seeded deterministic prompts, decode time from server log timestamps)
+  was NOT the problem.** The re-test used the identical methodology and
+  still found normal throughput at comparable depth. What differs is that
+  today's re-test happened to catch the slow-path triggering (or not) at
+  a DIFFERENT point in the sweep than the original session did — pointing
+  at something session/timing/state-dependent rather than a pure function
+  of `context_length`.
+
+### Leading candidate mechanisms for the ~2800-token anomaly (NOT yet confirmed)
+
+Per a second-opinion consult during this session: pure Metal
+kernel-compile/shapeless-retrace warmup was proposed and then ruled
+implausible as the *sole* explanation — ~50-90 consecutive slow cycles
+across an entire decode window is too many for a one-time compile cost
+(expect a handful of slow cycles, not sustained slowness for the whole
+window), and the exact 1.4-1.6s magnitude matching the original finding
+suggests the same expensive code path genuinely executing, not compile
+overhead. More likely candidates, NOT yet tested:
+
+1. **First-touch/allocator state establishment on first entry into the
+   sparse/Indexer code path per RUNNER PROCESS lifetime** (not per
+   context depth) — e.g. MLX buffer-cache growth, GPU memory
+   commit/wired-page first-touch, or lazy weight-shard materialization
+   for the sparse attention branch's parameters, which would explain why
+   the SAME depth (2825 tokens) was clean on run 2 but slow again on run
+   3: if the runner was recycled/restarted between requests (crashes were
+   observed in this exact session — see below), state that was "already
+   warm" could be lost and re-paid.
+2. **This session's own instability may be a confound, not just a
+   backdrop.** During this exact investigation, sending accidentally
+   low-entropy repeating-vocabulary prompts (a real, separate methodology
+   bug in this session's own sweep script, NOT any DSpark bug) tripped the
+   real degeneration kill-switch and crashed BOTH runners
+   (`PPSpecAlreadyActiveError`, `DEGENERATION DETECTED`), forcing the
+   master to tear down and reload fresh runners mid-sweep. The 2500-depth
+   requests that showed the anomaly were run shortly after this crash/
+   reload cycle. The 3000-15031 requests that were all clean ran later,
+   once the reloaded runners had processed several successful requests.
+   This is a plausible, testable "runner just came back from a crash/
+   reload, first few requests near a certain size are slow" story —
+   distinct from any context-length-based architectural mechanism.
+3. **A genuine but narrow, non-monotonic MLX/JACCL scheduling hazard**
+   specific to some interaction of prompt size, block boundary alignment,
+   or KV-cache buffer resize timing that happens to land badly near
+   ~2800 tokens for THIS model's chunking (`EXO_PREFILL_STEP_SIZE=2048`,
+   `EXO_DSV4_MOE_PARTS_ROWSEQ=shared`'s cache-growth pattern, or
+   `PoolingCache`'s `step=256` reallocation growth) — would predict the
+   anomaly is tied to a specific buffer-resize boundary, not literally
+   "2800 tokens" as a constant. NOT yet tested.
+
+### Concrete next steps (supersedes the "Concrete next steps" section above)
+
+1. **Rule in/out the crash-recovery-state hypothesis (candidate 1/2
+   above) first — cheapest test.** Deliberately crash/reload the runners
+   (or just relaunch cleanly), then IMMEDIATELY send a handful of
+   requests at ~2800 tokens before sending anything else, and watch
+   whether the outlier burst appears on the first few post-reload
+   requests specifically, regardless of exact token count. If confirmed,
+   this reframes the entire investigation: it's a runner-warmup/
+   crash-recovery cost, not a context-scaling cliff, and the practical
+   fix is very different (e.g., a proper warmup pass after any
+   runner reload, not an architectural rework of `FULLBLOCK`).
+2. **If ruled out, chase candidate 3 (buffer-resize boundary)** by
+   testing several depths tightly clustered around 2700-2900 with a FRESH
+   runner each time (no post-crash confound) to see if the anomaly is
+   reproducible independent of runner lifecycle.
+3. **Either way, retract the "15.9x collapse, context-scaling cliff" framing
+   from any downstream consumer of this doc** (the `exo-perf-tuning` and
+   `exo-speculative-decode-correctness` skills both currently state this
+   as a confirmed, severe, context-scaling bug — both need a correction
+   pass pointing back to this section) until the real mechanism is
+   understood. In the meantime, the practical, verified-true statement is
+   narrower: "DSpark+FULLBLOCK's verify-forward cost is NOT reliably
+   context-scaling; it CAN spike ~10-20x on a subset of requests for a
+   currently-unknown reason, independent of context depth" — a real
+   reliability/tail-latency concern, just not the mechanism originally
+   claimed.
+4. **`EXO_DSV4_DSPARK` default in `start_cluster.sh`:** the original
+   doc's recommendation to keep DSpark off by default is STILL reasonable
+   given a confirmed (if rarer/less predictable than first thought) risk
+   of a ~10-20x tail-latency spike, but the previously-stated reasoning
+   ("gets worse the longer the conversation runs") is no longer
+   supported and should not be cited as the justification going forward.
+
+### Where to find this correction's evidence
+
+Raw sweep data and outlier-log correlation captured via ad hoc scripts in
+`/tmp/dspark_knee_sweep*.py` (not committed — short, rewrite if needed,
+see the "Reproduction" section's methodology which was reused unmodified).
+Outlier log lines cross-referenced directly via
+`ssh <node> "grep 'DSpark OUTLIER' ~/.exo/exo_log/exo.log"` on both nodes
+for the 2026-08-04 15:40-16:03 window.
