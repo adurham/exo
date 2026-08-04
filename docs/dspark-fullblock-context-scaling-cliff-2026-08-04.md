@@ -12,7 +12,13 @@ stays clean (16-22 tok/s, zero diagnostic outliers) all the way out to
 See the "MAJOR CORRECTION" section below before trusting anything above
 this line. The doc is kept largely intact below for the historical trail
 and because the ~2800-token anomaly itself is real and still unexplained
-— just NOT the sustained, context-scaling cliff originally claimed.**
+— just NOT the sustained, context-scaling cliff originally claimed.
+A direct A/B control (see "DSPARK-SPECIFICITY CONTROL" section near the
+end) confirms the severe (~15-18x) form of this anomaly IS DSpark-specific
+at the tested sample size (0/20 DSpark-off vs 2/11 DSpark-on) — though a
+much milder (~2x) baseline variance exists even with DSpark off, and the
+sample sizes are too small to fully rule out a rarer DSpark-off
+occurrence of the severe form.**
 Cluster is currently live on **DSpark OFF** (`EXO_SPECULATIVE=0
 EXO_DSV4_DSPARK=0`) as a deliberate, temporary safety choice — DSpark's
 `FULLBLOCK` attention path is actively worse than no speculation at any
@@ -576,6 +582,64 @@ show elevated power at a lower clock, not near-idle power).
    next attempt should be scoped as its own focused session with the
    jaccl-diagnostic-correlation plan (item 2) as the starting hypothesis
    to test FIRST, rather than open-ended further probing.
+
+## DSPARK-SPECIFICITY CONTROL (2026-08-04, same evening) — direct A/B, answers "does this only happen with DSpark on?"
+
+User directly asked whether the confirmed ~2800-token collapse is
+DSpark-specific or a general cluster/hardware issue that DSpark's tight
+per-cycle OUTLIER logging just happens to expose (sequential decode has
+no equivalent unconditional per-step timing log to catch an equally rare
+event). This had NOT been tested — every occurrence and every repeated-
+request probe up to this point ran with DSpark ON. Ran the direct control:
+relaunched the cluster with `EXO_SPECULATIVE=0 EXO_DSV4_DSPARK=0`
+(confirmed via `ps eww` on both nodes), then ran the IDENTICAL repeated-
+request probe (prompt_tokens≈2825, temp=0, same seed) 20 times.
+
+**Result: 19/20 requests clean at 23.9–25.4 tok/s (very tight, consistent
+range). 1/20 showed a real but much milder dip — 10.98 tok/s, ~2.3x
+slower than baseline — nowhere near the 15-18x catastrophic magnitude
+seen with DSpark on (which drove throughput to 1.28 tok/s, GPU idle for
+235 seconds).**
+
+Comparison table (same depth, same cluster/commit, only the DSpark flag
+differs):
+
+| Config | Total requests (this session) | Catastrophic hits (~15-18x) | Mild dips (~2x) |
+|---|---|---|---|
+| DSpark ON | 11 (3+3+5 across 3 separate probes) | 2 | 0 recorded separately (folded into the "clean" bucket at the time) |
+| DSpark OFF | 20 (this control) | 0 | 1 (10.98 tok/s) |
+
+**Conclusion: the severe collapse (15-18x, GPU-idle-for-minutes) is real
+and appears DSpark-specific at this sample size** — it did not reproduce
+even once in 20 tries with DSpark off, despite reproducing twice in 11
+tries with DSpark on. A SEPARATE, much smaller, non-catastrophic variance
+(~2x) does exist in the DSpark-off baseline too, so the cluster/hardware
+is not perfectly deterministic even without DSpark — but that baseline
+variance is a different, far less severe phenomenon than the DSpark-on
+collapse and should not be conflated with it.
+
+**Caveat on sample size:** 11 vs 20 trials is not a rigorous statistical
+sample, especially for an event this rare (roughly 1-in-8 to 1-in-11 in
+the DSpark-on trials). It remains POSSIBLE that the DSpark-off path can
+also hit the same catastrophic failure mode at a much lower rate that
+simply wasn't sampled in 20 tries — this is a real caveat, not fully
+ruled out, just not observed. If resuming, more DSpark-off trials (50+)
+at the same depth would tighten this bound. But as measured, DSpark
+clearly makes the collapse dramatically MORE likely, whatever the
+underlying mechanism turns out to be (stall/wait, per the GPU-idle
+finding above) — DSpark should stay OFF as the safer default until the
+mechanism is understood, and any future root-cause investigation should
+treat "why does DSpark trigger this stall so much more often than
+sequential decode" as part of the core question, not assume the two
+paths are equally affected.
+
+### Where to find this control's evidence
+
+Same ad hoc script (`/tmp/dspark_knee_sweep.py`, reused unmodified) run
+twice in a row with the cluster in `EXO_DSV4_DSPARK=0` state. Raw output
+in `/tmp/dspark_off_control_2800_out.log` and `_out2.log` (not committed,
+short, rewrite if needed — see the sweep script's methodology, reused
+from the "Reproduction" section above).
 
 ### Where to find this correction's evidence
 
