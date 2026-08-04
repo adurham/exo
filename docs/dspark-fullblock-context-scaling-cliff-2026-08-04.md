@@ -717,6 +717,52 @@ ENTER/EXIT`) is still a reasonable secondary check if the DSpark-loop-
 level read doesn't turn up an obvious candidate, but should no longer be
 the FIRST thing tried.
 
+## HYPOTHESIS TESTED AND FALSIFIED (2026-08-04, same evening, immediately after) — EXO_PP_DSPARK_DRAFT_AHEAD is NOT the cause
+
+Read `pp_dspark_decode_loop` with the reasoning-pivot lens above and
+found `EXO_PP_DSPARK_DRAFT_AHEAD=1` (default-on whenever DSpark is
+active, confirmed via `ps eww` in this exact test session) adds a
+DSpark-unique cross-rank round trip on EVERY cycle: rank1 builds and
+sends a "SpecId" tag plus a piggybacked msg1b extension-token array,
+rank0 receives/unpacks/validates it. Diagnostic-only (decode never
+branches on the result) but a real extra synchronization point absent
+from plain sequential decode. Also found prior-session documented form
+for a severe stall in this exact area: `start_cluster.sh` (~line
+2028-2042) records that the SEPARATE `DRAFT_AHEAD_EXECUTE` mechanism
+(speculating against the live shared KV cache) was confirmed 2026-07-22
+to cause 15-70s GPU-BUSY stalls and was disabled by default behind an
+`_I_KNOW_THIS_IS_BROKEN` override — a plausible, testable, narrower
+hypothesis than generic RDMA.
+
+**Test: relaunched with the exact DSpark-on repro config PLUS
+`EXO_PP_DSPARK_DRAFT_AHEAD=0`** (confirmed via `ps eww` on both nodes:
+`EXO_DSV4_DSPARK=1 EXO_PP_DSPARK_DRAFT_AHEAD=0`). Ran the same repeated
+~2825-token probe: **2 slow hits out of 10 requests (20%)** — a rate
+statistically indistinguishable from the original 2/11 (18%) with
+DRAFT_AHEAD on. Confirmed via the OUTLIER log that the SAME signature
+reproduced (~1.5s cycles, `msg2_recv_wait` inflated, GPU-idle-consistent
+pattern) with the diagnostic tag-exchange mechanism fully disabled.
+
+**Conclusion: `EXO_PP_DSPARK_DRAFT_AHEAD`'s diagnostic tag-exchange is
+NOT the cause. This hypothesis is FALSIFIED.** The bug is somewhere else
+in DSpark-unique code. Candidates 2 (`SpecPipelineFirstLayer`/
+`SpecPipelineLastLayer` per-cycle wire-mode reconfiguration) and 3
+(`PoolingCache`'s deferred-update mechanism under FULLBLOCK's per-row
+loop) from the REASONING PIVOT section above remain untested and are now
+the leading candidates. The core reasoning from that section — search
+DSpark-unique code, not shared transport, since plain PP decode rides
+the identical jaccl transport without failing — still holds; this result
+just rules out ONE specific piece of DSpark-unique code, not the
+approach.
+
+**Methodology note validated by this negative result:** this is exactly
+why the "repeat 3-5x+ at a fixed depth before concluding anything"
+discipline established earlier in this doc matters even for hypothesis
+tests, not just baseline measurements — a single clean run after
+disabling DRAFT_AHEAD would have looked like confirmation; only running
+enough trials to sample the ~18-20% event rate again revealed the
+hypothesis was wrong.
+
 ### Where to find this correction's evidence
 
 Raw sweep data and outlier-log correlation captured via ad hoc scripts in
