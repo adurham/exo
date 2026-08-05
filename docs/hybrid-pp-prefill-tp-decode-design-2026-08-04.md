@@ -920,9 +920,39 @@ lazy-eval/deadline semantics or a specific model's real tensor shapes.
 Each bug was found, fixed, tested, and pushed in isolation, at
 transport-scope, before any Phase 1 scheduler/batching code exists to
 compound the debugging surface — the whole point of running this phase
-separately. The v3 fix has NOT yet been re-run against the real
-cluster; that's the next step, still gated on the user's separate
-explicit go-ahead per standing rules.
+separately.
+
+**PHASE 0.5 COMPLETE — 2026-08-05, v3 fix confirmed working end-to-end
+on the real cluster.** Third real cluster attempt, same-day, with the
+user's separate explicit go-ahead: relaunched with
+`EXO_PP_METAFRAME=1` + `DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731`
++ the v3 fix. Both runners reached `RunnerReady` on the first attempt
+(warmup itself exercises prefill, decode, AND the decode-gather
+handoff — the exact code path both prior bugs lived in, so a clean
+warmup is real evidence, not a coincidence). Two real generations
+confirmed correct end-to-end behavior over the metaframe transport, not
+just "the process didn't crash":
+- Short: "What is the capital of France? Answer in one word." →
+  `content: "Paris"`, `finish_reason: "stop"`, clean single-step decode.
+- Longer: "Count from 1 to 10, one number per line." → correct 1-10
+  output, 77 completion tokens, clean `finish_reason: "stop"` — a real
+  multi-step decode loop (repeatedly exercising the exact forward-hop +
+  decode-gather sequence the v3 fix touches) with no BOS-spam, no
+  garbage, no hang.
+
+This confirms the metadata-framed transport (Phase 0.5's actual
+deliverable) is now a WORKING, validated alternative to today's
+ambient-mutable-flag transport, at concurrency=1, on real 2-node RDMA
+hardware — not just locally simulated. Phase 0.5 is DONE. The cluster
+was left running on this validated `EXO_PP_METAFRAME=1` config after
+the successful verification (no reason to revert to `=0`, since this
+IS the now-proven-working target state) — see the next session's state
+before assuming which transport is currently live.
+
+**Next step: Phase 1** (rank-0 scheduler skeleton, 2 concurrent
+decode-only requests) can now build on a metaframe transport that has
+been proven correct against the real DSv4 model on real hardware, not
+just against a plain-Llama local simulation.
 
 **Phase 1 — Rank-0 scheduler skeleton, decode-only, 2 concurrent
 requests, NO speculative decode:** Build the metadata-frame protocol and
