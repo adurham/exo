@@ -275,7 +275,7 @@ before writing a line of new code.
 
 ## 6. Proposed architecture
 
-### 5.1 High-level
+### 6.1 High-level
 
 Keep PP's layer-split topology (rank 0 = first ~half of layers, rank 1 =
 second ~half) for BOTH prefill and decode — do not disaggregate PP vs TP
@@ -285,7 +285,7 @@ batching multiple concurrent requests through its existing point-to-point
 pipeline, using the batched-attention machinery TP's `prefill_batched`
 already proved out.
 
-### 5.2 Components (numbered, not necessarily an implementation order —
+### 6.2 Components (numbered, not necessarily an implementation order —
     see Section 9 for the actual phased plan)
 
 1. **Rank-0 step scheduler.** Rank 0 (today's request-accepting node)
