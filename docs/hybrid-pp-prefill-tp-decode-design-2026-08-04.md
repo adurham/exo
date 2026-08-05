@@ -964,6 +964,65 @@ request PP runs before touching throughput at all. (This phase now adds
 ONLY the scheduler+batching delta on top of Phase 0.5's already-verified
 transport, per the isolation rationale above.)
 
+**Phase 1, step 1 (wire-protocol state machine + fuzzing) — DONE,
+2026-08-05.** Per Risk #11's explicit requirement ("needs to be written
+out as an explicit state machine ... BEFORE Phase 1 starts") and
+Section 11 open question #1's answer (logic-level fuzzing before Phase
+1), built `src/exo/worker/engines/mlx/pp_scheduler_protocol.py` — a
+pure, zero-MLX, zero-I/O core (`SchedulerCore` for rank 0's decisions,
+`RankOneMirror` as rank 1's independent reactive validator, sharing one
+implementation per a `consult` review's guidance) plus
+`src/exo/worker/engines/mlx/tests/test_pp_scheduler_protocol.py` (14
+directed unit tests + a 2000-seed uniform-random fuzzer + 2 targeted
+abort/reuse-race tests + a 1000-seed targeted abort-cycle stress
+fuzzer, 24/24 passing, basedpyright/ruff clean). No `hypothesis`
+dependency (confirmed absent from this project; a hand-rolled seeded
+`random`-module fuzzer used instead — deterministic exact-reproduction
+matters more here than automatic shrinking for a state machine this
+small).
+
+Directly implements the fixes this doc already specified for Risk #10
+(cancellation-by-omission ambiguity — explicit `DRAINING` slot state +
+`EvictMessage`/`EvictAckMessage`, not silent omission) and Risk #11
+(no deadlock analysis — `RankOneMirror` rejects any illegal message
+loudly via `ProtocolViolationError` instead of silently corrupting
+cache state or blocking forever). Fail-stop throughout, per the
+consult's explicit warning that auto-correction/repair code is where
+silent corruption hides — nothing in this module attempts to recover
+from a violated invariant.
+
+**The fuzzer caught two real bugs in this module before it was ever
+committed** — exactly the outcome Section 11's fuzzing recommendation
+was for, not a formality:
+1. `RankOneMirror` double-counted the cache-length advance (validated
+   the claimed length via raw equality without accounting for
+   `n_tokens`, then separately re-added `n_tokens` on top of its own
+   tracked state).
+2. `SchedulerCore._active_batch_entries` hardcoded `n_tokens=1` for
+   EVERY co-listed active request in a step snapshot, not just the
+   one whose event actually fired — silently claiming every OTHER
+   concurrent request also advanced a token in lockstep. This one only
+   surfaced once a fuzzed sequence had more than one concurrently
+   active request; the earlier directed single-request-only unit tests
+   never exercised the code path where it mattered. Fixed by threading
+   through exactly which `request_id` advanced on each `handle()` call.
+
+Both bugs are the exact class the design doc's Risk #5/#11 warned
+about — silent cross-request state divergence, not a clean crash — and
+both were found and fixed at the pure-logic level, with zero cluster
+time spent, before any real scheduler code exists to compound the
+debugging surface. This is Section 11's fuzzing recommendation paying
+for itself immediately, not a box-ticking exercise.
+
+Not yet done: the actual rank-0 scheduler runtime (wiring
+`SchedulerCore`/`RankOneMirror` into real MLX/`pp_metaframe.py` code
+that drives actual model forward passes across 2 concurrent requests)
+and per-request cache routing (`BatchRotatingKVCache`/
+`BatchPoolingCache` keyed by request UID instead of a single active
+cache) — those are Phase 1's remaining real work, now built on a
+verified-correct protocol core rather than protocol design happening
+inline with scheduler implementation.
+
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
 `prefill_batched`'s padding/masking logic adapted for the PP split.
