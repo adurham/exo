@@ -1821,6 +1821,31 @@ for NODE in "${NODES[@]}"; do
         : "${EXO_PP_METAFRAME:=0}"
         EXO_ENV="$EXO_ENV EXO_PP_METAFRAME=$EXO_PP_METAFRAME"
     fi
+    # Phase 1 batched-decode (design doc, Section 9): opt-in scheduler
+    # (pp_batched_decode_glue.py/pp_batched_decode_runtime.py) with its
+    # own real, per-request slot-based state (BatchedCacheRouter,
+    # SchedulerCore) -- a STRUCTURALLY DIFFERENT design from the
+    # singular-instance-attribute hazard the concurrency gate directly
+    # below exists to prevent (see that gate's own comment). Verified
+    # this session via a real 2-OS-process test exercising exactly the
+    # N=2-concurrent-request scenario the gate below exists to block
+    # for the OTHER PP paths (test_pp_batched_decode_glue_subprocess.py:
+    # admit request A, admit request B mid-stream while A is already
+    # decoding, decode both together, evict A via a real wire round-
+    # trip, continue B solo -- matching two independent serial golden
+    # references exactly). Requires EXO_PP_METAFRAME=1 as a prerequisite
+    # (the batched layers are built on top of the metaframe transport,
+    # not a replacement for it -- see utils_mlx.py's own EXO_PP_
+    # BATCHED_DECODE branch, which only installs the batched layers
+    # when EXO_PP_METAFRAME=1 is also set). Default OFF -- this
+    # launcher line exists so a real cluster A/B CAN happen, not
+    # because the path is production-ready; requires the user's own
+    # separate explicit go-ahead per standing rule before actually
+    # setting it to 1 for a live run.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        : "${EXO_PP_BATCHED_DECODE:=0}"
+        EXO_ENV="$EXO_ENV EXO_PP_BATCHED_DECODE=$EXO_PP_BATCHED_DECODE"
+    fi
     # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
     # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
     # path (pp_dspark_decode_loop and friends) stores its per-request
@@ -1840,11 +1865,28 @@ for NODE in "${NODES[@]}"; do
     # user-supplied value survive for this mode, since this is a data-
     # corruption bug, not a throughput knob. Loud log line since this
     # silently overrides whatever the caller passed in.
+    #
+    # EXCEPTION (2026-08-05, design doc Section 9): when
+    # EXO_PP_BATCHED_DECODE=1 is genuinely active, relax the cap to 2 --
+    # the batched-decode scheduler is the one PP path with real,
+    # verified N=2-safe per-request state (see the comment above this
+    # gate). Every OTHER Pipeline-mode path (PP-spec, plain serial PP)
+    # still gets the original cap=1 enforcement below, completely
+    # unchanged -- this exception applies ONLY when the batched-decode
+    # flag is explicitly on, never as a default relaxation for Pipeline
+    # mode generally.
     if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "1" ]; then
-            echo "  ⚠️  DSV4_SHARDING=Pipeline forces EXO_MAX_CONCURRENT_REQUESTS=1 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- PP's shared per-rank decode-loop state cannot survive >1 concurrent request without data corruption/wedging."
+        if [ "${EXO_PP_BATCHED_DECODE:-0}" = "1" ]; then
+            if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "2" ]; then
+                echo "  ⚠️  DSV4_SHARDING=Pipeline + EXO_PP_BATCHED_DECODE=1 forces EXO_MAX_CONCURRENT_REQUESTS=2 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- the batched-decode scheduler's max_concurrency is 2 (see BatchedDecodeSession.new's default); do not let a higher value silently overshoot the scheduler's own real slot capacity."
+            fi
+            EXO_MAX_CONCURRENT_REQUESTS=2
+        else
+            if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "1" ]; then
+                echo "  ⚠️  DSV4_SHARDING=Pipeline forces EXO_MAX_CONCURRENT_REQUESTS=1 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- PP's shared per-rank decode-loop state cannot survive >1 concurrent request without data corruption/wedging."
+            fi
+            EXO_MAX_CONCURRENT_REQUESTS=1
         fi
-        EXO_MAX_CONCURRENT_REQUESTS=1
     fi
     [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=$EXO_MAX_CONCURRENT_REQUESTS"
     [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
