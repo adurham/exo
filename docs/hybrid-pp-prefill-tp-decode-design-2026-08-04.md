@@ -1184,6 +1184,38 @@ state machine, cache router, batched metaframe layers, and now the
 scheduler/cache-router driver glue -- verified together, end to end,
 at the CPU/simulated-transport level.
 
+**Phase 1, step 5 (mid-stream admission verified) — DONE, 2026-08-05.**
+The full-stack test above (step 4) only covered requests admitted
+UPFRONT (both before any decode step) -- the realistic case of a NEW
+request joining an ALREADY-IN-PROGRESS batch (one request has been
+decoding for a while, nonzero cache offset) was left open. Verified
+via a throwaway repro before writing any test code (per this session's
+established "test the primitive in isolation before building on it"
+habit): `mlx-lm`'s own `BatchKVCache.merge` already handles this
+heterogeneous-offset case correctly -- no new primitive needed.
+
+Added `test_merge_supports_mid_stream_admission_advanced_plus_fresh`
+(`test_pp_batched_cache_router.py`) confirming the cache-merge
+PRIMITIVE handles an advanced (nonzero-offset) request merged with a
+fresh (offset=0) one, and
+`test_mid_stream_admission_matches_serial_plain_forwards`
+(`test_pp_batched_decode_driver_full_stack.py`) confirming the actual
+attention math produces CORRECT results from this shape, end to end,
+through the real driver: request A decodes solo for 2 real steps
+(genuinely advancing its cache), THEN request B is admitted mid-stream
+and merges into the same in-progress batch, both continue decoding
+together for 2 more real steps -- greedy tokens for both requests
+match their serial plain-forward golden references across the whole
+lifecycle. 21/21 tests passing across both files, stable across 3
+repeated runs, basedpyright/ruff clean.
+
+This closes the LAST open question in Phase 1's local verification:
+admission (upfront and mid-stream), steady-state batched decode,
+eviction/slot-release, and solo continuation are all now proven
+correct at the CPU/simulated-transport level, through the real
+scheduler/cache-router/metaframe stack, not hand-picked test
+shortcuts.
+
 Not yet done: the real 2-node cluster A/B for this batched path
 (everything above is simulated-2-rank, proven correct at the CPU/logic
 level per this fork's established Phase 0 rationale for keeping
