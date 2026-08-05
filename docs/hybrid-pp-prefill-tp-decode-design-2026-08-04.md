@@ -1543,6 +1543,83 @@ is byte-identical to today's existing behavior; (3) ideally a mocked
 2-request interleaving test at the `ExoBatchGenerator` level itself,
 not just at the `BatchedDecodeSession` level below it.
 
+**Update, 2026-08-05 (later the same day, after explicit user go-ahead
+to attempt the dispatch wiring anyway):** Built the two remaining
+prerequisite pieces the earlier attempt didn't yet have --
+`install_batched_decode_pipeline_layers` (a real, load-time,
+`EXO_PP_METAFRAME`-pattern-mirroring function that installs
+`BatchedMetaFramedPipelineFirstLayer`/`LastLayer` onto an already-
+sharded model -- closes a real gap: without this, the batched layers
+only ever existed in test harnesses, never on a real loaded model) and
+`get_batched_pipeline_info` (mirrors `pp_speculation.get_pipeline_info`'s
+exact contract, detecting the BATCHED layers specifically so a caller
+doesn't conflate them with Phase 0.5's single-request metaframe layers
+or the legacy PP layers). Both gated behind a new `EXO_PP_BATCHED_DECODE`
+flag (default off, requires `EXO_PP_METAFRAME=1` as a prerequisite),
+both fully tested (12 tests total across two files, real Llama models,
+zero mocks except for the two `mx.distributed.*` passthrough patches a
+single-rank test setup genuinely needs), basedpyright/ruff clean, zero
+new regressions.
+
+Then attempted the actual `submit()`/`step()` dispatch and stopped
+again -- this time for a DIFFERENT, deeper reason than the admission-
+gate/unverified-hot-path concern above (both still fully apply too). A
+fourth `consult` review, asked specifically about the mechanics of
+admitting a SECOND request mid-decode under real PP lockstep,
+surfaced a genuine design gap this session had not yet worked through:
+**rank 0 and rank 1 both run the identical `ExoBatchGenerator` class,
+symmetrically** (already true today, per the existing PP-spec code's
+own `self.group.rank()`-driven branching) -- but `BatchedDecodeSession`
+(rank 0, decides) and `RankOneMirrorSession` (rank 1, mirrors) must
+NEVER independently decide admission from their own local view. If
+each rank's `submit()` call independently evaluated the eligibility
+gate and decided to admit, a race between the two ranks' local
+decisions (e.g. one rank's request arrives fractionally before the
+other's, or the gate evaluates a race-prone condition like a prefix-
+cache hit that could differ transiently between ranks) could produce
+MISMATCHED batch composition between rank 0 and rank 1's own driver
+state -- exactly the class of bug this whole session's wire protocol
+(`pp_scheduler_wire.py`) and `StepMessage.entries`-as-single-source-of-
+truth design were built to prevent for the DECODE step, but which
+`submit()`'s admission path has no equivalent mechanism for yet.
+Rank 0 must decide admission and broadcast that decision (a REAL wire
+message, not implicit agreement from both ranks running the same
+code on the same inputs) for rank 1 to replay identically; nothing in
+this session's design covers what that broadcast looks like at
+`submit()` time (as opposed to `prepare_step()`/`finish_step()` time,
+which the wire protocol already covers correctly). Designing that
+admission-broadcast mechanism, and verifying it doesn't reintroduce
+the exact "two ranks independently reconfiguring shared wire-link
+state" bug class that `PPSpecAlreadyActiveError`'s own docstring
+describes as a real, already-fixed 2026-07-20 incident for the
+speculative-decode path, is real, unstarted design work -- not
+mechanical wiring. Combined with the still-unaddressed admission-gate
+and unverified-hot-path concerns from the earlier attempt, the
+responsible stopping point remains the same: the fully-tested,
+independently-verifiable building blocks (eligibility gate, response
+adapter, layer install/detection) are complete and committed; the
+`ExoBatchGenerator.submit()`/`step()` edit itself needs a real
+admission-broadcast design (new work) plus real 2-rank execution to
+verify safely, neither of which this session could responsibly
+produce blind.
+
+**Full standing list of prerequisites for whoever attempts the
+`ExoBatchGenerator` dispatch wiring next**, updated:
+1. `EXO_MAX_CONCURRENT_REQUESTS=1` (`start_cluster.sh`) needs its own
+   explicit, separately-reviewed change -- the batched path is
+   unreachable dead code without it.
+2. A rank-0-decides/rank-1-replays admission-broadcast mechanism for
+   `submit()` (this stretch's finding) -- design work, not wiring.
+   The existing `pp_scheduler_wire.py`/`StepMessage` machinery is the
+   right foundation but does not yet cover the ADMISSION decision
+   itself, only per-step composition once a request is already in.
+3. A real-path batch=1 smoke test proving the flag-off (or flag-on-
+   but-single-request) case is byte-identical to today's existing
+   behavior.
+4. A mocked (or, better, real 2-process per the
+   `test_pp_batched_decode_subprocess.py` pattern) 2-request
+   interleaving test at the `ExoBatchGenerator` level itself.
+
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
 `prefill_batched`'s padding/masking logic adapted for the PP split.
