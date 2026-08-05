@@ -466,13 +466,40 @@ def shard_and_load(
                 )
 
                 handshake_metaframe_protocol(True, group)
-                # Concurrency=1 today regardless of this flag (see
-                # comment above) — the UID only needs to be a stable,
-                # consistent value for this single in-flight request's
-                # lifetime, not globally unique across requests, since
-                # Phase 1+'s real per-request UID plumbing is out of
-                # scope for this transport-only phase.
-                install_metaframed_pipeline_layers(model, group, request_uid=1)
+                # Phase 1 opt-in path (batched-PP decode design, same
+                # doc, Section 9 Phase 1). EXO_PP_BATCHED_DECODE
+                # installs the BATCHED metaframe layers
+                # (BatchedMetaFramedPipelineFirstLayer/LastLayer,
+                # pp_batched_decode_layers.py) instead of Phase 0.5's
+                # single-request ones -- REQUIRES EXO_PP_METAFRAME=1
+                # (batched decode is built ON TOP of the metaframe
+                # wire format, not a replacement for it). Default OFF.
+                # NOTE: installing these layers is necessary but NOT
+                # sufficient for real N=2 concurrent decode -- nothing
+                # in ExoBatchGenerator (generator/batch_generate.py)
+                # dispatches into BatchedDecodeSession/
+                # RankOneMirrorSession yet (deliberately not wired,
+                # see docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md
+                # Section 9's explicit reasoning), and
+                # EXO_MAX_CONCURRENT_REQUESTS is separately forced to 1
+                # for Pipeline mode in start_cluster.sh regardless of
+                # this flag. Setting EXO_PP_BATCHED_DECODE=1 today only
+                # changes which layer classes are installed; it does
+                # NOT by itself enable any new behavior end-to-end.
+                if os.environ.get("EXO_PP_BATCHED_DECODE", "0") == "1":
+                    from exo.worker.engines.mlx.pp_batched_decode_layers import (
+                        install_batched_decode_pipeline_layers,
+                    )
+
+                    install_batched_decode_pipeline_layers(model, group)
+                else:
+                    # Concurrency=1 today regardless of this flag (see
+                    # comment above) — the UID only needs to be a stable,
+                    # consistent value for this single in-flight request's
+                    # lifetime, not globally unique across requests, since
+                    # Phase 1+'s real per-request UID plumbing is out of
+                    # scope for this transport-only phase.
+                    install_metaframed_pipeline_layers(model, group, request_uid=1)
             elif group.size() > 1:
                 # Symmetric handshake call so a rank running WITHOUT the
                 # flag still participates in the agreement check — a
