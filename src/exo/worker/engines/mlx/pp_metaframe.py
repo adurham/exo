@@ -480,7 +480,33 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
                 _pending_prefill_sends.append((output_to_send, dst, self.group))
             else:
                 send_metaframe(header, table, dst, group=self.group)
-                output = mx.distributed.send(output_to_send, dst, group=self.group)
+                sent_forward = mx.distributed.send(
+                    output_to_send, dst, group=self.group
+                )
+                # CRITICAL: force this send to execute NOW. MLX distributed
+                # ops are lazy — building the graph node does not transmit
+                # any bytes; only mx.eval() does. The decode-only handoff
+                # block immediately below REASSIGNS `output` (see
+                # `output = output_for_gather` further down), which would
+                # silently drop the only reference to this send's lazy
+                # graph node before anything ever forced it to run —
+                # meaning the activation would NEVER actually reach the
+                # peer rank, which then blocks forever in its own recv
+                # (`MetaFramedPipelineFirstLayer.__call__`'s `mx.eval`)
+                # until jaccl's hardcoded 15s deadline fires ("[jaccl]
+                # recv() deadline in drain"). Found on the first real
+                # 2-node cluster run (2026-08-05) via a `consult` review
+                # of the exact failure trace — evaluating immediately here
+                # matches every OTHER send in this file (`send_metaframe`,
+                # the decode-gather sends below) and the pattern the
+                # original `PipelineLastLayer` relies on implicitly (its
+                # own un-evaluated send return value survives only because
+                # nothing downstream ever overwrites/discards it before
+                # the caller's own `mx.eval(output)` at the top of the
+                # NEXT layer's forward pass — a property this decode-gather
+                # block's reassignment breaks).
+                mx.eval(sent_forward)
+                output = sent_forward
             if out_dtype != mx.bfloat16:
                 # Keep behavior symmetric with PipelineLastLayer, which
                 # re-casts `output` (the return value, not the sent copy)

@@ -62,6 +62,8 @@ from exo.worker.engines.mlx.pp_batched_correctness import (
     compare_logits,
 )
 from exo.worker.engines.mlx.pp_metaframe import (
+    METAFRAME_PROTOCOL_VERSION,
+    MetaFrame,
     MetaFramedPipelineFirstLayer,
     MetaFramedPipelineLastLayer,
     encode_metaframe,
@@ -669,3 +671,135 @@ def test_metaframed_last_layer_sends_correct_extra_dim_for_4d_output() -> None:
     assert frame.extra_dim == 4  # type: ignore[attr-defined]
     assert frame.hidden_dim == 64  # type: ignore[attr-defined]
     assert frame.seq_lens == [3]  # type: ignore[attr-defined]
+
+
+def test_metaframed_last_layer_forward_send_is_evaluated_before_decode_gather_reassignment() -> (
+    None
+):
+    """Regression test for the REAL deadlock found on the first real
+    2-node cluster run of the v2 fix (2026-08-05). In a 2-rank PP split,
+    rank 0's ``MetaFramedPipelineLastLayer`` is the ONLY layer instance
+    where both blocks fire in the SAME ``__call__`` during decode:
+    (1) the forward-hop block (``self.r != self.s - 1`` -- rank 0 always
+    forwards to rank 1) builds a lazy ``mx.distributed.send(...)`` node
+    and assigns it to ``output``, THEN (2) the decode-only handoff block
+    (``self.r == 0`` branch) immediately overwrites that same ``output``
+    variable with the result of ``mx.distributed.recv_like(...)`` from
+    rank 1 -- discarding the ONLY reference to the forward-hop send's
+    lazy graph node before anything ever forced it to execute. MLX
+    distributed ops are LAZY: building the graph node does not transmit
+    any bytes, only `mx.eval()` does. So the activation NEVER actually
+    left rank 0 -- rank 1 blocked forever in its own recv (inside
+    ``MetaFramedPipelineFirstLayer.__call__``) until jaccl's hardcoded
+    15s deadline threw `[jaccl] recv() deadline in drain` (confirmed via
+    the real cluster's error trace: one runner failed inside
+    `MetaFramedPipelineFirstLayer`'s recv `mx.eval`, the other failed
+    inside THIS layer's own decode-gather `recv_metaframe` call --
+    exactly the two-sided deadlock this reproduces). Root-caused via a
+    `consult` review of the exact failure trace.
+
+    ``SimPipelineTransport`` is deliberately NOT used here:
+    ``SimPipelineTransport.send()`` eagerly calls ``mx.eval()``
+    internally regardless of caller discipline (by design, see its own
+    docstring/module docstring point 3 in ``pp_batched_correctness.py``)
+    -- which masks EXACTLY this class of bug, as confirmed empirically:
+    an earlier draft of this test built on ``SimPipelineTransport``
+    passed against the unfixed code too, defeating its own purpose.
+    This test instead uses hand-rolled, GENUINELY lazy send/recv fakes
+    that only append to a Python list -- proving nothing forces
+    evaluation except the code under test itself."""
+    real_eval = mx.eval
+    evaluated_ids: set[int] = set()
+
+    def _tracking_eval(*arrays: object) -> None:
+        for a in arrays:
+            if isinstance(a, mx.array):
+                evaluated_ids.add(id(a))
+        real_eval(*arrays)
+
+    # Genuinely lazy fakes: recording only, calling mx.eval on NOTHING.
+    # A real "did the code force evaluation" test must not have any
+    # side-channel that accidentally evaluates the array for it.
+    sent_log: list[tuple[mx.array, int]] = []
+
+    def _lazy_send(arr: mx.array, dst: int, *, group: object, **_: object) -> mx.array:
+        sent_log.append((arr, dst))
+        return arr  # the real mx.distributed.send also returns the input array
+
+    def _lazy_recv_like(
+        template: mx.array, src: int, *, group: object, **_: object
+    ) -> mx.array:
+        # Only ever called here for the decode-gather's RAW activation
+        # recv (the metadata frame itself is faked separately via
+        # ``_canned_recv_metaframe`` below, since a real header/table
+        # int32 payload needs valid field values, not an arbitrary
+        # filler array). Return a fixed same-shape/dtype array so the
+        # layer's arithmetic downstream has something valid to use.
+        return mx.ones(template.shape, dtype=template.dtype) * 3.0
+
+    def _canned_recv_metaframe(src: int, *, group: object) -> MetaFrame:
+        # Stands in for rank 1's reply frame in the decode-gather -- a
+        # single request, matching the (1, 1, 32) activation shape used
+        # throughout this test.
+        return MetaFrame(
+            version=METAFRAME_PROTOCOL_VERSION,
+            phase_flag=1,
+            hidden_dim=32,
+            extra_dim=0,
+            request_uids=[1],
+            seq_lens=[1],
+            is_last_chunk=[True],
+        )
+
+    class _FixedOutputLayer:
+        """original_layer stand-in for rank 0 during decode: returns a
+        fixed, identifiable 3D tensor every call."""
+
+        def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+            return mx.ones((1, 1, 32), dtype=mx.float32) * 7.0
+
+    group0 = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
+
+    rank0_layer = MetaFramedPipelineLastLayer(
+        cast(object, _FixedOutputLayer()), r=0, s=2, group=group0, request_uid=1
+    )
+    rank0_layer.is_prefill = False  # decode step -> forward-hop AND
+    # decode-gather-recv BOTH fire in this __call__ -- exactly the two
+    # blocks whose interaction produced the real deadlock.
+
+    with (
+        patch("mlx.core.distributed.send", _lazy_send),
+        patch("mlx.core.distributed.recv_like", _lazy_recv_like),
+        patch(
+            "exo.worker.engines.mlx.pp_metaframe.recv_metaframe",
+            _canned_recv_metaframe,
+        ),
+        patch("mlx.core.eval", _tracking_eval),
+    ):
+        result = rank0_layer(mx.zeros((1, 1, 32), dtype=mx.float32))
+        real_eval(result)
+
+    # The forward-hop activation send must have actually been issued.
+    activation_sends = [a for a, _dst in sent_log if a.shape == (1, 1, 32)]
+    assert len(activation_sends) >= 1, (
+        "the forward-hop activation was never sent at all -- rank 0's "
+        "__call__ path never reached mx.distributed.send for the "
+        "activation tensor"
+    )
+    # The critical assertion: the ACTIVATION array specifically (not
+    # just the small header/table int32 frames, which send_metaframe
+    # ALWAYS eval's immediately regardless of this bug -- checking
+    # against sent_log as a whole would be satisfied by those alone and
+    # mask the exact bug this test exists to catch) must have been
+    # passed to mx.eval() by the layer's own code before __call__
+    # returned -- i.e. the send's lazy graph node was forced to execute
+    # while `output` still held a reference to it, not after it was
+    # already overwritten and lost by the decode-gather reassignment.
+    activation_ids = {id(a) for a in activation_sends}
+    assert activation_ids & evaluated_ids, (
+        "the forward-hop activation's send array was built and sent, "
+        "but NEVER passed through mx.eval() by the layer's own code -- "
+        "this is exactly the deadlock bug: a lazy send node was "
+        "constructed but never forced to execute before its only "
+        "reference was discarded by the decode-gather reassignment"
+    )
