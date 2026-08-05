@@ -1065,17 +1065,87 @@ request A's tokens never leak into request B's extracted cache after a
 merge/extract round-trip — a real check of the design doc's own Risk
 #5 (silent cross-request corruption), not a shape-only smoke test.
 
-Not yet done: the actual rank-0 scheduler runtime — wiring
-`SchedulerCore`/`RankOneMirror` (protocol) and `BatchedCacheRouter`
-(cache lifecycle) into real MLX/`pp_metaframe.py` code that drives
-actual model forward passes across 2 concurrent requests. That's
-Phase 1's remaining real work, now built on a verified-correct
-protocol core AND a verified-correct cache-routing layer rather than
-either happening inline with the scheduler's runtime implementation.
-Per the design doc's own methodology (Section 9's Phase 0 correctness
-baseline), the next validation checkpoint once the runtime exists is
-byte-for-byte/greedy-token correctness against 2 serial single-request
-PP runs — before any throughput claim.
+**Phase 1, step 3 (batched-decode layers + real correctness
+checkpoint) — DONE, 2026-08-05.** Built
+`src/exo/worker/engines/mlx/pp_batched_decode_layers.py`
+(`BatchedMetaFramedPipelineFirstLayer`,
+`BatchedMetaFramedPipelineLastLayer`, `BatchStepContext`,
+`batch_step_scope`) — new, separate classes serving N=2 concurrent
+decode-only requests through ONE layer instance across different
+calls, using the metaframe protocol's new `batch_axis=1` stacking
+(step 3's prerequisite, also this session). Never touches Phase 0.5's
+already-cluster-verified `MetaFramedPipelineFirstLayer`/`LastLayer`.
+
+Design question this step answers: how does a single layer instance
+serve DIFFERENT request sets on different calls without falling back
+to the ambient-mutable-instance-flag anti-pattern
+(`is_prefill`/`queue_sends`) `pp_metaframe.py` was explicitly built to
+eliminate? Resolved via two `consult` reviews: per-call context is
+required (instance flags fail precisely in the case PP creates —
+multiple steps potentially in flight through one layer instance); a
+`contextvars.ContextVar` (`BatchStepContext`) scoped by a context
+manager around exactly one `model(...)` call per step is the right
+mechanism here (not embedding context in a cache-slot object, the
+alternative for callers who don't own the forward loop — this fork
+does own it, and the lifetime match is exact: per-step batch
+composition is per-CALL data, not per-REQUEST persistent state that
+goes stale as batch membership changes across steps); no default
+value on the ContextVar (a scoping bug fails loudly, never silently
+routes to the wrong/empty request set); explicit ordering/identity
+assertions in both layers (nothing else structurally ties context
+ordering to actual batch-tensor row order — a mismatch now fails
+loudly instead of silently swapping tokens between requests).
+
+**Real bug #1** (found by this step's new correctness test, not by
+`pp_batched_cache_router.py`'s existing 18 unit tests, which never
+crossed a thread boundary): `merge_request_caches`'s underlying
+`merge()` builds a lazy MLX graph not materialized until evaluated;
+handing an un-eval'd merged cache to a DIFFERENT thread than the one
+that built it (this fork's own 2-rank correctness-harness pattern)
+raises `RuntimeError: There is no Stream(gpu, N) in current thread.`
+Fixed by force-evaluating the merged cache's full `.state` before
+`merge_request_caches` returns, closing the hazard structurally rather
+than requiring every future caller to remember it.
+
+**Real bug #2** (found via the same test, in the test harness itself):
+`BatchKVCache.offset`/`left_padding` are lazy scalars advanced via
+`+=` each call — not necessarily on the model output's own dependency
+graph (output is computed from the PRE-increment offset). A harness
+that spawns a brand-new thread per decode step needs the cache's OWN
+state force-eval'd before the thread exits, or the next step's thread
+inherits lazy graph nodes still bound to a dead thread's MLX stream
+context. Both bugs are the SAME MLX-thread-interaction hazard class
+`pp_batched_correctness.py`'s module docstring already flagged (its
+own `mx.eval(tokens)`-before-dispatch fix) recurring in a new spot
+(cache state, not input tokens) — not a new discovery, now documented
+at both sites.
+
+**THE real checkpoint**
+(`test_pp_batched_decode_correctness.py`, 3/3 passing, stable across 3
+repeated runs, basedpyright/ruff clean): 2 concurrent decode-only
+requests through the FULL new scheduler-adjacent stack (batched
+metaframe transport + `BatchStepContext` + cache router's real
+merge/extract) via simulated 2-rank PP, compared against 2 SERIAL
+single-request PLAIN (unsharded) forward passes over 5 real decode
+steps each — greedy tokens match EXACTLY. Golden reference is the
+plain forward, not another PP path, per this fork's own established
+Phase 0 methodology (`pp_batched_correctness.py`'s module docstring
+point 2). Also covers the degenerate N=1 batch-of-one case and a
+direct unit test of the context-mismatch guard.
+
+Not yet done: (1) wiring `SchedulerCore`/`RankOneMirror` into the ACTUAL
+per-request admission/eviction control flow driving
+`BatchedMetaFramedPipelineFirstLayer`/`LastLayer` (this step's
+correctness test drives the batched layers directly with a
+hand-constructed `BatchStepContext` per step — the scheduler itself
+isn't wired in yet as the thing that decides which requests are in a
+given step's batch); (2) the real 2-node cluster A/B for this batched
+path (everything above is simulated-2-rank, proven correct at the CPU/
+logic level per this fork's established Phase 0 rationale for keeping
+GPU/cluster time off correctness questions the CPU can answer just as
+definitively — but per the design doc's OWN methodology, a real-
+cluster confirmation is still the final step before calling Phase 1
+done, exactly as Phase 0.5's transport was).
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
