@@ -71,7 +71,9 @@ runtime work) is a separate step.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
+
+import mlx.core as mx
 
 if TYPE_CHECKING:
     from exo.worker.engines.mlx.types import KVCacheType
@@ -217,6 +219,26 @@ def merge_request_caches(caches: list["KVCacheType"]) -> "KVCacheType":
     model architecture; a structural mismatch here indicates a caller
     bug (mixing caches from different model configs), not a data-driven
     condition to silently handle.
+
+    Force-evaluates the merged cache's array state before returning.
+    MLX arrays are lazy; ``merge()``'s internal ``mx.zeros``/indexing
+    ops build a graph that is NOT materialized until something calls
+    ``mx.eval`` on it. If the caller hands this merged cache to a
+    DIFFERENT thread than the one that called ``merge_request_caches``
+    (a real, expected usage pattern -- e.g. driving 2 simulated PP
+    ranks on separate OS threads, as this fork's own correctness test
+    harnesses do), that other thread would be the one to first force
+    evaluation of a graph node it never built -- MLX's per-thread
+    stream/command-queue context is thread-local, so evaluating a
+    lazy node from a different thread than the one it was built on
+    raises ``RuntimeError: There is no Stream(gpu, N) in current
+    thread.`` (confirmed empirically the first time this function was
+    exercised across a real thread boundary in
+    test_pp_batched_decode_correctness.py, 2026-08-05 -- not a
+    hypothetical). Evaluating HERE, before this function returns
+    control to any caller, closes that hazard structurally rather than
+    requiring every future caller to remember to ``mx.eval`` the
+    result themselves.
     """
     if not caches:
         raise CacheRouterError("merge_request_caches called with an empty list")
@@ -229,10 +251,12 @@ def merge_request_caches(caches: list["KVCacheType"]) -> "KVCacheType":
                 f"-- all caches being merged must share the same "
                 f"per-layer structure"
             )
-    return [
+    merged: list[Any] = [
         caches[0][layer_idx].merge([c[layer_idx] for c in caches])  # type: ignore[attr-defined]
         for layer_idx in range(n_layers)
     ]
+    mx.eval([layer.state for layer in merged])  # pyright: ignore[reportAny]
+    return cast("KVCacheType", merged)
 
 
 def extract_request_cache(batched_cache: "KVCacheType", slot: int) -> "KVCacheType":
