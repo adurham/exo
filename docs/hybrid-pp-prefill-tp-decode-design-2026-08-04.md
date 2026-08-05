@@ -1,4 +1,12 @@
-# Hybrid PP-Prefill / TP-Decode Sharding for DeepSeek-V4-Flash on the exo Cluster
+# Batched-PP Sharding for DeepSeek-V4-Flash on the exo Cluster
+(originally titled "Hybrid PP-Prefill / TP-Decode" — RENAMED 2026-08-04
+after a second review flagged the old title as misleading: the design
+keeps PP's layer-split topology for BOTH prefill AND decode, it does not
+switch to TP for decode. "Hybrid" refers to combining PP's topology with
+TP-derived REQUIREMENTS/capabilities — concurrency, cancellation,
+decode throughput — not to switching sharding schemes by phase. See
+Section 7 for why phase-disaggregation [PP-prefill → TP-decode, the
+approach the old title implied] was considered and set aside.)
 
 Status: DESIGN PROPOSAL — no code written yet. This document exists to be
 reviewed and revised before implementation starts.
@@ -238,15 +246,24 @@ starting the code-reading gate-check above. Its answer, summarized:
   as a fallback if Section 6's batched-PP design hits an unexpected wall.
 
 ## 5. Gate-check result: the "can DSv4 batch with heterogeneous lengths"
-   question is ALREADY ANSWERED YES by this fork's own TP code
+   question is PARTIALLY answered by this fork's own TP code —
+   CORRECTED 2026-08-04 after a second independent review (see Section 12)
 
-This is the most important finding of this design doc's research phase,
-and it changes the effort estimate significantly. The consult's stated
-biggest unknown — whether DSv4's MLA/sparse-attention/indexer code can
-handle a real batch dimension with per-request-different sequence
-lengths, or whether it's written assuming batch=1 — is not actually
-unknown. It's already built, tested, and running in production TP mode
-today:
+**CORRECTION: this section originally claimed the batching risk was
+"ALREADY ANSWERED YES" / "ALREADY RESOLVED." A second independent design
+review (Section 12) correctly identified this as overstated and
+self-contradicting Risk #1 in Section 8 — the claim is retracted to the
+narrower, accurate version below. Do not read this section as "risk
+closed"; read Section 12 first.**
+
+What TP's existing code actually proves, precisely: the per-layer
+batched-attention/cache-masking MATH exists and works correctly WHEN
+EVERY RANK RUNS EVERY ATTENTION LAYER AND SEES THE FULL SEQUENCE (TP's
+actual execution model — attention fully replicated on both ranks).
+This is still a real, valuable finding — the consult's stated biggest
+unknown ("does DSv4 batch at all, or is it hard-coded to batch=1") is
+answered: it batches, and the padding/masking/cache-prepare mechanism is
+real production code, not vaporware:
 
 - `prefill_batched()` right-pads N different-length prompts to a common
   `max_length`, builds one `(B, L_chunk)` tensor, and drives the WHOLE
@@ -262,16 +279,19 @@ today:
   chunk's real vs padded lengths so the attention mask is built
   correctly; finalize rolls the padding back off the cache after.
 
-CONSEQUENCE for the hybrid design: instead of writing new batched-attention
-code for DSv4 from scratch (a multi-week, high-risk undertaking touching
-the model's numerics), the batched-PP design in Section 6 can most likely
-reuse `prefill_batched`'s existing padding/masking/cache-prepare machinery
-almost directly — the NEW work is primarily in the PP SCHEDULING/transport
-layer (rank-0-as-scheduler, metadata-framed send/recv, micro-batch
-interleaving for decode), not in the model's attention math. This does
-NOT mean zero risk (see Section 8), but it means the single biggest named
-unknown from the external consult is resolved in this design's favor
-before writing a line of new code.
+CONSEQUENCE for the hybrid design, corrected: what's proven is narrower
+than originally claimed — the per-layer batched math is proven; its
+correctness when driven from metadata frames ACROSS a NEW PP rank
+boundary (rank 1 reconstructing per-stream masking/lengths/offsets
+purely from a metadata frame it didn't derive itself, never exercised by
+TP's validation) is UNPROVEN. This is exactly Risk #1 in Section 8, and
+per the second review (Section 12), it should be tested with a
+hardcoded two-request batch through the PP split BEFORE any scheduler
+code exists — not assumed solved. This does still mean the new work is
+primarily a PP SCHEDULING/transport-and-masking-across-a-rank-boundary
+problem rather than inventing batched-attention math from nothing, which
+somewhat bounds the problem — but "somewhat bounds" is a materially
+weaker claim than the original "resolved."
 
 ## 6. Proposed architecture
 
@@ -453,20 +473,158 @@ be done first before investing further engineering time in it.
    user has explicitly asked for this to be done right, not as a cheap
    prototype; Section 9's phased plan reflects that by front-loading
    correctness validation before any throughput claims are made.
+7. **Decode throughput is completely unquantified for PP — the single
+   biggest de-risking gap in this doc (found by second review, Section
+   12).** Section 3 has detailed PP PREFILL numbers across the full
+   context range. There are ZERO PP DECODE numbers anywhere in this doc
+   or the cited fork history. Requirement 3 (≥37.5 tok/s aggregate at
+   c=2) is confirmed ONLY under TP. Single-request PP decode pays a
+   real per-token wire hop plus, on exactly 2 pipeline stages, a ~50%
+   idle bubble per rank absent interleaving — Section 6.2 item 4's
+   micro-batch interleaving is the ONLY mechanism proposed to recover
+   that, and under the phased plan as originally written, this isn't
+   even MEASURED until Phase 3, the most expensive phase to discover a
+   hard-requirement failure in. See the new "Pre-Phase-0 checks" in
+   Section 9 for the fix.
+8. **Requirement 3 (37.5 tok/s) may conflict with item 7's DSpark
+   scope cut (found by second review).** The 37.5 tok/s TP benchmark
+   (fact 745) was measured "MTP on." This design's item 7 gates
+   speculative decode (DSpark) to concurrency=1, falling back to plain
+   single-token batched decode at concurrency≥2. If fact 745's 37.5
+   tok/s number depended on multi-token speculative acceptance (MTP),
+   and this design's c≥2 decode is plain (no speculation), the design
+   may be structurally incapable of hitting 37.5 tok/s at c=2 REGARDLESS
+   of how well micro-batch interleaving works — a scope decision, not an
+   engineering bug, but one made accidentally rather than deliberately if
+   left unexamined. NEEDS RESOLUTION: confirm whether fact 745's "MTP on"
+   config is the SAME mechanism as this design's DSpark gate, or a
+   different (always-batchable) speculative path, before accepting item 7
+   as written. See Section 9's new pre-work step.
+9. **Requirement 4 (400+ tok/s prefill) is not met by the numbers already
+   in this doc, even before adding new overhead (found by second
+   review).** Section 3's PP prefill numbers (364 tok/s at 500K) are
+   SINGLE-REQUEST measurements. This design's metadata-frame overhead
+   (item 2) and prefill-interleaved-with-concurrent-decode (item 5) will
+   make hybrid prefill-under-load strictly SLOWER than the already-
+   sub-400 single-request 500K number, not faster. No phase in the
+   original plan explicitly closes this gap — it must not be allowed to
+   die silently in Phase 5's final comparison. Either this gets
+   explicit engineering attention, or Requirement 4 needs an explicit,
+   deliberate renegotiation (e.g. "400+ through 200K, best-effort
+   beyond") — NOT a default that happens by omission.
+10. **Cancellation-by-omission (item 6) is underspecified and leaks
+    memory (found by second review).** As written, "rank 0 just stops
+    including a cancelled request's UID in future step metadata frames"
+    is AMBIGUOUS to rank 1: it cannot distinguish "this request simply
+    wasn't scheduled THIS step" (normal — happens constantly under
+    chunked prefill interleaving, Section 6.2 item 5) from "this request
+    was CANCELLED — free its KV/PoolingCache state now." Item 6 needs
+    an explicit EVICTION entry in the metadata frame (not just omission),
+    plus an explicit idle/shutdown frame so rank 1 is never left blocked
+    on `recv` with zero real work scheduled.
+11. **No wire-protocol state machine or deadlock analysis exists yet
+    (found by second review).** Micro-batch interleaving (item 4) means
+    TWO pipeline steps in flight on one physical link at once, combined
+    with MLX's lazy evaluation — exactly the condition class where
+    from-scratch distributed code deadlocks silently. The metadata-frame
+    protocol (item 2) needs to be written out as an explicit state
+    machine (what each rank sends/expects/blocks-on, in what order, for
+    every phase combination) BEFORE Phase 1 starts, not discovered
+    empirically while debugging a hang. Also needs an explicit check
+    (not yet done) of whether jaccl's `recv` can accept a dynamically-
+    shaped activation tensor purely from a metadata frame's declared
+    shape, or whether MLX/jaccl requires shapes to be collectively
+    pre-agreed — if the latter, that would be a hidden change to
+    transport-level assumptions this doc currently declares out of scope
+    (Section 10).
+12. **No KV-cache memory budget exists for concurrent requests at real
+    context depth (found by second review).** Requirement 3 must be
+    validated at 100K-500K context per item 3 of Section 2.5. Two (or
+    more) simultaneous deep-context KV caches, split by LAYER across
+    128GB nodes, alongside each node's resident expert weights, may
+    simply not fit — this is unchecked arithmetic, not yet done anywhere
+    in this doc. Its absence risks discovering an OOM wall at Phase 4's
+    realistic-concurrency load test rather than on paper beforehand.
 
 ## 9. Proposed phased plan (no code written yet — this is the plan to
    review, not a commitment to start immediately)
 
-**Phase 0 — Correctness baseline (before any new scheduler code):**
-Write a standalone, offline test harness that feeds 2+ different-length
-prompts through TP's EXISTING `prefill_batched` path and through
-PP's existing single-request path (serially, one at a time, as a
-reference), and diffs the resulting logits/KV-cache state at matching
-positions. This validates that TP's batching machinery genuinely
-produces request-A-identical-to-serial-A / request-B-identical-to-
-serial-B output (no cross-contamination) BEFORE building anything new on
-top of it — establishes ground truth for what "correct" looks like once
-the PP version exists to compare against.
+**PRE-PHASE-0 CHECKS (added 2026-08-04 after second review, Section 12
+— these are cheap, mostly arithmetic/measurement, and each one can
+independently invalidate or reshape the whole design; do ALL of them
+before Phase 0's correctness harness work begins):**
+
+- **Decode-throughput ceiling estimate (addresses Risk #7).** Measure
+  TODAY's single-request PP decode tok/s (no new code needed — this
+  already exists and runs). Compute the theoretical BEST-CASE aggregate
+  at c=2 assuming perfect micro-batch interleaving (i.e., what would
+  2-stage bubble-filling get you if it worked flawlessly). Compare
+  against the 37.5 tok/s bar. If the theoretical ceiling doesn't clear
+  37.5 with real margin, Requirement 3 is unreachable by this design as
+  structured and that needs to surface NOW, not after Phase 3's
+  multi-week investment.
+- **MTP/DSpark disambiguation (addresses Risk #8).** Determine whether
+  fact 745's "MTP on" 37.5 tok/s config is the SAME speculative
+  mechanism this design's item 7 gates to concurrency=1 (DSpark), or a
+  distinct, always-batchable path. This directly determines whether item
+  7's scope cut is compatible with Requirement 3 at all.
+- **KV-cache memory budget at depth (addresses Risk #12).** Compute,
+  don't guess: per-node resident expert weights (known, ~77-89GB) +
+  N concurrent requests' KV cache size at 100K/500K context (KV/token
+  is a previously-measured, cited figure in this fork's history — reuse
+  it, don't re-derive) — does N=2 fit in 128GB with room for runtime
+  overhead? Does N=4? This bounds how much real concurrency this design
+  can ever support at deep context, independent of whether the
+  scheduling logic itself works.
+- **Fallback memory math for Section 7's phase-disaggregation
+  alternative.** Cheap (~30 min per the original consult), do it now
+  so the fallback is fully ruled in or out rather than left open — if
+  the primary design's pre-checks above reveal a serious problem, this
+  is where the project pivots to, and it should already be known to be
+  viable (or not) rather than discovered mid-crisis.
+
+If any of the first three checks come back negative (ceiling doesn't
+clear 37.5, DSpark/MTP are the same mechanism and item 7 breaks
+Requirement 3, or KV memory doesn't fit even N=2 at real depth), STOP
+and revise this doc's approach before writing Phase 0 code — these are
+exactly the checks a second review identified as cheap enough to do
+first and expensive to discover late.
+
+**Phase 0 — Correctness baseline (before any new scheduler code) —
+METHODOLOGY CORRECTED 2026-08-04 after second review (Section 12):**
+Original methodology (diff TP batched output vs PP serial output,
+byte-for-byte) is WRONG and was flagged by the second review as likely
+to produce constant false alarms: TP's `all_sum` reduction order and
+quantized-matmul partitioning produce genuinely different float
+accumulation than PP's single-device compute, and batched/padded
+kernels differ numerically from unbatched ones even within the SAME
+sharding scheme — byte-equality across TWO DIFFERENT sharding schemes
+is not a meaningful correctness bar and would either cause constant
+false-positive failures or force loosening tolerances until real bugs
+hide behind them. CORRECTED baseline: diff **serial single-request PP**
+(today's already-trusted, already-shipped code) against **new batched
+PP** (once Phase 1+ exists), SAME sharding scheme throughout, using
+greedy-token-identical output or a tight logit-tolerance comparison —
+NOT cross-sharding byte equality. Phase 0's actual deliverable, given
+this correction, is establishing that harness/tooling and confirming
+what "correct" means for the SAME-sharding comparison, since there is
+no batched-PP code yet to diff against — this phase is largely
+tooling + the Pre-Phase-0 checks above, not a diff that can fully run
+until Phase 0.5 exists.
+
+**Phase 0.5 — Transport-only refactor at concurrency=1 (NEW phase added
+2026-08-04 after second review, Section 12):** The original Phase 1
+conflated THREE distinct pieces of new work — (a) the metadata-framed
+transport protocol replacing today's ambient mutable per-layer state,
+(b) the rank-0 scheduler, and (c) actual batching of multiple requests
+— into one phase. Given Risk #11 (silent-cross-request-corruption is
+this design's most dangerous failure mode), isolate (a) first: run a
+SINGLE request through the NEW metadata-framed send/recv protocol (no
+scheduler, no batching, concurrency still =1) and verify EXACT parity
+against today's existing PP transport. This isolates "did I break the
+transport" bugs from "did I break the batching" bugs before they can
+compound — a transport bug discovered under concurrency=2 batched load
+is much harder to localize than one caught here in isolation.
 
 **Phase 1 — Rank-0 scheduler skeleton, decode-only, 2 concurrent
 requests, NO speculative decode:** Build the metadata-frame protocol and
@@ -474,7 +632,9 @@ the rank-0 scheduler for the SIMPLEST case first — 2 concurrent plain
 (no DSpark) decode-only requests (both already prefilled via today's
 existing serial PP prefill, just testing the NEW concurrent decode
 path). Validate byte-for-byte correctness against 2 serial single-
-request PP runs before touching throughput at all.
+request PP runs before touching throughput at all. (This phase now adds
+ONLY the scheduler+batching delta on top of Phase 0.5's already-verified
+transport, per the isolation rationale above.)
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
@@ -523,21 +683,127 @@ discipline from fact 1018/1017's own hard-won methodology lesson).
   2 pipeline stages specifically (Section 6.2 item 4's "exactly 2
   micro-batches" simplification would need generalizing for N>2 stages).
 
-## 11. Open questions for review before implementation starts
+## 11. Open questions for review before implementation starts —
+    ANSWERED 2026-08-04 by the second review (Section 12); answers below,
+    original questions kept for record
 
-1. Does the phased plan's ordering make sense, or should Phase 0's
-   correctness-first framing be even MORE front-loaded (e.g. should
-   Phase 0 also include an adversarial fuzzing pass — many random
-   concurrent request combinations — before Phase 1 begins, rather than
-   after)?
-2. Is concurrency=1-only DSpark gating (risk #2) an acceptable permanent
-   scope boundary for v1, or should batched-DSpark be pulled INTO this
-   design's scope rather than deferred?
-3. Should Section 7's phase-disaggregation alternative get its memory-
-   residency math checked now (cheap, ~30 min per the consult) even
-   though it's not the primary direction, just to have it fully ruled
-   in/out rather than left as an open fallback?
-4. What's the actual timeline expectation — is this a "next available
-   multi-day focused session" project, or should it be scoped even
-   larger (e.g. spread across several sessions with explicit checkpoint
-   reviews after each phase)?
+1. **Fuzzing before Phase 1?** ANSWER: yes, before Phase 1 — but at the
+   LOGIC level (property-based/randomized testing of batch composition,
+   length permutations, request join/leave/cancel sequences against the
+   cache-routing and mask-construction code specifically), not
+   end-to-end cluster-level fuzzing, which should wait for Phase 2/4
+   once there's a real system to fuzz against. Logic-level fuzzing is
+   cheap and targets exactly Risk #5/#11 (silent cross-request
+   corruption, deadlock) directly.
+2. **DSpark gated to concurrency=1 — acceptable permanent v1 boundary?**
+   ANSWER: acceptable ONLY AFTER Risk #8 is resolved (confirm whether
+   fact 745's "MTP on" 37.5 tok/s baseline used the SAME mechanism this
+   design gates off). Do not answer this question until the Pre-Phase-0
+   MTP/DSpark disambiguation check (Section 9) has real data — if
+   Requirement 3 depended on the gated mechanism, batched speculative
+   decode must be pulled INTO scope, not deferred.
+3. **Check phase-disaggregation's memory math now?** ANSWER: yes, do it
+   now, as part of the Pre-Phase-0 checks (Section 9) — cheap (~30 min),
+   and do the PRIMARY design's own KV-memory math (Risk #12) at the same
+   time, for the same reason: if the primary design's pre-checks reveal
+   a wall, you want the fallback's viability already known rather than
+   discovered mid-crisis.
+4. **Timeline expectation?** ANSWER: this is realistically MULTI-WEEK,
+   not multi-day — from-scratch distributed concurrency-control code
+   with a silent-data-corruption failure mode (Risk #5/#11) is
+   consistently underestimated when treated as a quick build. Structure
+   this with per-phase estimates and explicit kill/checkpoint criteria,
+   with the FIRST checkpoint being the Pre-Phase-0 checks (Section 9)
+   and the SECOND being the end of Phase 0.5/Phase 1 (transport +
+   scheduler correctness, before any throughput work begins).
+
+## 12. Second independent design review (2026-08-04)
+
+A second, independent review of this doc (as it stood at commit
+`4a212d7ea`, before the corrections in this revision) was obtained via
+the `consult` tool at the user's explicit request, after Section 2.5's
+hard requirements were added. Full review record kept here for
+traceability; findings have been incorporated throughout this doc
+(Section 5's retracted claim, Section 8's new risks #7-12, Section 9's
+Pre-Phase-0 checks + Phase 0 methodology fix + new Phase 0.5, Section
+11's answered open questions, and the title itself).
+
+**Review findings, verbatim structure preserved:**
+
+1. **The "already resolved" claim in Section 5 was overstated and
+   self-contradicted the doc's own Risk #1.** What TP's code actually
+   proves is narrower than originally claimed: the per-layer batched
+   math works when every rank runs every attention layer and sees the
+   full sequence (TP's actual execution model). Under the proposed PP
+   design, rank 1 must reconstruct per-stream masking/lengths/offsets
+   purely from metadata frames it didn't derive itself — new
+   coordination code, unproven, and precisely the class of risk the
+   doc's own Risk #5 (silent cross-request corruption) already warned
+   about. CORRECTED in Section 5 and the CONSEQUENCE paragraph
+   immediately following it.
+2. **Decode throughput is completely unquantified for PP** — detailed
+   prefill numbers exist across the full context range; zero PP decode
+   numbers exist anywhere. This is flagged as the single biggest
+   de-risking omission, since Requirement 3 is a hard bar and nothing in
+   the original phase plan measured it until the expensive Phase 3.
+   Recommendation: estimate the theoretical best-case ceiling TODAY
+   (near-free, no new code) before investing in Phase 0. ADDED as Risk
+   #7 and the first Pre-Phase-0 check.
+3. **Requirement 3 may conflict with the DSpark concurrency=1 scope
+   cut** if fact 745's "MTP on" baseline used the same speculative
+   mechanism being gated off — unresolved ambiguity in the original
+   doc. ADDED as Risk #8 and a Pre-Phase-0 disambiguation check.
+4. **Requirement 4 (400+ tok/s prefill) is not met by the numbers
+   already in the doc**, before any new overhead from this design is
+   even added (the cited 500K single-request PP number, 364 tok/s, is
+   already below 400) — flagged as something the original doc's Phase 5
+   would have silently absorbed without any phase explicitly addressing
+   it. ADDED as Risk #9, with an explicit instruction not to let this die
+   silently.
+5. **Cancellation-by-omission (item 6) is underspecified and leaks
+   memory** — rank 1 cannot distinguish "not scheduled this step" from
+   "cancelled, free the state" from omission alone. ADDED as Risk #10,
+   with the fix (explicit eviction entry + idle/shutdown frame) folded
+   directly into the risk description for Section 6.2 item 6 to
+   implement against.
+6. **No wire-protocol state machine or deadlock analysis exists**,
+   which matters specifically because micro-batch interleaving keeps two
+   pipeline steps in flight on one physical link at once, combined with
+   MLX's lazy evaluation — flagged as needing to be written out
+   explicitly BEFORE Phase 1, not discovered empirically while debugging
+   a hang. Also flagged an unverified assumption (whether jaccl's `recv`
+   can accept a dynamically-shaped tensor from a metadata frame, or
+   requires shapes collectively pre-agreed — a potential hidden
+   transport-primitive dependency this doc otherwise declares out of
+   scope). ADDED as Risk #11.
+7. **No KV-cache memory budget exists for concurrent requests at real
+   context depth** — Requirement 3 must be validated at 100K-500K
+   context, and whether even N=2 concurrent deep-context KV caches fit
+   in 128GB alongside resident expert weights was simply never
+   calculated. ADDED as Risk #12 and a Pre-Phase-0 check.
+8. **Phase 0's original correctness methodology (diff TP batched output
+   against PP serial output byte-for-byte) was flagged as methodologically
+   wrong** — different sharding schemes produce genuinely different
+   float accumulation (all_sum reduction order, quantized-matmul
+   partitioning, batched-vs-unbatched kernel differences) independent of
+   any real bug, so a cross-sharding byte-diff would either produce
+   constant false alarms or force tolerances loose enough to hide real
+   bugs. CORRECTED to same-sharding-scheme diff (serial PP vs batched PP)
+   with greedy-token or logit-tolerance comparison, in Section 9.
+9. **Phase 1 as originally written conflated three distinct new things**
+   (metadata-framed transport, the rank-0 scheduler, and batching) into
+   one phase, which is risky given the silent-corruption failure mode —
+   recommended inserting an isolated transport-only-at-concurrency=1
+   step first. ADDED as Phase 0.5 in Section 9.
+10. Answered all four of the doc's original open questions — see the
+    updated Section 11 above.
+
+**Overall verdict from the review (direct quote preserved):** "the
+architecture is reasonable and the correctness-first phasing is the
+right instinct, but the doc is stronger on prefill (where you have data)
+than decode (where you have none), the 'already resolved' claim should
+be retracted to match your own Risk #1, and three cheap pre-Phase-0
+checks — decode throughput ceiling, KV memory math, MTP/DSpark
+disambiguation — could each invalidate the design and should happen
+before any code."
+
