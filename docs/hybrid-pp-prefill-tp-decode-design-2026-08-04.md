@@ -241,9 +241,10 @@ starting the code-reading gate-check above. Its answer, summarized:
   possibly SIMPLER to prototype (no batched-attention refactor needed)
   but with a real memory cost: running the union of PP's per-node full
   expert set for its owned layers AND TP's half-expert-set-per-layer
-  would push per-node expert-weight residency from ~50% to ~75%. NOT
-  adopted as the primary direction for this doc (see Section 7) but kept
-  as a fallback if Section 6's batched-PP design hits an unexpected wall.
+  would push per-node expert-weight residency from ~50% to ~75%.
+  NOT adopted as the primary direction for this doc — and, per Section 7,
+  subsequently REJECTED and PULLED entirely after the refined memory math
+  (Section 13.4) confirmed it's infeasible; not kept as a fallback.
 
 ## 5. Gate-check result: the "can DSv4 batch with heterogeneous lengths"
    question is PARTIALLY answered by this fork's own TP code —
@@ -375,10 +376,18 @@ already proved out.
    with) — but is flagged as a real scope decision, not a minor detail:
    see Section 8.
 
-## 7. Alternative considered and set aside: phase disaggregation
-   (PP-prefill → TP-decode handoff)
+## 7. Alternative REJECTED and PULLED (2026-08-04, user decision): phase
+   disaggregation (PP-prefill → TP-decode handoff)
 
-The consult also raised, as a possibly-cheaper alternative: use PP only
+**STATUS: PULLED. Not a fallback, not a documented option to fall back
+on — the user reviewed the refined memory math in Section 13.4 (dual
+weight-layout residency leaves only ~2.7GB/node headroom, effectively
+unusable) and explicitly rejected this as "not doable at all." This
+section is kept only as a historical record of what was considered and
+why it doesn't work — do not revisit this as a fallback option without
+new information that changes the memory math.**
+
+The consult had raised, as a possibly-cheaper alternative: use PP only
 for the prefill phase (get its throughput win), then hand the completed
 KV state off to a TP-mode decode process for the actual decode phase
 (get TP's concurrency win). The intermediate state (MLA latents) is
@@ -392,11 +401,13 @@ reasons:
   once during the handoff window: PP's per-node "all experts for my
   layers" residency AND TP's per-node "half experts for every layer"
   residency are structurally different weight PARTITIONS, not the same
-  weights viewed two ways — so the union would need real memory headroom
-  (the consult's rough estimate: per-node expert-weight residency rising
-  from ~50% to ~75% of the full expert set). This needs to be checked
-  against DSv4-Flash-8bit's actual per-node footprint before it can be
-  ruled in OR out; not yet done as of this doc.
+  weights viewed two ways — so the union would need real memory headroom.
+  **CONFIRMED INFEASIBLE (Section 13.4): refined math using this fork's
+  own measured per-layer weight distribution puts dual-layout residency
+  at ~115.3GB/node against a ~118GB budget — only ~2.7GB left for KV
+  cache and margin, below even a single request's real KV footprint at
+  any meaningful depth. This is not a tight-but-workable number; it's
+  categorically unusable.**
 - It introduces a genuinely NEW class of engineering (a live process
   handoff / weight-layout conversion mid-request) that doesn't reuse any
   existing exo machinery, whereas Section 6's batched-PP design reuses
@@ -409,11 +420,14 @@ reasons:
   duplicated) — a real, nontrivial cache-format translation on the hot
   path of every single request.
 
-This alternative is kept as a documented fallback: if Section 6's
-batched-PP scheduler design hits a wall during Phase 1 (see Section 9)
-that makes it structurally infeasible, phase disaggregation is the
-next direction to prototype, and the memory-residency math above should
-be done first before investing further engineering time in it.
+**This alternative is NOT a fallback.** If Section 6's batched-PP
+scheduler design hits a wall that makes it structurally infeasible, this
+is NOT where the project goes next — the memory math rules it out
+regardless of how Section 6 turns out. A genuinely different approach
+would need fresh design work (see Section 14 for the related open
+question this raises about Requirement 3's exact scope, since this was
+the option that would have let the design keep TP's already-proven
+37.5 tok/s number outright).
 
 ## 8. Real risks (not glossed over)
 
@@ -577,11 +591,12 @@ before Phase 0's correctness harness work begins):**
   can ever support at deep context, independent of whether the
   scheduling logic itself works.
 - **Fallback memory math for Section 7's phase-disaggregation
-  alternative.** Cheap (~30 min per the original consult), do it now
-  so the fallback is fully ruled in or out rather than left open — if
-  the primary design's pre-checks above reveal a serious problem, this
-  is where the project pivots to, and it should already be known to be
-  viable (or not) rather than discovered mid-crisis.
+  alternative — DONE, RESULT NEGATIVE, ALTERNATIVE PULLED.** See
+  Section 13.4: refined math shows only ~2.7GB/node headroom after
+  dual-layout residency, effectively unusable. Per explicit user
+  decision (2026-08-04), this alternative is REJECTED and no longer a
+  documented fallback — Section 7 updated accordingly. Do not revisit
+  without new information that changes the underlying memory math.
 
 If any of the first three checks come back negative (ceiling doesn't
 clear 37.5, DSpark/MTP are the same mechanism and item 7 breaks
@@ -650,14 +665,19 @@ throughput — this is the first point in the plan where a throughput
 number should be trusted/reported, because correctness is already
 locked in by Phases 0-2.
 
-**Phase 4 — N > 2 concurrent requests, cancellation, DSpark gating:**
-Extend the scheduler to handle more than 2 in-flight requests, wire up
-cancellation (item 6), and add the DSpark concurrency=1-only gate
-(item 7). Full correctness + throughput validation at realistic
-concurrency levels (mirroring actual Hermes usage patterns — the
-existing `/tmp/hermes_stress_test.py` corpus-replay harness built for
-the DSpark-off stability soak test is a natural fit to reuse/extend here
-for a mixed prefill+decode concurrent-load validation).
+**Phase 4 — Cancellation, DSpark gating, N=2 realistic-load validation
+(SCOPE CONFIRMED 2026-08-04: N=2 is the real target, N>2 is explicitly
+NOT a goal — see Section 13.3):** Wire up cancellation (item 6) and add
+the DSpark concurrency=1-only gate (item 7). Full correctness +
+throughput validation at N=2 concurrency under realistic load (mirroring
+actual Hermes usage patterns — the existing `/tmp/hermes_stress_test.py`
+corpus-replay harness built for the DSpark-off stability soak test is a
+natural fit to reuse/extend here for a mixed prefill+decode concurrent-
+load validation at N=2). Extending beyond N=2 concurrent requests is
+explicitly OUT of scope for this design per the user's confirmed target
+— if ever revisited later, Section 13.3's growing-session KV ceiling
+(N=4 doesn't fit at 500K context) is the first thing to re-check before
+attempting it.
 
 **Phase 5 — Production readiness:** basedpyright/ruff/nix fmt compliance
 per this repo's standing pre-commit requirements, full test suite
@@ -682,6 +702,16 @@ discipline from fact 1018/1017's own hard-won methodology lesson).
   this specific 2-node cluster topology. The design as written assumes
   2 pipeline stages specifically (Section 6.2 item 4's "exactly 2
   micro-batches" simplification would need generalizing for N>2 stages).
+- Supporting more than N=2 concurrent requests (CONFIRMED explicitly out
+  of scope by the user, 2026-08-04 — "I wouldn't ever target more than
+  N=2 there"). Phase 4 (Section 9) is scoped to N=2 accordingly; the
+  growing-session KV-memory ceiling at N=4+ (Section 13.3) is a real,
+  quantified constraint but not one this design needs to solve.
+- Phase disaggregation (PP-prefill → TP-decode handoff) as a fallback or
+  alternative approach — REJECTED and PULLED (Section 7, per user
+  decision after reviewing Section 13.4's refined memory math showing
+  it's infeasible, ~2.7GB/node headroom). Kept in the doc only as a
+  historical record of what was considered and ruled out.
 
 ## 11. Open questions for review before implementation starts —
     ANSWERED 2026-08-04 by the second review (Section 12); answers below,
@@ -911,14 +941,16 @@ fit (~42.92GB/node needed vs ~33GB available).**
 
 CONCLUSION: N=2 concurrent requests at real depth is safe under either
 KV-rate assumption — matches this design's Phase 1-3 scope (which is
-built around 2 concurrent requests throughout). N>2 at deep context with
-realistic (not cold) session growth is a genuine, quantified ceiling
-this design will hit if Phase 4 (N>2 concurrent requests, Section 9)
-is pushed to real depth without also either (a) capping deep-context
-concurrency below N=4, or (b) revisiting KV-cache compression/eviction
-as a prerequisite. Not a blocker for the design as scoped through Phase
-3, but a real, now-quantified constraint Phase 4 needs to respect
-rather than discover via OOM.
+built around 2 concurrent requests throughout). **RESOLVED by explicit
+user confirmation (2026-08-04): the design's real target is N=2
+concurrency, not N=4+ — "I wouldn't ever target more than N=2 there."
+This removes the N>2 growing-session memory ceiling as an open risk for
+this design's actual scope: it's a real, quantified limit if someone
+ever tried to push this beyond N=2 at deep context, but that's
+explicitly not a goal here.** Phase 4's original framing ("N > 2
+concurrent requests") should be read as the LOWEST priority / optional
+stretch extension given this scope confirmation, not a required
+deliverable — see the updated Phase 4 description in Section 9.
 
 ### 13.4 Phase-disaggregation fallback memory math — REFINED, and WORSE
     than the original rough estimate
@@ -977,15 +1009,17 @@ care whether that comes from PP or TP under the hood — get me PP's
 prefill win WITHOUT giving up TP's already-proven decode number."** If
 this is the real intent, this design's core premise (keep PP topology
 for decode, Section 6.1) needs to be reconsidered — the phase-
-disaggregation alternative (Section 7) was set aside specifically
-because it's memory-infeasible (confirmed worse in Section 13.4, not
-better), which would leave very few good options: possibly a genuinely
-different architecture not yet considered in this doc at all (e.g.
-running BOTH shardings as separate loaded instances and routing
-prefill-heavy vs decode-heavy traffic between them at the request
-level, accepting the cost of loading the model twice in some form,
-rather than trying to make one process serve both regimes) — this
-would need fresh design work, not a patch to the current doc.
+disaggregation alternative (Section 7), which was the option that would
+have let the design keep TP's decode number directly, is now REJECTED
+and PULLED (confirmed infeasible in Section 13.4, ~2.7GB/node headroom
+— not a fallback, the user explicitly agreed "dual residency is not
+doable at all"). This means option (b), if it's the real intent, has NO
+known viable path via a fallback already in this doc — it would need
+fresh design work not yet attempted here (e.g. running BOTH shardings
+as separate loaded instances and routing prefill-heavy vs decode-heavy
+traffic between them at the request level, accepting the cost of
+loading the model twice in some form, rather than trying to make one
+process serve both regimes).
 
 **This doc's own recommendation, pending the user's answer: option (a)
 is more consistent with what's actually achievable given Section 13's
