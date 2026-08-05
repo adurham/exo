@@ -807,3 +807,192 @@ checks — decode throughput ceiling, KV memory math, MTP/DSpark
 disambiguation — could each invalidate the design and should happen
 before any code."
 
+## 13. Pre-Phase-0 check RESULTS (2026-08-04) — TWO OF FOUR CAME BACK
+    NEGATIVE. Read this section before doing anything else with this doc.
+
+All four Pre-Phase-0 checks from Section 9 were run. Two are genuinely
+concerning findings that go BEYOND what the second review anticipated —
+not just "needs validation," but "the assumption behind Requirement 3's
+DSpark-gating scope decision (item 7) may be categorically wrong, not
+just imprecisely benchmarked." Full arithmetic and citations below.
+
+### 13.1 Decode-throughput ceiling estimate — MARGINAL, not a clean pass
+
+Using warm memory fact 1154 (PP mode, `EXO_SPECULATIVE=0`, no
+speculation, c=1, 6 runs): mean single-request PP decode = **24.68
+tok/s** (range 22.93-25.72).
+
+- Worst case at c=2 (zero benefit from micro-batch interleaving, pure
+  time-sharing): aggregate stays at ~24.68 tok/s.
+- Best case at c=2 (perfectly ideal 2-stage bubble-filling, fully hides
+  the pipeline idle time): aggregate ≈ 2× single-stream = **49.36
+  tok/s**.
+- Target: **37.5 tok/s**.
+- This means micro-batch interleaving needs to capture roughly **52% of
+  its theoretical maximum benefit** to hit the target — not a small
+  margin, but not obviously unreachable either. This is a real,
+  non-trivial engineering bar for Section 6.2 item 4 to clear, not a
+  free win. TREAT AS: proceed, but Phase 3's throughput validation
+  (Section 9) is now known to be a real risk point, not a formality —
+  if real-world interleaving efficiency lands meaningfully below ~50%,
+  Requirement 3 fails even with a working implementation.
+
+### 13.2 MTP/DSpark disambiguation — NEGATIVE. This is the serious one.
+
+Confirmed via direct code read, not assumption:
+
+- Fact 745 (the 37.5 tok/s benchmark) explicitly used **"seq-split
+  on."** `EXO_DSV4_SEQ_SPLIT` is a TP-only mechanism (Section 3's own
+  citation: it "splits prefill query rows across ranks + `all_gather`s
+  the result back" — this concept has no meaning under PP's layer-split
+  topology, PP has no query-row splitting to speak of).
+- Fact 1014 (this doc's own Section 3 citation, PP architecture)
+  states directly: **"MTP speculation disabled (`pp_speculation.py`
+  send/recv conflicts with `PipelineLastLayer` handoff)"** under PP mode
+  today.
+- CONCLUSION: fact 745's exact benchmarked configuration — TP sharding +
+  seq-split + MTP — **cannot run under PP as architected today, at
+  all, for ANY concurrency level, independent of this design's item 7
+  DSpark-gating decision.** This is not "the benchmark used a different
+  mechanism than what we're gating off" (Risk #8's original framing,
+  which implied a possible but uncertain conflict) — it's "the exact
+  benchmarked configuration is TP-specific and structurally
+  inapplicable to PP, full stop." Requirement 3's 37.5 tok/s number was
+  achieved in a regime (TP + MTP + seq-split) that has NOTHING to do
+  with the PP-only DSpark mechanism this design's item 7 discusses
+  gating — they are not even the same speculative-decode implementation
+  colliding with each other; PP-mode decode speculation, when it works
+  at all, goes through DSpark specifically (`pp_dspark_decode_loop` in
+  `pp_speculation.py`), a DIFFERENT code path from TP+MTP's mechanism
+  (`dsv4_mtp.py`) entirely.
+- **IMPLICATION FOR THE DESIGN:** Requirement 3 (37.5 tok/s aggregate at
+  c=2) was validated in a sharding mode (TP) this design is explicitly
+  NOT using — this design keeps PP's topology throughout (Section 6.1).
+  There is no historical measurement anywhere in this fork of PP c=2
+  MTP-on decode throughput, because that configuration has never
+  existed / has been actively disabled. The 13.1 ceiling estimate above
+  (24.68-49.36 tok/s, built from PP's own no-speculation baseline) is
+  therefore the ONLY grounded data point this design can lean on for
+  Requirement 3 — not fact 745, which measured a different sharding
+  scheme's different speculative mechanism. This should be treated as
+  a REQUIREMENT-SCOPING QUESTION for the user, not something this doc
+  can resolve unilaterally: is Requirement 3 "37.5 tok/s via WHATEVER
+  mechanism gets there" (in which case PP-mode's own eventual DSpark
+  batching, once/if built, is the actual candidate — not TP+MTP), or is
+  it specifically "match what TP+MTP already does" (in which case this
+  design's entire premise of staying on PP topology for decode may need
+  re-examination, since TP already meets this requirement TODAY with
+  zero new engineering)? See Section 14 for the concrete question to
+  put to the user.
+
+### 13.3 KV-cache memory budget at depth — MOSTLY FITS, with one real ceiling
+
+Per-node headroom after weights (~85GB, midpoint of measured 77-89GB
+range) + runtime overhead (~10GB) on a 128GB node: **~33GB.**
+
+PP shards KV cache BY LAYER across the 2 ranks, so each rank holds
+roughly half of any one request's total KV footprint.
+
+Using the ARCHITECTURE-CORRECT/cold-prefill KV rate (14 KB/token, warm
+memory facts 639/655/635, directly cited in this fork's own measured
+history): at 500K context, one request's KV ≈ 6.68GB total → ~3.34GB
+per node. N=2 concurrent requests at 500K: ~6.68GB/node — comfortably
+fits. Even N=8 concurrent 500K-context requests (~26.70GB/node) fits
+within the ~33GB headroom.
+
+BUT using the REALISTIC GROWING-SESSION rate (45 KB/token, warm memory
+fact 650/651 — the rate that ACTUALLY applies to real multi-turn
+conversations, not a cold single-shot prefill, and directly relevant
+since Requirement 3 must be validated against realistic usage per
+Section 2.5 item 3): at 500K context, one request's KV ≈ 21.46GB total
+→ ~10.73GB per node. N=2 fits (~21.46GB/node, under the 33GB headroom)
+but **N=4 concurrent growing-session requests at 500K context does NOT
+fit (~42.92GB/node needed vs ~33GB available).**
+
+CONCLUSION: N=2 concurrent requests at real depth is safe under either
+KV-rate assumption — matches this design's Phase 1-3 scope (which is
+built around 2 concurrent requests throughout). N>2 at deep context with
+realistic (not cold) session growth is a genuine, quantified ceiling
+this design will hit if Phase 4 (N>2 concurrent requests, Section 9)
+is pushed to real depth without also either (a) capping deep-context
+concurrency below N=4, or (b) revisiting KV-cache compression/eviction
+as a prerequisite. Not a blocker for the design as scoped through Phase
+3, but a real, now-quantified constraint Phase 4 needs to respect
+rather than discover via OOM.
+
+### 13.4 Phase-disaggregation fallback memory math — REFINED, and WORSE
+    than the original rough estimate
+
+The original Section 7 estimate (from the first consult, not yet
+verified against real per-layer numbers) was "~50% → ~75% per-node
+expert-weight residency." Refined using this fork's own measured
+per-layer weight distribution (155GB total / 43 layers ≈ 3.60GB/layer,
+consistent with the measured ~75.7GB for a ~21-layer PP rank residency
+against the actual measured 77-89GB range):
+
+- A PP rank already holds 100% of the weights for its own ~21-22
+  layers (~75.7GB, matches measured).
+- To ALSO run TP-style decode for its non-owned ~21-22 layers, it would
+  need TP's half-expert share for just those layers: ~39.7GB
+  incremental.
+- **Total dual-layout residency: ~115.3GB per node**, against a
+  ~118GB budget (128GB - ~10GB runtime overhead) — leaving only
+  **~2.7GB of headroom for KV cache and any margin.** This is
+  effectively unusable in practice: 2.7GB is far below even a SINGLE
+  request's KV cache at any meaningful context depth (per Section
+  13.3's own numbers, even a short/shallow request needs more than
+  this once real KV growth is accounted for).
+- CONCLUSION: this refined math is WORSE than the original rough
+  estimate suggested, not better — phase disaggregation (Section 7) is
+  now more confidently ruled out as a fallback than before, not less.
+  If Section 13.2's finding forces a real re-think of this design's
+  premise, phase disaggregation is NOT a viable fallback to fall back
+  on — a genuinely different approach would be needed.
+
+## 14. Concrete question for the user, arising from Section 13.2 — this
+    needs an answer before Phase 0 work begins
+
+**Requirement 3 (≥37.5 tok/s aggregate at c=2, MTP on) was validated in
+a sharding mode (TP) and mechanism (MTP via `dsv4_mtp.py`) that has
+NOTHING to do with this design, which keeps PP topology throughout and
+would use PP's own DSpark mechanism (`pp_speculation.py`) if any
+speculation runs at all. TP already meets this requirement TODAY, with
+zero new engineering, by definition — it's where the number came from.**
+
+This means one of two very different projects is actually being asked
+for, and this doc cannot resolve which without the user's input:
+
+**(a) "Give me PP's prefill advantage AND concurrent decode AND
+cancellation, at whatever aggregate decode throughput the resulting
+system achieves — 37.5 tok/s was just a rough proxy for 'good enough,'
+not a literal must-match-TP's-number bar."** If this is the real intent,
+this design proceeds mostly as planned, with Section 13.1's 24.68-49.36
+tok/s ceiling estimate as the honest expectation range, and the actual
+bar re-stated as something like "meaningfully better than PP's current
+single-request-only ~24.68 tok/s, ideally approaching TP's 37.5 as a
+stretch goal, not a hard gate."
+
+**(b) "I specifically want 37.5+ tok/s aggregate at c=2, and I don't
+care whether that comes from PP or TP under the hood — get me PP's
+prefill win WITHOUT giving up TP's already-proven decode number."** If
+this is the real intent, this design's core premise (keep PP topology
+for decode, Section 6.1) needs to be reconsidered — the phase-
+disaggregation alternative (Section 7) was set aside specifically
+because it's memory-infeasible (confirmed worse in Section 13.4, not
+better), which would leave very few good options: possibly a genuinely
+different architecture not yet considered in this doc at all (e.g.
+running BOTH shardings as separate loaded instances and routing
+prefill-heavy vs decode-heavy traffic between them at the request
+level, accepting the cost of loading the model twice in some form,
+rather than trying to make one process serve both regimes) — this
+would need fresh design work, not a patch to the current doc.
+
+**This doc's own recommendation, pending the user's answer: option (a)
+is more consistent with what's actually achievable given Section 13's
+findings, and with the spirit of Section 1's original goal ("PP's
+prefill advantage AND TP's concurrent-decode CAPABILITY" — capability,
+not necessarily identical throughput). But this is the user's call to
+make explicitly, not something to assume silently, given how central
+Requirement 3's exact number was to this doc's own Section 2.5.**
+
+
