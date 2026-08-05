@@ -1663,9 +1663,62 @@ without an explicit new push in that direction.
 3. A real-path batch=1 smoke test proving the flag-off (or flag-on-
    but-single-request) case is byte-identical to today's existing
    behavior.
-4. A mocked (or, better, real 2-process per the
-   `test_pp_batched_decode_subprocess.py` pattern) 2-request
-   interleaving test at the `ExoBatchGenerator` level itself.
+4. ~~A mocked (or, better, real 2-process...) 2-request interleaving
+   test at the `ExoBatchGenerator` level~~ CLOSED, 2026-08-05 (same
+   day, later still) -- see below.
+
+**Item 4 CLOSED: `pp_batched_decode_glue.py`
+(`Rank0BatchedDecodeGlue`/`Rank1BatchedDecodeGlue`) + a real 2-process
+lifecycle test.** Attempting the actual mechanical `submit()`/`step()`
+edit surfaced one MORE genuine design requirement beyond the
+already-closed admission-broadcast question: `submit()` must NEVER
+perform synchronous cross-rank wire I/O directly. Per a `consult`
+review: doing so would create a SECOND independent writer racing the
+existing decode-step loop's own wire traffic -- the classic
+multi-writer collective-ordering hazard, and since `submit()` is
+shared by every request (not just batched ones), a hang here would
+wedge the whole rank, not just the new path. The review's recommended
+fix, now built: a strict single-writer PIGGYBACK pattern.
+`enqueue_admission()` (the only thing `submit()` ever calls) is pure
+in-memory queueing with zero wire I/O -- cannot hang, cannot race.
+`tick()` (the only thing `step()` ever calls, from the exact same
+single call site `_step_pp_spec` already uses) is the ONLY place that
+ever touches the wire for this session, and does at most ONE of
+{admit one pending request, run one decode step} per call -- the same
+single-writer discipline `PPSpecAlreadyActiveError`'s own entry guard
+already enforces for its shared wire-link state, applied here.
+
+Rank 1's admission detection reuses `RankOneMirrorDriver`'s
+ALREADY-BUILT reactive mechanism (a `cache_slot` transitioning
+FREE-to-occupied within a normal `StepMessage`) rather than a new
+message kind -- slot-reuse ambiguity is structurally impossible per
+`SchedulerCore`'s own DRAINING-until-ack invariant (verified earlier
+this session), so "newly occupied" can only ever mean "genuinely new
+request." Rank 1's own prefilled cache for a to-be-admitted request
+is staged LOCALLY (`stage_local_cache`) and never crosses the wire --
+only rank 0's admission decision does.
+
+Verified with a real 2-PROCESS test
+(`test_pp_batched_decode_glue_subprocess.py`, extending this
+session's established subprocess harness): a full `submit()`/
+`step()`-SHAPED lifecycle across two genuine OS processes -- enqueue
+request A upfront, tick to admit, tick to decode solo, enqueue
+request B MID-STREAM (while A is already decoding), tick to admit B
+alongside A's ongoing decode, tick both together, `complete_request`
+to evict A via a REAL `EvictMessage`/`EvictAckMessage` round-trip,
+tick B solo to completion -- matching two independent serial
+plain-forward golden references exactly. 1/1 passing, stable across 3
+repeated runs, basedpyright/ruff clean, full worker suite 254 passing
+with the same 1 pre-existing unrelated failure.
+
+**Item 4's harness itself doubles as the "mocked 2-request
+interleaving test" this prerequisite originally called for** -- it is
+real (not mocked) at every layer except the runner/`ExoBatchGenerator`
+wrapper itself, which is exactly the piece the next step (below) adds.
+
+Item 1 (`EXO_MAX_CONCURRENT_REQUESTS=1`) and item 3 (batch=1 smoke
+test against the real `ExoBatchGenerator` wrapper) remain the only
+open prerequisites.
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
