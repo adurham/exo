@@ -793,6 +793,80 @@ concrete next step whenever cluster time is available — needs the
 user's separate explicit go-ahead per standing rules, not implied by
 this local validation work being complete.
 
+**Wiring + FIRST REAL CLUSTER ATTEMPT — 2026-08-05, found and fixed a
+real bug the local simulation could not have caught.** Wired
+`EXO_PP_METAFRAME=1` into `set_pipeline_prefill`/`set_pipeline_queue_sends`
+(`auto_parallel.py`, lazy-imports the metaframe counterparts, no
+circular-import issue, no new basedpyright/ruff errors vs the
+unmodified baseline — verified by stash-diffing both files), into the
+`PipelineShardMetadata` model-loading branch (`utils_mlx.py`, installs
+the metaframe layers via `install_metaframed_pipeline_layers` right
+after `pipeline_auto_parallel` returns, calls
+`handshake_metaframe_protocol` on BOTH the enabled and disabled path so
+a config mismatch fails loudly either way), and into
+`start_cluster.sh`'s env allow-list (default `0`, both nodes always get
+the identical value via the shared `EXO_ENV` variable — same
+propagation mechanism already proven safe by `EXO_PP_NO_COORD_COLLECTIVE`
+right above it). Full worker test suite (628 tests) run before touching
+the cluster: 3 pre-existing failures, all confirmed present on
+unmodified `main` via the same stash-diff method — zero regressions
+introduced.
+
+Relaunched the real cluster with `EXO_PP_METAFRAME=1` (with the user's
+separate explicit go-ahead, per standing rules) — placement succeeded,
+the `EXO_PP_METAFRAME=1` startup banner printed correctly on both
+nodes, but BOTH runners then failed during warmup with
+`RunnerFailed: ValueError: not enough values to unpack (expected 4, got 3)`
+inside `hyper_connection.py`. Root cause: DSv4-Flash broadcasts its
+residual stream to 4D `(batch, seq_len, hc_mult, hidden_dim)`
+immediately after embedding (hyper-connections — see
+`HyperHead`/`mlx_lm.models.hyper_connection`) and keeps it 4D through
+EVERY layer, only collapsing back to 3D at the final `hc_head`/`norm`.
+The metaframe protocol's v1 `activation_template_shape()` hardcoded a
+3D `(batch, seq_len, hidden_dim)` `recv_like` template — silently wrong
+for DSv4, since `mx.distributed.recv_like` needs a template matching
+the ACTUAL rank of the tensor being received, not just its last-dim
+size. **This gap was invisible to Phase 0.5's local test suite for a
+structural reason, not an oversight in test coverage per se**: that
+suite (deliberately, per this doc's own Phase 0/0.5 methodology)
+uses `mlx-lm`'s plain `Llama` as the test model to keep validation fast
+and independent of the real 166GB DSv4 checkpoint — and plain Llama has
+no hyper-connections, so it never leaves 3D. The bug only exists in the
+intersection of "the new transport code" and "DSv4's specific residual-
+stream shape," which by construction the local harness never exercises.
+**This is exactly why Phase 0.5 exists as an isolated, cheap-to-fail
+step before Phase 1** — the bug surfaced immediately on the very first
+real-model exercise, cleanly isolated to the transport layer alone (no
+scheduler/batching code yet to also debug), and cost one relaunch
+cycle to find, not a multi-week investigation compounded with Phase 1
+work.
+
+Fix (protocol v2, same day): added an `extra_dim` field to the fixed
+header (0 = the common 3D case; a positive value = the size of the
+extra middle dimension for a 4D residual stream like DSv4's
+`hc_mult`). `MetaFramedPipelineLastLayer` derives this from the ACTUAL
+tensor being sent (`tensor.ndim == 4` check) at both its `encode_metaframe`
+call sites — never a static per-model-type assumption, so this
+generalizes to any future architecture with an analogous extra
+dimension without a further protocol change. `activation_template_shape()`
+returns the correct 3-tuple or 4-tuple accordingly. Three new
+regression tests added (encode/decode roundtrip at DSv4's real
+`hc_mult=4`, an integration test driving a real
+`MetaFramedPipelineLastLayer` instance with a 4D-output stand-in layer
+through the actual send/encode call path, and a 3D-still-default guard
+proving the fix doesn't change behavior for every non-DSv4 model
+already covered) — 15/15 tests passing, stable across 3 repeated runs,
+basedpyright/ruff clean. **The v2 fix itself has NOT yet been re-run
+against the real cluster** — after the failure, the cluster was
+immediately restored to today's known-good transport
+(`EXO_PP_METAFRAME=0`) and the CORRECT model
+(`deepseek-ai/DeepSeek-V4-Flash-0731` — a first restore attempt
+mistakenly loaded the wrong default, `mlx-community/DeepSeek-V4-Flash`,
+caught and corrected before declaring the cluster safe), both runners
+confirmed `RunnerReady` on the right model. The next real-cluster A/B
+with the v2 fix is the concrete next step, still gated on the user's
+separate explicit go-ahead per standing rules.
+
 **Phase 1 — Rank-0 scheduler skeleton, decode-only, 2 concurrent
 requests, NO speculative decode:** Build the metadata-frame protocol and
 the rank-0 scheduler for the SIMPLEST case first — 2 concurrent plain
