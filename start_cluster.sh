@@ -1803,6 +1803,24 @@ for NODE in "${NODES[@]}"; do
         : "${EXO_PP_NO_COORD_COLLECTIVE:=1}"
         EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=$EXO_PP_NO_COORD_COLLECTIVE"
     fi
+    # Batched-PP sharding design, Phase 0.5 (docs/hybrid-pp-prefill-tp-
+    # decode-design-2026-08-04.md): opt-in metadata-framed PP transport
+    # (pp_metaframe.py), swapping today's ambient-mutable-state
+    # PipelineFirstLayer/PipelineLastLayer for MetaFramedPipelineFirstLayer/
+    # MetaFramedPipelineLastLayer. Validated LOCALLY (simulated 2-rank,
+    # exact parity, 9/9 tests) but NOT YET A/B'd on the real cluster --
+    # this launcher line exists so that A/B can happen, not because the
+    # flag is production-ready. Default OFF (unset/0 keeps today's
+    # trusted transport). MUST be set IDENTICALLY on both nodes --
+    # pp_metaframe.py's handshake_metaframe_protocol() fails loudly at
+    # warmup (not a silent hang) if the two ranks disagree, but that
+    # loud failure still means the launch failed, so get it right here.
+    # Does NOT change EXO_MAX_CONCURRENT_REQUESTS=1 below -- PP is
+    # single-request-only regardless of which transport is active.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        : "${EXO_PP_METAFRAME:=0}"
+        EXO_ENV="$EXO_ENV EXO_PP_METAFRAME=$EXO_PP_METAFRAME"
+    fi
     # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
     # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
     # path (pp_dspark_decode_loop and friends) stores its per-request
@@ -2393,6 +2411,14 @@ if [ "${DSV4_ENABLED:-0}" = "1" ]; then
         echo "      wire-level request tagging or cross-request micro-batching --"
         echo "      genuine new engineering, not present in this fork OR upstream."
         echo ""
+        if [ "${EXO_PP_METAFRAME:-0}" = "1" ]; then
+            echo "  ⚠️  EXO_PP_METAFRAME=1 -- metadata-framed PP transport ACTIVE"
+            echo "      (Phase 0.5, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md)."
+            echo "      Validated LOCALLY only (simulated 2-rank, exact parity, 9/9 tests)"
+            echo "      -- this is the FIRST real cluster run of this path. Still"
+            echo "      single-request-only, same as EXO_PP_METAFRAME=0."
+            echo ""
+        fi
     fi
     echo "Auto-placing DeepSeek V4 Flash ($DSV4_MODEL_ID) across both Studios via RDMA..."
 
