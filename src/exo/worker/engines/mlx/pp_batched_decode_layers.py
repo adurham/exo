@@ -83,6 +83,7 @@ from dataclasses import dataclass
 from typing import Iterator
 
 import mlx.core as mx
+import mlx.nn as nn
 
 from exo.worker.engines.mlx.auto_parallel import CustomMlxLayer, _LayerCallable
 from exo.worker.engines.mlx.pp_metaframe import (
@@ -329,3 +330,69 @@ class BatchedMetaFramedPipelineLastLayer(CustomMlxLayer):
         if gather_dtype != mx.bfloat16:
             output_for_gather = output_for_gather.astype(gather_dtype)
         return output_for_gather
+
+
+def install_batched_decode_pipeline_layers(
+    model: nn.Module,
+    group: mx.distributed.Group,
+) -> None:
+    """Replace an already-``pipeline_auto_parallel``-sharded model's
+    first/last ``PipelineFirstLayer``/``PipelineLastLayer`` instances
+    with ``BatchedMetaFramedPipelineFirstLayer``/
+    ``BatchedMetaFramedPipelineLastLayer``, in place, at MODEL-LOAD
+    TIME -- mirrors ``pp_metaframe.install_metaframed_pipeline_layers``
+    exactly (same idempotency check, same ``_set_layers`` call, same
+    "raise if nothing replaced" failure mode), one level up: THIS
+    function installs the BATCHED classes instead of the Phase 0.5
+    single-request ones.
+
+    Deliberately a one-time, load-time swap (never a per-request
+    mid-flight swap) -- both batched layer classes take no per-request
+    state at construction (``r``/``s``/``group`` only; per-step batch
+    composition flows entirely through ``batch_step_scope``'s
+    ``ContextVar``, never through instance attributes), so installing
+    them once before any request runs is safe and sufficient. This
+    avoids inventing risky new "swap a request's layers while another
+    request's decode may already be in flight in the same batch"
+    logic, which was flagged as a genuinely new, unverified piece of
+    engineering during this integration's own design review and
+    explicitly avoided in favor of this simpler, load-time-only
+    installation shape (matching the already-cluster-verified
+    ``EXO_PP_METAFRAME`` pattern this function's caller uses
+    identically).
+    """
+    from exo.worker.engines.mlx.auto_parallel import (
+        PipelineFirstLayer,
+        PipelineLastLayer,
+        _set_layers,
+        get_inner_model,
+        get_layers,
+    )
+
+    inner = get_inner_model(model)
+    layers = list(get_layers(inner))
+    replaced = 0
+    for i, layer in enumerate(layers):
+        if isinstance(layer, PipelineFirstLayer):
+            layers[i] = BatchedMetaFramedPipelineFirstLayer(
+                layer.original_layer, r=layer.r, group=layer.group
+            )
+            replaced += 1
+        elif isinstance(layer, PipelineLastLayer):
+            layers[i] = BatchedMetaFramedPipelineLastLayer(
+                layer.original_layer,
+                r=layer.r,
+                s=layer.s,
+                group=layer.group,
+            )
+            replaced += 1
+    if replaced == 0:
+        raise RuntimeError(
+            "install_batched_decode_pipeline_layers: found no "
+            "PipelineFirstLayer/PipelineLastLayer instances to replace "
+            "-- model is not pipeline-sharded, or was already swapped "
+            "to a metaframed variant (this function must run directly "
+            "on pipeline_auto_parallel's raw output, matching "
+            "install_metaframed_pipeline_layers's own precondition)"
+        )
+    _set_layers(model, layers)
