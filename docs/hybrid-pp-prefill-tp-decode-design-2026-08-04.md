@@ -533,6 +533,29 @@ the option that would have let the design keep TP's already-proven
    bound DSv4 mechanism — the workaround space (subprocess ranks vs.
    further compile-patching) is well-understood even though the final
    fix isn't chosen yet.
+
+   **RESOLVED, 2026-08-05 (later the same session):** built the
+   genuine multi-process harness flagged above as the real fix.
+   `test_pp_batched_decode_subprocess.py` launches two real
+   `subprocess.Popen` Python processes connected via MLX's own real
+   `ring` distributed backend (localhost TCP loopback -- no cluster or
+   RDMA hardware needed; `mlx.launch`'s CLI was avoided since it shells
+   out via ssh-like plumbing even for 127.0.0.1 and is fiddly with
+   venv/PATH resolution for local dev -- direct `MLX_HOSTFILE`/
+   `MLX_RANK` env vars per subprocess work cleanly instead). Confirmed:
+   the MLX cross-thread multi-output-`@mx.compile` bug does NOT apply
+   across real process boundaries (each process has its own single
+   main thread == its own compile-decoration thread). A real (small)
+   DSv4-Flash model -- including its `HyperConnection` multi-output
+   compiled Sinkhorn function, the exact mechanism that crashed the
+   in-process 2-thread harness -- runs a real batched-PP forward pass
+   cleanly across two genuinely separate processes with zero errors.
+   Two real bugs were found and fixed while BUILDING this harness (not
+   in the already-verified session/protocol code): a layer-installation
+   ordering bug (prefill must run before batched metaframe layers are
+   installed) and a `subprocess.Popen` call that silently dropped its
+   constructed `env=` dict. Both tests pass, stable across 3 repeated
+   runs. This closes Risk #1's own required correctness test.
 2. **DSpark + batching scope cut.** Restricting DSpark to concurrency=1
    is a real product/performance tradeoff, not a free lunch — it means
    the fastest decode mode (DSpark) and the concurrency win are mutually
@@ -1345,6 +1368,28 @@ all in-process tests still pass, stable across 3 repeated runs,
 basedpyright/ruff clean, full suite 223 passing with the same 1
 pre-existing unrelated failure.
 
+**Phase 1, step 9 (real 2-process harness, closes Risk #1) — DONE,
+2026-08-05.** Built `test_pp_batched_decode_subprocess.py` +
+`_pp_subprocess_worker.py`: a genuine 2-OS-process correctness
+harness using MLX's real `ring` distributed backend over localhost
+TCP (no cluster/RDMA hardware needed). This closes design doc
+Section 8 Risk #1's own required "dedicated correctness test... at
+temp=0" for real DSv4-Flash -- a real (small) DSv4-Flash model,
+including the exact `HyperConnection` multi-output `@mx.compile`d
+function that crashed this session's in-process 2-thread harness
+(Section 8 Risk #1's earlier update), runs a real batched-PP forward
+pass cleanly across two genuinely separate processes with zero
+errors. Also serves the integration-risk purpose a `consult` review
+flagged when scoping the next production-wiring step: a real process
+boundary is the one thing an in-process/threaded test suite
+structurally cannot exercise. Two real bugs were found and fixed
+while BUILDING the harness itself (layer-installation ordering;
+`subprocess.Popen` silently dropping its `env=` dict) -- not in the
+already-verified session/protocol code, which passed on the first
+correctly-configured run. Both tests pass, stable across 3 repeated
+runs, basedpyright/ruff clean, marked `@pytest.mark.slow` (excluded
+from the default fast suite, matching this project's convention).
+
 Still NOT wired into `mlx_generate`/`stream_generate`'s real request-
 admission path (`ExoBatchGenerator`'s async task queue) -- that is a
 separate, larger integration surface (touching request routing/
@@ -1352,7 +1397,13 @@ concurrency control at the API-server boundary, not just the MLX
 forward-pass mechanics this session's modules own) and is the
 concrete next step before a real cluster A/B of the BATCHED path
 specifically becomes possible (Phase 0.5's transport-only A/B didn't
-need this since it stayed at concurrency=1 throughout).
+need this since it stayed at concurrency=1 throughout). Per the same
+`consult` review: this wiring should land behind an opt-in flag
+(default off, zero change to the existing single-request path),
+proven via runner-level tests targeting the actual call sites (not
+re-verifying the session, which this step and step 8 already did),
+with any real-cluster behavior validation explicitly deferred to the
+separate cluster A/B step.
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
