@@ -267,3 +267,39 @@ def test_merge_then_extract_cachelist_structure_roundtrips() -> None:
         rotating_sub = cache_list_layer.caches[0]  # type: ignore[union-attr]
         assert rotating_sub.keys.shape[2] == 9
         assert bool(mx.all(rotating_sub.keys == 5.0))
+
+
+def test_merge_supports_mid_stream_admission_advanced_plus_fresh() -> None:
+    """THE mid-stream admission case: merging an ALREADY-ADVANCED
+    request's cache (nonzero offset -- it's been decoding for a while)
+    together with a BRAND-NEW request's cache (offset=0, just
+    prefilled, never decoded) into one batch.
+
+    This is the realistic Phase 1 admission scenario: a new request
+    doesn't wait for a natural batch boundary to join -- it merges
+    into an in-progress batch mid-stream. Confirmed here (via
+    mlx-lm's own ``BatchKVCache.merge`` -- not new code in this
+    module) that merge() already handles heterogeneous
+    offsets/lengths correctly for this exact shape, not just the
+    "two similarly-progressed requests" case the other tests above
+    cover. Cross-checked end-to-end against a real 2-layer LlamaModel
+    forward pass in
+    test_pp_batched_decode_driver_full_stack.py's
+    ``test_mid_stream_admission_matches_serial_plain_forwards`` --
+    this test only confirms the cache-merge PRIMITIVE handles the
+    shape; the MLX-level test confirms the actual attention math
+    produces correct results from it."""
+    cache_a_advanced = _make_plain_kv_request_cache(fill_value=1.0, n_tokens=7)
+    cache_b_fresh = _make_plain_kv_request_cache(fill_value=2.0, n_tokens=2)
+
+    merged = merge_request_caches([cache_a_advanced, cache_b_fresh])
+
+    extracted_a = extract_request_cache(merged, 0)
+    extracted_b = extract_request_cache(merged, 1)
+
+    for layer in extracted_a:
+        assert layer.keys.shape[2] == 7  # type: ignore[union-attr]
+        assert bool(mx.all(layer.keys == 1.0))  # type: ignore[union-attr]
+    for layer in extracted_b:
+        assert layer.keys.shape[2] == 2  # type: ignore[union-attr]
+        assert bool(mx.all(layer.keys == 2.0))  # type: ignore[union-attr]

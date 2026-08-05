@@ -268,10 +268,11 @@ def test_full_lifecycle_admit_batch_evict_matches_serial_plain_forwards() -> Non
     )
 
     # Candidate: real 2-rank batched split, both requests admitted
-    # UPFRONT (before any decode step) -- avoids needing an "add a
-    # request into an already-advanced batch" re-merge primitive,
-    # which this session hasn't built yet; that's real future work,
-    # not something this test claims to cover.
+    # UPFRONT (before any decode step) -- this scenario is the
+    # steady-state/eviction case; mid-stream admission (merging an
+    # already-advanced request's cache with a freshly-admitted one) is
+    # covered separately by
+    # test_mid_stream_admission_matches_serial_plain_forwards below.
     rank0_model = _seeded_model(seed=42)
     rank1_model = _seeded_model(seed=42)
     _copy_weights(golden_model, rank0_model)
@@ -397,4 +398,141 @@ def test_full_lifecycle_admit_batch_evict_matches_serial_plain_forwards() -> Non
         next_token_b = int(mx.argmax(logits[0, -1]).item())
         candidate_tokens_b.append(next_token_b)
 
+    assert candidate_tokens_b == golden_tokens_b
+
+
+def test_mid_stream_admission_matches_serial_plain_forwards() -> None:
+    """The mid-stream admission case
+    (test_pp_batched_cache_router.py's
+    ``test_merge_supports_mid_stream_admission_advanced_plus_fresh``
+    confirmed the cache-merge PRIMITIVE handles an already-advanced
+    cache merged with a fresh one; THIS test confirms the actual
+    attention math produces correct results from it, end to end,
+    through the real driver): request A decodes SOLO for 2 steps
+    (real batch of 1), THEN request B is admitted and merges into the
+    SAME in-progress batch (A's cache is already-advanced/nonzero
+    offset, B's is freshly-prefilled/offset matching its own prompt
+    length) -- both then decode TOGETHER for 2 more steps. Greedy
+    tokens for both requests must match their serial plain-forward
+    golden references across the whole lifecycle, confirming
+    mid-stream admission doesn't corrupt A's already-computed KV
+    state or misalign B's fresh state within the merged batch.
+    """
+    vocab_size = _ARGS.vocab_size
+
+    golden_model = _seeded_model(seed=77)
+    prompt_a = _make_prompt(length=4, vocab_size=vocab_size, seed=101)
+    prompt_b = _make_prompt(length=6, vocab_size=vocab_size, seed=202)
+
+    # A: prefill token + 2 solo steps + 2 batched steps (with B) = 5.
+    # B: prefill token + 2 batched steps (joins after A's 2 solo steps) = 3.
+    golden_model_a = _seeded_model(seed=77)
+    _copy_weights(golden_model, golden_model_a)
+    golden_tokens_a = _plain_prefill_and_decode(
+        golden_model_a, prompt_a, n_decode_steps=5
+    )
+
+    golden_model_b = _seeded_model(seed=77)
+    _copy_weights(golden_model, golden_model_b)
+    golden_tokens_b = _plain_prefill_and_decode(
+        golden_model_b, prompt_b, n_decode_steps=3
+    )
+
+    rank0_model = _seeded_model(seed=77)
+    rank1_model = _seeded_model(seed=77)
+    _copy_weights(golden_model, rank0_model)
+    _copy_weights(golden_model, rank1_model)
+
+    cache_a_full = _single_request_prefilled_cache(golden_model, 77, prompt_a)
+    n_layers = len(cache_a_full)
+    mid = n_layers // 2
+    rank0_cache_a = cache_a_full[:mid]
+    rank1_cache_a = cache_a_full[mid:]
+
+    rank0_model, rank1_model, transport = _build_two_rank_batched_split(
+        rank0_model, rank1_model
+    )
+
+    rank0_driver = BatchedDecodeDriver.new(max_concurrency=2)
+    rank1_driver = RankOneMirrorDriver(max_concurrency=2)
+
+    # Admit A alone at slot 0. Real batch of 1.
+    rank1_driver.on_step_message(rank0_driver.admit_request(request_id=1, cache_slot=0))
+    batched_rank0_cache = merge_request_caches([rank0_cache_a])
+    batched_rank1_cache = merge_request_caches([rank1_cache_a])
+
+    candidate_tokens_a: list[int] = [golden_tokens_a[0]]
+    next_token_a = golden_tokens_a[0]
+
+    # A decodes SOLO for 2 steps -- its cache genuinely advances
+    # (nonzero offset) before B ever exists.
+    for _ in range(2):
+        step_msg = rank0_driver.on_tokens_generated((1,))
+        ctx = batch_step_context_from_step_message(step_msg)
+        rank1_driver.on_step_message(step_msg)
+        assert ctx.request_uids == (1,)
+        batched_tokens = mx.array([[next_token_a]])
+        logits = _run_batched_decode_step(
+            rank0_model,
+            rank1_model,
+            transport,
+            batched_tokens,
+            batched_rank0_cache,
+            batched_rank1_cache,
+            request_uids=ctx.request_uids,
+        )
+        next_token_a = int(mx.argmax(logits[0, -1]).item())
+        candidate_tokens_a.append(next_token_a)
+
+    assert candidate_tokens_a == golden_tokens_a[: len(candidate_tokens_a)]
+
+    # B is admitted NOW, mid-stream -- its cache is freshly prefilled
+    # (offset == len(prompt_b)), A's is already-advanced (offset ==
+    # len(prompt_a) + 2). merge_request_caches handles this
+    # heterogeneous-offset case directly (mlx-lm's own
+    # BatchKVCache.merge, confirmed by
+    # test_merge_supports_mid_stream_admission_advanced_plus_fresh) --
+    # extract A's current (already-advanced) single-request cache back
+    # out of its batch-of-1 first, then re-merge alongside B's fresh
+    # one into a real batch-of-2.
+    from exo.worker.engines.mlx.pp_batched_cache_router import extract_request_cache
+
+    advanced_rank0_cache_a = extract_request_cache(batched_rank0_cache, 0)
+    advanced_rank1_cache_a = extract_request_cache(batched_rank1_cache, 0)
+
+    cache_b_full = _single_request_prefilled_cache(golden_model, 77, prompt_b)
+    rank0_cache_b = cache_b_full[:mid]
+    rank1_cache_b = cache_b_full[mid:]
+
+    batched_rank0_cache = merge_request_caches([advanced_rank0_cache_a, rank0_cache_b])
+    batched_rank1_cache = merge_request_caches([advanced_rank1_cache_a, rank1_cache_b])
+
+    rank1_driver.on_step_message(rank0_driver.admit_request(request_id=2, cache_slot=1))
+
+    candidate_tokens_b: list[int] = [golden_tokens_b[0]]
+    next_token_b = golden_tokens_b[0]
+
+    # A and B decode TOGETHER for 2 steps (real batch of 2), from the
+    # mid-stream-merged batched cache.
+    for _ in range(2):
+        step_msg = rank0_driver.on_tokens_generated((1, 2))
+        ctx = batch_step_context_from_step_message(step_msg)
+        rank1_driver.on_step_message(step_msg)
+        assert set(ctx.request_uids) == {1, 2}
+        batched_tokens = mx.array([[next_token_a], [next_token_b]])
+        logits = _run_batched_decode_step(
+            rank0_model,
+            rank1_model,
+            transport,
+            batched_tokens,
+            batched_rank0_cache,
+            batched_rank1_cache,
+            request_uids=ctx.request_uids,
+        )
+        next_token_a = int(mx.argmax(logits[0, -1]).item())
+        next_token_b = int(mx.argmax(logits[1, -1]).item())
+        candidate_tokens_a.append(next_token_a)
+        candidate_tokens_b.append(next_token_b)
+
+    assert candidate_tokens_a == golden_tokens_a
     assert candidate_tokens_b == golden_tokens_b
