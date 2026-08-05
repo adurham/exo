@@ -80,7 +80,22 @@ from exo.worker.engines.mlx.auto_parallel import (
 # Bump if the on-wire frame layout ever changes shape/field meaning.
 # The startup handshake asserts both ranks agree on this before any
 # real traffic flows — see ``handshake_metaframe_protocol``.
-METAFRAME_PROTOCOL_VERSION = 1
+#
+# v2 (2026-08-05): added the ``extra_dim`` header field after the FIRST
+# real cluster run surfaced a genuine correctness bug in v1 — DSv4-Flash
+# broadcasts its residual stream to 4D ``(B, L, hc_mult, D)`` right
+# after embedding (hyper-connections, see ``HyperHead``/
+# ``mlx_lm.models.hyper_connection``) and keeps it that way through
+# EVERY layer, only collapsing back to 3D at the final ``hc_head``/
+# ``norm``. v1's ``activation_template_shape()`` hardcoded a 3D
+# ``(batch, total_tokens, hidden_dim)`` template — silently wrong for
+# any model using hyper-connections, since ``mx.distributed.recv_like``
+# needs a template matching the ACTUAL sent tensor rank, not just its
+# last-dim size. Never caught locally because the Phase 0.5 test suite
+# (test_pp_metaframe.py) uses mlx-lm's plain Llama, which has no
+# hyper-connections and stays 3D throughout — the gap was invisible
+# until the real cluster A/B ran DSv4 for the first time.
+METAFRAME_PROTOCOL_VERSION = 2
 
 # Fixed-shape header, sent as one int32 array immediately before the
 # per-request table (also int32) and, in turn, immediately before the
@@ -95,11 +110,25 @@ METAFRAME_PROTOCOL_VERSION = 1
 #                            (Phase 0.5's scope); Phase 1+ scheduling
 #                            increases this without changing the header
 #                            shape.
-#   [3] hidden_dim         — activation tensor's last dim, so the
+#   [3] hidden_dim         — activation tensor's LAST dim, so the
 #                            receiver can derive the full recv_like
 #                            template shape from the table's per-request
 #                            seq_len without any side-channel knowledge.
-_HEADER_FIELDS = 4
+#   [4] extra_dim          — v2 addition. 0 means the activation tensor
+#                            is 3D: (batch, seq_len, hidden_dim) — the
+#                            common case (plain transformer models). A
+#                            positive value N means the activation
+#                            tensor is 4D: (batch, seq_len, N,
+#                            hidden_dim) — DSv4-Flash's hyper-connection
+#                            residual stream, where N == config.hc_mult.
+#                            Generalizes to "however many extra middle
+#                            dims a given model's residual stream needs"
+#                            without a further protocol-version bump, as
+#                            long as it's exactly one extra dim between
+#                            seq_len and hidden_dim (true for every
+#                            architecture in this fork today).
+_HEADER_FIELDS = 5
+
 
 # Per-request table row width (int32). Field order per row:
 #   [0] request_uid_low32  — low 32 bits of the request UID. exo's
@@ -136,6 +165,7 @@ class MetaFrame:
         "version",
         "phase_flag",
         "hidden_dim",
+        "extra_dim",
         "request_uids",
         "seq_lens",
         "is_last_chunk",
@@ -146,6 +176,7 @@ class MetaFrame:
         version: int,
         phase_flag: int,
         hidden_dim: int,
+        extra_dim: int,
         request_uids: list[int],
         seq_lens: list[int],
         is_last_chunk: list[bool],
@@ -153,6 +184,7 @@ class MetaFrame:
         self.version = version
         self.phase_flag = phase_flag
         self.hidden_dim = hidden_dim
+        self.extra_dim = extra_dim
         self.request_uids = request_uids
         self.seq_lens = seq_lens
         self.is_last_chunk = is_last_chunk
@@ -165,13 +197,23 @@ class MetaFrame:
     def total_tokens(self) -> int:
         return sum(self.seq_lens)
 
-    def activation_template_shape(self, batch_size: int = 1) -> tuple[int, int, int]:
+    def activation_template_shape(self, batch_size: int = 1) -> tuple[int, ...]:
         """Shape of the activation tensor that immediately follows this
         frame on the wire, for use as a ``recv_like`` template. At
         concurrency=1 (Phase 0.5's scope) this is always a single
-        request's ``(1, total_tokens, hidden_dim)`` — the ``batch_size``
-        parameter exists so Phase 1+ batching can reuse this method
-        without a signature change, not because it does anything yet."""
+        request's shape — the ``batch_size`` parameter exists so
+        Phase 1+ batching can reuse this method without a signature
+        change, not because it does anything yet.
+
+        Returns a 3-tuple ``(batch, total_tokens, hidden_dim)`` when
+        ``extra_dim == 0`` (the common case), or a 4-tuple
+        ``(batch, total_tokens, extra_dim, hidden_dim)`` when
+        ``extra_dim > 0`` — DSv4-Flash's hyper-connection residual
+        stream shape. See ``METAFRAME_PROTOCOL_VERSION``'s v2 comment
+        for why this field exists.
+        """
+        if self.extra_dim > 0:
+            return (batch_size, self.total_tokens, self.extra_dim, self.hidden_dim)
         return (batch_size, self.total_tokens, self.hidden_dim)
 
 
@@ -182,14 +224,24 @@ def encode_metaframe(
     request_uid: int,
     seq_len: int,
     is_last_chunk: bool,
+    extra_dim: int = 0,
 ) -> tuple[mx.array, mx.array]:
     """Build the (header, table) int32 array pair for a SINGLE request
     (concurrency=1 — Phase 0.5's scope). Returns two separate arrays
     (not one concatenated array) so the receiver can ``recv_like`` the
     header with a truly fixed, protocol-version-independent shape
-    before it knows ``num_requests`` — see ``recv_metaframe``."""
+    before it knows ``num_requests`` — see ``recv_metaframe``.
+
+    ``extra_dim``: 0 for a plain 3D ``(batch, seq_len, hidden_dim)``
+    activation tensor (most models); pass the size of the extra middle
+    dimension (e.g. DSv4-Flash's ``config.hc_mult``) for a 4D
+    ``(batch, seq_len, extra_dim, hidden_dim)`` tensor. Caller derives
+    this from the ACTUAL tensor being sent (``tensor.ndim == 4``), not
+    from a static model-type check — see the layer classes below.
+    """
     header = mx.array(
-        [METAFRAME_PROTOCOL_VERSION, phase_flag, 1, hidden_dim], dtype=mx.int32
+        [METAFRAME_PROTOCOL_VERSION, phase_flag, 1, hidden_dim, extra_dim],
+        dtype=mx.int32,
     )
     table = mx.array(
         [[request_uid & 0xFFFFFFFF, seq_len, int(is_last_chunk), 0]],
@@ -231,6 +283,7 @@ def recv_metaframe(src: int, *, group: mx.distributed.Group) -> MetaFrame:
     phase_flag: int = int(header_values[1])
     num_requests: int = int(header_values[2])
     hidden_dim: int = int(header_values[3])
+    extra_dim: int = int(header_values[4])
     if version != METAFRAME_PROTOCOL_VERSION:
         raise RuntimeError(
             f"MetaFrame protocol version mismatch: received {version}, "
@@ -254,6 +307,7 @@ def recv_metaframe(src: int, *, group: mx.distributed.Group) -> MetaFrame:
         version=version,
         phase_flag=phase_flag,
         hidden_dim=hidden_dim,
+        extra_dim=extra_dim,
         request_uids=[int(row[0]) for row in rows],
         seq_lens=[int(row[1]) for row in rows],
         is_last_chunk=[bool(row[2]) for row in rows],
@@ -393,8 +447,18 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
             output_to_send = (
                 output.astype(mx.bfloat16) if output.dtype != mx.bfloat16 else output
             )
+            # DSv4-Flash's hyper-connection residual stream is 4D
+            # (batch, seq_len, hc_mult, hidden_dim); everything else in
+            # this fork is 3D (batch, seq_len, hidden_dim). seq_len is
+            # always axis 1 and hidden_dim always the LAST axis
+            # regardless of rank, so only the extra middle axis (if
+            # present) needs deriving from the actual tensor shape —
+            # never a static per-model-type assumption. See
+            # METAFRAME_PROTOCOL_VERSION's v2 comment for the incident
+            # this fixes.
             seq_len = int(output_to_send.shape[1])
             hidden_dim = int(output_to_send.shape[-1])
+            extra_dim = int(output_to_send.shape[2]) if output_to_send.ndim == 4 else 0
             phase_flag = 0 if self.is_prefill else 1
             header, table = encode_metaframe(
                 phase_flag=phase_flag,
@@ -402,6 +466,7 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
                 request_uid=self.request_uid,
                 seq_len=seq_len,
                 is_last_chunk=not self.is_prefill,
+                extra_dim=extra_dim,
             )
             dst = (self.r + 1) % self.s
             if self.queue_sends:
@@ -444,12 +509,18 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
             if self.r == self.s - 1:
                 seq_len = int(output_for_gather.shape[1])
                 hidden_dim = int(output_for_gather.shape[-1])
+                extra_dim = (
+                    int(output_for_gather.shape[2])
+                    if output_for_gather.ndim == 4
+                    else 0
+                )
                 header, table = encode_metaframe(
                     phase_flag=1,
                     hidden_dim=hidden_dim,
                     request_uid=self.request_uid,
                     seq_len=seq_len,
                     is_last_chunk=True,
+                    extra_dim=extra_dim,
                 )
                 send_metaframe(header, table, 0, group=self.group)
                 sent = mx.distributed.send(output_for_gather, 0, group=self.group)

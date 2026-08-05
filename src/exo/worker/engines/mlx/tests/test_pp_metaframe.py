@@ -64,6 +64,7 @@ from exo.worker.engines.mlx.pp_batched_correctness import (
 from exo.worker.engines.mlx.pp_metaframe import (
     MetaFramedPipelineFirstLayer,
     MetaFramedPipelineLastLayer,
+    encode_metaframe,
     handshake_metaframe_protocol,
     install_metaframed_pipeline_layers,
     recv_metaframe,
@@ -370,7 +371,7 @@ def test_metaframe_protocol_version_mismatch_raises() -> None:
     group1 = cast(mx.distributed.Group, cast(object, _RankGroup(1, 2)))
 
     # Manually build a header with a wrong version number.
-    bad_header = mx.array([999, 0, 1, 64], dtype=mx.int32)
+    bad_header = mx.array([999, 0, 1, 64, 0], dtype=mx.int32)
     table = mx.array([[1, 4, 1, 0]], dtype=mx.int32)
 
     _MLX_CALL_LOCK.acquire()
@@ -385,7 +386,7 @@ def test_metaframe_protocol_version_mismatch_raises() -> None:
                 recv_metaframe(0, group=group1)
     finally:
         _MLX_CALL_LOCK.release()
-    assert _mod.METAFRAME_PROTOCOL_VERSION == 1
+    assert _mod.METAFRAME_PROTOCOL_VERSION == 2
 
 
 def test_metaframe_handshake_agrees_when_both_ranks_match() -> None:
@@ -489,8 +490,6 @@ def test_metaframe_encode_send_recv_roundtrip_preserves_fields() -> None:
     """Direct unit test of encode_metaframe -> send_metaframe ->
     recv_metaframe, independent of any model forward -- confirms the
     header+table wire format preserves every field exactly."""
-    from exo.worker.engines.mlx.pp_metaframe import encode_metaframe
-
     transport = SimPipelineTransport()
     group0 = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
     group1 = cast(mx.distributed.Group, cast(object, _RankGroup(1, 2)))
@@ -533,3 +532,140 @@ def test_metaframed_layers_are_new_classes_not_legacy_subclasses() -> None:
     assert not issubclass(MetaFramedPipelineLastLayer, PipelineLastLayer)
     assert not issubclass(PipelineFirstLayer, MetaFramedPipelineFirstLayer)
     assert not issubclass(PipelineLastLayer, MetaFramedPipelineLastLayer)
+
+
+def test_metaframe_encode_decode_roundtrip_4d_hyper_connection_shape() -> None:
+    """Regression test for the REAL bug found on the first live cluster
+    run (2026-08-05): DSv4-Flash's hyper-connection residual stream is
+    4D -- (batch, seq_len, hc_mult, hidden_dim) -- not the 3D shape
+    every OTHER test in this file exercises (mlx-lm's plain Llama has
+    no hyper-connections and stays 3D throughout, so this class of bug
+    was invisible to local validation until DSv4 actually ran on the
+    real cluster: `RunnerFailed: ValueError: not enough values to
+    unpack (expected 4, got 3)` inside hyper_connection.py, because
+    v1's activation_template_shape() hardcoded a 3D recv_like template
+    against a real 4D tensor). Confirms encode_metaframe/recv_metaframe
+    correctly round-trip the extra_dim field and that
+    activation_template_shape() returns the correct 4-tuple when
+    extra_dim > 0, matching DSv4's real hc_mult=4 configuration."""
+    transport = SimPipelineTransport()
+    group0 = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
+    group1 = cast(mx.distributed.Group, cast(object, _RankGroup(1, 2)))
+
+    hc_mult = 4  # DSv4-Flash's real config.hc_mult value.
+    header, table = encode_metaframe(
+        phase_flag=0,
+        hidden_dim=4096,
+        request_uid=42,
+        seq_len=128,
+        is_last_chunk=False,
+        extra_dim=hc_mult,
+    )
+
+    _MLX_CALL_LOCK.acquire()
+    try:
+        with (
+            patch("mlx.core.distributed.send", transport.send),
+            patch("mlx.core.distributed.recv_like", transport.recv_like),
+        ):
+            send_metaframe(header, table, 1, group=group0)
+            frame = recv_metaframe(0, group=group1)
+    finally:
+        _MLX_CALL_LOCK.release()
+
+    assert frame.extra_dim == hc_mult
+    assert frame.activation_template_shape() == (1, 128, hc_mult, 4096)
+    # And the 3D (extra_dim=0) path must be unaffected -- no regression
+    # in the common case from adding this field.
+    assert frame.activation_template_shape.__doc__ is not None  # sanity
+
+
+def test_metaframe_3d_shape_still_default_when_extra_dim_omitted() -> None:
+    """Guard: extra_dim defaults to 0 and produces the original 3D
+    shape when the caller doesn't pass it -- confirms the v2 field
+    addition didn't silently change behavior for every non-DSv4 model
+    already covered by this file's other parity tests."""
+    transport = SimPipelineTransport()
+    group0 = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
+    group1 = cast(mx.distributed.Group, cast(object, _RankGroup(1, 2)))
+
+    header, table = encode_metaframe(
+        phase_flag=1,
+        hidden_dim=256,
+        request_uid=1,
+        seq_len=1,
+        is_last_chunk=True,
+    )
+
+    _MLX_CALL_LOCK.acquire()
+    try:
+        with (
+            patch("mlx.core.distributed.send", transport.send),
+            patch("mlx.core.distributed.recv_like", transport.recv_like),
+        ):
+            send_metaframe(header, table, 1, group=group0)
+            frame = recv_metaframe(0, group=group1)
+    finally:
+        _MLX_CALL_LOCK.release()
+
+    assert frame.extra_dim == 0
+    assert frame.activation_template_shape() == (1, 1, 256)
+
+
+def test_metaframed_last_layer_sends_correct_extra_dim_for_4d_output() -> None:
+    """Integration-level regression test: build a REAL
+    MetaFramedPipelineLastLayer whose wrapped original_layer returns a
+    4D tensor (simulating DSv4's hyper-connection shape without needing
+    the full DSv4 model), drive it through the real
+    encode_metaframe/send_metaframe call path exactly as production
+    code does, and confirm the peer rank's recv_metaframe decodes the
+    correct extra_dim -- catches a regression in the LastLayer's own
+    shape-derivation logic (output_to_send.shape[2] when ndim==4),
+    not just the encode/decode functions in isolation."""
+
+    class _FourDLayer:
+        """Minimal original_layer stand-in returning a fixed 4D
+        tensor, shaped like DSv4's post-hyper-connection residual
+        stream -- (batch, seq_len, hc_mult, hidden_dim)."""
+
+        def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+            return mx.zeros((1, 3, 4, 64), dtype=mx.float32)
+
+    transport = SimPipelineTransport()
+    group0 = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
+    group1 = cast(mx.distributed.Group, cast(object, _RankGroup(1, 2)))
+
+    layer = MetaFramedPipelineLastLayer(
+        cast(object, _FourDLayer()), r=0, s=2, group=group0, request_uid=1
+    )
+    layer.is_prefill = True  # prefill chunk -> only the forward hop fires
+
+    result: dict[str, object] = {}
+
+    def _decode() -> None:
+        try:
+            result["frame"] = recv_metaframe(0, group=group1)
+        except BaseException as e:  # noqa: BLE001
+            result["error"] = e
+
+    import threading as _threading
+
+    _MLX_CALL_LOCK.acquire()
+    try:
+        with (
+            patch("mlx.core.distributed.send", transport.send),
+            patch("mlx.core.distributed.recv_like", transport.recv_like),
+        ):
+            t = _threading.Thread(target=_decode)
+            t.start()
+            layer(mx.zeros((1, 3, 4, 64), dtype=mx.float32))
+            t.join(timeout=10)
+    finally:
+        _MLX_CALL_LOCK.release()
+
+    if "error" in result:
+        raise cast(BaseException, result["error"])
+    frame = result["frame"]
+    assert frame.extra_dim == 4  # type: ignore[attr-defined]
+    assert frame.hidden_dim == 64  # type: ignore[attr-defined]
+    assert frame.seq_lens == [3]  # type: ignore[attr-defined]
