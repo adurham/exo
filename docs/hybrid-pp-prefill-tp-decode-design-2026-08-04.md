@@ -1593,26 +1593,73 @@ the exact "two ranks independently reconfiguring shared wire-link
 state" bug class that `PPSpecAlreadyActiveError`'s own docstring
 describes as a real, already-fixed 2026-07-20 incident for the
 speculative-decode path, is real, unstarted design work -- not
-mechanical wiring. Combined with the still-unaddressed admission-gate
-and unverified-hot-path concerns from the earlier attempt, the
-responsible stopping point remains the same: the fully-tested,
-independently-verifiable building blocks (eligibility gate, response
-adapter, layer install/detection) are complete and committed; the
-`ExoBatchGenerator.submit()`/`step()` edit itself needs a real
-admission-broadcast design (new work) plus real 2-rank execution to
-verify safely, neither of which this session could responsibly
-produce blind.
+mechanical wiring.
+
+**CORRECTION, 2026-08-05 (same day, later still):** the above
+"need a new admission-broadcast mechanism" conclusion was WRONG --
+re-tracing this session's OWN already-built code (not new
+investigation) found the mechanism already exists and was simply not
+recalled at the point of the third `consult` review:
+`BatchedDecodeDriver.admit_request`/`RankOneMirrorDriver` (built and
+tested earlier this session, `pp_batched_decode_driver.py`) already
+implement exactly "rank 0 decides admission, encodes it into a real
+`StepMessage` (a cache slot transitioning from FREE to occupied,
+detected reactively by `RankOneMirror.validate_step`), rank 1 mirrors
+it via the real wire (`pp_scheduler_wire.py`)" -- the SAME mechanism
+already proven correct for per-step batch composition changes
+(admission is not a structurally different operation from a slot
+gaining/losing an entry between steps, which this session's tests
+already cover). No new protocol design is needed for the wire-level
+admission decision itself.
+
+The other real concern from the earlier analysis -- whether
+`is_eligible_for_batched_decode`'s inputs are guaranteed
+cross-rank-identical -- also resolves cleanly: `submit()` ALREADY has
+a real, production-proven cross-rank agreement mechanism for the one
+genuinely rank-local input in the gate (`is_prefix_cache_hit`, since
+each rank's own `KVPrefixCache` is a local, independently-populated
+structure) -- `pipeline_agree_prefix_hit_length()`
+(`utils_mlx.py`, used today under `EXO_PP_NO_COORD_COLLECTIVE=1`, the
+standard PP launch config) runs BEFORE the eligibility check would
+need it, agreeing every rank to the SAME hit-length via the real p2p
+wire protocol ("unanimous or cold": any mismatch collapses to
+hit_length=0 on every rank identically). Every other gate input
+(`has_images`, `has_tools`, `uses_speculative_decode`,
+`sharding_is_pipeline`, `batched_decode_enabled`) is derived from
+`task_params`/config/env, which every rank already receives
+identically via the master's own event-sourced broadcast
+(`GLOBAL_EVENTS`, per `AGENTS.md`'s architecture: "Master indexes events and
+broadcasts; workers apply indexed events" -- confirmed via
+`worker/main.py`'s `_event_applier`/`_start_runner_task`, both ranks'
+runners receive the SAME `TextGeneration` task object from the SAME
+ordered event log). So the eligibility gate, evaluated identically and
+independently on both ranks against inputs that are ALREADY guaranteed
+identical by existing infrastructure, produces the same admission
+verdict on both ranks without needing its own separate broadcast --
+this satisfies the "input determinism" requirement a `consult` review
+flagged as the correct test (as opposed to a NEW broadcast of the
+verdict itself, which would be redundant given the wire-level
+admission mechanism above already exists).
+
+Net effect of this correction: prerequisite item 2 below is CLOSED --
+no new design work needed, only the same mechanical wiring the
+original (pre-correction) plan already described. The real remaining
+blockers are items 1, 3, and 4 below (admission-gate change,
+real-path verification, interleaving test) -- none of which this
+session has cluster access or a mocked-runner harness to close safely
+without an explicit new push in that direction.
 
 **Full standing list of prerequisites for whoever attempts the
 `ExoBatchGenerator` dispatch wiring next**, updated:
 1. `EXO_MAX_CONCURRENT_REQUESTS=1` (`start_cluster.sh`) needs its own
    explicit, separately-reviewed change -- the batched path is
    unreachable dead code without it.
-2. A rank-0-decides/rank-1-replays admission-broadcast mechanism for
-   `submit()` (this stretch's finding) -- design work, not wiring.
-   The existing `pp_scheduler_wire.py`/`StepMessage` machinery is the
-   right foundation but does not yet cover the ADMISSION decision
-   itself, only per-step composition once a request is already in.
+2. ~~A rank-0-decides/rank-1-replays admission-broadcast mechanism~~
+   CLOSED (see correction above) -- `BatchedDecodeDriver`/
+   `RankOneMirrorDriver`/`pp_scheduler_wire.py` already provide this;
+   the eligibility gate's inputs are already cross-rank-identical via
+   existing infrastructure (`pipeline_agree_prefix_hit_length` +
+   the master's event-sourced task broadcast). No new design needed.
 3. A real-path batch=1 smoke test proving the flag-off (or flag-on-
    but-single-request) case is byte-identical to today's existing
    behavior.
