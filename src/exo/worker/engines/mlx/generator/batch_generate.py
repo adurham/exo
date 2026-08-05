@@ -4,7 +4,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generator, Literal, cast
+from typing import TYPE_CHECKING, Any, Callable, Generator, Literal, cast
 
 import mlx.core as mx
 from mlx_lm.generate import (
@@ -74,6 +74,12 @@ from exo.worker.engines.mlx.vision import (
     prepare_vision,
 )
 from exo.worker.runner.bootstrap import logger
+
+if TYPE_CHECKING:
+    from exo.worker.engines.mlx.pp_batched_decode_glue import (
+        Rank0BatchedDecodeGlue,
+        Rank1BatchedDecodeGlue,
+    )
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 REMOTE_PREFILL_MIN_TOKENS = 1000
@@ -687,6 +693,30 @@ class ExoBatchGenerator:
     # not a real request id — never sent anywhere else).
     _prefix_hit_agree_tag: int = field(init=False, default=0)
 
+    # Phase 1 batched-decode (design doc, Section 9) -- opt-in,
+    # EXO_PP_BATCHED_DECODE=1 + real BatchedMetaFramedPipelineFirstLayer/
+    # LastLayer already installed at model-load time (see utils_mlx.py's
+    # EXO_PP_BATCHED_DECODE branch). LATCHED ONCE at __post_init__ (see
+    # this class's own docstring convention for _pp_spec_active) -- a
+    # mid-session flip of this flag is not supported, matching every
+    # other engine-selection flag in this class. Default OFF: when
+    # False, this entire subsystem is never constructed and submit()/
+    # step() take their existing, unmodified code paths -- see the
+    # single `if self._batched_decode_active:` branch point in each.
+    _batched_decode_active: bool = field(init=False, default=False)
+    # Exactly one of these two is non-None when _batched_decode_active
+    # is True (rank 0 gets the admitting/sampling glue, rank 1 gets the
+    # mirroring-only glue) -- never both, matching
+    # BatchedDecodeSession/RankOneMirrorSession's own rank-exclusive
+    # design.
+    _batched_decode_rank0_glue: "Rank0BatchedDecodeGlue | None" = field(
+        init=False, default=None
+    )
+    _batched_decode_rank1_glue: "Rank1BatchedDecodeGlue | None" = field(
+        init=False, default=None
+    )
+    _batched_decode_eos: set[int] = field(init=False, default_factory=set)
+
     def __post_init__(self) -> None:
         use_speculative = os.environ.get("EXO_SPECULATIVE", "0") == "1"
         stop_tokens = set(eos_ids_from_tokenizer(self.tokenizer))
@@ -916,6 +946,159 @@ class ExoBatchGenerator:
                         self._pp_mtp = None
             except Exception:
                 pass
+
+        # Phase 1 batched-decode (design doc Section 9): construct the
+        # rank-appropriate glue ONLY when explicitly opted in
+        # (EXO_PP_BATCHED_DECODE=1) AND the batched pipeline layers are
+        # actually installed on this model (get_batched_pipeline_info
+        # returns non-None only when utils_mlx.py's EXO_PP_BATCHED_
+        # DECODE branch actually ran at load time -- see that module's
+        # own gate). Mutually exclusive with PP-spec by construction:
+        # get_batched_pipeline_info only ever finds
+        # BatchedMetaFramedPipelineLastLayer, a DIFFERENT layer class
+        # than PP-spec's SpecPipelineLastLayer
+        # (get_pipeline_info/pp_speculation.py), so a model can never
+        # satisfy both checks at once. Latched HERE, once, for the
+        # lifetime of this generator instance -- mirrors _pp_spec_active's
+        # own single-construction-time-decision convention; no
+        # mid-session flag flips are supported anywhere in this class.
+        if os.environ.get("EXO_PP_BATCHED_DECODE", "0") == "1":
+            try:
+                from exo.worker.engines.mlx.pp_batched_decode_layers import (
+                    get_batched_pipeline_info,
+                )
+
+                pipeline_info = get_batched_pipeline_info(self.model)
+                if pipeline_info is not None:
+                    rank, _world_size, group = pipeline_info
+                    self._batched_decode_eos = set(
+                        eos_ids_from_tokenizer(self.tokenizer)
+                    )
+                    if rank == 0:
+                        from exo.worker.engines.mlx.pp_batched_decode_adapter import (
+                            BatchedDecodeResponseAdapter,
+                        )
+                        from exo.worker.engines.mlx.pp_batched_decode_glue import (
+                            Rank0BatchedDecodeGlue,
+                        )
+                        from exo.worker.engines.mlx.pp_batched_decode_runtime import (
+                            BatchedDecodeSession,
+                        )
+
+                        session = BatchedDecodeSession.new(max_concurrency=2)
+                        adapter = BatchedDecodeResponseAdapter(
+                            session=session, eos_ids=frozenset(self._batched_decode_eos)
+                        )
+                        self._batched_decode_rank0_glue = Rank0BatchedDecodeGlue(
+                            session=session,
+                            adapter=adapter,
+                            dst_rank=1,
+                            group=group,
+                        )
+                        logger.info(
+                            "Phase 1 batched-decode ENABLED (rank 0, "
+                            "admission+decode glue constructed)"
+                        )
+                    else:
+                        from exo.worker.engines.mlx.pp_batched_decode_glue import (
+                            Rank1BatchedDecodeGlue,
+                        )
+                        from exo.worker.engines.mlx.pp_batched_decode_runtime import (
+                            RankOneMirrorSession,
+                        )
+
+                        mirror_session = RankOneMirrorSession.new(max_concurrency=2)
+                        self._batched_decode_rank1_glue = Rank1BatchedDecodeGlue(
+                            session=mirror_session, src_rank=0, group=group
+                        )
+                        logger.info(
+                            "Phase 1 batched-decode ENABLED (rank 1, "
+                            "mirror glue constructed)"
+                        )
+                    self._batched_decode_active = True
+                else:
+                    logger.info(
+                        "EXO_PP_BATCHED_DECODE=1 but "
+                        "get_batched_pipeline_info found no installed "
+                        "batched pipeline layers on this model -- "
+                        "batched-decode path stays OFF for this "
+                        "generator instance (falls through to the "
+                        "existing submit()/step() paths unmodified)."
+                    )
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Phase 1 batched-decode construction failed -- "
+                    "falling back to the existing submit()/step() "
+                    "paths unmodified for this generator instance."
+                )
+                self._batched_decode_active = False
+                self._batched_decode_rank0_glue = None
+                self._batched_decode_rank1_glue = None
+
+    def _submit_batched_decode(
+        self,
+        task_params: TextGenerationTaskParams,
+        cache: KVCacheType,
+        last_tokens: mx.array,
+        sampler: Callable[[mx.array], mx.array],
+        max_tokens: int,
+        on_generation_token: Callable[[], None] | None,
+        prefill_tps: float,
+    ) -> int:
+        """Admission path for the Phase 1 batched-decode session
+        (design doc Section 9). Mirrors ``submit()``'s own uid
+        allocation and ``_active_tasks`` bookkeeping exactly -- the
+        SAME uid space, the SAME ``_EngineTask`` shape -- so every
+        downstream consumer (``step()``'s response-processing loop,
+        cancellation, stats) works completely unmodified regardless
+        of which engine produced a given uid.
+
+        Calls ONLY ``Rank0BatchedDecodeGlue.enqueue_admission`` --
+        per that module's own docstring and the `consult` review
+        behind its design, this is PURE in-memory queueing with ZERO
+        wire I/O, so this method cannot hang or race the decode-step
+        loop. The actual admission (real wire send) happens later,
+        inside ``step()``'s ``tick()`` call -- the single-writer rule
+        this whole subsystem is built around.
+        """
+        assert self._batched_decode_rank0_glue is not None
+
+        uid = self._uid_counter
+        self._uid_counter += 1
+
+        # cache_slot: Phase 1 scope is max_concurrency=2 (see
+        # BatchedDecodeSession.new's own default) -- reuse
+        # len(_active_tasks) at admission time as a simple 2-slot
+        # allocator (0 or 1), matching the max_concurrency this
+        # session/glue pair was constructed with above.
+        cache_slot = len(self._active_tasks) % 2
+
+        self._batched_decode_rank0_glue.enqueue_admission(
+            request_id=uid,
+            cache_slot=cache_slot,
+            prefilled_cache=cache,
+            initial_token=int(last_tokens[-1].item()),
+            sampler=sampler,
+            max_tokens=max_tokens,
+        )
+
+        self._active_tasks[uid] = _EngineTask(
+            uid=uid,
+            task_params=task_params,
+            all_prompt_tokens=last_tokens,
+            prefix_hit_length=0,
+            matched_index=None,
+            is_exact_hit=False,
+            cache_snapshots=None,
+            detokenizer=self.tokenizer.detokenizer,
+            on_generation_token=on_generation_token,
+            generation_start_time=time.perf_counter(),
+            prefill_tps=prefill_tps,
+            generation_time_at_start=0.0,
+            media_regions=[],
+        )
+        self._update_fence_arming()
+        return uid
 
     def _model_hidden_size(self) -> int | None:
         """Return the hidden_size of the loaded model, or None if undetectable.
@@ -1772,6 +1955,31 @@ class ExoBatchGenerator:
             if is_bench:
                 eos_ids = eos_ids_from_tokenizer(self.tokenizer)
                 logits_processors = [ban_token_ids(eos_ids)] + logits_processors
+
+        if self._batched_decode_active and self._batched_decode_rank0_glue is not None:
+            from exo.worker.engines.mlx.pp_batched_decode_eligibility import (
+                is_eligible_for_batched_decode,
+            )
+
+            eligibility = is_eligible_for_batched_decode(
+                has_images=bool(task_params.images),
+                has_tools=bool(task_params.tools),
+                uses_speculative_decode=hasattr(self._mlx_gen, "mtp"),
+                is_prefix_cache_hit=prefix_hit_length > 0,
+                sharding_is_pipeline=self.group is not None
+                and self.group.size() > 1,
+                batched_decode_enabled=True,
+            )
+            if eligibility.eligible:
+                with T("submit.batched_decode_enqueue"):
+                    return self._submit_batched_decode(
+                        task_params, cache, last_tokens, sampler, max_tokens,
+                        on_generation_token, _prefill_tps,
+                    )
+            logger.debug(
+                f"batched-decode ineligible, falling back to serial submit(): "
+                f"{eligibility.reason}"
+            )
 
         if self._pp_spec_active:
             with T("submit.pp_spec_setup"):
@@ -2729,6 +2937,58 @@ class ExoBatchGenerator:
             except Exception:
                 logger.debug("pp spec-decode generator close() raised", exc_info=True)
 
+    def _step_batched_decode(self) -> list[GenerationBatch.Response]:
+        """One step of the Phase 1 batched-decode session (design doc
+        Section 9). Rank-appropriate: rank 0 calls ``tick()`` on its
+        admitting/sampling glue and translates the result into real
+        ``GenerationBatch.Response`` objects (the SAME contract
+        ``_step_pp_spec`` returns, so the rest of ``step()``'s
+        response-processing loop works completely unmodified); rank 1
+        calls ``tick()`` on its mirror-only glue and always returns an
+        empty list (it has no decode output of its own to report to a
+        client -- matches ``RankOneMirrorSession``'s own
+        zero-decision-logic design and the pp_spec path's existing
+        rank1-produces-nothing convention).
+
+        Eviction (a request hitting EOS/max_tokens/degeneration) is
+        driven from HERE, sequentially AFTER ``tick()`` returns --
+        never concurrently with it. This stays inside the same
+        single-writer call chain the whole glue subsystem is built
+        around (``step()`` -> this method -> ``tick()`` then,
+        separately, ``complete_request()``), matching how PP's
+        existing send/recv-based decode loop elsewhere in this class
+        already blocks synchronously rank-to-rank every step -- this
+        is not new risk beyond what every other PP code path in this
+        file already accepts.
+        """
+        if self._batched_decode_rank1_glue is not None:
+            self._batched_decode_rank1_glue.tick(self.model)
+            return []
+
+        assert self._batched_decode_rank0_glue is not None
+        classified, _admitted_id = self._batched_decode_rank0_glue.tick(self.model)
+
+        responses: list[GenerationBatch.Response] = []
+        to_evict: list[int] = []
+        for request_id, result in classified.items():
+            finish_reason = result.finish_reason
+            responses.append(GenerationBatch.Response(
+                uid=request_id, token=result.token, logprobs=mx.zeros(1),
+                finish_reason=finish_reason, current_state=None,
+                match_sequence=None, prompt_cache=None, all_tokens=None,
+            ))
+            if finish_reason is not None:
+                to_evict.append(request_id)
+
+        # Eviction happens AFTER building this step's responses (never
+        # while classified.items() is still being iterated) -- mirrors
+        # step()'s own established "evict after the loop" discipline
+        # for the degeneration kill-switch / stop-sequence paths below.
+        for request_id in to_evict:
+            self._batched_decode_rank0_glue.complete_request(request_id)
+
+        return responses
+
     def step(self) -> list[tuple[int, GenerationResponse]]:
         # EXO_DECODE_PROBE: measure wall + GPU time per step() call (= per token
         # in single-stream mode). Aggregates over EXO_DECODE_PROBE_EVERY tokens
@@ -2796,7 +3056,12 @@ class ExoBatchGenerator:
         # response of every PP-spec completion. was_pp_spec_step is that
         # decision, frozen at the top of this call.
         was_pp_spec_step = bool(self._pp_spec_gen_by_uid)
-        if was_pp_spec_step:
+        if self._batched_decode_active:
+            _step_tic = time.perf_counter()
+            responses = self._step_batched_decode()
+            _next_elapsed = time.perf_counter() - _step_tic
+            request_trace.record("decode.step.mlx_next", _step_tic)
+        elif was_pp_spec_step:
             _step_tic = time.perf_counter()
             responses = self._step_pp_spec()
             _next_elapsed = time.perf_counter() - _step_tic
