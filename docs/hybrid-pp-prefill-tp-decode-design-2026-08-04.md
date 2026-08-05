@@ -1256,13 +1256,52 @@ correct at the CPU/simulated-transport level, through the real
 scheduler/cache-router/metaframe stack, not hand-picked test
 shortcuts.
 
-Not yet done: the real 2-node cluster A/B for this batched path
-(everything above is simulated-2-rank, proven correct at the CPU/logic
-level per this fork's established Phase 0 rationale for keeping
-GPU/cluster time off correctness questions the CPU can answer just as
-definitively -- but per the design doc's OWN methodology, a real-
-cluster confirmation is still the final step before calling Phase 1
-done, exactly as Phase 0.5's transport was).
+Not yet done at the time of step 5: the real 2-node cluster A/B for
+this batched path (everything above is simulated-2-rank, proven
+correct at the CPU/logic level per this fork's established Phase 0
+rationale for keeping GPU/cluster time off correctness questions the
+CPU can answer just as definitively).
+
+**Phase 1, step 6 (real decode-loop runtime session) — DONE,
+2026-08-05.** Everything built through step 5 was pure scheduling/
+transport glue (`SchedulerCore`/`RankOneMirror` protocol,
+`BatchedCacheRouter`, `BatchedMetaFramedPipeline*Layer`,
+`BatchedDecodeDriver`/`RankOneMirrorDriver`) -- nothing yet DROVE an
+actual `model(...)` call with real per-request sampling, generation
+state, and eviction as a usable session object. Built
+`pp_batched_decode_runtime.py`: `BatchedDecodeSession` (rank 0) owns
+per-request generation state (next_token, sampler, done flag) OUTSIDE
+the driver (which only owns protocol/cache-slot bookkeeping, never
+generation policy), and a three-phase `prepare_step`/`run_forward`/
+`finish_step` API -- split out from a single `step()` call
+SPECIFICALLY so a real 2-rank caller can hand rank 1 the `StepMessage`
+BEFORE either rank's forward pass starts, matching the real
+transport's actual ordering constraint (this also eliminated a race
+that an earlier single-call design hit in the 2-thread simulated-
+transport test harness, which needed a busy-poll workaround before the
+split; the split removes the race structurally instead of masking it).
+`RankOneMirrorSession` is the symmetric rank-1 side: zero sampling,
+zero generation-policy decisions, only validation + its own half of
+the identical forward pass.
+
+Verified via `test_pp_batched_decode_runtime.py` (3 new tests): the
+full multi-step lifecycle (admit both, batch decode, evict one,
+continue solo) through the REAL session API end to end, matching
+serial plain-forward golden references exactly -- plus a single-rank
+convenience-wrapper test and a `batch_step_scope` regression guard
+confirming `run_forward` really does activate the SAME
+`BatchStepContext` `prepare_step` computed. 3/3 passing, stable across
+3 repeated runs, basedpyright/ruff clean. Full worker suite: 211
+passing, same 1 pre-existing unrelated failure, 0 new regressions.
+
+Still NOT wired into `mlx_generate`/`stream_generate`'s real request-
+admission path (`ExoBatchGenerator`'s async task queue) -- that is a
+separate, larger integration surface (touching request routing/
+concurrency control at the API-server boundary, not just the MLX
+forward-pass mechanics this session's modules own) and is the
+concrete next step before a real cluster A/B of the BATCHED path
+specifically becomes possible (Phase 0.5's transport-only A/B didn't
+need this since it stayed at concurrency=1 throughout).
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
