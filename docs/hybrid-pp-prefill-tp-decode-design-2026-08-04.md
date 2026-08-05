@@ -92,25 +92,59 @@ against, instead of "measure throughput" with no number attached.
    cancellation must work during BOTH prefill and decode once this design
    ships, which is a strictly higher bar than what TP already does today.
 
-3. **Decode throughput: ≥37.5 tok/s aggregate at c=2, MTP on.**
-   STATUS: this exact number is ALREADY CONFIRMED ACHIEVED under TP —
-   warm memory fact 745 (2026-06-26, `concurrent_bench.py`, MTP on,
-   seq-split on, "verified config"): 37.5 tok/s aggregate (18.7 tok/s
-   per-request × 2 concurrent), stable (tail_ratio 1.02, zero errors),
-   beating the team's own 30 tok/s c=2 target by 25%. CRITICAL SCOPING
-   CAVEAT that must not get lost: fact 745's benchmark used a SHORT
-   prompt (120 words) with `max_tokens=512` — i.e., this number is
-   confirmed at LOW context depth, not at 100K/500K. No measurement of
-   c=2 MTP-on decode throughput at real (100K+) context depth exists in
-   this fork's history as of this doc. Decode throughput typically
-   degrades with context depth (KV-cache read cost grows), so 37.5 tok/s
-   holding at 500K is NOT something to assume — it is something Phase 3's
-   throughput validation MUST explicitly test at multiple context depths
-   (short, 100K, 500K), not just reproduce the short-prompt number and
-   declare victory. Also note: MTP, not DSpark, is the mechanism behind
-   this number — DSpark has its own separate, unresolved reliability bug
-   (Section 8 item 3) and is explicitly NOT part of this throughput
-   requirement's validated baseline.
+3. **Decode throughput: ≥30 tok/s AT 500K CONTEXT — REVISED 2026-08-04,
+   the goal below SUPERSEDES the original "37.5 tok/s at c=2" framing.**
+   User's own words, stated directly: "My real goal here is 30 tok/s of
+   decode at 500K of context, IDEALLY with that being N=2, but that may
+   not be feasible... I just know we had much better decode throughput
+   on TP and I want to work to get that back without losing the 400+
+   tok/s of prefill we get with PP." This is a SIMPLER, more honest
+   target than the original number, and changes what needs validating:
+   - **The core bar: 30 tok/s decode AT 500K context.** N=2 concurrency
+     is explicitly a NICE-TO-HAVE on top of that, not a hard gate —
+     if 500K-depth decode throughput and N=2 concurrency turn out to be
+     in tension, the 30 tok/s / 500K number wins.
+   - **STATUS: UNMEASURED, for either sharding scheme, at real depth.**
+     This is a real gap that needs to be named plainly, not glossed
+     over: there is NO existing measurement anywhere in this fork's
+     history of decode throughput specifically AT 500K context, under
+     ANY configuration — PP or TP, with or without speculation. Every
+     number cited in this doc's prior revisions (24.68 tok/s PP
+     no-speculation, 37.5 tok/s TP+MTP, the 15.5 tok/s c=1 100K figure)
+     was measured at SHORT prompts or, at best, 100K context — NOT 500K.
+     Decode cost scales with context depth (KV-cache read grows), so
+     none of these numbers can be assumed to hold at 500K; they're
+     starting points for extrapolation, not answers.
+   - **"We had much better decode throughput on TP" — this needs a
+     direct check before design work continues.** The user's own recall
+     of TP's real advantage should be trusted and verified, not
+     second-guessed from stale/mismatched-context historical numbers.
+     The most useful, cheapest immediate next step, before touching
+     any PP-batching code, is a genuinely fresh, matched-methodology,
+     real-500K-context decode measurement on TP (with whatever
+     speculation mechanism gets the best legitimate number — likely
+     MTP, since DSpark has its own unresolved reliability bug per
+     Section 8 item 3) AND on PP (no-speculation baseline first, since
+     that's what's currently stable and deployable). This is the
+     concrete next action — see the note at the end of this section.
+   - MTP vs DSpark: per Section 13.2's finding, MTP (TP-only mechanism)
+     and DSpark (PP-only mechanism) are structurally different
+     code paths that cannot be swapped for each other under a fixed
+     sharding scheme. Whichever real 500K measurement is taken must be
+     honest about which mechanism produced it and under which sharding
+     scheme, not conflated.
+
+   **CONCRETE NEXT STEP arising from this revision:** before any further
+   design work on the batched-PP scheduler (Section 6), get a real,
+   fresh, 500K-context decode throughput measurement — first on TP
+   (current cluster default, MTP available, no new relaunch needed
+   beyond confirming config) as the "what are we trying to get back"
+   baseline, then on PP (no speculation, single-request, already
+   deployable) as the "what does this design's foundation actually
+   deliver today" baseline. This requires a cluster relaunch and a
+   real, likely multi-minute-to-tens-of-minutes 500K prefill+decode
+   run — needs the user's explicit go-ahead per this fork's standing
+   relaunch-approval rule, not something to start unprompted.
 
 4. **Prefill throughput: 400+ tok/s (PP-derived), reduced RDMA syncs
    (PP-derived).** STATUS: PARTIALLY confirmed, with a real gap that must
