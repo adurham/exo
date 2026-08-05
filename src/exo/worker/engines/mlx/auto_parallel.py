@@ -321,11 +321,29 @@ def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     for layer in model.layers:  # type: ignore
         if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
             layer.is_prefill = is_prefill
+    # Metaframe-layer counterpart (EXO_PP_METAFRAME=1 opt-in path,
+    # pp_metaframe.py). Lazy import to avoid a module-load-time circular
+    # import (pp_metaframe imports several names FROM this module) —
+    # safe here since this only executes once both modules are already
+    # fully loaded. A model either has legacy OR metaframe layers
+    # installed, never both, so this is a no-op scan when the metaframe
+    # path isn't in use (the isinstance check below simply matches
+    # nothing).
+    from exo.worker.engines.mlx.pp_metaframe import MetaFramedPipelineLastLayer
+
+    for layer in model.layers:  # type: ignore
+        if isinstance(layer, MetaFramedPipelineLastLayer):
+            layer.is_prefill = is_prefill
 
 
 def set_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
     for layer in model.layers:  # type: ignore
         if isinstance(layer, PipelineLastLayer):
+            layer.queue_sends = queue_sends
+    from exo.worker.engines.mlx.pp_metaframe import MetaFramedPipelineLastLayer
+
+    for layer in model.layers:  # type: ignore
+        if isinstance(layer, MetaFramedPipelineLastLayer):
             layer.queue_sends = queue_sends
 
 

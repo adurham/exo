@@ -446,6 +446,44 @@ def shard_and_load(
             logger.info(f"loading model from {model_path} with pipeline parallelism")
             model = yield from pipeline_auto_parallel(model, group, shard_metadata)
             mx.eval(model.parameters())
+            # Phase 0.5 opt-in path (batched-PP sharding design,
+            # docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md).
+            # Swaps today's ambient-mutable-state PipelineFirstLayer/
+            # PipelineLastLayer for the new metadata-framed transport
+            # (pp_metaframe.py) — validated locally (simulated 2-rank,
+            # exact parity, 9/9 tests) but NOT yet A/B'd on the real
+            # cluster. Default OFF (production stays on today's trusted
+            # transport unless explicitly opted in); still
+            # single-request-only either way — this flag does not
+            # enable concurrency, only swaps the transport mechanism
+            # underneath the same concurrency=1 constraint. The startup
+            # handshake fails loudly (not silently hangs) if the two
+            # nodes disagree on this flag.
+            if os.environ.get("EXO_PP_METAFRAME", "0") == "1":
+                from exo.worker.engines.mlx.pp_metaframe import (
+                    handshake_metaframe_protocol,
+                    install_metaframed_pipeline_layers,
+                )
+
+                handshake_metaframe_protocol(True, group)
+                # Concurrency=1 today regardless of this flag (see
+                # comment above) — the UID only needs to be a stable,
+                # consistent value for this single in-flight request's
+                # lifetime, not globally unique across requests, since
+                # Phase 1+'s real per-request UID plumbing is out of
+                # scope for this transport-only phase.
+                install_metaframed_pipeline_layers(model, group, request_uid=1)
+            elif group.size() > 1:
+                # Symmetric handshake call so a rank running WITHOUT the
+                # flag still participates in the agreement check — a
+                # peer rank that mistakenly HAS the flag set would
+                # otherwise hang waiting for a handshake this rank never
+                # initiates.
+                from exo.worker.engines.mlx.pp_metaframe import (
+                    handshake_metaframe_protocol,
+                )
+
+                handshake_metaframe_protocol(False, group)
         case CfgShardMetadata():
             raise ValueError(
                 "CfgShardMetadata is not supported for text model loading - "
