@@ -1014,14 +1014,68 @@ time spent, before any real scheduler code exists to compound the
 debugging surface. This is Section 11's fuzzing recommendation paying
 for itself immediately, not a box-ticking exercise.
 
-Not yet done: the actual rank-0 scheduler runtime (wiring
-`SchedulerCore`/`RankOneMirror` into real MLX/`pp_metaframe.py` code
-that drives actual model forward passes across 2 concurrent requests)
-and per-request cache routing (`BatchRotatingKVCache`/
-`BatchPoolingCache` keyed by request UID instead of a single active
-cache) — those are Phase 1's remaining real work, now built on a
-verified-correct protocol core rather than protocol design happening
-inline with scheduler implementation.
+**Phase 1, step 2 (per-request cache routing) — DONE, 2026-08-05.**
+Per Section 6.2 item 3 ("each rank maintains its OWN half of each
+in-flight request's KV cache ... needs to become a dict keyed by
+request UID instead of a single active cache"), built
+`src/exo/worker/engines/mlx/pp_batched_cache_router.py`
+(`BatchedCacheRouter`, `merge_request_caches`, `extract_request_cache`)
+plus `src/exo/worker/engines/mlx/tests/test_pp_batched_cache_router.py`
+(18 tests, all passing, stable across 3 repeated runs,
+basedpyright/ruff clean). Reviewed via `consult` before writing code
+(2026-08-05) — the reviewer shaped the design directly:
+
+1. **Slot-indexed, matching `SchedulerCore`'s existing slot numbering
+   exactly** — not a second independent request-UID-keyed structure
+   that could drift out of sync with the protocol layer's own slot
+   tracking.
+2. **The batched cache IS canonical storage; this router tracks
+   METADATA (occupancy/length) only.** Physically merging/extracting
+   per-request cache lists on every decode step would be O(total cache
+   bytes) per token — flagged by the consult as a real perf mistake to
+   design around up front, not discover later. `merge()`/`extract()`
+   (mlx-lm's existing, already-proven-by-`prefill_batched` machinery)
+   are used only at real boundaries — constructing the initial batched
+   cache, and extracting a finished request's cache back out — not on
+   every step.
+3. **No generation counter needed for the classic ABA slot-reuse
+   race** (a corruption vector the consult explicitly flagged as
+   likely under-tested by naive designs): `SchedulerCore`'s `DRAINING`
+   slot state, from Phase 1 step 1, already structurally prevents a
+   new request being assigned to a slot before the prior occupant's
+   eviction is acknowledged. This router deliberately trusts that
+   single upstream source of truth rather than re-deriving the same
+   guarantee a second time, which the consult noted would risk the two
+   invariants silently diverging under a future edit.
+4. **Reset-on-assign, never trim-on-release** — a released slot's
+   stale KV bytes are left in the buffer; every consumer (attention
+   mask construction, in particular) must derive visibility strictly
+   from tracked length, never physical buffer extent. Accepted
+   trade-off, documented not silently incurred: a slot's buffer
+   capacity ratchets up to the longest request that ever occupied it
+   and never shrinks — bounded, but a real Phase 1 cost.
+
+Verified against REAL mlx-lm cache objects, not just mocked/pure
+Python: `KVCache` (plain, Llama-style) and DSv4's actual
+`CacheList(RotatingKVCache, PoolingCache)` structure, at both matched
+and DELIBERATELY HETEROGENEOUS per-request lengths (mixed
+prefill/decode-progress state — the realistic Phase 1 scenario), with
+explicit data-content assertions (not just shape checks) confirming
+request A's tokens never leak into request B's extracted cache after a
+merge/extract round-trip — a real check of the design doc's own Risk
+#5 (silent cross-request corruption), not a shape-only smoke test.
+
+Not yet done: the actual rank-0 scheduler runtime — wiring
+`SchedulerCore`/`RankOneMirror` (protocol) and `BatchedCacheRouter`
+(cache lifecycle) into real MLX/`pp_metaframe.py` code that drives
+actual model forward passes across 2 concurrent requests. That's
+Phase 1's remaining real work, now built on a verified-correct
+protocol core AND a verified-correct cache-routing layer rather than
+either happening inline with the scheduler's runtime implementation.
+Per the design doc's own methodology (Section 9's Phase 0 correctness
+baseline), the next validation checkpoint once the runtime exists is
+byte-for-byte/greedy-token correctness against 2 serial single-request
+PP runs — before any throughput claim.
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
