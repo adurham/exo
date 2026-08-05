@@ -332,6 +332,29 @@ class BatchedMetaFramedPipelineLastLayer(CustomMlxLayer):
         return output_for_gather
 
 
+def get_batched_pipeline_info(
+    model: nn.Module,
+) -> tuple[int, int, mx.distributed.Group] | None:
+    """Extract (rank, world_size, group) from the BATCHED pipeline
+    layer wrappers -- mirrors ``pp_speculation.get_pipeline_info``'s
+    exact contract (rank/world_size/group tuple, or ``None`` if the
+    model isn't batched-pipeline-parallel), one level up: THIS
+    function detects ``BatchedMetaFramedPipelineLastLayer``
+    specifically, not the legacy ``PipelineLastLayer``
+    ``get_pipeline_info`` looks for. A caller needing to know whether
+    ``EXO_PP_BATCHED_DECODE=1``'s layers are actually installed (as
+    opposed to Phase 0.5's single-request metaframe layers, or no
+    metaframe layers at all) should use this function, not
+    ``get_pipeline_info``, which would silently return ``None`` for a
+    batched-installed model (a real, easy-to-hit false negative if
+    conflated with this function).
+    """
+    for layer in model.layers:  # type: ignore
+        if isinstance(layer, BatchedMetaFramedPipelineLastLayer):
+            return (layer.r, layer.s, layer.group)
+    return None
+
+
 def install_batched_decode_pipeline_layers(
     model: nn.Module,
     group: mx.distributed.Group,

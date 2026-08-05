@@ -31,6 +31,7 @@ from exo.worker.engines.mlx.pp_batched_correctness import _RankGroup
 from exo.worker.engines.mlx.pp_batched_decode_layers import (
     BatchedMetaFramedPipelineFirstLayer,
     BatchedMetaFramedPipelineLastLayer,
+    get_batched_pipeline_info,
     install_batched_decode_pipeline_layers,
 )
 
@@ -205,3 +206,66 @@ def test_install_batched_decode_pipeline_layers_preserves_original_layer_weights
             mx.eval(logits_after)
 
     assert bool(mx.allclose(logits_before, logits_after, atol=1e-5).item())
+
+
+def test_get_batched_pipeline_info_returns_none_when_no_batched_layers() -> None:
+    """A model with no pipeline layers at all -- get_batched_pipeline_info
+    must return None, not raise (matches get_pipeline_info's own
+    contract for pp_speculation.py callers)."""
+    model = LlamaModel(_ARGS)
+    mx.eval(model.parameters())
+
+    assert get_batched_pipeline_info(model) is None
+
+
+def test_get_batched_pipeline_info_returns_none_for_legacy_layers() -> None:
+    """A model with the LEGACY PipelineFirstLayer/PipelineLastLayer
+    installed (not batched) must also return None -- this is the
+    real false-negative risk get_batched_pipeline_info's own
+    docstring warns about: conflating it with get_pipeline_info would
+    silently misdetect which transport is actually installed."""
+    model = _random_model(seed=4)
+    group = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
+    _install_legacy_pp_split(model, group)
+
+    assert get_batched_pipeline_info(model) is None
+
+
+def test_get_batched_pipeline_info_returns_none_for_phase05_metaframe_layers() -> None:
+    """A model with Phase 0.5's single-request
+    MetaFramedPipelineFirstLayer/LastLayer installed (not the batched
+    variant) must ALSO return None -- distinguishes the batched
+    layers from BOTH other layer kinds this codebase can install."""
+    from exo.worker.engines.mlx.pp_metaframe import (
+        install_metaframed_pipeline_layers,
+    )
+
+    model = _random_model(seed=5)
+    group = cast(mx.distributed.Group, cast(object, _RankGroup(0, 2)))
+    _install_legacy_pp_split(model, group)
+    install_metaframed_pipeline_layers(model, group, request_uid=1)
+
+    assert get_batched_pipeline_info(model) is None
+
+
+def test_get_batched_pipeline_info_returns_rank_worldsize_group_after_install() -> None:
+    """After install_batched_decode_pipeline_layers, get_batched_pipeline_info
+    must return the REAL (r, s, group) from the installed layers --
+    the exact tuple ExoBatchGenerator's dispatch will need to drive a
+    real batched decode step."""
+    model = _random_model(seed=6)
+    group = cast(mx.distributed.Group, cast(object, _RankGroup(1, 4)))
+    inner = get_inner_model(model)
+    layers = list(get_layers(inner))
+    layers[0] = PipelineFirstLayer(layers[0], r=1, group=group)
+    layers[-1] = PipelineLastLayer(layers[-1], r=1, s=4, group=group)
+    _set_layers(model, layers)
+
+    install_batched_decode_pipeline_layers(model, group)
+
+    info = get_batched_pipeline_info(model)
+    assert info is not None
+    rank, world_size, returned_group = info
+    assert rank == 1
+    assert world_size == 4
+    assert returned_group is group
