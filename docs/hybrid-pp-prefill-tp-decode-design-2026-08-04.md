@@ -493,6 +493,46 @@ the option that would have let the design keep TP's already-proven
    dedicated correctness test (batched-PP output vs known-good serial
    output, per request, byte-for-byte at temp=0) before trusting this
    for anything beyond a lab environment.
+
+   **Update (2026-08-05): a real MLX/DSv4-specific blocker discovered
+   while attempting this.** This fork's existing 2-rank correctness
+   harness (`pp_batched_correctness.py`'s `SimPipelineTransport`) uses
+   TWO REAL OS THREADS to simulate the two PP ranks in one process
+   (needed for the decode-only handoff's genuine send-then-block-on-
+   recv dependency). This harness is validated and works correctly for
+   plain Llama-proxy models (all of this session's Phase 1 tests) but
+   **crashes hard (fatal, non-catchable process crash) when the model
+   under test is real DSv4-Flash** — confirmed via a minimal repro: any
+   `@mx.compile`'d function with 2+ return values crashes MLX
+   ("RuntimeError: no Stream(gpu,0) in current thread" followed by a
+   fatal `PyThreadState_Get`/GIL crash) if invoked from any thread
+   OTHER than the thread that executed its `@mx.compile` DECORATION.
+   DSv4's `HyperConnection` (`hyper_connection.py`'s
+   `_hc_split_sinkhorn_ops`, 3 outputs) and at least two more functions
+   in `deepseek_v4.py` itself (`_gate_route`, `_split_softmax`, both
+   2-output) hit this. `mx.disable_compile()` fixes the ISOLATED
+   minimal repro when called before the decorating module is ever
+   imported, but did NOT fully resolve the real DSv4 model forward
+   cross-thread (still throws the same stream error, non-fatal this
+   time, from some remaining thread-bound compiled path not yet
+   isolated). Llama has no multi-output compiled functions in its
+   forward path and is entirely unaffected.
+
+   This is a TEST-HARNESS-ONLY limitation, not a production concern —
+   the real cluster runs each PP rank as a genuinely separate OS
+   PROCESS, not simulated threads in one process, so this exact
+   thread-affinity class of bug structurally cannot occur there.
+   Practical consequence for THIS item: the "dedicated correctness
+   test... byte-for-byte at temp=0" this risk calls for cannot be built
+   as an in-process simulated-2-rank test the way this fork's other
+   Phase 0/0.5/1 correctness tests were — it needs either a genuine
+   multi-process harness (heavier to build, more faithful to
+   production) or must be deferred to the real 2-node cluster A/B step
+   already planned for Phase 1's completion. Decision: stop here rather
+   than keep sinking time into isolating the exact remaining thread-
+   bound DSv4 mechanism — the workaround space (subprocess ranks vs.
+   further compile-patching) is well-understood even though the final
+   fix isn't chosen yet.
 2. **DSpark + batching scope cut.** Restricting DSpark to concurrency=1
    is a real product/performance tradeoff, not a free lunch — it means
    the fastest decode mode (DSpark) and the concurrency win are mutually
