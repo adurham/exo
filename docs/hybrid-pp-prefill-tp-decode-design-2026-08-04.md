@@ -1133,17 +1133,62 @@ Phase 0 methodology (`pp_batched_correctness.py`'s module docstring
 point 2). Also covers the degenerate N=1 batch-of-one case and a
 direct unit test of the context-mismatch guard.
 
-Not yet done: (1) wiring `SchedulerCore`/`RankOneMirror` into the ACTUAL
-per-request admission/eviction control flow driving
-`BatchedMetaFramedPipelineFirstLayer`/`LastLayer` (this step's
-correctness test drives the batched layers directly with a
-hand-constructed `BatchStepContext` per step — the scheduler itself
-isn't wired in yet as the thing that decides which requests are in a
-given step's batch); (2) the real 2-node cluster A/B for this batched
-path (everything above is simulated-2-rank, proven correct at the CPU/
-logic level per this fork's established Phase 0 rationale for keeping
+**Phase 1, step 4 (scheduler/cache-router driver glue + full-stack
+lifecycle checkpoint) — DONE, 2026-08-05.** Built
+`src/exo/worker/engines/mlx/pp_batched_decode_driver.py`
+(`BatchedDecodeDriver` for rank 0, `RankOneMirrorDriver` for rank 1) --
+the actual thing wiring `SchedulerCore`/`RankOneMirror` and
+`BatchedCacheRouter` into what a real decode loop calls
+(`admit_request`/`on_tokens_generated`/`evict_request`/`on_evict_ack`
+on rank 0; `on_step_message`/`on_evict_message` on rank 1). Reviewed
+via `consult` before writing code: the risk was introducing a SECOND,
+driftable encoding of batch composition (one inside the driver, one
+inside the metaframe/`BatchStepContext` plumbing). Resolved by making
+`StepMessage.entries` the single source of truth --
+`batch_step_context_from_step_message` is the ONE function that
+derives a `BatchStepContext` from a `StepMessage`, used identically by
+both rank 0's and rank 1's driver classes, never re-derived
+independently by either side. Per the same review:
+`RankOneMirrorDriver` contains ZERO decision logic -- it only
+validates rank 0's claims and mirrors bookkeeping to match.
+
+A real gap surfaced while starting this wiring: `TokenGeneratedEvent`
+was strictly single-request, but a real batched decode step advances
+N=2 requests SIMULTANEOUSLY in one model forward call -- fixed (via a
+separate `consult` review) by generalizing the event to carry
+`request_ids: tuple[int, ...]` rather than adding a parallel event
+type, since splitting a real batched step into N single-request events
+would make `RankOneMirror` pass through intermediate states that never
+existed on rank 0 -- exactly the core/mirror divergence surface this
+module's fail-stop design exists to prevent. `_handle_tokens_generated`
+validates ALL request_ids before mutating ANY state, so a bad id
+anywhere in a batch can't leave some requests advanced and others not.
+27/27 tests passing (24 existing + 3 new) on `pp_scheduler_protocol.py`
+after this change, 12/12 new tests on the driver itself.
+
+**The final local-verification checkpoint**
+(`test_pp_batched_decode_driver_full_stack.py`, 1/1 passing, stable
+across 3 repeated runs, basedpyright/ruff clean): the full request
+lifecycle -- two requests admitted, both decode together for 4 real
+batched steps (real batch of 2, all composition decided by the actual
+driver, not a hand-picked tuple), one is evicted (the real
+DRAINING/ack cycle through `evict_request`/`on_evict_ack`/
+`on_evict_message`), the other continues decoding alone for 2 more
+steps (real batch of 1 -- the "some slots active, others empty"
+mixed-step case) -- with greedy tokens for both requests matching
+their serial plain-forward golden references across the ENTIRE
+lifecycle, not just steady-state batching. This is the complete answer
+to what `test_pp_batched_decode_correctness.py` (Phase 1 step 3) had
+deliberately left open: every piece built this session -- protocol
+state machine, cache router, batched metaframe layers, and now the
+scheduler/cache-router driver glue -- verified together, end to end,
+at the CPU/simulated-transport level.
+
+Not yet done: the real 2-node cluster A/B for this batched path
+(everything above is simulated-2-rank, proven correct at the CPU/logic
+level per this fork's established Phase 0 rationale for keeping
 GPU/cluster time off correctness questions the CPU can answer just as
-definitively — but per the design doc's OWN methodology, a real-
+definitively -- but per the design doc's OWN methodology, a real-
 cluster confirmation is still the final step before calling Phase 1
 done, exactly as Phase 0.5's transport was).
 
