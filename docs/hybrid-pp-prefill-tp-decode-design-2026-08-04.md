@@ -1317,6 +1317,34 @@ with no prior kind knowledge, branch on `msg_kind`) handling all three
 kinds correctly in sequence. 11/11 passing, basedpyright/ruff clean,
 full suite 222 passing with the same 1 pre-existing unrelated failure.
 
+**Phase 1, step 8 (real-wire integration test found a real bug) —
+DONE, 2026-08-05.** Built
+`test_pp_batched_decode_over_real_wire.py`: the SAME full-lifecycle
+correctness test as step 6's, but with EVERY control message
+genuinely crossing `pp_scheduler_wire.py`'s real transport instead of
+being shared in-process as a live Python object -- rank 1 reconstructs
+each `StepMessage`/`EvictMessage`/`EvictAckMessage` purely from wire
+bytes, matching a real 2-process deployment's actual constraint. This
+immediately found a REAL, previously-hidden bug: `RankOneMirrorSession`
+held a separate `_slot_caches` dict, populated once at `admit_request`
+and never refreshed as `step()` advanced the real `batched_cache`.
+Eviction's `release_slot` rebuilt `batched_cache` from this STALE
+dict, silently reverting the surviving request's cache to its state
+at admission time instead of its actual current advanced state --
+confirmed via `git stash` A/B that the new test fails identically on
+the pre-fix code and passes on the fix. **The in-process test suite
+from step 6 never caught this** -- sharing `StepMessage` as a live
+Python object happened to never exercise the buggy bookkeeping path,
+exactly the class of bug this step was built to surface. Fixed by
+removing the separate dict entirely: `RankOneMirrorSession` now always
+extracts current per-slot state from the live `batched_cache` on
+demand (mirrors `BatchedDecodeSession`'s own established
+`_extract_all_current_slot_caches` pattern) -- one source of truth,
+never a second copy that can drift. Verified: real-wire test passes,
+all in-process tests still pass, stable across 3 repeated runs,
+basedpyright/ruff clean, full suite 223 passing with the same 1
+pre-existing unrelated failure.
+
 Still NOT wired into `mlx_generate`/`stream_generate`'s real request-
 admission path (`ExoBatchGenerator`'s async task queue) -- that is a
 separate, larger integration surface (touching request routing/
