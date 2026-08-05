@@ -733,6 +733,66 @@ transport" bugs from "did I break the batching" bugs before they can
 compound — a transport bug discovered under concurrency=2 batched load
 is much harder to localize than one caught here in isolation.
 
+**Phase 0.5 — DONE, 2026-08-05 (simulated, local — real-cluster A/B
+still pending).** Built `src/exo/worker/engines/mlx/pp_metaframe.py`
+(`MetaFramedPipelineFirstLayer`/`MetaFramedPipelineLastLayer`,
+`encode_metaframe`/`send_metaframe`/`recv_metaframe`,
+`handshake_metaframe_protocol`,
+`install_metaframed_pipeline_layers`) plus its test suite
+`src/exo/worker/engines/mlx/tests/test_pp_metaframe.py` (9 tests, all
+passing, stable across 5 repeated runs, basedpyright/ruff clean).
+Reviewed via `consult` before writing code (2026-08-05) — the reviewer
+shaped five real design decisions: (1) the frame is a fixed HEADER +
+per-request TABLE, not a flat tuple, specifically so Phase 1's
+scheduler can add rows without a second protocol-shape change; (2) a
+`version` field in the header, checked on every frame; (3) a startup
+`handshake_metaframe_protocol` so a per-node env-var mismatch
+(`EXO_PP_METAFRAME` set on one node, not the other) fails loudly at
+warmup instead of hanging on the first real request; (4) the new
+`MetaFramedPipelineLastLayer` reuses today's `_pending_prefill_sends`/
+`flush_prefill_sends` queue directly rather than reimplementing
+`queue_sends`' timing semantics, since a byte-identical-token
+comparison alone would never catch a queuing/deadlock regression; (5)
+brand-new classes (not an in-place flag on `PipelineFirstLayer`/
+`PipelineLastLayer`), so today's shipped transport is provably
+untouched by this work.
+
+Validated via the Phase 0 harness's simulated-2-rank machinery
+(`pp_batched_correctness.py`), not the real cluster yet — per Phase
+0.5's own isolation rationale, proving this locally first is strictly
+cheaper than discovering a transport bug during a live A/B. Exact
+parity (argmax mismatches==0, max logit diff < 1e-4 — both transports
+pay the identical bf16 cast cost, so a tight tolerance is the correct
+bar here, unlike Phase 0's plain-forward-vs-split comparison) confirmed
+across three coverage cases the consult review specifically asked for:
+a multi-chunk prefill + 8-step decode, a single-token-prompt edge case,
+and a 24-step long decode (stresses the phase-transition/`is_last_chunk`
+boundary where the old ambient-flag toggling and the new explicit
+per-step framing would be most likely to disagree).
+
+One real bug found and fixed while building this, not just written
+blind: the first draft of `MetaFramedPipelineLastLayer` omitted the
+decode-only final-hidden-state handoff (last pipeline stage sending its
+output back to rank 0 for sampling) — incorrectly reasoned as
+"out of scope" for a transport-only phase, when in fact it's required
+for decode to function at all. Phase 0.5's own parity tests caught
+this immediately (decode diverged/deadlocked without it) — exactly the
+kind of bug this isolated phase exists to surface before it could
+compound with Phase 1's scheduler/batching code.
+
+**Not yet done: the real 2-node cluster A/B.** Local simulation proves
+the protocol's NUMERICS and control flow are correct; it does NOT
+prove real jaccl/RDMA transport behavior (actual wire bytes, real
+timing, real multi-process semantics) — that requires the actual
+`EXO_PP_METAFRAME=1` env var wired into `start_cluster.sh`'s allow-list
+(not yet done — `pp_metaframe.py` is not called from any production
+code path yet, purely additive/dormant) and a live restart. That real
+A/B, plus wiring the metaframe classes into
+`pipeline_auto_parallel`/`mlx_generate` behind the flag, is the
+concrete next step whenever cluster time is available — needs the
+user's separate explicit go-ahead per standing rules, not implied by
+this local validation work being complete.
+
 **Phase 1 — Rank-0 scheduler skeleton, decode-only, 2 concurrent
 requests, NO speculative decode:** Build the metadata-frame protocol and
 the rank-0 scheduler for the SIMPLEST case first — 2 concurrent plain
