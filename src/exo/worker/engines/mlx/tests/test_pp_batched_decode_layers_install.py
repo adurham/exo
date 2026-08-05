@@ -269,3 +269,64 @@ def test_get_batched_pipeline_info_returns_rank_worldsize_group_after_install() 
     assert rank == 1
     assert world_size == 4
     assert returned_group is group
+
+
+def test_batched_layers_fall_back_to_single_request_outside_batch_step_scope() -> None:
+    """THE REGRESSION TEST for the real bug found on the first real
+    2-node cluster run (2026-08-05): installing the batched layers at
+    model-load time means EVERY forward pass through this model goes
+    through them -- including prefill()/warmup, which call model(...)
+    directly with NO batch_step_scope(...) wrapper (that context is
+    only ever entered by BatchedDecodeSession.run_forward's own
+    tick()-driven decode steps). Before the fix, this crashed
+    immediately with 'called outside an active batch_step_scope(...)
+    block'. After the fix (BatchedMetaFramedPipelineFirstLayer/
+    LastLayer subclass MetaFramedPipelineFirstLayer/LastLayer and
+    fall back to super().__call__() when no batch context is active),
+    a plain model(...) call with no batch_step_scope wrapper must
+    succeed via Phase 0.5's already-cluster-verified single-request
+    path, producing output IDENTICAL to what the Phase 0.5 metaframe
+    layers alone would produce on the same weights/input -- proving
+    the fallback is a genuine behavioral match, not just "doesn't
+    crash"."""
+    from unittest.mock import patch
+
+    from exo.worker.engines.mlx.pp_metaframe import (
+        install_metaframed_pipeline_layers,
+    )
+
+    def _passthrough_send(arr: mx.array, dst: int, **_: object) -> mx.array:
+        del dst
+        return arr
+
+    def _passthrough_recv_like(template: mx.array, src: int, **_: object) -> mx.array:
+        del src
+        return mx.zeros(template.shape, dtype=template.dtype)
+
+    group = cast(mx.distributed.Group, cast(object, _RankGroup(0, 1)))
+    mx.random.seed(77)
+    prompt = mx.random.randint(0, _ARGS.vocab_size, shape=(4,))
+
+    with (
+        patch("mlx.core.distributed.send", side_effect=_passthrough_send),
+        patch("mlx.core.distributed.recv_like", side_effect=_passthrough_recv_like),
+    ):
+        # Phase 0.5 reference: metaframe layers alone, no batching at all.
+        reference_model = _random_model(seed=3)
+        _install_legacy_pp_split(reference_model, group)
+        install_metaframed_pipeline_layers(reference_model, group, request_uid=1)
+        reference_cache = reference_model.make_cache()
+        reference_logits = reference_model(prompt[None, :], cache=reference_cache)
+        mx.eval(reference_logits)
+
+        # Batched layers installed, but called with NO batch_step_scope
+        # -- the exact prefill()/warmup call shape that crashed before
+        # this fix.
+        batched_model = _random_model(seed=3)
+        _install_legacy_pp_split(batched_model, group)
+        install_batched_decode_pipeline_layers(batched_model, group)
+        batched_cache = batched_model.make_cache()
+        batched_logits = batched_model(prompt[None, :], cache=batched_cache)
+        mx.eval(batched_logits)
+
+    assert bool(mx.allclose(reference_logits, batched_logits, atol=1e-5).item())

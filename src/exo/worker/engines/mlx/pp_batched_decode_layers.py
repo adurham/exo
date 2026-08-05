@@ -85,8 +85,10 @@ from typing import Iterator
 import mlx.core as mx
 import mlx.nn as nn
 
-from exo.worker.engines.mlx.auto_parallel import CustomMlxLayer, _LayerCallable
+from exo.worker.engines.mlx.auto_parallel import _LayerCallable
 from exo.worker.engines.mlx.pp_metaframe import (
+    MetaFramedPipelineFirstLayer,
+    MetaFramedPipelineLastLayer,
     encode_batched_decode_metaframe,
     recv_metaframe,
     send_metaframe,
@@ -147,25 +149,39 @@ def _require_batch_step_context() -> BatchStepContext:
         ) from e
 
 
-class BatchedMetaFramedPipelineFirstLayer(CustomMlxLayer):
+class BatchedMetaFramedPipelineFirstLayer(MetaFramedPipelineFirstLayer):
     """Batched-decode counterpart to
     ``pp_metaframe.MetaFramedPipelineFirstLayer``. Reads the current
     ``BatchStepContext`` (via ``ContextVar``, never an instance
     attribute) to know how many requests to expect on receive, instead
     of Phase 0.5's implicit single-request assumption.
+
+    SUBCLASSES ``MetaFramedPipelineFirstLayer`` (rather than wrapping
+    an owned instance of it) specifically so that any forward pass
+    OUTSIDE an active ``batch_step_scope`` -- prefill, warmup, or any
+    other single-request call site this fork's existing code already
+    makes without ever being updated to know about batching --
+    transparently falls back to Phase 0.5's already-cluster-verified
+    single-request behavior via ``super().__call__()``, with ZERO
+    state duplication (same ``r``/``group``, same base class, no
+    setter-forwarding to keep in sync). Found and fixed 2026-08-05
+    after the first real cluster run: installing these layers at
+    model-load time means EVERY forward pass through this model goes
+    through them, not just batched-decode's own tick()-driven steps --
+    warmup's ``prefill()`` call (unmodified, no ``batch_step_scope``
+    wrapper) crashed immediately on `_require_batch_step_context`'s
+    fail-loud guard, which is exactly correct behavior for a genuine
+    caller bug but was actually THIS class failing to also handle
+    the legitimate no-batch-context case. Per a `consult` review:
+    subclassing (not composition-with-setter-forwarding) is the
+    correct fix here specifically because both layer kinds construct
+    with the exact same (r/group) or (r/s/group) arguments as their
+    base class -- there is no divergent state to reconcile.
     """
 
-    def __init__(
-        self,
-        original_layer: _LayerCallable,
-        r: int,
-        group: mx.distributed.Group,
-    ) -> None:
-        super().__init__(original_layer)
-        self.r: int = r
-        self.group = group
-
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        if _batch_step_context.get(None) is None:
+            return super().__call__(x, *args, **kwargs)
         if self.r != 0:
             ctx = _require_batch_step_context()
             frame = recv_metaframe(self.r - 1, group=self.group)
@@ -209,15 +225,33 @@ class BatchedMetaFramedPipelineFirstLayer(CustomMlxLayer):
         return self.original_layer(x, *args, **kwargs)
 
 
-class BatchedMetaFramedPipelineLastLayer(CustomMlxLayer):
+class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
     """Batched-decode counterpart to
     ``pp_metaframe.MetaFramedPipelineLastLayer``. Decode-only (Phase 1
     scope, per the design doc: "2 concurrent plain (no DSpark)
     decode-only requests") -- deliberately does NOT implement the
     prefill/``queue_sends`` paths that make the Phase 0.5 class more
-    general; those aren't in scope for the batched case yet, and
-    omitting them keeps this class's control flow simple enough to
-    reason about directly rather than adding untested branches.
+    general FOR THE BATCHED PATH; those aren't in scope for the
+    batched case yet, and omitting them keeps that branch's control
+    flow simple enough to reason about directly rather than adding
+    untested branches.
+
+    SUBCLASSES ``MetaFramedPipelineLastLayer`` for the SAME reason as
+    ``BatchedMetaFramedPipelineFirstLayer`` above (see that class's
+    docstring for the full rationale) -- any forward pass outside an
+    active ``batch_step_scope`` (prefill, warmup) falls back to
+    ``super().__call__()``, reusing Phase 0.5's already-cluster-
+    verified single-request prefill/queue_sends/decode-gather logic
+    UNCHANGED, rather than this batched class needing to reimplement
+    (and get right a second time) prefill-phase handling it was never
+    actually designed to cover. ``request_uid`` defaults to 1 (a
+    single stable placeholder, never read as meaningfully unique --
+    matches ``install_metaframed_pipeline_layers(model, group,
+    request_uid=1)``'s own established Phase 0.5 convention for
+    concurrency=1 call sites) since the fallback path only ever
+    serves ONE request at a time by construction; the batched path
+    below never reads ``self.request_uid`` at all, it reads
+    ``BatchStepContext.request_uids`` instead.
     """
 
     def __init__(
@@ -227,12 +261,11 @@ class BatchedMetaFramedPipelineLastLayer(CustomMlxLayer):
         s: int,
         group: mx.distributed.Group,
     ) -> None:
-        super().__init__(original_layer)
-        self.r: int = r
-        self.s: int = s
-        self.group = group
+        super().__init__(original_layer, r=r, s=s, group=group, request_uid=1)
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        if _batch_step_context.get(None) is None:
+            return super().__call__(x, *args, **kwargs)
         ctx = _require_batch_step_context()
         if x.shape[0] != len(ctx.request_uids):
             raise RuntimeError(
