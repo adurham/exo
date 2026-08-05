@@ -194,10 +194,40 @@ class NewRequestEvent:
 
 @dataclass(frozen=True)
 class TokenGeneratedEvent:
-    """One decode step completed for ``request_id`` -- its cache length
-    grows by exactly 1 token."""
+    """One real decode step completed for ``request_ids`` -- EVERY
+    request in this tuple advanced by exactly 1 token, as part of the
+    SAME real batched forward pass.
 
-    request_id: int
+    ``request_ids`` is a tuple, not a single ``request_id`` (v1 of this
+    event, changed 2026-08-05 when batched-decode wiring work began) --
+    per a `consult` review: a real batched decode step where N
+    requests advance SIMULTANEOUSLY in one model forward call is a
+    single atomic occurrence, and must map to a single atomic protocol
+    event. Splitting it into N single-request events would make
+    ``RankOneMirror`` pass through N-1 intermediate states that never
+    existed on rank 0 (e.g. after event 1 of 2, the mirror would see
+    request A advanced but B not) -- exactly the kind of core/mirror
+    divergence surface this module's fail-stop design exists to avoid
+    creating in the first place. A tuple (not a ``set``) preserves a
+    defined iteration order matching ``_active_batch_entries``'s own
+    ``sorted(self._requests.items())`` convention -- both ranks must
+    see identical ordering for anything order-dependent.
+
+    Non-empty by construction (see ``__post_init__``) -- an empty
+    tuple would silently mean \"a decode step advanced zero requests\",
+    which is not a real occurrence this protocol should ever need to
+    represent.
+    """
+
+    request_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.request_ids:
+            raise ProtocolViolationError(
+                "TokenGeneratedEvent.request_ids must be non-empty -- a "
+                "decode step with zero advancing requests is not a real "
+                "occurrence this event should represent"
+            )
 
 
 @dataclass(frozen=True)
@@ -297,21 +327,28 @@ class SchedulerCore:
         return self._step_id
 
     def _active_batch_entries(
-        self, *, advancing_request_id: int | None = None
+        self, *, advancing_request_ids: frozenset[int] = frozenset()
     ) -> tuple[BatchEntry, ...]:
         """Snapshot the full current active set for rank 1's routing.
 
-        ``advancing_request_id``: the ONE request (if any) whose state
-        actually changed as a result of THIS ``handle()`` call --  its
-        entry gets ``n_tokens=1`` (Phase-1 scope: decode-only, always
-        exactly 1 token per real advance). Every OTHER active request
+        ``advancing_request_ids``: the set of requests whose state
+        actually changed as a result of THIS ``handle()`` call -- each
+        gets ``n_tokens=1`` (Phase-1 scope: decode-only, always exactly
+        1 token per real advance). Every OTHER active request
         co-listed in the same snapshot gets ``n_tokens=0`` -- being
         included in a step message for rank 1's bookkeeping does NOT
         mean every co-listed request generated a token in lockstep with
-        this specific event; only the one whose event actually fired
-        did. ``None`` means no request advanced this call (e.g. a brand
-        new request just joined at its baseline cache_len=0, or the
-        batch composition changed for bookkeeping reasons only).
+        this specific event; only the ones actually named here did.
+        Empty (the default) means no request advanced this call (e.g.
+        a brand new request just joined at its baseline cache_len=0,
+        or the batch composition changed for bookkeeping reasons
+        only).
+
+        A ``frozenset`` (not a plain ``set``) -- immutable, matching
+        this dataclass-heavy module's preference for frozen/hashable
+        types throughout (see ``Event``/``Command`` types, all
+        ``@dataclass(frozen=True)``) even though membership testing
+        (not hashing this specific object) is all that's needed here.
 
         Earlier versions of this method hardcoded ``n_tokens=1`` for
         EVERY entry regardless of which request's event fired -- this
@@ -331,7 +368,7 @@ class SchedulerCore:
                 cache_slot=rec.cache_slot,
                 phase=rec.phase,
                 expected_cache_len=rec.cache_len,
-                n_tokens=1 if rid == advancing_request_id else 0,
+                n_tokens=1 if rid in advancing_request_ids else 0,
             )
             for rid, rec in sorted(self._requests.items())
         )
@@ -340,8 +377,8 @@ class SchedulerCore:
         match event:
             case NewRequestEvent(request_id=rid, cache_slot=slot):
                 return self._handle_new_request(rid, slot)
-            case TokenGeneratedEvent(request_id=rid):
-                return self._handle_token_generated(rid)
+            case TokenGeneratedEvent(request_ids=rids):
+                return self._handle_tokens_generated(rids)
             case RequestDoneEvent(request_id=rid) | RequestAbortedEvent(request_id=rid):
                 return self._handle_evict_request(rid)
             case EvictAckReceivedEvent(request_id=rid, cache_slot=slot):
@@ -396,21 +433,34 @@ class SchedulerCore:
             )
         ]
 
-    def _handle_token_generated(self, request_id: int) -> list[Command]:
-        rec = self._requests.get(request_id)
-        if rec is None:
+    def _handle_tokens_generated(self, request_ids: tuple[int, ...]) -> list[Command]:
+        """Handle a single real (possibly batched) decode step -- EVERY
+        request in ``request_ids`` advanced by exactly 1 token as part
+        of the SAME real forward pass (see ``TokenGeneratedEvent``'s
+        docstring). Validates ALL requests before mutating ANY state,
+        so a bad request_id in the middle of a batch can't leave some
+        requests advanced and others not (partial-application would be
+        its own silent-corruption surface -- exactly the class of bug
+        this module's fail-stop design exists to avoid)."""
+        missing = [rid for rid in request_ids if rid not in self._requests]
+        if missing:
             raise ProtocolViolationError(
-                f"TokenGeneratedEvent for request_id={request_id} which "
-                f"is not active -- stale/duplicate event, refusing to "
-                f"process (this would otherwise silently create a phantom "
-                f"cache-length increment for a slot no request owns)"
+                f"TokenGeneratedEvent for request_ids={missing} which "
+                f"{'are' if len(missing) > 1 else 'is'} not active -- "
+                f"stale/duplicate event, refusing to process (this would "
+                f"otherwise silently create a phantom cache-length "
+                f"increment for a slot no request owns)"
             )
-        rec.cache_len = known_len_advance(rec.cache_len, n_tokens=1)
+        for rid in request_ids:
+            rec = self._requests[rid]
+            rec.cache_len = known_len_advance(rec.cache_len, n_tokens=1)
         return [
             SendStepCommand(
                 StepMessage(
                     step_id=self._next_step_id(),
-                    entries=self._active_batch_entries(advancing_request_id=request_id),
+                    entries=self._active_batch_entries(
+                        advancing_request_ids=frozenset(request_ids)
+                    ),
                 )
             )
         ]

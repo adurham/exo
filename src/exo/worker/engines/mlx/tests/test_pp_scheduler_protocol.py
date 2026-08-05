@@ -106,7 +106,7 @@ def test_max_concurrency_enforced() -> None:
 def test_token_generated_advances_cache_len() -> None:
     core = SchedulerCore(max_concurrency=2)
     core.handle(NewRequestEvent(request_id=1, cache_slot=0))
-    commands = core.handle(TokenGeneratedEvent(request_id=1))
+    commands = core.handle(TokenGeneratedEvent(request_ids=(1,)))
     cmd = commands[0]
     assert isinstance(cmd, SendStepCommand)
     assert cmd.message.entries[0].expected_cache_len == 1
@@ -115,7 +115,54 @@ def test_token_generated_advances_cache_len() -> None:
 def test_token_generated_for_unknown_request_raises() -> None:
     core = SchedulerCore(max_concurrency=2)
     with pytest.raises(ProtocolViolationError, match="not active"):
-        core.handle(TokenGeneratedEvent(request_id=99))
+        core.handle(TokenGeneratedEvent(request_ids=(99,)))
+
+
+def test_token_generated_empty_request_ids_raises_at_construction() -> None:
+    """TokenGeneratedEvent's own __post_init__ invariant -- an empty
+    request_ids tuple is rejected before it ever reaches
+    SchedulerCore.handle at all."""
+    with pytest.raises(ProtocolViolationError, match="non-empty"):
+        TokenGeneratedEvent(request_ids=())
+
+
+def test_token_generated_batched_advances_both_requests_same_step() -> None:
+    """THE real batched-decode case: N=2 requests advancing in ONE
+    real forward pass must be represented as ONE TokenGeneratedEvent
+    with both request_ids, not two separate events -- per the design
+    rationale in TokenGeneratedEvent's own docstring (a consult
+    review: splitting into N events would make RankOneMirror pass
+    through intermediate states that never existed on rank 0)."""
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(NewRequestEvent(request_id=1, cache_slot=0))
+    core.handle(NewRequestEvent(request_id=2, cache_slot=1))
+    commands = core.handle(TokenGeneratedEvent(request_ids=(1, 2)))
+    assert len(commands) == 1
+    cmd = commands[0]
+    assert isinstance(cmd, SendStepCommand)
+    entries_by_id = {e.request_id: e for e in cmd.message.entries}
+    assert entries_by_id[1].expected_cache_len == 1
+    assert entries_by_id[1].n_tokens == 1
+    assert entries_by_id[2].expected_cache_len == 1
+    assert entries_by_id[2].n_tokens == 1
+
+
+def test_token_generated_batched_one_bad_id_rejects_atomically() -> None:
+    """Validates ALL request_ids before mutating ANY state -- a bad id
+    anywhere in the batch must leave every request's cache_len
+    UNCHANGED (partial application would itself be a silent-corruption
+    surface: request A's cache_len advancing while the event as a
+    whole raises)."""
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(NewRequestEvent(request_id=1, cache_slot=0))
+    with pytest.raises(ProtocolViolationError, match="not active"):
+        core.handle(TokenGeneratedEvent(request_ids=(1, 99)))
+    # request 1's cache_len must NOT have advanced despite being valid
+    # -- the whole batch failed atomically.
+    commands = core.handle(TokenGeneratedEvent(request_ids=(1,)))
+    cmd = commands[0]
+    assert isinstance(cmd, SendStepCommand)
+    assert cmd.message.entries[0].expected_cache_len == 1  # not 2
 
 
 def test_request_done_transitions_slot_to_draining_and_emits_evict() -> None:
@@ -195,10 +242,10 @@ def test_mirror_accepts_well_formed_step_sequence() -> None:
     for cmd in core.handle(NewRequestEvent(request_id=1, cache_slot=0)):
         assert isinstance(cmd, SendStepCommand)
         mirror.validate_step(cmd.message)
-    for cmd in core.handle(TokenGeneratedEvent(request_id=1)):
+    for cmd in core.handle(TokenGeneratedEvent(request_ids=(1,))):
         assert isinstance(cmd, SendStepCommand)
         mirror.validate_step(cmd.message)
-    for cmd in core.handle(TokenGeneratedEvent(request_id=1)):
+    for cmd in core.handle(TokenGeneratedEvent(request_ids=(1,))):
         assert isinstance(cmd, SendStepCommand)
         mirror.validate_step(cmd.message)
     # No exception -- 2 decode steps processed cleanly.
@@ -406,7 +453,7 @@ class _FuzzHarness:
             return
         rid = rng.choice(sorted(self.active_request_ids))
         self.event_log.append(f"token_generated(request_id={rid})")
-        self._apply(self.core.handle(TokenGeneratedEvent(request_id=rid)))
+        self._apply(self.core.handle(TokenGeneratedEvent(request_ids=(rid,))))
 
     def evict_request(self, rng: random.Random, aborted: bool) -> None:
         if not self.active_request_ids:
