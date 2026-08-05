@@ -675,6 +675,50 @@ no batched-PP code yet to diff against — this phase is largely
 tooling + the Pre-Phase-0 checks above, not a diff that can fully run
 until Phase 0.5 exists.
 
+**Phase 0 tooling — DONE, 2026-08-05.** Built and validated the
+correctness-diff harness this phase exists to deliver, on the local
+dev machine (no cluster relaunch needed — pure single-process MLX/CPU
+work): `src/exo/worker/engines/mlx/pp_batched_correctness.py`
+(`SimPipelineTransport`, `build_two_rank_split`, `run_two_rank_pp_forward`,
+`compare_logits`) plus
+`src/exo/worker/engines/mlx/tests/test_pp_batched_correctness_harness.py`
+(7 tests, all passing, basedpyright/ruff clean). Reviewed via `consult`
+before writing code — the reviewer flagged three real correctness risks
+in the original plan (real OS threads directly touching MLX's lazy
+graph/eval machinery is not documented thread-safe; anchoring against
+*simulated* serial PP instead of a plain unsharded forward would
+validate one unproven thing against another; passing the same `mx.array`
+object across simulated ranks would hide real transport bugs), all
+addressed in the shipped harness: a global `_MLX_CALL_LOCK` serializes
+actual MLX op execution across the two simulated-rank threads (released
+only while blocked inside the fake transport's `recv_like`); the golden
+reference is a PLAIN unsharded forward, not "trust the split"; the fake
+transport copies (numpy roundtrip) rather than aliasing.
+
+One real, expected finding surfaced while validating the harness itself
+(not a harness bug): a REAL 2-rank simulated split does NOT match a
+plain unsharded forward at float-tolerance precision, because the real
+`PipelineFirstLayer`/`PipelineLastLayer` classes cast activations to
+bf16 before every cross-rank send (a genuine JACCL/RDMA requirement) —
+a cost the plain forward never pays. Measured directly: max logit diff
+~0.18-0.20 for a small random-weight test model, well outside a
+byte-equality-style tolerance, but with ZERO greedy-token (argmax)
+mismatches across all tested decode steps. This means the design doc's
+own "greedy-token-identical output OR a tight logit-tolerance
+comparison" framing (this section, above) needs to be read as an
+EITHER/OR, not both simultaneously satisfiable at a tight tolerance —
+greedy-token agreement is the meaningful correctness bar for a
+cross-transport-hop comparison; a tight float tolerance is only
+meaningful for a SAME-transport-cost comparison (e.g. serial-PP vs
+batched-PP, Phase 0.5+, which both pay the identical bf16 cast cost and
+so CAN reuse a tight tolerance). Test file docstrings capture this
+finding in detail for whoever picks up Phase 0.5+.
+
+Not yet done: the actual Phase 0.5 diff (serial-PP-through-this-harness
+vs real batched-PP output) — there is still no batched-PP code to diff
+against; that's Phase 0.5+'s job once the metadata-framed transport
+exists.
+
 **Phase 0.5 — Transport-only refactor at concurrency=1 (NEW phase added
 2026-08-04 after second review, Section 12):** The original Phase 1
 conflated THREE distinct pieces of new work — (a) the metadata-framed
