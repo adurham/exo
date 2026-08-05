@@ -1294,6 +1294,29 @@ confirming `run_forward` really does activate the SAME
 3 repeated runs, basedpyright/ruff clean. Full worker suite: 211
 passing, same 1 pre-existing unrelated failure, 0 new regressions.
 
+**Phase 1, step 7 (real wire encoding for scheduler control messages)
+— DONE, 2026-08-05.** Everything through step 6 used in-process
+Python object sharing for `StepMessage`/`EvictMessage`/
+`EvictAckMessage` between the two simulated-thread "ranks" -- fine for
+a same-process test harness, but a real 2-process deployment needs
+these control messages to actually cross the wire. Built
+`pp_scheduler_wire.py`: real `mx.distributed.send`/`recv_like`-based
+encoding for all three message kinds, unified under one fixed 5-field
+header (a real design bug was found and fixed here -- the first
+attempt gave each kind a different header shape, so a kind mismatch
+crashed the transport with a raw shape error instead of a clean
+`SchedulerWireProtocolError`; fixed by matching `pp_metaframe.py`'s
+own fixed-header discipline). Per a `consult` review: the cache_slot
+mapping is the dangerous part, not the uid list -- this carries
+`BatchEntry`'s full field set (request_id, cache_slot, phase,
+expected_cache_len, n_tokens), not just the bare uids
+`encode_batched_decode_metaframe` already carries. Verified via 11
+tests over the real 2-thread `SimPipelineTransport`, including the
+actual production header-first dispatch pattern (receive the header
+with no prior kind knowledge, branch on `msg_kind`) handling all three
+kinds correctly in sequence. 11/11 passing, basedpyright/ruff clean,
+full suite 222 passing with the same 1 pre-existing unrelated failure.
+
 Still NOT wired into `mlx_generate`/`stream_generate`'s real request-
 admission path (`ExoBatchGenerator`'s async task queue) -- that is a
 separate, larger integration surface (touching request routing/
