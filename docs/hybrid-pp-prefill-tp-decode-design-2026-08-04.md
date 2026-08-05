@@ -115,18 +115,31 @@ against, instead of "measure throughput" with no number attached.
      Decode cost scales with context depth (KV-cache read grows), so
      none of these numbers can be assumed to hold at 500K; they're
      starting points for extrapolation, not answers.
-   - **"We had much better decode throughput on TP" — this needs a
-     direct check before design work continues.** The user's own recall
-     of TP's real advantage should be trusted and verified, not
-     second-guessed from stale/mismatched-context historical numbers.
-     The most useful, cheapest immediate next step, before touching
-     any PP-batching code, is a genuinely fresh, matched-methodology,
-     real-500K-context decode measurement on TP (with whatever
-     speculation mechanism gets the best legitimate number — likely
-     MTP, since DSpark has its own unresolved reliability bug per
-     Section 8 item 3) AND on PP (no-speculation baseline first, since
-     that's what's currently stable and deployable). This is the
-     concrete next action — see the note at the end of this section.
+   - **"We had much better decode throughput on TP" — TRUSTED, NOT
+     RE-VERIFIED.** User's explicit direction (2026-08-04): "I don't
+     think we need to re-baseline at all, we have our requirements and
+     my memory says the baseline numbers we do have SHOULD be valid."
+     This fork's existing TP+MTP numbers at short/100K context (fact
+     745's 37.5 tok/s aggregate at c=2 short-prompt, the ~30 tok/s c=1
+     100K champion figures cited elsewhere in this fork's history) are
+     taken as trustworthy AS-IS — NOT scheduled for a fresh re-measurement
+     pass, despite real code changes since they were measured (DSpark
+     self-doubt-loop fixes, FULLBLOCK/FULLBLOCK_MOE, ROWSEQ work, the
+     -0731 checkpoint switch — none of which are known/confirmed to
+     have touched TP+MTP's code path specifically, but also not
+     independently re-verified not to have). This is an explicit,
+     deliberate scope decision: spend effort on the genuinely NEW
+     measurement gap (500K depth) rather than re-litigating numbers
+     already trusted from memory.
+   - **BUT this does NOT resolve the actual gap — 500K decode
+     throughput was never measured under ANY configuration, ever, by
+     anyone, so there is nothing to "re-baseline" there in the first
+     place.** "Don't re-baseline" applies to numbers that already exist
+     (short/100K context data) and are being kept as-is; it does not
+     and cannot apply to a number that has simply never been taken. The
+     30 tok/s @ 500K target remains genuinely unmeasured ground for both
+     PP and TP — this is new territory to explore when the time comes,
+     not old territory to re-walk.
    - MTP vs DSpark: per Section 13.2's finding, MTP (TP-only mechanism)
      and DSpark (PP-only mechanism) are structurally different
      code paths that cannot be swapped for each other under a fixed
@@ -134,17 +147,18 @@ against, instead of "measure throughput" with no number attached.
      honest about which mechanism produced it and under which sharding
      scheme, not conflated.
 
-   **CONCRETE NEXT STEP arising from this revision:** before any further
-   design work on the batched-PP scheduler (Section 6), get a real,
-   fresh, 500K-context decode throughput measurement — first on TP
-   (current cluster default, MTP available, no new relaunch needed
-   beyond confirming config) as the "what are we trying to get back"
-   baseline, then on PP (no speculation, single-request, already
-   deployable) as the "what does this design's foundation actually
-   deliver today" baseline. This requires a cluster relaunch and a
-   real, likely multi-minute-to-tens-of-minutes 500K prefill+decode
-   run — needs the user's explicit go-ahead per this fork's standing
-   relaunch-approval rule, not something to start unprompted.
+   **CONCRETE NEXT STEP arising from this revision:** at whatever point
+   this design reaches a phase that needs a real throughput number
+   (per Section 9's phased plan, that's Phase 3 at the earliest — NOT
+   now, not as a prerequisite to starting design/Phase-0 work), take
+   ONE fresh measurement: PP no-speculation decode at 500K context
+   (the "what does this design's foundation actually deliver at the
+   depth we care about" number). This is NOT a TP re-baseline — per
+   the correction above, TP's existing numbers are trusted as-is and
+   not being re-measured. It's simply the one number that has never
+   existed for PP at real depth and is needed to know how large the
+   gap to 30 tok/s actually is before building the batching layer on
+   top of it.
 
 4. **Prefill throughput: 400+ tok/s (PP-derived), reduced RDMA syncs
    (PP-derived).** STATUS: PARTIALLY confirmed, with a real gap that must
