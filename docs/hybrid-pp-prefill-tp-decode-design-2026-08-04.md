@@ -50,7 +50,89 @@ concurrent-decode capability, on the SAME cluster, for the SAME model,
 without a full rewrite of MLX's distributed primitives (send/recv/
 collectives) or hand-rolling network-level request tagging.
 
-## 2. Prior art / cited measurements (this fork, this cluster)
+## 2.5 Hard requirements (user-specified, 2026-08-04) — THIS DESIGN MUST HIT ALL FOUR
+
+These are not aspirational — they are the acceptance bar. A version of
+this design that doesn't clear all four is not done. Restated here in one
+place so Section 9's phase plan has an unambiguous target to validate
+against, instead of "measure throughput" with no number attached.
+
+1. **Concurrent requests (TP-derived).** Multiple simultaneous requests
+   must work, matching TP's existing capability. STATUS: architecturally
+   addressed by Section 6.2 items 1-3 (rank-0 scheduler + per-request
+   cache routing); TP's own `prefill_batched`/`BatchGenerator` prove the
+   underlying batching machinery already works today. NOT YET BUILT for
+   the PP-batched path — this is what Phases 1-4 exist to deliver and
+   validate.
+
+2. **Instant cancellation (TP-derived).** A request must be cancellable
+   and stop immediately. STATUS: real, existing caveat that must not get
+   lost — TP's cancellation today works cleanly for DECODE (checked
+   per-step, so effectively near-instant) but does NOT interrupt an
+   in-flight PREFILL; a large prefill runs to completion regardless of a
+   cancel request (warm memory facts 649/656, confirmed via direct code
+   read: `POST /v1/cancel/{command_id}` closes the stream but "only
+   decode checks the cancel flag, so full prefill runs to completion
+   regardless"). This hybrid design's Section 6.2 item 5 (chunked
+   prefill interleaved with decode) is actually a DIRECT opportunity to
+   FIX this long-standing gap, not just preserve it — because prefill
+   becomes a sequence of small scheduler-visible chunks instead of one
+   giant blocking call, rank 0 can check for cancellation BETWEEN chunks
+   and stop a prefill mid-flight for the first time in this fork's
+   history. This should be treated as a first-class requirement of
+   Section 6.2 item 6 ("cancellation"), not left as "same as before":
+   cancellation must work during BOTH prefill and decode once this design
+   ships, which is a strictly higher bar than what TP already does today.
+
+3. **Decode throughput: ≥37.5 tok/s aggregate at c=2, MTP on.**
+   STATUS: this exact number is ALREADY CONFIRMED ACHIEVED under TP —
+   warm memory fact 745 (2026-06-26, `concurrent_bench.py`, MTP on,
+   seq-split on, "verified config"): 37.5 tok/s aggregate (18.7 tok/s
+   per-request × 2 concurrent), stable (tail_ratio 1.02, zero errors),
+   beating the team's own 30 tok/s c=2 target by 25%. CRITICAL SCOPING
+   CAVEAT that must not get lost: fact 745's benchmark used a SHORT
+   prompt (120 words) with `max_tokens=512` — i.e., this number is
+   confirmed at LOW context depth, not at 100K/500K. No measurement of
+   c=2 MTP-on decode throughput at real (100K+) context depth exists in
+   this fork's history as of this doc. Decode throughput typically
+   degrades with context depth (KV-cache read cost grows), so 37.5 tok/s
+   holding at 500K is NOT something to assume — it is something Phase 3's
+   throughput validation MUST explicitly test at multiple context depths
+   (short, 100K, 500K), not just reproduce the short-prompt number and
+   declare victory. Also note: MTP, not DSpark, is the mechanism behind
+   this number — DSpark has its own separate, unresolved reliability bug
+   (Section 8 item 3) and is explicitly NOT part of this throughput
+   requirement's validated baseline.
+
+4. **Prefill throughput: 400+ tok/s (PP-derived), reduced RDMA syncs
+   (PP-derived).** STATUS: PARTIALLY confirmed, with a real gap that must
+   be stated plainly, not glossed over. Warm memory fact 1018's
+   fresh-restart, thermally-matched PP numbers: 1K=490, 10K=512,
+   94K=485, 200K=431, 400K=377, 500K=364 tok/s. **400+ tok/s holds
+   cleanly from short context through roughly 200K, but the confirmed
+   number AT 500K (364 tok/s) is BELOW the 400 tok/s bar.** This design
+   must either (a) hit 400+ at 500K specifically — which nothing in
+   today's PP numbers demonstrates yet, so this is a real, live gap this
+   design needs to close, not just preserve — or (b) the requirement
+   needs an explicit sign-off that "400+ at short/mid context, best-
+   effort beyond that" is acceptable, which has NOT been given. Treat
+   this as unresolved until Phase 3/5's real measurement, not assumed
+   satisfied. On "reduced RDMA syncs": this is a real, measurable,
+   already-partially-quantified TP cost this design removes by
+   construction — TP pays an explicit per-chunk `mx_barrier(group)` sync
+   during prefill (Section 3's `generate.py` citation) AND a per-layer
+   `all_sum` collective during decode that warm memory fact 752 measured
+   directly via GPU-idle profiling as a real bottleneck (302ms / 7.5% of
+   decode wall time is GPU sitting idle waiting on the MoE `all_sum`
+   collective to complete, not compute). PP's point-to-point send/recv
+   has no equivalent per-chunk-barrier-then-collective pattern in either
+   phase — this is a structural win of the design, not something that
+   needs a new benchmark to prove exists, though Phase 5's real
+   comparison should still quantify it (e.g. count/measure actual sync
+   points per request under both modes) rather than leave it purely
+   qualitative.
+
+## 3. Prior art / cited measurements (this fork, this cluster)
 
 - Fresh-restart, thermally-matched PP vs TP prefill comparison
   (warm memory fact 1018, 2026-07-17): PP beats TP at EVERY tested
@@ -114,7 +196,7 @@ collectives) or hand-rolling network-level request tagging.
   behind PP's prefill throughput edge — PP's point-to-point handoff has
   no equivalent per-chunk barrier-then-collective cost.
 
-## 3. Second-opinion consult (2026-08-04, before this doc was written)
+## 4. Second-opinion consult (2026-08-04, before this doc was written)
 
 Consulted an external reference model on this exact question before
 starting the code-reading gate-check above. Its answer, summarized:
@@ -138,7 +220,7 @@ starting the code-reading gate-check above. Its answer, summarized:
   cancelled request from the next step's batch).
 - Named risk: whether DSv4's attention/indexer code can handle a real
   batched, heterogeneous-length request — flagged as gating the whole
-  design. THIS RISK IS NOW RESOLVED (see Section 2 above and Section 4
+  design. THIS RISK IS NOW RESOLVED (see Section 3 above and Section 5
   below) — the machinery already exists in TP's `prefill_batched` path
   and can very likely be reused rather than rebuilt.
 - Also flagged: DSpark speculative decode + batching interact badly
@@ -152,10 +234,10 @@ starting the code-reading gate-check above. Its answer, summarized:
   but with a real memory cost: running the union of PP's per-node full
   expert set for its owned layers AND TP's half-expert-set-per-layer
   would push per-node expert-weight residency from ~50% to ~75%. NOT
-  adopted as the primary direction for this doc (see Section 6) but kept
-  as a fallback if Section 5's batched-PP design hits an unexpected wall.
+  adopted as the primary direction for this doc (see Section 7) but kept
+  as a fallback if Section 6's batched-PP design hits an unexpected wall.
 
-## 4. Gate-check result: the "can DSv4 batch with heterogeneous lengths"
+## 5. Gate-check result: the "can DSv4 batch with heterogeneous lengths"
    question is ALREADY ANSWERED YES by this fork's own TP code
 
 This is the most important finding of this design doc's research phase,
@@ -182,29 +264,29 @@ today:
 
 CONSEQUENCE for the hybrid design: instead of writing new batched-attention
 code for DSv4 from scratch (a multi-week, high-risk undertaking touching
-the model's numerics), the batched-PP design in Section 5 can most likely
+the model's numerics), the batched-PP design in Section 6 can most likely
 reuse `prefill_batched`'s existing padding/masking/cache-prepare machinery
 almost directly — the NEW work is primarily in the PP SCHEDULING/transport
 layer (rank-0-as-scheduler, metadata-framed send/recv, micro-batch
 interleaving for decode), not in the model's attention math. This does
-NOT mean zero risk (see Section 7), but it means the single biggest named
+NOT mean zero risk (see Section 8), but it means the single biggest named
 unknown from the external consult is resolved in this design's favor
 before writing a line of new code.
 
-## 5. Proposed architecture
+## 6. Proposed architecture
 
 ### 5.1 High-level
 
 Keep PP's layer-split topology (rank 0 = first ~half of layers, rank 1 =
 second ~half) for BOTH prefill and decode — do not disaggregate PP vs TP
-by phase (see Section 6 for why phase disaggregation was considered and
+by phase (see Section 7 for why phase disaggregation was considered and
 set aside as the primary direction). Instead, make PP itself support
 batching multiple concurrent requests through its existing point-to-point
 pipeline, using the batched-attention machinery TP's `prefill_batched`
 already proved out.
 
 ### 5.2 Components (numbered, not necessarily an implementation order —
-    see Section 8 for the actual phased plan)
+    see Section 9 for the actual phased plan)
 
 1. **Rank-0 step scheduler.** Rank 0 (today's request-accepting node)
    decides, once per pipeline step, which in-flight requests are
@@ -271,9 +353,9 @@ already proved out.
    strict win over today's PP (concurrency=1 is IMPOSSIBLE today; DSpark
    works today only because there's never a second request to conflict
    with) — but is flagged as a real scope decision, not a minor detail:
-   see Section 7.
+   see Section 8.
 
-## 6. Alternative considered and set aside: phase disaggregation
+## 7. Alternative considered and set aside: phase disaggregation
    (PP-prefill → TP-decode handoff)
 
 The consult also raised, as a possibly-cheaper alternative: use PP only
@@ -297,7 +379,7 @@ reasons:
   ruled in OR out; not yet done as of this doc.
 - It introduces a genuinely NEW class of engineering (a live process
   handoff / weight-layout conversion mid-request) that doesn't reuse any
-  existing exo machinery, whereas Section 5's batched-PP design reuses
+  existing exo machinery, whereas Section 6's batched-PP design reuses
   `prefill_batched`'s already-proven padding/masking/cache logic almost
   directly.
 - It would still leave PP's per-request KV cache format (RotatingKVCache/
@@ -307,16 +389,16 @@ reasons:
   duplicated) — a real, nontrivial cache-format translation on the hot
   path of every single request.
 
-This alternative is kept as a documented fallback: if Section 5's
-batched-PP scheduler design hits a wall during Phase 1 (see Section 8)
+This alternative is kept as a documented fallback: if Section 6's
+batched-PP scheduler design hits a wall during Phase 1 (see Section 9)
 that makes it structurally infeasible, phase disaggregation is the
 next direction to prototype, and the memory-residency math above should
 be done first before investing further engineering time in it.
 
-## 7. Real risks (not glossed over)
+## 8. Real risks (not glossed over)
 
 1. **DSv4 attention/indexer numerics under a NEW batching pattern.**
-   Section 4 establishes that DSv4 CAN batch heterogeneous lengths — but
+   Section 5 establishes that DSv4 CAN batch heterogeneous lengths — but
    `prefill_batched` was built and validated for TP's forward pass
    (attention replicated on both ranks, full sequence visible to both).
    Running the SAME padded/masked batch through a PP-split forward
@@ -340,7 +422,7 @@ be done first before investing further engineering time in it.
    STILL UNRESOLVED** (see `docs/dspark-fullblock-context-scaling-cliff-2026-08-04.md`,
    this fork, ongoing separate investigation as of this doc's writing).
    This hybrid design does not depend on DSpark being fixed (item 7 in
-   Section 5.2 already scopes DSpark to concurrency=1-only), but if
+   Section 6.2 already scopes DSpark to concurrency=1-only), but if
    DSpark's own reliability bug is still open when this design reaches
    implementation, concurrency=1 requests running DSpark under the new
    batched-PP scheduler will STILL be exposed to that separate,
@@ -369,10 +451,10 @@ be done first before investing further engineering time in it.
    touches the model's cache-preparation path, the PP layer classes, and
    requires a new scheduler component with real state machine logic. The
    user has explicitly asked for this to be done right, not as a cheap
-   prototype; Section 8's phased plan reflects that by front-loading
+   prototype; Section 9's phased plan reflects that by front-loading
    correctness validation before any throughput claims are made.
 
-## 8. Proposed phased plan (no code written yet — this is the plan to
+## 9. Proposed phased plan (no code written yet — this is the plan to
    review, not a commitment to start immediately)
 
 **Phase 0 — Correctness baseline (before any new scheduler code):**
@@ -403,7 +485,7 @@ lengths.
 
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
-micro-batch interleaving from Section 5.2 item 4, and THEN measure
+micro-batch interleaving from Section 6.2 item 4, and THEN measure
 throughput — this is the first point in the plan where a throughput
 number should be trusted/reported, because correctness is already
 locked in by Phases 0-2.
@@ -426,7 +508,7 @@ against both existing modes under matched thermal/load conditions
 (reusing the "fresh-restart, no back-to-back thermal contamination"
 discipline from fact 1018/1017's own hard-won methodology lesson).
 
-## 9. Explicitly out of scope for this doc
+## 10. Explicitly out of scope for this doc
 
 - Fixing the existing, separately-tracked DSpark ~18-20% catastrophic
   stall bug (`docs/dspark-fullblock-context-scaling-cliff-2026-08-04.md`).
@@ -438,10 +520,10 @@ discipline from fact 1018/1017's own hard-won methodology lesson).
   at the Python application layer, on top of existing MLX primitives.
 - Extending this hybrid approach to any model other than DSv4-Flash on
   this specific 2-node cluster topology. The design as written assumes
-  2 pipeline stages specifically (Section 5.2 item 4's "exactly 2
+  2 pipeline stages specifically (Section 6.2 item 4's "exactly 2
   micro-batches" simplification would need generalizing for N>2 stages).
 
-## 10. Open questions for review before implementation starts
+## 11. Open questions for review before implementation starts
 
 1. Does the phased plan's ordering make sense, or should Phase 0's
    correctness-first framing be even MORE front-loaded (e.g. should
@@ -451,7 +533,7 @@ discipline from fact 1018/1017's own hard-won methodology lesson).
 2. Is concurrency=1-only DSpark gating (risk #2) an acceptable permanent
    scope boundary for v1, or should batched-DSpark be pulled INTO this
    design's scope rather than deferred?
-3. Should Section 6's phase-disaggregation alternative get its memory-
+3. Should Section 7's phase-disaggregation alternative get its memory-
    residency math checked now (cheap, ~30 min per the consult) even
    though it's not the primary direction, just to have it fully ruled
    in/out rather than left as an open fallback?
