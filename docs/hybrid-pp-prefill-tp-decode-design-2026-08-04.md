@@ -1479,6 +1479,70 @@ confirmed scope (decode-only, no speculative decode) and turns "does
 this interact badly" into "was this request eligible," which is a
 cheap, loud, testable gate rather than a silent correctness risk.
 
+**Building blocks for this integration completed, 2026-08-05** (per
+the above shape, `consult`-reviewed):
+
+- `pp_batched_decode_eligibility.py` -- `is_eligible_for_batched_decode`,
+  the pure gate function itself. 13 tests, basedpyright/ruff clean.
+- `pp_batched_decode_adapter.py` -- `BatchedDecodeResponseAdapter`,
+  translating `BatchedDecodeSession`'s raw `{request_id: (token,
+  is_done)}` step output into `finish_reason` classification
+  (None/stop/length), mirroring `_step_pp_spec`'s own EOS-membership-
+  test/max_tokens logic (not reimplementing it independently -- a
+  second `consult` review's explicit requirement, to prevent silent
+  drift between the two paths). 7 tests using real Llama forward
+  passes, basedpyright/ruff clean.
+
+**Actual `ExoBatchGenerator.submit()`/`step()` dispatch wiring —
+DELIBERATELY NOT DONE, 2026-08-05, after a third `consult` review.**
+This is the one piece of Phase 1's remaining scope this session
+concluded should NOT be attempted blind. The critical fact that
+changed the risk calculus while investigating this: **the actual
+concurrency admission gate is `EXO_MAX_CONCURRENT_REQUESTS=1`,
+hardcoded for Pipeline mode in `start_cluster.sh` as a documented
+CORRECTNESS fix** ("PP's shared per-rank decode-loop state cannot
+survive >1 concurrent request without data corruption/wedging" --
+`start_cluster.sh`'s own 2026-07-19 comment, a real production
+incident). Wiring `BatchedDecodeSession` into `ExoBatchGenerator`
+alone does NOT enable N=2 concurrency; that separate gate would ALSO
+need to change, which is a bigger, safety-relevant edit this session
+never scoped or attempted.
+
+But the deeper reason to stop here, surfaced by the third `consult`
+review directly: **`submit()`/`step()` are the same functions EVERY
+request already goes through today, including today's normal
+batch=1/serial traffic.** Even a flag-gated new branch inside those
+functions changes their control flow, and this session has zero
+ability to execute `ExoBatchGenerator` end-to-end (no loaded model,
+no real runner plumbing, no cluster this stretch) to verify the
+existing single-request path is unperturbed by the edit. Per that
+review: "stopping is defensible only after (a) a real-path batch-
+size-1 smoke test and (b) a mocked two-request interleaving test" --
+neither of which this session could produce without either cluster
+access or building a much larger mocked-runner harness, which was
+judged out of scope for this stretch. The two completed building
+blocks above (eligibility gate, response adapter) are the genuinely
+safe, fully independently-testable pieces; the actual `submit()`/
+`step()` edit is where "component-tested" stops being sufficient
+justification and real end-to-end verification becomes mandatory.
+
+**For whoever picks this up next:** the remaining wiring is
+mechanical (mirror `_submit_pp_spec`/`_step_pp_spec`/
+`_close_pp_spec_gen`'s existing three-method shape exactly, dispatch
+via a new `self._batched_decode_active` flag alongside the existing
+`self._pp_spec_active` check in `submit()`/`step()`, construct
+`GenerationBatch.Response(uid=..., token=..., logprobs=mx.zeros(1),
+finish_reason=..., prompt_cache=None, all_tokens=None)` from the
+adapter's classification -- matching `_step_pp_spec`'s own Response
+construction exactly). What is NOT yet done and must happen before or
+during that edit: (1) the `EXO_MAX_CONCURRENT_REQUESTS=1` gate in
+`start_cluster.sh` needs its own explicit, separately-reviewed change
+to ever let a 2nd request reach this code; (2) a real-path batch=1
+smoke test proving the flag-off (or flag-on-but-single-request) case
+is byte-identical to today's existing behavior; (3) ideally a mocked
+2-request interleaving test at the `ExoBatchGenerator` level itself,
+not just at the `BatchedDecodeSession` level below it.
+
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
 `prefill_batched`'s padding/masking logic adapted for the PP split.
