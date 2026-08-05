@@ -1720,6 +1720,52 @@ Item 1 (`EXO_MAX_CONCURRENT_REQUESTS=1`) and item 3 (batch=1 smoke
 test against the real `ExoBatchGenerator` wrapper) remain the only
 open prerequisites.
 
+**Item 3 CLOSED -- `ExoBatchGenerator.submit()`/`step()`
+wiring itself DONE, 2026-08-05 (same day, later still).** The actual
+mechanical edit landed: `submit()` gains one new branch point
+(mirrors `_pp_spec_active`'s own single branch) running the
+eligibility gate and, if eligible, calling `_submit_batched_decode`
+(pure `enqueue_admission` + the SAME `_active_tasks`/`_EngineTask`
+bookkeeping every other path uses); `step()` gains one new branch
+(`_step_batched_decode`) calling `tick()` and translating the result
+into real `GenerationBatch.Response` objects -- the exact same
+contract `_step_pp_spec` already returns. Construction happens once
+in `__post_init__`, detecting rank via `get_batched_pipeline_info()`
+and building the rank-appropriate glue -- mutually exclusive with
+PP-spec by construction (different layer classes).
+
+Verified inert when the flag is off (the only state this can ship
+in right now) via a REAL git-worktree A/B run: the pre-edit commit
+and the edited tree, run side-by-side against the identical
+2-request sequential-submit scenario through a real
+`ExoBatchGenerator` instance, produced byte-for-byte IDENTICAL
+tokens for every single generated token across both requests -- the
+only diff in the JSON trace was the new `_batched_decode_active`
+attribute existing at all (expected, doesn't exist pre-edit). This
+is the strongest form of the "prove flag-off changes nothing"
+guarantee this session's `consult` reviews called for: not a
+hand-reconstructed independent reference (two earlier drafts of the
+committed regression test got mlx-lm's internal
+`insert()`/`prefill()` token-consumption accounting wrong trying
+exactly that), but a genuine differential comparison against the
+real, unedited code.
+
+`basedpyright`/`ruff` both matched origin/main's pre-edit baseline
+error count exactly (0 new errors either tool). Full worker suite:
+255 passing (+1 new committed regression test), same 1 pre-existing
+unrelated failure, 0 regressions.
+
+**Remaining before this path is reachable/safe to actually enable in
+production:**
+1. `EXO_MAX_CONCURRENT_REQUESTS=1` (`start_cluster.sh`) needs its own
+   explicit, separately-reviewed change -- the batched path is
+   unreachable dead code without it (this is deliberate: the wiring
+   above cannot admit a second concurrent request until this
+   separate safety-relevant gate is relaxed for Pipeline mode).
+2. A real 2-node cluster A/B, which per this session's standing rule
+   requires the user's own separate explicit go-ahead -- not
+   something this session grants itself from a general "keep going."
+
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
 `prefill_batched`'s padding/masking logic adapted for the PP split.
