@@ -353,15 +353,43 @@ class RankOneMirrorSession:
     rank 0 sent -- never samples, never holds per-request generation
     state (matches ``RankOneMirrorDriver``'s zero-decision-logic
     design).
+
+    Deliberately holds NO per-slot cache dict as separate mutable
+    state (an earlier version of this class did -- ``_slot_caches``,
+    set once at ``admit_request`` and never refreshed as ``step()``
+    advanced the real ``batched_cache``. A real-wire correctness test
+    caught this: after eviction, ``release_slot`` rebuilt
+    ``batched_cache`` from that STALE dict, silently reverting the
+    surviving request's cache to its state at admission time instead
+    of its actual current advanced state -- a real, previously-hidden
+    bug the in-process object-sharing test suite never exercised
+    because it happened to never evict a slot mid-lifecycle in a way
+    that surfaced the staleness. Fixed by always extracting current
+    per-slot state from the live ``batched_cache`` on demand (mirrors
+    ``BatchedDecodeSession._extract_all_current_slot_caches``'s own
+    pattern exactly) -- there is only ONE source of truth for a
+    slot's cache state: the live batched cache itself.
     """
 
     mirror_driver: RankOneMirrorDriver
     batched_cache: "KVCacheType" = field(default_factory=list)
-    _slot_caches: dict[int, "KVCacheType"] = field(default_factory=dict)
 
     @classmethod
     def new(cls, *, max_concurrency: int = 2) -> RankOneMirrorSession:
         return cls(mirror_driver=RankOneMirrorDriver(max_concurrency=max_concurrency))
+
+    def _extract_all_current_slot_caches(self) -> dict[int, "KVCacheType"]:
+        """Snapshot every currently-occupied slot's own single-request
+        cache out of the current batched cache, keyed by slot index --
+        mirrors ``BatchedDecodeSession``'s identically-named method
+        exactly (see this class's docstring for why this must always
+        read from the LIVE ``batched_cache``, never a separately
+        tracked dict)."""
+        assert self.mirror_driver.cache_router is not None
+        result: dict[int, "KVCacheType"] = {}
+        for slot in self.mirror_driver.cache_router.occupied_slots():
+            result[slot] = extract_request_cache(self.batched_cache, slot)
+        return result
 
     def admit_request(
         self, message: StepMessage, cache_slot: int, prefilled_cache: "KVCacheType"
@@ -371,7 +399,11 @@ class RankOneMirrorSession:
         cache into the batch, at the SAME slot rank 0 used (the
         message itself carries the slot; this call's ``cache_slot``
         argument is the caller's own already-known assignment, cross-
-        checked against the message's own entries for consistency)."""
+        checked against the message's own entries for consistency).
+        Correctly handles a request joining alongside already-
+        ADVANCED slots (mid-stream admission) since it re-extracts
+        every existing slot's CURRENT state before re-merging, exactly
+        like ``BatchedDecodeSession.admit_request``."""
         entry_slots = {entry.cache_slot for entry in message.entries}
         if cache_slot not in entry_slots:
             raise BatchedDecodeSessionError(
@@ -380,8 +412,9 @@ class RankOneMirrorSession:
                 f"0/rank 1 admission mismatch"
             )
         self.mirror_driver.on_step_message(message)
-        self._slot_caches[cache_slot] = prefilled_cache
-        ordered = [self._slot_caches[slot] for slot in sorted(self._slot_caches)]
+        existing = self._extract_all_current_slot_caches()
+        existing[cache_slot] = prefilled_cache
+        ordered = [existing[slot] for slot in sorted(existing)]
         self.batched_cache = merge_request_caches(ordered)
 
     def step(self, model: _ModelLike, message: StepMessage, tokens: mx.array) -> None:
@@ -403,14 +436,17 @@ class RankOneMirrorSession:
         ``RankOneMirrorDriver.on_evict_message``'s own established
         boundary)."""
         self.mirror_driver.on_evict_message(message)
-        final_cache = extract_request_cache(self.batched_cache, message.cache_slot)
-        del self._slot_caches[message.cache_slot]
-        return final_cache
+        return extract_request_cache(self.batched_cache, message.cache_slot)
 
     def release_slot(self, cache_slot: int) -> None:
+        """Free ``cache_slot`` in the router's bookkeeping and rebuild
+        ``batched_cache`` from every REMAINING occupied slot's CURRENT
+        state (see this class's docstring on why this must never use
+        a separately tracked, staleness-prone dict)."""
         assert self.mirror_driver.cache_router is not None
+        remaining = self._extract_all_current_slot_caches()
+        remaining.pop(cache_slot, None)
         self.mirror_driver.cache_router.release_slot(cache_slot)
-        remaining = self._slot_caches
         if remaining:
             ordered = [remaining[slot] for slot in sorted(remaining)]
             self.batched_cache = merge_request_caches(ordered)
