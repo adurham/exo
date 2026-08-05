@@ -95,7 +95,28 @@ from exo.worker.engines.mlx.auto_parallel import (
 # (test_pp_metaframe.py) uses mlx-lm's plain Llama, which has no
 # hyper-connections and stays 3D throughout — the gap was invisible
 # until the real cluster A/B ran DSv4 for the first time.
-METAFRAME_PROTOCOL_VERSION = 2
+#
+# v3 (2026-08-05, Phase 1): added the ``batch_axis`` header field.
+# Phase 0.5's protocol only ever had ONE request per frame, so
+# ``total_tokens = sum(seq_lens)`` unambiguously meant "concatenate
+# along the SEQUENCE axis" (the only case that mattered at
+# concurrency=1: multiple prefill CHUNKS of the same request, stacked
+# in sequence). Phase 1's decode batching is structurally different:
+# N DIFFERENT requests, each contributing exactly 1 token, stacked
+# along the BATCH axis (axis 0) — matching mlx-lm's own decode-step
+# convention (`model(input_tokens[None], cache=...)`, confirmed by
+# reading `mlx_lm.generate.generate_step`'s `_model_call`, and
+# `prefill_batched`'s own `model(padded_tokens[:, offset:offset+n],
+# cache=batched_cache)` batch-axis-0 convention). Reusing
+# `total_tokens`/sequence-axis-concat for this case would silently
+# produce the WRONG tensor shape (one long single-batch-row sequence
+# instead of an N-row batch) with no protocol-level signal to catch
+# it — `batch_axis` makes the distinction explicit and checkable
+# instead of inferred from context. 0 = sequence-axis concat (Phase
+# 0.5's only case, still the default so v1/v2 callers upgrading to v3
+# need no behavior change), 1 = batch-axis stack (Phase 1's decode
+# batching case).
+METAFRAME_PROTOCOL_VERSION = 3
 
 # Fixed-shape header, sent as one int32 array immediately before the
 # per-request table (also int32) and, in turn, immediately before the
@@ -106,10 +127,12 @@ METAFRAME_PROTOCOL_VERSION = 2
 #                            mixed-binary skew the startup handshake
 #                            can't see.
 #   [1] phase_flag         — 0 = prefill chunk, 1 = decode step.
-#   [2] num_requests       — table row count. Always 1 at concurrency=1
-#                            (Phase 0.5's scope); Phase 1+ scheduling
-#                            increases this without changing the header
-#                            shape.
+#   [2] num_requests       — table row count. Always 1 at Phase 0.5's
+#                            concurrency=1 scope; Phase 1's decode
+#                            batching increases this (up to
+#                            max_concurrency, N=2 per the design doc's
+#                            confirmed scope) without changing the
+#                            header shape.
 #   [3] hidden_dim         — activation tensor's LAST dim, so the
 #                            receiver can derive the full recv_like
 #                            template shape from the table's per-request
@@ -127,7 +150,23 @@ METAFRAME_PROTOCOL_VERSION = 2
 #                            long as it's exactly one extra dim between
 #                            seq_len and hidden_dim (true for every
 #                            architecture in this fork today).
-_HEADER_FIELDS = 5
+#   [5] batch_axis          — v3 addition. 0 = sequence-axis concat
+#                            (Phase 0.5's single-request-only
+#                            convention: table rows describe
+#                            consecutive chunks of ONE growing
+#                            sequence, `total_tokens = sum(seq_lens)`
+#                            is the tensor's axis-1 length, tensor's
+#                            axis-0/batch dim is always 1). 1 =
+#                            batch-axis stack (Phase 1's decode
+#                            batching: table rows describe N DIFFERENT
+#                            requests, each contributing exactly
+#                            `seq_lens[i]` tokens on ITS OWN batch row
+#                            — Phase 1 scope requires every row's
+#                            `seq_lens[i]` to be equal, since decode
+#                            steps are naturally uniform-length with
+#                            no padding needed, per design doc Section
+#                            6.2 item 1).
+_HEADER_FIELDS = 6
 
 
 # Per-request table row width (int32). Field order per row:
@@ -166,6 +205,7 @@ class MetaFrame:
         "phase_flag",
         "hidden_dim",
         "extra_dim",
+        "batch_axis",
         "request_uids",
         "seq_lens",
         "is_last_chunk",
@@ -177,6 +217,7 @@ class MetaFrame:
         phase_flag: int,
         hidden_dim: int,
         extra_dim: int,
+        batch_axis: int,
         request_uids: list[int],
         seq_lens: list[int],
         is_last_chunk: list[bool],
@@ -185,6 +226,7 @@ class MetaFrame:
         self.phase_flag = phase_flag
         self.hidden_dim = hidden_dim
         self.extra_dim = extra_dim
+        self.batch_axis = batch_axis
         self.request_uids = request_uids
         self.seq_lens = seq_lens
         self.is_last_chunk = is_last_chunk
@@ -199,19 +241,49 @@ class MetaFrame:
 
     def activation_template_shape(self, batch_size: int = 1) -> tuple[int, ...]:
         """Shape of the activation tensor that immediately follows this
-        frame on the wire, for use as a ``recv_like`` template. At
-        concurrency=1 (Phase 0.5's scope) this is always a single
-        request's shape — the ``batch_size`` parameter exists so
-        Phase 1+ batching can reuse this method without a signature
-        change, not because it does anything yet.
+        frame on the wire, for use as a ``recv_like`` template.
 
-        Returns a 3-tuple ``(batch, total_tokens, hidden_dim)`` when
-        ``extra_dim == 0`` (the common case), or a 4-tuple
-        ``(batch, total_tokens, extra_dim, hidden_dim)`` when
-        ``extra_dim > 0`` — DSv4-Flash's hyper-connection residual
-        stream shape. See ``METAFRAME_PROTOCOL_VERSION``'s v2 comment
-        for why this field exists.
+        Two structurally different cases, selected by ``batch_axis``
+        (see ``METAFRAME_PROTOCOL_VERSION``'s v3 comment for the full
+        rationale):
+
+        - ``batch_axis == 0`` (Phase 0.5's sequence-axis-concat
+          convention, still the default): ``batch_size`` (the
+          parameter, always 1 for this case) stays on axis 0,
+          ``total_tokens = sum(seq_lens)`` becomes axis 1. Returns a
+          3-tuple ``(batch_size, total_tokens, hidden_dim)`` when
+          ``extra_dim == 0``, or a 4-tuple ``(batch_size, total_tokens,
+          extra_dim, hidden_dim)`` when ``extra_dim > 0`` (DSv4's
+          hyper-connection shape).
+        - ``batch_axis == 1`` (Phase 1's decode-batching convention):
+          ``num_requests`` (NOT the ``batch_size`` parameter, which is
+          unused in this branch) becomes axis 0, and every request's
+          ``seq_lens[i]`` must be equal (decode steps are uniform-
+          length, no padding needed — design doc Section 6.2 item 1) —
+          that shared value becomes axis 1. Returns a 3-tuple
+          ``(num_requests, seq_len, hidden_dim)`` or a 4-tuple
+          ``(num_requests, seq_len, extra_dim, hidden_dim)``.
         """
+        if self.batch_axis == 1:
+            if self.num_requests == 0:
+                raise RuntimeError(
+                    "activation_template_shape: batch_axis=1 but "
+                    "num_requests=0 -- a batch-axis frame must describe "
+                    "at least one request"
+                )
+            distinct_lens = set(self.seq_lens)
+            if len(distinct_lens) != 1:
+                raise RuntimeError(
+                    f"activation_template_shape: batch_axis=1 requires "
+                    f"every request's seq_len to be equal (decode steps "
+                    f"are uniform-length, no padding), got "
+                    f"seq_lens={self.seq_lens} -- {len(distinct_lens)} "
+                    f"distinct values"
+                )
+            seq_len = self.seq_lens[0]
+            if self.extra_dim > 0:
+                return (self.num_requests, seq_len, self.extra_dim, self.hidden_dim)
+            return (self.num_requests, seq_len, self.hidden_dim)
         if self.extra_dim > 0:
             return (batch_size, self.total_tokens, self.extra_dim, self.hidden_dim)
         return (batch_size, self.total_tokens, self.hidden_dim)
@@ -227,10 +299,11 @@ def encode_metaframe(
     extra_dim: int = 0,
 ) -> tuple[mx.array, mx.array]:
     """Build the (header, table) int32 array pair for a SINGLE request
-    (concurrency=1 — Phase 0.5's scope). Returns two separate arrays
-    (not one concatenated array) so the receiver can ``recv_like`` the
-    header with a truly fixed, protocol-version-independent shape
-    before it knows ``num_requests`` — see ``recv_metaframe``.
+    (concurrency=1 — Phase 0.5's scope; ``batch_axis=0``, unchanged
+    behavior from v1/v2). Returns two separate arrays (not one
+    concatenated array) so the receiver can ``recv_like`` the header
+    with a truly fixed, protocol-version-independent shape before it
+    knows ``num_requests`` — see ``recv_metaframe``.
 
     ``extra_dim``: 0 for a plain 3D ``(batch, seq_len, hidden_dim)``
     activation tensor (most models); pass the size of the extra middle
@@ -238,13 +311,70 @@ def encode_metaframe(
     ``(batch, seq_len, extra_dim, hidden_dim)`` tensor. Caller derives
     this from the ACTUAL tensor being sent (``tensor.ndim == 4``), not
     from a static model-type check — see the layer classes below.
+
+    For Phase 1's decode-batching case (N different requests stacked
+    on the batch axis), use ``encode_batched_decode_metaframe``
+    instead — a separate function, not an overload of this one, so
+    Phase 0.5's already-cluster-verified single-request call sites are
+    never touched by Phase 1 work (matching this module's own
+    established "new functions/classes, not in-place mutation"
+    pattern — see the module docstring's point 5 for the layer-class
+    precedent this follows).
     """
     header = mx.array(
-        [METAFRAME_PROTOCOL_VERSION, phase_flag, 1, hidden_dim, extra_dim],
+        [METAFRAME_PROTOCOL_VERSION, phase_flag, 1, hidden_dim, extra_dim, 0],
         dtype=mx.int32,
     )
     table = mx.array(
         [[request_uid & 0xFFFFFFFF, seq_len, int(is_last_chunk), 0]],
+        dtype=mx.int32,
+    )
+    return header, table
+
+
+def encode_batched_decode_metaframe(
+    *,
+    hidden_dim: int,
+    request_uids: list[int],
+    seq_len: int,
+    extra_dim: int = 0,
+) -> tuple[mx.array, mx.array]:
+    """Build the (header, table) int32 array pair for Phase 1's
+    BATCHED decode step — N different requests, each contributing
+    exactly ``seq_len`` tokens (uniform-length, no padding, per design
+    doc Section 6.2 item 1), stacked on the BATCH axis
+    (``batch_axis=1`` — see ``METAFRAME_PROTOCOL_VERSION``'s v3
+    comment for the full rationale).
+
+    Always ``phase_flag=1`` (decode) and ``is_last_chunk=True`` for
+    every row — Phase 1's scope is decode-ONLY batching (design doc:
+    "2 concurrent plain (no DSpark) decode-only requests"); a decode
+    step has no concept of "more chunks coming" the way a chunked
+    prefill does, so this is not a simplification, it's the actual
+    invariant for every frame this function will ever build within
+    Phase 1's scope.
+    """
+    if not request_uids:
+        raise RuntimeError(
+            "encode_batched_decode_metaframe: request_uids is empty -- "
+            "a batched decode frame must describe at least one request"
+        )
+    header = mx.array(
+        [
+            METAFRAME_PROTOCOL_VERSION,
+            1,  # phase_flag: always decode for this function
+            len(request_uids),
+            hidden_dim,
+            extra_dim,
+            1,  # batch_axis: batch-axis stack
+        ],
+        dtype=mx.int32,
+    )
+    table = mx.array(
+        [
+            [uid & 0xFFFFFFFF, seq_len, 1, 0]  # is_last_chunk always True
+            for uid in request_uids
+        ],
         dtype=mx.int32,
     )
     return header, table
@@ -284,6 +414,7 @@ def recv_metaframe(src: int, *, group: mx.distributed.Group) -> MetaFrame:
     num_requests: int = int(header_values[2])
     hidden_dim: int = int(header_values[3])
     extra_dim: int = int(header_values[4])
+    batch_axis: int = int(header_values[5])
     if version != METAFRAME_PROTOCOL_VERSION:
         raise RuntimeError(
             f"MetaFrame protocol version mismatch: received {version}, "
@@ -308,6 +439,7 @@ def recv_metaframe(src: int, *, group: mx.distributed.Group) -> MetaFrame:
         phase_flag=phase_flag,
         hidden_dim=hidden_dim,
         extra_dim=extra_dim,
+        batch_axis=batch_axis,
         request_uids=[int(row[0]) for row in rows],
         seq_lens=[int(row[1]) for row in rows],
         is_last_chunk=[bool(row[2]) for row in rows],

@@ -373,7 +373,7 @@ def test_metaframe_protocol_version_mismatch_raises() -> None:
     group1 = cast(mx.distributed.Group, cast(object, _RankGroup(1, 2)))
 
     # Manually build a header with a wrong version number.
-    bad_header = mx.array([999, 0, 1, 64, 0], dtype=mx.int32)
+    bad_header = mx.array([999, 0, 1, 64, 0, 0], dtype=mx.int32)
     table = mx.array([[1, 4, 1, 0]], dtype=mx.int32)
 
     _MLX_CALL_LOCK.acquire()
@@ -388,7 +388,7 @@ def test_metaframe_protocol_version_mismatch_raises() -> None:
                 recv_metaframe(0, group=group1)
     finally:
         _MLX_CALL_LOCK.release()
-    assert _mod.METAFRAME_PROTOCOL_VERSION == 2
+    assert _mod.METAFRAME_PROTOCOL_VERSION == 3
 
 
 def test_metaframe_handshake_agrees_when_both_ranks_match() -> None:
@@ -746,6 +746,7 @@ def test_metaframed_last_layer_forward_send_is_evaluated_before_decode_gather_re
             phase_flag=1,
             hidden_dim=32,
             extra_dim=0,
+            batch_axis=0,
             request_uids=[1],
             seq_lens=[1],
             is_last_chunk=[True],
