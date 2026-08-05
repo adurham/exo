@@ -867,6 +867,63 @@ confirmed `RunnerReady` on the right model. The next real-cluster A/B
 with the v2 fix is the concrete next step, still gated on the user's
 separate explicit go-ahead per standing rules.
 
+**SECOND REAL CLUSTER ATTEMPT — 2026-08-05, v2 fix verified, found and
+fixed a second real deadlock (v3 fix).** With the user's separate
+explicit go-ahead, relaunched with `EXO_PP_METAFRAME=1` +
+`DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731` (the correct model
+this time). The 4D hyper-connection shape bug was confirmed FIXED — no
+more `ValueError: not enough values to unpack`. But both runners then
+failed with a NEW error: `RuntimeError: [jaccl] recv() deadline in
+drain` — a two-sided deadlock (rank 0 stuck in its own decode-gather
+`recv_metaframe` call, rank 1 stuck in `MetaFramedPipelineFirstLayer`'s
+forward-hop recv).
+
+Root cause (found via a `consult` review of the exact two-rank failure
+trace, not blind trial-and-error): in rank 0's
+`MetaFramedPipelineLastLayer.__call__` during decode, the forward-hop
+block builds a lazy `mx.distributed.send(...)` node and assigns it to
+`output` — then the decode-only handoff block a few lines later
+IMMEDIATELY overwrites that same `output` variable with the
+decode-gather recv result, discarding the send's only reference before
+anything ever calls `mx.eval()` on it. MLX distributed ops are lazy:
+building the graph node transmits no bytes, only `eval()` does. The
+activation therefore never actually left rank 0 — rank 1 blocked
+forever waiting for it that would never arrive, and rank 0 (having sent
+nothing real) then blocked forever waiting for rank 1's gather reply
+that rank 1 could never produce, since rank 1 itself never got past its
+own stuck recv.
+
+Fix (v3): explicitly `mx.eval()` the forward-hop send immediately,
+before `output` can be reassigned — matching every other send call in
+the file. Added a regression test using GENUINELY lazy hand-rolled
+send/recv fakes rather than `pp_batched_correctness.py`'s
+`SimPipelineTransport` — the latter eagerly calls `mx.eval()`
+internally by design (documented, needed for its own OS-thread
+synchronization), which was EMPIRICALLY CONFIRMED to mask this exact
+bug: an earlier draft of the regression test built on
+`SimPipelineTransport` passed even against the unfixed code, defeating
+its own purpose. The final test was verified BOTH ways — explicitly
+reverted the fix via `git stash` and confirmed the test fails against
+the buggy code, then restored the fix and confirmed it passes — not
+just "wrote a test and it happened to pass once." 13/13 tests passing,
+stable across 3 repeated runs, basedpyright/ruff clean, full worker
+suite shows the same single pre-existing unrelated failure as before
+(no new regressions).
+
+Cluster restored again to `EXO_PP_METAFRAME=0` with the correct model,
+both runners confirmed `RunnerReady`, before any further code work.
+**Two real, structurally distinct bugs found on two consecutive real
+cluster attempts — this is exactly what Phase 0.5's isolation rationale
+predicted:** local simulation validates numerics and control-flow
+logic but cannot by construction exercise the real RDMA transport's
+lazy-eval/deadline semantics or a specific model's real tensor shapes.
+Each bug was found, fixed, tested, and pushed in isolation, at
+transport-scope, before any Phase 1 scheduler/batching code exists to
+compound the debugging surface — the whole point of running this phase
+separately. The v3 fix has NOT yet been re-run against the real
+cluster; that's the next step, still gated on the user's separate
+explicit go-ahead per standing rules.
+
 **Phase 1 — Rank-0 scheduler skeleton, decode-only, 2 concurrent
 requests, NO speculative decode:** Build the metadata-frame protocol and
 the rank-0 scheduler for the SIMPLEST case first — 2 concurrent plain
