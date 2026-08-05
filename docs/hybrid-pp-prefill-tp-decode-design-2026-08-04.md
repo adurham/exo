@@ -1405,6 +1405,80 @@ re-verifying the session, which this step and step 8 already did),
 with any real-cluster behavior validation explicitly deferred to the
 separate cluster A/B step.
 
+**`ExoBatchGenerator` feature-interaction matrix (2026-08-05, per a
+`consult` review before attempting the wiring) -- required reading
+before touching `ExoBatchGenerator`'s ~3500 lines of hardened
+production code.** `ExoBatchGenerator` has accumulated substantial
+correctness hardening this session's batched-decode session has NOT
+been tested against (all of this session's testing exercises the
+session/protocol/transport in isolation or paired with a plain model,
+never alongside these production features). Per-feature status:
+
+- **MTP / speculative decode (DSv4 self-speculative, DSpark) —
+  KNOWN INCOMPATIBLE, not yet redesigned for.** MTP/DSpark accept a
+  VARIABLE number of draft tokens per real step (γ-token batched
+  verify, not always advancing by exactly 1). This session's
+  `BatchedDecodeSession`/scheduler protocol assumes every active slot
+  advances by EXACTLY 1 token per step (`TokenGeneratedEvent`'s
+  `request_ids` tuple all treated identically, `n_tokens=1` baked into
+  `BatchEntry` construction throughout). Running MTP/DSpark under
+  batched decode as built would desynchronize the two slots' cache
+  positions the very first time their accepted-token counts diverge.
+  Design doc Section 6.2 item 7 and Phase 4 (above) already scope
+  DSpark to concurrency=1-only for exactly this reason -- this is a
+  confirmed, already-anticipated limitation, not a newly discovered
+  gap, but worth restating explicitly here since it's the single
+  most likely thing an integrator reaches for first (MTP is the
+  default speculative path when `EXO_SPECULATIVE=1`).
+- **Cancellation mid-batch (one slot cancelled, other continues) —
+  PARTIALLY VERIFIED.** The eviction protocol (`evict_request`/
+  `on_evict_ack`, DRAINING state) is real and tested end-to-end,
+  INCLUDING the asymmetric case (`test_full_lifecycle_over_real_wire_matches_serial_plain_forwards`:
+  A evicted, B continues solo with a different remaining length) --
+  this is the mechanism a real cancellation would drive. NOT verified:
+  a cancellation arriving from `ExoBatchGenerator`'s existing
+  degeneration-kill-switch / stop-sequence / client-disconnect paths,
+  which are today's SINGLE-REQUEST cancellation surfaces and have
+  never been exercised against this session's eviction protocol.
+- **Per-slot streaming/detokenization state (partial-UTF-8 buffers,
+  stop-sequence match windows, tool-call parser state) — NOT
+  VERIFIED, believed compatible by construction.** This session's
+  session classes only produce raw token ids per request per step
+  (`finish_step`'s `{request_id: (new_token, is_done)}`); they never
+  touch detokenization, stop-sequence matching, or tool parsing.
+  `ExoBatchGenerator`'s existing per-task `GeneratorQueue`/
+  `output_generator` plumbing (already keyed by uid, matching this
+  session's `request_id` keying) SHOULD compose cleanly since neither
+  side shares mutable state with the other -- but this has never
+  actually been run together.
+- **Prefix-cache reuse (`KVPrefixCache`) — NOT VERIFIED, likely
+  requires new logic.** `KVPrefixCache` assumes a single serial
+  per-request cache lifecycle (snapshot/restore keyed by trie
+  position); `BatchedCacheRouter`'s slot-indexed batched cache has a
+  different lifecycle (merge-into-batch, extract-on-evict). No
+  analysis has been done on whether/how a prefix-cache HIT could feed
+  into `BatchedDecodeSession.admit_request`'s `prefilled_cache`
+  parameter, or whether the batched cache's slot-reuse (DRAINING ->
+  FREE -> reassigned) is compatible with the prefix-cache's own
+  snapshot bookkeeping.
+- **Vision / tool calling / reasoning-budget-limiter / loop-detection
+  kill-switches — NOT VERIFIED, believed independent.** These operate
+  on already-detokenized text/response objects downstream of raw
+  token generation and don't touch cache/scheduling state directly,
+  so they're LIKELY compatible by construction (same reasoning as
+  streaming state above) -- but, again, never actually run together.
+
+**Recommended integration shape, unblocked by the above:** gate on
+BOTH the opt-in flag AND per-request feature detection -- any request
+using vision, tools, MTP/DSpark, or hitting a prefix-cache HIT falls
+back to today's existing single-request path automatically (not a
+routing decision the integrator has to invent case-by-case); only
+DECODE-ONLY, no-speculation, no-vision, no-tools, cold-cache requests
+are eligible for the batched path. This matches Phase 1's own already-
+confirmed scope (decode-only, no speculative decode) and turns "does
+this interact badly" into "was this request eligible," which is a
+cheap, loud, testable gate rather than a silent correctness risk.
+
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
 `prefill_batched`'s padding/masking logic adapted for the PP split.
