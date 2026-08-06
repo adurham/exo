@@ -1053,16 +1053,43 @@ class ExoBatchGenerator:
         cancellation, stats) works completely unmodified regardless
         of which engine produced a given uid.
 
-        Calls ONLY ``Rank0BatchedDecodeGlue.enqueue_admission`` --
-        per that module's own docstring and the `consult` review
-        behind its design, this is PURE in-memory queueing with ZERO
-        wire I/O, so this method cannot hang or race the decode-step
-        loop. The actual admission (real wire send) happens later,
-        inside ``step()``'s ``tick()`` call -- the single-writer rule
-        this whole subsystem is built around.
-        """
-        assert self._batched_decode_rank0_glue is not None
+        RANK-DEPENDENT (found + fixed 2026-08-05 after the second
+        real cluster run): rank 0 calls
+        ``Rank0BatchedDecodeGlue.enqueue_admission`` -- per that
+        module's own docstring and the `consult` review behind its
+        design, this is PURE in-memory queueing with ZERO wire I/O,
+        so this branch cannot hang or race the decode-step loop. The
+        actual admission (real wire send) happens later, inside
+        ``step()``'s ``tick()`` call -- the single-writer rule this
+        whole subsystem is built around.
 
+        Rank 1 calls ``Rank1BatchedDecodeGlue.stage_local_cache``
+        instead -- rank 1's OWN local ``prefill()`` call (the
+        unmodified, already-run call immediately before this method,
+        same as every other request) already produced a real
+        prefilled KV cache for this request; that cache is never
+        sent over the wire (only rank 0's activations/metadata are),
+        so it must be staged locally, keyed by ``request_id``, for
+        ``Rank1BatchedDecodeGlue.tick()`` to pick up reactively when
+        this request's admission arrives over the wire from rank 0
+        (see that glue's own docstring for the full reactive-
+        admission-detection design). Symmetric ``uid``/``cache_slot``
+        derivation with rank 0's branch is REQUIRED here: both ranks
+        process the identical, globally-ordered stream of eligible
+        submissions (this fork's own event-sourcing architecture
+        guarantees this -- see the design doc's "why no new
+        broadcast-admission protocol is needed" analysis), so
+        ``self._uid_counter``/``len(self._active_tasks)`` grow
+        identically on both ranks call-for-call, making the SAME
+        ``uid``/``cache_slot`` pair available on rank 1 at its own
+        ``submit()`` time without any cross-rank message -- verified
+        against the real wire protocol's own slot-assignment
+        invariant (``pp_scheduler_protocol.py``'s ``SchedulerCore``:
+        a slot can never move DRAINING->FREE->reassigned without an
+        explicit eviction-ack round trip, so rank 0's decision and
+        rank 1's independently-derived value cannot silently diverge
+        onto different physical slots for the same request_id).
+        """
         uid = self._uid_counter
         self._uid_counter += 1
 
@@ -1070,17 +1097,25 @@ class ExoBatchGenerator:
         # BatchedDecodeSession.new's own default) -- reuse
         # len(_active_tasks) at admission time as a simple 2-slot
         # allocator (0 or 1), matching the max_concurrency this
-        # session/glue pair was constructed with above.
+        # session/glue pair was constructed with above. Computed
+        # BEFORE the rank-dependent branch below so both ranks derive
+        # it identically from the same (symmetric) counter state.
         cache_slot = len(self._active_tasks) % 2
 
-        self._batched_decode_rank0_glue.enqueue_admission(
-            request_id=uid,
-            cache_slot=cache_slot,
-            prefilled_cache=cache,
-            initial_token=int(last_tokens[-1].item()),
-            sampler=sampler,
-            max_tokens=max_tokens,
-        )
+        if self._batched_decode_rank1_glue is not None:
+            self._batched_decode_rank1_glue.stage_local_cache(
+                request_id=uid, cache_slot=cache_slot, prefilled_cache=cache
+            )
+        else:
+            assert self._batched_decode_rank0_glue is not None
+            self._batched_decode_rank0_glue.enqueue_admission(
+                request_id=uid,
+                cache_slot=cache_slot,
+                prefilled_cache=cache,
+                initial_token=int(last_tokens[-1].item()),
+                sampler=sampler,
+                max_tokens=max_tokens,
+            )
 
         self._active_tasks[uid] = _EngineTask(
             uid=uid,
@@ -1956,7 +1991,10 @@ class ExoBatchGenerator:
                 eos_ids = eos_ids_from_tokenizer(self.tokenizer)
                 logits_processors = [ban_token_ids(eos_ids)] + logits_processors
 
-        if self._batched_decode_active and self._batched_decode_rank0_glue is not None:
+        if self._batched_decode_active and (
+            self._batched_decode_rank0_glue is not None
+            or self._batched_decode_rank1_glue is not None
+        ):
             from exo.worker.engines.mlx.pp_batched_decode_eligibility import (
                 is_eligible_for_batched_decode,
             )
