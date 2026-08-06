@@ -1113,3 +1113,156 @@ unidentified bug in this path. Single-request PP
 fully unaffected and repeatedly verified working, including
 immediately after both of today's crashes.
 
+---
+
+## 2026-08-06 root-cause analysis: Attempt 1 and Attempt 2 (bug #7), deeper log/code trace
+
+Same-day follow-up analysis on the two crashes above -- deeper log
+correlation (both ranks' logs cross-referenced by exact timestamp) plus
+reading the actual `runner.py`/`pp_batched_decode_glue.py` code paths
+involved. This is REVISION, not new hardware testing -- no new cluster
+runs happened for this section; it re-examines the SAME two captured
+crash logs from the section above with more rigor.
+
+### Attempt 1 root cause: CONFIRMED, not just hypothesized
+
+The working hypothesis above is now confirmed by reading
+`ExoBatchGenerator.submit_batched()`'s actual fallback-gate code
+(`batch_generate.py` ~line 2568): it explicitly checks
+`self._pp_spec_active` and falls back to per-task `submit()` when PP
+speculative decode is active, but has **NO equivalent check for
+`self._batched_decode_active`**. `runner.py`'s
+`handle_generation_tasks` calls `_batched_start_task` ->
+`submit_batched()` whenever `EXO_DSV4_BATCHED_PREFILL` is on and 2+
+tasks are queued -- entirely independent of, and with zero awareness
+of, the `pp_batched_decode_glue` tick()-gated channel. This is a real,
+confirmed gap: `EXO_DSV4_BATCHED_PREFILL`'s rendezvous-batching
+mechanism can send real metaframe prefill traffic for N concurrent
+requests at once, completely bypassing the single-writer discipline
+the entire `pp_batched_decode_glue` subsystem (bugs #1, #5, #6) was
+built around. **Fix direction: add a `self._batched_decode_active`
+check to `submit_batched()`'s own fallback gate**, symmetric with the
+existing `_pp_spec_active` check -- when batched-decode is active,
+`EXO_DSV4_BATCHED_PREFILL`'s rendezvous path must not run; all
+admission goes through `_submit_batched_decode_deferred` instead.
+
+### Attempt 2 root cause: NOT a new bug -- this IS bug #6's own documented fail-stop guard, working as designed, tripped by a retry-budget flaw
+
+Re-reading Attempt 2's traceback with fresh eyes: the actual raised
+exception on rank 0 was
+```
+GlueError: tick(): rank 1 NACK'd PrefillMessage for request_id=2
+50 consecutive times -- rank 1's own local _DeferredPrefill
+registration for this request never arrived. ... Refusing to retry
+forever.
+```
+This is `Rank0BatchedDecodeGlue.tick()`'s own `_PREFILL_READY_MAX_RETRIES`
+fail-stop guard -- the EXACT mechanism bug #6's own hardware finding
+already documented tripping (see "2026-08-06 fix:
+prefill forward-pass race (PrefillReadyMessage)" above: "the
+PrefillReadyMessage fix worked EXACTLY as designed... The fail-stop
+guard fired cleanly instead"). The `[jaccl] Recv failed with errno=54`
+(ECONNRESET) on BOTH ranks 0.6s later is a downstream symptom of rank
+0's runner process dying and closing its socket -- NOT an independent
+transport bug. This section originally miscategorized this as a "third,
+unidentified crash signature"; it is not. It is the SAME fail-stop
+guard bug #6's finding already named, now reproduced under a scenario
+where eligibility is no longer the trigger.
+
+**What IS newly confirmed by this attempt: WHY the NACK storm
+happened, even with bug #6's eligibility-divergence fix in place.**
+Cross-referencing both ranks' logs by exact timestamp:
+
+- `13:08:55.933`: master broadcasts the second request ("Name 3
+  colors.", task `e88d742f`) as created.
+- `13:08:56.006` - `13:08:57.398` (node1/rank0) and `13:08:56.006` -
+  `13:08:57.381` (node2/rank1): BOTH ranks are synchronously running
+  their own real, local prefill forward pass for the FIRST request
+  ("Count from 1 to 5.") on their single main thread -- ~1.35s of
+  real GPU compute, not a cheap operation.
+- `13:08:57.401` (node2/rank1's OWN log): `runner.py`'s
+  admission gate -- a SEPARATE, higher-level gate in
+  `handle_generation_tasks` (`if len(self.active_tasks) <
+  EXO_MAX_CONCURRENT_REQUESTS: ... else: logger.info(f"deferring task
+  {item.task_id} -- at concurrency limit...")`) -- explicitly DEFERRED
+  the second request: `deferring task e88d742f... at concurrency limit
+  (2/2 active)`. This confirms rank 1's own runner-level admission
+  gate, not just the glue-level registration, held request 2 back.
+- `13:08:57.535` (node1/rank0): the 50-retry ceiling trips, ~1.5s
+  after request 2 was created.
+
+**Root cause: `Rank0BatchedDecodeGlue.tick()`'s retry budget
+(`_PREFILL_READY_MAX_RETRIES=50`) is a fixed RETRY-COUNT ceiling, but
+what it's actually waiting on -- rank 1's main thread becoming free to
+process its own work queue and eventually call
+`mark_prefill_registered()` for the new request -- has a wall-clock
+cost that scales with OTHER, unrelated, synchronous work already
+happening on that SAME thread** (here, a different request's own real
+prefill forward pass, ~1.35s). A `consult` review of this evidence
+flagged an additional, more damning point: **all 50 retries received
+an EXPLICIT `ready=False` NACK reply from rank 1** -- meaning rank 1's
+own `tick()` call was demonstrably alive and responding throughout the
+entire window. Rank 0 crashed after 50 consecutive PROOFS OF
+LIVENESS, not 50 timeouts against a dead or hung peer. The guard's own
+error message ("this many consecutive NACKs indicates a genuine stall
+on rank 1... not an expected timing race") is stating an assumption
+that this trace directly falsifies: rank 1 was neither stalled nor
+hung, it was just legitimately busy with other work, and correctly
+reported so every single time.
+
+### Fix direction for the retry-budget flaw (not yet implemented)
+
+Per the same `consult` review, ranked:
+
+1. **Wrong fix: raise `_PREFILL_READY_MAX_RETRIES`.** Prompt-length-
+   and load-dependent; any fixed count eventually trips again on a
+   longer prefill or a longer active-generation backlog.
+2. **Partial fix: switch to a wall-clock deadline instead of a retry
+   count.** Better for detecting a genuinely DEAD peer, but still
+   fundamentally guessing at a "reasonable" timeout when the real
+   wait duration depends on unrelated in-flight work on the peer.
+3. **Structurally correct direction:** an explicit NACK (`ready=False`,
+   a real reply proving rank 1 is alive and simply not ready yet)
+   should NOT consume the same failure budget as SILENCE/a timeout
+   (no reply at all -- the actual dead/hung-peer signal). Concretely:
+   only count consecutive TIMEOUTS toward the fail-stop ceiling; reset
+   or don't-count on every explicit NACK, since a NACK IS the liveness
+   proof the guard's own error message says it's looking for.
+   Optionally combine with a wall-clock deadline for the timeout case
+   specifically (item 2), not the NACK case.
+4. Also worth investigating, per the same review: whether rank 1's
+   OWN runner-level admission gate (`EXO_MAX_CONCURRENT_REQUESTS`
+   capped at 2, confirmed via the `deferring task... at concurrency
+   limit (2/2 active)` log line) and the `pp_batched_decode_glue`
+   layer's own admission logic are, in effect, TWO independent
+   admission decisions that can disagree on timing -- worth checking
+   whether request 2 being deferred at the runner level for ~1.5s
+   (while a slot was tied up by request 1's still-active generation,
+   not just its prefill) is itself expected/intended interaction with
+   `EXO_MAX_CONCURRENT_REQUESTS=2`, or a second contributing factor
+   independent of the retry-budget issue above.
+
+### Updated status
+
+- **Attempt 1's root cause (submit_batched/EXO_DSV4_BATCHED_PREFILL
+  bypassing the tick()-gated channel) is CONFIRMED via code reading,
+  not just log correlation.** Fix direction is clear (add the missing
+  `self._batched_decode_active` check to `submit_batched`'s fallback
+  gate) but NOT YET IMPLEMENTED.
+- **Attempt 2 is NOT a new/unidentified bug.** It is bug #6's own
+  documented PrefillReadyMessage fail-stop guard, correctly detecting
+  that admission wasn't completing in time -- but tripped by a
+  retry-budget design flaw (NACK vs timeout conflation) that predates
+  bug #6 and is a property of the ORIGINAL bug #5 fix
+  (`_PREFILL_READY_MAX_RETRIES`), not something bug #6 introduced.
+  Fix direction is clear (don't count explicit NACKs toward the
+  fail-stop ceiling) but NOT YET IMPLEMENTED.
+- Both fixes are real, scoped, and implementable in a future session
+  -- neither requires further hardware exploration to design; the
+  NEXT hardware step should be implementing both fixes locally,
+  verifying via the existing subprocess test suite, THEN a fresh
+  hardware attempt (with the user's own separate go-ahead, per this
+  doc's standing rule).
+- Cluster remains in safe known-good config (single-request PP,
+  `EXO_PP_BATCHED_DECODE` unset), verified clean.
+
