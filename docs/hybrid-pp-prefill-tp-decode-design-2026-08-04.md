@@ -1878,6 +1878,117 @@ concurrent requests with different context lengths this section
 originally called for. Every real-cluster step still needs the user's
 own fresh explicit go-ahead per standing rules.
 
+**Phase 2 design — `consult` review (2026-08-06), 8 findings, code-
+verified: the design above is NOT ready for implementation as written.**
+Requested a full independent critique of the design above before
+writing any code (matching this campaign's own established practice of
+a `consult` review before every real design decision, not just this
+one). The two most severe findings were spot-checked against the ACTUAL
+`pp_scheduler_protocol.py` code, not taken on faith — both confirmed
+true and more severe than the review itself estimated:
+
+1. **The prefill->decode KV cache handoff is completely unaddressed,
+   and may be the REAL starvation source Phase 2 exists to fix.** This
+   is a hybrid PP-prefill/TP-decode design -- the KV cache built during
+   PP-layout prefill must be resharded into decode's TP layout at the
+   transition. Chunking the COMPUTE (item 1 above) says nothing about
+   this handoff. For a 100K+-token prompt this could be a large,
+   blocking cache-resharding transfer at the last chunk -- potentially
+   seconds of decode starvation for the concurrent user, which is
+   exactly the requirement this phase exists to satisfy. Needs an
+   explicit answer (chunk/overlap it, quantify why a one-shot handoff
+   is acceptable, or scope it as a separate sub-problem) before code.
+2. **No latency budget was computed, and fixed 1:1 alternation at the
+   DEFAULT `EXO_PREFILL_STEP_SIZE=4096` plausibly fails outright.** A
+   4096-token chunk is plausibly 1-4+ seconds of wall time on this
+   hardware for a large model; 1:1 alternation means the concurrent
+   decode user gets one token per chunk-duration -- sub-1-tok/s decode
+   for the ENTIRE prefill, which does not satisfy "long prefill doesn't
+   starve concurrent decode users." Chunk size (not adaptive shrinking,
+   which was correctly scoped out) is the actual load-bearing knob left
+   unaddressed. **Action before code: measure real per-chunk wall time
+   on real hardware at a few `EXO_PREFILL_STEP_SIZE` values, pick a
+   target decode inter-token-latency ceiling during prefill, and derive
+   a static chunk size from that measurement -- write both the
+   measurement and the derived value down.** `tick()` running one chunk
+   synchronously also bounds scheduler responsiveness to
+   eviction/admission events by the same chunk duration.
+3. **CODE-VERIFIED, more severe than estimated: the state-machine work
+   is completely unbuilt, not just "extend it."** Direct read of
+   `pp_scheduler_protocol.py` confirms: `SchedulerCore._handle_new_request`
+   hardcodes `phase=Phase.DECODE` for EVERY new request (Phase 1's own
+   scope note: "every request modeled by this module begins
+   already-prefilled, in DECODE") -- there is currently NO code path
+   anywhere that ever constructs a record with `phase=PREFILL`.
+   `RankOneMirror` never reads or branches on `.phase` at all -- the
+   ONLY reference to `.phase` in the entire module (line ~554) WRITES
+   it onto the outgoing wire `BatchEntry`, it is never validated on
+   receipt. So "reuse `phase=PREFILL`, no new message kind" was
+   accurate about the WIRE shape but seriously understated the real
+   work: this phase needs (a) a new `SchedulerCore` event/handler for
+   "advance this request's prefill by one chunk" (mirroring
+   `_handle_new_request`'s shape but for chunk progression), (b) an
+   explicit PREFILL->DECODE transition handler (not implicit), and (c)
+   a genuinely new `RankOneMirror` validation branch for prefill-chunk
+   entries -- none of which exist in any form today. Budget this as
+   real, from-scratch state-machine work, not a small extension.
+4. **Underspecified, needs explicit answers before code (per-item, not
+   yet decided):**
+   - Mirror validation per PREFILL chunk: `expected_cache_len`
+     progression per chunk, INCLUDING the final partial chunk
+     (`prompt_len mod chunk_size`) and the existing off-by-one
+     convention (`prefill()` is called with `prompt_tokens[:-1]`,
+     caller-side "drop the last token" -- the resumable-chunk version
+     must preserve this exactly, not re-derive it per chunk and risk
+     drift).
+   - Who samples the first generated token and on which step -- final
+     PREFILL chunk or first DECODE step? Left implicit is a guaranteed
+     off-by-one/divergence site (same failure class as bug #7's rank-1
+     admission-gate omission from the closed campaign).
+   - Enforce "no mixed-phase entries in one `StepMessage`" as a
+     MIRROR-VALIDATED invariant (loud `ProtocolViolationError` on
+     violation), not just an implementation convention nobody checks.
+   - Rank 1's actual handler for a PREFILL `StepMessage`: which cache
+     object, which model call path, and how the per-chunk activation
+     transfer sequences against the single-writer control channel.
+     Alternation means prefill and decode traffic never overlap in
+     time on the wire -- state this explicitly as a load-bearing
+     invariant the design relies on, not just an implied consequence.
+   - Eviction/cancellation MID-chunked-prefill: resumable-cursor
+     teardown, partial-KV-cache freeing on both ranks in the PP layout,
+     mirror state cleanup, ordering of `EvictMessage` vs an in-flight
+     PREFILL `StepMessage` (the single-writer channel gives ordering
+     for free -- say so explicitly), and a client-timeout story for a
+     second request queued behind a multi-minute prefill in
+     `_pending_prefill`.
+   - Alternation-state edge cases: decode request finishes (EOS)
+     mid-prefill (chunks then run back-to-back, presumably -- confirm
+     and make it fall out of the state machine, not a special case); no
+     decode work present at admission time; interaction with rung 2
+     (prefill-GRANT) firing for a second request while a first request
+     is already mid-chunk. Whose-turn state must be DERIVABLE from the
+     state machine, never a separately-mutable flag that can desync.
+5. **MLX-specific risks not yet addressed:** (a) laziness -- the
+   resumable cursor must force `mx.eval`/`async_eval` at each yield
+   point or an unbounded lazy graph accumulates silently across ticks
+   (same failure class, different call site, as the design doc's
+   already-fixed v3 metaframe bug -- Section 9, "SECOND REAL CLUSTER
+   ATTEMPT" -- where an unevaled lazy send node was silently discarded);
+   (b) peak memory during interleaving = a growing 100K+-token prefill
+   cache + both decode requests' caches + both working sets held
+   simultaneously -- needs a real back-of-envelope number for the
+   largest supported model before committing, same discipline as the
+   Pre-Phase-0 KV-memory check already did for Phase 1.
+
+**Verdict: items 1-3 above must be resolved with real answers (not
+best-judgment defaults) before any code is written.** Items 4-5 can
+remain open questions carried into implementation IF they are written
+down explicitly first (which this entry now does) -- the review's own
+framing, endorsed here. The "no per-chunk ack" decision (mechanism item
+4, above) remains sound AS LONG AS finding 3's real mirror-validation
+work is actually built -- it is what makes the no-ack decision safe,
+and it does not exist yet.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
