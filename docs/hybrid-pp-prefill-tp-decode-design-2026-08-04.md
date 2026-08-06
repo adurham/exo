@@ -2161,15 +2161,21 @@ Requirement 3's exact number was to this doc's own Section 2.5.**
     concurrent admission found UNSAFE (new architectural gap)
 
 **STATUS (2026-08-06): the N=2 admission race this section documents
-is FIXED at the code level** -- see
-`docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
+is FIXED and hardware-verified for the admission DECISION itself** --
+see `docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
 "2026-08-06 fix: in-band PrefillMessage admission signal" section for
 the full implementation and verification writeup (regression gate
 `test_pp_admission_race_subprocess.py` flipped from a real XFAIL to a
 genuine PASS across 5 independent seeds, 252+14 worker tests green,
-zero new basedpyright/ruff errors). NOT yet verified on real cluster
-hardware -- that still needs a fresh, separate explicit go-ahead per
-this doc's own standing reminder below. The single_request_fallback
+zero new basedpyright/ruff errors). Real N=2 hardware testing
+subsequently found and fixed FOUR more real bugs in eviction/slot-reuse
+(see that same doc's "2026-08-06 follow-up" section) and found -- but
+has NOT yet fixed -- a FIFTH, deeper bug in the prefill forward-pass's
+metaframe transport (see that doc's "2026-08-06 finding: prefill
+forward-pass race (NOT FIXED)" section for the full mechanism and fix
+direction). `EXO_PP_BATCHED_DECODE=1` remains UNSAFE for production
+until the fifth bug is closed; single-request PP is unaffected and
+repeatedly verified clean on real hardware. The single_request_fallback
 (ineligible-request) path remains unfixed, explicitly out of scope for
 now.
 

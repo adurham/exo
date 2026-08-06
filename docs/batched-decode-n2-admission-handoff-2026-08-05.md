@@ -1,11 +1,19 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06): FIXED.** The admission race documented
-below is closed. See the new section at the bottom of this file,
-"2026-08-06 fix: in-band PrefillMessage admission signal", for the
-full implementation summary, verification evidence, and what remains
-explicitly out of scope. The original handoff content is left
-unmodified below for the historical record of the investigation.
+**STATUS UPDATE (2026-08-06): PARTIALLY FIXED.** The original
+admission-decision race documented below is closed and
+hardware-verified for the single-request case. Four additional real
+bugs found via real N=2 hardware testing were also fixed and shipped
+(see "2026-08-06 fix: in-band PrefillMessage admission signal" and
+"2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse" sections
+below). A FIFTH real bug -- deeper, in the metaframe transport shared
+with the single-request path -- was found on real hardware and is
+NOT yet fixed; see "2026-08-06 finding: prefill forward-pass race
+(NOT FIXED)" at the bottom of this file for the full mechanism and
+next-session starting point. Real N=2 batched-decode concurrency
+(`EXO_PP_BATCHED_DECODE=1`) remains UNSAFE to enable in production
+until that fifth bug is closed. Single-request PP (the default,
+`EXO_PP_BATCHED_DECODE` unset/0) is unaffected and verified working.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -297,4 +305,200 @@ Before that attempt: re-enable `JACCL_TRACE_STEP=1` (or equivalent) so
 a real trace can confirm the fix on real hardware, not just "no
 crash," and follow the same crash → restore-to-known-good → diagnose
 discipline used throughout the original campaign.
+
+**UPDATE (2026-08-06, same day, later): this DID subsequently run on
+real 2-node hardware** with explicit user go-ahead. Single-request PP
+(the smoke-test baseline) confirmed clean every time
+(`finish_reason=stop`, "Paris"). The admission-decision race itself
+(this section's own subject) is genuinely closed. But the FIRST real
+N=2 concurrent-request attempt surfaced FOUR MORE real bugs in the
+adjacent eviction/slot-reuse code, all invisible until this fix made
+N=2 slot-lifecycle reachable for the first time -- see the next
+section for the full writeup, then "2026-08-06 finding: prefill
+forward-pass race (NOT FIXED)" after that for a FIFTH, still-open bug
+that blocks safely enabling `EXO_PP_BATCHED_DECODE=1` in production.
+
+---
+
+## 2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse under N=2
+
+All four found via the SAME real 2-process test (`_pp_glue_subprocess_worker.py`,
+extended with a third request C admitted into a freshly-evicted slot)
+during one focused debugging chain, immediately after the admission
+race fix above first ran on real hardware and hit an eviction+reuse
+scenario for the first time ever. Commit `ab68565a6`.
+
+**Common root cause for all four**: `EXO_MAX_CONCURRENT_REQUESTS` was
+ALWAYS forced to 1 under Pipeline sharding before this session's
+admission-race work relaxed it to 2 for the batched-decode path. That
+meant real eviction-then-slot-reuse (request A occupies slot 0, A
+finishes and evicts, request C is admitted into slot 0 -- A's now-freed
+slot) was structurally UNREACHABLE until this session. All four bugs
+below are real, pre-existing latent defects that simply had zero
+opportunity to manifest before N=2 concurrency became possible.
+
+1. **Stuck-DRAINING mirror bug.** `RankOneMirror.build_evict_ack()`
+   (`pp_scheduler_protocol.py`) existed, was fully correct, and had
+   its own passing unit tests -- but nothing in PRODUCTION ever called
+   it. `Rank1BatchedDecodeGlue.tick()`'s `MSG_KIND_EVICT` branch
+   hand-constructed an `EvictAckMessage` directly instead of routing
+   through `build_evict_ack`, so rank 1's own `RankOneMirror._slot_state`
+   never transitioned back to FREE after an eviction -- it stayed
+   permanently DRAINING. Invisible under
+   `EXO_MAX_CONCURRENT_REQUESTS=1` (a slot could never be reused).
+   Real symptom: `ProtocolViolationError: StepMessage ... schedules
+   request_id=N on cache_slot=M which is DRAINING` the instant a real
+   N=2 test tried to reuse a freed slot -- the module's own "#1
+   corruption vector" fail-stop guard working exactly as designed.
+   Fixed by routing both ranks' eviction-ack construction through
+   `build_evict_ack` (added to `RankOneMirrorDriver` and
+   `RankOneMirrorSession` as thin wrappers).
+
+2. **Slot-number vs physical-cache-row-position bug.**
+   `extract_request_cache` (via mlx-lm's `BatchKVCache.extract(idx)`)
+   treats `idx` as a raw PHYSICAL array row -- but
+   `merge_request_caches` builds the batched cache by enumerating
+   occupied SLOTS in ascending slot-NUMBER order. Physical row
+   position only equals slot number by coincidence when slot 0 is
+   always occupied and no lower slot is ever evicted while a higher
+   one survives -- exactly the precondition N=1 always satisfied
+   trivially. Fixed via a new `_physical_position_for_slot` helper
+   (both `BatchedDecodeSession` and `RankOneMirrorSession`) that maps
+   a logical slot number to its actual enumeration position in
+   `cache_router.occupied_slots()`, used everywhere `extract_request_cache`
+   is called on a single slot.
+
+3. **Extraction-vs-mutation ordering bug (2 instances).**
+   `admit_request` and `on_evict_ack` extracted existing slot caches
+   AFTER mutating the cache_router's occupancy (`assign_slot`/
+   `release_slot`), so the CORRECT extraction logic from bug #2 read
+   against occupancy that no longer matched what `batched_cache`
+   physically held. Fixed by snapshotting existing caches BEFORE the
+   router mutation in both methods (both `BatchedDecodeSession` and
+   `RankOneMirrorSession`'s `admit_request`).
+
+4. **Wire-protocol vs physical-cache ordering divergence (the most
+   dangerous variant -- silently WRONG output, not a crash).**
+   `SchedulerCore._active_batch_entries()` sorted `StepMessage.entries`
+   by REQUEST_ID (`sorted(self._requests.items())`, dict key =
+   request_id). But the physical `batched_cache` row order AND
+   `BatchedDecodeSession.prepare_step()`'s own token-tensor row order
+   are BOTH cache_slot-ordered -- a real physical constraint (fixed by
+   `merge_request_caches`'s construction), not a convention that could
+   be changed on that side instead. Under real slot reuse (a NEW,
+   HIGHER request_id admitted into a LOWER, freshly-freed cache_slot)
+   these two orders diverge. First caught by `prepare_step()`'s own
+   defensive check (`BatchStepContext order (2, 3) does not match ...
+   (3, 2)`); after fixing that ordering source, the SAME divergence
+   resurfaced as silently WRONG decoded tokens for the surviving
+   request (caught only by diffing against an independent golden
+   serial-forward reference, since nothing crashed). Fixed by changing
+   `_active_batch_entries()`'s sort key to cache_slot -- confirmed safe
+   for every consumer of `StepMessage.entries`'s order (`RankOneMirror
+   .validate_step`'s duplicate-slot check and `RankOneMirrorDriver
+   .on_step_message`'s assign/advance loop both key off each entry's
+   own fields, never positional index).
+
+**Verification**: extended `test_pp_batched_decode_glue_subprocess.py`
+(genuine 2-process test, not a mock) with request C admitted into A's
+freshly-evicted slot, checked against an independent golden
+serial-forward reference for ALL THREE requests -- this is now the
+permanent regression gate for all four bugs. 252 fast + 14 slow tests
+pass; zero new basedpyright/ruff errors vs baseline.
+
+---
+
+## 2026-08-06 finding: prefill forward-pass race (NOT FIXED)
+
+**This is the reason `EXO_PP_BATCHED_DECODE=1` is still UNSAFE for
+production despite everything above being fixed and verified.** Found
+on the SECOND real N=2 hardware attempt (after bugs 1-4 above were
+fixed, committed as `ab68565a6`, and re-deployed) -- two fresh,
+cold-cache concurrent requests crashed the cluster again, with a NEW
+error signature not seen before:
+
+- Rank 0 (the node running its own real prefill forward pass via
+  `_run_deferred_prefill_for_grant` → `deferred.run_prefill()`):
+  crashed mid-`send_metaframe` with `[jaccl] reliable_all_reduce_v2
+  deadline`.
+- Rank 1 (the peer): crashed with `SchedulerWireProtocolError:
+  recv_header: version mismatch -- received 3, this rank expects 1`
+  -- it called `pp_scheduler_wire.recv_header()` (expecting the
+  scheduler-wire protocol, version 1) and instead read raw
+  `pp_metaframe` bytes (`METAFRAME_PROTOCOL_VERSION=3`) off the wire.
+
+**Root cause (confirmed via reading `_run_deferred_prefill_for_grant`,
+`pp_batched_decode_glue.py`'s `tick()`, and both node logs -- not
+speculation):**
+
+The admission-race fix (section above) correctly single-writer-gates
+the DECISION to prefill (`PrefillMessage`/`PrefillGrant`, via
+`tick()`). But it does NOT gate the ACTUAL PREFILL FORWARD PASS that
+runs immediately afterward. `_run_deferred_prefill_for_grant` calls
+`deferred.run_prefill()` synchronously right after receiving a grant
+-- and that forward pass internally uses `pp_metaframe.py`'s
+`send_metaframe`/`recv_metaframe`, a COMPLETELY SEPARATE wire
+transport from the scheduler-wire protocol, for the per-layer
+hidden-state handoff (Phase 1's batched-decode layers only wrap the
+DECODE step; prefill still runs through the legacy single-request
+metaframe layer code path, unbatched).
+
+Both ranks are SUPPOSED to run this forward pass in lockstep (this is
+the SAME mechanism that already works correctly for single-request
+prefill) -- but there's a structural gap in HOW rank 1 gets there:
+`_run_deferred_prefill_for_grant`'s own rank-1 "grant PARKING"
+mechanism (`_parked_prefill_grants`, built specifically to handle the
+real, expected timing skew between two independently-scheduled OS
+processes' `submit()`/`tick()` calls) lets rank 1 receive a
+`PrefillGrant` and DEFER running its own matching forward pass --
+without any way to tell rank 0 it did so. Rank 0, having decided to
+grant the prefill, proceeds UNCONDITIONALLY and immediately into its
+own real forward pass, sending real metaframe activation bytes onto
+the wire. If rank 1 parked instead of running its matching side (a
+real, not-rare timing window), rank 1's NEXT wire read is a
+`scheduler-wire recv_header()` call from its own next `tick()`
+iteration -- which reads rank 0's metaframe bytes and misparses them
+as a `SchedulerWireProtocolError`.
+
+**Consult-reviewed fix direction (not yet implemented):** treat
+`PrefillMessage` as an in-band CHANNEL-MODE SWITCH, not merely a
+notification. Once a rank consumes a `PrefillMessage` off the wire,
+that rank's protocol state machine must commit to running its
+matching metaframe-mode forward pass to completion before issuing any
+further `recv_header()` call on that channel -- i.e. the parking
+mechanism as currently designed (park now, run later, out of band) is
+itself the structural defect; parking a `PrefillGrant` without
+immediately running its metaframe side breaks the lockstep invariant
+the transport requires. Since the channel is a single ordered FIFO
+stream per rank pair, rank 0 does not need proof rank 1 is ready
+before it starts sending metaframe bytes -- they simply queue in the
+transport; rank 1's state machine, once it eventually processes the
+`PrefillMessage` (whenever its own event loop gets there), must treat
+that as an unconditional "run the matching forward pass now, do not
+return to scheduler-wire in between" commitment, never a decision it
+can defer to later. This likely means `_run_deferred_prefill_for_grant`
+on rank 1 needs to become a BLOCKING call inline within the SAME
+`tick()`/wire-consuming call that received the `PrefillMessage` --
+never park-and-return -- which may require restructuring how
+`Rank1BatchedDecodeGlue.tick()` and `_run_deferred_prefill_for_grant`
+compose (currently two separate calls from `_step_batched_decode`,
+with the parking dict bridging a gap between them).
+
+**Explicitly NOT yet done:**
+- No fix implemented -- this section is a diagnosis + fix-direction
+  writeup only, not a patch.
+- No new regression test exists for this specific race (the existing
+  2-process glue test predates the parking mechanism being exercised
+  by a genuine cross-process timing race -- it always runs both ranks'
+  admissions in a controlled, non-racy order).
+- Real hardware re-verification after any fix attempt needs its own
+  fresh explicit go-ahead, same as every other real-cluster step in
+  this campaign.
+
+**Practical guidance for whoever picks this up next:** `EXO_PP_BATCHED_DECODE=1`
+must stay OFF (the `start_cluster.sh` default) in any deployment until
+this is closed. `EXO_PP_METAFRAME=1` alone (single-request PP,
+metaframe transport, no batched-decode) is unaffected by this bug and
+has been repeatedly verified clean on real hardware throughout this
+session.
 
