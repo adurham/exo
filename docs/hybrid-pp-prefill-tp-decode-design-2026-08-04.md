@@ -2160,21 +2160,21 @@ Requirement 3's exact number was to this doc's own Section 2.5.**
     bugs found and fixed, single-request path VERIFIED WORKING, N=2
     concurrent admission found UNSAFE (new architectural gap)
 
-**STATUS (2026-08-06): SIX real bugs found via real N=2 hardware
-testing. FIVE are FIXED and hardware-verified** -- see
+**STATUS (2026-08-06, later): SIX real bugs found via real N=2
+hardware testing. ALL SIX are now FIXED AT THE CODE LEVEL** -- see
 `docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
 "2026-08-06 fix: in-band PrefillMessage admission signal", "2026-08-06
-follow-up: 4 real bugs in eviction+slot-reuse", and "2026-08-06 fix:
-prefill forward-pass race (PrefillReadyMessage)" sections for the full
-implementation and verification writeups. The FIFTH fix
-(PrefillReadyMessage) WAS re-verified on real N=2 hardware and worked
-exactly as designed (no crash, clean fail-stop instead). That clean
-fail-stop led directly to finding a SIXTH bug -- cross-rank
-eligibility divergence on `is_prefix_cache_hit`, see that same doc's
-"2026-08-06 finding: cross-rank eligibility divergence
-(is_prefix_cache_hit)" section -- which is diagnosed but NOT yet
-fixed. `EXO_PP_BATCHED_DECODE=1` should stay OFF in any deployment
-until bug #6 is closed. Single-request PP is unaffected and
+follow-up: 4 real bugs in eviction+slot-reuse", "2026-08-06 fix:
+prefill forward-pass race (PrefillReadyMessage)", and "2026-08-06 fix:
+eliminate cross-rank eligibility divergence (drop is_prefix_cache_hit)"
+sections for the full implementation and verification writeups. Bugs
+#1-5 are hardware-verified. **Bug #6 (cross-rank eligibility
+divergence on `is_prefix_cache_hit`) is fixed and locally verified
+(basedpyright/ruff/pytest all clean against baseline) but has NOT yet
+run on real N=2 hardware** -- that needs the user's own fresh explicit
+go-ahead, same as every other real-cluster step in this campaign.
+`EXO_PP_BATCHED_DECODE=1` should stay OFF in any deployment until bug
+#6's fix is hardware-verified. Single-request PP is unaffected and
 repeatedly verified clean on real hardware. The single_request_fallback
 (ineligible-request) path remains unfixed, explicitly out of scope for
 now.
