@@ -1,24 +1,31 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06, later): ALL SIX real bugs found this
-campaign are now fixed AT THE CODE LEVEL.** Bug #6 (cross-rank
-eligibility divergence, `is_prefix_cache_hit`) is fixed -- see
-"2026-08-06 fix: eliminate cross-rank eligibility divergence (drop
-is_prefix_cache_hit)" at the bottom of this file for the full
-implementation, tests, and verification. **Bug #6's fix has NOT yet
-run on real N=2 hardware** -- everything below the code-level bar
-(basedpyright/ruff/pytest, all clean/passing) is confirmed; real
-hardware re-verification needs the user's own fresh explicit
-go-ahead, same as every other real-cluster step in this campaign.
-Bugs #1-5 remain hardware-verified as described below -- see
-"2026-08-06 fix: in-band PrefillMessage admission signal",
+**STATUS UPDATE (2026-08-06, later still): bug #6's fix does NOT
+close N=2 on real hardware -- a SEVENTH real bug (or bugs) found.**
+Bug #6's own fix (dropping `is_prefix_cache_hit`, see below) is
+correct for what it touches and did not regress anything -- but the
+first real N=2 hardware run after deploying it crashed again, with
+the EXACT SAME error signature bug #5 was supposed to have already
+closed (`SchedulerWireProtocolError: recv_header: version mismatch --
+received 3, this rank expects 1`), via a THIRD call path neither bug
+#5 nor bug #6 touched. A follow-up attempt with
+`EXO_DSV4_BATCHED_PREFILL=0` (an older, unrelated, always-on-by-default
+rendezvous-batching mechanism suspected as the interacting factor)
+did NOT fix it either -- it crashed again, faster, with a DIFFERENT
+raw transport error (`[jaccl] Recv failed with errno=54`, not a
+version-mismatch parse error). See "2026-08-06 finding: N=2 still
+crashes after bug #6's fix (bug #7, root cause NOT yet identified)"
+at the bottom of this file for the full repro, both crash signatures,
+and what's ruled out so far. **Bugs #1-5 remain hardware-verified**
+-- see "2026-08-06 fix: in-band PrefillMessage admission signal",
 "2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse", and
 "2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)".
 Single-request PP is unaffected and repeatedly verified working on
-real hardware. `EXO_PP_BATCHED_DECODE=1` remains UNSAFE for
-production until bug #6's fix is verified on real N=2 hardware --
-the cluster must stay in the safe known-good config (single-request
-PP, `EXO_PP_BATCHED_DECODE` unset) until that happens.
+real hardware, including immediately after BOTH of today's crashes
+(self-healed cleanly each time). `EXO_PP_BATCHED_DECODE=1` remains
+UNSAFE for production -- the cluster must stay in the safe known-good
+config (single-request PP, `EXO_PP_BATCHED_DECODE` unset) until bug
+#7 is actually root-caused and closed.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -931,4 +938,178 @@ concurrent, cold-start, DIFFERENT-topic requests sharing a
 chat-template prefix (the exact bug #6 repro scenario) now both reach
 the IDENTICAL eligibility verdict and no longer trigger the
 PrefillReadyMessage NACK-retry fail-stop guard.
+
+**UPDATE (2026-08-06, later still): this DID run on real N=2
+hardware, with explicit user go-ahead -- and it crashed. Bug #6's own
+fix worked as designed (no eligibility-divergence symptom observed),
+but N=2 is still NOT safe.** See the next section for the full
+writeup.
+
+---
+
+## 2026-08-06 finding: N=2 still crashes after bug #6's fix (bug #7, root cause NOT yet identified)
+
+**Status: found on real N=2 hardware, root cause NOT yet identified.**
+Bug #6's fix (dropping `is_prefix_cache_hit` from the eligibility
+computation) is verified correct for what it touches -- the specific
+divergence symptom it was designed to close (rank 0 believing a
+request eligible while rank 1 believes it ineligible, producing a
+PrefillReadyMessage 50x-NACK fail-stop) did NOT occur on this run.
+But the underlying goal -- N=2 genuinely concurrent requests working
+cleanly -- is still not achieved. Two DIFFERENT crash signatures were
+observed across two back-to-back attempts, and neither points at
+bug #6's own code.
+
+### Repro (identical to bug #6's own repro scenario)
+
+Cluster launched with the exact bug #6 hardware-test config:
+```bash
+DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731 DSV4_SHARDING=Pipeline \
+EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1 \
+EXO_SPECULATIVE=0 EXO_DSV4_DSPARK=0 EXO_DSV4_MTP=0 \
+./start_cluster.sh
+```
+Both nodes confirmed on commit `5588d674a` (includes bug #6's fix).
+Single-request smoke test clean (`finish_reason=stop`, "Paris") before
+each concurrent attempt, per standing discipline. Two genuinely
+concurrent, cold-start, DIFFERENT-topic requests fired via a
+`ThreadPoolExecutor(max_workers=2)` against `/v1/chat/completions`:
+`"Count from 1 to 5."` and `"Name 3 colors."` -- the identical repro
+from bug #6's own finding.
+
+### Attempt 1: `EXO_DSV4_BATCHED_PREFILL=1` (default) -- crashed after ~18s
+
+Both requests returned HTTP 500. Rank 0 (node2) log shows
+`Rendezvous batched 2 concurrent tasks (window=200ms)` followed by
+`Starting batched prefill: B=2 max_L=10 lengths=[10, 7]` --
+`EXO_DSV4_BATCHED_PREFILL` (a separate, older, always-on-by-default
+mechanism in `runner.py`'s `handle_generation_tasks` that rendezvous-
+batches concurrent requests into a single `prefill_batched()` call
+BEFORE the PP batched-decode admission machinery ever sees them --
+unrelated to and pre-dating bugs #1-#6's entire scope) took the two
+concurrent requests down its own batched-prefill path over the
+metaframe transport.
+
+Rank 1 (node1) crashed with the **exact bug #5 error signature**:
+```
+SchedulerWireProtocolError: recv_header: version mismatch -- received 3,
+this rank expects 1. Both ranks must run identical exo builds; refusing
+to guess at a compatible decoding.
+```
+via traceback: `runner.py handle_generation_tasks` -> `batch_generate.py
+step()` -> `_step_batched_decode()` -> `self._batched_decode_rank1_glue
+.tick(self.model)` -> `pp_scheduler_wire.py recv_header()` raises.
+
+Rank 0 (node2) simultaneously deadlined on its NEXT decode collective:
+`[jaccl-v2] DEADLINE rank=0 call_id=533 all_recv=0/1 chunks_posted=1
+small=1 peer_in_call=0` -> `[jaccl] reliable_all_reduce_v2 deadline --
+clean re-place` -> in-place reconnect attempted -> reconnect failed
+(`[jaccl] Recv failed: peer closed connection (EOF) fd=52
+remaining=4`) -> propagated as a re-place.
+
+`peer_in_call=0` on rank 0's deadline confirms rank 1 never entered
+that collective -- rank 1's crash is causally FIRST, rank 0's deadline
+and EOF are downstream symptoms of rank 1 dying, not an independent
+failure.
+
+**Working hypothesis (NOT confirmed by trace, no `JACCL_TRACE_STEP`
+enabled)**: rank 0 took `EXO_DSV4_BATCHED_PREFILL`'s rendezvous path
+for the two concurrent requests -- a genuinely batched prefill (B=2)
+over the metaframe transport, entirely outside the PP batched-decode
+`tick()`-gated channel bugs #1-#6 were scoped around -- while rank 1
+was still polling that scheduler-wire channel via `tick()`. Rank 1's
+`recv_header()` on that channel then ate rank 0's batched-prefill
+metaframe bytes and misparsed them as a scheduler-wire header. This
+would be the SAME class of decode/prefill wire-framing collision bug
+#5 closed for the `PrefillMessage`/`PrefillReadyMessage` path
+specifically -- but via a THIRD call path (`EXO_DSV4_BATCHED_PREFILL`'s
+rendezvous mechanism) that bug #5's fix never touched and was never in
+scope for.
+
+### Attempt 2: `EXO_DSV4_BATCHED_PREFILL=0` -- STILL crashed, differently, after ~2.3s
+
+Relaunched with `EXO_DSV4_BATCHED_PREFILL=0` added on top of the same
+config, specifically to test the Attempt-1 hypothesis. Confirmed via
+`ps` on the running process that the env var took
+(`EXO_DSV4_BATCHED_PREFILL=0` present, `EXO_PP_BATCHED_DECODE=1` still
+active). Single-request smoke test clean again before the retry.
+
+**The hypothesis was WRONG, or at best incomplete**: the identical
+concurrent repro STILL failed -- both requests HTTP 500 again -- but
+in ~2.3s this time (vs ~18s in Attempt 1), and with a DIFFERENT error
+signature. Rank 1 (node1) crashed inside the SAME call path
+(`_step_batched_decode()` -> `Rank1BatchedDecodeGlue.tick()` ->
+`recv_header()`) but this time at the `mx.eval(header)` line itself,
+with a raw transport-level error, not a parsed-header version
+mismatch:
+```
+RuntimeError: [jaccl] Recv failed with errno=54 n=-1 fd=53 remaining=16
+flags=0x2 nonblock=0
+```
+Rank 0 (node2) hit the identical raw error
+(`jaccl transport fault in generator.step(): [jaccl] Recv failed with
+errno=54 ...`) at essentially the same moment, attempted an in-place
+reconnect, and the runner was re-placed. Both nodes self-healed
+cleanly (new runner spun up automatically); single-request smoke test
+after this crash was clean (`finish_reason=stop`, "Paris") with no
+manual intervention needed beyond the automatic re-place.
+
+errno=54 is `ECONNRESET` on macOS/BSD -- a raw connection reset, not
+a framing/parse-level mismatch. This is NOT the same failure mode as
+Attempt 1's `SchedulerWireProtocolError`, which strongly suggests
+`EXO_DSV4_BATCHED_PREFILL` was NOT the (sole) interacting factor --
+disabling it changed the race's timing/outcome but did not close it.
+
+### What this rules out
+
+- **NOT a regression from bug #6's own diff.** Bug #6's fix touches
+  only `pp_batched_decode_eligibility.py` and the routing/ordering in
+  `batch_generate.py`'s `submit()` -- neither crash traceback passes
+  through that code. Both crashes originate inside
+  `Rank1BatchedDecodeGlue.tick()`'s `recv_header()` call, in code bug
+  #6 never touched.
+- **NOT (solely) `EXO_DSV4_BATCHED_PREFILL`.** Disabling it changed
+  the crash's timing and error signature but did not prevent a crash.
+  Either it's a secondary contributing factor (removing it removes
+  ONE source of extra wire traffic but not the root race), or it was
+  never the real cause and Attempt 1's specific error signature was
+  coincidental.
+- **NOT an eligibility-divergence symptom.** Neither crash produced
+  bug #6's specific NACK-storm fail-stop (`GlueError: rank 1 NACK'd
+  PrefillMessage ... 50 consecutive times`). Bug #6's fix appears to
+  be doing its job; the cluster is failing for a DIFFERENT reason
+  underneath it.
+
+### What's still open
+
+- **Root cause NOT identified.** Both crashes point at the same
+  general SEAM (decode-step `tick()` polling on `pp_scheduler_wire`
+  vs SOME other traffic hitting the same rank-pair transport at the
+  same time) that bugs #1, #5, and now this finding all share -- but
+  WHAT the other traffic is in Attempt 2 (with `EXO_DSV4_BATCHED_
+  PREFILL=0` ruled out as sole cause) is not yet identified.
+- **No `JACCL_TRACE_STEP=1` or `EXO_PREFIX_CACHE_DIAG=1` was enabled**
+  for either attempt -- both this finding's root cause AND the
+  still-unresolved bug #6 log-line question from the earlier
+  archaeology section would benefit from a fresh hardware run with
+  full tracing enabled.
+- **Two visibly different crash signatures from what should be the
+  identical repro** (version-mismatch parse error vs raw ECONNRESET)
+  suggests either a genuine timing-dependent race with multiple
+  possible failure surfaces, or two distinct bugs both reachable from
+  the same N=2 concurrent-admission scenario. Not yet distinguished.
+- Cluster was restored to safe known-good (single-request PP,
+  `EXO_PP_BATCHED_DECODE` unset) after each crash, verified clean with
+  a real "Paris" completion each time -- no corrupted or crashed state
+  left running at any point.
+
+### Practical guidance
+
+`EXO_PP_BATCHED_DECODE=1` must stay OFF (the `start_cluster.sh`
+default) in any deployment. Bug #6's fix, while itself correct, has
+NOT resolved N=2 concurrency -- there is at least one more real,
+unidentified bug in this path. Single-request PP
+(`EXO_PP_METAFRAME=1` alone, `EXO_PP_BATCHED_DECODE` unset) remains
+fully unaffected and repeatedly verified working, including
+immediately after both of today's crashes.
 
