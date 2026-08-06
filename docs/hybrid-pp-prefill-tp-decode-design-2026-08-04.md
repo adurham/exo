@@ -1785,6 +1785,99 @@ Validate correctness (Phase 0-style diff) for BOTH the prefill and
 decode halves together, at 2 concurrent requests with different context
 lengths.
 
+**Phase 2 — concrete design (2026-08-06, scoping session, no code
+written yet).** Picks up from the N=2 admission-race campaign's own
+handoff (`docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
+"2026-08-06 handoff: starting point for Phase 2/3/4" section) now that
+campaign is closed. Traced the actual current code path first
+(`ExoBatchGenerator._submit_batched_decode_deferred` →
+`_DeferredPrefill.run_prefill()` → `generate.py`'s `prefill()`): today
+that closure runs a request's ENTIRE multi-chunk prefill (every
+`EXO_PREFILL_STEP_SIZE`-sized chunk, e.g. dozens of chunks for a
+100K+-token prompt) synchronously inside a single `Rank0BatchedDecodeGlue
+.tick()` call, with no yield point back to the scheduler for another
+request's decode steps in between — this is the concrete mechanism
+behind this section's "long prefill doesn't starve concurrent decode
+users" requirement; it is not yet true today.
+
+**Interleaving model — consult-reviewed, 2026-08-06: separate
+alternating steps, NOT a mixed per-step tensor.** Considered joining a
+prefill-chunk's rows and a decode batch's rows into one padded
+`(B_step, L_chunk, hidden)` forward pass per step (mirroring item 1's
+"ONE batched tensor covering all of them" wording literally). Rejected:
+padding decode's 1-token rows up to a 4096-token prefill chunk's length
+wastes ~4000x compute on every decode row every step it co-occurs with
+a chunk, and mixed-phase rows need per-row causal masks/RoPE
+offsets/cache-write boundaries in the SAME forward pass — exactly the
+subtle shape/masking bug class the closed admission-race campaign spent
+7 real hardware bugs eliminating, reintroduced for a net throughput
+loss. A ragged/packed block-diagonal-mask alternative (Sarathi-Serve/
+vLLM-style chunked-prefill continuous batching) was also considered and
+explicitly rejected for this design: uncertain MLX varlen-attention
+kernel support, and at the confirmed N=2 hard ceiling (Section 13.3) it
+buys negligible benefit over plain alternation to justify the added
+correctness surface. Recorded here so a future pass doesn't
+"rediscover" and re-litigate either rejected option.
+
+Chosen mechanism, in terms of the ALREADY-EXISTING wire protocol (no
+new message kind):
+1. **Make `run_prefill()` resumable, not call-to-completion.** Refactor
+   `prefill()`'s internal `while offset < max_length` chunk loop
+   (`generate.py`) so a caller can drive exactly ONE chunk and get back
+   a resumable cursor, instead of looping every chunk in one call.
+   `_DeferredPrefill` becomes a per-chunk step function, invoked once
+   per prefill-chunk tick rather than once per admission.
+2. **Reuse `BatchEntry.phase=PREFILL` on `StepMessage`, not a new
+   message kind.** `StepMessage.entries` already carries
+   `phase`/`expected_cache_len`/`n_tokens` per entry (Phase 1 built
+   `Phase.PREFILL` into the enum specifically as this forward-compatible
+   placeholder — see `pp_scheduler_protocol.py`'s module docstring
+   Scope note). A prefill-chunk step is simply a `StepMessage` with one
+   `phase=PREFILL` entry; rank 1 dispatches on `.phase` the same way it
+   already dispatches on message kind. `PrefillMessage`/
+   `PrefillReadyMessage` stay scoped to their proven one-shot job (the
+   admission-time "start this new request's prefill" announcement +
+   readiness handshake) — not stretched into a per-chunk protocol.
+3. **`Rank0BatchedDecodeGlue.tick()` gets one new rung**, between the
+   existing rung 2 (prefill-grant announcement) and rung 3 (decode
+   step): if a request is mid-chunked-prefill, emit its next chunk as a
+   `phase=PREFILL` `StepMessage`. Per this section's own "one prefill
+   chunk ... then a batch of pending decode steps ... alternating"
+   wording, this rung ALTERNATES with decode rather than unconditionally
+   outranking it the way the one-shot prefill-grant rung does today —
+   Decision (below) fixes the ratio at 1:1 for the first cut.
+4. No new ack/NACK handshake per chunk — the one-shot
+   `PrefillReadyMessage` before chunk 1 already establishes both ranks
+   are in lockstep on this request; subsequent chunks are ordinary
+   `StepMessage`s on the already-proven single-writer channel.
+
+**Two scope decisions locked in 2026-08-06 (best-judgment default,
+simplest-first, per this campaign's own established discipline of
+correctness before throughput and revisiting only if data shows it's
+insufficient — not re-litigated without new evidence):**
+- **Alternation ratio: fixed 1 prefill-chunk-tick : 1 decode-tick,
+  always.** No adaptive `EXO_PREFILL_STEP_SIZE` shrinking based on
+  decode load in the first cut. Ship this, measure real per-chunk
+  latency and decode-stall impact on real hardware, revisit only if
+  Phase 3/4 throughput data shows fixed alternation isn't enough — not
+  a speculative optimization up front.
+- **At most ONE request mid-prefill at a time.** At the confirmed N=2
+  hard ceiling, Phase 2's scope is "one request's prefill chunks
+  timesliced against decode steps of already-active OTHER request(s)" —
+  NOT simultaneous multi-request prefill batching. This means Phase 2
+  does NOT need `prefill_batched`'s real N-stream padded-batch/masking
+  machinery for the PP split; it only needs the SAME single-stream
+  `prefill()` chunk loop made resumable (item 1 above). If a second
+  request arrives while one is already mid-prefill, it queues behind it
+  in `Rank0BatchedDecodeGlue`'s existing `_pending_prefill` list exactly
+  as today — no new queueing logic needed, this already exists.
+
+Not yet started: the actual `prefill()` resumable-chunk refactor, the
+new `tick()` rung, and the Phase 0-style correctness diff at 2
+concurrent requests with different context lengths this section
+originally called for. Every real-cluster step still needs the user's
+own fresh explicit go-ahead per standing rules.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
