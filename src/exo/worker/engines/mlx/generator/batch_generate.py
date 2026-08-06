@@ -99,9 +99,7 @@ _MEM_PROFILE_INTERVAL = int(os.environ.get("EXO_MEMORY_PROFILE_INTERVAL", "256")
 #
 # Trade-off: clearing forces subsequent allocations to come from a cold
 # pool, costing decode tok/s. Empirical sweet spot TBD; defaults to off.
-_MLX_CLEAR_CACHE_INTERVAL = int(
-    os.environ.get("EXO_MLX_CLEAR_CACHE_INTERVAL", "0")
-)
+_MLX_CLEAR_CACHE_INTERVAL = int(os.environ.get("EXO_MLX_CLEAR_CACHE_INTERVAL", "0"))
 
 # Periodic gc.collect() to break Python ref cycles on the MLX array graph.
 # `heap` snapshot during DSv4 long decode showed 2.4M std::__shared_ptr_emplace
@@ -115,6 +113,7 @@ _MLX_CLEAR_CACHE_INTERVAL = int(
 # per decode step. Default 256 is a balance between leak control and GC
 # overhead. Set to 0 to disable.
 import gc  # noqa: E402  (placed after env reads for clarity)
+
 _GC_COLLECT_INTERVAL = int(os.environ.get("EXO_GC_COLLECT_INTERVAL", "0"))
 
 # ── Degeneration (repetition-loop) detection ──
@@ -336,9 +335,7 @@ _malloc_zone_pressure_relief: Any = None
 if _MALLOC_RELIEF_INTERVAL > 0:
     try:
         _libsystem_malloc = ctypes.CDLL("/usr/lib/system/libsystem_malloc.dylib")
-        _malloc_zone_pressure_relief = (
-            _libsystem_malloc.malloc_zone_pressure_relief
-        )
+        _malloc_zone_pressure_relief = _libsystem_malloc.malloc_zone_pressure_relief
         _malloc_zone_pressure_relief.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
         _malloc_zone_pressure_relief.restype = ctypes.c_size_t
     except Exception as exc:
@@ -359,6 +356,7 @@ _tracemalloc_prev_snapshot: Any = None
 
 if _TRACEMALLOC_PATH:
     import tracemalloc as _tracemalloc
+
     _tracemalloc.start(25)
 
 
@@ -460,6 +458,7 @@ def _mem_profile_record(
                 pass
         try:
             import psutil
+
             mi = psutil.Process().memory_info()
             record["rss_bytes"] = int(mi.rss)
             record["vms_bytes"] = int(mi.vms)
@@ -516,11 +515,11 @@ def _detect_token_loop(
     for period in range(1, max_period + 1):
         if n < period * min_repeats:
             break
-        cycle = token_ids[n - period:]
+        cycle = token_ids[n - period :]
         repeats = 1
         # walk backwards in blocks of `period`, counting identical cycles
         pos = n - period
-        while pos - period >= 0 and token_ids[pos - period:pos] == cycle:
+        while pos - period >= 0 and token_ids[pos - period : pos] == cycle:
             repeats += 1
             pos -= period
         if repeats >= min_repeats:
@@ -558,10 +557,10 @@ def _detect_long_period_loop(
     for period in range(1, max_period + 1):
         if n < period * min_repeats:
             break
-        cycle = block_hashes[n - period:]
+        cycle = block_hashes[n - period :]
         repeats = 1
         pos = n - period
-        while pos - period >= 0 and block_hashes[pos - period:pos] == cycle:
+        while pos - period >= 0 and block_hashes[pos - period : pos] == cycle:
             repeats += 1
             pos -= period
         if repeats >= min_repeats:
@@ -711,9 +710,9 @@ class ExoBatchGenerator:
     # work, not this fix. EXO_MAX_CONCURRENT_REQUESTS stays capped at 1
     # for Pipeline mode; this dict never holds more than one entry in
     # today's architecture, by design (the entry guard enforces it).
-    _pp_spec_gen_by_uid: dict[
-        int, Generator[tuple[int, mx.array], None, None]
-    ] = field(default_factory=dict, init=False)
+    _pp_spec_gen_by_uid: dict[int, Generator[tuple[int, mx.array], None, None]] = field(
+        default_factory=dict, init=False
+    )
     _pp_spec_eos: set[int] = field(init=False, default_factory=set)
     _uid_counter: int = field(init=False, default=0)
     # Monotonic per-process counter, incremented once per submit() call,
@@ -916,9 +915,15 @@ class ExoBatchGenerator:
         # DISABLE flag (removed from start_cluster.sh the same day) genuinely
         # redundant rather than "removed but still needed via a workaround".
         draft_path = os.environ.get("EXO_PP_DRAFT_MODEL", "")
-        if use_speculative and draft_path and self.group is not None and self.group.size() > 1:
+        if (
+            use_speculative
+            and draft_path
+            and self.group is not None
+            and self.group.size() > 1
+        ):
             try:
                 from ..pp_speculation import get_pipeline_info
+
                 if get_pipeline_info(self.model) is not None:
                     self._pp_spec_active = True
                     logger.info("PP speculation enabled in BatchGenerator")
@@ -962,7 +967,10 @@ class ExoBatchGenerator:
                                 )
                             except Exception as e:
                                 import traceback
-                                logger.warning(f"PP MTP load failed: {e}\n{traceback.format_exc()}")
+
+                                logger.warning(
+                                    f"PP MTP load failed: {e}\n{traceback.format_exc()}"
+                                )
                                 self._pp_mtp = None
                         else:
                             mtp_weights = self._resolve_mtp_weights()
@@ -973,12 +981,17 @@ class ExoBatchGenerator:
                                     )
 
                                     self._pp_mtp = MTPPredictor(
-                                        self.model, mtp_weights, quantize=False,
+                                        self.model,
+                                        mtp_weights,
+                                        quantize=False,
                                     )
                                     logger.info(f"PP MTP loaded from {mtp_weights}")
                                 except Exception as e:
                                     import traceback
-                                    logger.warning(f"PP MTP load failed: {e}\n{traceback.format_exc()}")
+
+                                    logger.warning(
+                                        f"PP MTP load failed: {e}\n{traceback.format_exc()}"
+                                    )
                                     self._pp_mtp = None
                             else:
                                 self._pp_mtp = None
@@ -1260,16 +1273,14 @@ class ExoBatchGenerator:
             with vision_ctx, T("submit.prefill"):
                 if use_remote and task_params.prefill_endpoint is not None:
                     try:
-                        _prefill_tps, _prefill_tokens, cache_snapshots = (
-                            remote_prefill(
-                                prompt_tokens[:-1],
-                                cache,
-                                on_prefill_progress,
-                                endpoint=task_params.prefill_endpoint,
-                                request_id=str(uuid.uuid4()),
-                                model_id=str(task_params.model),
-                                start_pos=prefix_hit_length,
-                            )
+                        _prefill_tps, _prefill_tokens, cache_snapshots = remote_prefill(
+                            prompt_tokens[:-1],
+                            cache,
+                            on_prefill_progress,
+                            endpoint=task_params.prefill_endpoint,
+                            request_id=str(uuid.uuid4()),
+                            model_id=str(task_params.model),
+                            start_pos=prefix_hit_length,
                         )
                         remote_prefilled = True
                     except Exception:
@@ -1430,6 +1441,7 @@ class ExoBatchGenerator:
         """
         import json
         import struct
+
         try:
             with open(weights_path, "rb") as f:
                 header_size_bytes = f.read(8)
@@ -1525,6 +1537,7 @@ class ExoBatchGenerator:
         if self.model_id:
             from exo.download.download_utils import build_model_path
             from exo.shared.types.common import ModelId
+
             local_path = self._extract_mtp_from_local(
                 build_model_path(ModelId(self.model_id)), cache_dir, cache_key
             )
@@ -1554,18 +1567,22 @@ class ExoBatchGenerator:
         when 397B's MTP file was loaded into a 35B-A3B model.
         """
         try:
-            inner = getattr(self.model, 'model', None) or self.model.language_model.model
-            args = (getattr(self.model, 'args', None)
-                    or getattr(inner, 'args', None)
-                    or getattr(getattr(inner, 'model', None), 'args', None))
-            model_type = getattr(args, 'model_type', '') if args else ''
-            if not model_type and args and hasattr(args, 'text_config'):
-                model_type = args.text_config.get('model_type', '')
+            inner = (
+                getattr(self.model, "model", None) or self.model.language_model.model
+            )
+            args = (
+                getattr(self.model, "args", None)
+                or getattr(inner, "args", None)
+                or getattr(getattr(inner, "model", None), "args", None)
+            )
+            model_type = getattr(args, "model_type", "") if args else ""
+            if not model_type and args and hasattr(args, "text_config"):
+                model_type = args.text_config.get("model_type", "")
 
             # Check if model has MTP layers configured
-            has_mtp = args and getattr(args, 'mtp_num_hidden_layers', 0) > 0
+            has_mtp = args and getattr(args, "mtp_num_hidden_layers", 0) > 0
 
-            if has_mtp or 'qwen3_5' in model_type:
+            if has_mtp or "qwen3_5" in model_type:
                 # Prefer a dedicated, MLX-ready MTP drafter repo
                 # (mlx-community/<base>-MTP-bf16) when one is published — its
                 # norm weights are already +1-shifted for MLX and the proj
@@ -1574,14 +1591,20 @@ class ExoBatchGenerator:
                 # heuristic. Falls back to the upstream Qwen/<base> full repo
                 # (MTP tensors extracted from its shards) when no dedicated
                 # drafter exists.
-                dedicated = self._dedicated_mtp_repo(self.model_id) if self.model_id else ''
+                dedicated = (
+                    self._dedicated_mtp_repo(self.model_id) if self.model_id else ""
+                )
                 if dedicated:
-                    logger.info(f"Auto-detected dedicated MTP drafter: {dedicated} (model_type={model_type})")
+                    logger.info(
+                        f"Auto-detected dedicated MTP drafter: {dedicated} (model_type={model_type})"
+                    )
                     return dedicated
                 # Map model_id to original HF repo (strip mlx-community prefix + quant suffix)
-                repo = self._model_id_to_hf_repo(self.model_id) if self.model_id else ''
+                repo = self._model_id_to_hf_repo(self.model_id) if self.model_id else ""
                 if repo:
-                    logger.info(f"Auto-detected MTP repo: {repo} (model_type={model_type})")
+                    logger.info(
+                        f"Auto-detected MTP repo: {repo} (model_type={model_type})"
+                    )
                     return repo
                 logger.info(
                     f"No MTP repo derivable for model_id={self.model_id!r} "
@@ -1589,7 +1612,7 @@ class ExoBatchGenerator:
                 )
         except Exception as e:
             logger.warning(f"MTP detection failed: {e}")
-        return ''
+        return ""
 
     @staticmethod
     def _model_id_to_hf_repo(model_id: str) -> str:
@@ -1599,20 +1622,28 @@ class ExoBatchGenerator:
         """
         # Strip common MLX community prefixes
         name = model_id
-        if name.startswith('mlx-community/'):
-            name = name[len('mlx-community/'):]
+        if name.startswith("mlx-community/"):
+            name = name[len("mlx-community/") :]
 
         # Strip quantization suffixes
-        for suffix in ['-4bit', '-8bit', '-bf16', '-fp16', '-MLX-4bit', '-MLX-8bit', '-MLX']:
+        for suffix in [
+            "-4bit",
+            "-8bit",
+            "-bf16",
+            "-fp16",
+            "-MLX-4bit",
+            "-MLX-8bit",
+            "-MLX",
+        ]:
             if name.endswith(suffix):
-                name = name[:-len(suffix)]
+                name = name[: -len(suffix)]
                 break
 
         # Map to original Qwen repo
-        if name.startswith('Qwen3'):
+        if name.startswith("Qwen3"):
             return f"Qwen/{name}"
 
-        return ''
+        return ""
 
     @staticmethod
     def _dedicated_mtp_repo(model_id: str) -> str:
@@ -1625,33 +1656,44 @@ class ExoBatchGenerator:
         so we don't hit the network on every detection.
         """
         import os as _os
+
         if _os.environ.get("EXO_MTP_NO_DEDICATED", "") == "1":
-            return ''
+            return ""
         # Strip mlx-community/ prefix and a quant suffix to get <base>.
         name = model_id
-        if name.startswith('mlx-community/'):
-            name = name[len('mlx-community/'):]
-        for suffix in ['-4bit', '-8bit', '-6bit', '-5bit', '-bf16', '-fp16',
-                       '-MLX-4bit', '-MLX-8bit', '-MLX']:
+        if name.startswith("mlx-community/"):
+            name = name[len("mlx-community/") :]
+        for suffix in [
+            "-4bit",
+            "-8bit",
+            "-6bit",
+            "-5bit",
+            "-bf16",
+            "-fp16",
+            "-MLX-4bit",
+            "-MLX-8bit",
+            "-MLX",
+        ]:
             if name.endswith(suffix):
-                name = name[:-len(suffix)]
+                name = name[: -len(suffix)]
                 break
         candidate = f"mlx-community/{name}-MTP-bf16"
         # Cache existence checks on the class to avoid repeat network calls.
-        cache = ExoBatchGenerator.__dict__.get('_dedicated_mtp_cache')
+        cache = ExoBatchGenerator.__dict__.get("_dedicated_mtp_cache")
         if cache is None:
             cache = {}
             ExoBatchGenerator._dedicated_mtp_cache = cache  # type: ignore[attr-defined]
         if candidate in cache:
             return cache[candidate]
-        exists = ''
+        exists = ""
         try:
             from huggingface_hub import HfApi
+
             if HfApi().repo_exists(candidate):
                 exists = candidate
         except Exception as e:
             logger.debug(f"Dedicated MTP repo check for {candidate} failed: {e}")
-            exists = ''
+            exists = ""
         cache[candidate] = exists
         return exists
 
@@ -1673,10 +1715,13 @@ class ExoBatchGenerator:
             return None
 
         mtp_shards = sorted({idx["weight_map"][k] for k in mtp_keys})
-        logger.info(f"Found {len(mtp_keys)} MTP weights in local model ({len(mtp_shards)} shards)")
+        logger.info(
+            f"Found {len(mtp_keys)} MTP weights in local model ({len(mtp_shards)} shards)"
+        )
 
         # Extract MTP tensors from local shards
         from safetensors.torch import load_file, save_file
+
         mtp_tensors = {}
         for shard_name in mtp_shards:
             shard_path = model_dir / shard_name
@@ -1692,7 +1737,9 @@ class ExoBatchGenerator:
 
         cached_path = cache_dir / f"mtp_{cache_key}.safetensors"
         save_file(mtp_tensors, str(cached_path))
-        logger.info(f"Extracted {len(mtp_tensors)} MTP tensors from local model → {cached_path}")
+        logger.info(
+            f"Extracted {len(mtp_tensors)} MTP tensors from local model → {cached_path}"
+        )
         return str(cached_path)
 
     @staticmethod
@@ -1711,8 +1758,8 @@ class ExoBatchGenerator:
                     lin.weight = v
                     ql = nn.QuantizedLinear.from_linear(lin, group_size=64, bits=4)
                     q_weights[k] = ql.weight
-                    q_weights[k.replace('.weight', '.scales')] = ql.scales
-                    q_weights[k.replace('.weight', '.biases')] = ql.biases
+                    q_weights[k.replace(".weight", ".scales")] = ql.scales
+                    q_weights[k.replace(".weight", ".biases")] = ql.biases
                     mx.eval(ql.weight, ql.scales, ql.biases)
                     del lin, ql
                 else:
@@ -1771,7 +1818,7 @@ class ExoBatchGenerator:
         def _norm_key(k: str) -> str | None:
             """Map a raw tensor key to the canonical ``mtp.*`` form, or None to drop."""
             if k.startswith("model.mtp."):
-                return "mtp." + k[len("model.mtp."):]
+                return "mtp." + k[len("model.mtp.") :]
             if k.startswith("mtp."):
                 return k
             if is_dedicated:
@@ -1789,10 +1836,13 @@ class ExoBatchGenerator:
                 with open(idx_path) as f:
                     idx = json.load(f)
                 mtp_shards = {
-                    shard for key, shard in idx["weight_map"].items()
+                    shard
+                    for key, shard in idx["weight_map"].items()
                     if key.startswith("model.mtp.") or key.startswith("mtp.")
                 }
-                logger.info(f"MTP weights span {len(mtp_shards)} of {len(set(idx['weight_map'].values()))} shards")
+                logger.info(
+                    f"MTP weights span {len(mtp_shards)} of {len(set(idx['weight_map'].values()))} shards"
+                )
             except Exception:
                 mtp_shards = None
 
@@ -1807,7 +1857,10 @@ class ExoBatchGenerator:
             # Dedicated drafter repo, or a small full repo with no index:
             # download every safetensors and keep the MTP/bare tensors.
             from huggingface_hub import snapshot_download
-            model_dir = snapshot_download(repo_id, allow_patterns=["*.safetensors", "*.json"])
+
+            model_dir = snapshot_download(
+                repo_id, allow_patterns=["*.safetensors", "*.json"]
+            )
             for sf_file in sorted(Path(model_dir).glob("*.safetensors")):
                 for k, v in load_file(str(sf_file)).items():
                     nk = _norm_key(k)
@@ -1834,7 +1887,7 @@ class ExoBatchGenerator:
 
     def warmup_speculative(self, model, tokenizer) -> None:
         """Warm up the speculative decoding path (MTP draft + verify kernels)."""
-        if not hasattr(self._mlx_gen, 'mtp'):
+        if not hasattr(self._mlx_gen, "mtp"):
             return
 
         from mlx_lm.models import cache as cache_mod
@@ -1872,7 +1925,7 @@ class ExoBatchGenerator:
             next_arr = all_next[0].reshape(1, 1)
             last_pn = vpn[:, 0:1, :]
             for i, c in enumerate(cache):
-                if hasattr(c, 'base'):
+                if hasattr(c, "base"):
                     cache[i] = c.base
 
         logger.info("Speculative warmup complete")
@@ -1883,9 +1936,7 @@ class ExoBatchGenerator:
         # with _unprocessed_sequences. Keep fallbacks to the old names so this
         # module still works against older mlx-lm checkouts if someone pins
         # back.
-        unprocessed = getattr(
-            self._mlx_gen, "_unprocessed_sequences", None
-        )
+        unprocessed = getattr(self._mlx_gen, "_unprocessed_sequences", None)
         if unprocessed is None:
             unprocessed = getattr(self._mlx_gen, "unprocessed_prompts", None)
         has_unprocessed = bool(unprocessed) if unprocessed is not None else False
@@ -2065,8 +2116,7 @@ class ExoBatchGenerator:
                 has_images=bool(task_params.images),
                 has_tools=bool(task_params.tools),
                 uses_speculative_decode=hasattr(self._mlx_gen, "mtp"),
-                sharding_is_pipeline=self.group is not None
-                and self.group.size() > 1,
+                sharding_is_pipeline=self.group is not None and self.group.size() > 1,
                 batched_decode_enabled=True,
             )
             if early_eligibility.eligible:
@@ -2189,7 +2239,9 @@ class ExoBatchGenerator:
                         # NOT yet closed; see this method's own
                         # SCOPE NOTE above and the handoff doc).
                         prefix_hit_length = 0
-                        cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                        cache = make_kv_cache(
+                            self.model, max_kv_size=self.max_kv_tokens
+                        )
                     else:
                         self._prefix_hit_agree_tag += 1
                         with T("submit.pp_prefix_hit_agreement"):
@@ -2216,7 +2268,9 @@ class ExoBatchGenerator:
                             prompt_tokens = all_prompt_tokens
                             matched_index = None
                             is_exact_hit = False
-                            cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                            cache = make_kv_cache(
+                                self.model, max_kv_size=self.max_kv_tokens
+                            )
                         elif prefix_hit_length > 0:
                             logger.info(
                                 f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} "
@@ -2225,7 +2279,9 @@ class ExoBatchGenerator:
                             )
                             prompt_tokens = remaining_tokens
                         else:
-                            cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                            cache = make_kv_cache(
+                                self.model, max_kv_size=self.max_kv_tokens
+                            )
                 else:
                     prefix_hit_length = local_hit_length
                     if prefix_hit_length > 0:
@@ -2235,7 +2291,9 @@ class ExoBatchGenerator:
                         )
                         prompt_tokens = remaining_tokens
                     else:
-                        cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                        cache = make_kv_cache(
+                            self.model, max_kv_size=self.max_kv_tokens
+                        )
             else:
                 cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
 
@@ -2376,7 +2434,9 @@ class ExoBatchGenerator:
             # exists to measure. Skip it for bench requests.
             if not is_bench:
                 _reasoning_budget = make_reasoning_budget_limiter(
-                    think_start_id=safe_think_token_id(self.tokenizer, "think_start_id"),
+                    think_start_id=safe_think_token_id(
+                        self.tokenizer, "think_start_id"
+                    ),
                     think_end_id=safe_think_token_id(self.tokenizer, "think_end_id"),
                     budget_tokens=min(
                         int(max_tokens * _REASONING_BUDGET_FRACTION),
@@ -2397,10 +2457,20 @@ class ExoBatchGenerator:
         if self._pp_spec_active:
             with T("submit.pp_spec_setup"):
                 return self._submit_pp_spec(
-                    task_params, all_prompt_tokens, prefix_hit_length, matched_index,
-                    is_exact_hit, cache_snapshots, cache, last_tokens, sampler,
-                    logits_processors, max_tokens, on_generation_token, _prefill_tps,
-            )
+                    task_params,
+                    all_prompt_tokens,
+                    prefix_hit_length,
+                    matched_index,
+                    is_exact_hit,
+                    cache_snapshots,
+                    cache,
+                    last_tokens,
+                    sampler,
+                    logits_processors,
+                    max_tokens,
+                    on_generation_token,
+                    _prefill_tps,
+                )
 
         uids = self._mlx_gen.insert(
             prompts=[last_tokens.tolist()],
@@ -2424,8 +2494,8 @@ class ExoBatchGenerator:
         # multi-stream cache from per-uid snapshots at every BS-transition.
         # The old code's `mtp.reset_cache()` (no snapshot) clobbered stream
         # 1's MTP K/V whenever stream 2 arrived → catastrophic c>=2 regression.
-        if hasattr(self._mlx_gen, 'mtp'):
-            prompt_pre_norm = self._mlx_gen._captured.get('prompt_pre_norm')
+        if hasattr(self._mlx_gen, "mtp"):
+            prompt_pre_norm = self._mlx_gen._captured.get("prompt_pre_norm")
             if prompt_pre_norm is not None:
                 mx.eval(prompt_pre_norm)
                 # submit() handles exactly ONE stream, so the MTP cache it
@@ -2444,18 +2514,21 @@ class ExoBatchGenerator:
                 self._mlx_gen.mtp.reset_cache()
                 S_pre = prompt_pre_norm.shape[1]
                 if S_pre > 1:
-                    toks_list = all_prompt_tokens.tolist() if hasattr(all_prompt_tokens, 'tolist') else list(all_prompt_tokens)
+                    toks_list = (
+                        all_prompt_tokens.tolist()
+                        if hasattr(all_prompt_tokens, "tolist")
+                        else list(all_prompt_tokens)
+                    )
                     mtp_tokens = toks_list[1:S_pre]
                     _ = self._mlx_gen.mtp.predict(
-                        prompt_pre_norm[:, :-1, :],
-                        mx.array([mtp_tokens])
+                        prompt_pre_norm[:, :-1, :], mx.array([mtp_tokens])
                     )
                     mx.eval(_)
                     logger.info(f"MTP cache prefilled ({S_pre} positions)")
                 # Snapshot for this uid. Safe even when S_pre==1 (empty cache
                 # is a valid snapshot — subsequent draft will start from
                 # zero MTP history, same as the pre-fix c=1 short-prompt case).
-                if hasattr(self._mlx_gen.mtp, 'snapshot_for_uid'):
+                if hasattr(self._mlx_gen.mtp, "snapshot_for_uid"):
                     self._mlx_gen.mtp.snapshot_for_uid(uid)
 
         # DSpark ctx warm-up + per-request reset. The draft module's rotating
@@ -2467,9 +2540,7 @@ class ExoBatchGenerator:
         # the incremental suffix on a prefix-cache hit). RoPE positions are
         # window-relative (constant absolute shift cancels in q·k), matching
         # how the per-cycle appends extend the same cache.
-        _dspark_mod = getattr(
-            getattr(self._mlx_gen, "model", None), "model", None
-        )
+        _dspark_mod = getattr(getattr(self._mlx_gen, "model", None), "model", None)
         _dspark_mod = getattr(_dspark_mod, "dspark", None)
         if _dspark_mod is not None:
             from mlx_lm.models.deepseek_v4 import get_dspark_ctx
@@ -2479,20 +2550,14 @@ class ExoBatchGenerator:
             if _ds_ctx is not None:
                 if _ds_ctx.shape[0] != 1:
                     _ds_ctx = _ds_ctx[-1:, :, :]
-                _dspark_mod.append_ctx(
-                    _ds_ctx, self._mlx_gen._dspark_caches
-                )
-                mx.eval(
-                    [c.keys for c in self._mlx_gen._dspark_caches]
-                )
-                logger.info(
-                    f"DSpark ctx warmed ({_ds_ctx.shape[1]} positions)"
-                )
+                _dspark_mod.append_ctx(_ds_ctx, self._mlx_gen._dspark_caches)
+                mx.eval([c.keys for c in self._mlx_gen._dspark_caches])
+                logger.info(f"DSpark ctx warmed ({_ds_ctx.shape[1]} positions)")
 
         # Set per-request temperature for speculative. EXO_SPECULATIVE_TEMP
         # overrides everything; otherwise fall through the same resolution
         # chain (request → instance → cluster → hardcoded) as the sampler.
-        if hasattr(self._mlx_gen, '_request_temp'):
+        if hasattr(self._mlx_gen, "_request_temp"):
             env_temp = os.environ.get("EXO_SPECULATIVE_TEMP")
             if env_temp is not None:
                 self._mlx_gen._request_temp[uid] = float(env_temp)
@@ -2527,13 +2592,15 @@ class ExoBatchGenerator:
 
     def submit_batched(  # noqa: C901
         self,
-        tasks: list[tuple[
-            TextGenerationTaskParams,
-            str,
-            Callable[[int, int], None] | None,
-            Callable[[], None] | None,
-            Callable[[], None] | None,
-        ]],
+        tasks: list[
+            tuple[
+                TextGenerationTaskParams,
+                str,
+                Callable[[int, int], None] | None,
+                Callable[[], None] | None,
+                Callable[[], None] | None,
+            ]
+        ],
     ) -> list[int]:
         """Submit multiple tasks with a SINGLE batched prefill pass.
 
@@ -2652,9 +2719,7 @@ class ExoBatchGenerator:
         uids: list[int | None] = [None] * len(tasks)
 
         with T("submit_batched.batched_path"):
-            batch_uids = self._submit_batched_eligible(
-                [tasks[i] for i in eligible]
-            )
+            batch_uids = self._submit_batched_eligible([tasks[i] for i in eligible])
         for i, uid in zip(eligible, batch_uids, strict=True):
             uids[i] = uid
 
@@ -2666,13 +2731,15 @@ class ExoBatchGenerator:
 
     def _submit_batched_eligible(  # noqa: C901
         self,
-        tasks: list[tuple[
-            TextGenerationTaskParams,
-            str,
-            Callable[[int, int], None] | None,
-            Callable[[], None] | None,
-            Callable[[], None] | None,
-        ]],
+        tasks: list[
+            tuple[
+                TextGenerationTaskParams,
+                str,
+                Callable[[int, int], None] | None,
+                Callable[[], None] | None,
+                Callable[[], None] | None,
+            ]
+        ],
     ) -> list[int]:
         """Run a SINGLE batched-prefill pass across `tasks` (all eligible).
 
@@ -2693,7 +2760,9 @@ class ExoBatchGenerator:
         prompt_tokens_list: list[mx.array] = []
         cache_list: list[Any] = []
         sampler_list: list[Callable[[mx.array], mx.array]] = []
-        logits_processors_list: list[list[Callable[[mx.array, mx.array], mx.array]]] = []
+        logits_processors_list: list[
+            list[Callable[[mx.array, mx.array], mx.array]]
+        ] = []
         max_tokens_list: list[int] = []
         prefix_hit_lengths: list[int] = [0] * n
         matched_indices: list[int | None] = [None] * n
@@ -2827,10 +2896,9 @@ class ExoBatchGenerator:
             # mtp_module._combine ("reshape 841 into (0,841)", 2026-07-10).
             # Guard: skip MTP prefill entirely on a batch-dim mismatch —
             # the draft caches start cold (perf-only; verify corrects).
-            if (
-                captured_prompt_pre_norm is not None
-                and captured_prompt_pre_norm.shape[0] != len(tasks)
-            ):
+            if captured_prompt_pre_norm is not None and captured_prompt_pre_norm.shape[
+                0
+            ] != len(tasks):
                 logger.warning(
                     "prompt_pre_norm capture batch {} != {} streams; "
                     "skipping MTP cache prefill (cold draft caches)".format(
@@ -2851,12 +2919,16 @@ class ExoBatchGenerator:
         # neither stream actually produces tokens until BOTH MTP caches are
         # ready. See Phase 14 Plan A for the 2026-05-21 forensics.
         uids: list[int] = []
-        per_stream_meta: list[tuple[
-            int,                                # uid
-            TextGenerationTaskParams,           # task_params
-            Callable[[], None] | None,          # on_generation_token
-        ]] = []
-        for i, (task_params, _prompt, _opp, _dppc, on_generation_token) in enumerate(tasks):
+        per_stream_meta: list[
+            tuple[
+                int,  # uid
+                TextGenerationTaskParams,  # task_params
+                Callable[[], None] | None,  # on_generation_token
+            ]
+        ] = []
+        for i, (task_params, _prompt, _opp, _dppc, on_generation_token) in enumerate(
+            tasks
+        ):
             last_tokens = prompt_tokens_list[i][-2:]
             with T("submit_batched.insert"):
                 inserted = self._mlx_gen.insert(
@@ -3089,18 +3161,30 @@ class ExoBatchGenerator:
                 _draft_tokens = all_prompt_tokens[-_draft_kv_window:]
                 _draft_chunk = 512
                 for i in range(0, len(_draft_tokens), _draft_chunk):
-                    _pp_draft(_draft_tokens[i:i + _draft_chunk][None], cache=_pp_draft_cache)
-                    mx.eval([c.state if hasattr(c, 'state') else c for c in _pp_draft_cache])
+                    _pp_draft(
+                        _draft_tokens[i : i + _draft_chunk][None], cache=_pp_draft_cache
+                    )
+                    mx.eval(
+                        [c.state if hasattr(c, "state") else c for c in _pp_draft_cache]
+                    )
                 mx.clear_cache()
-                logger.info(f"Draft model prefilled with {len(_draft_tokens)} tokens (of {len(all_prompt_tokens)} total)")
+                logger.info(
+                    f"Draft model prefilled with {len(_draft_tokens)} tokens (of {len(all_prompt_tokens)} total)"
+                )
 
         # First token via standard PP
         with T("pp_spec.first_token"):
             _first_gen = stream_generate(
-                model=self.model, tokenizer=self.tokenizer, prompt=last_tokens,
-                max_tokens=1, sampler=sampler, logits_processors=logits_processors,
-                prompt_cache=cache, prefill_step_size=1,
-                kv_group_size=KV_GROUP_SIZE, kv_bits=KV_BITS,
+                model=self.model,
+                tokenizer=self.tokenizer,
+                prompt=last_tokens,
+                max_tokens=1,
+                sampler=sampler,
+                logits_processors=logits_processors,
+                prompt_cache=cache,
+                prefill_step_size=1,
+                kv_group_size=KV_GROUP_SIZE,
+                kv_bits=KV_BITS,
             )
             _first_out = next(_first_gen)
             first_y = mx.array([_first_out.token])
@@ -3109,7 +3193,7 @@ class ExoBatchGenerator:
         logger.info(f"PP speculation active: rank={pp_rank}")
 
         # Get PP MTP predictor (lightweight, skip_mlp=True)
-        _pp_mtp = getattr(self, '_pp_mtp', None)
+        _pp_mtp = getattr(self, "_pp_mtp", None)
         if _pp_mtp is not None:
             logger.info("PP speculation using MTP for drafting")
 
@@ -3165,7 +3249,8 @@ class ExoBatchGenerator:
                 prompt_cache=cache,
                 first_y=first_y,
                 max_tokens=max_tokens - 1,
-                pp_rank=pp_rank, pp_world_size=pp_world_size,
+                pp_rank=pp_rank,
+                pp_world_size=pp_world_size,
                 pp_group=pp_group,
             )
         elif _chain_k > 1 and _pp_mtp is not None and hasattr(_pp_mtp, "predict"):
@@ -3174,21 +3259,28 @@ class ExoBatchGenerator:
                 model=self.model,
                 prompt_cache=cache,
                 sampler=sampler,
-                first_y=first_y, first_logprobs=mx.zeros(1),
+                first_y=first_y,
+                first_logprobs=mx.zeros(1),
                 max_tokens=max_tokens - 1,
-                pp_rank=pp_rank, pp_world_size=pp_world_size,
+                pp_rank=pp_rank,
+                pp_world_size=pp_world_size,
                 pp_group=pp_group,
                 mtp_predictor=_pp_mtp,
                 chain_k=_chain_k,
             )
         else:
             _pp_spec_gen = pp_speculative_decode_loop(
-                model=self.model, draft_model=_pp_draft,  # type: ignore
-                prompt_cache=cache, draft_cache=_pp_draft_cache,  # type: ignore
-                sampler=sampler, logits_processors=logits_processors,
-                first_y=first_y, first_logprobs=mx.zeros(1),
+                model=self.model,
+                draft_model=_pp_draft,  # type: ignore
+                prompt_cache=cache,
+                draft_cache=_pp_draft_cache,  # type: ignore
+                sampler=sampler,
+                logits_processors=logits_processors,
+                first_y=first_y,
+                first_logprobs=mx.zeros(1),
                 max_tokens=max_tokens - 1,
-                pp_rank=pp_rank, pp_world_size=pp_world_size,
+                pp_rank=pp_rank,
+                pp_world_size=pp_world_size,
                 pp_group=pp_group,
                 mtp_predictor=_pp_mtp,
             )
@@ -3267,7 +3359,7 @@ class ExoBatchGenerator:
         _rank_for_log = getattr(self, "_pp_rank_for_log", "?")
 
         # Yield the first token if we haven't yet
-        if hasattr(self, '_pp_first_token'):
+        if hasattr(self, "_pp_first_token"):
             tok = self._pp_first_token
             del self._pp_first_token
             # int() normalization (2026-07-19). VERIFIED NOT THE BUG: traced
@@ -3297,11 +3389,16 @@ class ExoBatchGenerator:
                 # hardening -- see the matching comment below for why bare
                 # refcount-drop finalization is not safe to depend on here).
                 self._close_pp_spec_gen(uid)
-            return [GenerationBatch.Response(
-                uid=uid, token=tok, logprobs=mx.zeros(1),
-                finish_reason="stop" if is_eos else None,
-                prompt_cache=None, all_tokens=None,
-            )]
+            return [
+                GenerationBatch.Response(
+                    uid=uid,
+                    token=tok,
+                    logprobs=mx.zeros(1),
+                    finish_reason="stop" if is_eos else None,
+                    prompt_cache=None,
+                    all_tokens=None,
+                )
+            ]
 
         _pp_spec_gen = self._pp_spec_gen_by_uid[uid]
         try:
@@ -3337,11 +3434,16 @@ class ExoBatchGenerator:
                 # but not-yet-iterated generator is expected and swallowed by
                 # close() itself, so no try/except is needed here.
                 self._close_pp_spec_gen(uid)
-            return [GenerationBatch.Response(
-                uid=uid, token=tok_id, logprobs=lp,
-                finish_reason="stop" if is_eos else None,
-                prompt_cache=None, all_tokens=None,
-            )]
+            return [
+                GenerationBatch.Response(
+                    uid=uid,
+                    token=tok_id,
+                    logprobs=lp,
+                    finish_reason="stop" if is_eos else None,
+                    prompt_cache=None,
+                    all_tokens=None,
+                )
+            ]
         except StopIteration:
             # max_tokens reached
             if _fin_log:
@@ -3350,11 +3452,16 @@ class ExoBatchGenerator:
                     f"branch=stop_iteration (max_tokens reached)"
                 )
             self._close_pp_spec_gen(uid)
-            return [GenerationBatch.Response(
-                uid=uid, token=0, logprobs=mx.zeros(1),
-                finish_reason="length",
-                prompt_cache=None, all_tokens=None,
-            )]
+            return [
+                GenerationBatch.Response(
+                    uid=uid,
+                    token=0,
+                    logprobs=mx.zeros(1),
+                    finish_reason="length",
+                    prompt_cache=None,
+                    all_tokens=None,
+                )
+            ]
 
     def _close_pp_spec_gen(self, uid: int) -> None:
         """Deterministically finalize the PP spec-decode generator for ``uid``.
@@ -3525,22 +3632,27 @@ class ExoBatchGenerator:
         set matters, to trigger the existing drain path.
         """
         if self._batched_decode_rank1_glue is not None:
-            grant, evicted_request_id = self._batched_decode_rank1_glue.tick(
-                self.model
+            grant, evicted_request_id, _prefill_advance_completed = (
+                self._batched_decode_rank1_glue.tick(self.model)
             )
             if grant is not None:
                 self._run_deferred_prefill_for_grant(grant, is_rank1=True)
             if evicted_request_id is not None:
-                return [GenerationBatch.Response(
-                    uid=evicted_request_id, token=0, logprobs=mx.zeros(1),
-                    finish_reason="stop",
-                    prompt_cache=None, all_tokens=None,
-                )]
+                return [
+                    GenerationBatch.Response(
+                        uid=evicted_request_id,
+                        token=0,
+                        logprobs=mx.zeros(1),
+                        finish_reason="stop",
+                        prompt_cache=None,
+                        all_tokens=None,
+                    )
+                ]
             return []
 
         assert self._batched_decode_rank0_glue is not None
-        classified, _admitted_id, grant = self._batched_decode_rank0_glue.tick(
-            self.model
+        classified, _admitted_id, grant, _prefill_advance_completed = (
+            self._batched_decode_rank0_glue.tick(self.model)
         )
         if grant is not None:
             self._run_deferred_prefill_for_grant(grant, is_rank1=False)
@@ -3550,11 +3662,16 @@ class ExoBatchGenerator:
         to_evict: list[int] = []
         for request_id, result in classified.items():
             finish_reason = result.finish_reason
-            responses.append(GenerationBatch.Response(
-                uid=request_id, token=result.token, logprobs=mx.zeros(1),
-                finish_reason=finish_reason,
-                prompt_cache=None, all_tokens=None,
-            ))
+            responses.append(
+                GenerationBatch.Response(
+                    uid=request_id,
+                    token=result.token,
+                    logprobs=mx.zeros(1),
+                    finish_reason=finish_reason,
+                    prompt_cache=None,
+                    all_tokens=None,
+                )
+            )
             if finish_reason is not None:
                 to_evict.append(request_id)
 
@@ -3590,6 +3707,7 @@ class ExoBatchGenerator:
                 _per_gpu = (_g - self._exo_window_g0) / 1e6 / self._exo_probe_every
                 _pct = _per_gpu / _per_wall * 100 if _per_wall > 0 else 0.0
                 import sys as _sys
+
                 _sys.stderr.write(
                     f"[BG_DECODE_PROBE pid={os.getpid()}] step={self._exo_cnt} "
                     f"wall_ms={_per_wall:.2f} gpu_ms={_per_gpu:.2f} gpu_pct={_pct:.1f}\n"
@@ -3618,8 +3736,12 @@ class ExoBatchGenerator:
             return []
         if _gpu_probe_local:
             _t_mx_any_ns = int((time.perf_counter() - _t_mx_any_start) * 1e9)
-            self._gpu_probe_mx_any_total = getattr(self, "_gpu_probe_mx_any_total", 0) + _t_mx_any_ns
-            self._gpu_probe_mx_any_count = getattr(self, "_gpu_probe_mx_any_count", 0) + 1
+            self._gpu_probe_mx_any_total = (
+                getattr(self, "_gpu_probe_mx_any_total", 0) + _t_mx_any_ns
+            )
+            self._gpu_probe_mx_any_count = (
+                getattr(self, "_gpu_probe_mx_any_count", 0) + 1
+            )
 
         _trace = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
         from exo.worker.engines.mlx.trace import request_trace
@@ -3750,12 +3872,14 @@ class ExoBatchGenerator:
                 # Once we've decided to terminate, no need to keep scanning.
                 # Otherwise scan every token (not just until first warn) so the
                 # termination fires the instant the cycle crosses threshold.
-                loop = _detect_token_loop(ids) if not state.degeneration_warned else None
+                loop = (
+                    _detect_token_loop(ids) if not state.degeneration_warned else None
+                )
                 if loop is not None:
                     period, repeats = loop
                     state.degeneration_warned = True
                     degeneration_terminate = _LOOP_DETECT_ACTION in ("stop", "error")
-                    cycle_ids = ids[len(ids) - period:]
+                    cycle_ids = ids[len(ids) - period :]
                     try:
                         cycle_text = self.tokenizer.decode(cycle_ids)
                     except Exception:
@@ -3775,15 +3899,13 @@ class ExoBatchGenerator:
                             _DEGEN_PROBE_ENABLED,
                             _degen_probe_write,
                         )
+
                         if _DEGEN_PROBE_ENABLED:
                             import time as _t
-                            _stamp = _DEGEN_LAST_TRANSITION.get(
-                                int(response.uid)
-                            )
+
+                            _stamp = _DEGEN_LAST_TRANSITION.get(int(response.uid))
                             if _stamp is not None:
-                                _ms = (
-                                    _t.perf_counter_ns() - _stamp["wall_ns"]
-                                ) / 1e6
+                                _ms = (_t.perf_counter_ns() - _stamp["wall_ns"]) / 1e6
                                 _degen_transition = (
                                     f"ms_since_swap={_ms:.1f} "
                                     f"last_swap_bs_gt1={_stamp['bs_gt1']} "
@@ -3791,23 +3913,21 @@ class ExoBatchGenerator:
                                 )
                             else:
                                 _degen_transition = "no_swap_seen_this_uid"
-                            _degen_probe_write({
-                                "event": "degeneration",
-                                "uid": int(response.uid),
-                                "completion_token": int(
-                                    state.completion_tokens
-                                ),
-                                "period": int(period),
-                                "repeats": int(repeats),
-                                "cycle_text": cycle_text,
-                                "in_thinking": bool(state.in_thinking),
-                                "prompt_tokens": int(
-                                    state.all_prompt_tokens.size
-                                ),
-                                "prefix_hit": int(state.prefix_hit_length),
-                                "last_transition": _stamp,
-                                "wall_ns": _t.perf_counter_ns(),
-                            })
+                            _degen_probe_write(
+                                {
+                                    "event": "degeneration",
+                                    "uid": int(response.uid),
+                                    "completion_token": int(state.completion_tokens),
+                                    "period": int(period),
+                                    "repeats": int(repeats),
+                                    "cycle_text": cycle_text,
+                                    "in_thinking": bool(state.in_thinking),
+                                    "prompt_tokens": int(state.all_prompt_tokens.size),
+                                    "prefix_hit": int(state.prefix_hit_length),
+                                    "last_transition": _stamp,
+                                    "wall_ns": _t.perf_counter_ns(),
+                                }
+                            )
                     except Exception:
                         _degen_transition = "probe-err"
                     # Pre-format into one string: the runner's logger is
@@ -3865,12 +3985,12 @@ class ExoBatchGenerator:
                         # trusting a hash match — cheap here since this only
                         # runs on the rare detection path (see
                         # _detect_long_period_loop's docstring).
-                        tail_blocks = blocks[len(blocks) - long_period:]
+                        tail_blocks = blocks[len(blocks) - long_period :]
                         verify_pos = len(blocks) - long_period
                         verified_repeats = 1
                         while (
                             verify_pos - long_period >= 0
-                            and blocks[verify_pos - long_period:verify_pos]
+                            and blocks[verify_pos - long_period : verify_pos]
                             == tail_blocks
                         ):
                             verified_repeats += 1
@@ -3881,9 +4001,7 @@ class ExoBatchGenerator:
                                 "stop",
                                 "error",
                             )
-                            cycle_tokens = [
-                                t for blk in tail_blocks for t in blk
-                            ]
+                            cycle_tokens = [t for blk in tail_blocks for t in blk]
                             try:
                                 cycle_text = self.tokenizer.decode(cycle_tokens)
                             except Exception:
@@ -4026,9 +4144,7 @@ class ExoBatchGenerator:
                 # MTP self-spec cumulative counters from the generator
                 # if it's a DSv4MTPBatchGenerator. Master diffs successive
                 # completions to drive Prometheus.
-                mtp_cycles_cum = int(
-                    getattr(self._mlx_gen, "_spec_cycles", 0) or 0
-                )
+                mtp_cycles_cum = int(getattr(self._mlx_gen, "_spec_cycles", 0) or 0)
                 mtp_accepted_cum = int(
                     getattr(self._mlx_gen, "_spec_total_accepted", 0) or 0
                 )
@@ -4056,9 +4172,7 @@ class ExoBatchGenerator:
                     # 1e9 (decimal SI gigabytes), which made the metric
                     # read ~7% larger than actual usage and confused
                     # near-OOM diagnosis.
-                    peak_memory_usage=Memory.from_gb(
-                        mx.get_peak_memory() / 1024**3
-                    ),
+                    peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1024**3),
                     prefix_cache_hit=prefix_cache_kind,
                     mtp_cycles_cumulative=mtp_cycles_cum,
                     mtp_accepted_drafts_cumulative=mtp_accepted_cum,
@@ -4106,15 +4220,21 @@ class ExoBatchGenerator:
         _step_end = time.perf_counter()
         _step_elapsed = _step_end - _step_tic
         _overhead = _step_elapsed - _next_elapsed
-        _post_total = _t_callback_total + _t_detok_total + _t_stop_total + _t_logprobs_total + _t_response_build_total
-        request_trace.record("decode.step.post_process", _step_tic + _next_elapsed, _step_end)
+        _post_total = (
+            _t_callback_total
+            + _t_detok_total
+            + _t_stop_total
+            + _t_logprobs_total
+            + _t_response_build_total
+        )
+        request_trace.record(
+            "decode.step.post_process", _step_tic + _next_elapsed, _step_end
+        )
 
         # _next_count was added by the old fast_next patch; on vanilla
         # BatchGenerator (new mlx-lm) it doesn't exist — fall back to our own
         # cumulative step counter for logging cadence.
-        _mlx_next_count = getattr(
-            self._mlx_gen, "_next_count", None
-        )
+        _mlx_next_count = getattr(self._mlx_gen, "_next_count", None)
         if _mlx_next_count is None:
             _mlx_next_count = getattr(self, "_step_counter", 0) + 1
             self._step_counter = _mlx_next_count  # pyright: ignore[reportAttributeAccessIssue]
@@ -4122,7 +4242,11 @@ class ExoBatchGenerator:
             _gpu_probe_local = bool(os.environ.get("MLX_GPU_TIME"))
             _mxa_total = getattr(self, "_gpu_probe_mx_any_total", 0)
             _mxa_count = getattr(self, "_gpu_probe_mx_any_count", 0)
-            _mxa_avg_ms = (_mxa_total / _mxa_count / 1e6) if (_gpu_probe_local and _mxa_count > 0) else 0.0
+            _mxa_avg_ms = (
+                (_mxa_total / _mxa_count / 1e6)
+                if (_gpu_probe_local and _mxa_count > 0)
+                else 0.0
+            )
             logger.debug(
                 f"step overhead: {_overhead * 1000:.2f}ms (next={_next_elapsed * 1000:.2f}ms total={_step_elapsed * 1000:.2f}ms)"
             )
@@ -4169,10 +4293,7 @@ class ExoBatchGenerator:
         ):
             mx.clear_cache()
 
-        if (
-            _GC_COLLECT_INTERVAL > 0
-            and _mlx_next_count % _GC_COLLECT_INTERVAL == 0
-        ):
+        if _GC_COLLECT_INTERVAL > 0 and _mlx_next_count % _GC_COLLECT_INTERVAL == 0:
             gc.collect()
 
         if (
@@ -4182,7 +4303,10 @@ class ExoBatchGenerator:
         ):
             try:
                 released = _malloc_zone_pressure_relief(None, 0)
-                if released > 0 and _mlx_next_count % (_MALLOC_RELIEF_INTERVAL * 10) == 0:
+                if (
+                    released > 0
+                    and _mlx_next_count % (_MALLOC_RELIEF_INTERVAL * 10) == 0
+                ):
                     logger.info(
                         f"[mem] malloc pressure_relief released {released / (1024**2):.1f} MB"
                     )

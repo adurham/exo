@@ -370,7 +370,9 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
                     b_enqueued = True
 
                 trace.append(f"it={iteration} tick")
-                responses, admitted_id, grant = rank0_glue.tick(model)
+                responses, admitted_id, grant, _prefill_advance_completed = (
+                    rank0_glue.tick(model)
+                )
                 del admitted_id
                 if 1 in responses:
                     tokens_a.append(responses[1].token)
@@ -416,7 +418,9 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
                     b_registered = True
 
                 trace.append(f"it={iteration} tick")
-                grant, _evicted_request_id = rank1_glue.tick(model)
+                grant, _evicted_request_id, _prefill_advance_completed = (
+                    rank1_glue.tick(model)
+                )
                 if grant is not None:
                     assert grant.request_id == 2
                     trace.append(f"it={iteration} run_grant_prefill_b")

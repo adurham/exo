@@ -147,21 +147,27 @@ from exo.worker.engines.mlx.pp_batched_decode_runtime import (
     BatchedDecodeSession,
     RankOneMirrorSession,
 )
+from exo.worker.engines.mlx.pp_metaframe import ForwardPhase
+from exo.worker.engines.mlx.pp_prefill_session import ResumablePrefillSession
 from exo.worker.engines.mlx.pp_scheduler_protocol import (
     PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    PrefillAdvanceMessage,
     PrefillMessage,
     PrefillReadyMessage,
 )
 from exo.worker.engines.mlx.pp_scheduler_wire import (
     MSG_KIND_EVICT,
     MSG_KIND_PREFILL,
+    MSG_KIND_PREFILL_ADVANCE,
     MSG_KIND_STEP,
     decode_evict_message,
     recv_header,
+    recv_prefill_advance_body,
     recv_prefill_body,
     recv_prefill_ready_message,
     recv_step_table,
     send_evict_ack_message,
+    send_prefill_advance_message,
     send_prefill_message,
     send_prefill_ready_message,
     send_step_message,
@@ -312,6 +318,32 @@ class PrefillGrant:
     single_request_fallback: bool
 
 
+@dataclass(frozen=True)
+class PrefillAdvanceCompleted:
+    """``tick()``'s signal (rank 0 only -- see
+    ``register_prefill_session``'s own docstring for why rank 1 has
+    no equivalent return path) that an in-flight
+    ``ResumablePrefillSession`` this glue was driving just reached its
+    own ``done=True`` -- i.e. ONE CHUNK's forward pass has fully
+    completed. 2026-08-06, Phase 2 Stage 3.
+
+    Deliberately narrow: carries only what a caller needs to decide
+    "what happens next for this chunk's output" -- NOT a decision
+    this module makes itself (mirrors ``PrefillGrant``'s own "this
+    module does mechanics, not prefill-completion policy" boundary).
+    A caller holding a multi-chunk prefill (the not-yet-built
+    generator-ified ``pipeline_parallel_prefill``, Stage 2's remaining
+    piece) is expected to inspect ``output``, decide whether more
+    chunks remain, and either call ``register_prefill_session`` again
+    for the NEXT chunk or -- once every chunk is done -- proceed to
+    ``enqueue_admission`` exactly as the existing synchronous
+    ``run_prefill()`` path already does today.
+    """
+
+    request_id: int
+    output: mx.array
+
+
 @dataclass
 class Rank0BatchedDecodeGlue:
     """Rank 0's single-writer orchestrator. Owns the ONLY call site
@@ -370,6 +402,81 @@ class Rank0BatchedDecodeGlue:
     # way while rank 1 is legitimately busy with other work. Cleared
     # on a successful (ready=True) grant.
     _prefill_ready_deadline: dict[int, float] = field(default_factory=dict)
+    # 2026-08-06, Phase 2 Stage 3: the ONE in-flight chunked-prefill
+    # ResumablePrefillSession this glue is currently driving, if any.
+    # Deliberately a single Optional slot, not a dict/queue -- matches
+    # the design doc's confirmed Phase 2 scope ("at most one request
+    # mid-chunked-prefill at a time"; PrefillAdvanceMessage.request_id
+    # is carried explicitly anyway so a future scope relaxation to
+    # multiple concurrent chunked prefills doesn't need a wire-shape
+    # change, per that message's own docstring). Set by
+    # ``register_prefill_session``, cleared by ``tick()`` itself the
+    # instant a driven advance reaches ``done=True`` (this glue never
+    # holds a stale completed session across ticks).
+    _active_prefill_session: tuple[int, ResumablePrefillSession] | None = field(
+        default=None, init=False
+    )
+    # Per-request monotonic advance_seq counter for
+    # PrefillAdvanceMessage -- see that dataclass's own docstring for
+    # why this is a SEPARATE counter from step_id (the desync tripwire
+    # a `consult` review specifically recommended). Reset (via simply
+    # never being read again) once a session completes; the NEXT
+    # session's first advance always starts back at 1, matching
+    # PrefillAdvanceMessage's own documented 1-based convention.
+    _prefill_advance_seq: int = field(default=0, init=False)
+    # Layer-segment size for EVERY advance() call this glue drives --
+    # module docstring's own "this glue does mechanics, not real
+    # scheduling-fairness tuning" boundary: a fixed default here, not
+    # yet exposed as a real constructor-configurable knob, since no
+    # real hardware layer-timing data exists yet to tune it against
+    # (see the design doc's own "eval-boundary overhead: measured
+    # locally, needs real cluster confirmation" gating note).
+    _prefill_advance_max_layers: int = field(default=2, init=False)
+    # Alternation state for the advance-vs-decode fairness policy
+    # above -- True means "an advance just ran, decode gets priority
+    # THIS tick if there's decode work"; False (the initial value)
+    # means "decode just ran (or nothing has run yet), advance gets
+    # priority this tick." A simple 2-state flip-flop, not a ratio --
+    # see the tick() rung's own comment for why a smarter ratio is
+    # deliberately left untuned here.
+    _prefill_favor_decode_next: bool = field(default=False, init=False)
+
+    def register_prefill_session(
+        self, request_id: int, session: ResumablePrefillSession
+    ) -> None:
+        """Register a live, not-yet-advanced ``ResumablePrefillSession``
+        for ``tick()`` to drive -- the real caller (the not-yet-built
+        generator-ified ``pipeline_parallel_prefill``, Stage 2's
+        remaining piece) constructs the session for ONE CHUNK's
+        forward pass and hands it here INSTEAD of calling
+        ``session.advance(...)`` itself, so every real layer-segment
+        advance happens inside ``tick()``'s single-writer wire call --
+        the same discipline every other piece of real wire traffic in
+        this module already follows (module docstring's own "ONLY
+        call site that ever touches mx.distributed.send/recv_like"
+        invariant, now extended to cover chunked-prefill advances too).
+
+        Raises ``GlueError`` if a session is already registered and
+        still in flight -- per the confirmed Phase 2 scope (module
+        docstring above), at most ONE chunked prefill session may be
+        active at a time; a second registration while one is already
+        pending is a caller bug, not a real occurrence to silently
+        queue or overwrite.
+        """
+        if self._active_prefill_session is not None:
+            active_id, _ = self._active_prefill_session
+            raise GlueError(
+                f"register_prefill_session({request_id}): a session for "
+                f"request_id={active_id} is already active -- at most one "
+                f"chunked-prefill session may be in flight at a time "
+                f"(confirmed Phase 2 scope), refusing to silently queue "
+                f"or overwrite a second one"
+            )
+        self._active_prefill_session = (request_id, session)
+        self._prefill_advance_seq = 0
+
+    def has_active_prefill_session(self) -> bool:
+        return self._active_prefill_session is not None
 
     def enqueue_admission(
         self,
@@ -437,7 +544,12 @@ class Rank0BatchedDecodeGlue:
 
     def tick(
         self, model: object
-    ) -> tuple[dict[int, "AdmitResponse | StepResponse"], int | None, PrefillGrant | None]:
+    ) -> tuple[
+        dict[int, "AdmitResponse | StepResponse"],
+        int | None,
+        PrefillGrant | None,
+        PrefillAdvanceCompleted | None,
+    ]:
         """The ONLY call site that ever touches
         ``mx.distributed.send``/``recv_like`` for this session on
         rank 0. Called from EXACTLY ONE place:
@@ -515,7 +627,7 @@ class Rank0BatchedDecodeGlue:
                 cast(StepMessage, message), dst=self.dst_rank, group=self.group
             )
             self._reserved_slots.discard(pending.cache_slot)
-            return {pending.request_id: admit_response}, pending.request_id, None
+            return {pending.request_id: admit_response}, pending.request_id, None, None
 
         if self._pending_prefill:
             head = self._pending_prefill[0]
@@ -624,7 +736,7 @@ class Rank0BatchedDecodeGlue:
                     # keeps this tick's OWN single "at most one thing
                     # per call" contract -- a NACK still counted as
                     # this tick's one real wire round-trip.
-                    return {}, None, None
+                    return {}, None, None, None
                 self._prefill_ready_deadline.pop(head.request_id, None)
                 self._pending_prefill.pop(0)
                 return (
@@ -636,7 +748,60 @@ class Rank0BatchedDecodeGlue:
                         n_prompt_tokens=head.n_prompt_tokens,
                         single_request_fallback=head.single_request_fallback,
                     ),
+                    None,
                 )
+
+        # 2026-08-06, Phase 2 Stage 3: if a chunked-prefill session is
+        # active, this tick either advances it by one real layer-
+        # segment (sending a PrefillAdvanceMessage) or runs a decode
+        # step -- alternating between the two when BOTH are available,
+        # for the exact same reason branch 2 above outranks decode for
+        # ADMISSION but must not starve it forever: an advance-always-
+        # wins policy would mean a long chunk's segment count (tens of
+        # advances) starves decode for the ENTIRE chunk, defeating
+        # this whole mechanism's purpose (the "prefill hogs the pipe
+        # for the whole chunk" problem this design exists to fix in
+        # the first place). Alternation is a placeholder policy --
+        # this glue does mechanics, not real scheduling-fairness
+        # tuning (module docstring's own boundary) -- a real caller
+        # may want a smarter ratio (e.g. N decode ticks per advance)
+        # once real hardware latency numbers are available; that
+        # tuning knob is deliberately NOT hardcoded here.
+        if self._active_prefill_session is not None:
+            has_decode_work = self.session.has_active_requests()
+            advance_this_tick = (
+                not has_decode_work or not self._prefill_favor_decode_next
+            )
+            if advance_this_tick:
+                self._prefill_favor_decode_next = True
+                request_id, prefill_session = self._active_prefill_session
+                self._prefill_advance_seq += 1
+                advance_message = PrefillAdvanceMessage(
+                    step_id=self._prefill_step_id + 1,
+                    request_id=request_id,
+                    advance_seq=self._prefill_advance_seq,
+                    max_layers=self._prefill_advance_max_layers,
+                )
+                self._prefill_step_id += 1
+                send_prefill_advance_message(
+                    advance_message, dst=self.dst_rank, group=self.group
+                )
+                _layers_advanced, done = prefill_session.advance(
+                    max_layers=self._prefill_advance_max_layers,
+                    phase_for_pause=ForwardPhase.PREFILL_CONTINUE,
+                )
+                if done:
+                    self._active_prefill_session = None
+                    return (
+                        {},
+                        None,
+                        None,
+                        PrefillAdvanceCompleted(
+                            request_id=request_id, output=prefill_session.output()
+                        ),
+                    )
+                return {}, None, None, None
+            self._prefill_favor_decode_next = False
 
         if self.session.has_active_requests():
             prepared = self.session.prepare_step()
@@ -644,9 +809,9 @@ class Rank0BatchedDecodeGlue:
             logits = self.session.run_forward(cast("_ModelLike", model), prepared)
             step_results = self.session.finish_step(prepared, logits)
             classified = self.adapter.classify_step_results(step_results)
-            return dict(classified), None, None
+            return dict(classified), None, None, None
 
-        return {}, None, None
+        return {}, None, None, None
 
     def complete_request(self, request_id: int) -> None:
         """Caller (``ExoBatchGenerator``) signals ``request_id`` hit
@@ -726,6 +891,54 @@ class Rank1BatchedDecodeGlue:
     # self-contained and its "tick() is the ONLY wire I/O call site"
     # invariant intact.
     _registered_request_ids: set[int] = field(default_factory=set)
+    # 2026-08-06, Phase 2 Stage 3: rank 1's OWN local
+    # ResumablePrefillSession, mirroring rank 0's own
+    # ``_active_prefill_session`` field -- each rank drives ITS OWN
+    # session (holding ITS OWN half of the model's layers), advancing
+    # in lockstep ONLY because both ranks react to the SAME
+    # PrefillAdvanceMessage.advance_seq sequence on the wire, never
+    # because either rank makes an independent local timing decision
+    # (module docstring's own "rank 1 never independently decides"
+    # discipline, now extended to advances the same way it already
+    # covers admission).
+    _active_prefill_session: tuple[int, ResumablePrefillSession] | None = field(
+        default=None, init=False
+    )
+    # Rank 1's own view of the last advance_seq it processed for the
+    # currently-active session -- the desync tripwire a `consult`
+    # review specifically recommended (PrefillAdvanceMessage's own
+    # docstring). None before any advance has been received for the
+    # current session.
+    _last_prefill_advance_seq: int | None = field(default=None, init=False)
+
+    def register_prefill_session(
+        self, request_id: int, session: ResumablePrefillSession
+    ) -> None:
+        """Register rank 1's OWN local ``ResumablePrefillSession`` for
+        ``tick()`` to drive reactively -- called by the not-yet-built
+        generator-ified ``pipeline_parallel_prefill`` on rank 1 the
+        SAME way rank 0's own ``register_prefill_session`` is (see
+        that method's own docstring for the full rationale); the two
+        registrations are independent local calls on each rank, but
+        stay in lockstep because BOTH ranks' ``tick()`` only ever
+        advances a registered session in reaction to the SAME wire
+        message (rank 0 sends it, rank 1 receives it) -- never on
+        either rank's own local schedule.
+        """
+        if self._active_prefill_session is not None:
+            active_id, _ = self._active_prefill_session
+            raise GlueError(
+                f"register_prefill_session({request_id}): a session for "
+                f"request_id={active_id} is already active on this rank -- "
+                f"at most one chunked-prefill session may be in flight at "
+                f"a time (confirmed Phase 2 scope), refusing to silently "
+                f"queue or overwrite a second one"
+            )
+        self._active_prefill_session = (request_id, session)
+        self._last_prefill_advance_seq = None
+
+    def has_active_prefill_session(self) -> bool:
+        return self._active_prefill_session is not None
 
     def mark_prefill_registered(self, request_id: int) -> None:
         """Called from ``ExoBatchGenerator.submit()`` the moment this
@@ -760,7 +973,9 @@ class Rank1BatchedDecodeGlue:
         self._staged_local_caches[request_id] = prefilled_cache
         self._staged_slot_for_request[request_id] = cache_slot
 
-    def tick(self, model: object) -> tuple[PrefillGrant | None, int | None]:
+    def tick(
+        self, model: object
+    ) -> tuple[PrefillGrant | None, int | None, PrefillAdvanceCompleted | None]:
         """The ONLY call site that ever touches
         ``mx.distributed.send``/``recv_like`` for this session on
         rank 1. Receives exactly one header, branches on its real
@@ -859,7 +1074,7 @@ class Rank1BatchedDecodeGlue:
                 group=self.group,
             )
             if not ready:
-                return None, None
+                return None, None, None
             self._registered_request_ids.discard(prefill_message.request_id)
             return (
                 PrefillGrant(
@@ -871,7 +1086,70 @@ class Rank1BatchedDecodeGlue:
                     ),
                 ),
                 None,
+                None,
             )
+        if header.msg_kind == MSG_KIND_PREFILL_ADVANCE:
+            # 2026-08-06, Phase 2 Stage 3: rank 1's reactive half of
+            # the advance rung -- rank 0's tick() already decided
+            # "advance, not decode" and sent this message; rank 1
+            # NEVER independently decides to advance its own session
+            # (module docstring's own "rank 1 never independently
+            # decides" discipline, now extended here exactly as it
+            # already covers admission and prefill announcement).
+            advance_message = recv_prefill_advance_body(
+                header, self.src_rank, group=self.group
+            )
+            if self._active_prefill_session is None:
+                raise GlueError(
+                    f"tick(): received PrefillAdvanceMessage for "
+                    f"request_id={advance_message.request_id} but this "
+                    f"rank has no active local prefill session registered "
+                    f"-- register_prefill_session was never called for "
+                    f"this request_id, or this rank's session already "
+                    f"completed/was never started. The two ranks' "
+                    f"control-message streams have desynced."
+                )
+            active_id, prefill_session = self._active_prefill_session
+            if active_id != advance_message.request_id:
+                raise GlueError(
+                    f"tick(): PrefillAdvanceMessage request_id mismatch "
+                    f"-- this rank's active session is for "
+                    f"request_id={active_id}, received an advance for "
+                    f"request_id={advance_message.request_id}. The two "
+                    f"ranks' control-message streams have desynced."
+                )
+            # advance_seq desync tripwire -- per the consult review
+            # that recommended this field: catch a cross-rank
+            # divergence as an IMMEDIATE loud assertion here, rather
+            # than as a silent multi-tick-later jaccl/RDMA hang.
+            expected_seq = (self._last_prefill_advance_seq or 0) + 1
+            if advance_message.advance_seq != expected_seq:
+                raise GlueError(
+                    f"tick(): PrefillAdvanceMessage.advance_seq="
+                    f"{advance_message.advance_seq} for request_id="
+                    f"{advance_message.request_id} does not match this "
+                    f"rank's own expected next seq={expected_seq} -- "
+                    f"the two ranks' local advance counts have "
+                    f"desynchronized. Refusing to advance on a "
+                    f"potentially-misaligned layer-segment boundary."
+                )
+            self._last_prefill_advance_seq = advance_message.advance_seq
+            _layers_advanced, done = prefill_session.advance(
+                max_layers=advance_message.max_layers,
+                phase_for_pause=ForwardPhase.PREFILL_CONTINUE,
+            )
+            if done:
+                self._active_prefill_session = None
+                self._last_prefill_advance_seq = None
+                return (
+                    None,
+                    None,
+                    PrefillAdvanceCompleted(
+                        request_id=advance_message.request_id,
+                        output=prefill_session.output(),
+                    ),
+                )
+            return None, None, None
         if header.msg_kind == MSG_KIND_STEP:
             message = recv_step_table(header, self.src_rank, group=self.group)
             previously_occupied = set(
@@ -940,12 +1218,12 @@ class Rank1BatchedDecodeGlue:
             # response -- see this method's own docstring for the
             # full incident this closes (runner.py's admission gate
             # on rank 1 could never drain without this).
-            return None, evict_message.request_id
+            return None, evict_message.request_id, None
         else:
             raise GlueError(
                 f"tick(): received unexpected msg_kind={header.msg_kind} "
                 f"-- rank 1's glue only ever expects MSG_KIND_PREFILL, "
-                f"MSG_KIND_STEP, or MSG_KIND_EVICT next on the wire for "
-                f"this session"
+                f"MSG_KIND_PREFILL_ADVANCE, MSG_KIND_STEP, or MSG_KIND_EVICT "
+                f"next on the wire for this session"
             )
-        return None, None
+        return None, None, None

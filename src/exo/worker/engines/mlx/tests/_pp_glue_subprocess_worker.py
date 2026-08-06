@@ -180,13 +180,17 @@ def main() -> int:
             # token A's prefill already produced) -- do not
             # pre-seed tokens_a with first_token_a separately, or
             # it gets double-counted.
-            responses, admitted_id, _grant = glue.tick(model)
+            responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                model
+            )
             assert admitted_id == 1, f"expected admission of 1, got {admitted_id}"
             assert responses[1].token == first_token_a
             tokens_a: list[int] = [responses[1].token]
 
             # tick() #2: A decodes solo (no pending admissions left).
-            responses, admitted_id, _grant = glue.tick(model)
+            responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                model
+            )
             assert admitted_id is None
             tokens_a.append(responses[1].token)
 
@@ -208,14 +212,18 @@ def main() -> int:
             # from the response, matching tokens_a's own pattern
             # above (never pre-seed separately from a value the very
             # next tick() call will also report, or it double-counts).
-            responses, admitted_id, _grant = glue.tick(model)
+            responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                model
+            )
             assert admitted_id == 2, f"expected admission of 2, got {admitted_id}"
             assert responses[2].token == first_token_b
             tokens_b: list[int] = [responses[2].token]
 
             # tick() #4-5: A and B decode together.
             for _ in range(2):
-                responses, admitted_id, _grant = glue.tick(model)
+                responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                    model
+                )
                 assert admitted_id is None
                 tokens_a.append(responses[1].token)
                 tokens_b.append(responses[2].token)
@@ -226,7 +234,9 @@ def main() -> int:
 
             # tick() #6-7: B continues solo after A's eviction.
             for _ in range(2):
-                responses, admitted_id, _grant = glue.tick(model)
+                responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                    model
+                )
                 assert admitted_id is None
                 tokens_b.append(responses[2].token)
 
@@ -248,7 +258,9 @@ def main() -> int:
             )
 
             # tick() #8: admits C into the reused slot 0.
-            responses, admitted_id, _grant = glue.tick(model)
+            responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                model
+            )
             assert admitted_id == 3, f"expected admission of 3, got {admitted_id}"
             assert responses[3].token == first_token_c
             tokens_c: list[int] = [responses[3].token]
@@ -256,7 +268,9 @@ def main() -> int:
             # tick() #9-10: B and C decode together (B in slot 1, C now
             # occupying A's former slot 0).
             for _ in range(2):
-                responses, admitted_id, _grant = glue.tick(model)
+                responses, admitted_id, _grant, _prefill_advance_completed = glue.tick(
+                    model
+                )
                 assert admitted_id is None
                 tokens_b.append(responses[2].token)
                 tokens_c.append(responses[3].token)
