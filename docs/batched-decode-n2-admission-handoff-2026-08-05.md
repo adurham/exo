@@ -1,19 +1,19 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06): PARTIALLY FIXED.** The original
-admission-decision race documented below is closed and
-hardware-verified for the single-request case. Four additional real
-bugs found via real N=2 hardware testing were also fixed and shipped
-(see "2026-08-06 fix: in-band PrefillMessage admission signal" and
-"2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse" sections
-below). A FIFTH real bug -- deeper, in the metaframe transport shared
-with the single-request path -- was found on real hardware and is
-NOT yet fixed; see "2026-08-06 finding: prefill forward-pass race
-(NOT FIXED)" at the bottom of this file for the full mechanism and
-next-session starting point. Real N=2 batched-decode concurrency
-(`EXO_PP_BATCHED_DECODE=1`) remains UNSAFE to enable in production
-until that fifth bug is closed. Single-request PP (the default,
-`EXO_PP_BATCHED_DECODE` unset/0) is unaffected and verified working.
+**STATUS UPDATE (2026-08-06): FIXED AT THE CODE LEVEL, hardware
+re-verification pending.** The original admission-decision race
+documented below is closed and hardware-verified for the
+single-request case. Five real bugs found via real N=2 hardware
+testing were all found and fixed (see "2026-08-06 fix: in-band
+PrefillMessage admission signal", "2026-08-06 follow-up: 4 real bugs
+in eviction+slot-reuse", and "2026-08-06 fix: prefill forward-pass
+race (PrefillReadyMessage)" sections below). All fixes are verified
+via the real 2-process regression test suite (genuinely independent
+per-rank event loops, not lockstep) but the FIFTH fix (prefill
+forward-pass race) has NOT YET been re-verified on real N=2 hardware
+-- that needs its own fresh explicit go-ahead before the next cluster
+relaunch/test, per standing discipline. Single-request PP is
+unaffected and repeatedly verified working on real hardware.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -408,10 +408,15 @@ pass; zero new basedpyright/ruff errors vs baseline.
 
 ---
 
-## 2026-08-06 finding: prefill forward-pass race (NOT FIXED)
+## 2026-08-06 finding: prefill forward-pass race (root cause + design)
 
-**This is the reason `EXO_PP_BATCHED_DECODE=1` is still UNSAFE for
-production despite everything above being fixed and verified.** Found
+**STATUS (2026-08-06, later): FIXED at the code level -- see the new
+"2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)"
+section at the bottom of this file for the full implementation.** The
+diagnosis below is left unmodified as the historical record of how
+this was found. This was the reason `EXO_PP_BATCHED_DECODE=1` stayed
+UNSAFE for production despite everything above being fixed and
+verified. Found
 on the SECOND real N=2 hardware attempt (after bugs 1-4 above were
 fixed, committed as `ab68565a6`, and re-deployed) -- two fresh,
 cold-cache concurrent requests crashed the cluster again, with a NEW
@@ -501,4 +506,99 @@ this is closed. `EXO_PP_METAFRAME=1` alone (single-request PP,
 metaframe transport, no batched-decode) is unaffected by this bug and
 has been repeatedly verified clean on real hardware throughout this
 session.
+
+---
+
+## 2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)
+
+Implements the "channel-mode switch" direction diagnosed above, in a
+concrete NACK+retry shape (a `consult` review confirmed the
+alternative -- rank 1 doing a bounded, blocking POLL for its own
+local registration -- would structurally deadlock: rank 1's task
+dispatch pipeline and its `tick()` call both run on the SAME
+main-thread runner loop, so a wait for registration inside `tick()`
+can never be satisfied by that SAME thread's own later work). Commit
+`f4e6972a9`.
+
+### What shipped
+
+1. **New wire message, `PrefillReadyMessage`
+   (`MSG_KIND_PREFILL_READY=5`, `pp_scheduler_wire.py`/
+   `pp_scheduler_protocol.py`)** -- rank 1's reply to every
+   `PrefillMessage`, ALWAYS sent synchronously and unconditionally
+   from inside `tick()`, never withheld: `ready=True` if
+   `mark_prefill_registered(request_id)` was already called (rank 1's
+   own local `_DeferredPrefill` genuinely exists and is about to run),
+   `ready=False` (a real, expected NACK -- not an error) otherwise.
+
+2. **`Rank1BatchedDecodeGlue` extended**: new `mark_prefill_registered`
+   (pure local set-membership update, zero wire I/O, called from
+   `submit()` the instant registration happens -- same "just data,
+   caller does the real work" shape as every other `*_registered`/
+   `*_staged` method in this glue layer) and `_registered_request_ids`
+   tracking set. `tick()`'s `MSG_KIND_PREFILL` branch now ALWAYS
+   replies before returning -- either a real `PrefillGrant` (on ready)
+   or `None` (on NACK, no grant this tick).
+
+3. **`Rank0BatchedDecodeGlue` extended**: after sending a
+   `PrefillMessage`, `tick()` now BLOCKS on `recv_prefill_ready_message`
+   before returning a `PrefillGrant` to the caller -- this is what
+   makes it safe for the caller to immediately follow a grant with
+   real metaframe wire traffic; rank 1 has JUST confirmed readiness on
+   the SAME wire. On NACK: does NOT retry synchronously (the caller
+   gets an empty tick, exactly as if nothing happened this cycle) --
+   the SAME pending request stays at the front of `_pending_prefill`
+   (not popped) with its slot still reserved, so a LATER real `tick()`
+   call retries it, giving rank 1's own event loop a genuine,
+   unblocked window to process its pending `submit()` work in between
+   attempts. Bounded at `_PREFILL_READY_MAX_RETRIES=50` consecutive
+   NACKs before failing loud (a real stall on rank 1 -- crashed, hung,
+   or a genuine registration bug -- rather than an expected timing
+   race).
+
+4. **Removed**: rank 1's `_parked_prefill_grants` mechanism
+   (`ExoBatchGenerator`) -- the structural defect this whole fix
+   closes. `_run_deferred_prefill_for_grant`'s missing-`_DeferredPrefill`
+   case is now a hard `GlueError` on EITHER rank (previously only
+   rank 0 failed loud there; rank 1 silently parked) -- since the
+   ack/NACK handshake means rank 1 now NEVER returns a grant for an
+   unregistered request in the first place, hitting this path is
+   structurally impossible on both ranks, not just rank 0.
+
+### Verification (real 2-process tests, not simulated)
+
+- `test_pp_admission_race_subprocess.py` (the SAME genuinely-
+  independent-per-rank-event-loop regression test that gates the
+  original admission-race fix) required the identical fix on its own
+  worker script: rank 1 now calls `mark_prefill_registered` on its OWN
+  independent random schedule (mirroring rank 0's own independently-
+  randomized `enqueue_prefill` timing, deliberately NOT synchronized
+  with it) -- exercising the SAME kind of real timing race the
+  ack/NACK handshake exists to resolve, rather than trivially always
+  registering before rank 0's grant attempt. Confirmed via a captured
+  real trace that NACK-then-retry-then-success genuinely occurred:
+  seed 41's trace shows `PrefillMessage` sent at `it=3` (implicitly
+  NACK'd -- no `run_grant_prefill_b` followed), then
+  `mark_prefill_registered_b` at `it=4`, then a successful grant+run at
+  the SAME `it=4` tick. Passes consistently across repeated runs (5
+  seeds each).
+- 252 fast + 14 slow tests pass; zero new basedpyright/ruff errors vs
+  the established baseline (305 file-scope / 9348 whole-repo
+  basedpyright, 9 ruff -- all pre-existing, confirmed identical
+  before/after via `git stash` diff).
+
+### Not yet verified (needs its own fresh explicit go-ahead)
+
+This fix has NOT run on real 2-node hardware yet. The prior two N=2
+hardware attempts each surfaced a genuinely new bug this session
+hadn't seen in local testing -- there is real reason to expect a
+THIRD attempt could surface something else the 2-process test harness
+doesn't reach (different timing characteristics, different jaccl
+transport behavior under real RDMA vs. the test's local ring backend,
+etc.). Follow the same crash → restore-to-known-good (verify with a
+real "Paris" single-request inference) → diagnose discipline used
+throughout this entire campaign. `EXO_PP_BATCHED_DECODE=1` should stay
+OFF in any deployment until a real N=2 hardware run confirms this fix
+holds under genuine RDMA/jaccl conditions, not just the local
+2-process ring-backend test harness.
 

@@ -2160,22 +2160,22 @@ Requirement 3's exact number was to this doc's own Section 2.5.**
     bugs found and fixed, single-request path VERIFIED WORKING, N=2
     concurrent admission found UNSAFE (new architectural gap)
 
-**STATUS (2026-08-06): the N=2 admission race this section documents
-is FIXED and hardware-verified for the admission DECISION itself** --
-see `docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
-"2026-08-06 fix: in-band PrefillMessage admission signal" section for
-the full implementation and verification writeup (regression gate
-`test_pp_admission_race_subprocess.py` flipped from a real XFAIL to a
-genuine PASS across 5 independent seeds, 252+14 worker tests green,
-zero new basedpyright/ruff errors). Real N=2 hardware testing
-subsequently found and fixed FOUR more real bugs in eviction/slot-reuse
-(see that same doc's "2026-08-06 follow-up" section) and found -- but
-has NOT yet fixed -- a FIFTH, deeper bug in the prefill forward-pass's
-metaframe transport (see that doc's "2026-08-06 finding: prefill
-forward-pass race (NOT FIXED)" section for the full mechanism and fix
-direction). `EXO_PP_BATCHED_DECODE=1` remains UNSAFE for production
-until the fifth bug is closed; single-request PP is unaffected and
-repeatedly verified clean on real hardware. The single_request_fallback
+**STATUS (2026-08-06): all FIVE real bugs found via real N=2 hardware
+testing are FIXED at the code level** -- see
+`docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
+"2026-08-06 fix: in-band PrefillMessage admission signal", "2026-08-06
+follow-up: 4 real bugs in eviction+slot-reuse", and "2026-08-06 fix:
+prefill forward-pass race (PrefillReadyMessage)" sections for the full
+implementation and verification writeups. All fixes verified via the
+real 2-process regression test suite (genuinely independent per-rank
+event loops, not lockstep; 252+14 worker tests, zero new
+basedpyright/ruff errors). The FIFTH fix (PrefillReadyMessage) has NOT
+YET been re-verified on real N=2 hardware -- needs its own fresh
+explicit go-ahead before the next cluster relaunch/test.
+`EXO_PP_BATCHED_DECODE=1` should stay OFF in any deployment until that
+real-hardware re-verification confirms the fix holds under genuine
+RDMA/jaccl conditions. Single-request PP is unaffected and repeatedly
+verified clean on real hardware. The single_request_fallback
 (ineligible-request) path remains unfixed, explicitly out of scope for
 now.
 
