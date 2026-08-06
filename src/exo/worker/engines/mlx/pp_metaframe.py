@@ -66,6 +66,8 @@ implementation of it.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+from enum import Enum, auto
 from typing import Any, cast
 
 import mlx.core as mx
@@ -77,7 +79,153 @@ from exo.worker.engines.mlx.auto_parallel import (
     _pending_prefill_sends,
 )
 
-# Bump if the on-wire frame layout ever changes shape/field meaning.
+
+class ForwardPhase(Enum):
+    """Which phase-transition state THIS specific forward-pass call is
+    in -- 2026-08-06, Phase 2 (chunked-prefill interruption) scoping
+    session. Replaces the old ``is_prefill: bool`` ambient instance
+    flag (see ``MetaFramedPipelineLastLayer``'s own docstring for the
+    reentrancy hazard that motivated removing it) AND fixes a second,
+    independent bug found auditing that removal: the old
+    ``is_last_chunk = not is_prefill`` derivation collapsed two
+    genuinely distinct facts -- "is this call still prefilling" and
+    "is THIS call the one where a chunk/phase boundary lands" -- into
+    one boolean. That collapse was harmless in the original single-
+    shot-prefill-then-decode world (there was never more than one
+    prefill/decode transition to represent per request, so the two
+    facts always agreed), but silently WRONG the moment prefill can
+    span multiple chunks: a mid-prefill chunk (more chunks follow) and
+    the request's FINAL prefill chunk (decode follows) both have
+    ``is_prefill=True`` under the old boolean, yet need DIFFERENT
+    ``is_last_chunk`` wire values.
+
+    Per a `consult` review (2026-08-06): a 3-valued enum makes the
+    invalid 4th combination two independent booleans would allow
+    (``is_prefill=False, is_last_chunk=False`` -- meaningless) simply
+    unrepresentable, rather than merely undocumented.
+
+    - ``PREFILL_CONTINUE``: this chunk's forward pass just completed,
+      but more chunks remain for this request's prefill. Wire:
+      ``phase_flag=0, is_last_chunk=False`` -- a genuinely NEW
+      combination this enum introduces; never emitted before chunked
+      prefill existed.
+    - ``PREFILL_FINAL``: this is the LAST prefill chunk for this
+      request -- the next forward pass for this request will be a real
+      decode step. Wire: ``phase_flag=0, is_last_chunk=True`` -- same
+      bytes the old single-shot prefill call always sent for its one
+      (only) chunk, so this variant is exact backward-compatible wire
+      behavior for the non-chunked case.
+    - ``DECODE``: an ordinary decode step. Wire: ``phase_flag=1,
+      is_last_chunk=True`` -- identical to today's ``not is_prefill``
+      derivation when ``is_prefill=False``, so this variant is also
+      exact backward-compatible wire behavior.
+    """
+
+    PREFILL_CONTINUE = auto()
+    PREFILL_FINAL = auto()
+    DECODE = auto()
+
+    @property
+    def phase_flag(self) -> int:
+        """0 = prefill (either PREFILL_CONTINUE or PREFILL_FINAL), 1 =
+        decode -- matches ``encode_metaframe``'s existing wire
+        contract exactly."""
+        return 0 if self is not ForwardPhase.DECODE else 1
+
+    @property
+    def is_last_chunk(self) -> bool:
+        """True for PREFILL_FINAL and DECODE (both were the OLD
+        ``not is_prefill`` derivation's only two reachable outcomes);
+        False ONLY for PREFILL_CONTINUE, the genuinely new state this
+        enum makes representable."""
+        return self is not ForwardPhase.PREFILL_CONTINUE
+
+
+class ForwardStepInfo:
+    """Bundles the two per-forward-pass facts
+    ``MetaFramedPipelineLastLayer``/``BatchedMetaFramedPipelineLastLayer``
+    need but the generic model layer loop (vendored, provider-agnostic
+    ``deepseek_v4.py`` -- cannot import exo's own wrapper types, so
+    cannot special-case which layers want extra kwargs) has no way to
+    pass explicitly. Mirrors ``pp_batched_decode_layers.py``'s
+    ALREADY-PROVEN ``_batch_step_context`` pattern for the structurally
+    identical problem (per-step metadata a wrapper layer needs,
+    invisible to the generic loop) -- deliberately the SAME mechanism,
+    not a new one.
+
+    Bundled into ONE object (not two independent contextvars) so
+    ``phase``/``queue_sends`` can never be set out of sync with each
+    other via two separate calls racing or one being forgotten --
+    confirmed via a direct code audit that these two facts are
+    genuinely ORTHOGONAL, not derivable from one another: the
+    non-pipelined small-prompt prefill path (``generate.py``'s
+    ``prefill()``, when ``num_tokens < prefill_step_size``, falls
+    through to ``stream_generate`` rather than
+    ``pipeline_parallel_prefill``) sets ``is_prefill=True`` but NEVER
+    sets ``queue_sends=True`` -- so ``queue_sends`` cannot be derived
+    as "``phase != DECODE``" the way it might naively look from the
+    chunked-interruption case alone (which always uses
+    ``pipeline_parallel_prefill``, where the two facts DO happen to
+    coincide).
+
+    REENTRANCY WARNING (2026-08-06, consult-reviewed): plain
+    contextvars do NOT give a suspended Python generator its own
+    isolated context (PEP 567 dropped PEP 550's generator-context-
+    isolation). A prefill chunk's forward pass, paused mid-layer-loop
+    via a generator, and an INTERLEAVED decode step's own forward pass
+    run in the SAME context on the SAME thread -- if the decode step
+    calls ``set_forward_step_info(...)`` for its own pass, that write
+    is visible to the paused prefill generator's LATER reads after it
+    resumes, corrupting its phase/queue_sends info. The FIX (not yet
+    wired -- this is the primitive, not the caller discipline):
+    whoever DRIVES an interruptible prefill generator MUST capture its
+    own isolated context via ``contextvars.copy_context()`` at
+    generator-creation time (with the info already set in that
+    captured context) and resume the generator via that captured
+    context's ``.run(...)``, never via a bare ``next()``/``send()`` on
+    the ambient context. This makes the suspended generator's reads
+    immune to whatever the interleaving decode step does to the
+    ambient context in between. See the (not-yet-built) generate.py
+    chunk-driving integration for where this discipline must be
+    applied.
+    """
+
+    __slots__ = ("phase", "queue_sends")
+
+    def __init__(self, *, phase: ForwardPhase, queue_sends: bool) -> None:
+        self.phase = phase
+        self.queue_sends = queue_sends
+
+
+_forward_step_info_context: ContextVar["ForwardStepInfo"] = ContextVar(
+    "forward_step_info_context"
+)
+
+
+def set_forward_step_info(*, phase: ForwardPhase, queue_sends: bool) -> None:
+    """Set the current forward pass's phase/queue_sends for
+    ``MetaFramedPipelineLastLayer``/``BatchedMetaFramedPipelineLastLayer``
+    to read. Caller's responsibility to use ``copy_context().run(...)``
+    around any interruptible (multi-yield) forward pass -- see
+    ``ForwardStepInfo``'s docstring above for why a bare call here is
+    unsafe for a paused generator sharing a thread with interleaved
+    work."""
+    _forward_step_info_context.set(
+        ForwardStepInfo(phase=phase, queue_sends=queue_sends)
+    )
+
+
+def get_forward_step_info() -> ForwardStepInfo:
+    """Read the current forward pass's phase/queue_sends. Raises
+    ``LookupError`` (uncaught -- fail loud, matching this module's
+    fail-stop discipline) if no caller ever set it for this context;
+    there is deliberately NO default, since silently assuming a phase
+    (e.g. DECODE) for a caller that forgot to set it would be exactly
+    the kind of ambient-state bug this mechanism replaces, just moved
+    one layer over."""
+    return _forward_step_info_context.get()
+
+
 # The startup handshake asserts both ranks agree on this before any
 # real traffic flows — see ``handshake_metaframe_protocol``.
 #
@@ -567,10 +715,17 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
         self.s: int = s
         self.group = group
         self.request_uid = request_uid
-        self.is_prefill: bool = False
-        self.queue_sends: bool = False
+        # 2026-08-06 (Phase 2 scoping session): NO ambient is_prefill/
+        # queue_sends instance flags -- see ForwardStepInfo's own
+        # docstring for the reentrancy hazard that motivated removing
+        # them (a paused prefill-chunk generator and an interleaved
+        # decode step share one instance; an ambient flag one of them
+        # mutates is visible to the other). Both facts are now read
+        # PER-CALL from ``get_forward_step_info()`` inside __call__
+        # below, never stored on self.
 
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
+        step_info = get_forward_step_info()
         output: mx.array = self.original_layer(x, *args, **kwargs)
         mx.eval(output)
 
@@ -591,17 +746,16 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
             seq_len = int(output_to_send.shape[1])
             hidden_dim = int(output_to_send.shape[-1])
             extra_dim = int(output_to_send.shape[2]) if output_to_send.ndim == 4 else 0
-            phase_flag = 0 if self.is_prefill else 1
             header, table = encode_metaframe(
-                phase_flag=phase_flag,
+                phase_flag=step_info.phase.phase_flag,
                 hidden_dim=hidden_dim,
                 request_uid=self.request_uid,
                 seq_len=seq_len,
-                is_last_chunk=not self.is_prefill,
+                is_last_chunk=step_info.phase.is_last_chunk,
                 extra_dim=extra_dim,
             )
             dst = (self.r + 1) % self.s
-            if self.queue_sends:
+            if step_info.queue_sends:
                 # Match PipelineLastLayer's queued-send semantics exactly:
                 # defer the ACTIVATION send (reusing the existing shared
                 # queue), but the metadata frame is small and must arrive
@@ -644,7 +798,7 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
                 # re-casts `output` (the return value, not the sent copy)
                 # back to the caller's original dtype after the send call
                 # returns a same-shape "sent" marker array.
-                output = output.astype(out_dtype) if self.queue_sends else output
+                output = output.astype(out_dtype) if step_info.queue_sends else output
 
         # DECODE-ONLY final-hidden-state handoff: the last pipeline
         # stage (r == s-1) sends its output back to rank 0 so rank 0 can
@@ -659,7 +813,7 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
         # exactly the point where this return-path framing starts
         # carrying real information (which of several in-flight
         # requests this handoff belongs to).
-        if not self.is_prefill:
+        if step_info.phase is ForwardPhase.DECODE:
             gather_dtype = output.dtype
             output_for_gather = (
                 output.astype(mx.bfloat16) if output.dtype != mx.bfloat16 else output
@@ -750,22 +904,3 @@ def install_metaframed_pipeline_layers(
             "install_metaframed_pipeline_layers was called twice"
         )
     _set_layers(model, cast(list[Any], layers))
-
-
-def set_metaframed_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
-    """Metaframe-layer counterpart to ``set_pipeline_prefill``. Only
-    ``MetaFramedPipelineLastLayer`` needs this (it's used to compute
-    ``phase_flag``/``is_last_chunk`` for the OUTGOING frame it builds
-    itself) — ``MetaFramedPipelineFirstLayer`` deliberately never reads
-    ambient phase state at all (see its class docstring), so it has
-    nothing to set here."""
-    for layer in model.layers:  # type: ignore[attr-defined]
-        if isinstance(layer, MetaFramedPipelineLastLayer):
-            layer.is_prefill = is_prefill
-
-
-def set_metaframed_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
-    """Metaframe-layer counterpart to ``set_pipeline_queue_sends``."""
-    for layer in model.layers:  # type: ignore[attr-defined]
-        if isinstance(layer, MetaFramedPipelineLastLayer):
-            layer.queue_sends = queue_sends

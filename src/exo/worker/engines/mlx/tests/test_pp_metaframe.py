@@ -180,18 +180,41 @@ def _run_forward(
     metaframe layer classes (set_pipeline_prefill/set_pipeline_queue_sends
     vs the metaframe module's own counterparts)."""
     if metaframe:
-        from exo.worker.engines.mlx.pp_metaframe import (
-            set_metaframed_pipeline_prefill,
-            set_metaframed_pipeline_queue_sends,
-        )
+        from exo.worker.engines.mlx.pp_metaframe import ForwardPhase
 
-        set_metaframed_pipeline_prefill(r0, is_prefill)
-        set_metaframed_pipeline_prefill(r1, is_prefill)
-        set_metaframed_pipeline_queue_sends(r0, is_prefill)
+        # 2026-08-06 (Phase 2 scoping session): set_metaframed_pipeline_
+        # prefill/queue_sends were DELETED along with the ambient
+        # is_prefill/queue_sends instance flags they mutated (see
+        # ForwardStepInfo's docstring in pp_metaframe.py for the
+        # reentrancy hazard that motivated the removal). This test
+        # doesn't exercise chunking, so PREFILL_FINAL (not
+        # PREFILL_CONTINUE) is the correct phase for is_prefill=True --
+        # matches this test's own single-shot-prefill-then-decode
+        # shape exactly, and produces byte-identical wire behavior to
+        # the old is_prefill=True/is_last_chunk=True combination this
+        # test already validated.
+        #
+        # IMPORTANT: contextvars do NOT propagate into a NEW native
+        # thread automatically (threading.Thread starts with a fresh,
+        # empty top-level Context -- unlike asyncio tasks or an
+        # explicit contextvars.Context.run() call). r0/r1 below run in
+        # separate threading.Thread instances, so set_forward_step_info
+        # must be called INSIDE each thread's own target function
+        # (_rank0/_rank1 below), never here in the caller's thread --
+        # this is the exact real-world discipline the metaframe design
+        # doc's "copy_context().run(...)" guidance was written for,
+        # just directly applicable here since these are OS threads, not
+        # a paused generator sharing one thread.
+        metaframe_phase: ForwardPhase | None = (
+            ForwardPhase.PREFILL_FINAL if is_prefill else ForwardPhase.DECODE
+        )
+        metaframe_queue_sends = is_prefill
     else:
         set_pipeline_prefill(r0, is_prefill=is_prefill)
         set_pipeline_prefill(r1, is_prefill=is_prefill)
         set_pipeline_queue_sends(r0, queue_sends=is_prefill)
+        metaframe_phase = None
+        metaframe_queue_sends = False
 
     mx.eval(tokens)
     result: dict[str, object] = {}
@@ -199,6 +222,12 @@ def _run_forward(
     def _rank0() -> None:
         _MLX_CALL_LOCK.acquire()
         try:
+            if metaframe_phase is not None:
+                from exo.worker.engines.mlx.pp_metaframe import set_forward_step_info
+
+                set_forward_step_info(
+                    phase=metaframe_phase, queue_sends=metaframe_queue_sends
+                )
             mx.eval(mx.zeros(1))
             out = r0(tokens, cache=c0)
             # Match production's per-chunk discipline (generate.py's
@@ -219,6 +248,12 @@ def _run_forward(
     def _rank1() -> None:
         _MLX_CALL_LOCK.acquire()
         try:
+            if metaframe_phase is not None:
+                from exo.worker.engines.mlx.pp_metaframe import set_forward_step_info
+
+                set_forward_step_info(
+                    phase=metaframe_phase, queue_sends=metaframe_queue_sends
+                )
             mx.eval(mx.zeros(1))
             out = r1(tokens, cache=c1)
             mx.eval(out)
@@ -640,7 +675,11 @@ def test_metaframed_last_layer_sends_correct_extra_dim_for_4d_output() -> None:
     layer = MetaFramedPipelineLastLayer(
         cast(object, _FourDLayer()), r=0, s=2, group=group0, request_uid=1
     )
-    layer.is_prefill = True  # prefill chunk -> only the forward hop fires
+    from exo.worker.engines.mlx.pp_metaframe import ForwardPhase, set_forward_step_info
+
+    # prefill chunk (final -- decode follows) -> only the forward hop
+    # fires, matching this test's original is_prefill=True intent.
+    set_forward_step_info(phase=ForwardPhase.PREFILL_FINAL, queue_sends=False)
 
     result: dict[str, object] = {}
 
@@ -764,9 +803,12 @@ def test_metaframed_last_layer_forward_send_is_evaluated_before_decode_gather_re
     rank0_layer = MetaFramedPipelineLastLayer(
         cast(object, _FixedOutputLayer()), r=0, s=2, group=group0, request_uid=1
     )
-    rank0_layer.is_prefill = False  # decode step -> forward-hop AND
-    # decode-gather-recv BOTH fire in this __call__ -- exactly the two
-    # blocks whose interaction produced the real deadlock.
+    from exo.worker.engines.mlx.pp_metaframe import ForwardPhase, set_forward_step_info
+
+    # decode step -> forward-hop AND decode-gather-recv BOTH fire in
+    # this __call__ -- exactly the two blocks whose interaction
+    # produced the real deadlock.
+    set_forward_step_info(phase=ForwardPhase.DECODE, queue_sends=False)
 
     with (
         patch("mlx.core.distributed.send", _lazy_send),

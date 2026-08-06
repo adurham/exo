@@ -292,7 +292,9 @@ def test_batched_layers_fall_back_to_single_request_outside_batch_step_scope() -
     from unittest.mock import patch
 
     from exo.worker.engines.mlx.pp_metaframe import (
+        ForwardPhase,
         install_metaframed_pipeline_layers,
+        set_forward_step_info,
     )
 
     def _passthrough_send(arr: mx.array, dst: int, **_: object) -> mx.array:
@@ -306,6 +308,13 @@ def test_batched_layers_fall_back_to_single_request_outside_batch_step_scope() -
     group = cast(mx.distributed.Group, cast(object, _RankGroup(0, 1)))
     mx.random.seed(77)
     prompt = mx.random.randint(0, _ARGS.vocab_size, shape=(4,))
+    # 2026-08-06 (Phase 2 scoping session): with world_size=1 here,
+    # self.r == self.s - 1 is always true, so the decode-only handoff
+    # branch always runs regardless of phase -- matching this test's
+    # ORIGINAL behavior (before the ambient is_prefill flag was
+    # removed, it defaulted to False = a decode-shaped forward pass).
+    # DECODE reproduces that exact default.
+    set_forward_step_info(phase=ForwardPhase.DECODE, queue_sends=False)
 
     with (
         patch("mlx.core.distributed.send", side_effect=_passthrough_send),

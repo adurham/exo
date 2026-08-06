@@ -266,12 +266,22 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
             as ``_local_prefill``'s own convention above -- rank 1's
             return value is never read).
             """
-            last_layer.is_prefill = True
-            try:
-                out = model(prompt_b[None, :], cache=cache_b)
-                mx.eval(out)
-            finally:
-                last_layer.is_prefill = False
+            from exo.worker.engines.mlx.pp_metaframe import (
+                ForwardPhase,
+                set_forward_step_info,
+            )
+
+            # 2026-08-06 (Phase 2 scoping session): NO ambient
+            # is_prefill instance flag anymore -- see ForwardStepInfo's
+            # docstring in pp_metaframe.py for the reentrancy hazard
+            # that motivated removing it. This test doesn't exercise
+            # chunking, so PREFILL_FINAL is the correct phase (single-
+            # shot prefill, decode follows immediately after) --
+            # produces byte-identical wire behavior to the old
+            # is_prefill=True/is_last_chunk=True combination.
+            set_forward_step_info(phase=ForwardPhase.PREFILL_FINAL, queue_sends=False)
+            out = model(prompt_b[None, :], cache=cache_b)
+            mx.eval(out)
             return int(mx.argmax(out[0, -1]).item())
 
         rank0_glue: Rank0BatchedDecodeGlue | None = None
@@ -297,9 +307,7 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
             )
         else:
             mirror = RankOneMirrorSession.new(max_concurrency=2)
-            rank1_glue = Rank1BatchedDecodeGlue(
-                session=mirror, src_rank=0, group=group
-            )
+            rank1_glue = Rank1BatchedDecodeGlue(session=mirror, src_rank=0, group=group)
             rank1_glue.stage_local_cache(
                 request_id=1, cache_slot=0, prefilled_cache=my_cache_a
             )
@@ -346,15 +354,10 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
 
             if rank == 0:
                 assert rank0_glue is not None
-                b_available = (
-                    iteration >= _B_EARLIEST_ITERATION and not b_enqueued
-                )
-                must_enqueue_b_now = (
-                    b_available and iteration == _ITERATIONS - 2
-                )
+                b_available = iteration >= _B_EARLIEST_ITERATION and not b_enqueued
+                must_enqueue_b_now = b_available and iteration == _ITERATIONS - 2
                 do_enqueue_b_now = must_enqueue_b_now or (
-                    b_available
-                    and schedule_rng.random() < _PREFILL_PICK_PROBABILITY
+                    b_available and schedule_rng.random() < _PREFILL_PICK_PROBABILITY
                 )
                 if do_enqueue_b_now:
                     trace.append(f"it={iteration} enqueue_prefill_b")
@@ -402,15 +405,10 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
                 # exists to resolve, rather than always registering
                 # suspiciously early/late relative to rank 0's own
                 # schedule.
-                b_registerable = (
-                    iteration >= _B_EARLIEST_ITERATION and not b_registered
-                )
-                must_register_b_now = (
-                    b_registerable and iteration == _ITERATIONS - 2
-                )
+                b_registerable = iteration >= _B_EARLIEST_ITERATION and not b_registered
+                must_register_b_now = b_registerable and iteration == _ITERATIONS - 2
                 do_register_b_now = must_register_b_now or (
-                    b_registerable
-                    and schedule_rng.random() < _PREFILL_PICK_PROBABILITY
+                    b_registerable and schedule_rng.random() < _PREFILL_PICK_PROBABILITY
                 )
                 if do_register_b_now:
                     trace.append(f"it={iteration} mark_prefill_registered_b")
