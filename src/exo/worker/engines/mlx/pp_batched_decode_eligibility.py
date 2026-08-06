@@ -68,11 +68,30 @@ def is_eligible_for_batched_decode(
     has_images: bool,
     has_tools: bool,
     uses_speculative_decode: bool,
-    is_prefix_cache_hit: bool,
     sharding_is_pipeline: bool,
     batched_decode_enabled: bool,
 ) -> EligibilityResult:
     """Decide whether ONE request may use the batched-decode path.
+
+    INVARIANT (2026-08-06 cross-rank divergence fix -- see
+    ``docs/batched-decode-n2-admission-handoff-2026-08-05.md``): batched-
+    decode eligibility is a PURE function of (request payload, static
+    startup config) -- NEVER of per-rank mutable state like
+    ``KVPrefixCache``. This is enforced structurally by the signature:
+    every input here is either derived from the request itself (which
+    both ranks receive identically via the same broadcast/queue) or
+    from static cluster-wide-identical startup config
+    (``batched_decode_enabled`` = ``EXO_PP_BATCHED_DECODE`` env,
+    ``sharding_is_pipeline`` = static shard topology). No parameter
+    reflects per-process trie state, cache hit/miss, or anything else
+    that could diverge across ranks -- so both ranks are mathematically
+    guaranteed to compute the identical verdict with zero wire
+    coordination. Real N=2 hardware hit a divergence bug where a
+    ``is_prefix_cache_hit`` input (computed from each rank's own
+    independent radix trie) made rank 0 route to the batched path
+    while rank 1 routed to the serial path for the SAME request; the
+    fix was to drop that input entirely (batched-eligible requests
+    simply never consult the prefix cache).
 
     All inputs are plain booleans the caller has ALREADY computed from
     real request/runtime state (this function never reaches into
@@ -116,13 +135,5 @@ def is_eligible_for_batched_decode(
             "exactly 1 token per active slot per step -- KNOWN "
             "INCOMPATIBLE, not a missing test. See design doc Section 6.2 "
             "item 7 / Phase 4 and the feature-interaction matrix.)",
-        )
-    if is_prefix_cache_hit:
-        return EligibilityResult(
-            eligible=False,
-            reason="is_prefix_cache_hit (KVPrefixCache's serial "
-            "snapshot/restore lifecycle vs BatchedCacheRouter's slot-based "
-            "lifecycle has not been analyzed for compatibility -- see "
-            "design doc's feature-interaction matrix)",
         )
     return EligibilityResult(eligible=True)

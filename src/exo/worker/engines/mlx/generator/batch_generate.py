@@ -1976,6 +1976,131 @@ class ExoBatchGenerator:
 
         is_bench = task_params.bench
 
+        # Seed + sampler are set up here (BEFORE the batched-decode routing
+        # decision below) so both the batched-decode and serial paths can
+        # share a single construction. Order: seed derivation from
+        # task_params has no dependency on cache state, so hoisting it
+        # above the KVPrefixCache lookup is safe and lets us avoid
+        # duplicating the sampler-construction block across the two
+        # dispatch paths.
+        seed = task_params.seed if task_params.seed is not None else 42
+        mx.random.seed(seed)
+
+        _card = card_sampling_values(task_params.model, task_params.enable_thinking)
+        _resolved = resolve_sampling(
+            request_temperature=task_params.temperature,
+            request_top_p=task_params.top_p,
+            request_top_k=task_params.top_k,
+            request_min_p=task_params.min_p,
+            request_presence_penalty=task_params.presence_penalty,
+            request_repetition_penalty=task_params.repetition_penalty,
+            request_frequency_penalty=task_params.frequency_penalty,
+            instance_temperature=self.default_temperature,
+            instance_top_p=self.default_top_p,
+            instance_top_k=self.default_top_k,
+            instance_min_p=self.default_min_p,
+            instance_presence_penalty=self.default_presence_penalty,
+            instance_repetition_penalty=self.default_repetition_penalty,
+            instance_frequency_penalty=self.default_frequency_penalty,
+            card_temperature=_card.temperature if _card else None,
+            card_top_p=_card.top_p if _card else None,
+            card_top_k=_card.top_k if _card else None,
+            card_min_p=_card.min_p if _card else None,
+            card_presence_penalty=_card.presence_penalty if _card else None,
+            card_repetition_penalty=_card.repetition_penalty if _card else None,
+            card_frequency_penalty=_card.frequency_penalty if _card else None,
+        )
+        with T("submit.make_sampler"):
+            sampler = make_sampler(
+                temp=_resolved["temp"],
+                top_p=_resolved["top_p"],
+                top_k=_resolved["top_k"],
+                min_p=_resolved["min_p"],
+            )
+
+        # 2026-08-06 cross-rank eligibility divergence fix (bug #6, see
+        # docs/batched-decode-n2-admission-handoff-2026-08-05.md, section
+        # "2026-08-06 fix: eliminate cross-rank eligibility divergence"):
+        # decide batched-decode routing HERE, BEFORE any per-rank
+        # KVPrefixCache lookup runs. The eligibility inputs used at this
+        # point (has_images/has_tools/uses_speculative_decode/
+        # sharding_is_pipeline/batched_decode_enabled) are ALL either
+        # request-derived (identical on every rank via the broadcast/queue)
+        # or static cluster-wide startup config -- so both ranks are
+        # mathematically guaranteed to compute the identical verdict with
+        # zero wire coordination. Previously the eligibility check ran
+        # AFTER the prefix-cache lookup and consumed an
+        # ``is_prefix_cache_hit`` input; because each rank's KVPrefixCache
+        # is an independent per-process radix trie that can genuinely
+        # diverge across ranks (differing timing of when a prior request's
+        # tokens fold into each rank's trie), rank 0 and rank 1 could
+        # compute different verdicts for the SAME request -- producing the
+        # hardware-observed 50x PrefillReadyMessage NACK-retry storm on
+        # real N=2. Removing the parameter from is_eligible_for_batched_
+        # decode() and routing BEFORE any trie touch structurally
+        # eliminates the divergence source.
+        #
+        # TRADEOFF (intentional, accepted): requests that are shape-
+        # eligible for batched-decode will never get prefix-cache-hit
+        # benefits while EXO_PP_BATCHED_DECODE is enabled, even for
+        # trivial chat-template-boilerplate prefix hits. The prior design
+        # already treated ANY non-zero prefix hit as making a request
+        # INELIGIBLE for batched-decode, so this doesn't change behavior
+        # for genuinely cache-benefiting requests being pulled INTO
+        # batched-decode -- it only prevents the divergence at the cost
+        # of the trivial-prefix opportunity that the (buggy) old
+        # is_prefix_cache_hit input made per-rank-inconsistent anyway.
+        # Shape-INELIGIBLE requests (vision/tools/speculative/non-PP) fall
+        # through to the serial path below UNCHANGED and still enjoy full
+        # prefix-cache behavior (via pipeline_agree_prefix_hit_length()).
+        if self._batched_decode_active and (
+            self._batched_decode_rank0_glue is not None
+            or self._batched_decode_rank1_glue is not None
+        ):
+            from exo.worker.engines.mlx.pp_batched_decode_eligibility import (
+                is_eligible_for_batched_decode,
+            )
+
+            early_eligibility = is_eligible_for_batched_decode(
+                has_images=bool(task_params.images),
+                has_tools=bool(task_params.tools),
+                uses_speculative_decode=hasattr(self._mlx_gen, "mtp"),
+                sharding_is_pipeline=self.group is not None
+                and self.group.size() > 1,
+                batched_decode_enabled=True,
+            )
+            if early_eligibility.eligible:
+                # Batched-eligible: skip KVPrefixCache lookup entirely
+                # (do not read, do not mutate -- no trie touch at all)
+                # and dispatch to the deferred-prefill batched path with
+                # a fresh cold cache. Seed + sampler were built above,
+                # shared with the serial path.
+                cache_bd = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                with T("submit.batched_decode_enqueue_prefill"):
+                    return self._submit_batched_decode_deferred(
+                        task_params=task_params,
+                        prompt=prompt,
+                        prompt_tokens=all_prompt_tokens,
+                        all_prompt_tokens=all_prompt_tokens,
+                        cache=cache_bd,
+                        sampler=sampler,
+                        max_tokens=task_params.max_output_tokens or MAX_TOKENS,
+                        on_generation_token=on_generation_token,
+                        on_prefill_progress=on_prefill_progress,
+                        distributed_prompt_progress_callback=(
+                            distributed_prompt_progress_callback
+                        ),
+                        vision=vision,
+                        media_regions=media_regions,
+                        prefix_hit_length=0,
+                        matched_index=None,
+                        is_bench=is_bench,
+                    )
+            logger.debug(
+                f"batched-decode ineligible, falling back to serial submit(): "
+                f"{early_eligibility.reason}"
+            )
+
         # Multi-rank Pipeline-Parallel serving with coord collectives disabled
         # (EXO_PP_NO_COORD_COLLECTIVE=1, the standard PP launch config) has no
         # channel left to make the prefix-cache hit/miss DECISION collective
@@ -2118,107 +2243,19 @@ class ExoBatchGenerator:
         # client sent none — api/main.py resolves it at admission so every PP
         # rank seeds identically). The 42 fallback below is only reachable for
         # engine-internal/bench constructions that bypass the API.
-        seed = task_params.seed if task_params.seed is not None else 42
-        mx.random.seed(seed)
+        # (Seed + sampler are now built ABOVE, near the batched-decode routing
+        # decision, so both paths share the same construction; they are no
+        # longer duplicated here. See the block near "cross-rank eligibility
+        # divergence fix" above.)
 
-        _card = card_sampling_values(task_params.model, task_params.enable_thinking)
-        _resolved = resolve_sampling(
-            request_temperature=task_params.temperature,
-            request_top_p=task_params.top_p,
-            request_top_k=task_params.top_k,
-            request_min_p=task_params.min_p,
-            request_presence_penalty=task_params.presence_penalty,
-            request_repetition_penalty=task_params.repetition_penalty,
-            request_frequency_penalty=task_params.frequency_penalty,
-            instance_temperature=self.default_temperature,
-            instance_top_p=self.default_top_p,
-            instance_top_k=self.default_top_k,
-            instance_min_p=self.default_min_p,
-            instance_presence_penalty=self.default_presence_penalty,
-            instance_repetition_penalty=self.default_repetition_penalty,
-            instance_frequency_penalty=self.default_frequency_penalty,
-            card_temperature=_card.temperature if _card else None,
-            card_top_p=_card.top_p if _card else None,
-            card_top_k=_card.top_k if _card else None,
-            card_min_p=_card.min_p if _card else None,
-            card_presence_penalty=_card.presence_penalty if _card else None,
-            card_repetition_penalty=_card.repetition_penalty if _card else None,
-            card_frequency_penalty=_card.frequency_penalty if _card else None,
-        )
-        with T("submit.make_sampler"):
-            sampler = make_sampler(
-                temp=_resolved["temp"],
-                top_p=_resolved["top_p"],
-                top_k=_resolved["top_k"],
-                min_p=_resolved["min_p"],
-            )
-
-        # 2026-08-06 N=2 admission-race fix: the batched-decode ELIGIBILITY
-        # check moves HERE -- BEFORE prefill runs -- instead of its old
-        # position after prefill (see design doc Section 15 / handoff doc
-        # for the hardware-confirmed deadlock this closes). All the
-        # eligibility inputs (images/tools/mtp/prefix-cache-hit/sharding)
-        # are already known at this point; nothing below this line is
-        # needed to decide eligibility. Moving the check earlier is what
-        # lets an ELIGIBLE request skip running prefill inline at all --
-        # its prefill is deferred until Rank0BatchedDecodeGlue.tick()
-        # (single-writer wire call) grants it, closing the race where
-        # submit()'s own independent, per-rank-scheduled prefill call
-        # could issue mismatched wire traffic against an in-flight
-        # decode-step tick() on the peer rank.
-        #
-        # SCOPE NOTE (deliberately out of scope for this fix): an
-        # INELIGIBLE request (falls through the `eligibility.eligible`
-        # check below) still runs prefill INLINE, unchanged, via the old
-        # single-request metaframe path further down in this method. That
-        # path is NOT yet folded into the single-writer tick() gate --
-        # only the ELIGIBLE/batched-decode path is fixed here. Mixed
-        # eligible+ineligible concurrent admission could in principle
-        # still race by the same mechanism; this is a known, explicitly
-        # scoped-out follow-up (see docs/batched-decode-n2-admission-
-        # handoff-2026-08-05.md for the next-steps list), not an oversight.
-        if self._batched_decode_active and (
-            self._batched_decode_rank0_glue is not None
-            or self._batched_decode_rank1_glue is not None
-        ):
-            from exo.worker.engines.mlx.pp_batched_decode_eligibility import (
-                is_eligible_for_batched_decode,
-            )
-
-            eligibility = is_eligible_for_batched_decode(
-                has_images=bool(task_params.images),
-                has_tools=bool(task_params.tools),
-                uses_speculative_decode=hasattr(self._mlx_gen, "mtp"),
-                is_prefix_cache_hit=prefix_hit_length > 0,
-                sharding_is_pipeline=self.group is not None
-                and self.group.size() > 1,
-                batched_decode_enabled=True,
-            )
-            if eligibility.eligible:
-                with T("submit.batched_decode_enqueue_prefill"):
-                    return self._submit_batched_decode_deferred(
-                        task_params=task_params,
-                        prompt=prompt,
-                        prompt_tokens=prompt_tokens,
-                        all_prompt_tokens=all_prompt_tokens,
-                        cache=cache,
-                        sampler=sampler,
-                        max_tokens=task_params.max_output_tokens or MAX_TOKENS,
-                        on_generation_token=on_generation_token,
-                        on_prefill_progress=on_prefill_progress,
-                        distributed_prompt_progress_callback=(
-                            distributed_prompt_progress_callback
-                        ),
-                        vision=vision,
-                        media_regions=media_regions,
-                        prefix_hit_length=prefix_hit_length,
-                        matched_index=matched_index,
-                        is_bench=is_bench,
-                    )
-            logger.debug(
-                f"batched-decode ineligible, falling back to serial submit(): "
-                f"{eligibility.reason}"
-            )
+        # 2026-08-06 cross-rank eligibility divergence fix (bug #6): the
+        # batched-decode routing decision has moved EARLIER in this method
+        # (before the KVPrefixCache lookup) -- see the block near the top
+        # of submit() marked "cross-rank eligibility divergence fix".
+        # Any request reaching THIS point is guaranteed to be running the
+        # serial-path prefill (either shape-ineligible for batched-decode,
+        # or batched-decode not active on this generator). No second
+        # eligibility check is needed here.
 
         vision_ctx = (
             patch_embed_tokens(
