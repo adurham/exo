@@ -2205,6 +2205,52 @@ proof the `mx.eval()` mechanism ITSELF is cheap on this hardware/model
 scale locally; the distributed-cluster question is still open and
 gates the next real-hardware step.
 
+**Protocol/state-machine layer — DONE, 2026-08-06, same session
+(commit `71d62c66d`).** `pp_scheduler_protocol.py`'s pure
+`SchedulerCore`/`RankOneMirror` state machine (the same one already
+hardware-verified for Phase 1's decode-only N=2 case, and the same one
+`pp_batched_decode_driver.py`'s real `BatchedDecodeDriver`/
+`RankOneMirrorDriver` wrap for the actual runtime -- this is real,
+load-bearing logic, not a fuzzing-only artifact) now represents chunked
+prefill admission: `NewChunkedPrefillRequestEvent` (admits a request
+starting in `Phase.PREFILL`, records `total_prompt_tokens`) and
+`PrefillChunkAdvancedEvent` (advances `cache_len` by a chunk's token
+count, may be >1 unlike decode's always-1). A second `consult` review
+of this specific extension (separate from the earlier design-level
+reviews) caught 4 real gaps before implementation, all closed: (1) a
+slot legitimately evicted and reused by a later, DIFFERENT
+chunked-prefill request must reset phase/total tracking, not treat
+"PREFILL->DECODE once per slot" as permanent; (2) `RankOneMirror` must
+INDEPENDENTLY DERIVE prefill completion (`cache_len ==
+total_prompt_tokens`) rather than trusting a caller-claimed
+"this is the final chunk" flag -- a rank-0 bug flipping to DECODE one
+chunk early is now caught even though the raw cache-length arithmetic
+alone would pass; (3) the final-chunk boundary convention is explicit
+and directly tested (2048+2048+904=5000 lands exactly on the DECODE
+transition, not one chunk early or late); (4) a `StepMessage` may not
+co-list an advancing PREFILL entry alongside any other advancing entry
+-- structurally enforces this session's earlier "separate alternating
+steps, not a mixed per-step tensor" interleaving-model decision at the
+protocol layer, not just as a design intention. 15 new tests (directed,
+covering both `SchedulerCore` and `RankOneMirror` sides of all 4 gaps
+plus the happy path), all passing; 27 pre-existing tests unchanged,
+zero regressions (full module suite run before AND after: 304 passed
+both times, one known pre-existing flaky test -- reproduced identically
+on unmodified `main` with this session's changes stashed --
+unrelated). basedpyright/ruff both clean.
+
+**Deliberately still NOT done, same session:** the actual MLX
+layer-segmentation forward-pass surgery this whole pivot exists to
+enable -- driving a real model's per-layer loop from outside to yield
+between segments and interleave a real decode tick mid-chunk. That is
+real, model-specific code against `generate.py`'s forward-pass
+internals (not a protocol-layer change), a separate and larger piece
+of work, and needs real-cluster time to validate once built (per this
+session's own "distributed sync path, MoE interaction, and concurrent
+decode-tick interleaving under contention all remain untested" gating
+note above). The protocol/state-machine layer done this session is a
+necessary precondition for that work, not a substitute for it.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
