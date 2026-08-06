@@ -2160,24 +2160,29 @@ Requirement 3's exact number was to this doc's own Section 2.5.**
     bugs found and fixed, single-request path VERIFIED WORKING, N=2
     concurrent admission found UNSAFE (new architectural gap)
 
-**STATUS (2026-08-06, later): SIX real bugs found via real N=2
-hardware testing. ALL SIX are now FIXED AT THE CODE LEVEL** -- see
-`docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
+**STATUS (2026-08-06, final): SEVEN real bugs found via real N=2
+hardware testing. ALL SEVEN are FIXED AND HARDWARE-VERIFIED. N=2
+genuinely concurrent requests now work cleanly on real 2-node
+hardware.** See `docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
 "2026-08-06 fix: in-band PrefillMessage admission signal", "2026-08-06
 follow-up: 4 real bugs in eviction+slot-reuse", "2026-08-06 fix:
-prefill forward-pass race (PrefillReadyMessage)", and "2026-08-06 fix:
-eliminate cross-rank eligibility divergence (drop is_prefix_cache_hit)"
-sections for the full implementation and verification writeups. Bugs
-#1-5 are hardware-verified. **Bug #6 (cross-rank eligibility
-divergence on `is_prefix_cache_hit`) is fixed and locally verified
-(basedpyright/ruff/pytest all clean against baseline) but has NOT yet
-run on real N=2 hardware** -- that needs the user's own fresh explicit
-go-ahead, same as every other real-cluster step in this campaign.
-`EXO_PP_BATCHED_DECODE=1` should stay OFF in any deployment until bug
-#6's fix is hardware-verified. Single-request PP is unaffected and
-repeatedly verified clean on real hardware. The single_request_fallback
+prefill forward-pass race (PrefillReadyMessage)", "2026-08-06 fix:
+eliminate cross-rank eligibility divergence (drop is_prefix_cache_hit)",
+and "2026-08-06 fix: bug #7's third root cause (rank 1 admission-gate
+never drains) + hardware verification" sections for the full
+implementation and verification writeups. Bug #7 (the last one) had
+THREE separate root causes found iteratively across three real
+hardware attempts: `EXO_DSV4_BATCHED_PREFILL` bypassing the
+single-writer channel, a NACK/timeout conflation in the retry guard,
+and rank 1's `runner.py`-level admission gate never draining while
+batched-decode was active (the real blocker). A 4th hardware attempt
+after all three fixes ran 8 genuinely concurrent requests across 4
+rounds with zero crashes, zero 500s, zero wire errors. Single-request
+PP remains unaffected throughout. `EXO_PP_BATCHED_DECODE=1` stays OFF
+by `start_cluster.sh`'s default (intentionally opt-in) but is now a
+genuinely verified, working code path. The single_request_fallback
 (ineligible-request) path remains unfixed, explicitly out of scope for
-now.
+this campaign.
 
 Following the user's explicit go-ahead for a real cluster A/B (Section
 9's remaining item 2), this section records the full campaign: four
