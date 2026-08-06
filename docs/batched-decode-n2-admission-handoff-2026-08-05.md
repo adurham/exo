@@ -1,31 +1,32 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06, later still): bug #6's fix does NOT
-close N=2 on real hardware -- a SEVENTH real bug (or bugs) found.**
-Bug #6's own fix (dropping `is_prefix_cache_hit`, see below) is
-correct for what it touches and did not regress anything -- but the
-first real N=2 hardware run after deploying it crashed again, with
-the EXACT SAME error signature bug #5 was supposed to have already
-closed (`SchedulerWireProtocolError: recv_header: version mismatch --
-received 3, this rank expects 1`), via a THIRD call path neither bug
-#5 nor bug #6 touched. A follow-up attempt with
-`EXO_DSV4_BATCHED_PREFILL=0` (an older, unrelated, always-on-by-default
-rendezvous-batching mechanism suspected as the interacting factor)
-did NOT fix it either -- it crashed again, faster, with a DIFFERENT
-raw transport error (`[jaccl] Recv failed with errno=54`, not a
-version-mismatch parse error). See "2026-08-06 finding: N=2 still
-crashes after bug #6's fix (bug #7, root cause NOT yet identified)"
-at the bottom of this file for the full repro, both crash signatures,
-and what's ruled out so far. **Bugs #1-5 remain hardware-verified**
--- see "2026-08-06 fix: in-band PrefillMessage admission signal",
-"2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse", and
-"2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)".
-Single-request PP is unaffected and repeatedly verified working on
-real hardware, including immediately after BOTH of today's crashes
-(self-healed cleanly each time). `EXO_PP_BATCHED_DECODE=1` remains
+**STATUS UPDATE (2026-08-06, latest): bug #7's TWO root causes are now
+IDENTIFIED AND FIXED AT THE CODE LEVEL, NOT yet hardware-verified.**
+Bug #6's own fix (dropping `is_prefix_cache_hit`) is correct and did
+not regress anything. Real N=2 hardware testing after deploying it
+surfaced two crashes, both now root-caused and fixed: (1)
+`ExoBatchGenerator.submit_batched()` (the `EXO_DSV4_BATCHED_PREFILL`
+rendezvous path) could bypass the `pp_batched_decode_glue`
+single-writer channel entirely, now gated behind a
+`self._batched_decode_active` check; (2)
+`Rank0BatchedDecodeGlue.tick()`'s `PrefillReadyMessage` retry guard
+conflated explicit NACKs (proof of liveness) with silent timeouts
+(the real dead-peer signal), now a wall-clock deadline instead of a
+fixed retry count. See "2026-08-06 root-cause analysis: Attempt 1 and
+Attempt 2 (bug #7)" and the fix commit for the full evidence trail and
+implementation. **Bugs #1-6 remain fixed** -- see "2026-08-06 fix:
+in-band PrefillMessage admission signal", "2026-08-06 follow-up: 4
+real bugs in eviction+slot-reuse", "2026-08-06 fix: prefill
+forward-pass race (PrefillReadyMessage)", and "2026-08-06 fix:
+eliminate cross-rank eligibility divergence". Single-request PP is
+unaffected and repeatedly verified working on real hardware, including
+immediately after both of the bug #7 crashes (self-healed cleanly each
+time). Bug #7's fixes have basedpyright/ruff/pytest all clean against
+baseline but have NOT yet run on real N=2 hardware -- that needs the
+user's own fresh explicit go-ahead. `EXO_PP_BATCHED_DECODE=1` remains
 UNSAFE for production -- the cluster must stay in the safe known-good
 config (single-request PP, `EXO_PP_BATCHED_DECODE` unset) until bug
-#7 is actually root-caused and closed.
+#7's fixes are verified on real N=2 hardware.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -1266,3 +1267,85 @@ Per the same `consult` review, ranked:
 - Cluster remains in safe known-good config (single-request PP,
   `EXO_PP_BATCHED_DECODE` unset), verified clean.
 
+
+---
+
+## 2026-08-06 fix: close bug #7 (submit_batched bypass + NACK/timeout conflation)
+
+**Status: FIXED at the code level, NOT yet hardware-verified.** Closes
+both root causes identified in the section above. Commit `64e08a503`.
+
+### What shipped
+
+1. **`ExoBatchGenerator.submit_batched()` gains a
+   `self._batched_decode_active` check**, symmetric with the existing
+   `self._pp_spec_active` check that already lived there. When Phase 1
+   batched-decode is active, `submit_batched()` now falls back to
+   per-task `submit()` for every task -- each task's own eligibility
+   check there routes it through the `pp_batched_decode_glue`
+   single-writer `tick()`-gated channel (or the safe serial fallback
+   for shape-ineligible requests), never through
+   `EXO_DSV4_BATCHED_PREFILL`'s separate rendezvous-batching path that
+   has zero awareness of the tick()-gated admission protocol.
+
+2. **`Rank0BatchedDecodeGlue.tick()`'s PrefillReadyMessage retry guard
+   rewritten from a fixed retry COUNT to a wall-clock DEADLINE.**
+   `_PREFILL_READY_MAX_RETRIES = 50` (a count) replaced by
+   `_PREFILL_READY_MAX_WAIT_SECONDS = 30.0` (a wall-clock budget). The
+   glue's `_prefill_ready_retries: dict[int, int]` (retry counter per
+   request_id) is now `_prefill_ready_deadline: dict[int, float]` (an
+   absolute `time.monotonic()` deadline per request_id, set on the
+   FIRST NACK and left unchanged on every subsequent NACK for the same
+   request). The fail-stop `GlueError` now fires only when
+   `time.monotonic()` exceeds that deadline, not after N round-trips
+   -- so however many fast NACK replies happen while rank 1 is
+   legitimately busy with unrelated synchronous work (e.g. another
+   request's own real prefill forward pass) no longer erodes a fixed
+   budget. A genuinely wedged rank 1 still fails loud: the underlying
+   `recv_prefill_ready_message()` call has no timeout of its own (by
+   design, matching every other blocking recv in this module), so a
+   truly hung or crashed rank 1 manifests as THAT call itself hanging
+   rather than producing fast NACKs -- the wall-clock deadline still
+   catches this class of failure, just measured correctly.
+
+### Verification (real, not simulated)
+
+- `uv run basedpyright` on both touched files: 305 errors (matches
+  established baseline exactly, confirmed via `git stash` diff --
+  zero new errors).
+- `uv run ruff check` on both touched files: 9 errors (matches
+  baseline; `git stash` diff on the exact error-code set, not just
+  the count, confirms no new findings).
+- `uv run pytest -m ""` across the full relevant subsystem test set --
+  `test_pp_admission_race_subprocess.py`,
+  `test_pp_batched_decode_subprocess.py`,
+  `test_pp_batched_decode_glue_subprocess.py`, `test_pp_metaframe.py`,
+  `test_pp_batched_correctness_harness.py`,
+  `test_batch_generate_rank1_batched_decode_dispatch.py`,
+  `test_batch_generate_batched_decode_flag_off_smoke.py`, and
+  `test_pp_batched_decode_eligibility.py` -- **40 passed, 0 failed**.
+  Notably, `test_pp_admission_race_subprocess.py` is the SAME genuine
+  2-OS-process, independent-per-rank-event-loop test that already
+  exercises a real NACK-then-retry-then-success timing race (its own
+  worker script calls `mark_prefill_registered` on an independently-
+  randomized schedule, deliberately not synchronized with rank 0's own
+  `enqueue_prefill` timing) -- it passed cleanly against the new
+  wall-clock-deadline logic, confirming the retry/grant mechanics
+  still work correctly under a genuine timing race, not just in
+  isolation.
+- Broader `uv run pytest src/exo/worker/engines/mlx/tests/` (fast
+  suite): **253 passed, 14 deselected** (the 14 deselected are the
+  slow/subprocess tests already run explicitly above).
+
+### Not yet verified (needs its own fresh explicit go-ahead)
+
+Neither fix has run on real 2-node hardware yet. Per this doc's
+standing reminder, a real cluster relaunch/test needs the user's own
+separate explicit go-ahead. `EXO_PP_BATCHED_DECODE=1` must stay OFF in
+any deployment (cluster remains in its current safe known-good config:
+single-request PP, `EXO_PP_BATCHED_DECODE` unset) until a fresh N=2
+hardware run confirms both fixes behave as designed -- specifically,
+that the exact bug #7 repro (two genuinely concurrent, cold-start,
+different-topic requests) now completes cleanly with no
+`SchedulerWireProtocolError`, no `GlueError` fail-stop, and both
+requests returning `finish_reason=stop` with correct content.
