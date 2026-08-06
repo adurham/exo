@@ -2160,22 +2160,22 @@ Requirement 3's exact number was to this doc's own Section 2.5.**
     bugs found and fixed, single-request path VERIFIED WORKING, N=2
     concurrent admission found UNSAFE (new architectural gap)
 
-**STATUS (2026-08-06): all FIVE real bugs found via real N=2 hardware
-testing are FIXED at the code level** -- see
+**STATUS (2026-08-06): SIX real bugs found via real N=2 hardware
+testing. FIVE are FIXED and hardware-verified** -- see
 `docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
 "2026-08-06 fix: in-band PrefillMessage admission signal", "2026-08-06
 follow-up: 4 real bugs in eviction+slot-reuse", and "2026-08-06 fix:
 prefill forward-pass race (PrefillReadyMessage)" sections for the full
-implementation and verification writeups. All fixes verified via the
-real 2-process regression test suite (genuinely independent per-rank
-event loops, not lockstep; 252+14 worker tests, zero new
-basedpyright/ruff errors). The FIFTH fix (PrefillReadyMessage) has NOT
-YET been re-verified on real N=2 hardware -- needs its own fresh
-explicit go-ahead before the next cluster relaunch/test.
-`EXO_PP_BATCHED_DECODE=1` should stay OFF in any deployment until that
-real-hardware re-verification confirms the fix holds under genuine
-RDMA/jaccl conditions. Single-request PP is unaffected and repeatedly
-verified clean on real hardware. The single_request_fallback
+implementation and verification writeups. The FIFTH fix
+(PrefillReadyMessage) WAS re-verified on real N=2 hardware and worked
+exactly as designed (no crash, clean fail-stop instead). That clean
+fail-stop led directly to finding a SIXTH bug -- cross-rank
+eligibility divergence on `is_prefix_cache_hit`, see that same doc's
+"2026-08-06 finding: cross-rank eligibility divergence
+(is_prefix_cache_hit)" section -- which is diagnosed but NOT yet
+fixed. `EXO_PP_BATCHED_DECODE=1` should stay OFF in any deployment
+until bug #6 is closed. Single-request PP is unaffected and
+repeatedly verified clean on real hardware. The single_request_fallback
 (ineligible-request) path remains unfixed, explicitly out of scope for
 now.
 

@@ -1,19 +1,22 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06): FIXED AT THE CODE LEVEL, hardware
-re-verification pending.** The original admission-decision race
-documented below is closed and hardware-verified for the
-single-request case. Five real bugs found via real N=2 hardware
-testing were all found and fixed (see "2026-08-06 fix: in-band
-PrefillMessage admission signal", "2026-08-06 follow-up: 4 real bugs
-in eviction+slot-reuse", and "2026-08-06 fix: prefill forward-pass
-race (PrefillReadyMessage)" sections below). All fixes are verified
-via the real 2-process regression test suite (genuinely independent
-per-rank event loops, not lockstep) but the FIFTH fix (prefill
-forward-pass race) has NOT YET been re-verified on real N=2 hardware
--- that needs its own fresh explicit go-ahead before the next cluster
-relaunch/test, per standing discipline. Single-request PP is
-unaffected and repeatedly verified working on real hardware.
+**STATUS UPDATE (2026-08-06): FIVE bugs fixed and hardware-verified.
+The PrefillReadyMessage fix (#5) IS re-verified on real N=2
+hardware -- it worked exactly as designed: no crash, no deadlock. A
+SIXTH, architecturally distinct bug was found on that same real N=2
+run (clean fail-stop, not a crash) -- see "2026-08-06 finding:
+cross-rank eligibility divergence (is_prefix_cache_hit)" at the
+bottom of this file. The original admission-decision race documented
+below is closed and hardware-verified for the single-request case.**
+All FIVE prior real bugs found via real N=2 hardware testing are
+fixed (see "2026-08-06 fix: in-band PrefillMessage admission signal",
+"2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse", and
+"2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)"
+sections below). Single-request PP is unaffected and repeatedly
+verified working on real hardware. `EXO_PP_BATCHED_DECODE=1` remains
+UNSAFE for production (N=2 concurrent DIFFERENT-topic requests with a
+shared chat-template prefix can hit a clean, loud, NON-corrupting
+failure) until bug #6 is closed.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -592,13 +595,164 @@ can never be satisfied by that SAME thread's own later work). Commit
 This fix has NOT run on real 2-node hardware yet. The prior two N=2
 hardware attempts each surfaced a genuinely new bug this session
 hadn't seen in local testing -- there is real reason to expect a
-THIRD attempt could surface something else the 2-process test harness
-doesn't reach (different timing characteristics, different jaccl
-transport behavior under real RDMA vs. the test's local ring backend,
-etc.). Follow the same crash → restore-to-known-good (verify with a
-real "Paris" single-request inference) → diagnose discipline used
-throughout this entire campaign. `EXO_PP_BATCHED_DECODE=1` should stay
-OFF in any deployment until a real N=2 hardware run confirms this fix
-holds under genuine RDMA/jaccl conditions, not just the local
-2-process ring-backend test harness.
+**UPDATE (2026-08-06, same day, later): this DID run on real N=2
+hardware, with explicit user go-ahead.** Result: the PrefillReadyMessage
+fix worked EXACTLY as designed -- no crash, no deadlock, no
+`SchedulerWireProtocolError`. The fail-stop guard fired cleanly
+instead (`GlueError: rank 1 NACK'd PrefillMessage ... 50 consecutive
+times ... Refusing to retry forever`), confirming the ack/NACK
+handshake behaves correctly under real RDMA/jaccl transport. That
+clean failure led directly to discovering a SIXTH, architecturally
+distinct bug -- see "2026-08-06 finding: cross-rank eligibility
+divergence (is_prefix_cache_hit)" below.
+
+---
+
+## 2026-08-06 finding: cross-rank eligibility divergence (is_prefix_cache_hit)
+
+**Status: found on real N=2 hardware, NOT yet fixed.** Unlike bugs
+1-5, this one did NOT crash or deadlock the cluster -- the
+PrefillReadyMessage fail-stop guard (bug #5's own fix) caught it
+cleanly and loudly. This is a genuinely different bug class from
+everything above: not a wire-ordering/timing race, but a
+**cross-rank disagreement about which requests are even eligible**
+for the batched-decode path in the first place.
+
+### Real repro (exact scenario from the hardware test)
+
+Two concurrent, cold-start, DIFFERENT-topic requests: "Count from 1
+to 5." (request A) and "Name 3 colors." (request B), both using the
+same chat template. A admits and completes its prefill first (no
+concurrency issue there). B's `submit()` then runs, on BOTH ranks,
+independently.
+
+**Confirmed via real node logs from both ranks**: after A's prefill,
+B's KV-prefix-cache lookup found a 2-token shared prefix with A (the
+`<|begin_of_sentence|><|User|>` chat-template boilerplate both
+prompts share) -- `[shared_prefix=2 tok (16%)]`, logged identically
+on BOTH ranks. That means `local_hit_length=2 > 0` on both ranks,
+which (per `is_eligible_for_batched_decode`'s own documented rule)
+makes `is_prefix_cache_hit=True` -- and a prefix-cache-hit request is
+explicitly, deliberately INELIGIBLE for the batched-decode path
+(`pp_batched_decode_eligibility.py`'s own comment: "KVPrefixCache's
+serial snapshot/restore lifecycle vs BatchedCacheRouter's slot-based
+lifecycle has not been analyzed for compatibility").
+
+Rank 0's `tick()` nonetheless sent a real `PrefillMessage` for
+request B and retried it 50 times before failing loud -- meaning rank
+0 believed B was ELIGIBLE (`enqueue_prefill` was called, i.e.
+`eligibility.eligible` was `True` on rank 0's side) while rank 1
+never called `mark_prefill_registered` for it (consistent with rank
+1 believing B was INELIGIBLE and routing it through the old serial
+fallback instead). **The two ranks reached different eligibility
+verdicts for the SAME logical request.**
+
+### Root cause (partially confirmed, one open question)
+
+The `is_prefix_cache_hit` eligibility input is computed from each
+rank's own SEPARATE `KVPrefixCache` object -- a real, physically
+distinct per-process Python data structure (each rank owns a
+disjoint slice of the model's LAYERS, but each maintains its OWN
+prefix-cache trie tracking the same logical token sequences). The
+existing `pipeline_agree_prefix_hit_length()` function's own
+docstring already assumes this can diverge in the general case
+("Each rank's independently-maintained KVPrefixCache SHOULD reach an
+identical local hit-length ... in the common case ... This function
+verifies that with a cheap min+max reduce rather than assuming it")
+-- but the 2026-08-06 admission-race fix's own follow-up
+optimization (commit `f705c9abe`, "skip cross-rank prefix-hit
+agreement wire call when local hit_length=0") means the WIRE
+AGREEMENT that would normally catch and reconcile this divergence is
+ONLY skipped when a rank's own `local_hit_length` is exactly 0 --
+i.e. it fires correctly for genuinely-cold requests, but does
+nothing to help two ranks whose local `KVPrefixCache` states have
+ALREADY diverged (e.g. one rank folded A's KV state into its trie
+before evaluating B's eligibility, the other hadn't yet) BEFORE the
+eligibility check runs, since eligibility is computed from
+`local_hit_length` directly, not from the (already fixed, real) wire
+agreement's result.
+
+There is ALSO a pre-existing, still-open diagnostic comment in
+`cache.py`'s `get_kv_cache()` (added 2026-07-23, gated on
+`EXO_PREFIX_CACHE_DIAG=1`, never removed): *"Diagnostic: root-causing
+why rank 1 (PP mode) never reports a local hit-length while rank 0
+does, on an exact-repeat prompt."* This confirms cross-rank
+KVPrefixCache divergence is a REAL, PRE-EXISTING, independently
+already-suspected issue in this codebase -- not something newly
+introduced by this session's admission-race work. This session's
+work is what first made it possible for that divergence to actually
+manifest as an observable failure (N=2 concurrent admission was
+structurally unreachable before `EXO_MAX_CONCURRENT_REQUESTS` was
+relaxed from 1 to 2), the same pattern as bugs #1-4.
+
+**Open question, NOT yet resolved**: is the observed log line
+(`[shared_prefix=2 tok (16%)]`, logged IDENTICALLY on both ranks) the
+lookup that FED eligibility (`get_kv_cache()`'s own `_longest_prefix_match`
+call, BEFORE prefill), or the WRITE-BACK that happens AFTER prefill
+completes (`add_kv_cache()`'s own diagnostic `_longest_prefix_match`
+call, logged for a different purpose -- cross-session dedup
+visibility, per that function's own comment)? The log line's format
+(`shared_prefix=N tok`) appears in both call sites and this session's
+log archaeology could not conclusively disambiguate which one fired
+inside the eligibility-determining window versus which one is
+post-hoc write-back telemetry, given both ranks' `.log.prev` files
+only capture INFO-level output (no `EXO_PREFIX_CACHE_DIAG=1` was set
+for this run). If it's the write-back line, the actual pre-eligibility
+`local_hit_length` values that diverged are NOT directly visible in
+the captured logs and this write-up's mechanism, while consistent
+with all observed evidence, is a well-supported HYPOTHESIS, not a
+byte-for-byte confirmed trace.
+
+### Candidate fix direction (not attempted -- needs a fresh session)
+
+Per a `consult` review: this needs the SAME class of fix as the
+original admission-decision race (bug #1) -- fold the ELIGIBILITY
+decision itself into the single-writer `tick()`-gated channel, so
+rank 0 decides eligibility once (from its own local state) and TELLS
+rank 1, rather than each rank independently computing eligibility
+from local state that can genuinely diverge. This is real,
+non-trivial protocol work (comparable in scope to bug #1's fix, not
+a quick patch), with a real open question the consult flagged: if
+rank 0 tells rank 1 "this request IS eligible" but rank 1's own local
+KVPrefixCache genuinely has a real prefix hit for it, what does rank
+1 do with that real local state when forced down the batched-decode
+path against its own cache's evidence? That interaction with the
+EXISTING `pipeline_agree_prefix_hit_length()` wire-agreement
+mechanism (and this session's own `f705c9abe` skip-when-local-0
+optimization) needs to be traced through carefully -- not attempted
+this session, deliberately, to avoid starting fresh protocol-layer
+work at the end of an already-long, multi-fix session.
+
+### Explicitly NOT yet done
+
+- No fix implemented -- this section is a diagnosis + fix-direction
+  writeup only, matching how bug #5 (prefill forward-pass race) was
+  first documented before being fixed in a later pass.
+- The open question above (which `shared_prefix` log line was
+  captured) is NOT resolved -- whoever picks this up next should
+  re-run with `EXO_PREFIX_CACHE_DIAG=1` on both nodes to get an
+  unambiguous, rank-tagged trace of `local_hit_length` at the ACTUAL
+  eligibility-check call site, before assuming this write-up's
+  mechanism is 100% correct.
+- No new regression test exists for this specific divergence (the
+  2-process test suite's requests are all either genuinely disjoint
+  cold-cache prompts with no shared chat-template ambiguity, or the
+  scenario doesn't naturally arise in the smaller synthetic prompts
+  those tests use).
+- The cluster was restored to known-good (single-request PP,
+  verified with a real "Paris" completion) immediately after this
+  finding -- no corrupted or crashed state was left running.
+
+### Practical guidance
+
+`EXO_PP_BATCHED_DECODE=1` must stay OFF (the `start_cluster.sh`
+default) in any production deployment. It is a REAL improvement over
+the pre-session state (the original hard deadlock is closed, and this
+bug fails loud/clean instead of corrupting or hanging), but N=2
+concurrent requests sharing even a trivial chat-template prefix (which
+is the COMMON case for any two requests using the same model/template)
+can still hit a clean but user-visible failure. Single-request PP
+(`EXO_PP_METAFRAME=1` alone, `EXO_PP_BATCHED_DECODE` unset) remains
+fully unaffected and repeatedly verified working throughout this
+entire multi-session campaign.
 
