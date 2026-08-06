@@ -1515,3 +1515,112 @@ batching, micro-batch interleaving, cancellation + DSpark-gating +
 realistic-load validation -- see the design doc
 (`docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`) Section 9
 for that plan.
+
+---
+
+## 2026-08-06 handoff: starting point for Phase 2/3/4
+
+This N=2 admission-race campaign (this doc) is now CLOSED -- all 7
+bugs fixed and hardware-verified (see the status update at the top of
+this file). This section is the concrete starting point for whoever
+picks up the design doc's Phase 2/3/4 plan next, since that plan was
+explicitly blocked on this campaign closing.
+
+### What's actually unblocked now
+
+Per the design doc (`docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`)
+Section 9's phased plan:
+
+- **Phase 2 -- prefill batching + chunked interleaving.** Batched/chunked
+  prefill through the scheduler this campaign built, reusing
+  `prefill_batched`'s padding/masking logic adapted for the PP split.
+  Validate correctness (Phase 0-style diff -- see Section 9's Phase 0
+  writeup for the established methodology: greedy-token-identical
+  output for cross-transport comparisons, tight logit tolerance for
+  same-transport comparisons) for BOTH the prefill and decode halves
+  together, at 2 concurrent requests with DIFFERENT context lengths
+  (not yet exercised by this campaign -- every N=2 test here used
+  short, roughly-equal-length prompts).
+- **Phase 3 -- micro-batch interleaving for decode throughput.** Add the
+  2-stage micro-batch interleaving from the design doc's Section 6.2
+  item 4. This is the FIRST point in the whole plan where a throughput
+  number should be trusted/reported -- correctness must already be
+  locked in by Phases 0-2 first, per the design doc's own explicit
+  ordering.
+- **Phase 4 -- cancellation, DSpark gating, N=2 realistic-load
+  validation.** Wire up cancellation (Section 6.2 item 6) and the
+  DSpark concurrency=1-only gate (item 7). Full correctness +
+  throughput validation at N=2 under realistic load -- design doc
+  suggests reusing/extending `/tmp/hermes_stress_test.py`'s
+  corpus-replay harness (built for the DSpark-off stability soak
+  test) for mixed prefill+decode concurrent load at N=2. **N>2 is
+  explicitly OUT of scope** per the user's confirmed target (Section
+  13.3) -- if ever revisited, re-check the KV-memory ceiling math
+  there first (N=4 doesn't fit at 500K context).
+
+### What Phase 2 inherits from this campaign (don't re-litigate)
+
+- The `pp_batched_decode_glue` single-writer `tick()`-gated channel
+  (`Rank0BatchedDecodeGlue`/`Rank1BatchedDecodeGlue`,
+  `src/exo/worker/engines/mlx/pp_batched_decode_glue.py`) is the
+  PROVEN, hardware-verified admission/decode coordination mechanism.
+  Any new Phase 2 wire traffic (prefill batching's own coordination)
+  MUST go through this same channel or an equally single-writer-safe
+  extension of it -- do NOT add a second independent coordination
+  path the way `EXO_DSV4_BATCHED_PREFILL` did (bug #7's first root
+  cause). If Phase 2's batched/chunked prefill needs its own new wire
+  message kind, follow the `PrefillMessage`/`PrefillReadyMessage`
+  pattern (a real ack/NACK handshake with a WALL-CLOCK bound if any
+  waiting is involved, per bug #7's second root cause) rather than a
+  fixed retry count.
+- **Whenever adding a new "this rank just finished/evicted something"
+  signal, it MUST propagate back through `_step_batched_decode()`'s
+  (or whatever Phase 2's equivalent method is) return value on BOTH
+  ranks**, mirroring `_step_pp_spec`'s established convention --
+  bug #7's third root cause was exactly this omission on rank 1, and
+  it is easy to reintroduce in new code that doesn't know to check
+  for it. If Phase 2 adds new per-rank internal state transitions
+  (e.g. a chunked-prefill completion), audit whether `runner.py`'s
+  OWN `active_tasks` admission gate needs to observe them the same
+  way.
+- `is_eligible_for_batched_decode()`
+  (`pp_batched_decode_eligibility.py`) is currently a PURE function of
+  request shape + static config (bug #6's fix) -- if Phase 2 needs to
+  add new eligibility conditions (e.g. "not currently prefill-batched
+  with an incompatible context length"), keep that invariant: NEVER
+  reintroduce a per-rank-mutable-state input. `is_eligible_for_batched_decode`'s
+  own docstring states the invariant explicitly and
+  `test_pp_batched_decode_eligibility.py`'s
+  `test_signature_has_no_per_rank_mutable_state_input` test enforces
+  it structurally -- extend that test's allowlist deliberately if a
+  new input is genuinely needed, don't just add a parameter.
+- `EXO_DSV4_BATCHED_PREFILL`'s rendezvous mechanism
+  (`runner.py`/`batch_generate.py`'s `submit_batched`) is now
+  correctly gated OFF when Phase 1 batched-decode is active (bug #7
+  fix #1). Phase 2's own prefill batching should probably SUPERSEDE
+  `EXO_DSV4_BATCHED_PREFILL` for the batched-decode-active case
+  entirely, rather than layering a third mechanism on top -- worth an
+  explicit design decision early in Phase 2, not a default assumption.
+
+### Practical guidance for the next session
+
+- `EXO_PP_BATCHED_DECODE=1` is currently OFF by `start_cluster.sh`'s
+  default (opt-in only) -- this is still the correct default. Phase 2
+  work should continue developing behind that same flag.
+- Every real-cluster step needs the user's own fresh explicit
+  go-ahead, per this campaign's standing rule throughout -- this
+  applies to Phase 2/3/4 work exactly the same way it applied here.
+- Follow this campaign's established crash discipline: single-request
+  smoke test (`"capital of France"` -> `"Paris"`, `finish_reason=stop`)
+  before AND after every real-cluster change, restore to safe
+  known-good immediately on any crash, never leave the cluster in an
+  unverified state while investigating.
+- This campaign's hardware-verified N=2 concurrent test (bug #7's
+  final verification) used SHORT, roughly-equal-length prompts across
+  4 rounds. Phase 2/3/4 work should deliberately test the cases this
+  campaign did NOT cover: different-length prompts, longer contexts,
+  N=2 requests that finish at very different times (stresses the
+  admission-gate drain path bug #7's third fix closes, under a
+  DIFFERENT timing profile than what was tested here), and sustained
+  multi-round load (this campaign's longest test was 4 back-to-back
+  rounds, not a soak test).
