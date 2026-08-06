@@ -2565,6 +2565,35 @@ class ExoBatchGenerator:
             logger.info(f"submit_batched fallback gate-1: len(tasks)={len(tasks)}")
             return [self.submit(*t) for t in tasks]
 
+        # 2026-08-06 bug #7 fix (Attempt 1 root cause, see
+        # docs/batched-decode-n2-admission-handoff-2026-08-05.md's
+        # "2026-08-06 root-cause analysis: Attempt 1 and Attempt 2 (bug
+        # #7)" section): Phase 1 batched-decode path active -- fall back
+        # to per-task submit() (each task's own eligibility check there
+        # routes it through the pp_batched_decode_glue single-writer
+        # tick()-gated channel, or the safe serial fallback for
+        # ineligible requests). EXO_DSV4_BATCHED_PREFILL's rendezvous
+        # batching here is a SEPARATE, older mechanism that sends real
+        # metaframe prefill traffic directly, with zero awareness of the
+        # tick()-gated admission protocol bugs #1/#5/#6 were built
+        # around -- letting it run while batched-decode is active lets
+        # rank 0 send genuine prefill wire bytes while rank 1 is mid-tick
+        # on the decode-step channel, hitting the EXACT
+        # SchedulerWireProtocolError version-mismatch crash bug #5's fix
+        # was supposed to have already closed (confirmed via real N=2
+        # hardware, 2026-08-06). Mirrors the existing `_pp_spec_active`
+        # check immediately below -- same shape, same reason (a
+        # DIFFERENT admission mechanism must not race the glue's own
+        # single-writer wire channel).
+        if self._batched_decode_active:
+            logger.info(
+                "submit_batched: Phase 1 batched-decode active — falling "
+                "back to per-task submit() (each task routes through the "
+                "pp_batched_decode_glue single-writer channel or the "
+                "safe serial fallback)"
+            )
+            return [self.submit(*t) for t in tasks]
+
         # PP-spec path: batched prefill not yet wired. Keep falling back.
         # MTP path: 2026-05-20 — was previously falling back to per-task
         # submit(), which serialized prefill across streams (stream 2

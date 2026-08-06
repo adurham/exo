@@ -132,6 +132,7 @@ single-writer channel via a new `MSG_KIND_PREFILL` control message
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -178,22 +179,51 @@ class GlueError(RuntimeError):
 
 # 2026-08-06 fix for the prefill forward-pass race (see
 # PrefillReadyMessage's own docstring in pp_scheduler_protocol.py for
-# the full incident this closes). Bounds how many consecutive ticks
-# rank 0 will re-announce the SAME pending prefill after a NACK
-# (rank 1 not yet locally registered for it) before failing loud
-# rather than retrying forever -- matching this session's own
-# root-cause-only, no-silent-mitigation standing rule: a bounded
-# retry across REAL, DIFFERENT tick() calls (each one giving rank 1's
-# own event loop a genuine, unblocked opportunity to drain its work
-# queue and register the matching _DeferredPrefill) is a real
-# resolution of a real, expected timing race -- not a disguised
-# sleep loop. Chosen generously: each retry costs exactly one
-# skipped tick's worth of latency for the currently-active batch
-# (mirrors the existing branch-2-before-branch-3 priority-ordering
-# cost already documented on Rank0BatchedDecodeGlue.tick()), and a
-# genuinely stuck rank 1 (crashed, hung) should fail loud well before
-# this bound rather than silently starving admission forever.
-_PREFILL_READY_MAX_RETRIES = 50
+# the full incident this closes). Bounds how long rank 0 will
+# re-announce the SAME pending prefill after a NACK (rank 1 not yet
+# locally registered for it) before failing loud rather than retrying
+# forever -- matching this session's own root-cause-only,
+# no-silent-mitigation standing rule: a bounded retry across REAL,
+# DIFFERENT tick() calls (each one giving rank 1's own event loop a
+# genuine, unblocked opportunity to drain its work queue and register
+# the matching _DeferredPrefill) is a real resolution of a real,
+# expected timing race -- not a disguised sleep loop.
+#
+# 2026-08-06 bug #7 fix (see
+# docs/batched-decode-n2-admission-handoff-2026-08-05.md's
+# "2026-08-06 root-cause analysis: Attempt 1 and Attempt 2 (bug #7)"
+# section): this bound used to be a fixed RETRY COUNT
+# (_PREFILL_READY_MAX_RETRIES=50), which real N=2 hardware testing
+# proved tripped falsely -- rank 0 crashed after receiving 50
+# CONSECUTIVE EXPLICIT NACKs (ready=False replies) from rank 1, which
+# is 50 consecutive PROOFS OF LIVENESS, not evidence of a stalled or
+# hung peer. The failure happened because rank 1's main thread was
+# legitimately busy running a DIFFERENT request's own real prefill
+# forward pass (real GPU compute, ~1.35s observed on hardware) on the
+# SAME thread that would otherwise reach its own submit()/
+# mark_prefill_registered() call for the new request -- an explicit
+# NACK proves rank 1 is alive and responding, it just hasn't gotten
+# to registration yet. A fixed retry count conflates "peer explicitly
+# said not-yet, N times" (expected, benign, scales with unrelated
+# concurrent work) with "peer went SILENT / timed out" (the actual
+# dead/hung-peer signal this guard is meant to catch).
+#
+# Fixed by switching to a WALL-CLOCK deadline measured from the FIRST
+# NACK for a given request_id, not a retry count: as long as rank 1
+# keeps explicitly replying (even every reply being ready=False), the
+# deadline is a real signal of "has genuinely too much wall-clock time
+# passed" rather than "has an arbitrary number of round-trips
+# happened" -- correctly generous under load (many ticks can complete
+# quickly while other requests are mid-prefill) and correctly strict
+# against a truly wedged peer (recv_prefill_ready_message's own
+# underlying recv has no timeout, so a hung/crashed rank 1 would
+# manifest as this call itself hanging, not as fast NACKs -- see that
+# function's own docstring). Chosen generously: several times longer
+# than any single real prefill this session's hardware testing has
+# observed (worst case so far: low single-digit seconds even at
+# moderate prompt lengths), while still catching a genuinely stuck
+# rank 1 well before an operator would otherwise notice.
+_PREFILL_READY_MAX_WAIT_SECONDS = 30.0
 
 
 @dataclass
@@ -329,11 +359,17 @@ class Rank0BatchedDecodeGlue:
     _prefill_step_id: int = field(default=0, init=False)
     # 2026-08-06 fix for the prefill forward-pass race (see
     # PrefillReadyMessage's own docstring in pp_scheduler_protocol.py
-    # for the full incident this closes). Tracks how many consecutive
-    # NACK'd tick() attempts a given pending request_id has had --
-    # see _PREFILL_READY_MAX_RETRIES's own docstring. Cleared on a
-    # successful (ready=True) grant.
-    _prefill_ready_retries: dict[int, int] = field(default_factory=dict)
+    # for the full incident this closes).
+    #
+    # 2026-08-06 bug #7 fix (see _PREFILL_READY_MAX_WAIT_SECONDS's own
+    # docstring above for the full rationale): tracks the WALL-CLOCK
+    # deadline (an absolute `time.monotonic()` value) for each pending
+    # request_id's FIRST NACK, not a retry count -- so the fail-stop
+    # guard measures genuine elapsed time waiting on rank 1, correctly
+    # tolerant of however many fast NACK round-trips happen along the
+    # way while rank 1 is legitimately busy with other work. Cleared
+    # on a successful (ready=True) grant.
+    _prefill_ready_deadline: dict[int, float] = field(default_factory=dict)
 
     def enqueue_admission(
         self,
@@ -484,7 +520,7 @@ class Rank0BatchedDecodeGlue:
         if self._pending_prefill:
             head = self._pending_prefill[0]
             # A slot already reserved FOR THIS EXACT PENDING REQUEST
-            # (tracked by `head.request_id in self._prefill_ready_retries`
+            # (tracked by `head.request_id in self._prefill_ready_deadline`
             # -- i.e. this is a RETRY of an attempt that already
             # reserved it, not a fresh grant to a DIFFERENT request)
             # must NOT count as "busy" here, or a retry can never
@@ -496,7 +532,7 @@ class Rank0BatchedDecodeGlue:
             # someone ELSE's reservation" from "busy with MY OWN,
             # still-pending reservation" without needing to widen
             # `_reserved_slots` into a slot->request_id map.
-            is_own_retry = head.request_id in self._prefill_ready_retries
+            is_own_retry = head.request_id in self._prefill_ready_deadline
             slot_busy = self.session.driver.cache_router.is_occupied(
                 head.cache_slot
             ) or (head.cache_slot in self._reserved_slots and not is_own_retry)
@@ -547,23 +583,40 @@ class Rank0BatchedDecodeGlue:
                         f"streams have desynced."
                     )
                 if not ack.ready:
-                    retries = self._prefill_ready_retries.get(head.request_id, 0) + 1
-                    if retries > _PREFILL_READY_MAX_RETRIES:
+                    # 2026-08-06 bug #7 fix (see
+                    # _PREFILL_READY_MAX_WAIT_SECONDS's own docstring
+                    # above for the full rationale): an explicit NACK
+                    # is a real reply proving rank 1 is ALIVE -- it is
+                    # not, by itself, evidence of a stall. Only genuine
+                    # elapsed WALL-CLOCK time waiting for rank 1 to
+                    # finish whatever else it's legitimately doing
+                    # (e.g. another request's own real prefill forward
+                    # pass) is the actual signal this guard should act
+                    # on, not how many times rank 1 happened to reply
+                    # "not yet" along the way.
+                    now = time.monotonic()
+                    deadline = self._prefill_ready_deadline.get(head.request_id)
+                    if deadline is None:
+                        deadline = now + _PREFILL_READY_MAX_WAIT_SECONDS
+                        self._prefill_ready_deadline[head.request_id] = deadline
+                    elif now > deadline:
+                        waited = now - (deadline - _PREFILL_READY_MAX_WAIT_SECONDS)
                         raise GlueError(
                             f"tick(): rank 1 NACK'd PrefillMessage for "
-                            f"request_id={head.request_id} "
-                            f"{_PREFILL_READY_MAX_RETRIES} consecutive "
-                            f"times -- rank 1's own local "
-                            f"_DeferredPrefill registration for this "
-                            f"request never arrived. This should self-"
-                            f"resolve within a handful of ticks under "
-                            f"normal scheduling; this many consecutive "
-                            f"NACKs indicates a genuine stall on rank 1 "
-                            f"(crashed, hung, or a real registration bug), "
-                            f"not an expected timing race. Refusing to "
-                            f"retry forever."
+                            f"request_id={head.request_id} for "
+                            f"{waited:.1f}s (limit "
+                            f"{_PREFILL_READY_MAX_WAIT_SECONDS:.1f}s) -- "
+                            f"rank 1's own local _DeferredPrefill "
+                            f"registration for this request never "
+                            f"arrived. This should self-resolve within a "
+                            f"handful of seconds under normal scheduling "
+                            f"(even while rank 1 is busy with another "
+                            f"request's own real prefill); this long a "
+                            f"wait indicates a genuine stall on rank 1 "
+                            f"(crashed, hung, or a real registration "
+                            f"bug), not an expected timing race. "
+                            f"Refusing to retry forever."
                         )
-                    self._prefill_ready_retries[head.request_id] = retries
                     # Leave head at the front of _pending_prefill (NOT
                     # popped) and its slot reserved -- the next tick()
                     # will retry the SAME request. Returning here
@@ -572,7 +625,7 @@ class Rank0BatchedDecodeGlue:
                     # per call" contract -- a NACK still counted as
                     # this tick's one real wire round-trip.
                     return {}, None, None
-                self._prefill_ready_retries.pop(head.request_id, None)
+                self._prefill_ready_deadline.pop(head.request_id, None)
                 self._pending_prefill.pop(0)
                 return (
                     {},
