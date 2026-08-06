@@ -1,22 +1,24 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06): FIVE bugs fixed and hardware-verified.
-The PrefillReadyMessage fix (#5) IS re-verified on real N=2
-hardware -- it worked exactly as designed: no crash, no deadlock. A
-SIXTH, architecturally distinct bug was found on that same real N=2
-run (clean fail-stop, not a crash) -- see "2026-08-06 finding:
-cross-rank eligibility divergence (is_prefix_cache_hit)" at the
-bottom of this file. The original admission-decision race documented
-below is closed and hardware-verified for the single-request case.**
-All FIVE prior real bugs found via real N=2 hardware testing are
-fixed (see "2026-08-06 fix: in-band PrefillMessage admission signal",
+**STATUS UPDATE (2026-08-06, later): ALL SIX real bugs found this
+campaign are now fixed AT THE CODE LEVEL.** Bug #6 (cross-rank
+eligibility divergence, `is_prefix_cache_hit`) is fixed -- see
+"2026-08-06 fix: eliminate cross-rank eligibility divergence (drop
+is_prefix_cache_hit)" at the bottom of this file for the full
+implementation, tests, and verification. **Bug #6's fix has NOT yet
+run on real N=2 hardware** -- everything below the code-level bar
+(basedpyright/ruff/pytest, all clean/passing) is confirmed; real
+hardware re-verification needs the user's own fresh explicit
+go-ahead, same as every other real-cluster step in this campaign.
+Bugs #1-5 remain hardware-verified as described below -- see
+"2026-08-06 fix: in-band PrefillMessage admission signal",
 "2026-08-06 follow-up: 4 real bugs in eviction+slot-reuse", and
-"2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)"
-sections below). Single-request PP is unaffected and repeatedly
-verified working on real hardware. `EXO_PP_BATCHED_DECODE=1` remains
-UNSAFE for production (N=2 concurrent DIFFERENT-topic requests with a
-shared chat-template prefix can hit a clean, loud, NON-corrupting
-failure) until bug #6 is closed.
+"2026-08-06 fix: prefill forward-pass race (PrefillReadyMessage)".
+Single-request PP is unaffected and repeatedly verified working on
+real hardware. `EXO_PP_BATCHED_DECODE=1` remains UNSAFE for
+production until bug #6's fix is verified on real N=2 hardware --
+the cluster must stay in the safe known-good config (single-request
+PP, `EXO_PP_BATCHED_DECODE` unset) until that happens.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -755,4 +757,178 @@ can still hit a clean but user-visible failure. Single-request PP
 (`EXO_PP_METAFRAME=1` alone, `EXO_PP_BATCHED_DECODE` unset) remains
 fully unaffected and repeatedly verified working throughout this
 entire multi-session campaign.
+
+---
+
+## 2026-08-06 archaeology: which `shared_prefix` log line was captured
+
+Resolves the "open question, NOT yet resolved" from the section above,
+via read-only code archaeology (no hardware rerun needed).
+
+**Definitive finding: the captured `[shared_prefix=2 tok (16%)]` line
+came from `add_kv_cache()`'s post-prefill write-back diagnostic
+(`cache.py:872`), NOT from `get_kv_cache()`'s pre-eligibility lookup.**
+
+- `add_kv_cache()` (defined `cache.py:812`) emits, unconditionally at
+  `logger.info` level (no env-var gate), a line of the exact form
+  `[shared_prefix={shared_depth} tok ({share_pct}%), unique=... tok,
+  trie_leaves=..., trie_bytes=...]` at `cache.py:872-876`. A
+  repo-wide grep confirms this is the ONLY call site anywhere in
+  source that can produce the `shared_prefix=` token.
+- `get_kv_cache()` (defined `cache.py:1165`) has its own diagnostic
+  lines (`[PREFIX_DIAG rank=...] ...`, `cache.py:1186-1189` and
+  `1202-1205`) but they use a DIFFERENT format (no `shared_prefix=`
+  substring) and are gated behind `EXO_PREFIX_CACHE_DIAG=1`
+  (`cache.py:1183`, `if _diag:` at 1185/1201) -- silent in the
+  captured run, since no diag flag was set.
+- Call ordering in `batch_generate.py` confirms `add_kv_cache()` runs
+  strictly AFTER the eligibility-determining lookup: `get_kv_cache()`
+  at line ~2018 feeds `is_eligible_for_batched_decode()` at line
+  ~2188, prefill runs, THEN `add_kv_cache()` runs at line ~4230 as a
+  post-hoc cross-session-dedup write-back.
+
+**Conclusion**: the write-up's hypothesis in the section above was
+correct -- the pre-eligibility `local_hit_length` values that actually
+diverged across ranks are NOT recoverable from the existing INFO-only
+log capture. A fresh `EXO_PREFIX_CACHE_DIAG=1` hardware rerun would
+have been the only way to see them directly. **This is now moot**: the
+fix below (2026-08-06) eliminates `is_prefix_cache_hit` from the
+eligibility computation entirely, so there is no longer any
+per-rank-divergent value to trace in the first place.
+
+---
+
+## 2026-08-06 fix: eliminate cross-rank eligibility divergence (drop is_prefix_cache_hit)
+
+**Status: FIXED at the code level, NOT yet hardware-verified.** Closes
+bug #6, the last of the six real bugs found this campaign.
+
+### Design note: this is NOT the wire-message fix originally scoped
+
+The "candidate fix direction" section above (and the original
+next-session handoff) proposed folding the eligibility DECISION into
+the single-writer `tick()`-gated wire channel -- rank 0 decides once
+and tells rank 1, mirroring the bug #1 (`PrefillMessage`) pattern. Two
+`consult` reviews during this session's implementation concluded a
+SIMPLER, strictly-better fix exists: **eliminate the divergent input
+entirely rather than building a channel to coordinate over it.**
+Reasoning:
+
+- Wire-communicating rank 0's verdict to rank 1 introduces an ordering
+  dependency (rank 1 must block or defer until the verdict arrives) --
+  exactly the class of complexity that produced bugs #1 and #5 in the
+  first place.
+- `is_prefix_cache_hit` was the ONLY eligibility input that could ever
+  diverge across ranks. Every other input
+  (`has_images`/`has_tools`/`uses_speculative_decode`/
+  `sharding_is_pipeline`/`batched_decode_enabled`) is either derived
+  from the request itself (both ranks receive the identical request
+  via the existing broadcast/queue) or static, cluster-wide-identical
+  startup config (`EXO_PP_BATCHED_DECODE` env, static shard topology).
+  Removing the one divergence-capable parameter makes both ranks
+  provably compute the IDENTICAL verdict with ZERO wire coordination
+  -- strictly simpler than adding a message to reconcile a value that
+  didn't need to exist as an eligibility input at all.
+- The existing design already treated ANY non-zero prefix hit as
+  making a request INELIGIBLE for batched-decode (the
+  `BatchedCacheRouter` vs `KVPrefixCache` lifecycle-incompatibility
+  concern documented in the original eligibility module). So dropping
+  the input doesn't change behavior for genuinely cache-benefiting
+  requests being pulled INTO batched-decode -- it only removes the
+  possibility of DIVERGENCE, at the cost of batched-eligible requests
+  never getting even a trivial chat-template-prefix cache hit while
+  `EXO_PP_BATCHED_DECODE=1` is active (an intentional, accepted
+  tradeoff -- see the code comment at the fix site for the full
+  reasoning).
+
+### What shipped
+
+1. **`pp_batched_decode_eligibility.py`**: `is_prefix_cache_hit`
+   removed from `is_eligible_for_batched_decode()`'s signature
+   entirely, along with its corresponding ineligibility branch/reason.
+   A new docstring paragraph states the invariant explicitly:
+   batched-decode eligibility is a PURE function of (request payload,
+   static startup config) -- NEVER of per-rank mutable state like
+   `KVPrefixCache`. This is now enforced structurally by the function
+   signature itself, not by a runtime flag check.
+
+2. **`batch_generate.py` (`ExoBatchGenerator.submit()`)**: the
+   batched-decode ROUTING decision moved to run BEFORE any
+   `KVPrefixCache` lookup (previously the eligibility check ran after
+   `get_kv_cache()`, consuming its `local_hit_length` result). Seed
+   and sampler construction were hoisted above the routing decision so
+   both the batched and serial paths can share one construction
+   (avoids duplicating that block). If a request is batched-eligible,
+   it is dispatched to the deferred-prefill batched path with a fresh
+   cache -- `get_kv_cache()` is never called, so the trie is never
+   read OR mutated for that request. If a request is shape-ineligible
+   (or batched-decode is inactive), it falls through UNCHANGED to the
+   existing serial path, which is now the ONLY place
+   `get_kv_cache()`/`pipeline_agree_prefix_hit_length()` run --
+   preserving 100% of existing serial-path prefix-cache behavior for
+   genuinely-ineligible requests (vision/tools/speculative-decode/
+   non-Pipeline-sharding).
+
+3. **`add_kv_cache()` fold-on-completion**: left UNCHANGED. Completed
+   batched-decode requests still fold their tokens into
+   `KVPrefixCache` on completion, so a LATER shape-ineligible request
+   (routed to the serial path) can still benefit from cache reuse
+   against a request that happened to go through batched-decode.
+   Since nothing reads the cache for batched-eligible requests
+   anymore, there is no divergence risk from keeping this fold --
+   serial-path lookups already tolerate/reconcile via the existing
+   `pipeline_agree_prefix_hit_length()` wire-agreement mechanism,
+   unchanged by this fix.
+
+4. **`test_pp_batched_decode_eligibility.py`**: two new regression
+   tests. `test_signature_has_no_per_rank_mutable_state_input` asserts
+   via `inspect.signature()` that the function's parameter set is
+   EXACTLY the request-derived/static-config allowlist -- forbidding
+   `is_prefix_cache_hit` and lookalike per-rank-state parameter names
+   from ever being re-added without this test failing first.
+   `test_two_simulated_ranks_compute_identical_verdicts_regardless_of_per_rank_state`
+   proves by construction that two simulated ranks calling the
+   function with identical request/config inputs get identical
+   verdicts, across every eligibility branch. Pre-existing tests
+   updated to drop the now-removed `is_prefix_cache_hit` kwarg and
+   disqualifying-condition case.
+
+### Verification (real, not simulated)
+
+- `uv run basedpyright` on all touched files: 305 errors (matches the
+  established whole-repo baseline exactly, confirmed via `git stash`
+  diff -- zero new errors introduced).
+- `uv run ruff check` on all touched files: 9 errors (matches
+  baseline exactly; `git stash` diff confirms the only differences
+  are line-number shifts from the code insertion, not new findings).
+- `uv run pytest -m ""` across the full relevant subsystem test set --
+  `test_pp_admission_race_subprocess.py`,
+  `test_pp_batched_decode_subprocess.py`,
+  `test_pp_batched_decode_glue_subprocess.py`, `test_pp_metaframe.py`,
+  `test_pp_batched_correctness_harness.py`,
+  `test_batch_generate_rank1_batched_decode_dispatch.py`,
+  `test_batch_generate_batched_decode_flag_off_smoke.py`, and
+  `test_pp_batched_decode_eligibility.py` (including both new tests)
+  -- **40 passed, 0 failed**. This includes the genuine 2-OS-process,
+  independent-event-loop subprocess tests (`test_pp_admission_race_
+  subprocess.py` and friends), not just in-process unit tests.
+- Broader `uv run pytest src/` run (excluding known-pre-existing
+  unrelated collection errors in `src/exo/download/tests` and
+  `test_routing_concurrency.py`, confirmed pre-existing via the same
+  `git stash` diff technique) showed no new failures attributable to
+  this change.
+
+### Not yet verified (needs its own fresh explicit go-ahead)
+
+This fix has NOT run on real 2-node hardware yet. Per this doc's own
+standing reminder, a real cluster relaunch/test needs its own separate
+explicit go-ahead -- not implied by this write-up. `EXO_PP_BATCHED_
+DECODE=1` must stay OFF in any deployment (the cluster should remain
+in its current safe known-good config: single-request PP,
+`EXO_PP_BATCHED_DECODE` unset) until a real N=2 hardware run confirms
+this fix behaves as designed -- specifically, that two genuinely
+concurrent, cold-start, DIFFERENT-topic requests sharing a
+chat-template prefix (the exact bug #6 repro scenario) now both reach
+the IDENTICAL eligibility verdict and no longer trigger the
+PrefillReadyMessage NACK-retry fail-stop guard.
 
