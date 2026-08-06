@@ -2394,6 +2394,57 @@ wiring) and real-cluster validation remain, in that order, gated on
 the user's own fresh explicit go-ahead for any real-cluster step per
 standing rules.
 
+**Stage 2 (ResumablePrefillSession) and Stage 3-part-1/2 (wire +
+tick() mechanism) — DONE, 2026-08-06, same session** (`exo` main
+commits `44b5c645c`, `79f0e198f`, `6ec04e964`).
+
+`ResumablePrefillSession` (`pp_prefill_session.py`) is the real
+caller that drives `_forward_steps` across multiple real pause/resume
+cycles -- consult-reviewed design: ONE `contextvars.Context` captured
+at construction, reused (never re-copied) per resume; `mx.eval()`
+happens at the point of genuinely pausing, never inside the generator
+itself; segment-size policy lives in the caller of `advance()`, not
+in the session or the generator. 9 tests, including the core proof:
+a session paused mid-chunk with a REAL independent forward pass run
+on a separate model instance in the gap, then resumed and completed
+correctly.
+
+`PrefillAdvanceMessage` (new wire kind, `MSG_KIND_PREFILL_ADVANCE`)
+is the lockstep signal keeping both ranks' sessions synchronized --
+NOT folded into `StepMessage` or `PrefillChunkAdvancedEvent` (both
+considered and rejected via consult review: different granularity,
+different "what happens this tick" semantics). Carries a dedicated
+`advance_seq` per-request counter -- the desync tripwire a consult
+review specifically recommended, turning a cross-rank divergence into
+an immediate loud `GlueError` instead of a later jaccl/RDMA hang.
+
+`Rank0BatchedDecodeGlue`/`Rank1BatchedDecodeGlue` both got a new
+`register_prefill_session()` + a new `tick()` rung: when a session is
+active, alternate between advancing it (sending the real
+`PrefillAdvanceMessage`) and running a decode step, so a chunk's many
+segments don't starve decode for the chunk's whole duration -- the
+same "outranking must not mean permanent starvation" fix branch 2
+already applied to prefill-vs-decode, one level deeper. Rank 1 never
+independently decides to advance (validates `request_id` AND
+`advance_seq` before ever touching its own session). `tick()`'s
+return-tuple shape changed on both classes; every real call site
+(2 production, several test/subprocess-worker) was found and updated.
+Full worker suite incl. both real 2-process subprocess tests: zero
+regressions throughout.
+
+**Explicitly NOT yet done, the actual remaining piece:** nothing in
+production calls `register_prefill_session()` yet.
+`pipeline_parallel_prefill` (`generate.py`) itself still needs its
+own generator-core split -- per an earlier consult review, this is
+NOT a "swap the inner `model(...)` call" job; the function's own
+chunk-size/dummy-iteration pipeline-bubble-fill bookkeeping needs the
+same treatment `DeepseekV4Model.__call__` already got (Stage 1b),
+so ITS OWN chunk boundaries can construct+register a session instead
+of blocking to completion. Until that exists, this entire mechanism
+is real, tested, wired machinery with nothing yet driving it in
+production -- the next real step, and real-cluster validation after
+it, both still gated on the user's own fresh explicit go-ahead.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
