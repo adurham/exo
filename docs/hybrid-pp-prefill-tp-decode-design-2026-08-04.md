@@ -1757,14 +1757,26 @@ unrelated failure, 0 regressions.
 
 **Remaining before this path is reachable/safe to actually enable in
 production:**
-1. `EXO_MAX_CONCURRENT_REQUESTS=1` (`start_cluster.sh`) needs its own
-   explicit, separately-reviewed change -- the batched path is
-   unreachable dead code without it (this is deliberate: the wiring
-   above cannot admit a second concurrent request until this
-   separate safety-relevant gate is relaxed for Pipeline mode).
-2. A real 2-node cluster A/B, which per this session's standing rule
-   requires the user's own separate explicit go-ahead -- not
-   something this session grants itself from a general "keep going."
+1. ~~`EXO_MAX_CONCURRENT_REQUESTS=1` (`start_cluster.sh`) needs its own
+   explicit, separately-reviewed change~~ DONE, 2026-08-05 (user
+   go-ahead given) -- `start_cluster.sh` now forwards
+   `EXO_PP_BATCHED_DECODE` and relaxes the cap to 2 ONLY when that
+   flag is genuinely active; every other Pipeline-mode path keeps the
+   original cap=1 enforcement unchanged. See commit
+   `ccf780f90`.
+2. ~~A real 2-node cluster A/B~~ ATTEMPTED, 2026-08-05 (user go-ahead
+   given) -- see Section 15 below for the full campaign: three real
+   wiring/environment bugs found and fixed via iterative real-cluster
+   testing, culminating in a genuinely successful single-request
+   result. **N=2 concurrent admission is NOT yet safe** -- a real,
+   previously-undiscovered architectural gap (not a wiring bug) was
+   found: nothing today guarantees all ranks agree on the exact tick
+   boundary where a second request gets admitted mid-stream, so
+   request B's prefill traffic on one rank can race request A's
+   decode-step traffic on the other over the same physical wire link.
+   This produced a real jaccl deadline/deadlock under a genuine
+   2-concurrent-request test. Section 15 has the full analysis and
+   the concrete, unstarted design work needed before N=2 is safe.
 
 **Phase 2 — Extend to prefill batching + chunked interleaving:** Add
 batched/chunked prefill through the new scheduler, reusing
@@ -2143,5 +2155,280 @@ prefill advantage AND TP's concurrent-decode CAPABILITY" — capability,
 not necessarily identical throughput). But this is the user's call to
 make explicitly, not something to assume silently, given how central
 Requirement 3's exact number was to this doc's own Section 2.5.**
+
+## 15. Real 2-node cluster campaign (2026-08-05) — three wiring/env
+    bugs found and fixed, single-request path VERIFIED WORKING, N=2
+    concurrent admission found UNSAFE (new architectural gap)
+
+Following the user's explicit go-ahead for a real cluster A/B (Section
+9's remaining item 2), this section records the full campaign: four
+real cluster launch attempts, three genuine bugs found and fixed via
+the standard cycle (crash → restore to known-good → diagnose locally →
+fix → redeploy → retry), and one real, previously-undiscovered
+architectural gap that blocks N=2 concurrency specifically.
+
+**Standing discipline followed throughout:** every crash was followed
+IMMEDIATELY by killing the crash-looping launcher and relaunching with
+`EXO_PP_METAFRAME=1` only (no `EXO_PP_BATCHED_DECODE`) to restore the
+cluster to its last-known-good state, verified via a real
+`curl`-issued "capital of France" → "Paris" `finish_reason=stop`
+inference each time before any further diagnosis — never left the
+cluster in a crashed/unverified state while investigating.
+
+### Attempt 1: batched layers crash outside `batch_step_scope`
+
+**Symptom:** both runners `RunnerFailed` immediately at warmup, before
+any real request:
+```
+RuntimeError: BatchedMetaFramedPipelineFirstLayer/LastLayer called
+outside an active batch_step_scope(...) block -- this is a caller bug
+(forgot to wrap the model(...) call), not a data-driven condition;
+refusing to guess at a request set
+```
+
+**Root cause:** installing `BatchedMetaFramedPipelineFirstLayer`/
+`LastLayer` at model-load time means EVERY forward pass through the
+model goes through them — not just `BatchedDecodeSession`'s own
+`tick()`-driven decode steps. Runner warmup's `prefill()` call
+(existing, unmodified code, no `batch_step_scope` wrapper — it was
+never designed to need one) crashed immediately on the fail-loud
+`_require_batch_step_context()` guard. The guard's fail-loud behavior
+was exactly correct for a genuine caller bug; the actual bug was that
+these classes never handled the legitimate "no batch context active"
+case at all.
+
+**Fix (commit `95ae867db`):** `BatchedMetaFramedPipelineFirstLayer`/
+`LastLayer` now SUBCLASS `MetaFramedPipelineFirstLayer`/
+`MetaFramedPipelineLastLayer` (Phase 0.5's already-cluster-verified
+single-request classes) instead of `CustomMlxLayer` directly, and fall
+back to `super().__call__()` whenever no `BatchStepContext` is active
+— reusing Phase 0.5's proven prefill/queue_sends/decode-gather logic
+UNCHANGED rather than reimplementing it. Per a `consult` review,
+subclassing (not composition-with-setter-forwarding) was the correct
+shape here specifically because both layer kinds construct with the
+exact same arguments as their base class, so there's no divergent
+state to reconcile — and it comes with a real bonus: `auto_parallel.py`'s
+`set_pipeline_prefill`/`set_pipeline_queue_sends` already
+`isinstance`-check for `MetaFramedPipelineLastLayer`, so the subclass
+picks up correct `is_prefill`/`queue_sends` behavior for the fallback
+path for free, zero additional wiring.
+
+New regression test
+(`test_batched_layers_fall_back_to_single_request_outside_batch_step_scope`)
+verified via `git stash` A/B to fail against the pre-fix code with the
+EXACT error message the cluster hit, and pass against the fix.
+
+### Attempt 2: rank 1's `submit()` never called `stage_local_cache`
+
+**Symptom:** first real single request after the Attempt-1 fix crashed
+on rank 1:
+```
+GlueError: tick(): rank 1 received an admission for request_id=0
+cache_slot=0 but has no staged local prefilled cache for it --
+stage_local_cache was never called for this request_id.
+```
+
+**Root cause:** `submit()`'s dispatch gate only checked
+`self._batched_decode_rank0_glue is not None` — always `False` on
+rank 1 (that glue lives on `_batched_decode_rank1_glue` instead), so
+every one of rank 1's requests silently fell through to the old
+serial `_mlx_gen.insert()` path and never staged its locally-prefilled
+KV cache. When rank 0's admission for that request arrived over the
+real wire, rank 1's glue had nothing staged to bind it to.
+
+**Fix (commit `ba02ba9c8`):** two changes. (1) `submit()`'s dispatch
+gate now checks EITHER glue being set, not just rank 0's. (2)
+`_submit_batched_decode()` now branches on which glue is present: rank
+0 calls `Rank0BatchedDecodeGlue.enqueue_admission` (unchanged), rank 1
+calls `Rank1BatchedDecodeGlue.stage_local_cache` instead. Both
+branches derive `uid`/`cache_slot` identically from the SAME symmetric
+counter state (`self._uid_counter` / `len(self._active_tasks)`) —
+correct because both ranks process the identical, globally-ordered
+stream of eligible submissions per this fork's own event-sourcing
+architecture, so no new cross-rank message is needed to keep them in
+sync.
+
+New regression test
+(`test_rank1_submit_dispatches_to_stage_local_cache_not_serial_insert`)
+constructs a real `ExoBatchGenerator` with a real `Rank1BatchedDecodeGlue`
+attached and proves `submit()` calls `stage_local_cache`, not the old
+serial path — verified via `git stash` A/B to fail against the pre-fix
+code and pass against the fix.
+
+### Attempt 3: `GenerationBatch.Response` kwargs didn't match the real
+    mlx-lm submodule — a LOCAL DEV-ENVIRONMENT bug, not a cluster bug
+
+**Symptom:** first real single request after the Attempt-2 fix crashed
+on rank 0:
+```
+TypeError: GenerationBatch.Response.__init__() got an unexpected
+keyword argument 'current_state'
+```
+
+**Root cause, once diagnosed: NOT a cluster/deployment problem.** The
+local dev Mac's `~/repos/exo/.venv` had silently drifted from the
+vendored `./mlx-lm` submodule after a plain `uv sync` earlier in the
+session. `uv.lock` pins `mlx-lm` by an exact git SHA, but the package
+version string never changes between mlx-lm commits, so `uv sync`
+alone reports "already satisfied" and skips reinstalling even when the
+submodule gitlink has moved. `start_cluster.sh`'s own comment (~line
+1156) documents this exact trap for the CLUSTER nodes and fixes it via
+`uv pip install --no-deps --force-reinstall ./mlx-lm` immediately after
+`uv sync --extra mlx --all-packages` — but the same fix needs running
+LOCALLY too after any submodule-adjacent work, and hadn't been. The
+drifted local venv had a NEWER `GenerationBatch.Response` with
+`current_state`/`match_sequence` fields that don't exist in the real,
+currently-vendored submodule (or on either cluster node) — so code
+written and unit-tested locally against the stale, newer signature
+crashed immediately against the real deployed mlx-lm. Compounding
+factor: a stale committed type stub (`.typings/mlx_lm/generate.pyi`)
+had the SAME phantom fields, so `basedpyright` agreed with the broken
+code instead of catching it.
+
+**Fix (commit `69a4f21e9`):** (1) rebuilt the local venv correctly
+(`uv sync --extra mlx --all-packages` + `uv pip install --no-deps
+--force-reinstall ./mlx-lm` + Rust bindings rebuild), matching
+`start_cluster.sh`'s own node-sync sequence exactly; (2) removed the
+two non-existent kwargs from the one call site that had them; (3)
+fixed the stale type stub to match the real submodule.
+
+**Significant side discovery:** the full worker suite's "1 pre-existing
+unrelated failure" reported consistently throughout this ENTIRE
+session (both this stretch and prior ones) was ALSO caused by this
+same venv drift, not a real codebase issue — confirmed by re-running
+that specific test 3× against the corrected venv, all passing. Saved
+to warm memory (fact 1216) as a durable environment-hygiene lesson.
+
+### Attempt 4: single request SUCCEEDS — first genuinely successful
+    real-cluster result on this design's decode path
+
+With all three fixes deployed, a real single request through the
+batched-decode path returned a clean, correct result:
+```json
+{"finish_reason": "stop", "content": "Paris", ...}
+```
+Both ranks' logs confirmed the batched-decode session actually
+engaged (`"Phase 1 batched-decode ENABLED (rank 0, admission+decode
+glue constructed)"` / `"...(rank 1, mirror glue constructed)"`), not a
+silent fallback to the serial path. This is a real milestone: every
+piece of Phase 1's admission → decode → response machinery, built and
+unit-tested across this and prior sessions, now genuinely works
+end-to-end on real hardware for the single-request case.
+
+### The N=2 concurrent-admission race — a real, NEW architectural gap
+
+Sending 2 genuinely concurrent HTTP requests (via a Python
+`ThreadPoolExecutor`, not sequential `curl` calls) to the same runner
+produced an HTTP 500, with the runner log showing:
+```
+[jaccl-v2] DEADLINE rank=0 call_id=604 all_recv=0/1 chunks_posted=1 small=1 peer_in_call=0
+[mlx scheduler] captured St13runtime_error in task: [jaccl] reliable_all_reduce_v2 deadline — clean re-place
+jaccl transport fault in generator.step(): [jaccl] reliable_all_reduce_v2 deadline — clean re-place.
+jaccl reconnect failed (RuntimeError('[jaccl] Recv failed: peer closed connection (EOF) fd=52 remaining=4'))
+Runner crashed with critical exception [jaccl] reliable_all_reduce_v2 deadline — clean re-place
+```
+(The exact per-rank collective trace at the moment of deadlock was
+NOT captured — the log rotated before it could be pulled during the
+subsequent restore-to-known-good. The finding below is the
+architectural analysis of WHY this class of failure is expected given
+the current design, not a byte-for-byte forensic trace of this
+specific occurrence. A follow-up attempt with `JACCL_TRACE_STEP=1` or
+similar per-step tracing enabled would be needed to capture the exact
+trace if bulletproof confirmation is wanted before starting the fix
+below.)
+
+**Root cause (per a `consult` review, restated more precisely than the
+first-pass framing):** the bug is NOT "prefill's wire traffic and
+decode's wire traffic are not mutually exclusive" — within one rank,
+the single synchronous `handle_generation_tasks()` while-loop in
+`runner.py` DOES serialize `submit()`/prefill and `step()`/decode; they
+cannot literally overlap on a given rank. The actual flaw is
+**unsynchronized admission decisions across ranks**: nothing today
+guarantees every rank decides to admit a given second request (call it
+B) at the same tick boundary. Each rank's runner independently pulls
+work off its own local `_work_queue` (populated by the master's
+event-sourced broadcast, which IS globally ordered — see Section 9's
+existing "why no new broadcast-admission protocol is needed" analysis
+for `submit()`/`_submit_batched_decode`'s own uid/cache_slot
+symmetry) and independently decides, each loop iteration, whether to
+call `submit()` (issuing PREFILL's own p2p send/recv collectives,
+using the single-request metaframe layers via this session's Attempt-1
+fallback) or `step()` (issuing DECODE's collectives via the batched
+glue's `tick()`). If rank 0 reaches request B's `submit()` in its own
+loop iteration before rank 1 has processed the same event off its own
+queue — plausible, since nothing synchronizes the two ranks' local
+polling cadence — rank 0 can start issuing prefill's collective
+pattern while rank 1 is still mid-`tick()` issuing decode's pattern.
+Two ranks running MISMATCHED collective operations on jaccl is exactly
+the deadline/deadlock signature observed.
+
+**Why this didn't surface in Attempt 4 or in this session's earlier
+2-process subprocess tests:** the subprocess harness
+(`test_pp_batched_decode_glue_subprocess.py`) drives BOTH ranks'
+`glue.tick()`/`glue.enqueue_admission()`/`glue.stage_local_cache()`
+calls explicitly, in lockstep, from a single test driver — it never
+exercises the REAL runner's independent per-rank event-loop polling at
+all, so it structurally cannot reproduce a race that only exists
+because two independent `runner.py` processes decide independently
+when to advance. This is a real, high-value catch for future
+regression-test design: a "real 2-process test" that still drives both
+sides from one script is not equivalent to two genuinely independent
+runner event loops.
+
+**What does NOT need to change:** the existing decode-step protocol
+itself (`pp_scheduler_wire.py`, `Rank0BatchedDecodeGlue`/
+`Rank1BatchedDecodeGlue`, `SchedulerCore`'s DRAINING-until-ack
+invariant) is not implicated — it was built single-writer from the
+start specifically to avoid exactly this class of hazard WITHIN the
+decode-step loop (see Section 9 item 4's "piggyback" design). The gap
+is specifically at the SEAM between `submit()`'s prefill dispatch and
+`step()`'s decode dispatch — the point where a runner decides which of
+the two to call next, independently per rank.
+
+**Concrete, UNSTARTED design work needed before N=2 admission is
+safe** (per the consult review's stated fix direction — this is a
+recommendation, not yet designed or built):
+
+1. **All ranks must agree, deterministically, on the exact tick
+   boundary where a new request is admitted** — not merely "both ranks
+   eventually see the event," but "both ranks switch from decode-mode
+   collectives to prefill-mode collectives (or vice versa) at the same
+   logical step." Per the consult review, the cheapest correct
+   mechanism is likely IN-BAND: fold the admission signal into the
+   EXISTING decode-step wire traffic (e.g. a flag in the batched
+   metaframe header, or piggybacked onto the next `StepMessage`) so
+   every rank naturally switches at the same well-defined point in the
+   traffic it's already synchronized on — rather than an
+   out-of-band/independent per-rank queue-polling decision, which is
+   exactly what creates the race today.
+2. **Only the driver/head rank (rank 0) should independently decide
+   "start prefill for request B now"** — rank 1 should never make that
+   decision from its own local queue state; it should react to a
+   signal from rank 0, mirroring the same "rank 0 decides, rank 1
+   reacts reactively" pattern the existing decode-admission protocol
+   already uses successfully (`RankOneMirrorDriver`'s reactive
+   cache_slot-transition detection).
+3. A genuinely new regression test that exercises two REAL, independent
+   `runner.py`-equivalent event loops (not a single test driver calling
+   both sides' glue methods directly) — since this is the exact gap
+   that let the race through undetected in this session's existing
+   subprocess test.
+4. Once (1)-(3) exist, re-attempt the real 2-node N=2 concurrent test
+   — with per-step jaccl tracing enabled this time
+   (`JACCL_TRACE_STEP=1` or equivalent) to capture the exact collective
+   trace and confirm the fix, not just the absence of a crash.
+
+**Cluster state at end of session:** restored to known-good
+(`EXO_PP_METAFRAME=1` only, `EXO_PP_BATCHED_DECODE` unset/off,
+`deepseek-ai/DeepSeek-V4-Flash-0731`, `RunnerReady` 2/2), verified via
+a real inference. All three fixes from this campaign are committed and
+pushed to `main` (commits `95ae867db`, `ba02ba9c8`, `69a4f21e9`,
+`ccf780f90`). The single-request batched-decode path is genuinely
+proven working on real hardware; N=2 concurrent admission remains
+correctly gated OFF pending the design work above — `EXO_MAX_CONCURRENT_REQUESTS`
+is still forced to 1 unless `EXO_PP_BATCHED_DECODE=1` is explicitly
+set (opt-in only), so this campaign's findings do not put any
+production traffic at risk.
+
 
 
