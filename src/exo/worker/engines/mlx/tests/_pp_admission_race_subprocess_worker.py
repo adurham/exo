@@ -418,7 +418,7 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
                     b_registered = True
 
                 trace.append(f"it={iteration} tick")
-                grant = rank1_glue.tick(model)
+                grant, _evicted_request_id = rank1_glue.tick(model)
                 if grant is not None:
                     assert grant.request_id == 2
                     trace.append(f"it={iteration} run_grant_prefill_b")

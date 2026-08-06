@@ -760,7 +760,7 @@ class Rank1BatchedDecodeGlue:
         self._staged_local_caches[request_id] = prefilled_cache
         self._staged_slot_for_request[request_id] = cache_slot
 
-    def tick(self, model: object) -> PrefillGrant | None:
+    def tick(self, model: object) -> tuple[PrefillGrant | None, int | None]:
         """The ONLY call site that ever touches
         ``mx.distributed.send``/``recv_like`` for this session on
         rank 1. Receives exactly one header, branches on its real
@@ -771,13 +771,22 @@ class Rank1BatchedDecodeGlue:
         ``recv_header`` directly and branch on ``.msg_kind``"), and
         drives exactly the matching local action.
 
-        Returns a ``PrefillGrant`` ONLY when a ``PrefillMessage`` was
-        just received AND this rank confirmed (via a real
-        ``PrefillReadyMessage`` ack -- see that dataclass's own
-        docstring for the full 2026-08-06 race this handshake closes)
-        it is ready to run the matching prefill forward pass RIGHT
-        NOW; ``None`` on every other kind of tick, including a
-        not-yet-ready ``PrefillMessage`` (see below).
+        Returns a 2-tuple ``(grant, evicted_request_id)``:
+
+        - ``grant``: a ``PrefillGrant`` ONLY when a ``PrefillMessage``
+          was just received AND this rank confirmed (via a real
+          ``PrefillReadyMessage`` ack -- see that dataclass's own
+          docstring for the full 2026-08-06 race this handshake
+          closes) it is ready to run the matching prefill forward
+          pass RIGHT NOW; ``None`` on every other kind of tick,
+          including a not-yet-ready ``PrefillMessage`` (see below).
+        - ``evicted_request_id``: the ``request_id`` this tick just
+          evicted, ONLY on an eviction tick (see the 2026-08-06 bug
+          #7 fix below for why the caller needs this); ``None`` on
+          every other kind of tick. Never both non-None in the same
+          call -- ``tick()``'s "at most one real thing per call"
+          contract still holds; a tick is either a prefill grant, an
+          eviction, a decode step, or an idle/not-ready no-op.
 
         RANK 1 NEVER INDEPENDENTLY DECIDES TO PREFILL (2026-08-06 fix
         for the real N=2 admission-race deadlock -- see module
@@ -803,6 +812,36 @@ class Rank1BatchedDecodeGlue:
         number of times, on a LATER ``tick()`` cycle -- giving this
         rank's own event loop real, unblocked opportunities to
         process its pending ``submit()`` work in between attempts).
+
+        2026-08-06 bug #7 fix (third root cause, see
+        docs/batched-decode-n2-admission-handoff-2026-08-05.md's
+        "2026-08-06 root-cause analysis" sections for the full
+        hardware evidence): before this fix, ``_step_batched_decode``
+        ALWAYS returned an empty response list on rank 1 -- meaning
+        rank 1's own eviction handling (this method's
+        ``MSG_KIND_EVICT`` branch, which correctly frees this glue's
+        internal cache_router/mirror bookkeeping) never propagated a
+        finish signal back up to ``runner.py``'s OWN, SEPARATE
+        admission gate (``self.active_tasks``, capped by
+        ``EXO_MAX_CONCURRENT_REQUESTS``). Real N=2 hardware testing
+        confirmed the consequence directly: rank 1's `runner.py`
+        never logged a second "runner ready" (which only fires when
+        ``self.active_tasks`` empties) for the ENTIRE remainder of a
+        session after the very first admission, even though the
+        request had already completed and been forgotten by every
+        OTHER part of the system (rank 0, the master, the client) --
+        rank 1's admission gate monotonically filled up and could
+        NEVER drain while batched-decode was active, so once
+        ``EXO_MAX_CONCURRENT_REQUESTS`` slots were consumed, every
+        subsequent request was deferred FOREVER on rank 1, not merely
+        delayed by a resolvable timing race. Fixed by having THIS
+        eviction branch return the evicted request_id so the caller
+        (``_step_batched_decode``) can synthesize a real
+        finish-classified response for it -- mirroring
+        ``_step_pp_spec``'s own established convention of returning
+        real classified responses unconditionally on BOTH ranks (not
+        just rank 0), which is exactly how that path's own
+        ``runner.py``-level admission gate already drains correctly.
         """
         from exo.worker.engines.mlx.pp_batched_decode_runtime import _ModelLike
 
@@ -820,15 +859,18 @@ class Rank1BatchedDecodeGlue:
                 group=self.group,
             )
             if not ready:
-                return None
+                return None, None
             self._registered_request_ids.discard(prefill_message.request_id)
-            return PrefillGrant(
-                request_id=prefill_message.request_id,
-                cache_slot=prefill_message.cache_slot,
-                n_prompt_tokens=prefill_message.n_prompt_tokens,
-                single_request_fallback=bool(
-                    prefill_message.flags & PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
+            return (
+                PrefillGrant(
+                    request_id=prefill_message.request_id,
+                    cache_slot=prefill_message.cache_slot,
+                    n_prompt_tokens=prefill_message.n_prompt_tokens,
+                    single_request_fallback=bool(
+                        prefill_message.flags & PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
+                    ),
                 ),
+                None,
             )
         if header.msg_kind == MSG_KIND_STEP:
             message = recv_step_table(header, self.src_rank, group=self.group)
@@ -893,6 +935,12 @@ class Rank1BatchedDecodeGlue:
             # (mirror state FREE) is the more defensible sequencing.
             ack = self.session.build_evict_ack(evict_message)
             send_evict_ack_message(ack, dst=self.src_rank, group=self.group)
+            # 2026-08-06 bug #7 fix: return the evicted request_id so
+            # the caller can synthesize a real finish-classified
+            # response -- see this method's own docstring for the
+            # full incident this closes (runner.py's admission gate
+            # on rank 1 could never drain without this).
+            return None, evict_message.request_id
         else:
             raise GlueError(
                 f"tick(): received unexpected msg_kind={header.msg_kind} "
@@ -900,4 +948,4 @@ class Rank1BatchedDecodeGlue:
                 f"MSG_KIND_STEP, or MSG_KIND_EVICT next on the wire for "
                 f"this session"
             )
-        return None
+        return None, None

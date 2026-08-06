@@ -3468,11 +3468,15 @@ class ExoBatchGenerator:
         ``GenerationBatch.Response`` objects (the SAME contract
         ``_step_pp_spec`` returns, so the rest of ``step()``'s
         response-processing loop works completely unmodified); rank 1
-        calls ``tick()`` on its mirror-only glue and always returns an
-        empty list (it has no decode output of its own to report to a
-        client -- matches ``RankOneMirrorSession``'s own
+        calls ``tick()`` on its mirror-only glue and returns an empty
+        list on every tick EXCEPT an eviction tick (see the 2026-08-06
+        bug #7 fix below) -- it has no DECODE output of its own to
+        report to a client (matches ``RankOneMirrorSession``'s own
         zero-decision-logic design and the pp_spec path's existing
-        rank1-produces-nothing convention).
+        rank1-produces-no-CONTENT convention: ``runner.py``'s
+        ``send_chunk`` already discards everything on non-zero ranks,
+        so the response's actual token/content is never observed by a
+        client either way).
 
         Eviction (a request hitting EOS/max_tokens/degeneration) is
         driven from HERE, sequentially AFTER ``tick()`` returns --
@@ -3495,11 +3499,43 @@ class ExoBatchGenerator:
         forward pass) and the control-message tick() that granted it
         never straddle two separate runner-loop iterations with other
         work interleaved in between.
+
+        2026-08-06 bug #7 fix (third root cause -- see
+        docs/batched-decode-n2-admission-handoff-2026-08-05.md's
+        "2026-08-06 root-cause analysis" sections for the full
+        hardware evidence): rank 1 unconditionally returning an empty
+        list meant ``runner.py``'s OWN admission gate
+        (``self.active_tasks``, capped by
+        ``EXO_MAX_CONCURRENT_REQUESTS``) could NEVER learn a request
+        had finished while batched-decode was active -- the gate
+        monotonically filled up and never drained, so every request
+        past the concurrency cap deferred FOREVER, confirmed directly
+        on real N=2 hardware. Fixed by translating
+        ``Rank1BatchedDecodeGlue.tick()``'s new ``evicted_request_id``
+        return value into a real finish-classified
+        ``GenerationBatch.Response`` -- this rank's own
+        ``batch_generator.py`` wrapper already pops the matching uid
+        out of its ``_active_tasks`` on any non-None ``finish_reason``
+        (the SAME mechanism ``_step_pp_spec`` already relies on for
+        rank 1's own admission-gate draining on that path), and
+        ``runner.py``'s outer gate follows suit. The actual
+        token/``finish_reason`` VALUE reported here is never observed
+        by a client (rank 1 never emits chunks -- see this method's
+        own docstring above); only the fact that SOME finish_reason is
+        set matters, to trigger the existing drain path.
         """
         if self._batched_decode_rank1_glue is not None:
-            grant = self._batched_decode_rank1_glue.tick(self.model)
+            grant, evicted_request_id = self._batched_decode_rank1_glue.tick(
+                self.model
+            )
             if grant is not None:
                 self._run_deferred_prefill_for_grant(grant, is_rank1=True)
+            if evicted_request_id is not None:
+                return [GenerationBatch.Response(
+                    uid=evicted_request_id, token=0, logprobs=mx.zeros(1),
+                    finish_reason="stop",
+                    prompt_cache=None, all_tokens=None,
+                )]
             return []
 
         assert self._batched_decode_rank0_glue is not None
