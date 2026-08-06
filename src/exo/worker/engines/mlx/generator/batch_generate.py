@@ -3012,8 +3012,8 @@ class ExoBatchGenerator:
             finish_reason = result.finish_reason
             responses.append(GenerationBatch.Response(
                 uid=request_id, token=result.token, logprobs=mx.zeros(1),
-                finish_reason=finish_reason, current_state=None,
-                match_sequence=None, prompt_cache=None, all_tokens=None,
+                finish_reason=finish_reason,
+                prompt_cache=None, all_tokens=None,
             ))
             if finish_reason is not None:
                 to_evict.append(request_id)
