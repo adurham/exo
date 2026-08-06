@@ -93,6 +93,7 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
     EvictMessage,
     Phase,
     PrefillMessage,
+    PrefillReadyMessage,
     StepMessage,
 )
 
@@ -106,6 +107,7 @@ MSG_KIND_STEP = 1
 MSG_KIND_EVICT = 2
 MSG_KIND_EVICT_ACK = 3
 MSG_KIND_PREFILL = 4
+MSG_KIND_PREFILL_READY = 5
 
 _HEADER_FIELDS = 5  # [version, msg_kind, step_id, field_d, field_e]
 _STEP_ROW_FIELDS = (
@@ -198,6 +200,7 @@ def _require_kind(header: WireHeader, expected: int, *, fn_name: str) -> None:
             MSG_KIND_EVICT: "MSG_KIND_EVICT",
             MSG_KIND_EVICT_ACK: "MSG_KIND_EVICT_ACK",
             MSG_KIND_PREFILL: "MSG_KIND_PREFILL",
+            MSG_KIND_PREFILL_READY: "MSG_KIND_PREFILL_READY",
         }
         raise SchedulerWireProtocolError(
             f"{fn_name}: expected {_names.get(expected, expected)} "
@@ -484,3 +487,48 @@ def recv_evict_ack_message(src: int, *, group: mx.distributed.Group) -> EvictAck
     docstring for the same caveat about production dispatch code)."""
     header = recv_header(src, group=group)
     return decode_evict_ack_message(header)
+
+
+def send_prefill_ready_message(
+    message: PrefillReadyMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillReadyMessage`` to ``dst`` -- rank 1's reply to
+    an incoming ``PrefillMessage`` (see that dataclass's own docstring
+    for the full 2026-08-06 race this closes). ``ready`` is encoded as
+    a plain 0/1 int32 in ``field_e``, matching this module's existing
+    convention of packing every field into the fixed-shape header
+    rather than adding a variable-length table for a 1-bit payload."""
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL_READY,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=1 if message.ready else 0,
+    )
+    send_header(header, dst, group=group)
+
+
+def decode_prefill_ready_message(header: WireHeader) -> PrefillReadyMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL_READY``, assemble the
+    ``PrefillReadyMessage``."""
+    _require_kind(header, MSG_KIND_PREFILL_READY, fn_name="decode_prefill_ready_message")
+    return PrefillReadyMessage(
+        step_id=header.step_id,
+        request_id=header.field_d,
+        ready=bool(header.field_e),
+    )
+
+
+def recv_prefill_ready_message(
+    src: int, *, group: mx.distributed.Group
+) -> PrefillReadyMessage:
+    """Convenience one-call wrapper (see ``recv_step_message``'s own
+    docstring for the same caveat about production dispatch code) --
+    THIS is the function rank 0's ``_run_deferred_prefill_for_grant``
+    calls to BLOCK (bounded, via the caller's own retry-count
+    discipline -- this function itself does not impose a timeout,
+    matching every other blocking recv in this module) until rank 1
+    confirms readiness before running its own prefill forward pass."""
+    header = recv_header(src, group=group)
+    return decode_prefill_ready_message(header)
+

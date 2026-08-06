@@ -265,6 +265,69 @@ class EvictAckMessage:
     cache_slot: int
 
 
+@dataclass(frozen=True)
+class PrefillReadyMessage:
+    """Rank 1's reply to a ``PrefillMessage`` -- closes the SECOND
+    real, hardware-confirmed race the PrefillMessage/PrefillGrant
+    mechanism left open (see ``docs/batched-decode-n2-admission-
+    handoff-2026-08-05.md``'s "2026-08-06 finding: prefill
+    forward-pass race" section for the full incident writeup this
+    message was built to fix -- a genuine
+    ``SchedulerWireProtocolError: recv_header: version mismatch``
+    crash on real N=2 hardware).
+
+    THE RACE THIS CLOSES: rank 0's own real prefill forward pass (the
+    thing ``PrefillMessage`` announces is about to happen) uses a
+    SEPARATE wire transport (``pp_metaframe.py``'s
+    ``send_metaframe``/``recv_metaframe``) from the scheduler-wire
+    control channel ``PrefillMessage`` itself travels on. Both ranks
+    MUST enter their respective ``model(...)`` forward calls at
+    roughly the SAME real time for the per-layer p2p hidden-state
+    exchange inside those calls to succeed (this is the SAME
+    already-proven invariant single-request PP prefill has always
+    relied on -- nothing new here). But `agree_on_tasks()` under
+    `EXO_PP_NO_COORD_COLLECTIVE=1` is PURELY LOCAL (confirmed by
+    reading ``get_coord_group``/``mx_all_gather_tasks``: `group=None`
+    is a genuine local-only no-op, not a degraded collective) -- so
+    rank 1's own local task-dispatch pipeline (its `_work_queue` /
+    `submit()` call for the SAME logical request) can genuinely lag
+    rank 0's, for real reasons (rank 1 busy mid-decode-step for a
+    DIFFERENT active request, or its own runner event loop simply not
+    having reached that point yet), not just microsecond jitter.
+    Without this ack, rank 0 had no way to know rank 1 wasn't ready
+    yet and would start sending real metaframe bytes onto the wire
+    regardless -- exactly the byte-stream corruption the real crash
+    exhibited (rank 1's own SCHEDULER-WIRE `recv_header()` call, made
+    from its own next unrelated `tick()` iteration, read rank 0's
+    METAFRAME bytes and decoded `version=3` where it expected `1`).
+
+    Rank 0 now BLOCKS on receiving this message (bounded, fails loud
+    on timeout -- never an unbounded wait) before running its own
+    prefill forward pass. ``ready=True`` means rank 1 has its matching
+    ``_DeferredPrefill`` entry registered and is about to run the SAME
+    real forward pass itself, immediately, synchronously, in the same
+    call that sends this ack -- so by the time rank 0 receives
+    ``ready=True`` and starts its own forward pass, rank 1 is either
+    already inside its matching ``model(...)`` call or about to be,
+    restoring the "both ranks enter together" timing invariant.
+    ``ready=False`` (a genuine, expected NACK, not an error) means
+    rank 1's own local dispatch hasn't registered this request yet --
+    rank 0 must NOT run its forward pass this tick; it returns to its
+    own loop and re-grants the SAME request on a LATER tick (bounded
+    retry count, fails loud rather than looping forever) rather than
+    blocking rank 1's own event loop with a synchronous wait for a
+    dict entry only that SAME loop's own later iteration can ever
+    populate (a real, confirmed deadlock hazard: rank 1's task-reader
+    thread only feeds a queue -- the SAME main-thread loop that would
+    run this wait is also the loop responsible for draining that
+    queue and calling `submit()`, so a blocking poll here cannot ever
+    resolve; consult-reviewed, see the handoff doc's own writeup)."""
+
+    step_id: int
+    request_id: int
+    ready: bool
+
+
 # ---------------------------------------------------------------------
 # Events fed into SchedulerCore.handle() (rank 0's pure decision logic).
 # These are NOT wire messages -- they are the local inputs that drive

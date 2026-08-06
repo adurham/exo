@@ -149,6 +149,7 @@ from exo.worker.engines.mlx.pp_batched_decode_runtime import (
 from exo.worker.engines.mlx.pp_scheduler_protocol import (
     PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
     PrefillMessage,
+    PrefillReadyMessage,
 )
 from exo.worker.engines.mlx.pp_scheduler_wire import (
     MSG_KIND_EVICT,
@@ -157,9 +158,11 @@ from exo.worker.engines.mlx.pp_scheduler_wire import (
     decode_evict_message,
     recv_header,
     recv_prefill_body,
+    recv_prefill_ready_message,
     recv_step_table,
     send_evict_ack_message,
     send_prefill_message,
+    send_prefill_ready_message,
     send_step_message,
 )
 
@@ -171,6 +174,26 @@ if TYPE_CHECKING:
 class GlueError(RuntimeError):
     """Raised on any glue-layer invariant violation -- fail-stop by
     design, matching this whole session's established discipline."""
+
+
+# 2026-08-06 fix for the prefill forward-pass race (see
+# PrefillReadyMessage's own docstring in pp_scheduler_protocol.py for
+# the full incident this closes). Bounds how many consecutive ticks
+# rank 0 will re-announce the SAME pending prefill after a NACK
+# (rank 1 not yet locally registered for it) before failing loud
+# rather than retrying forever -- matching this session's own
+# root-cause-only, no-silent-mitigation standing rule: a bounded
+# retry across REAL, DIFFERENT tick() calls (each one giving rank 1's
+# own event loop a genuine, unblocked opportunity to drain its work
+# queue and register the matching _DeferredPrefill) is a real
+# resolution of a real, expected timing race -- not a disguised
+# sleep loop. Chosen generously: each retry costs exactly one
+# skipped tick's worth of latency for the currently-active batch
+# (mirrors the existing branch-2-before-branch-3 priority-ordering
+# cost already documented on Rank0BatchedDecodeGlue.tick()), and a
+# genuinely stuck rank 1 (crashed, hung) should fail loud well before
+# this bound rather than silently starving admission forever.
+_PREFILL_READY_MAX_RETRIES = 50
 
 
 @dataclass
@@ -304,6 +327,13 @@ class Rank0BatchedDecodeGlue:
     # order, because rank 0 never sends two without an intervening
     # StepMessage/EvictMessage, by this very tick() call structure).
     _prefill_step_id: int = field(default=0, init=False)
+    # 2026-08-06 fix for the prefill forward-pass race (see
+    # PrefillReadyMessage's own docstring in pp_scheduler_protocol.py
+    # for the full incident this closes). Tracks how many consecutive
+    # NACK'd tick() attempts a given pending request_id has had --
+    # see _PREFILL_READY_MAX_RETRIES's own docstring. Cleared on a
+    # successful (ready=True) grant.
+    _prefill_ready_retries: dict[int, int] = field(default_factory=dict)
 
     def enqueue_admission(
         self,
@@ -453,12 +483,32 @@ class Rank0BatchedDecodeGlue:
 
         if self._pending_prefill:
             head = self._pending_prefill[0]
-            slot_busy = (
-                self.session.driver.cache_router.is_occupied(head.cache_slot)
-                or head.cache_slot in self._reserved_slots
-            )
+            # A slot already reserved FOR THIS EXACT PENDING REQUEST
+            # (tracked by `head.request_id in self._prefill_ready_retries`
+            # -- i.e. this is a RETRY of an attempt that already
+            # reserved it, not a fresh grant to a DIFFERENT request)
+            # must NOT count as "busy" here, or a retry can never
+            # proceed past its own first reservation. `_reserved_slots`
+            # itself only tracks slot NUMBERS (not which request holds
+            # the reservation) since it's a cross-request mutual-
+            # exclusion guard (module docstring/field comment above);
+            # this retry-dict check is what disambiguates "busy with
+            # someone ELSE's reservation" from "busy with MY OWN,
+            # still-pending reservation" without needing to widen
+            # `_reserved_slots` into a slot->request_id map.
+            is_own_retry = head.request_id in self._prefill_ready_retries
+            slot_busy = self.session.driver.cache_router.is_occupied(
+                head.cache_slot
+            ) or (head.cache_slot in self._reserved_slots and not is_own_retry)
             if not slot_busy:
-                self._pending_prefill.pop(0)
+                # Reserve the slot on the FIRST attempt for this
+                # request only -- idempotent across retries (a NACK
+                # leaves ``head`` at the front of ``_pending_prefill``
+                # for the next tick() to retry, so this branch can run
+                # again for the SAME request before it's ever popped;
+                # ``head.cache_slot in self._reserved_slots`` above
+                # already guards re-reservation, this comment just
+                # makes that fact explicit at the call site).
                 self._reserved_slots.add(head.cache_slot)
                 flags = (
                     PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
@@ -476,6 +526,54 @@ class Rank0BatchedDecodeGlue:
                 send_prefill_message(
                     prefill_message, dst=self.dst_rank, group=self.group
                 )
+                # 2026-08-06 fix for the prefill forward-pass race (see
+                # PrefillReadyMessage's own docstring in
+                # pp_scheduler_protocol.py for the full incident this
+                # closes): BLOCK for rank 1's real ack before running
+                # (granting the caller permission to run) the real
+                # prefill forward pass. This is the single change that
+                # makes it safe for the caller to immediately follow a
+                # returned PrefillGrant with real metaframe wire
+                # traffic -- rank 1 has JUST confirmed, on this same
+                # wire, that it is genuinely ready to run its own
+                # matching forward pass right now.
+                ack = recv_prefill_ready_message(self.dst_rank, group=self.group)
+                if ack.request_id != head.request_id:
+                    raise GlueError(
+                        f"tick(): PrefillReadyMessage request_id mismatch "
+                        f"-- sent PrefillMessage for request_id="
+                        f"{head.request_id}, received ack for request_id="
+                        f"{ack.request_id}. The two ranks' control-message "
+                        f"streams have desynced."
+                    )
+                if not ack.ready:
+                    retries = self._prefill_ready_retries.get(head.request_id, 0) + 1
+                    if retries > _PREFILL_READY_MAX_RETRIES:
+                        raise GlueError(
+                            f"tick(): rank 1 NACK'd PrefillMessage for "
+                            f"request_id={head.request_id} "
+                            f"{_PREFILL_READY_MAX_RETRIES} consecutive "
+                            f"times -- rank 1's own local "
+                            f"_DeferredPrefill registration for this "
+                            f"request never arrived. This should self-"
+                            f"resolve within a handful of ticks under "
+                            f"normal scheduling; this many consecutive "
+                            f"NACKs indicates a genuine stall on rank 1 "
+                            f"(crashed, hung, or a real registration bug), "
+                            f"not an expected timing race. Refusing to "
+                            f"retry forever."
+                        )
+                    self._prefill_ready_retries[head.request_id] = retries
+                    # Leave head at the front of _pending_prefill (NOT
+                    # popped) and its slot reserved -- the next tick()
+                    # will retry the SAME request. Returning here
+                    # (rather than falling through to decode below)
+                    # keeps this tick's OWN single "at most one thing
+                    # per call" contract -- a NACK still counted as
+                    # this tick's one real wire round-trip.
+                    return {}, None, None
+                self._prefill_ready_retries.pop(head.request_id, None)
+                self._pending_prefill.pop(0)
                 return (
                     {},
                     None,
@@ -560,6 +658,33 @@ class Rank1BatchedDecodeGlue:
     # cache_slot, not which staged request_id it corresponds to except
     # via this glue's own bookkeeping at stage() time).
     _staged_slot_for_request: dict[int, int] = field(default_factory=dict)
+    # 2026-08-06 fix for the prefill forward-pass race (see
+    # PrefillReadyMessage's own docstring in pp_scheduler_protocol.py
+    # for the full incident this closes -- a real
+    # SchedulerWireProtocolError crash on N=2 hardware). Populated by
+    # ``mark_prefill_registered`` (called from
+    # ``ExoBatchGenerator.submit()`` the INSTANT this rank registers
+    # its own local ``_DeferredPrefill`` for a request -- pure local
+    # bookkeeping, zero wire I/O, matching every other *_registered/
+    # *_staged method in this module). ``tick()``'s ``MSG_KIND_PREFILL``
+    # branch checks membership here SYNCHRONOUSLY, inline, to decide
+    # whether to ACK or NACK rank 0's ``PrefillMessage`` -- never a
+    # callback into ``ExoBatchGenerator``, keeping this glue
+    # self-contained and its "tick() is the ONLY wire I/O call site"
+    # invariant intact.
+    _registered_request_ids: set[int] = field(default_factory=set)
+
+    def mark_prefill_registered(self, request_id: int) -> None:
+        """Called from ``ExoBatchGenerator.submit()`` the moment this
+        rank registers its own local ``_DeferredPrefill`` closure for
+        ``request_id`` -- BEFORE any ``PrefillMessage`` for it may
+        have arrived (the common case) or possibly AFTER (the real,
+        expected timing race two independently-scheduled per-rank
+        event loops can hit). Either ordering is safe: this is pure
+        set membership, checked fresh on whatever ``tick()`` call
+        actually receives the matching ``PrefillMessage``, whenever
+        that happens to be. Pure in-memory update, zero wire I/O."""
+        self._registered_request_ids.add(request_id)
 
     def stage_local_cache(
         self, request_id: int, cache_slot: int, prefilled_cache: "KVCacheType"
@@ -594,21 +719,56 @@ class Rank1BatchedDecodeGlue:
         drives exactly the matching local action.
 
         Returns a ``PrefillGrant`` ONLY when a ``PrefillMessage`` was
-        just received (see that dataclass's own docstring for what
-        the caller must do with it); ``None`` on every other kind of
-        tick, INCLUDING the "unmet" case documented below.
+        just received AND this rank confirmed (via a real
+        ``PrefillReadyMessage`` ack -- see that dataclass's own
+        docstring for the full 2026-08-06 race this handshake closes)
+        it is ready to run the matching prefill forward pass RIGHT
+        NOW; ``None`` on every other kind of tick, including a
+        not-yet-ready ``PrefillMessage`` (see below).
 
         RANK 1 NEVER INDEPENDENTLY DECIDES TO PREFILL (2026-08-06 fix
         for the real N=2 admission-race deadlock -- see module
         docstring's 2026-08-06 update). This is the reactive half of
         that fix: the only way this glue ever learns "prefill request
         X now" is by receiving rank 0's ``PrefillMessage`` right here.
+
+        2026-08-06 UPDATE (prefill forward-pass race fix -- see
+        ``PrefillReadyMessage``'s own docstring in
+        ``pp_scheduler_protocol.py`` for the full incident this
+        closes): a received ``PrefillMessage`` no longer
+        unconditionally returns a grant. This rank replies with a
+        real ``PrefillReadyMessage`` FIRST -- ``ready=True`` only if
+        ``mark_prefill_registered`` was already called for this
+        ``request_id`` (this rank's own local ``_DeferredPrefill`` is
+        genuinely ready to run). If not yet registered, this rank
+        sends ``ready=False`` and returns ``None`` -- it does NOT
+        block/wait for registration here (that would deadlock: the
+        SAME main-thread runner loop that would run this wait is also
+        the loop responsible for draining the work queue and calling
+        ``submit()``, which is the only thing that could ever satisfy
+        the wait). Rank 0 is responsible for retrying (a bounded
+        number of times, on a LATER ``tick()`` cycle -- giving this
+        rank's own event loop real, unblocked opportunities to
+        process its pending ``submit()`` work in between attempts).
         """
         from exo.worker.engines.mlx.pp_batched_decode_runtime import _ModelLike
 
         header = recv_header(self.src_rank, group=self.group)
         if header.msg_kind == MSG_KIND_PREFILL:
             prefill_message = recv_prefill_body(header, self.src_rank, group=self.group)
+            ready = prefill_message.request_id in self._registered_request_ids
+            send_prefill_ready_message(
+                PrefillReadyMessage(
+                    step_id=prefill_message.step_id,
+                    request_id=prefill_message.request_id,
+                    ready=ready,
+                ),
+                dst=self.src_rank,
+                group=self.group,
+            )
+            if not ready:
+                return None
+            self._registered_request_ids.discard(prefill_message.request_id)
             return PrefillGrant(
                 request_id=prefill_message.request_id,
                 cache_slot=prefill_message.cache_slot,

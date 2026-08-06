@@ -339,6 +339,7 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
         # ------------------------------------------------------------
         tokens_a: list[int] = []
         b_enqueued = False
+        b_registered = False
         b_prefill_done = False
         for iteration in range(_ITERATIONS):
             time.sleep(schedule_rng.uniform(0.0, _MAX_JITTER_SECONDS))
@@ -385,6 +386,37 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
                     )
             else:
                 assert rank1_glue is not None
+                # 2026-08-06 fix (prefill forward-pass race, see
+                # PrefillReadyMessage's own docstring in
+                # pp_scheduler_protocol.py): rank 1 must call
+                # mark_prefill_registered() on its OWN independent
+                # schedule -- mirroring submit()'s real call site in
+                # production, and matching rank 0's own independently-
+                # randomized enqueue_prefill timing above -- for
+                # tick() to ever return a real (non-NACK'd) grant.
+                # Deliberately uses the SAME kind of independent
+                # per-rank random gate as rank 0's b_available/
+                # do_enqueue_b_now logic (not synchronized with it in
+                # any way) so this test continues to genuinely
+                # exercise the real timing race the ack/NACK handshake
+                # exists to resolve, rather than always registering
+                # suspiciously early/late relative to rank 0's own
+                # schedule.
+                b_registerable = (
+                    iteration >= _B_EARLIEST_ITERATION and not b_registered
+                )
+                must_register_b_now = (
+                    b_registerable and iteration == _ITERATIONS - 2
+                )
+                do_register_b_now = must_register_b_now or (
+                    b_registerable
+                    and schedule_rng.random() < _PREFILL_PICK_PROBABILITY
+                )
+                if do_register_b_now:
+                    trace.append(f"it={iteration} mark_prefill_registered_b")
+                    rank1_glue.mark_prefill_registered(2)
+                    b_registered = True
+
                 trace.append(f"it={iteration} tick")
                 grant = rank1_glue.tick(model)
                 if grant is not None:

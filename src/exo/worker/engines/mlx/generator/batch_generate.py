@@ -756,26 +756,6 @@ class ExoBatchGenerator:
     _deferred_prefill_by_uid: dict[int, "_DeferredPrefill"] = field(
         init=False, default_factory=dict
     )
-    # Rank-1-only: a PrefillGrant that arrived (via _step_batched_decode's
-    # rank-1 tick()) BEFORE this rank's own submit() had a chance to
-    # register the matching _DeferredPrefill for the same request_id.
-    # This is a genuine, expected race (NOT a bug): rank 0's tick() and
-    # rank 1's submit() are driven by two independent per-rank
-    # schedules (the runner's step()/submit() calls interleave freely),
-    # so rank 0 can process the globally-ordered "admit this request"
-    # event -- and issue the resulting PrefillMessage -- before rank 1's
-    # own submit() call for the SAME request has run. The event-sourcing
-    # broadcast architecture (both ranks subscribe to the same globally-
-    # ordered event stream) guarantees the request's metadata WILL
-    # eventually reach rank 1's local queue and submit() WILL eventually
-    # run for it, so parking the grant here (instead of dropping it or
-    # retrying/sleeping) is a real state-machine fix, not a mitigation:
-    # submit()'s own registration point checks this dict immediately
-    # after registering and runs the deferred prefill right there if a
-    # grant was already parked for this uid.
-    _parked_prefill_grants: dict[int, "PrefillGrant"] = field(
-        init=False, default_factory=dict
-    )
 
     def __post_init__(self) -> None:
         use_speculative = os.environ.get("EXO_SPECULATIVE", "0") == "1"
@@ -1367,18 +1347,30 @@ class ExoBatchGenerator:
             )
         else:
             assert self._batched_decode_rank1_glue is not None
-            # Rank 1 registers the deferred work above but does NOT call
-            # anything on its glue yet -- it only reacts to a PrefillGrant
-            # arriving via tick() (_run_deferred_prefill_for_grant). If a
-            # grant for THIS uid already arrived and was parked (rank 0's
-            # tick() can race ahead of this rank's own submit() -- see
-            # _parked_prefill_grants's own field docstring for the full
-            # rationale), service it immediately, synchronously, right
-            # here -- rather than waiting for another _step_batched_decode
-            # cycle to notice.
-            parked = self._parked_prefill_grants.pop(uid, None)
-            if parked is not None:
-                self._run_deferred_prefill_for_grant(parked, is_rank1=True)
+            # 2026-08-06 fix for the prefill forward-pass race (see
+            # PrefillReadyMessage's own docstring in
+            # pp_scheduler_protocol.py for the full incident this
+            # closes, and this method's own module for the earlier
+            # "parking" mechanism this REPLACES): rank 1 registers its
+            # own local readiness the INSTANT this _DeferredPrefill
+            # exists -- pure local bookkeeping, zero wire I/O. If
+            # rank 0's PrefillMessage for this uid already arrived
+            # (rank 0's tick() can race ahead of this rank's own
+            # submit(), a real and expected timing skew between two
+            # independently-scheduled per-rank event loops), rank 0
+            # already got a NACK for that attempt and will retry on a
+            # LATER tick() -- this mark_prefill_registered() call is
+            # what makes that RETRY succeed; there is no "already
+            # arrived, service it now" special case to handle here
+            # anymore (the old _parked_prefill_grants mechanism this
+            # replaced tried to service a grant synchronously the
+            # instant registration happened, WITHOUT rank 0 having any
+            # way to know whether that succeeded -- which is exactly
+            # the race that produced the real
+            # SchedulerWireProtocolError crash on N=2 hardware; see the
+            # handoff doc's "2026-08-06 finding" section for the full
+            # incident writeup).
+            self._batched_decode_rank1_glue.mark_prefill_registered(uid)
 
         self._active_tasks[uid] = _EngineTask(
             uid=uid,
@@ -3335,40 +3327,45 @@ class ExoBatchGenerator:
         ``enqueue_admission`` (rank 0) / ``stage_local_cache``
         (rank 1).
 
-        RANK-1 PARKING (see ``_parked_prefill_grants``'s own field
-        docstring for the full rationale): if this rank's own
-        ``submit()`` hasn't registered the matching
-        ``_DeferredPrefill`` yet (a real, expected timing race
-        between two independently-scheduled per-rank event loops
-        consuming the SAME globally-ordered event stream at
-        different speeds), the grant is parked here instead of
-        raising or retrying -- ``submit()``'s own registration point
-        checks ``_parked_prefill_grants`` immediately after
-        registering and completes the deferred work itself if a
-        grant was already waiting. This is a genuine state-machine
-        resolution of the race (the grant WILL eventually be
-        serviced, deterministically, whichever call reaches the
-        "both halves present" condition second), not a masked
-        sleep/retry mitigation.
+        2026-08-06 UPDATE (prefill forward-pass race fix -- see
+        ``PrefillReadyMessage``'s own docstring in
+        ``pp_scheduler_protocol.py`` for the full incident this
+        closes): this method is now ONLY EVER CALLED with a grant for
+        a request whose matching ``_DeferredPrefill`` is genuinely
+        registered. The real-hardware-confirmed race this used to
+        paper over with a "parking" mechanism (rank 1 receiving a
+        grant before its own registration existed, then silently
+        deferring the real forward pass to a LATER, unsynchronized
+        call -- while rank 0 had ALREADY started sending real
+        metaframe bytes, assuming rank 1 was running its matching
+        side right now) is now closed one level up, in
+        ``Rank1BatchedDecodeGlue.tick()``'s own ``PrefillReadyMessage``
+        ack/NACK handshake: rank 1 NEVER returns a grant for an
+        unregistered request in the first place (it NACKs instead,
+        and rank 0 retries on a later tick until registration lands).
+        A missing ``_DeferredPrefill`` here is therefore now
+        structurally impossible on EITHER rank -- fail loud
+        immediately rather than silently parking, matching rank 0's
+        own pre-existing fail-loud behavior for the identical case.
         """
         deferred = self._deferred_prefill_by_uid.pop(grant.request_id, None)
         if deferred is None:
-            if not is_rank1:
-                from exo.worker.engines.mlx.pp_batched_decode_glue import GlueError
+            from exo.worker.engines.mlx.pp_batched_decode_glue import GlueError
 
-                raise GlueError(
-                    f"_run_deferred_prefill_for_grant: rank 0 received its "
-                    f"own PrefillGrant for request_id={grant.request_id} "
-                    f"but has no matching _DeferredPrefill registered -- "
-                    f"rank 0's enqueue_prefill() and this grant's origin "
-                    f"are the SAME call path (Rank0BatchedDecodeGlue.tick() "
-                    f"only ever grants a request it itself popped from its "
-                    f"own _pending_prefill queue), so this should be "
-                    f"structurally impossible; refusing to guess at a "
-                    f"prefill to run."
-                )
-            self._parked_prefill_grants[grant.request_id] = grant
-            return
+            raise GlueError(
+                f"_run_deferred_prefill_for_grant: rank "
+                f"{1 if is_rank1 else 0} received a PrefillGrant for "
+                f"request_id={grant.request_id} but has no matching "
+                f"_DeferredPrefill registered. Since the 2026-08-06 "
+                f"PrefillReadyMessage ack/NACK fix, this is "
+                f"structurally impossible on EITHER rank -- rank 1 "
+                f"only ever returns a grant for a request its own "
+                f"mark_prefill_registered() already covered (it NACKs "
+                f"and rank 0 retries otherwise), and rank 0's grant "
+                f"origin is the SAME call path as its own "
+                f"enqueue_prefill(). Refusing to guess at a prefill "
+                f"to run."
+            )
 
         # cache_snapshots is already consumed inside run_prefill()'s own
         # closure (it calls _save_prefix_cache with it before returning) --
