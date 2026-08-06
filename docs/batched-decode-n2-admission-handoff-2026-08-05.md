@@ -1,32 +1,39 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
-**STATUS UPDATE (2026-08-06, latest): bug #7's TWO root causes are now
-IDENTIFIED AND FIXED AT THE CODE LEVEL, NOT yet hardware-verified.**
-Bug #6's own fix (dropping `is_prefix_cache_hit`) is correct and did
-not regress anything. Real N=2 hardware testing after deploying it
-surfaced two crashes, both now root-caused and fixed: (1)
-`ExoBatchGenerator.submit_batched()` (the `EXO_DSV4_BATCHED_PREFILL`
-rendezvous path) could bypass the `pp_batched_decode_glue`
-single-writer channel entirely, now gated behind a
-`self._batched_decode_active` check; (2)
+**STATUS UPDATE (2026-08-06, final): ALL SEVEN real bugs found this
+campaign are FIXED AND HARDWARE-VERIFIED. N=2 genuinely concurrent
+requests now work cleanly on real 2-node hardware.** Bug #7 turned
+out to have THREE root causes, found and fixed iteratively across
+three real hardware attempts: (1) `ExoBatchGenerator.submit_batched()`
+(the `EXO_DSV4_BATCHED_PREFILL` rendezvous path) could bypass the
+`pp_batched_decode_glue` single-writer channel entirely -- fixed with
+a `self._batched_decode_active` gate; (2)
 `Rank0BatchedDecodeGlue.tick()`'s `PrefillReadyMessage` retry guard
-conflated explicit NACKs (proof of liveness) with silent timeouts
-(the real dead-peer signal), now a wall-clock deadline instead of a
-fixed retry count. See "2026-08-06 root-cause analysis: Attempt 1 and
-Attempt 2 (bug #7)" and the fix commit for the full evidence trail and
-implementation. **Bugs #1-6 remain fixed** -- see "2026-08-06 fix:
-in-band PrefillMessage admission signal", "2026-08-06 follow-up: 4
-real bugs in eviction+slot-reuse", "2026-08-06 fix: prefill
+conflated explicit NACKs (proof of liveness) with silent timeouts --
+fixed with a wall-clock deadline instead of a fixed retry count; (3)
+**the real blocker**: `_step_batched_decode()` unconditionally
+returned an empty response list on rank 1, so rank 1's own
+`runner.py`-level admission gate (`EXO_MAX_CONCURRENT_REQUESTS`)
+could never learn a request had finished and monotonically filled up
+forever -- fixed by propagating rank 1's eviction signal back through
+`Rank1BatchedDecodeGlue.tick()`'s return value into a real
+finish-classified response, mirroring `_step_pp_spec`'s existing
+convention. After all three fixes, a fourth real N=2 hardware attempt
+(4 rounds, 8 total concurrent requests across the exact bug #7 repro
+scenario plus additional variations) completed with **zero crashes,
+zero 500s, zero wire errors** -- see "2026-08-06 fix: bug #7's third
+root cause (rank 1 admission-gate never drains) + hardware
+verification" at the bottom of this file for the full log evidence.
+**Bugs #1-6 remain fixed and hardware-verified** -- see "2026-08-06
+fix: in-band PrefillMessage admission signal", "2026-08-06 follow-up:
+4 real bugs in eviction+slot-reuse", "2026-08-06 fix: prefill
 forward-pass race (PrefillReadyMessage)", and "2026-08-06 fix:
-eliminate cross-rank eligibility divergence". Single-request PP is
-unaffected and repeatedly verified working on real hardware, including
-immediately after both of the bug #7 crashes (self-healed cleanly each
-time). Bug #7's fixes have basedpyright/ruff/pytest all clean against
-baseline but have NOT yet run on real N=2 hardware -- that needs the
-user's own fresh explicit go-ahead. `EXO_PP_BATCHED_DECODE=1` remains
-UNSAFE for production -- the cluster must stay in the safe known-good
-config (single-request PP, `EXO_PP_BATCHED_DECODE` unset) until bug
-#7's fixes are verified on real N=2 hardware.
+eliminate cross-rank eligibility divergence". Single-request PP
+remains fully unaffected throughout. `EXO_PP_BATCHED_DECODE=1` is
+still OFF by `start_cluster.sh`'s default (opt-in only) but is now a
+genuinely verified, working code path for N=2 concurrency -- any
+future decision to flip the default to ON should be made deliberately,
+not implied by this doc.
 
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
@@ -1349,3 +1356,162 @@ that the exact bug #7 repro (two genuinely concurrent, cold-start,
 different-topic requests) now completes cleanly with no
 `SchedulerWireProtocolError`, no `GlueError` fail-stop, and both
 requests returning `finish_reason=stop` with correct content.
+
+---
+
+## 2026-08-06 fix: bug #7's third root cause (rank 1 admission-gate never drains) + hardware verification
+
+**Status: FIXED and HARDWARE-VERIFIED. This is the final fix that
+closes bug #7 and the entire N=2 admission campaign.** Commit
+`03d26a29f`.
+
+### The third crash (real hardware, after the first two bug #7 fixes)
+
+With `EXO_DSV4_BATCHED_PREFILL` bypass fixed and the retry guard
+switched to a wall-clock deadline, the identical bug #7 repro (two
+genuinely concurrent, cold-start, different-topic requests) still
+failed -- but differently: rank 0 now waited the FULL 30-second
+deadline (confirming the wall-clock fix itself worked exactly as
+designed) before failing loud with the same `GlueError` message,
+just reporting the real elapsed time instead of a retry count.
+
+### Root cause: rank 1's runner.py-level admission gate structurally could never drain
+
+Cross-referencing rank 1's own log timeline directly answered the
+question: `"runner running"` (which fires exactly once, when
+`runner.py`'s main `while self.active_tasks:` loop is entered) was
+logged only ONCE for the ENTIRE session -- and `"runner ready"`
+(which only fires when `self.active_tasks` becomes EMPTY, exiting
+that loop) was also logged only ONCE, at initial runner startup,
+never again for the rest of the session, DESPITE a single-request
+smoke test having already completed successfully and been confirmed
+finished client-side minutes earlier.
+
+Reading `_step_batched_decode()`'s code confirmed why: on rank 1, it
+ALWAYS returned `[]` (an empty response list), unconditionally, on
+every kind of tick -- including an eviction tick, where
+`Rank1BatchedDecodeGlue.tick()`'s own `MSG_KIND_EVICT` branch
+correctly frees the glue's INTERNAL cache_router/mirror bookkeeping
+but has no way to tell `_step_batched_decode()`'s caller that a
+request just finished. `runner.py`'s own, SEPARATE admission gate
+(`self.active_tasks`, capped by `EXO_MAX_CONCURRENT_REQUESTS`) has
+exactly ONE removal path: a `FinishedResponse`/`CancelledResponse`
+tuple appearing in `generator.step()`'s return value. Since
+`_step_batched_decode()` never produced one on rank 1, that gate was
+**monotonically non-decreasing** while batched-decode was active --
+once its slots filled, EVERY subsequent request was deferred
+FOREVER on rank 1, not merely delayed by a resolvable timing race.
+This explains precisely why the wall-clock deadline fix still timed
+out at its full 30 seconds: there was nothing to wait for that would
+ever arrive.
+
+Confirmed via a targeted `consult` review of this exact evidence
+before implementing: the review flagged (and this session verified
+via reading `_step_pp_spec`'s own code) that the existing,
+already-working PP speculative-decode path does NOT have this bug --
+`_step_pp_spec` returns real classified `GenerationBatch.Response`
+objects UNCONDITIONALLY on both ranks (no `device_rank` branching at
+all), which is exactly how that path's own `runner.py`-level
+admission gate already drains correctly. Batched-decode's rank 1
+path had silently diverged from that established convention.
+
+### What shipped
+
+1. **`Rank1BatchedDecodeGlue.tick()`'s return signature changed** from
+   `PrefillGrant | None` to `tuple[PrefillGrant | None, int | None]`.
+   The second element is the evicted `request_id` on an eviction
+   tick (`MSG_KIND_EVICT` branch), `None` on every other kind of
+   tick. Never both non-None in the same call -- `tick()`'s
+   established "at most one real thing per call" contract still
+   holds.
+
+2. **`_step_batched_decode()` translates a non-None
+   `evicted_request_id` into a real finish-classified
+   `GenerationBatch.Response`** (`finish_reason="stop"`, token=0 --
+   the actual value is never observed by any client, since rank 1
+   never emits chunks; only the presence of a non-None
+   `finish_reason` matters, to trigger the existing drain path).
+   `batch_generator.py`'s existing wrapper already pops the matching
+   uid out of its own `_active_tasks` on any non-None
+   `finish_reason` -- no new mechanism needed, just the missing
+   signal.
+
+3. Callers of `Rank1BatchedDecodeGlue.tick()` updated for the new
+   2-tuple signature (`_pp_admission_race_subprocess_worker.py`; the
+   other subprocess worker's calls discard the return value and
+   needed no change).
+
+### Verification (real, both local and hardware)
+
+**Local (before the 4th hardware attempt):**
+- `uv run basedpyright`: 305 errors (baseline, zero new).
+- `uv run ruff check`: 9 errors (baseline, zero new).
+- `uv run pytest -m ""` across the full relevant subsystem test set:
+  **40 passed, 0 failed**, including
+  `test_pp_batched_decode_glue_subprocess.py`, which genuinely
+  exercises `Rank1BatchedDecodeGlue.tick()`'s eviction branch over a
+  REAL 2-process transport (not a mock) -- confirming the new return
+  signature doesn't break the real eviction protocol.
+- `uv run pytest src/exo/worker/engines/mlx/tests/`: 253 passed, 14
+  deselected (slow tests, run explicitly above).
+
+**Real N=2 hardware (4th attempt, with explicit user go-ahead):**
+- Cluster launched with the exact bug #7/repro config
+  (`EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1
+  EXO_DSV4_BATCHED_PREFILL=1` [default], `EXO_SPECULATIVE=0
+  EXO_DSV4_DSPARK=0 EXO_DSV4_MTP=0`). Both nodes confirmed on commit
+  `03d26a29f` (all three bug #7 fixes).
+- Single-request smoke test: clean (`finish_reason=stop`, "Paris").
+- **Bug #7's exact repro** (two genuinely concurrent, cold-start,
+  different-topic requests: "Count from 1 to 5." / "Name 3
+  colors."): **both succeeded**, `finish_reason=stop` on both,
+  ~6.7s elapsed, zero errors in either rank's log.
+- **Extended stress test**: 3 additional rounds of genuinely
+  concurrent request pairs (6 more requests, 8 total across the
+  whole session) -- **all 8 succeeded**, zero crashes, zero HTTP
+  500s, zero wire errors (`grep` for `GlueError`/`deadline`/`version
+  mismatch`/`Recv failed`/`jaccl transport fault` across both ranks'
+  full logs: zero matches).
+- **Confirmed the actual fix mechanism working**: rank 1's log shows
+  `"runner ready"` firing repeatedly (7 times across the session,
+  via `handle_generation_tasks:804` -- the SAME log line that
+  previously fired only once) -- direct confirmation the admission
+  gate now genuinely drains between requests, not just that
+  responses happened to succeed.
+- Cluster restored to safe known-good (single-request PP,
+  `EXO_PP_BATCHED_DECODE` unset) after the test, verified clean with
+  a real "Paris" completion.
+
+### Not a regression, not a new bug in this fix
+
+Two of the concurrent test responses had empty `content` with the
+actual answer appearing inside `reasoning_content` instead (e.g.
+"Name 3 colors." → content="", reasoning_content="...red, green,
+blue."). Verified via an isolated standalone single-request repro
+(NOT concurrent) that this is a pre-existing DeepSeek-V4-Flash
+model/quality quirk (the model sometimes answers inside its
+`<think>` block) -- unrelated to bug #7, N=2 concurrency, or any fix
+in this campaign. Not investigated further here; out of scope for
+this admission-race campaign.
+
+### Campaign status: closed
+
+All 7 real bugs found across this multi-day N=2 batched-decode
+campaign are now fixed and hardware-verified:
+1. In-band admission race (`PrefillMessage`)
+2. Eviction+slot-reuse (4 bugs, one commit)
+3. Prefill forward-pass race (`PrefillReadyMessage`)
+4. Cross-rank eligibility divergence (dropped `is_prefix_cache_hit`)
+5. `EXO_DSV4_BATCHED_PREFILL` bypass of the single-writer channel
+6. NACK/timeout conflation in the `PrefillReadyMessage` retry guard
+7. Rank 1's admission gate never draining while batched-decode active
+
+`EXO_PP_BATCHED_DECODE` remains OFF by `start_cluster.sh`'s default
+(intentionally opt-in) but the code path itself is now genuinely
+verified working for N=2 concurrent requests on real hardware. Per
+Section 9's original phased plan, the next unblocked work (not
+started, not scoped in this handoff) is Phase 2/3/4: prefill
+batching, micro-batch interleaving, cancellation + DSpark-gating +
+realistic-load validation -- see the design doc
+(`docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`) Section 9
+for that plan.
