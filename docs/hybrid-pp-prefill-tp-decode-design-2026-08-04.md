@@ -2251,6 +2251,74 @@ decode-tick interleaving under contention all remain untested" gating
 note above). The protocol/state-machine layer done this session is a
 necessary precondition for that work, not a substitute for it.
 
+**Layer-surgery Stage 1 (metaframe reentrancy prerequisite) — DONE,
+2026-08-06, same session (commit `761d493d8`).** Before touching the
+vendored model's forward pass, did the full blast-radius audit +
+consult review the earlier "layer-segmentation surgery" note above
+flagged as needed. Two real bugs found and fixed, both consult-
+reviewed before implementation:
+
+1. `MetaFramedPipelineLastLayer`'s ambient `is_prefill`/`queue_sends`
+   instance flags -- the exact reentrancy hazard predicted: a paused
+   prefill-chunk generator and an interleaved decode step would share
+   ONE layer instance, so one side mutating an ambient flag corrupts
+   the other's read. Fixed by threading both as an explicit per-call
+   `ForwardStepInfo` read via a contextvar (mirrors
+   `pp_batched_decode_layers.py`'s already-proven `_batch_step_context`
+   pattern for the identical "generic vendored model loop can't pass
+   exo-specific kwargs to wrapper layers only" problem) -- NOT kept as
+   a fallback; `set_metaframed_pipeline_prefill`/
+   `set_metaframed_pipeline_queue_sends` deleted entirely.
+2. A SECOND, independent bug the same audit surfaced: `is_last_chunk`
+   was derived as `not is_prefill`, collapsing "still prefilling, more
+   chunks follow" and "still prefilling, this is the final chunk" into
+   the same value -- harmless in the old single-shot-prefill world
+   (never more than one prefill/decode transition per request) but
+   silently wrong the moment prefill spans multiple chunks. Fixed with
+   a 3-valued `ForwardPhase` enum (`PREFILL_CONTINUE`/`PREFILL_FINAL`/
+   `DECODE`) that makes the invalid 4th boolean combination
+   unrepresentable, per a consult review.
+
+Documented explicitly, for whoever wires the actual interruptible
+generator next: plain Python contextvars do NOT isolate a suspended
+generator from a same-thread interleaved call (PEP 567 dropped PEP
+550's generator-context-isolation) -- the future driver MUST use
+`contextvars.copy_context().run(...)` per resume, never a bare
+`next()`/`send()` on the ambient context, or a decode step's own
+phase-set will leak into the paused prefill generator's later reads.
+
+Confirmed via code read (not assumed): interruption only ever needs to
+interoperate with the METAFRAME layer stack -- `EXO_PP_BATCHED_DECODE=1`
+requires the metaframe layer classes to already be installed, so the
+legacy (non-metaframe) `PipelineFirstLayer`/`PipelineLastLayer` in
+`auto_parallel.py` were deliberately left untouched; batched decode
+never runs through them.
+
+Migrated every real call site this change broke, including one caught
+only by running the FULL worker suite (not just directly-touched
+files): the real 2-process admission-race regression gate
+(`test_pp_admission_race_subprocess.py`) broke on the first full-suite
+run, was fixed within the same session, and re-verified passing.
+Full suite (incl. slow/subprocess tests, `-m ""`): 323 passed, 1
+skipped, zero failures. basedpyright/ruff/ruff format all clean.
+
+**Repo-state note:** the `mlx-lm` submodule's pinned commit was found
+diverged from its own `origin/main` (29 ahead / 18 behind, on a
+detached diagnostic branch) when this work began -- NOT reconciled as
+part of this session (a separate decision, not guessed through
+mid-task). Work branched off the existing pin
+(`pp-layer-segment-wip`) rather than touch that divergence. This
+Stage 1 commit lives entirely in the main `exo` repo (`pp_metaframe.py`
+and its tests) -- it does not yet touch the vendored submodule at all.
+
+**Not yet started:** the actual `DeepseekV4Model.__call__`
+generator-core split (vendored `mlx-lm/mlx_lm/models/deepseek_v4.py`,
+`pp-layer-segment-wip` branch) and the isolation test harness (pause/
+resume equivalence + interleaved-request stress, per this session's
+consult review's required coverage). This Stage 1 work is the wire-
+protocol/reentrancy-safety prerequisite the generator-core split
+depends on, not a substitute for it.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
