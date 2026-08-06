@@ -92,6 +92,7 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
     EvictAckMessage,
     EvictMessage,
     Phase,
+    PrefillAdvanceMessage,
     PrefillMessage,
     PrefillReadyMessage,
     StepMessage,
@@ -108,12 +109,14 @@ MSG_KIND_EVICT = 2
 MSG_KIND_EVICT_ACK = 3
 MSG_KIND_PREFILL = 4
 MSG_KIND_PREFILL_READY = 5
+MSG_KIND_PREFILL_ADVANCE = 6
 
 _HEADER_FIELDS = 5  # [version, msg_kind, step_id, field_d, field_e]
 _STEP_ROW_FIELDS = (
     5  # [request_id, cache_slot, phase_ordinal, expected_cache_len, n_tokens]
 )
 _PREFILL_BODY_FIELDS = 2  # [request_id, flags]
+_PREFILL_ADVANCE_BODY_FIELDS = 1  # [advance_seq]
 
 _PHASE_TO_ORDINAL: dict[Phase, int] = {Phase.PREFILL: 0, Phase.DECODE: 1}
 _ORDINAL_TO_PHASE: dict[int, Phase] = {v: k for k, v in _PHASE_TO_ORDINAL.items()}
@@ -200,6 +203,7 @@ def _require_kind(header: WireHeader, expected: int, *, fn_name: str) -> None:
             MSG_KIND_EVICT: "MSG_KIND_EVICT",
             MSG_KIND_EVICT_ACK: "MSG_KIND_EVICT_ACK",
             MSG_KIND_PREFILL: "MSG_KIND_PREFILL",
+            MSG_KIND_PREFILL_ADVANCE: "MSG_KIND_PREFILL_ADVANCE",
             MSG_KIND_PREFILL_READY: "MSG_KIND_PREFILL_READY",
         }
         raise SchedulerWireProtocolError(
@@ -456,6 +460,71 @@ def recv_prefill_message(src: int, *, group: mx.distributed.Group) -> PrefillMes
     return recv_prefill_body(header, src, group=group)
 
 
+def encode_prefill_advance_message(
+    message: PrefillAdvanceMessage,
+) -> tuple[mx.array, mx.array]:
+    """Build the (header, body) int32 array pair for a
+    ``PrefillAdvanceMessage`` -- 2026-08-06, Phase 2 Stage 3. Shape
+    mirrors ``encode_prefill_message`` deliberately (header first,
+    small fixed-shape follow-up body second): ``request_id`` and
+    ``max_layers`` fit in the header's two free fields
+    (``field_d``/``field_e``); ``advance_seq`` follows in a 1-int32
+    body, since three real fields cannot fit in the header's two free
+    slots alongside ``step_id``."""
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL_ADVANCE,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=message.max_layers,
+    )
+    body = mx.array([message.advance_seq], dtype=mx.int32)
+    return header, body
+
+
+def send_prefill_advance_message(
+    message: PrefillAdvanceMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillAdvanceMessage`` to ``dst``: header, then body.
+    Follows ``send_header``'s documented eval discipline exactly (see
+    ``send_prefill_message``'s own docstring for the full rationale)."""
+    header, body = encode_prefill_advance_message(message)
+    send_header(header, dst, group=group)
+    sent_body = mx.distributed.send(body, dst, group=group)
+    mx.eval(sent_body)
+
+
+def recv_prefill_advance_body(
+    header: WireHeader, src: int, *, group: mx.distributed.Group
+) -> PrefillAdvanceMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL_ADVANCE`` (see ``recv_header``),
+    receive the fixed 1-int32 follow-up body and assemble the full
+    ``PrefillAdvanceMessage``. Raises ``SchedulerWireProtocolError``
+    if ``header`` is not actually a prefill-advance header (identical
+    rationale to ``recv_step_table``/``recv_prefill_body``)."""
+    _require_kind(header, MSG_KIND_PREFILL_ADVANCE, fn_name="recv_prefill_advance_body")
+    body_template = mx.zeros((_PREFILL_ADVANCE_BODY_FIELDS,), dtype=mx.int32)
+    body = mx.distributed.recv_like(body_template, src, group=group)
+    mx.eval(body)
+    body_values = cast(list[int], body.tolist())
+    (advance_seq,) = (int(v) for v in body_values)
+    return PrefillAdvanceMessage(
+        step_id=header.step_id,
+        request_id=header.field_d,
+        advance_seq=advance_seq,
+        max_layers=header.field_e,
+    )
+
+
+def recv_prefill_advance_message(
+    src: int, *, group: mx.distributed.Group
+) -> PrefillAdvanceMessage:
+    """Convenience one-call wrapper (see ``recv_step_message``'s own
+    docstring for the same caveat about production dispatch code)."""
+    header = recv_header(src, group=group)
+    return recv_prefill_advance_body(header, src, group=group)
+
+
 def send_evict_ack_message(
     message: EvictAckMessage, dst: int, *, group: mx.distributed.Group
 ) -> None:
@@ -511,7 +580,9 @@ def decode_prefill_ready_message(header: WireHeader) -> PrefillReadyMessage:
     """Given an already-received ``header`` with
     ``msg_kind == MSG_KIND_PREFILL_READY``, assemble the
     ``PrefillReadyMessage``."""
-    _require_kind(header, MSG_KIND_PREFILL_READY, fn_name="decode_prefill_ready_message")
+    _require_kind(
+        header, MSG_KIND_PREFILL_READY, fn_name="decode_prefill_ready_message"
+    )
     return PrefillReadyMessage(
         step_id=header.step_id,
         request_id=header.field_d,
@@ -531,4 +602,3 @@ def recv_prefill_ready_message(
     confirms readiness before running its own prefill forward pass."""
     header = recv_header(src, group=group)
     return decode_prefill_ready_message(header)
-

@@ -267,6 +267,100 @@ PREFILL_FLAGS_KNOWN_MASK = PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
 
 
 @dataclass(frozen=True)
+class PrefillAdvanceMessage:
+    """Rank 0's per-tick "advance your OWN local chunked-prefill
+    session forward, do NOT run a decode step this tick" instruction
+    to rank 1 -- 2026-08-06, Phase 2 Stage 3 (chunked-prefill layer-
+    segmentation). A distinct, NEW message kind, not folded into
+    ``StepMessage`` or piggybacked onto ``PrefillChunkAdvancedEvent``
+    -- per a `consult` review of this exact design question.
+
+    WHY A NEW MESSAGE KIND (not reused/repurposed existing ones):
+    ``tick()``'s own established invariant is "one action per tick,
+    and the MESSAGE KIND received IS the instruction for what rank 1's
+    tick does" -- ``StepMessage`` means "this tick is a decode step",
+    ``PrefillMessage`` means "this tick is an admission handshake".
+    Advancing a chunked-prefill session by a real layer-segment is a
+    THIRD variant of "what happens this tick", so it needs a THIRD
+    message kind for the same reason the first two are distinct: a
+    degenerate empty-batch ``StepMessage`` sent on an advance-only tick
+    would drag ``BatchedDecodeSession``'s decode-step code path into a
+    tick where it must never run -- exactly the "mixed prefill/decode
+    wire traffic within one rank's synchronous loop" conflation the
+    original N=2 admission-race campaign closed for chunk-vs-decode
+    timing; this closes the identical class of bug one level deeper
+    (LAYER-segment-vs-decode timing, not chunk-vs-decode).
+
+    WHY ``PrefillChunkAdvancedEvent`` (``pp_scheduler_protocol.py``,
+    already built/tested) is NOT reused for this: that event fires
+    once per COMPLETED CHUNK (e.g. every ~2048 tokens); a single chunk
+    is advanced across MANY real layer-segment ``advance()`` calls
+    (tens of them, at 2-3 layers per call against a ~20-layer per-rank
+    stack) -- a strictly FINER granularity than chunk completion. Using
+    the coarse event for the fine-grained lockstep signal would mean
+    rank 1 only learns to advance once per chunk, not once per real
+    ``tick()``-driven layer-segment -- rank 0 and rank 1 would
+    desynchronize their per-segment collective timing immediately.
+    ``PrefillChunkAdvancedEvent`` keeps its existing job (protocol-
+    level bookkeeping: cache_len tracking, PREFILL->DECODE derivation)
+    completely unchanged; this message is a per-tick WIRE COMMAND, a
+    different layer with a different job.
+
+    Fields:
+      ``step_id``: the usual lockstep monotonic step counter shared
+        with every other control message kind (module docstring point
+        5) -- an advance consumes a step id exactly like a decode step
+        or admission does, so a skipped/duplicated advance is caught
+        by the same cheap tripwire.
+      ``request_id``: which request's session to advance -- at the
+        confirmed "at most ONE request mid-prefill at a time" scope
+        (design doc's Phase 2 entry), this is redundant with "the one
+        active session," but carried explicitly anyway so a future
+        relaxation of that scope constraint doesn't need a wire-shape
+        change, and so a mismatch is a loud, cheap tripwire rather
+        than an implicit assumption.
+      ``advance_seq``: monotonic PER-REQUEST advance counter (distinct
+        from ``step_id``, which is shared/global across ALL message
+        kinds) -- per a `consult` review's explicit recommendation: a
+        cheap sequence-number check on rank 1 turns a real desync from
+        a silent multi-tick-later jaccl/RDMA hang into an IMMEDIATE,
+        loud assertion at the exact point divergence began. Starts at
+        1 for a request's first advance (mirrors ``step_id``'s own
+        1-based convention).
+      ``max_layers``: the layer-segment size for THIS advance --
+        deliberately RANK-AGNOSTIC (a count, not a specific layer
+        index), since rank 0 and rank 1 hold potentially DIFFERENT
+        per-rank layer counts (an uneven PP split) and each rank maps
+        this count to its own local ``ResumablePrefillSession.advance
+        (max_layers=...)`` call independently -- this message tells
+        rank 1 HOW MANY of its own local layers to advance by, not
+        WHICH global layer index to reach. Per the consult review: if
+        a future caller ever assumes equal per-rank splits instead,
+        that assumption must be asserted loudly at session-creation
+        time, not silently baked into this field's semantics.
+    """
+
+    step_id: int
+    request_id: int
+    advance_seq: int
+    max_layers: int
+
+    def __post_init__(self) -> None:
+        if self.advance_seq < 1:
+            raise ProtocolViolationError(
+                f"PrefillAdvanceMessage.advance_seq={self.advance_seq} must "
+                f"be >=1 -- a zero/negative advance sequence number is not "
+                f"a real occurrence this message should represent"
+            )
+        if self.max_layers < 1:
+            raise ProtocolViolationError(
+                f"PrefillAdvanceMessage.max_layers={self.max_layers} must "
+                f"be >=1 -- a zero/negative-layer advance is not a real "
+                f"occurrence this message should represent"
+            )
+
+
+@dataclass(frozen=True)
 class EvictMessage:
     """Explicit eviction notice for one cache slot -- the fix for Risk
     #10's cancellation-by-omission ambiguity (module docstring point
