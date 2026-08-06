@@ -44,8 +44,10 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
     Command,
     EvictAckReceivedEvent,
     EvictMessage,
+    NewChunkedPrefillRequestEvent,
     NewRequestEvent,
     Phase,
+    PrefillChunkAdvancedEvent,
     ProtocolViolationError,
     RankOneMirror,
     RequestAbortedEvent,
@@ -385,6 +387,345 @@ def test_mirror_evict_without_prior_active_raises() -> None:
     msg = EvictMessage(step_id=1, request_id=1, cache_slot=0)
     with pytest.raises(ProtocolViolationError, match="not ACTIVE"):
         mirror.validate_evict(msg)
+
+
+# ---------------------------------------------------------------------
+# Chunked-prefill directed unit tests (2026-08-06, Phase 2 scoping
+# session). See pp_scheduler_protocol.py's module docstring Phase 2
+# addendum -- this is the pure protocol-layer extension only; the real
+# MLX layer-segmentation forward-pass surgery is a separate, not-yet-
+# started piece of work.
+# ---------------------------------------------------------------------
+
+
+def test_new_chunked_prefill_request_starts_in_prefill_phase() -> None:
+    core = SchedulerCore(max_concurrency=2)
+    commands = core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=5000
+        )
+    )
+    assert len(commands) == 1
+    cmd = commands[0]
+    assert isinstance(cmd, SendStepCommand)
+    entry = cmd.message.entries[0]
+    assert entry.phase == Phase.PREFILL
+    assert entry.expected_cache_len == 0
+    assert entry.n_tokens == 0
+
+
+def test_new_chunked_prefill_request_zero_total_prompt_tokens_raises_at_construction() -> (
+    None
+):
+    with pytest.raises(ProtocolViolationError, match=">=1"):
+        NewChunkedPrefillRequestEvent(request_id=1, cache_slot=0, total_prompt_tokens=0)
+
+
+def test_prefill_chunk_advanced_partial_chunk_stays_in_prefill() -> None:
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=5000
+        )
+    )
+    commands = core.handle(
+        PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=2048)
+    )
+    cmd = commands[0]
+    assert isinstance(cmd, SendStepCommand)
+    entry = cmd.message.entries[0]
+    assert entry.phase == Phase.PREFILL
+    assert entry.expected_cache_len == 2048
+    assert entry.n_tokens == 2048
+
+
+def test_prefill_chunk_advanced_final_chunk_transitions_to_decode() -> None:
+    """THE off-by-one boundary this design's own consult review flagged
+    as a real risk: total_prompt_tokens=5000, chunks of 2048+2048+904
+    must land EXACTLY on 5000 and flip to DECODE on the final chunk --
+    not one chunk early, not one chunk late."""
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=5000
+        )
+    )
+    core.handle(PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=2048))
+    core.handle(PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=2048))
+    assert core._requests[1].phase == Phase.PREFILL  # 4096/5000, not yet final
+    commands = core.handle(
+        PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=904)
+    )
+    cmd = commands[0]
+    assert isinstance(cmd, SendStepCommand)
+    entry = cmd.message.entries[0]
+    assert entry.phase == Phase.DECODE
+    assert entry.expected_cache_len == 5000
+    assert core._requests[1].phase == Phase.DECODE
+
+
+def test_prefill_chunk_advanced_overshoot_raises() -> None:
+    """A chunk that would push cache_len PAST total_prompt_tokens is
+    the off-by-one silent-corruption shape module docstring point 6
+    exists to catch -- must raise, not silently clamp or accept."""
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=1000
+        )
+    )
+    with pytest.raises(ProtocolViolationError, match="OVERSHOOTING"):
+        core.handle(PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=2000))
+
+
+def test_prefill_chunk_advanced_for_unknown_request_raises() -> None:
+    core = SchedulerCore(max_concurrency=2)
+    with pytest.raises(ProtocolViolationError, match="not active"):
+        core.handle(PrefillChunkAdvancedEvent(request_id=99, n_tokens_this_chunk=100))
+
+
+def test_prefill_chunk_advanced_after_decode_started_raises() -> None:
+    """A chunk-advance event arriving for a request that's already
+    transitioned to DECODE (e.g. a stale/duplicate event) must raise,
+    not silently re-extend a completed prefill."""
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=100
+        )
+    )
+    core.handle(PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=100))
+    assert core._requests[1].phase == Phase.DECODE
+    with pytest.raises(ProtocolViolationError, match="not PREFILL"):
+        core.handle(PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=1))
+
+
+def test_token_generated_for_still_prefilling_request_raises() -> None:
+    """A decode-step event cannot apply to a request still mid-prefill
+    -- these are mutually exclusive phases for one request."""
+    core = SchedulerCore(max_concurrency=2)
+    core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=5000
+        )
+    )
+    with pytest.raises(ProtocolViolationError, match="still in Phase.PREFILL"):
+        core.handle(TokenGeneratedEvent(request_ids=(1,)))
+
+
+def test_prefill_chunk_advanced_zero_tokens_raises_at_construction() -> None:
+    with pytest.raises(ProtocolViolationError, match=">=1"):
+        PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=0)
+
+
+def test_mirror_accepts_well_formed_chunked_prefill_sequence() -> None:
+    """The full happy path through the mirror: admission -> two partial
+    chunks -> final chunk (derives DECODE transition independently) ->
+    a real decode step afterward. No exception anywhere."""
+    core = SchedulerCore(max_concurrency=2)
+    mirror = RankOneMirror()
+    mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=5000)
+
+    for cmd in core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=5000
+        )
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+    for cmd in core.handle(
+        PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=2048)
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+    for cmd in core.handle(
+        PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=2048)
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+    for cmd in core.handle(
+        PrefillChunkAdvancedEvent(request_id=1, n_tokens_this_chunk=904)
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+        # This final chunk's entry must be DECODE, independently derived
+        # by the mirror -- not merely accepted because rank 0 claimed it.
+        assert cmd.message.entries[0].phase == Phase.DECODE
+    for cmd in core.handle(TokenGeneratedEvent(request_ids=(1,))):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+
+
+def test_mirror_rejects_claimed_phase_disagreeing_with_derived_phase() -> None:
+    """Fable consult-review gap #2, directly tested: a rank-0 bug that
+    flips to DECODE one chunk EARLY (before cache_len actually reaches
+    total_prompt_tokens) must be caught by the mirror's INDEPENDENT
+    derivation, even though the raw expected_cache_len arithmetic alone
+    would pass."""
+    core = SchedulerCore(max_concurrency=2)
+    mirror = RankOneMirror()
+    mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=5000)
+
+    for cmd in core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=5000
+        )
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+
+    # Simulate a buggy rank 0 claiming DECODE at cache_len=2048 (way
+    # short of total_prompt_tokens=5000) -- the arithmetic
+    # (0 + 2048 == 2048) is internally consistent, but the CLAIMED
+    # phase is wrong.
+    bad_msg = StepMessage(
+        step_id=2,
+        entries=(
+            BatchEntry(
+                request_id=1,
+                cache_slot=0,
+                phase=Phase.DECODE,  # WRONG -- should still be PREFILL
+                expected_cache_len=2048,
+                n_tokens=2048,
+            ),
+        ),
+    )
+    with pytest.raises(ProtocolViolationError, match="INDEPENDENTLY DERIVES"):
+        mirror.validate_step(bad_msg)
+
+
+def test_mirror_rejects_prefill_step_without_prior_admission_record() -> None:
+    """record_prefill_admission must run BEFORE the first PREFILL-phase
+    StepMessage for a slot -- this is what gives the mirror independent
+    ground truth; skipping it must be rejected, not silently accepted
+    with an assumed total."""
+    mirror = RankOneMirror()
+    msg = StepMessage(
+        step_id=1,
+        entries=(
+            BatchEntry(
+                request_id=1,
+                cache_slot=0,
+                phase=Phase.PREFILL,
+                expected_cache_len=0,
+                n_tokens=0,
+            ),
+        ),
+    )
+    with pytest.raises(ProtocolViolationError, match="no total_prompt_tokens"):
+        mirror.validate_step(msg)
+
+
+def test_mirror_rejects_mixed_prefill_and_decode_advancing_in_same_step() -> None:
+    """Fable consult-review gap #4: a StepMessage may not co-list an
+    ADVANCING prefill-chunk entry alongside an advancing decode entry
+    in the same step -- per the design doc's 'separate alternating
+    steps, not a mixed per-step tensor' decision."""
+    mirror = RankOneMirror()
+    mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=5000)
+    # Register slot 0 (prefill, freshly admitted) and slot 1 (decode)
+    # in an initial step first, so step 2 below can legally ADVANCE
+    # both together (a newly-introduced slot must start at
+    # expected_cache_len=0, per the FREE-branch invariant -- advancing
+    # them requires a PRIOR step to have introduced them at 0 first).
+    setup_msg = StepMessage(
+        step_id=1,
+        entries=(
+            BatchEntry(
+                request_id=1,
+                cache_slot=0,
+                phase=Phase.PREFILL,
+                expected_cache_len=0,
+                n_tokens=0,
+            ),
+            BatchEntry(
+                request_id=2,
+                cache_slot=1,
+                phase=Phase.DECODE,
+                expected_cache_len=0,
+                n_tokens=0,
+            ),
+        ),
+    )
+    mirror.validate_step(setup_msg)
+
+    # A genuinely mixed-phase-advancing message needs two DIFFERENT
+    # slots: slot 0 (prefill, advancing) and slot 1 (decode, advancing)
+    # together in the same step.
+    bad_msg = StepMessage(
+        step_id=2,
+        entries=(
+            BatchEntry(
+                request_id=1,
+                cache_slot=0,
+                phase=Phase.PREFILL,
+                expected_cache_len=2048,
+                n_tokens=2048,
+            ),
+            BatchEntry(
+                request_id=2,
+                cache_slot=1,
+                phase=Phase.DECODE,
+                expected_cache_len=1,
+                n_tokens=1,
+            ),
+        ),
+    )
+    with pytest.raises(ProtocolViolationError, match="co-lists an ADVANCING"):
+        mirror.validate_step(bad_msg)
+
+
+def test_mirror_slot_reuse_after_chunked_prefill_evict_starts_fresh() -> None:
+    """Fable consult-review gap #1, directly tested: a slot that hosted
+    a chunked-prefill request, then evicted, then reused by a SECOND
+    chunked-prefill request with a DIFFERENT total_prompt_tokens, must
+    validate cleanly against the SECOND request's own total -- no stale
+    tracking leaking from the first occupant."""
+    core = SchedulerCore(max_concurrency=1)
+    mirror = RankOneMirror()
+
+    # First occupant: total_prompt_tokens=1000, evicted before completing.
+    mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=1000)
+    for cmd in core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=1, cache_slot=0, total_prompt_tokens=1000
+        )
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+    evict_commands = core.handle(RequestAbortedEvent(request_id=1))
+    evict_cmd = evict_commands[0]
+    assert isinstance(evict_cmd, SendEvictCommand)
+    mirror.validate_evict(evict_cmd.message)
+    ack = mirror.build_evict_ack(evict_cmd.message)
+    core.handle(
+        EvictAckReceivedEvent(request_id=ack.request_id, cache_slot=ack.cache_slot)
+    )
+
+    # Second occupant, SAME slot, DIFFERENT total_prompt_tokens -- must
+    # validate cleanly against ITS OWN total, not the first's.
+    mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=777)
+    for cmd in core.handle(
+        NewChunkedPrefillRequestEvent(
+            request_id=2, cache_slot=0, total_prompt_tokens=777
+        )
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+    for cmd in core.handle(
+        PrefillChunkAdvancedEvent(request_id=2, n_tokens_this_chunk=777)
+    ):
+        assert isinstance(cmd, SendStepCommand)
+        mirror.validate_step(cmd.message)
+        assert cmd.message.entries[0].phase == Phase.DECODE
+        assert cmd.message.entries[0].expected_cache_len == 777
+
+
+def test_mirror_double_record_prefill_admission_without_evict_raises() -> None:
+    mirror = RankOneMirror()
+    mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=1000)
+    with pytest.raises(ProtocolViolationError, match="ALREADY has a tracked"):
+        mirror.record_prefill_admission(cache_slot=0, total_prompt_tokens=2000)
 
 
 # ---------------------------------------------------------------------

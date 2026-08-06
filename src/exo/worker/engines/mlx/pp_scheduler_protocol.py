@@ -64,14 +64,40 @@ future edits don't accidentally violate them):
    flagged as the classic silent-corruption case for this kind of
    system.
 
-Scope: this module implements the SIMPLEST case Phase 1 targets per the
-design doc — 2 concurrent DECODE-ONLY requests (both already prefilled
-via today's existing serial PP prefill), NO speculative decode. PREFILL
-batching/chunking (Phase 2) and DSpark gating (Phase 4) are explicitly
-NOT modeled here yet; ``Phase.PREFILL`` exists in the state enum as a
-forward-compatible placeholder (a request must pass through it before
-DECODE, matching real usage) but this module's Phase-1 scope only ever
-constructs requests that begin already in DECODE, mirroring "both
+Scope: this module originally implemented ONLY Phase 1's simplest case
+— 2 concurrent DECODE-ONLY requests (both already prefilled via today's
+existing serial PP prefill), NO speculative decode. Phase 1's own scope
+note (kept below for historical record) said ``Phase.PREFILL`` existed
+only as a forward-compatible placeholder. **2026-08-06 (Phase 2
+scoping session): chunked-prefill support was added to this pure
+protocol layer** -- ``NewChunkedPrefillRequestEvent``/
+``PrefillChunkAdvancedEvent`` let a request begin in PREFILL and
+advance by >1 token per chunk, with ``RankOneMirror`` INDEPENDENTLY
+DERIVING when a request's prefill is complete (comparing its own
+tracked ``cache_len`` against a ``total_prompt_tokens`` value recorded
+via ``record_prefill_admission`` -- mirroring how a real
+``PrefillMessage.n_prompt_tokens`` would be consumed) rather than
+trusting a caller-claimed "this is the final chunk" flag -- this is
+the SAME "rank 1 never trusts, always independently validates"
+discipline every other invariant in this module already follows (see
+point 2 above). **Deliberately still OUT of scope, same session:** the
+actual MLX model-forward layer-segmentation surgery (driving a real
+model's per-layer loop from outside to yield between segments and
+interleave a real decode step) -- that is real, model-specific code
+against `generate.py`'s forward-pass internals, not a protocol-layer
+change, and is a separate, larger, not-yet-started piece of work (see
+the design doc's own Phase 2 entries for the real hardware
+measurements/estimates that inform its later sizing). This module's
+job is only to make the WIRE PROTOCOL correctly representable and
+independently verifiable for chunked admission -- it says nothing about
+how or when a real forward pass gets interrupted; that's a purely LOCAL
+scheduling decision on rank 0's side, invisible to this protocol by
+design (an interleaved decode step is already its own ordinary
+``StepMessage``; where rank 0 chose to yield within its own layer loop
+to produce it is not this protocol's concern). Old Phase-1-era note,
+still accurate for the ORIGINAL decode-only case: this module's
+original scope only ever constructed requests that begin already in
+DECODE, mirroring "both
 already prefilled via today's existing serial PP prefill" from the
 design doc's own Phase 1 description.
 """
@@ -347,6 +373,69 @@ class NewRequestEvent:
 
 
 @dataclass(frozen=True)
+class NewChunkedPrefillRequestEvent:
+    """A new request has arrived and been assigned a cache slot, but is
+    NOT yet prefilled -- it begins in ``Phase.PREFILL`` with
+    ``cache_len=0`` (2026-08-06, Phase 2 scoping session -- see module
+    docstring's Phase 2 addendum). ``total_prompt_tokens`` is recorded
+    so ``RankOneMirror`` can independently derive when this request's
+    prefill is COMPLETE (``cache_len == total_prompt_tokens``) rather
+    than trusting a caller-supplied "this is the final chunk" claim --
+    the same "rank 1 never trusts, always independently re-derives"
+    discipline every other invariant in this module already follows.
+    Mirrors what a real ``PrefillMessage.n_prompt_tokens`` field would
+    carry over the wire at admission time.
+    """
+
+    request_id: int
+    cache_slot: int
+    total_prompt_tokens: int
+
+    def __post_init__(self) -> None:
+        if self.total_prompt_tokens < 1:
+            raise ProtocolViolationError(
+                f"NewChunkedPrefillRequestEvent.total_prompt_tokens="
+                f"{self.total_prompt_tokens} must be >=1 -- a prefill "
+                f"request with zero or negative prompt length is not a "
+                f"real occurrence this event should represent"
+            )
+
+
+@dataclass(frozen=True)
+class PrefillChunkAdvancedEvent:
+    """One real prefill chunk completed for ``request_id`` -- its cache
+    advanced by ``n_tokens_this_chunk`` (NOT always 1, unlike
+    ``TokenGeneratedEvent`` -- a chunk may cover many tokens, per
+    ``EXO_PREFILL_STEP_SIZE``). Deliberately a SINGLE-request event,
+    not a tuple like ``TokenGeneratedEvent`` -- per this session's
+    scope decision (design doc's Phase 2 entry, "at most ONE request
+    mid-prefill at a time"), only one request is ever mid-chunked-
+    prefill at once, so there is no multi-request atomicity concern to
+    preserve here the way there is for real batched decode steps.
+
+    Does NOT itself claim whether this is the final chunk -- see
+    ``NewChunkedPrefillRequestEvent``'s docstring: finality is DERIVED
+    by ``RankOneMirror`` from ``cache_len == total_prompt_tokens``,
+    never asserted by the event. ``SchedulerCore`` derives it
+    identically from its own tracked state for the same reason (so
+    both ranks compute the SAME derived fact from the SAME kind of
+    ground truth, not one side trusting the other's claim).
+    """
+
+    request_id: int
+    n_tokens_this_chunk: int
+
+    def __post_init__(self) -> None:
+        if self.n_tokens_this_chunk < 1:
+            raise ProtocolViolationError(
+                f"PrefillChunkAdvancedEvent.n_tokens_this_chunk="
+                f"{self.n_tokens_this_chunk} must be >=1 -- a chunk "
+                f"advancing zero tokens is not a real occurrence this "
+                f"event should represent"
+            )
+
+
+@dataclass(frozen=True)
 class TokenGeneratedEvent:
     """One real decode step completed for ``request_ids`` -- EVERY
     request in this tuple advanced by exactly 1 token, as part of the
@@ -415,7 +504,9 @@ class EvictAckReceivedEvent:
 
 Event = (
     NewRequestEvent
+    | NewChunkedPrefillRequestEvent
     | TokenGeneratedEvent
+    | PrefillChunkAdvancedEvent
     | RequestDoneEvent
     | RequestAbortedEvent
     | EvictAckReceivedEvent
@@ -449,6 +540,14 @@ class _RequestRecord:
     cache_slot: int
     phase: Phase
     cache_len: int
+    # None for a request admitted via NewRequestEvent (Phase-1's
+    # original decode-only path, no prefill tracked here at all).
+    # Set for a request admitted via NewChunkedPrefillRequestEvent --
+    # the ground truth SchedulerCore checks its OWN prefill-advance
+    # bookkeeping against (module docstring's Phase 2 addendum;
+    # RankOneMirror tracks the identical fact independently via
+    # ``record_prefill_admission``, never trusting this side's claim).
+    total_prompt_tokens: int | None = None
 
 
 class SchedulerCore:
@@ -483,22 +582,32 @@ class SchedulerCore:
         return self._step_id
 
     def _active_batch_entries(
-        self, *, advancing_request_ids: frozenset[int] = frozenset()
+        self, *, advancing: dict[int, int] | None = None
     ) -> tuple[BatchEntry, ...]:
         """Snapshot the full current active set for rank 1's routing.
 
-        ``advancing_request_ids``: the set of requests whose state
-        actually changed as a result of THIS ``handle()`` call -- each
-        gets ``n_tokens=1`` (Phase-1 scope: decode-only, always exactly
-        1 token per real advance). Every OTHER active request
-        co-listed in the same snapshot gets ``n_tokens=0`` -- being
-        included in a step message for rank 1's bookkeeping does NOT
-        mean every co-listed request generated a token in lockstep with
-        this specific event; only the ones actually named here did.
-        Empty (the default) means no request advanced this call (e.g.
-        a brand new request just joined at its baseline cache_len=0,
-        or the batch composition changed for bookkeeping reasons
-        only).
+        ``advancing``: maps request_id -> n_tokens for requests whose
+        state actually changed as a result of THIS ``handle()`` call.
+        Every OTHER active request co-listed in the same snapshot gets
+        ``n_tokens=0`` -- being included in a step message for rank 1's
+        bookkeeping does NOT mean every co-listed request generated a
+        token/chunk-advance in lockstep with this specific event; only
+        the ones actually named here did. Empty/``None`` (the default)
+        means no request advanced this call (e.g. a brand new request
+        just joined at its baseline cache_len=0, or the batch
+        composition changed for bookkeeping reasons only).
+
+        2026-08-06 (Phase 2 scoping session): generalized from
+        ``advancing_request_ids: frozenset[int]`` (every advance always
+        exactly 1 token, Phase-1's decode-only assumption) to this
+        ``dict[int, int]`` shape so a single prefill CHUNK advance
+        (``n_tokens_this_chunk`` -- may be many tokens, per
+        ``EXO_PREFILL_STEP_SIZE``) and a decode-step advance (always
+        exactly 1 token) can both flow through the SAME snapshot method
+        without a parallel near-duplicate implementation. Every
+        existing call site updated accordingly; no behavior change for
+        the decode-only case (``{rid: 1 for rid in request_ids}`` is
+        exactly the old frozenset-of-1s semantics).
 
         A ``frozenset`` (not a plain ``set``) -- immutable, matching
         this dataclass-heavy module's preference for frozen/hashable
@@ -547,13 +656,14 @@ class SchedulerCore:
         immediately the first time a real test exercised it: "order
         (2, 3) does not match ... (3, 2)".
         """
+        advancing = advancing or {}
         return tuple(
             BatchEntry(
                 request_id=rid,
                 cache_slot=rec.cache_slot,
                 phase=rec.phase,
                 expected_cache_len=rec.cache_len,
-                n_tokens=1 if rid in advancing_request_ids else 0,
+                n_tokens=advancing.get(rid, 0),
             )
             for rid, rec in sorted(
                 self._requests.items(), key=lambda kv: kv[1].cache_slot
@@ -564,8 +674,16 @@ class SchedulerCore:
         match event:
             case NewRequestEvent(request_id=rid, cache_slot=slot):
                 return self._handle_new_request(rid, slot)
+            case NewChunkedPrefillRequestEvent(
+                request_id=rid, cache_slot=slot, total_prompt_tokens=total
+            ):
+                return self._handle_new_chunked_prefill_request(rid, slot, total)
             case TokenGeneratedEvent(request_ids=rids):
                 return self._handle_tokens_generated(rids)
+            case PrefillChunkAdvancedEvent(
+                request_id=rid, n_tokens_this_chunk=n_tokens
+            ):
+                return self._handle_prefill_chunk_advanced(rid, n_tokens)
             case RequestDoneEvent(request_id=rid) | RequestAbortedEvent(request_id=rid):
                 return self._handle_evict_request(rid)
             case EvictAckReceivedEvent(request_id=rid, cache_slot=slot):
@@ -620,6 +738,70 @@ class SchedulerCore:
             )
         ]
 
+    def _handle_new_chunked_prefill_request(
+        self, request_id: int, cache_slot: int, total_prompt_tokens: int
+    ) -> list[Command]:
+        """2026-08-06 (Phase 2 scoping session). Same slot-exclusivity/
+        duplicate-id/max-concurrency invariants as ``_handle_new_request``
+        (kept fully duplicated rather than factored into a shared helper
+        with a phase parameter -- this module's own established style,
+        see e.g. ``RequestDoneEvent``/``RequestAbortedEvent`` sharing one
+        handler ONLY because their semantics are truly identical; here
+        the two admission paths' error messages and PHASE OUTCOME
+        genuinely differ, so keeping them as textually separate, easily-
+        greppable methods is preferred over a shared helper with a
+        branch inside it).
+
+        Per module docstring's Phase 2 addendum and the design doc's
+        own "at most ONE request mid-prefill at a time" scope decision:
+        this does NOT enforce single-concurrent-prefill here -- that is
+        a scheduling POLICY decision for the real ``tick()`` caller
+        (which event to feed this core, and when), not a protocol
+        INVARIANT this pure core should hard-enforce. A future policy
+        change to allow N>1 concurrent prefills would not need to touch
+        this module at all; deliberately kept orthogonal.
+        """
+        if request_id in self._requests:
+            raise ProtocolViolationError(
+                f"NewChunkedPrefillRequestEvent for request_id={request_id} "
+                f"which is ALREADY active (slot="
+                f"{self._requests[request_id].cache_slot}) -- duplicate "
+                f"request_id, refusing to silently overwrite"
+            )
+        current_state = self._slot_state.get(cache_slot, SlotState.FREE)
+        if current_state != SlotState.FREE:
+            raise ProtocolViolationError(
+                f"NewChunkedPrefillRequestEvent targets cache_slot="
+                f"{cache_slot} which is {current_state.name}, not FREE -- "
+                f"this is EXACTLY the slot-reuse-before-eviction-ack race "
+                f"this module exists to prevent (see module docstring "
+                f"point 4); refusing to assign a request to a slot that "
+                f"hasn't been evicted yet"
+            )
+        if len(self._requests) >= self.max_concurrency:
+            raise ProtocolViolationError(
+                f"NewChunkedPrefillRequestEvent would exceed "
+                f"max_concurrency={self.max_concurrency} (currently "
+                f"{len(self._requests)} active) -- N>{self.max_concurrency} "
+                f"concurrency is explicitly out of scope for this design "
+                f"(design doc Section 10)"
+            )
+        self._requests[request_id] = _RequestRecord(
+            cache_slot=cache_slot,
+            phase=Phase.PREFILL,
+            cache_len=0,
+            total_prompt_tokens=total_prompt_tokens,
+        )
+        self._slot_state[cache_slot] = SlotState.ACTIVE
+        return [
+            SendStepCommand(
+                StepMessage(
+                    step_id=self._next_step_id(),
+                    entries=self._active_batch_entries(),
+                )
+            )
+        ]
+
     def _handle_tokens_generated(self, request_ids: tuple[int, ...]) -> list[Command]:
         """Handle a single real (possibly batched) decode step -- EVERY
         request in ``request_ids`` advanced by exactly 1 token as part
@@ -638,6 +820,25 @@ class SchedulerCore:
                 f"otherwise silently create a phantom cache-length "
                 f"increment for a slot no request owns)"
             )
+        # 2026-08-06 (Phase 2 scoping session): a request currently in
+        # PREFILL phase cannot ALSO be advancing via a real decode step
+        # -- these are mutually exclusive phases for one request at one
+        # instant. Checked BEFORE mutating any state (same "validate
+        # everything, then mutate" discipline as the missing-id check
+        # above), and named explicitly per-request so the error is
+        # actionable rather than a generic assertion failure.
+        still_prefilling = [
+            rid for rid in request_ids if self._requests[rid].phase == Phase.PREFILL
+        ]
+        if still_prefilling:
+            raise ProtocolViolationError(
+                f"TokenGeneratedEvent for request_ids={still_prefilling} "
+                f"which {'are' if len(still_prefilling) > 1 else 'is'} "
+                f"still in Phase.PREFILL, not DECODE -- a decode-step "
+                f"advance cannot apply to a request still mid-prefill; "
+                f"this would silently mix prefill and decode semantics "
+                f"for the same request in the same step"
+            )
         for rid in request_ids:
             rec = self._requests[rid]
             rec.cache_len = known_len_advance(rec.cache_len, n_tokens=1)
@@ -646,7 +847,91 @@ class SchedulerCore:
                 StepMessage(
                     step_id=self._next_step_id(),
                     entries=self._active_batch_entries(
-                        advancing_request_ids=frozenset(request_ids)
+                        advancing={rid: 1 for rid in request_ids}
+                    ),
+                )
+            )
+        ]
+
+    def _handle_prefill_chunk_advanced(
+        self, request_id: int, n_tokens_this_chunk: int
+    ) -> list[Command]:
+        """2026-08-06 (Phase 2 scoping session). Advances ``request_id``'s
+        prefill cache by ``n_tokens_this_chunk`` and, if that advance
+        reaches ``total_prompt_tokens`` exactly, transitions the request
+        PREFILL -> DECODE. Finality is DERIVED here (``cache_len ==
+        total_prompt_tokens`` after the advance), never asserted by the
+        event -- see ``PrefillChunkAdvancedEvent``'s own docstring for
+        why (mirrors ``RankOneMirror``'s identical independent
+        derivation, so both ranks compute the same fact from the same
+        kind of ground truth rather than one side trusting the other's
+        claim -- module docstring point 2).
+
+        Per module docstring point 6 (off-by-one tripwire) and the
+        design doc's Phase 2 entry's "final-chunk boundary" open item:
+        this module's OWN convention is that ``total_prompt_tokens`` is
+        the exact count of tokens this request's prefill must advance
+        the cache by BEFORE the first real decode step runs -- i.e.
+        ``total_prompt_tokens`` already reflects whatever "drop the
+        last prompt token" convention the real prefill call site uses
+        (``prefill()``'s own ``prompt_tokens[:-1]`` contract), NOT the
+        raw prompt length. The caller (a future real ``tick()``
+        integration, not yet built) is responsible for computing
+        ``total_prompt_tokens`` consistently with that existing
+        convention; this module only enforces internal self-consistency
+        (the running sum matches what's claimed), not what the number
+        SHOULD be relative to the real tokenized prompt -- that's a real
+        integration-time cross-check to add when the actual ``tick()``
+        wiring is built, not something this zero-I/O core can verify on
+        its own.
+        """
+        rec = self._requests.get(request_id)
+        if rec is None:
+            raise ProtocolViolationError(
+                f"PrefillChunkAdvancedEvent for request_id={request_id} "
+                f"which is not active -- stale/duplicate event, refusing "
+                f"to process (this would otherwise silently create a "
+                f"phantom cache-length increment for a slot no request "
+                f"owns)"
+            )
+        if rec.phase != Phase.PREFILL:
+            raise ProtocolViolationError(
+                f"PrefillChunkAdvancedEvent for request_id={request_id} "
+                f"which is in Phase.{rec.phase.name}, not PREFILL -- a "
+                f"chunk advance cannot apply to a request that has "
+                f"already finished prefilling (or never started via "
+                f"NewChunkedPrefillRequestEvent in the first place)"
+            )
+        assert rec.total_prompt_tokens is not None, (
+            "internal invariant violation: a Phase.PREFILL record must "
+            "always carry total_prompt_tokens -- this is a bug in this "
+            "module itself (NewChunkedPrefillRequestEvent is the only "
+            "path that ever sets phase=PREFILL, and it always sets this "
+            "field), not a caller error"
+        )
+        new_len = known_len_advance(rec.cache_len, n_tokens_this_chunk)
+        if new_len > rec.total_prompt_tokens:
+            raise ProtocolViolationError(
+                f"PrefillChunkAdvancedEvent for request_id={request_id} "
+                f"claims n_tokens_this_chunk={n_tokens_this_chunk}, which "
+                f"would advance cache_len from {rec.cache_len} to "
+                f"{new_len} -- OVERSHOOTING total_prompt_tokens="
+                f"{rec.total_prompt_tokens}. A chunk that reads past the "
+                f"end of its own claimed prompt length is exactly the "
+                f"off-by-one silent-corruption shape module docstring "
+                f"point 6 exists to catch"
+            )
+        rec.cache_len = new_len
+        if new_len == rec.total_prompt_tokens:
+            # Finality DERIVED here, not asserted by the event -- see
+            # this method's own docstring.
+            rec.phase = Phase.DECODE
+        return [
+            SendStepCommand(
+                StepMessage(
+                    step_id=self._next_step_id(),
+                    entries=self._active_batch_entries(
+                        advancing={request_id: n_tokens_this_chunk}
                     ),
                 )
             )
@@ -707,6 +992,52 @@ class RankOneMirror:
         self._slot_state: dict[int, SlotState] = {}
         self._slot_cache_len: dict[int, int] = {}
         self._last_step_id: int = 0
+        # 2026-08-06 (Phase 2 scoping session). Both keyed by cache_slot,
+        # populated/cleared in lockstep with ``_slot_cache_len`` (same
+        # admission -> ... -> evict-ack lifecycle) so a slot that is
+        # EVICTED and REUSED by a later, different request starts this
+        # tracking fresh -- Fable's consult-review gap #1: an earlier
+        # draft of this design treated "PREFILL -> DECODE, once per
+        # SLOT, ever" as the invariant, which is wrong the instant a
+        # slot is evicted and reused by a second chunked-prefill
+        # request; the real invariant is per-ADMISSION (this dict's
+        # lifecycle), not per-slot-forever.
+        self._slot_phase: dict[int, Phase] = {}
+        self._slot_total_prompt_tokens: dict[int, int] = {}
+
+    def record_prefill_admission(
+        self, cache_slot: int, total_prompt_tokens: int
+    ) -> None:
+        """Call BEFORE the first ``StepMessage`` naming ``cache_slot`` in
+        ``Phase.PREFILL`` arrives -- mirrors receiving a real
+        ``PrefillMessage.n_prompt_tokens`` over the wire at admission
+        time (2026-08-06, Phase 2 scoping session; module docstring's
+        Phase 2 addendum). This is the independent ground truth
+        ``validate_step`` derives prefill completion FROM -- it is
+        NEVER inferred from a caller-claimed "this is the final chunk"
+        signal (Fable's consult-review gap #2: trusting such a claim
+        would defeat this class's entire "rank 1 never trusts, always
+        independently re-derives" purpose -- see class docstring).
+        """
+        if cache_slot in self._slot_total_prompt_tokens:
+            raise ProtocolViolationError(
+                f"record_prefill_admission called for cache_slot="
+                f"{cache_slot} which ALREADY has a tracked "
+                f"total_prompt_tokens={self._slot_total_prompt_tokens[cache_slot]} "
+                f"-- duplicate registration, refusing to silently "
+                f"overwrite (if this slot was legitimately evicted and "
+                f"reused, ``build_evict_ack`` must run first -- it clears "
+                f"this tracking as part of the same evict lifecycle "
+                f"``_slot_cache_len`` already goes through)"
+            )
+        if total_prompt_tokens < 1:
+            raise ProtocolViolationError(
+                f"record_prefill_admission(cache_slot={cache_slot}, "
+                f"total_prompt_tokens={total_prompt_tokens}) -- must be "
+                f">=1, matching NewChunkedPrefillRequestEvent's own "
+                f"validation on rank 0's side"
+            )
+        self._slot_total_prompt_tokens[cache_slot] = total_prompt_tokens
 
     def _check_step_id(self, step_id: int) -> None:
         if step_id != self._last_step_id + 1:
@@ -724,6 +1055,18 @@ class RankOneMirror:
     def validate_step(self, message: StepMessage) -> None:
         self._check_step_id(message.step_id)
         seen_slots: set[int] = set()
+        # 2026-08-06 (Phase 2 scoping session, Fable consult-review gap
+        # #4): within ONE StepMessage, an advancing (n_tokens>0) PREFILL
+        # entry may never be co-listed with any OTHER advancing entry --
+        # per the design doc's "at most ONE request mid-prefill at a
+        # time" + "separate alternating steps, not a mixed per-step
+        # tensor" scope decisions, a real step is either a pure prefill-
+        # chunk step (exactly one advancing PREFILL entry) or a pure
+        # decode step (one or more advancing DECODE entries), never
+        # both. Collected here, enforced after the per-entry loop below
+        # (which still needs to run first to know each entry's
+        # DERIVED phase, not just rank 0's claimed one).
+        advancing_phases: list[Phase] = []
         for entry in message.entries:
             if entry.cache_slot in seen_slots:
                 raise ProtocolViolationError(
@@ -749,27 +1092,46 @@ class RankOneMirror:
             if slot_state == SlotState.FREE:
                 # First time this rank has seen this slot scheduled --
                 # rank 0's claimed expected_cache_len becomes the
-                # baseline (Phase-1 scope: always 0, since every
-                # request modeled here starts already-prefilled with an
-                # empty per-rank decode cache -- see module docstring's
-                # Scope note. A nonzero baseline here would indicate a
-                # scheduling bug in Phase-1 scope, not a real prefilled
-                # cache length, since this mirror has no prefill state
-                # to compare against yet).
+                # baseline (always 0: EITHER Phase-1's legacy decode-
+                # only admission, which always starts already-prefilled
+                # with an empty per-rank decode cache, OR a fresh
+                # Phase-2 chunked-prefill admission, which also always
+                # starts at cache_len=0 by construction -- see
+                # ``NewChunkedPrefillRequestEvent``. A nonzero baseline
+                # here would indicate a scheduling bug either way, not a
+                # legitimate prefilled length, since this mirror has no
+                # prior cache state to compare against yet).
                 if entry.expected_cache_len != 0:
                     raise ProtocolViolationError(
                         f"StepMessage step_id={message.step_id} claims "
                         f"expected_cache_len={entry.expected_cache_len} for "
                         f"NEWLY-scheduled cache_slot={entry.cache_slot} "
                         f"(request_id={entry.request_id}), but this mirror "
-                        f"has no prior cache state for this slot -- Phase-1 "
-                        f"scope requires new requests to start with an "
-                        f"empty per-rank decode cache (already prefilled "
-                        f"elsewhere); a nonzero claim here indicates a "
-                        f"scheduler bug, not a legitimate prefilled length"
+                        f"has no prior cache state for this slot -- both "
+                        f"Phase-1 decode-only and Phase-2 chunked-prefill "
+                        f"admissions always start at cache_len=0; a "
+                        f"nonzero claim here indicates a scheduler bug, "
+                        f"not a legitimate prefilled length"
+                    )
+                if entry.phase == Phase.PREFILL and (
+                    entry.cache_slot not in self._slot_total_prompt_tokens
+                ):
+                    raise ProtocolViolationError(
+                        f"StepMessage step_id={message.step_id} schedules "
+                        f"request_id={entry.request_id} on NEWLY-scheduled "
+                        f"cache_slot={entry.cache_slot} in Phase.PREFILL, "
+                        f"but this mirror has no total_prompt_tokens on "
+                        f"record for this slot -- ``record_prefill_"
+                        f"admission`` must be called (mirroring a real "
+                        f"``PrefillMessage``'s arrival) BEFORE the first "
+                        f"PREFILL-phase StepMessage for a slot, so this "
+                        f"mirror has independent ground truth to derive "
+                        f"completion from rather than trusting rank 0's "
+                        f"claimed phase blindly"
                     )
                 self._slot_state[entry.cache_slot] = SlotState.ACTIVE
                 self._slot_cache_len[entry.cache_slot] = 0
+                self._slot_phase[entry.cache_slot] = entry.phase
             else:
                 if known_len is None:
                     # Invariant violation, not a user-triggerable
@@ -801,6 +1163,58 @@ class RankOneMirror:
                         f"review; refusing to process a step whose claimed "
                         f"state disagrees with this rank's own ground truth"
                     )
+                # 2026-08-06 (Phase 2 scoping session, Fable consult-
+                # review gap #2): DERIVE the phase this entry SHOULD be
+                # in, from this mirror's OWN prior-tracked phase + the
+                # newly-validated cache length, and cross-check it
+                # against rank 0's claimed ``entry.phase`` -- never
+                # trust the claim outright. This is what actually gives
+                # the phase tracker teeth: a rank-0 bug that flips to
+                # DECODE one chunk early (silently dropping prompt
+                # tokens) is caught here even though the raw
+                # expected_cache_len arithmetic above would pass, because
+                # the DERIVED phase and the CLAIMED phase disagree.
+                prior_phase = self._slot_phase.get(entry.cache_slot)
+                if prior_phase is None:
+                    raise ProtocolViolationError(
+                        f"internal invariant violation: cache_slot="
+                        f"{entry.cache_slot} is ACTIVE but has no tracked "
+                        f"phase -- this is a bug in RankOneMirror itself"
+                    )
+                if prior_phase == Phase.DECODE:
+                    derived_phase = Phase.DECODE
+                else:
+                    total = self._slot_total_prompt_tokens.get(entry.cache_slot)
+                    if total is None:
+                        raise ProtocolViolationError(
+                            f"internal invariant violation: cache_slot="
+                            f"{entry.cache_slot} is tracked as Phase.PREFILL "
+                            f"but has no total_prompt_tokens on record -- "
+                            f"this is a bug in RankOneMirror itself"
+                        )
+                    derived_phase = (
+                        Phase.DECODE
+                        if entry.expected_cache_len == total
+                        else Phase.PREFILL
+                    )
+                if derived_phase != entry.phase:
+                    raise ProtocolViolationError(
+                        f"StepMessage step_id={message.step_id} claims "
+                        f"phase=Phase.{entry.phase.name} for cache_slot="
+                        f"{entry.cache_slot} (request_id={entry.request_id}), "
+                        f"but this mirror INDEPENDENTLY DERIVES "
+                        f"Phase.{derived_phase.name} from its own tracked "
+                        f"state (prior_phase={prior_phase.name}, "
+                        f"expected_cache_len={entry.expected_cache_len} vs "
+                        f"total_prompt_tokens="
+                        f"{self._slot_total_prompt_tokens.get(entry.cache_slot)}) "
+                        f"-- a claimed phase that disagrees with this "
+                        f"rank's own independent derivation is exactly the "
+                        f"'trusting a caller-claimed final-chunk signal' "
+                        f"hazard this design deliberately avoids (see "
+                        f"``record_prefill_admission``'s docstring)"
+                    )
+                self._slot_phase[entry.cache_slot] = derived_phase
             # ``entry.expected_cache_len`` IS the ground-truth length
             # AFTER this step's token(s) are applied (validated above
             # against this mirror's own prior tracked length + the
@@ -809,6 +1223,21 @@ class RankOneMirror:
             # ground truth in sync with rank 0's, since the addition
             # already happened conceptually in the comparison above.
             self._slot_cache_len[entry.cache_slot] = entry.expected_cache_len
+            if entry.n_tokens > 0:
+                advancing_phases.append(entry.phase)
+        if Phase.PREFILL in advancing_phases and len(advancing_phases) > 1:
+            raise ProtocolViolationError(
+                f"StepMessage step_id={message.step_id} co-lists an "
+                f"ADVANCING Phase.PREFILL entry alongside "
+                f"{len(advancing_phases) - 1} other advancing "
+                f"entr{'y' if len(advancing_phases) == 2 else 'ies'} in "
+                f"the SAME step -- per the design doc's 'separate "
+                f"alternating steps, not a mixed per-step tensor' "
+                f"scope decision, a real step is either a pure "
+                f"prefill-chunk step (exactly one advancing PREFILL "
+                f"entry) or a pure decode step (one or more advancing "
+                f"DECODE entries), never both in the same step"
+            )
 
     def validate_evict(self, message: EvictMessage) -> None:
         self._check_step_id(message.step_id)
@@ -827,7 +1256,23 @@ class RankOneMirror:
         """Call AFTER ``validate_evict`` has accepted the eviction and
         this rank has actually freed its cache state for the slot --
         transitions the mirror's own view to FREE and returns the ack
-        message the real transport layer would send back to rank 0."""
+        message the real transport layer would send back to rank 0.
+
+        2026-08-06 (Phase 2 scoping session, Fable consult-review gap
+        #1): also clears ``_slot_phase``/``_slot_total_prompt_tokens``
+        for this slot, in the SAME lifecycle step as the pre-existing
+        ``_slot_cache_len`` clear -- so a slot legitimately evicted and
+        later reused by a DIFFERENT chunked-prefill request starts this
+        tracking fresh, rather than a stale phase/total from the
+        PREVIOUS occupant leaking into the new admission's validation.
+        Uses ``.pop(..., None)`` (not ``del``) for both -- ``_slot_phase``
+        is always populated (every admission path sets it in
+        ``validate_step``'s FREE branch), but
+        ``_slot_total_prompt_tokens`` is populated ONLY for a
+        chunked-prefill admission (``record_prefill_admission``) -- a
+        decode-only (Phase-1-style) admission never sets it, so evicting
+        one must not raise a KeyError.
+        """
         slot_state = self._slot_state.get(message.cache_slot)
         if slot_state != SlotState.DRAINING:
             raise ProtocolViolationError(
@@ -837,6 +1282,8 @@ class RankOneMirror:
             )
         self._slot_state[message.cache_slot] = SlotState.FREE
         del self._slot_cache_len[message.cache_slot]
+        self._slot_phase.pop(message.cache_slot, None)
+        self._slot_total_prompt_tokens.pop(message.cache_slot, None)
         return EvictAckMessage(
             step_id=message.step_id,
             request_id=message.request_id,
