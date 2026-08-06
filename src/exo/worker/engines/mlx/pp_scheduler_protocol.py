@@ -150,6 +150,97 @@ class StepMessage:
 
 
 @dataclass(frozen=True)
+class PrefillMessage:
+    """Rank 0's explicit "admit request ``request_id`` NOW, on
+    ``cache_slot``, and run its prefill" instruction to rank 1.
+
+    WHY THIS EXISTS (this is not a convenience message -- it closes a
+    real, hardware-confirmed deadlock):
+    ``docs/batched-decode-n2-admission-handoff-2026-08-05.md`` and
+    ``docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md``
+    Section 15 document that N=2 genuinely concurrent requests
+    deadlock the real 2-node cluster with
+    ``[jaccl] reliable_all_reduce_v2 deadline``. The root cause is NOT
+    that prefill and decode traffic overlap within a rank (each
+    rank's ``runner.py`` loop is synchronous and cannot do both at
+    once) -- it is that admission decisions are UNSYNCHRONIZED ACROSS
+    RANKS. Each rank's runner independently pulls work off its OWN
+    local work queue and independently decides, per loop iteration,
+    whether to prefill a newly-arrived request (the old single-request
+    metaframe path, structurally different wire traffic) or to run a
+    batched decode step (``Rank0BatchedDecodeGlue``/
+    ``Rank1BatchedDecodeGlue.tick()``). Nothing today makes both ranks
+    reach the SAME decision at the SAME logical moment, so rank 0 can
+    begin request B's prefill collectives in the very window rank 1 is
+    still mid-decode-step -- two ranks issuing mismatched jaccl
+    collectives, which is a real deadlock.
+
+    The fix this message implements: the "admit request B now, start
+    its prefill" decision stops being a per-rank local decision and
+    becomes an explicit control message on the SAME single-writer wire
+    channel the decode-step traffic already uses. Rank 1 no longer
+    decides when to prefill; it is TOLD, in-band, in the same ordered
+    stream as ``StepMessage``/``EvictMessage``, so the tick boundary at
+    which admission happens is by construction identical on both
+    ranks.
+
+    Fields:
+      ``step_id``: the usual lockstep monotonic step counter shared
+        with ``StepMessage``/``EvictMessage`` (module docstring point
+        5) -- an admission consumes a step id exactly like any other
+        control message, so a skipped/duplicated admission is caught by
+        the same cheap tripwire.
+      ``request_id``/``cache_slot``: which request is being admitted,
+        and the slot rank 1 must bind its cache state to. The slot MUST
+        be FREE on rank 1's own independently-tracked view (module
+        docstring point 4) -- admitting onto a DRAINING slot is the
+        slot-reuse-before-ack corruption vector.
+      ``n_prompt_tokens``: the prompt length rank 1 should expect to
+        prefill, so rank 1 can validate the activation shapes it
+        subsequently receives instead of inferring them (same
+        "explicit expected length as a tripwire" rationale as
+        ``BatchEntry.expected_cache_len``, module docstring point 6).
+      ``flags``: bitfield, see ``PREFILL_FLAG_*`` below. Reserved bits
+        MUST be zero; this module never silently ignores an unknown
+        flag bit (module docstring point 3: fail-stop, never repair) --
+        the wire layer rejects them.
+
+    ``flags`` bit 0 (``PREFILL_FLAG_SINGLE_REQUEST_FALLBACK``) means
+    "this request is INELIGIBLE for the batched-decode path; prefill it
+    through the OLD single-request ``MetaFramedPipelineFirstLayer``/
+    ``MetaFramedPipelineLastLayer`` path, not the batched metaframe
+    layers." Rank 1 cannot derive this itself -- eligibility is
+    evaluated on rank 0 (see the batched-decode eligibility logic) --
+    and getting it wrong means the two ranks install structurally
+    DIFFERENT metaframe layer stacks for the same request, which is the
+    same mismatched-collectives deadlock in a different disguise. So it
+    is carried explicitly on the wire rather than recomputed.
+    """
+
+    step_id: int
+    request_id: int
+    cache_slot: int
+    n_prompt_tokens: int
+    flags: int
+
+
+# Bit 0 of ``PrefillMessage.flags`` -- see that dataclass's docstring.
+# Set => route this request's prefill through the legacy
+# single-request MetaFramedPipelineFirstLayer/LastLayer path (it is
+# ineligible for batched decode). Clear => batched metaframe path.
+PREFILL_FLAG_SINGLE_REQUEST_FALLBACK = 1 << 0
+
+# Every currently-defined flag bit OR'd together. Anything outside this
+# mask is a reserved bit and MUST be zero on the wire -- the wire layer
+# (``pp_scheduler_wire.py``) rejects violations loudly rather than
+# masking them off, because a set reserved bit means the peer is
+# running a build with semantics this build does not implement, and
+# silently dropping it is precisely how a version skew turns into
+# wrong-path routing instead of a clean crash.
+PREFILL_FLAGS_KNOWN_MASK = PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
+
+
+@dataclass(frozen=True)
 class EvictMessage:
     """Explicit eviction notice for one cache slot -- the fix for Risk
     #10's cancellation-by-omission ambiguity (module docstring point

@@ -52,6 +52,27 @@ clean ``SchedulerWireProtocolError``):
   ``request_id`` and ``header[4]`` is ``cache_slot`` -- the ENTIRE
   message fits in the fixed header, no follow-up table.
 
+  For MSG_KIND_PREFILL, ``header[3]`` is ``cache_slot`` and
+  ``header[4]`` is ``n_prompt_tokens`` -- a ``PrefillMessage``'s
+  remaining two fields (``request_id``, ``flags``) do not fit
+  alongside ``step_id``/``cache_slot``/``n_prompt_tokens`` in the
+  5-field header, so they follow in a small FIXED-shape body, sent/
+  received only after the header reveals
+  ``msg_kind == MSG_KIND_PREFILL``:
+    body: [request_id, flags]  (2 int32, always exactly one row --
+          unlike MSG_KIND_STEP's variable-length table, a
+          ``PrefillMessage`` always carries exactly one request)
+
+MSG_KIND_PREFILL is what folds the "admit request B now, start its
+prefill" decision into THIS single-writer control channel instead of
+leaving it as an independent per-rank local decision -- see
+``PrefillMessage``'s own docstring in ``pp_scheduler_protocol.py`` for
+the hardware-confirmed N=2 jaccl deadlock
+(``docs/batched-decode-n2-admission-handoff-2026-08-05.md``) this
+closes. The header-first-then-branch pattern above extends to it
+naturally: a receiver still reads the same fixed 5-int32 header first
+and only then learns a 2-int32 body follows.
+
 ``phase_ordinal`` encodes ``Phase.PREFILL``/``Phase.DECODE`` as a
 fixed integer (NOT ``Enum.value``, which is not part of this module's
 stable wire contract) -- see ``_PHASE_TO_ORDINAL``/
@@ -66,10 +87,12 @@ from typing import cast
 import mlx.core as mx
 
 from exo.worker.engines.mlx.pp_scheduler_protocol import (
+    PREFILL_FLAGS_KNOWN_MASK,
     BatchEntry,
     EvictAckMessage,
     EvictMessage,
     Phase,
+    PrefillMessage,
     StepMessage,
 )
 
@@ -82,11 +105,13 @@ SCHEDULER_WIRE_PROTOCOL_VERSION = 1
 MSG_KIND_STEP = 1
 MSG_KIND_EVICT = 2
 MSG_KIND_EVICT_ACK = 3
+MSG_KIND_PREFILL = 4
 
 _HEADER_FIELDS = 5  # [version, msg_kind, step_id, field_d, field_e]
 _STEP_ROW_FIELDS = (
     5  # [request_id, cache_slot, phase_ordinal, expected_cache_len, n_tokens]
 )
+_PREFILL_BODY_FIELDS = 2  # [request_id, flags]
 
 _PHASE_TO_ORDINAL: dict[Phase, int] = {Phase.PREFILL: 0, Phase.DECODE: 1}
 _ORDINAL_TO_PHASE: dict[int, Phase] = {v: k for k, v in _PHASE_TO_ORDINAL.items()}
@@ -172,6 +197,7 @@ def _require_kind(header: WireHeader, expected: int, *, fn_name: str) -> None:
             MSG_KIND_STEP: "MSG_KIND_STEP",
             MSG_KIND_EVICT: "MSG_KIND_EVICT",
             MSG_KIND_EVICT_ACK: "MSG_KIND_EVICT_ACK",
+            MSG_KIND_PREFILL: "MSG_KIND_PREFILL",
         }
         raise SchedulerWireProtocolError(
             f"{fn_name}: expected {_names.get(expected, expected)} "
@@ -310,6 +336,121 @@ def recv_evict_message(src: int, *, group: mx.distributed.Group) -> EvictMessage
     docstring for the same caveat about production dispatch code)."""
     header = recv_header(src, group=group)
     return decode_evict_message(header)
+
+
+def encode_prefill_message(message: PrefillMessage) -> tuple[mx.array, mx.array]:
+    """Build the (header, body) int32 array pair for a
+    ``PrefillMessage`` -- rank 0's in-band "admit this request now and
+    prefill it" instruction (see ``PrefillMessage``'s docstring in
+    ``pp_scheduler_protocol.py`` for the N=2 jaccl deadlock this
+    closes).
+
+    Shape mirrors ``encode_step_message`` deliberately -- header first,
+    follow-up array second -- so the receive side is the SAME
+    header-then-branch pattern with no new control flow to get wrong.
+    The only difference: the body is FIXED-shape ``(2,)``, not a
+    variable row count, because a ``PrefillMessage`` always describes
+    exactly one request.
+
+    ``flags`` is validated against ``PREFILL_FLAGS_KNOWN_MASK`` HERE,
+    at encode time, as well as on receive -- an unknown/reserved bit
+    means this build is being asked to transmit semantics it does not
+    itself implement, which is a caller bug worth catching on the
+    sending rank rather than only surfacing as a peer-side rejection.
+    """
+    if message.flags & ~PREFILL_FLAGS_KNOWN_MASK:
+        raise SchedulerWireProtocolError(
+            f"encode_prefill_message: flags={message.flags:#x} sets "
+            f"reserved bit(s) outside "
+            f"PREFILL_FLAGS_KNOWN_MASK={PREFILL_FLAGS_KNOWN_MASK:#x} -- "
+            f"refusing to encode a message whose semantics this build "
+            f"does not implement (fail-stop, never mask off)."
+        )
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL,
+        step_id=message.step_id,
+        field_d=message.cache_slot,
+        field_e=message.n_prompt_tokens,
+    )
+    body = mx.array([message.request_id, message.flags], dtype=mx.int32)
+    return header, body
+
+
+def send_prefill_message(
+    message: PrefillMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillMessage`` to ``dst``: header, then body.
+
+    Follows ``send_header``'s documented eval discipline exactly: the
+    ``mx.distributed.send`` result for the body is bound to its own
+    name and ``mx.eval``'d immediately, never discarded or reassigned
+    before evaluation -- over a real RDMA link an unevaluated send is a
+    send that never happened, the exact bug this codebase already
+    root-caused once (protocol v3 fix, Phase 0.5).
+    """
+    header, body = encode_prefill_message(message)
+    send_header(header, dst, group=group)
+    sent_body = mx.distributed.send(body, dst, group=group)
+    mx.eval(sent_body)
+
+
+def recv_prefill_body(
+    header: WireHeader, src: int, *, group: mx.distributed.Group
+) -> PrefillMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL`` (see ``recv_header``), receive the
+    fixed 2-int32 follow-up body and assemble the full
+    ``PrefillMessage``. Raises ``SchedulerWireProtocolError`` if
+    ``header`` is not actually a prefill header -- callers that already
+    branched on ``header.msg_kind`` get this as a redundant, cheap
+    safety net, not their only check (identical rationale to
+    ``recv_step_table``).
+
+    Also rejects reserved ``flags`` bits: a peer setting a bit this
+    build does not know about is running different admission/routing
+    semantics, and silently masking it off would mean routing the
+    request's prefill through the WRONG layer stack (batched metaframe
+    vs single-request ``MetaFramedPipelineFirstLayer``/``LastLayer``)
+    -- i.e. structurally mismatched collectives on the two ranks, which
+    is the very deadlock class this message kind exists to eliminate.
+    A loud crash here is strictly better.
+    """
+    _require_kind(header, MSG_KIND_PREFILL, fn_name="recv_prefill_body")
+    body_template = mx.zeros((_PREFILL_BODY_FIELDS,), dtype=mx.int32)
+    body = mx.distributed.recv_like(body_template, src, group=group)
+    mx.eval(body)
+    body_values = cast(list[int], body.tolist())
+    request_id, flags = (int(v) for v in body_values)
+    if flags & ~PREFILL_FLAGS_KNOWN_MASK:
+        raise SchedulerWireProtocolError(
+            f"recv_prefill_body: received flags={flags:#x} with reserved "
+            f"bit(s) set outside "
+            f"PREFILL_FLAGS_KNOWN_MASK={PREFILL_FLAGS_KNOWN_MASK:#x} "
+            f"(step_id={header.step_id}, request_id={request_id}) -- the "
+            f"peer rank is running a build with admission semantics this "
+            f"rank does not implement. Both ranks must run identical exo "
+            f"builds; refusing to guess at a routing decision."
+        )
+    return PrefillMessage(
+        step_id=header.step_id,
+        request_id=request_id,
+        cache_slot=header.field_d,
+        n_prompt_tokens=header.field_e,
+        flags=flags,
+    )
+
+
+def recv_prefill_message(src: int, *, group: mx.distributed.Group) -> PrefillMessage:
+    """Convenience one-call wrapper: ``recv_header`` +
+    ``recv_prefill_body`` for a caller that already knows to expect a
+    ``PrefillMessage`` next (e.g. a test, or a caller with its own
+    out-of-band kind expectation). Real production dispatch code that
+    must handle ANY of the four kinds arriving next should call
+    ``recv_header`` directly and branch on ``.msg_kind`` instead --
+    that is precisely the point of the uniform header (see
+    ``recv_step_message``'s own docstring)."""
+    header = recv_header(src, group=group)
+    return recv_prefill_body(header, src, group=group)
 
 
 def send_evict_ack_message(

@@ -77,6 +77,7 @@ from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:
     from exo.worker.engines.mlx.pp_batched_decode_glue import (
+        PrefillGrant,
         Rank0BatchedDecodeGlue,
         Rank1BatchedDecodeGlue,
     )
@@ -588,6 +589,34 @@ class PPSpecAlreadyActiveError(RuntimeError):
 
 
 @dataclass
+class _DeferredPrefill:
+    """A single-request's prefill work, deferred until
+    ``Rank0BatchedDecodeGlue``/``Rank1BatchedDecodeGlue.tick()`` grants
+    it via a real ``PrefillGrant`` (2026-08-06 fix for the N=2
+    admission-race deadlock -- see ``pp_batched_decode_glue.py``'s
+    module docstring for the full rationale).
+
+    ``run_prefill`` is a zero-argument closure built inside
+    ``submit()``, capturing exactly the same local state (vision
+    context, remote-vs-local prefill choice, cache-snapshot
+    collection, RotatingKVCache clamping, prefix-cache write-back)
+    that used to run INLINE, immediately, before this fix. Deferring
+    it to a closure -- rather than re-deriving these steps a second
+    time inside ``_step_batched_decode`` -- keeps this fix a pure
+    reordering of WHEN that existing, already-correct code runs, not
+    a reimplementation of it.
+    """
+
+    run_prefill: Callable[[], tuple[float, int, list[CacheSnapshot], "KVCacheType"]]
+    task_params: TextGenerationTaskParams
+    last_tokens: mx.array
+    sampler: Callable[[mx.array], mx.array]
+    max_tokens: int
+    on_generation_token: Callable[[], None] | None
+    cache_slot: int
+
+
+@dataclass
 class _EngineTask:
     uid: int
     task_params: TextGenerationTaskParams
@@ -716,6 +745,37 @@ class ExoBatchGenerator:
         init=False, default=None
     )
     _batched_decode_eos: set[int] = field(init=False, default_factory=set)
+    # Rank-0-only: prefill work deferred until Rank0BatchedDecodeGlue's
+    # tick() grants it (2026-08-06 fix, see _DeferredPrefill's own
+    # docstring). Keyed by uid so _step_batched_decode can look up the
+    # exact deferred work a PrefillGrant's request_id refers to -- a
+    # PrefillGrant only carries request_id/cache_slot/n_prompt_tokens
+    # (the wire-transmissible subset), not the full closure, so this
+    # dict is where the rest of a submit() call's captured state lives
+    # between enqueue_prefill() and the grant actually arriving.
+    _deferred_prefill_by_uid: dict[int, "_DeferredPrefill"] = field(
+        init=False, default_factory=dict
+    )
+    # Rank-1-only: a PrefillGrant that arrived (via _step_batched_decode's
+    # rank-1 tick()) BEFORE this rank's own submit() had a chance to
+    # register the matching _DeferredPrefill for the same request_id.
+    # This is a genuine, expected race (NOT a bug): rank 0's tick() and
+    # rank 1's submit() are driven by two independent per-rank
+    # schedules (the runner's step()/submit() calls interleave freely),
+    # so rank 0 can process the globally-ordered "admit this request"
+    # event -- and issue the resulting PrefillMessage -- before rank 1's
+    # own submit() call for the SAME request has run. The event-sourcing
+    # broadcast architecture (both ranks subscribe to the same globally-
+    # ordered event stream) guarantees the request's metadata WILL
+    # eventually reach rank 1's local queue and submit() WILL eventually
+    # run for it, so parking the grant here (instead of dropping it or
+    # retrying/sleeping) is a real state-machine fix, not a mitigation:
+    # submit()'s own registration point checks this dict immediately
+    # after registering and runs the deferred prefill right there if a
+    # grant was already parked for this uid.
+    _parked_prefill_grants: dict[int, "PrefillGrant"] = field(
+        init=False, default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         use_speculative = os.environ.get("EXO_SPECULATIVE", "0") == "1"
@@ -1129,6 +1189,209 @@ class ExoBatchGenerator:
             on_generation_token=on_generation_token,
             generation_start_time=time.perf_counter(),
             prefill_tps=prefill_tps,
+            generation_time_at_start=0.0,
+            media_regions=[],
+        )
+        self._update_fence_arming()
+        return uid
+
+    def _submit_batched_decode_deferred(
+        self,
+        *,
+        task_params: TextGenerationTaskParams,
+        prompt: str,
+        prompt_tokens: mx.array,
+        all_prompt_tokens: mx.array,
+        cache: KVCacheType,
+        sampler: Callable[[mx.array], mx.array],
+        max_tokens: int,
+        on_generation_token: Callable[[], None] | None,
+        on_prefill_progress: Callable[[int, int], None] | None,
+        distributed_prompt_progress_callback: Callable[[], None] | None,
+        vision: VisionResult | None,
+        media_regions: list[MediaRegion],
+        prefix_hit_length: int,
+        matched_index: int | None,
+        is_bench: bool,
+    ) -> int:
+        """Admission path for the Phase 1 batched-decode session,
+        2026-08-06 update (N=2 admission-race fix -- see
+        ``pp_batched_decode_glue.py``'s module docstring for the full
+        rationale). Supersedes ``_submit_batched_decode`` (kept above,
+        unused, as a documented reference for the OLD pre-fix shape --
+        a future cleanup pass may delete it once this path has proven
+        itself on real hardware) for the ELIGIBLE-request case: instead
+        of running prefill immediately and folding an already-prefilled
+        cache into the batch, this method DEFERS the real prefill
+        forward pass until ``Rank0BatchedDecodeGlue``/
+        ``Rank1BatchedDecodeGlue.tick()`` grants it -- the fix for the
+        real, hardware-confirmed deadlock where each rank's own
+        independently-scheduled ``submit()`` call could issue prefill's
+        wire traffic in the same window the peer rank was still
+        mid-``tick()`` issuing decode's wire traffic.
+
+        Builds a ``run_prefill`` closure that is a byte-for-byte
+        relocation of what USED to run inline in ``submit()`` (vision
+        context, remote-vs-local prefill choice, cache-snapshot
+        collection, RotatingKVCache clamping, prefix-cache write-back)
+        -- none of that logic is reimplemented here, only its EXECUTION
+        TIME moves, from "immediately, inside submit()" to "later,
+        inside ``_run_deferred_prefill_for_grant``, when a
+        ``PrefillGrant`` says it's this rank's turn."
+
+        uid/cache_slot derivation is IDENTICAL to
+        ``_submit_batched_decode``'s own symmetric-counter scheme (see
+        that method's docstring for the full "why no new broadcast-
+        admission protocol is needed" rationale) -- unaffected by this
+        fix, since both ranks still process the identical, globally-
+        ordered stream of eligible submissions and still grow
+        ``self._uid_counter``/``len(self._active_tasks)`` identically,
+        call-for-call.
+        """
+        uid = self._uid_counter
+        self._uid_counter += 1
+        cache_slot = len(self._active_tasks) % 2
+
+        last_tokens = prompt_tokens[-2:]
+
+        def run_prefill() -> tuple[float, int, list[CacheSnapshot], KVCacheType]:
+            from exo.worker.engines.mlx.trace import T
+
+            vision_ctx = (
+                patch_embed_tokens(
+                    self.model,
+                    vision.embeddings,
+                    prefix_hit_length,
+                    len(prompt_tokens) - 1,
+                )
+                if vision is not None
+                else contextlib.nullcontext()
+            )
+            uncached_count = len(prompt_tokens)
+            use_remote = (
+                uncached_count > REMOTE_PREFILL_MIN_TOKENS
+                and task_params.prefill_endpoint is not None
+            )
+
+            _prefill_tps: float = 0.0
+            _prefill_tokens: int = 0
+            cache_snapshots: list[CacheSnapshot] = []
+            remote_prefilled = False
+            with vision_ctx, T("submit.prefill"):
+                if use_remote and task_params.prefill_endpoint is not None:
+                    try:
+                        _prefill_tps, _prefill_tokens, cache_snapshots = (
+                            remote_prefill(
+                                prompt_tokens[:-1],
+                                cache,
+                                on_prefill_progress,
+                                endpoint=task_params.prefill_endpoint,
+                                request_id=str(uuid.uuid4()),
+                                model_id=str(task_params.model),
+                                start_pos=prefix_hit_length,
+                            )
+                        )
+                        remote_prefilled = True
+                    except Exception:
+                        logger.opt(exception=True).warning(
+                            "Remote prefill failed, falling back to local prefill"
+                        )
+
+                if not remote_prefilled:
+                    # See _submit_batched_decode_deferred's own docstring
+                    # and the identical block this was relocated from
+                    # (submit()'s old inline prefill, pre-2026-08-06) for
+                    # the full snapshot_offset/cross-request-contamination
+                    # rationale -- unchanged here, only relocated.
+                    _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
+                        self.model,
+                        self.tokenizer,
+                        sampler,
+                        prompt_tokens[:-1],
+                        cache,
+                        self.group,
+                        on_prefill_progress,
+                        distributed_prompt_progress_callback,
+                        prefill_step_size=self.prefill_step_size,
+                        snapshot_offset=prefix_hit_length,
+                    )
+
+            with T("submit.clamp_rotating_caches"):
+                for c in cache:
+                    if (
+                        isinstance(c, RotatingKVCache)
+                        and c.keys is not None
+                        and c.values is not None
+                        and c.keys.shape[2] > c.max_size
+                    ):
+                        trim_size = c.keys.shape[2] - c.max_size
+                        c.keys = c._trim(trim_size, c.keys)
+                        c.values = c._trim(trim_size, c.values)
+                        c._idx = c.max_size
+
+            with T("submit.save_prefix_cache"):
+                if not is_bench:
+                    min_prefix_hit_length = max(
+                        1000, system_prompt_token_count(task_params, self.tokenizer)
+                    )
+                    self._save_prefix_cache(
+                        all_prompt_tokens,
+                        list(cache),
+                        cache_snapshots,
+                        prefix_hit_length,
+                        matched_index,
+                        min_prefix_hit_length,
+                        media_regions,
+                        task_params.low_priority,
+                        task_params.high_priority,
+                    )
+
+            return _prefill_tps, _prefill_tokens, cache_snapshots, cache
+
+        self._deferred_prefill_by_uid[uid] = _DeferredPrefill(
+            run_prefill=run_prefill,
+            task_params=task_params,
+            last_tokens=last_tokens,
+            sampler=sampler,
+            max_tokens=max_tokens,
+            on_generation_token=on_generation_token,
+            cache_slot=cache_slot,
+        )
+
+        if self._batched_decode_rank0_glue is not None:
+            self._batched_decode_rank0_glue.enqueue_prefill(
+                request_id=uid,
+                cache_slot=cache_slot,
+                n_prompt_tokens=len(prompt_tokens) - 1,
+                single_request_fallback=False,
+            )
+        else:
+            assert self._batched_decode_rank1_glue is not None
+            # Rank 1 registers the deferred work above but does NOT call
+            # anything on its glue yet -- it only reacts to a PrefillGrant
+            # arriving via tick() (_run_deferred_prefill_for_grant). If a
+            # grant for THIS uid already arrived and was parked (rank 0's
+            # tick() can race ahead of this rank's own submit() -- see
+            # _parked_prefill_grants's own field docstring for the full
+            # rationale), service it immediately, synchronously, right
+            # here -- rather than waiting for another _step_batched_decode
+            # cycle to notice.
+            parked = self._parked_prefill_grants.pop(uid, None)
+            if parked is not None:
+                self._run_deferred_prefill_for_grant(parked, is_rank1=True)
+
+        self._active_tasks[uid] = _EngineTask(
+            uid=uid,
+            task_params=task_params,
+            all_prompt_tokens=last_tokens,
+            prefix_hit_length=0,
+            matched_index=None,
+            is_exact_hit=False,
+            cache_snapshots=None,
+            detokenizer=self.tokenizer.detokenizer,
+            on_generation_token=on_generation_token,
+            generation_start_time=time.perf_counter(),
+            prefill_tps=0.0,
             generation_time_at_start=0.0,
             media_regions=[],
         )
@@ -1854,6 +2117,73 @@ class ExoBatchGenerator:
                 min_p=_resolved["min_p"],
             )
 
+        # 2026-08-06 N=2 admission-race fix: the batched-decode ELIGIBILITY
+        # check moves HERE -- BEFORE prefill runs -- instead of its old
+        # position after prefill (see design doc Section 15 / handoff doc
+        # for the hardware-confirmed deadlock this closes). All the
+        # eligibility inputs (images/tools/mtp/prefix-cache-hit/sharding)
+        # are already known at this point; nothing below this line is
+        # needed to decide eligibility. Moving the check earlier is what
+        # lets an ELIGIBLE request skip running prefill inline at all --
+        # its prefill is deferred until Rank0BatchedDecodeGlue.tick()
+        # (single-writer wire call) grants it, closing the race where
+        # submit()'s own independent, per-rank-scheduled prefill call
+        # could issue mismatched wire traffic against an in-flight
+        # decode-step tick() on the peer rank.
+        #
+        # SCOPE NOTE (deliberately out of scope for this fix): an
+        # INELIGIBLE request (falls through the `eligibility.eligible`
+        # check below) still runs prefill INLINE, unchanged, via the old
+        # single-request metaframe path further down in this method. That
+        # path is NOT yet folded into the single-writer tick() gate --
+        # only the ELIGIBLE/batched-decode path is fixed here. Mixed
+        # eligible+ineligible concurrent admission could in principle
+        # still race by the same mechanism; this is a known, explicitly
+        # scoped-out follow-up (see docs/batched-decode-n2-admission-
+        # handoff-2026-08-05.md for the next-steps list), not an oversight.
+        if self._batched_decode_active and (
+            self._batched_decode_rank0_glue is not None
+            or self._batched_decode_rank1_glue is not None
+        ):
+            from exo.worker.engines.mlx.pp_batched_decode_eligibility import (
+                is_eligible_for_batched_decode,
+            )
+
+            eligibility = is_eligible_for_batched_decode(
+                has_images=bool(task_params.images),
+                has_tools=bool(task_params.tools),
+                uses_speculative_decode=hasattr(self._mlx_gen, "mtp"),
+                is_prefix_cache_hit=prefix_hit_length > 0,
+                sharding_is_pipeline=self.group is not None
+                and self.group.size() > 1,
+                batched_decode_enabled=True,
+            )
+            if eligibility.eligible:
+                with T("submit.batched_decode_enqueue_prefill"):
+                    return self._submit_batched_decode_deferred(
+                        task_params=task_params,
+                        prompt=prompt,
+                        prompt_tokens=prompt_tokens,
+                        all_prompt_tokens=all_prompt_tokens,
+                        cache=cache,
+                        sampler=sampler,
+                        max_tokens=task_params.max_output_tokens or MAX_TOKENS,
+                        on_generation_token=on_generation_token,
+                        on_prefill_progress=on_prefill_progress,
+                        distributed_prompt_progress_callback=(
+                            distributed_prompt_progress_callback
+                        ),
+                        vision=vision,
+                        media_regions=media_regions,
+                        prefix_hit_length=prefix_hit_length,
+                        matched_index=matched_index,
+                        is_bench=is_bench,
+                    )
+            logger.debug(
+                f"batched-decode ineligible, falling back to serial submit(): "
+                f"{eligibility.reason}"
+            )
+
         vision_ctx = (
             patch_embed_tokens(
                 self.model, vision.embeddings, prefix_hit_length, len(prompt_tokens) - 1
@@ -1990,34 +2320,6 @@ class ExoBatchGenerator:
             if is_bench:
                 eos_ids = eos_ids_from_tokenizer(self.tokenizer)
                 logits_processors = [ban_token_ids(eos_ids)] + logits_processors
-
-        if self._batched_decode_active and (
-            self._batched_decode_rank0_glue is not None
-            or self._batched_decode_rank1_glue is not None
-        ):
-            from exo.worker.engines.mlx.pp_batched_decode_eligibility import (
-                is_eligible_for_batched_decode,
-            )
-
-            eligibility = is_eligible_for_batched_decode(
-                has_images=bool(task_params.images),
-                has_tools=bool(task_params.tools),
-                uses_speculative_decode=hasattr(self._mlx_gen, "mtp"),
-                is_prefix_cache_hit=prefix_hit_length > 0,
-                sharding_is_pipeline=self.group is not None
-                and self.group.size() > 1,
-                batched_decode_enabled=True,
-            )
-            if eligibility.eligible:
-                with T("submit.batched_decode_enqueue"):
-                    return self._submit_batched_decode(
-                        task_params, cache, last_tokens, sampler, max_tokens,
-                        on_generation_token, _prefill_tps,
-                    )
-            logger.debug(
-                f"batched-decode ineligible, falling back to serial submit(): "
-                f"{eligibility.reason}"
-            )
 
         if self._pp_spec_active:
             with T("submit.pp_spec_setup"):
@@ -2975,6 +3277,83 @@ class ExoBatchGenerator:
             except Exception:
                 logger.debug("pp spec-decode generator close() raised", exc_info=True)
 
+    def _run_deferred_prefill_for_grant(
+        self, grant: "PrefillGrant", *, is_rank1: bool
+    ) -> None:
+        """Shared grant-fulfillment logic for both ranks
+        (2026-08-06 N=2 admission-race fix): looks up the
+        ``_DeferredPrefill`` this rank registered at ``submit()``
+        time for ``grant.request_id``, runs its real prefill closure
+        NOW (synchronously, still inside the SAME ``step()`` call
+        that received the grant -- never deferred to a later loop
+        iteration, so nothing else can interleave wire traffic in
+        between), and folds the result into the batch via
+        ``enqueue_admission`` (rank 0) / ``stage_local_cache``
+        (rank 1).
+
+        RANK-1 PARKING (see ``_parked_prefill_grants``'s own field
+        docstring for the full rationale): if this rank's own
+        ``submit()`` hasn't registered the matching
+        ``_DeferredPrefill`` yet (a real, expected timing race
+        between two independently-scheduled per-rank event loops
+        consuming the SAME globally-ordered event stream at
+        different speeds), the grant is parked here instead of
+        raising or retrying -- ``submit()``'s own registration point
+        checks ``_parked_prefill_grants`` immediately after
+        registering and completes the deferred work itself if a
+        grant was already waiting. This is a genuine state-machine
+        resolution of the race (the grant WILL eventually be
+        serviced, deterministically, whichever call reaches the
+        "both halves present" condition second), not a masked
+        sleep/retry mitigation.
+        """
+        deferred = self._deferred_prefill_by_uid.pop(grant.request_id, None)
+        if deferred is None:
+            if not is_rank1:
+                from exo.worker.engines.mlx.pp_batched_decode_glue import GlueError
+
+                raise GlueError(
+                    f"_run_deferred_prefill_for_grant: rank 0 received its "
+                    f"own PrefillGrant for request_id={grant.request_id} "
+                    f"but has no matching _DeferredPrefill registered -- "
+                    f"rank 0's enqueue_prefill() and this grant's origin "
+                    f"are the SAME call path (Rank0BatchedDecodeGlue.tick() "
+                    f"only ever grants a request it itself popped from its "
+                    f"own _pending_prefill queue), so this should be "
+                    f"structurally impossible; refusing to guess at a "
+                    f"prefill to run."
+                )
+            self._parked_prefill_grants[grant.request_id] = grant
+            return
+
+        # cache_snapshots is already consumed inside run_prefill()'s own
+        # closure (it calls _save_prefix_cache with it before returning) --
+        # not needed again here, hence the underscore-prefixed discard.
+        prefill_tps, _prefill_tokens, _cache_snapshots, prefilled_cache = (
+            deferred.run_prefill()
+        )
+        active_task = self._active_tasks.get(grant.request_id)
+        if active_task is not None:
+            active_task.prefill_tps = prefill_tps
+
+        if is_rank1:
+            assert self._batched_decode_rank1_glue is not None
+            self._batched_decode_rank1_glue.stage_local_cache(
+                request_id=grant.request_id,
+                cache_slot=grant.cache_slot,
+                prefilled_cache=prefilled_cache,
+            )
+        else:
+            assert self._batched_decode_rank0_glue is not None
+            self._batched_decode_rank0_glue.enqueue_admission(
+                request_id=grant.request_id,
+                cache_slot=grant.cache_slot,
+                prefilled_cache=prefilled_cache,
+                initial_token=int(deferred.last_tokens[-1].item()),
+                sampler=deferred.sampler,
+                max_tokens=deferred.max_tokens,
+            )
+
     def _step_batched_decode(self) -> list[GenerationBatch.Response]:
         """One step of the Phase 1 batched-decode session (design doc
         Section 9). Rank-appropriate: rank 0 calls ``tick()`` on its
@@ -2998,13 +3377,31 @@ class ExoBatchGenerator:
         already blocks synchronously rank-to-rank every step -- this
         is not new risk beyond what every other PP code path in this
         file already accepts.
+
+        2026-08-06 UPDATE (N=2 admission-race fix): ``tick()`` on
+        EITHER rank may now also return a non-None ``PrefillGrant``
+        (see that dataclass's own docstring). When it does, THIS
+        method runs the real, previously-deferred prefill for that
+        request synchronously (via ``_run_deferred_prefill_for_grant``)
+        before returning -- still inside this same single ``step()``
+        call, so the prefill's own wire I/O (the batched-metaframe
+        forward pass) and the control-message tick() that granted it
+        never straddle two separate runner-loop iterations with other
+        work interleaved in between.
         """
         if self._batched_decode_rank1_glue is not None:
-            self._batched_decode_rank1_glue.tick(self.model)
+            grant = self._batched_decode_rank1_glue.tick(self.model)
+            if grant is not None:
+                self._run_deferred_prefill_for_grant(grant, is_rank1=True)
             return []
 
         assert self._batched_decode_rank0_glue is not None
-        classified, _admitted_id = self._batched_decode_rank0_glue.tick(self.model)
+        classified, _admitted_id, grant = self._batched_decode_rank0_glue.tick(
+            self.model
+        )
+        if grant is not None:
+            self._run_deferred_prefill_for_grant(grant, is_rank1=False)
+            return []
 
         responses: list[GenerationBatch.Response] = []
         to_evict: list[int] = []

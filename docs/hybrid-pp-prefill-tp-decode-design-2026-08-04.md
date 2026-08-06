@@ -2160,6 +2160,19 @@ Requirement 3's exact number was to this doc's own Section 2.5.**
     bugs found and fixed, single-request path VERIFIED WORKING, N=2
     concurrent admission found UNSAFE (new architectural gap)
 
+**STATUS (2026-08-06): the N=2 admission race this section documents
+is FIXED at the code level** -- see
+`docs/batched-decode-n2-admission-handoff-2026-08-05.md`'s
+"2026-08-06 fix: in-band PrefillMessage admission signal" section for
+the full implementation and verification writeup (regression gate
+`test_pp_admission_race_subprocess.py` flipped from a real XFAIL to a
+genuine PASS across 5 independent seeds, 252+14 worker tests green,
+zero new basedpyright/ruff errors). NOT yet verified on real cluster
+hardware -- that still needs a fresh, separate explicit go-ahead per
+this doc's own standing reminder below. The single_request_fallback
+(ineligible-request) path remains unfixed, explicitly out of scope for
+now.
+
 Following the user's explicit go-ahead for a real cluster A/B (Section
 9's remaining item 2), this section records the full campaign: four
 real cluster launch attempts, three genuine bugs found and fixed via

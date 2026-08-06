@@ -1,5 +1,12 @@
 # Batched-decode Phase 1: N=2 concurrent admission — handoff (2026-08-05)
 
+**STATUS UPDATE (2026-08-06): FIXED.** The admission race documented
+below is closed. See the new section at the bottom of this file,
+"2026-08-06 fix: in-band PrefillMessage admission signal", for the
+full implementation summary, verification evidence, and what remains
+explicitly out of scope. The original handoff content is left
+unmodified below for the historical record of the investigation.
+
 Design doc: `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`
 (Section 15 has the full campaign writeup this doc summarizes into an
 actionable next-session starting point).
@@ -177,3 +184,117 @@ next.
   on `EXO_PP_BATCHED_DECODE=1` — do not touch that gate as part of
   fixing the admission race; the gate itself is fine, the race is a
   separate, deeper problem underneath it.
+
+---
+
+## 2026-08-06 fix: in-band PrefillMessage admission signal
+
+Implements the design this handoff's "Concrete next steps" section 1
+called for: an in-band signal, folded into the existing single-writer
+`tick()` wire channel, so both ranks agree on the exact tick boundary
+where a request's prefill begins -- rank 1 never independently decides
+to prefill.
+
+### What shipped
+
+1. **New wire control message, `MSG_KIND_PREFILL`**
+   (`pp_scheduler_wire.py`) + `PrefillMessage` frozen dataclass
+   (`pp_scheduler_protocol.py`, fields: `step_id`, `request_id`,
+   `cache_slot`, `n_prompt_tokens`, `flags` -- bit 0
+   `PREFILL_FLAG_SINGLE_REQUEST_FALLBACK` for the ineligible-request
+   case). Wire layout mirrors `MSG_KIND_STEP`'s established
+   header-then-body pattern exactly. 7 new unit tests, all passing;
+   0 basedpyright/ruff errors.
+
+2. **`pp_batched_decode_glue.py` extended** (both classes gain a new
+   `PrefillGrant` return value from `tick()`):
+   - `Rank0BatchedDecodeGlue.enqueue_prefill(...)` -- pure in-memory
+     queueing (mirrors `enqueue_admission`'s zero-wire-I/O guarantee),
+     called from `submit()` INSTEAD OF running prefill inline.
+   - `tick()`'s priority ladder reordered to: (1) admit an
+     already-prefilled pending request if its slot is free, (2)
+     announce a queued prefill via a real `PrefillMessage` send + a
+     `PrefillGrant` return IF its target slot is neither occupied nor
+     already reserved, (3) run one decode step, (4) idle. **Order 2
+     before 3 is load-bearing** -- an earlier draft put decode before
+     the new-prefill-grant check, which meant `has_active_requests()`
+     staying `True` for a request's entire generation would starve
+     ALL future admissions forever, defeating N=2 concurrency
+     entirely. Caught via a `consult` review before shipping.
+   - `_reserved_slots: set[int]` closes a second race a `consult`
+     review caught: without reserving a slot the instant its
+     `PrefillMessage` is sent, a SECOND `tick()` call (before the
+     first grant's `enqueue_admission` arrives) could grant a
+     different request onto the same physical slot.
+   - `Rank1BatchedDecodeGlue.tick()` gains a matching `MSG_KIND_PREFILL`
+     branch: reactively decodes the `PrefillMessage` and returns its
+     own `PrefillGrant`. Rank 1 has no other path to ever decide
+     "prefill this now" -- it only ever learns this from a grant
+     `tick()` itself produced.
+
+3. **`batch_generate.py` (`ExoBatchGenerator`) integration:**
+   - The batched-decode eligibility check moved BEFORE prefill runs
+     (was after). An eligible request's prefill now runs inside a
+     deferred closure (`_DeferredPrefill`, `_submit_batched_decode_deferred`)
+     registered in `_deferred_prefill_by_uid`, NOT executed inline in
+     `submit()`.
+   - `_step_batched_decode` now handles a non-None `PrefillGrant` from
+     either rank's `tick()`: runs the deferred closure synchronously,
+     still inside the same `step()` call, then folds the result in via
+     `enqueue_admission`/`stage_local_cache`.
+   - **Rank-1 grant-parking** (`_parked_prefill_grants`): closes a
+     real, expected race where rank 0's `tick()` can produce a grant
+     for a `request_id` rank 1's own `submit()` hasn't registered yet
+     (two independent per-rank event loops consuming the SAME
+     globally-ordered broadcast at different speeds -- not a bug, a
+     genuine timing window). Resolved via a real state-machine
+     completion (whichever side -- the grant or the registration --
+     arrives second services the request), NOT a retry/sleep loop,
+     per the standing root-cause-only rule.
+   - Scope: only the ELIGIBLE/batched-decode path is fixed. The
+     INELIGIBLE fallback (vision/tools/speculative-decode requests,
+     or non-Pipeline sharding) still runs prefill inline, unchanged --
+     explicitly scoped out, documented inline at the eligibility-check
+     call site. A mixed eligible+ineligible concurrent-admission race
+     is a known, real follow-up, not yet closed.
+
+### Verification (real, not simulated)
+
+- **The regression gate itself flipped from XFAIL to a genuine PASS**:
+  `test_pp_admission_race_subprocess.py`'s
+  `test_independent_per_rank_event_loops_do_not_desynchronize_the_wire`
+  -- two real OS processes, real MLX ring transport, genuinely
+  independent per-rank event loops with random per-rank jitter (not a
+  lockstep test driver) -- confirmed XPASS against the fix (`1 xpassed
+  in 15.27s`), then re-verified as a plain `PASSED` (`1 passed in
+  15.35s`) after removing the now-unnecessary `xfail` marker. Run
+  across 5 independent seeds every time; all clean.
+- Full worker test suite: **252 fast tests + 14 slow (real-subprocess)
+  tests, all passing**, including every pre-existing 2-process
+  correctness test for this subsystem
+  (`test_pp_batched_decode_glue_subprocess.py`,
+  `test_pp_batched_decode_subprocess.py`,
+  `test_pp_batched_correctness_harness.py`, `test_pp_metaframe.py`).
+- `basedpyright`/`ruff` on every touched file: zero NEW errors
+  introduced (diffed against a clean pre-change baseline; the
+  pre-existing ~305 file-scope / ~9350 whole-repo basedpyright errors
+  and 9 ruff findings are unrelated, untouched code and were confirmed
+  identical before and after).
+- `test_batch_generate_rank1_batched_decode_dispatch.py` rewritten
+  (its old assertion -- "stage_local_cache called synchronously inside
+  submit()" -- directly contradicted the new, correct architecture) to
+  a composed two-phase test that drives the REAL grant-servicing
+  method (`_run_deferred_prefill_for_grant`, the same one
+  `_step_batched_decode` calls), so a miswired grant-to-staging path
+  still fails it the way the original 2026-08-05 bug would have.
+
+### Not yet verified (still needs the user's explicit go-ahead)
+
+Nothing in this fix has run on the real 2-node cluster yet. Per this
+doc's own standing reminder above, a real cluster relaunch/test needs
+its own separate explicit go-ahead -- not implied by this write-up.
+Before that attempt: re-enable `JACCL_TRACE_STEP=1` (or equivalent) so
+a real trace can confirm the fix on real hardware, not just "no
+crash," and follow the same crash → restore-to-known-good → diagnose
+discipline used throughout the original campaign.
+

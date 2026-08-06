@@ -20,15 +20,20 @@ step, with no crash, just permanently wrong batch composition.
 
 Design (the piggyback pattern the consult review recommended):
   - `Rank0BatchedDecodeGlue.enqueue_admission(...)` is the ONLY thing
-    `submit()` ever calls -- pure in-memory queueing, zero wire I/O,
-    cannot hang, cannot race anything.
+    a caller uses to fold an ALREADY-PREFILLED request's result into
+    the batch -- pure in-memory queueing, zero wire I/O, cannot hang,
+    cannot race anything.
   - `Rank0BatchedDecodeGlue.tick(...)` is the ONLY thing that ever
     touches the wire on rank 0 for this session, and it is called
     from EXACTLY ONE place: `ExoBatchGenerator.step()`'s existing
     per-cycle call (mirroring `_step_pp_spec`'s own call site). Each
-    `tick()` call does AT MOST ONE of: admit exactly one pending
-    request (if the queue is non-empty AND a slot is free), or run
-    one real batched decode step for the current batch. This keeps
+    `tick()` call does AT MOST ONE of the following, in this fixed
+    priority order (see the 2026-08-06 update below for why a THIRD
+    branch, prefill announcement, was added ABOVE admission/decode):
+    admit exactly one pending, already-prefilled request (if any is
+    queued AND its slot is free), or run one real batched decode step
+    for the current batch, or announce (via a real `PrefillMessage`
+    send) that a new request's prefill may now begin. This keeps
     every wire message this session ever sends inside one
     deterministic, single-writer call path -- the SAME guarantee
     `_submit_pp_spec`'s existing entry guard
@@ -48,14 +53,81 @@ Design (the piggyback pattern the consult review recommended):
     genuinely new request."
   - `Rank1BatchedDecodeGlue` mirrors the same "queue locally, drain
     reactively" shape: rank 1's OWN prefill of a to-be-admitted
-    request's local cache half happens ENTIRELY LOCALLY on rank 1
-    (via `submit()`'s existing `prefill()` call, unchanged, same as
-    every other request path) -- rank 1's prefilled cache is NEVER
-    sent over the wire (only rank 0's admission decision + the
-    resulting `StepMessage` cross the wire); this glue just needs a
-    place to STAGE that locally-prefilled cache, keyed by
-    `request_id`, until the matching admission arrives reactively in
-    a `StepMessage`.
+    request's local cache half happens ENTIRELY LOCALLY on rank 1,
+    but -- see the 2026-08-06 update below -- ONLY once rank 1's own
+    `tick()` reactively receives rank 0's `PrefillMessage`, never
+    independently. Rank 1's prefilled cache is NEVER sent over the
+    wire (only rank 0's admission decision + the resulting
+    `StepMessage` cross the wire); this glue just needs a place to
+    STAGE that locally-prefilled cache, keyed by `request_id`, until
+    the matching admission arrives reactively in a `StepMessage`.
+
+UPDATE (2026-08-06, closes the real N=2 admission-race deadlock
+documented in
+``docs/batched-decode-n2-admission-handoff-2026-08-05.md`` and
+``docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md`` Section 15):
+the ORIGINAL design above assumed a request's prefill had ALREADY
+happened (via the old, unchanged, per-rank-independent `prefill()`
+call inside `submit()`) by the time `enqueue_admission`/
+`stage_local_cache` were ever called -- i.e. `submit()` on BOTH ranks
+ran its own local prefill, independently, on its own schedule, BEFORE
+either side of this glue was ever touched. That is exactly the
+uncoordinated cross-rank decision the design doc's Section 15 traced
+the real hardware deadlock to: rank 0's `submit()` could start
+issuing prefill's metaframe wire traffic in the same window rank 1's
+`step()` was still mid-`tick()` issuing decode's `StepMessage`
+traffic -- two structurally different wire shapes on the same link,
+observed as `[jaccl] reliable_all_reduce_v2 deadline`.
+
+The fix folds "start prefill for request X now" into this SAME
+single-writer channel via a new `MSG_KIND_PREFILL` control message
+(`PrefillMessage`, `pp_scheduler_wire.py`/`pp_scheduler_protocol.py`):
+  - `submit()` no longer runs prefill unconditionally. It calls
+    `Rank0BatchedDecodeGlue.enqueue_prefill(...)` (rank 0) -- pure
+    in-memory queueing, zero wire I/O, mirroring
+    `enqueue_admission`'s own no-I/O guarantee -- and returns without
+    prefilling. Rank 1 does NOTHING at `submit()` time for this
+    request; it has not yet been told to prefill anything.
+  - `tick()` gains a NEW, HIGHEST-priority branch: if a pending
+    prefill is queued, `tick()` (a) allocates ("reserves") the
+    request's cache slot in the driver's OWN bookkeeping right here,
+    atomically with the send, so a LATER `tick()` call in the SAME
+    process can never grant a second prefill onto that slot before
+    this one's `enqueue_admission` arrives (this is the fix for a
+    real gap a `consult` review caught in an earlier draft of this
+    design: without reserving the slot immediately, `tick()`'s
+    admission branch and its prefill-announcement branch could race
+    each other ACROSS iterations, not just across ranks); (b) sends a
+    real `PrefillMessage` to rank 1 (the single wire-touching act for
+    this branch); (c) returns a `PrefillGrant` telling the CALLER
+    (still `ExoBatchGenerator`, one layer up) to now run the real
+    prefill forward pass and report back via `enqueue_admission`.
+    Because slot reservation happens IN `tick()`, admission (existing
+    branch, now second-priority) is checked before a NEW prefill can
+    be granted -- in-flight work finishes before new work starts,
+    which is both the fix for the slot race and the right operational
+    order (never start a heavier operation while cheaper pending work
+    could clear a slot first).
+  - `Rank1BatchedDecodeGlue.tick()` gains a matching THIRD branch on
+    `header.msg_kind`: `MSG_KIND_PREFILL` reactively decodes the
+    `PrefillMessage` and returns a `PrefillGrant` of its own. Rank 1
+    NEVER independently decides "prefill this now" from its own local
+    queue state anymore -- it can only ever learn this from a
+    `PrefillGrant` `tick()` itself produced by receiving rank 0's
+    message. This is what makes the fix actually close the race:
+    both ranks now agree, by construction, on the exact tick boundary
+    where a switch from decode-mode to prefill-mode collectives
+    happens, because that boundary IS a message in the one ordered
+    control stream both ranks already serialize on.
+  - `PrefillMessage.flags` carries whether this request is eligible
+    for the batched-decode path or must use the OLD single-request
+    `MetaFramedPipelineFirstLayer`/`LastLayer` fallback -- rank 1
+    reads this from the wire (`PrefillGrant.single_request_fallback`)
+    rather than recomputing eligibility itself, because eligibility
+    is a rank-0-only decision (it depends on request features rank 1
+    never sees) and recomputing it independently on rank 1 would
+    reopen exactly the same class of cross-rank-disagreement bug this
+    whole message kind exists to close.
 """
 
 from __future__ import annotations
@@ -74,13 +146,20 @@ from exo.worker.engines.mlx.pp_batched_decode_runtime import (
     BatchedDecodeSession,
     RankOneMirrorSession,
 )
+from exo.worker.engines.mlx.pp_scheduler_protocol import (
+    PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    PrefillMessage,
+)
 from exo.worker.engines.mlx.pp_scheduler_wire import (
     MSG_KIND_EVICT,
+    MSG_KIND_PREFILL,
     MSG_KIND_STEP,
     decode_evict_message,
     recv_header,
+    recv_prefill_body,
     recv_step_table,
     send_evict_ack_message,
+    send_prefill_message,
     send_step_message,
 )
 
@@ -105,6 +184,82 @@ class _PendingAdmission:
     max_tokens: int
 
 
+@dataclass(frozen=True)
+class _PendingPrefill:
+    """A rank-0-local, not-yet-announced request waiting for
+    ``tick()`` to become its single-writer dispatch point for the
+    "admit request B now, start its prefill" decision -- see
+    ``Rank0BatchedDecodeGlue.enqueue_prefill``'s docstring for the
+    full N=2 admission-race rationale this closes
+    (``docs/batched-decode-n2-admission-handoff-2026-08-05.md``,
+    ``PrefillMessage``'s own docstring in ``pp_scheduler_protocol.py``).
+
+    Pure data, NO closure/callable -- deliberately mirrors
+    ``_PendingAdmission``'s own "just data, caller does the real
+    work" shape. This glue module has no access to (and must not
+    need to know about) the tokenizer/vision-processor/kv-prefix-
+    cache/logits-processor machinery the real ``prefill()`` call
+    needs; it only needs enough to (a) decide FIFO admission order
+    and (b) put ``request_id``/``cache_slot``/``n_prompt_tokens`` on
+    the wire via a real ``PrefillMessage``. The caller (whichever of
+    ``ExoBatchGenerator``'s two prefill code paths is in play) is
+    responsible for actually running prefill once ``tick()`` returns
+    a ``PrefillGrant`` naming this ``request_id``, then calling
+    ``enqueue_admission`` with the real result to fold it into the
+    batch on a LATER ``tick()``.
+    """
+
+    request_id: int
+    cache_slot: int
+    n_prompt_tokens: int
+    single_request_fallback: bool
+
+
+@dataclass(frozen=True)
+class PrefillGrant:
+    """``tick()``'s signal (on EITHER rank) that the caller must now
+    run a real prefill forward pass for ``request_id`` at
+    ``cache_slot`` -- and ONLY NOW, never independently, per the
+    single-writer/single-decider design this whole module exists to
+    enforce (module docstring, updated 2026-08-06 for the N=2
+    admission-race fix).
+
+    On rank 0: returned the tick a pending prefill was announced
+    (the real ``PrefillMessage`` send already happened inside this
+    same ``tick()`` call, BEFORE this grant is returned) -- the
+    caller must now run its own real prefill (batched-metaframe or
+    single-request-fallback path, per ``single_request_fallback``),
+    then call ``Rank0BatchedDecodeGlue.enqueue_admission`` with the
+    result so the NEXT ``tick()`` folds it into the batch.
+
+    On rank 1: returned the tick a ``PrefillMessage`` was reactively
+    received (matching rank 0's send) -- the caller must run ITS OWN
+    local prefill (the receive side of the SAME real cross-rank
+    forward pass rank 0 just announced and is now running), then call
+    ``Rank1BatchedDecodeGlue.stage_local_cache`` with the result so
+    the admission arriving in a later ``StepMessage`` has a staged
+    cache to bind to (unchanged from the pre-existing reactive-
+    admission mechanism -- only WHEN prefill itself runs changed,
+    not what happens after).
+
+    ``single_request_fallback``: mirrors
+    ``PrefillMessage.flags``'s ``PREFILL_FLAG_SINGLE_REQUEST_FALLBACK``
+    bit -- tells the caller which real layer stack
+    (``BatchedMetaFramedPipelineFirstLayer``/``LastLayer`` vs the
+    plain ``MetaFramedPipelineFirstLayer``/``LastLayer`` this
+    request is ineligible for the batched path and must use instead)
+    this prefill's forward pass will exercise. Both ranks always
+    agree on this value because it travels on the wire inside the
+    same ``PrefillMessage`` rank 1 reactively decoded to produce this
+    grant -- it is never independently recomputed on rank 1.
+    """
+
+    request_id: int
+    cache_slot: int
+    n_prompt_tokens: int
+    single_request_fallback: bool
+
+
 @dataclass
 class Rank0BatchedDecodeGlue:
     """Rank 0's single-writer orchestrator. Owns the ONLY call site
@@ -117,6 +272,39 @@ class Rank0BatchedDecodeGlue:
     dst_rank: int
     group: mx.distributed.Group
     _pending: list[_PendingAdmission] = field(default_factory=list)
+    _pending_prefill: list[_PendingPrefill] = field(default_factory=list)
+    # Slots a PrefillGrant has been issued for but whose matching
+    # enqueue_admission() has not yet arrived -- i.e. "reserved but
+    # not yet occupied." Separate from
+    # ``session.driver.cache_router``'s own occupied/free bookkeeping
+    # (which only tracks ADMITTED, post-prefill requests, per
+    # ``BatchedDecodeDriver.admit_request``'s Phase-1 scope: Phase-1's
+    # ``SchedulerCore`` only ever models requests that are already
+    # decode-ready). Without this set, a SECOND ``tick()`` call in the
+    # SAME process -- before the first grant's ``enqueue_admission``
+    # arrives -- could see the slot as still "free" (the router has
+    # no idea it was just promised to someone) and grant a prefill
+    # for a DIFFERENT request onto the SAME slot, corrupting whichever
+    # admission lands second. A `consult` review (2026-08-06) caught
+    # this gap in an earlier draft; reserving here, atomically with
+    # the ``PrefillMessage`` send inside ``tick()``, is what closes it
+    # -- the reservation and the wire send happen in the SAME
+    # single-writer call, so no other ``tick()`` invocation can ever
+    # observe the slot as free in between.
+    _reserved_slots: set[int] = field(default_factory=set)
+    # Dedicated monotonic counter for PrefillMessage.step_id, kept
+    # SEPARATE from SchedulerCore's own internal step counter (which
+    # backs StepMessage/EvictMessage and is not exposed outside
+    # pp_scheduler_protocol.py). A shared counter across ALL three
+    # control-message kinds would be a nice future strengthening of
+    # the wire's monotonicity tripwire (module docstring point 5 of
+    # pp_scheduler_protocol.py), but is not required for correctness
+    # here: PrefillMessage's own ordering is already enforced by this
+    # being the single-writer wire call for ALL of this session's
+    # traffic (rank 1 never receives two PrefillMessages out of
+    # order, because rank 0 never sends two without an intervening
+    # StepMessage/EvictMessage, by this very tick() call structure).
+    _prefill_step_id: int = field(default=0, init=False)
 
     def enqueue_admission(
         self,
@@ -127,10 +315,17 @@ class Rank0BatchedDecodeGlue:
         sampler: "Sampler",
         max_tokens: int,
     ) -> None:
-        """The ONLY thing ``ExoBatchGenerator.submit()`` ever calls
-        for this session. Pure in-memory append -- no wire I/O, so it
-        cannot hang or race the decode-step loop. The actual admission
-        (which touches the wire) happens later, inside ``tick()``.
+        """Fold an ALREADY-PREFILLED request's result into the batch.
+        Called either (a) directly by a caller that already ran
+        prefill itself BEFORE this glue was ever involved (the
+        original, pre-2026-08-06 shape -- still valid, e.g. for a
+        test harness driving prefill out of band), or (b), the real
+        production shape as of the 2026-08-06 fix, by
+        ``ExoBatchGenerator`` AFTER it ran the real prefill a
+        ``PrefillGrant`` returned by ``tick()`` asked for. Pure
+        in-memory append -- no wire I/O, so it cannot hang or race
+        the decode-step loop. The actual admission (which touches the
+        wire) happens later, inside ``tick()``.
         """
         self._pending.append(
             _PendingAdmission(
@@ -143,35 +338,98 @@ class Rank0BatchedDecodeGlue:
             )
         )
 
+    def enqueue_prefill(
+        self,
+        request_id: int,
+        cache_slot: int,
+        n_prompt_tokens: int,
+        single_request_fallback: bool,
+    ) -> None:
+        """Called from ``ExoBatchGenerator.submit()`` INSTEAD OF
+        running prefill directly (2026-08-06 fix for the real N=2
+        admission-race deadlock -- see module docstring's 2026-08-06
+        update). Pure in-memory append, zero wire I/O -- mirrors
+        ``enqueue_admission``'s own no-I/O guarantee, so this call
+        can never hang or race the decode-step loop. The actual
+        prefill announcement (a real ``PrefillMessage`` send) happens
+        later, inside ``tick()``, which is the single place this
+        whole module allows wire traffic to originate.
+        """
+        self._pending_prefill.append(
+            _PendingPrefill(
+                request_id=request_id,
+                cache_slot=cache_slot,
+                n_prompt_tokens=n_prompt_tokens,
+                single_request_fallback=single_request_fallback,
+            )
+        )
+
     def has_pending_admissions(self) -> bool:
         return bool(self._pending)
 
+    def has_pending_prefills(self) -> bool:
+        return bool(self._pending_prefill)
+
     def tick(
         self, model: object
-    ) -> tuple[dict[int, "AdmitResponse | StepResponse"], int | None]:
+    ) -> tuple[dict[int, "AdmitResponse | StepResponse"], int | None, PrefillGrant | None]:
         """The ONLY call site that ever touches
         ``mx.distributed.send``/``recv_like`` for this session on
         rank 0. Called from EXACTLY ONE place:
         ``ExoBatchGenerator.step()`` (mirrors ``_step_pp_spec``'s own
         single call site).
 
-        Does AT MOST ONE of the following per call (never both, never
-        zero unless there is genuinely nothing to do):
-          - If a pending admission exists AND its target slot is
-            free: admit it (real ``StepMessage`` send to rank 1),
-            return its first classified response keyed by
-            ``request_id``.
-          - Else, if the session has active requests: run one real
-            batched decode step, return every active request's
-            classified response this step.
-          - Else: return an empty dict (nothing to do this tick).
+        Does AT MOST ONE of the following per call, in this FIXED
+        priority order (never more than one, never zero unless there
+        is genuinely nothing to do):
+          1. If a pending, ALREADY-PREFILLED admission exists AND its
+             target slot is free: admit it (real ``StepMessage`` send
+             to rank 1), return its first classified response keyed
+             by ``request_id``. Checked FIRST so in-flight work
+             (a request whose prefill already ran) finishes before
+             any NEW prefill is granted -- both the fix for the
+             slot-reservation race documented on ``_reserved_slots``
+             above, and the right operational order.
+          2. Else, if a pending prefill is queued AND its target slot
+             is neither occupied (an active request) nor already
+             reserved (a grant already issued, awaiting admission):
+             reserve the slot, send a real ``PrefillMessage``
+             announcing it to rank 1, and return a ``PrefillGrant``
+             telling the caller to now run the real prefill forward
+             pass. THIS is the branch that closes the N=2 admission
+             race (module docstring 2026-08-06 update): the decision
+             "start prefill for request X now" is made HERE, inside
+             the single-writer wire call, instead of independently
+             inside ``submit()`` on each rank's own schedule.
+             CHECKED BEFORE decode (branch 3, not after) -- an
+             earlier draft of this method placed decode first, which
+             is a real bug: ``has_active_requests()`` stays True for
+             the entire lifetime of ANY currently-decoding request, so
+             if decode outranked a new prefill, a second request could
+             NEVER be granted while the first was still generating --
+             defeating N=2 concurrency's entire purpose. Prefill
+             outranking decode costs exactly one decode-step tick's
+             worth of latency for the currently-active batch each time
+             a new request is admitted (bounded by
+             ``max_concurrency`` -- at most that many consecutive
+             non-decode ticks can ever happen back to back, since each
+             one consumes a free slot), which is the correct,
+             deliberate trade -- a `consult` review (2026-08-06)
+             caught this ordering bug before it shipped.
+          3. Else, if the session has active requests: run one real
+             batched decode step, return every active request's
+             classified response this step.
+          4. Else: return an empty result (nothing to do this tick).
 
         The second element of the returned tuple is the
         ``request_id`` that was JUST admitted this tick (``None`` on
-        a decode-step tick or a fully-idle tick) -- callers need this
-        to know which request's FIRST response came from admission
-        (a different code path than steady-state decode) without
-        re-deriving it from the dict's own contents.
+        every other kind of tick) -- callers need this to know which
+        request's FIRST response came from admission (a different
+        code path than steady-state decode) without re-deriving it
+        from the dict's own contents. The third element is non-None
+        ONLY on a prefill-announcement tick (branch 2) -- see
+        ``PrefillGrant``'s own docstring for what the caller must do
+        with it.
         """
         from exo.worker.engines.mlx.pp_batched_decode_runtime import _ModelLike
         from exo.worker.engines.mlx.pp_scheduler_protocol import StepMessage
@@ -191,7 +449,44 @@ class Rank0BatchedDecodeGlue:
             send_step_message(
                 cast(StepMessage, message), dst=self.dst_rank, group=self.group
             )
-            return {pending.request_id: admit_response}, pending.request_id
+            self._reserved_slots.discard(pending.cache_slot)
+            return {pending.request_id: admit_response}, pending.request_id, None
+
+        if self._pending_prefill:
+            head = self._pending_prefill[0]
+            slot_busy = (
+                self.session.driver.cache_router.is_occupied(head.cache_slot)
+                or head.cache_slot in self._reserved_slots
+            )
+            if not slot_busy:
+                self._pending_prefill.pop(0)
+                self._reserved_slots.add(head.cache_slot)
+                flags = (
+                    PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
+                    if head.single_request_fallback
+                    else 0
+                )
+                self._prefill_step_id += 1
+                prefill_message = PrefillMessage(
+                    step_id=self._prefill_step_id,
+                    request_id=head.request_id,
+                    cache_slot=head.cache_slot,
+                    n_prompt_tokens=head.n_prompt_tokens,
+                    flags=flags,
+                )
+                send_prefill_message(
+                    prefill_message, dst=self.dst_rank, group=self.group
+                )
+                return (
+                    {},
+                    None,
+                    PrefillGrant(
+                        request_id=head.request_id,
+                        cache_slot=head.cache_slot,
+                        n_prompt_tokens=head.n_prompt_tokens,
+                        single_request_fallback=head.single_request_fallback,
+                    ),
+                )
 
         if self.session.has_active_requests():
             prepared = self.session.prepare_step()
@@ -199,9 +494,9 @@ class Rank0BatchedDecodeGlue:
             logits = self.session.run_forward(cast("_ModelLike", model), prepared)
             step_results = self.session.finish_step(prepared, logits)
             classified = self.adapter.classify_step_results(step_results)
-            return dict(classified), None
+            return dict(classified), None, None
 
-        return {}, None
+        return {}, None, None
 
     def complete_request(self, request_id: int) -> None:
         """Caller (``ExoBatchGenerator``) signals ``request_id`` hit
@@ -288,20 +583,41 @@ class Rank1BatchedDecodeGlue:
         self._staged_local_caches[request_id] = prefilled_cache
         self._staged_slot_for_request[request_id] = cache_slot
 
-    def tick(self, model: object) -> None:
+    def tick(self, model: object) -> PrefillGrant | None:
         """The ONLY call site that ever touches
         ``mx.distributed.send``/``recv_like`` for this session on
         rank 1. Receives exactly one header, branches on its real
-        ``msg_kind`` (decode step vs. eviction -- matching
-        ``pp_scheduler_wire.py``'s own documented dispatch contract:
-        "production dispatch code that must handle ANY of the kinds
-        arriving next should call ``recv_header`` directly and branch
-        on ``.msg_kind``"), and drives exactly the matching local
-        action.
+        ``msg_kind`` (prefill announcement, decode step, or eviction
+        -- matching ``pp_scheduler_wire.py``'s own documented
+        dispatch contract: "production dispatch code that must
+        handle ANY of the kinds arriving next should call
+        ``recv_header`` directly and branch on ``.msg_kind``"), and
+        drives exactly the matching local action.
+
+        Returns a ``PrefillGrant`` ONLY when a ``PrefillMessage`` was
+        just received (see that dataclass's own docstring for what
+        the caller must do with it); ``None`` on every other kind of
+        tick, INCLUDING the "unmet" case documented below.
+
+        RANK 1 NEVER INDEPENDENTLY DECIDES TO PREFILL (2026-08-06 fix
+        for the real N=2 admission-race deadlock -- see module
+        docstring's 2026-08-06 update). This is the reactive half of
+        that fix: the only way this glue ever learns "prefill request
+        X now" is by receiving rank 0's ``PrefillMessage`` right here.
         """
         from exo.worker.engines.mlx.pp_batched_decode_runtime import _ModelLike
 
         header = recv_header(self.src_rank, group=self.group)
+        if header.msg_kind == MSG_KIND_PREFILL:
+            prefill_message = recv_prefill_body(header, self.src_rank, group=self.group)
+            return PrefillGrant(
+                request_id=prefill_message.request_id,
+                cache_slot=prefill_message.cache_slot,
+                n_prompt_tokens=prefill_message.n_prompt_tokens,
+                single_request_fallback=bool(
+                    prefill_message.flags & PREFILL_FLAG_SINGLE_REQUEST_FALLBACK
+                ),
+            )
         if header.msg_kind == MSG_KIND_STEP:
             message = recv_step_table(header, self.src_rank, group=self.group)
             previously_occupied = set(
@@ -357,6 +673,8 @@ class Rank1BatchedDecodeGlue:
         else:
             raise GlueError(
                 f"tick(): received unexpected msg_kind={header.msg_kind} "
-                f"-- rank 1's glue only ever expects MSG_KIND_STEP or "
-                f"MSG_KIND_EVICT next on the wire for this session"
+                f"-- rank 1's glue only ever expects MSG_KIND_PREFILL, "
+                f"MSG_KIND_STEP, or MSG_KIND_EVICT next on the wire for "
+                f"this session"
             )
+        return None

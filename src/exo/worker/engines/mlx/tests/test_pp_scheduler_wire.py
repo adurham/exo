@@ -27,29 +27,37 @@ from exo.worker.engines.mlx.pp_batched_correctness import (
     _RankGroup,
 )
 from exo.worker.engines.mlx.pp_scheduler_protocol import (
+    PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    PREFILL_FLAGS_KNOWN_MASK,
     BatchEntry,
     EvictAckMessage,
     EvictMessage,
     Phase,
+    PrefillMessage,
     StepMessage,
 )
 from exo.worker.engines.mlx.pp_scheduler_wire import (
     MSG_KIND_EVICT,
     MSG_KIND_EVICT_ACK,
+    MSG_KIND_PREFILL,
     MSG_KIND_STEP,
     SCHEDULER_WIRE_PROTOCOL_VERSION,
     SchedulerWireProtocolError,
     decode_evict_ack_message,
     decode_evict_message,
+    encode_prefill_message,
     encode_step_message,
     recv_evict_ack_message,
     recv_evict_message,
     recv_header,
+    recv_prefill_body,
+    recv_prefill_message,
     recv_step_message,
     recv_step_table,
     send_evict_ack_message,
     send_evict_message,
     send_header,
+    send_prefill_message,
     send_step_message,
 )
 
@@ -286,6 +294,8 @@ def _real_dispatch_receive(src: int, *, group: mx.distributed.Group) -> Any:
         return decode_evict_message(header)
     if header.msg_kind == MSG_KIND_EVICT_ACK:
         return decode_evict_ack_message(header)
+    if header.msg_kind == MSG_KIND_PREFILL:
+        return recv_prefill_body(header, src, group=group)
     raise AssertionError(f"unexpected msg_kind in test: {header.msg_kind}")
 
 
@@ -349,3 +359,131 @@ def test_send_header_and_recv_header_roundtrip_directly() -> None:
     assert received.step_id == 42
     assert received.field_d == 7
     assert received.field_e == 0
+
+
+def test_encode_prefill_message_shapes() -> None:
+    """Pure encode test, no I/O -- mirrors
+    test_encode_step_message_shapes. Pins the exact header field
+    mapping documented in pp_scheduler_wire.py's module docstring
+    (field_d=cache_slot, field_e=n_prompt_tokens) plus the fixed
+    2-int32 [request_id, flags] body, so a future field-order change
+    can't silently pass round-trip tests (which would still pass if
+    encode and decode were changed symmetrically but wrongly)."""
+    message = PrefillMessage(
+        step_id=11,
+        request_id=77,
+        cache_slot=1,
+        n_prompt_tokens=512,
+        flags=PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    )
+    header, body = encode_prefill_message(message)
+    assert header.shape == (5,)
+    assert body.shape == (2,)
+    header_values = header.tolist()
+    assert header_values[0] == SCHEDULER_WIRE_PROTOCOL_VERSION
+    assert header_values[1] == MSG_KIND_PREFILL
+    assert header_values[2] == 11
+    assert header_values[3] == 1  # cache_slot
+    assert header_values[4] == 512  # n_prompt_tokens
+    assert body.tolist() == [77, PREFILL_FLAG_SINGLE_REQUEST_FALLBACK]
+
+
+def test_prefill_message_roundtrip_over_real_transport() -> None:
+    message = PrefillMessage(
+        step_id=6,
+        request_id=42,
+        cache_slot=0,
+        n_prompt_tokens=1024,
+        flags=0,
+    )
+    received = _send_and_recv(
+        lambda dst, group: send_prefill_message(message, dst, group=group),
+        recv_prefill_message,
+    )
+    assert received == message
+
+
+def test_prefill_message_roundtrip_preserves_fallback_flag() -> None:
+    """The single-request-fallback bit is the field rank 1 uses to
+    decide between the batched metaframe layers and the OLD
+    MetaFramedPipelineFirstLayer/LastLayer path -- if it were dropped
+    on the wire the two ranks would install structurally different
+    layer stacks, which is the same mismatched-collectives deadlock
+    this message kind exists to eliminate. So it gets its own explicit
+    round-trip test rather than only riding along in the flags=0
+    case."""
+    message = PrefillMessage(
+        step_id=2,
+        request_id=9,
+        cache_slot=1,
+        n_prompt_tokens=7,
+        flags=PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    )
+    received = _send_and_recv(
+        lambda dst, group: send_prefill_message(message, dst, group=group),
+        recv_prefill_message,
+    )
+    assert received == message
+    assert bool(received.flags & PREFILL_FLAG_SINGLE_REQUEST_FALLBACK)
+
+
+def test_encode_prefill_message_rejects_reserved_flag_bits() -> None:
+    """Fail-stop on the SENDING rank too: a reserved flag bit means
+    the caller is asking this build to transmit semantics it does not
+    implement."""
+    bad = PrefillMessage(
+        step_id=1,
+        request_id=1,
+        cache_slot=0,
+        n_prompt_tokens=1,
+        flags=~PREFILL_FLAGS_KNOWN_MASK & 0xFF,
+    )
+    with pytest.raises(SchedulerWireProtocolError, match="reserved bit"):
+        encode_prefill_message(bad)
+
+
+def test_recv_prefill_message_rejects_evict_kind() -> None:
+    """A receiver expecting a PrefillMessage that gets an EvictMessage
+    instead (control-message stream desync) must fail loudly via
+    _require_kind rather than blocking forever waiting for a 2-int32
+    body that will never be sent."""
+    evict = EvictMessage(step_id=1, request_id=1, cache_slot=0)
+    with pytest.raises(SchedulerWireProtocolError, match="expected MSG_KIND_PREFILL"):
+        _send_and_recv(
+            lambda dst, group: send_evict_message(evict, dst, group=group),
+            recv_prefill_message,
+        )
+
+
+def test_recv_step_message_rejects_prefill_kind() -> None:
+    """And the converse: the pre-existing STEP receiver rejects the
+    NEW kind cleanly instead of misreading the prefill header's
+    field_d (cache_slot) as a num_entries row count -- the exact
+    confusion the per-kind header field reuse could otherwise cause."""
+    prefill = PrefillMessage(
+        step_id=1, request_id=1, cache_slot=3, n_prompt_tokens=8, flags=0
+    )
+    with pytest.raises(SchedulerWireProtocolError, match="expected MSG_KIND_STEP"):
+        _send_and_recv(
+            lambda dst, group: send_prefill_message(prefill, dst, group=group),
+            recv_step_message,
+        )
+
+
+def test_real_dispatch_pattern_handles_prefill_kind() -> None:
+    """The established header-first-then-branch receive pattern
+    extends to the new third traffic shape with no special-casing --
+    the whole reason MSG_KIND_PREFILL was added as a header kind
+    rather than as an out-of-band channel."""
+    prefill = PrefillMessage(
+        step_id=1,
+        request_id=5,
+        cache_slot=1,
+        n_prompt_tokens=256,
+        flags=PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    )
+    received = _send_and_recv(
+        lambda dst, group: send_prefill_message(prefill, dst, group=group),
+        _real_dispatch_receive,
+    )
+    assert received == prefill

@@ -15,8 +15,31 @@ the very first real request.
 This test constructs a real ExoBatchGenerator with a REAL
 Rank1BatchedDecodeGlue attached (mirroring what utils_mlx.py's
 __post_init__ branch builds on an actual rank-1 process) and proves
-submit() dispatches into ``_submit_batched_decode`` -> the
-``stage_local_cache`` branch, not the old serial insert() path.
+submit() dispatches into the batched-decode path, not the old serial
+insert() path.
+
+UPDATED 2026-08-06 for the N=2 admission-race fix (see
+pp_batched_decode_glue.py's module docstring, "UPDATE (2026-08-06...)"
+section, for the full architecture): rank 1's submit() no longer calls
+stage_local_cache SYNCHRONOUSLY -- that would just recreate a milder
+version of the very race this fix closes (rank 1 independently
+deciding to run prefill on its own schedule). Instead, submit() now
+registers a DEFERRED prefill (``_deferred_prefill_by_uid``) and
+returns; ``stage_local_cache`` only runs once rank 1 reactively
+receives a real ``PrefillMessage`` (a ``PrefillGrant`` from
+``Rank1BatchedDecodeGlue.tick()``) telling it rank 0 has decided to
+admit this request. This test's assertion is therefore now COMPOSED,
+matching the whole path end-to-end (submit() -> deferred registration
+-> real PrefillGrant delivered via a real tick() -> stage_local_cache)
+rather than a single synchronous check -- see the consult review
+recorded 2026-08-06: testing only "deferred and not yet staged" would
+NOT catch the modern equivalent of the original bug (a grant that
+silently fails to route to staging); this test drives the real
+grant-servicing path (``_run_deferred_prefill_for_grant``, the SAME
+method ``_step_batched_decode`` calls on a real tick()-returned grant)
+with an injected ``PrefillGrant``, not a private closure shortcut, so
+a miswired grant dispatch still fails it the same way the original
+bug would have.
 """
 
 from __future__ import annotations
@@ -32,7 +55,10 @@ from transformers import AutoTokenizer
 from exo.shared.types.common import ModelId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.worker.engines.mlx.generator.batch_generate import ExoBatchGenerator
-from exo.worker.engines.mlx.pp_batched_decode_glue import Rank1BatchedDecodeGlue
+from exo.worker.engines.mlx.pp_batched_decode_glue import (
+    PrefillGrant,
+    Rank1BatchedDecodeGlue,
+)
 from exo.worker.engines.mlx.pp_batched_decode_runtime import RankOneMirrorSession
 
 
@@ -89,28 +115,25 @@ class _FakeGroup:
         return 2
 
 
-def test_rank1_submit_dispatches_to_stage_local_cache_not_serial_insert() -> None:
-    """THE REGRESSION TEST for the second real cluster bug: with a
-    REAL Rank1BatchedDecodeGlue attached (mirroring an actual rank-1
-    process) and EXO_PP_BATCHED_DECODE=1, submit() must call
-    stage_local_cache for the request rather than falling through to
-    the old serial _mlx_gen.insert() path. Before the fix, the
-    dispatch gate's ``self._batched_decode_rank0_glue is not None``
-    check was always False here (this glue lives on
-    ``_batched_decode_rank1_glue`` instead), so the request went
-    through _mlx_gen.insert() and stage_local_cache was NEVER
-    called -- exactly reproducing the real
-    ``GlueError: ... has no staged local prefilled cache`` crash.
+def test_rank1_submit_registers_deferred_prefill_then_grant_stages_cache() -> None:
+    """THE REGRESSION TEST for the second real cluster bug, updated for
+    the 2026-08-06 admission-race fix's new (correct) two-phase
+    contract.
 
-    Patches ``mx.distributed.all_sum`` for the duration of the call
-    (identity pass-through) -- ``submit()``'s own ``prefill()`` call
-    unconditionally invokes ``mx_barrier`` whenever ``group is not
-    None`` (a real cross-rank collective this single-process test has
-    no real peer for); this test's fake group only needs to satisfy
-    the eligibility gate's own ``group.size() > 1`` check, not
-    participate in a genuine collective -- same rationale as this
-    session's established ``pp_batched_correctness.py``-style
-    send/recv patching for other single-process glue-layer tests.
+    Phase 1: with a REAL Rank1BatchedDecodeGlue attached (mirrors an
+    actual rank-1 process), submit() must register a deferred prefill
+    for this uid -- NOT call stage_local_cache synchronously (that
+    synchronous call is exactly the independent-per-rank decision this
+    fix eliminates) -- and must NOT fall through to the old serial
+    _mlx_gen.insert() path (uid must land in _active_tasks either way).
+
+    Phase 2: delivering a real PrefillGrant for this uid (as
+    Rank1BatchedDecodeGlue.tick() would produce upon reactively
+    receiving rank 0's PrefillMessage) must cause the deferred prefill
+    to run and stage_local_cache to be called -- proving the grant
+    correctly routes through to staging, the modern equivalent of the
+    original bug's failure mode (a request that never gets a staged
+    cache to bind its admission to).
     """
     from unittest.mock import patch
 
@@ -152,19 +175,54 @@ def test_rank1_submit_dispatches_to_stage_local_cache_not_serial_insert() -> Non
     with patch("mlx.core.distributed.all_sum", side_effect=_identity_all_sum):
         uid = gen.submit(task_params, "What is the capital of France?")
 
-    # The real assertion: stage_local_cache was called for this uid
-    # (proves submit() took the batched-decode branch, not the old
-    # serial insert() path) -- checked via the glue's own internal
-    # staging dict, which is exactly what tick() would consult next.
-    assert uid in glue._staged_local_caches
-    assert glue._staged_slot_for_request[uid] == 0
-
-    # And the OLD path must NOT have been taken: this uid must be
-    # tracked in _active_tasks (the batched-decode registration path
-    # in _submit_batched_decode), never handed to the old serial
-    # mlx-lm BatchGenerator's own insert() at all -- if the bug were
-    # still present, submit() would have fallen through past the
-    # dispatch gate entirely and stage_local_cache above would never
-    # have been called (the assertion on _staged_local_caches already
-    # would have failed first).
+    # PHASE 1 assertion: submit() registered a DEFERRED prefill for
+    # this uid and did NOT stage anything yet -- proves submit() took
+    # the NEW batched-decode-deferred branch (not the old synchronous
+    # stage_local_cache call, and not the old serial insert() path).
+    assert uid in gen._deferred_prefill_by_uid, (
+        "submit() must register a deferred prefill for an eligible "
+        "request on rank 1 -- if this fails, either the eligibility "
+        "gate rejected the request (falling through to the old serial "
+        "path) or the dispatch gate regressed back to the pre-2026-08-06 "
+        "shape"
+    )
+    assert uid not in glue._staged_local_caches, (
+        "rank 1 must NEVER stage a cache synchronously inside submit() "
+        "-- that is exactly the independent per-rank prefill decision "
+        "this fix eliminates; staging must only happen reactively, "
+        "after a real PrefillGrant is delivered via tick()"
+    )
     assert uid in gen._active_tasks
+
+    # PHASE 2: deliver a real PrefillGrant for this uid, exactly as
+    # Rank1BatchedDecodeGlue.tick() would produce it upon reactively
+    # receiving rank 0's PrefillMessage over the wire (constructed
+    # directly here rather than driving a real 2-process transport --
+    # the real-wire-transport case is already covered by
+    # test_pp_admission_race_subprocess.py's genuinely-independent-
+    # event-loop harness; this test's job is ExoBatchGenerator's own
+    # grant-to-staging wiring, one layer up). Routed through the SAME
+    # method (_run_deferred_prefill_for_grant) _step_batched_decode
+    # itself calls on a real tick()-returned grant -- not a shortcut.
+    deferred_cache_slot = gen._deferred_prefill_by_uid[uid].cache_slot
+    grant = PrefillGrant(
+        request_id=uid,
+        cache_slot=deferred_cache_slot,
+        n_prompt_tokens=1,
+        single_request_fallback=False,
+    )
+    with patch("mlx.core.distributed.all_sum", side_effect=_identity_all_sum):
+        gen._run_deferred_prefill_for_grant(grant, is_rank1=True)
+
+    # THE core regression assertion, updated for the new contract:
+    # the grant must have driven the deferred prefill to completion
+    # and staged its result -- exactly the step the original bug
+    # skipped entirely (silently falling through to the wrong path
+    # with nothing ever staged).
+    assert uid in glue._staged_local_caches
+    assert glue._staged_slot_for_request[uid] == deferred_cache_slot
+    assert uid not in gen._deferred_prefill_by_uid, (
+        "the deferred prefill entry must be consumed (popped) once its "
+        "grant has been serviced -- a lingering entry would mean this "
+        "uid could be double-serviced by a later grant"
+    )
