@@ -2311,13 +2311,88 @@ mid-task). Work branched off the existing pin
 Stage 1 commit lives entirely in the main `exo` repo (`pp_metaframe.py`
 and its tests) -- it does not yet touch the vendored submodule at all.
 
-**Not yet started:** the actual `DeepseekV4Model.__call__`
-generator-core split (vendored `mlx-lm/mlx_lm/models/deepseek_v4.py`,
-`pp-layer-segment-wip` branch) and the isolation test harness (pause/
-resume equivalence + interleaved-request stress, per this session's
-consult review's required coverage). This Stage 1 work is the wire-
-protocol/reentrancy-safety prerequisite the generator-core split
-depends on, not a substitute for it.
+**Layer-surgery Stage 1b (generator-core split) — DONE, 2026-08-06,
+same session (`mlx-lm` fork commit `26eb90f0b`, branch
+`pp-layer-segment-wip`, pushed -- NOT merged to `mlx-lm`'s own
+`origin/main`, that divergence still unreconciled per the repo-state
+note above; main `exo` repo's submodule pointer deliberately left at
+the original pin, `55401ac57`, to keep `main`'s working tree clean per
+the standing rule).** The actual `DeepseekV4Model.__call__` split,
+consult-reviewed before implementation (the "generator core, eager
+wrapper" shape from that review): the original ~290-line `__call__`
+body moved byte-for-byte into a new private `_forward_steps` generator
+method with one new conditional yield inside the per-layer loop
+(`if interruptible: yield ("layer", _ap_i, h)`) and the final
+`return out` changed to `yield ("done", None, out)`. `__call__` itself
+became a thin 2-line eager wrapper (`*_, (_kind, _idx, out) =
+self._forward_steps(inputs, cache); return out`) -- `interruptible`
+defaults to `False`, so EVERY existing caller (decode, speculative-
+decode verify, tree-verify, non-chunked prefill) is byte-identical in
+both code path and timing to the pre-refactor function: a generator's
+conditional yield that a given call's control flow never reaches
+simply never fires, so `__call__`'s default path runs start-to-finish
+on its first internal iteration exactly as before. Only a future,
+not-yet-built `generate.py` integration will ever pass
+`interruptible=True` and drive multiple `next()`/`send()` calls across
+this generator, pausing between transformer layers so a real decode
+step can run in the gap -- deliberately NOT wired in this commit; this
+change only makes the mechanism CAPABLE of being driven that way.
+Also deliberately does NOT call `mx.eval()` at the yield point itself
+-- per the consult review, the CALLER decides whether to genuinely
+pause (evaluate + do real work) or keep draining immediately, so the
+non-interrupted case's MLX kernel fusion across layers is unaffected
+either way.
+
+Verified, not just written: `ruff check` on the touched file showed
+143 errors before AND after (unchanged pre-existing baseline for this
+vendored file, confirmed via `git stash` diff -- zero new issues from
+this edit). `basedpyright` showed 1453 errors baseline, 1457
+immediately after (4 new, all from the generator's inferred-`Unknown`
+return type) -- added an explicit
+`Iterator[Union[Tuple[Literal["layer"], int, mx.array], Tuple[Literal["done"], None, mx.array]]]`
+return annotation on `_forward_steps`, back to exactly 1453 -- zero
+net new type errors. Confirmed the real (not stand-in) module imports
+cleanly and has the correct structural shape via direct inspection
+(`inspect.isgeneratorfunction`): `_forward_steps` is a genuine
+generator function with `interruptible` defaulting to `False`,
+`__call__` stays a plain function with its original signature. A
+separate disposable isolation harness (same generator SHAPE --
+conditional mid-loop yield + thin draining wrapper -- exercised
+against a stand-in, since the real DSv4 forward needs the real 166GB
+checkpoint + a real distributed group this local machine doesn't have)
+confirmed: eager and fully-drained-generator paths produce identical
+output, AND a generator genuinely paused mid-loop and resumed AFTER a
+fully-independent interleaved forward pass on a SEPARATE model
+instance produces the correct final value, unaffected by the
+interleaving in between.
+
+**What this stand-in harness does NOT prove (same caveat this session
+already applied to the local eval-boundary-overhead benchmark above):
+single-process, single-thread pause/resume semantics only.** It does
+NOT exercise the real DSv4 model's actual weights/MoE routing, the
+real distributed PP send/recv path (a paused generator interacting
+with `mx.distributed` collectives mid-forward-pass), or genuine OS-
+thread/contextvar interaction the way the real
+`generate.py`/`Rank0BatchedDecodeGlue.tick()` integration eventually
+will. These remain the same real, explicitly-flagged gating items for
+the first real-cluster attempt this design doc's earlier "Real
+measurement #2" entry already named -- this generator-core split does
+not close them, it is the prerequisite mechanism the next integration
+step will need to exercise them against.
+
+**Not yet started:** the actual `generate.py` chunk-driving
+integration (which decides how many `next()`/`send()` calls to drain
+per tick, when to `mx.eval()`-pause vs. keep going, and how to apply
+the `contextvars.copy_context().run(...)` discipline `ForwardStepInfo`
+already documents as required), and `Rank0BatchedDecodeGlue.tick()`'s
+new rung wiring this generator to the already-tested
+`NewChunkedPrefillRequestEvent`/`PrefillChunkAdvancedEvent` protocol
+events (Stage 3, per the original phased plan). Both Stage 1 pieces
+(protocol/state-machine + the metaframe reentrancy fix + the
+generator-core split) are now done; Stages 2/3 (the real caller
+wiring) and real-cluster validation remain, in that order, gated on
+the user's own fresh explicit go-ahead for any real-cluster step per
+standing rules.
 
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
