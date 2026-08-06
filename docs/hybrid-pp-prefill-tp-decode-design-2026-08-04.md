@@ -1989,6 +1989,128 @@ framing, endorsed here. The "no per-chunk ack" decision (mechanism item
 work is actually built -- it is what makes the no-ack decision safe,
 and it does not exist yet.
 
+**Follow-up code/data audit (2026-08-06, same session) -- finding 1
+RETRACTED, finding 2 substantially revised with real hardware numbers,
+design PIVOTS from chunk-level alternation to intra-chunk layer-boundary
+yield points:**
+
+**Finding 1 (prefill->decode cache reshard) is RETRACTED -- false
+premise, confirmed by code + doc cross-check.** This design doc's own
+title is a naming leftover: Section 6.1 explicitly states the CHOSEN
+architecture "keep[s] PP's layer-split topology ... for BOTH prefill
+and decode -- do not disaggregate PP vs TP by phase." The PP-prefill/
+TP-decode phase-disaggregation alternative (a genuinely different
+design that WOULD have needed a layout reshard) was evaluated and
+explicitly REJECTED/PULLED in Section 7 (insufficient memory headroom
+for dual weight-layout residency, ~2.7GB/node). Confirmed directly in
+code: `_run_deferred_prefill_for_grant` (`batch_generate.py`) returns
+`prefilled_cache: KVCacheType` from `run_prefill()` and passes it
+UNCHANGED into `enqueue_admission`/`stage_local_cache` -- the exact
+same cache type the decode session already operates on, no conversion
+step anywhere. `pp_batched_cache_router.py`'s `merge_request_caches`/
+`extract_request_cache` have zero TP/reshard-related code. There is no
+cache-layout handoff in this architecture because there is only ever
+one layout (PP). This finding should not have been raised without
+first re-reading Section 6.1 -- noted as a process lesson: check the
+doc's own stated architecture before speculating about a problem a
+plausible-sounding doc TITLE implies.
+
+**Finding 2 (latency budget) revised with REAL measured hardware
+numbers -- the original estimate was based on the WRONG chunk size and
+the real numbers are worse, structurally, not just numerically.**
+Corrected input: the deployed production chunk size is
+`EXO_PREFILL_STEP_SIZE=2048` (`start_cluster.sh`, quality- and
+perf-validated), NOT the code default of 4096 the original finding
+assumed. Real measured GPU time per 2048-token chunk (`mx.metal
+.gpu_time_ns` + `mx.synchronize`, single-request PP prefill, prior
+session's profiling work): 2K context=4.78s/chunk, 64K=4.85s,
+129K=5.06s, 227K=5.38s, 358K=5.92s, 489K=6.46s, 522K=6.49s (93-95%
+GPU-utilized throughout, not idle-bound). **Fixed ratio-based
+alternation (any N decode-ticks-per-chunk) cannot fix this**, per a
+second `consult` review: changing N changes the duty cycle, not the
+INTERRUPTION GRANULARITY -- the worst-case inter-token gap for the
+concurrent decode user is still one full chunk (4.8-6.5s) regardless of
+N. Getting a tolerable AVERAGE decode rate via more decode-ticks per
+chunk roughly doubles total prefill wall time (a 500K prefill is
+already ~256 chunks x ~5.7s = ~24 minutes; doubling it fails any
+plausible prefill-latency budget). This is not a tuning problem, it is
+a granularity problem -- the mechanism itself (item 3, "one new tick()
+rung, alternates chunk-vs-decode") is the wrong shape, not just
+mistuned.
+
+**Chunk size cannot be shrunk as the fix either -- real, measured
+quality hazard, not just a throughput one.** A prior chunk-size sweep
+at 500K context found chunk sizes OTHER than 2048 produce mode-collapse
+garbage output (chunk=256/384/1024 all produced incoherent repeated-
+token garbage; only chunk=2048 was coherent) -- an unexplained,
+never-root-caused boundary-indexing-shaped bug, previously deprioritized
+because it wasn't on the throughput-critical path. This means "shrink
+`EXO_PREFILL_STEP_SIZE` while a decode request is active" (the obvious-
+looking adaptive-chunk-size fix, previously scoped OUT for being a
+premature optimization, not for being unsafe) is now flagged as a
+POSSIBLE CORRECTNESS HAZARD, not merely a deferred optimization --
+downgrading chunk size to interleave more finely could silently corrupt
+the interleaved request's prefill instead of just slowing it down. Do
+not revisit "adaptive chunk shrinking" as a fix without first
+root-causing this bug.
+
+**Revised direction (consult-reviewed): intra-chunk layer-boundary
+yield points, not chunk-level alternation.** Split ONE 2048-token
+chunk's forward pass into segments of K consecutive transformer layers
+(both nodes' own PP layer range independently, e.g. ~2-3 layers per
+segment against this model's ~60 total layers, ~90ms/layer at the
+measured chunk times above), with an eval/async_eval boundary and a
+"decode work pending" check between segments -- pause the prefill
+between segments, run one decode tick, resume the SAME in-flight chunk
+where it left off. This is safe against the chunk-size quality hazard
+above because it is ORTHOGONAL to it: the chunk stays 2048 tokens
+through every layer, unchanged; only the SCHEDULING of layers within
+that unchanged forward pass gets interrupted between segments. The
+existing PP rank-0/rank-1 boundary is already a free yield point (2
+segments); this adds sync points WITHIN each rank's own layer range.
+Rough math: segment size of 2-3 layers implies a worst-case decode gap
+in the low hundreds of ms (segment time + one decode-tick time) instead
+of 4.8-6.5s -- a qualitatively different result, not a smaller version
+of the same one.
+
+**Real measurements needed before this can be locked in (none taken
+yet, real-cluster time, needs the user's own fresh explicit go-ahead
+per standing rules):**
+1. Real decode-tick wall time on this hardware (not yet measured
+   anywhere in this doc's history) -- required to size segment
+   granularity against a concrete "worst-case decode gap" target, not
+   a guess.
+2. A per-layer-segment-size sweep (candidates: 1, 2, 4, 8 layers) to
+   measure real eval-boundary overhead against the current 93-95%
+   GPU-utilization baseline -- losing kernel fusion / adding sync
+   points at each boundary has a real, unmeasured cost that could erode
+   the chunk-level throughput number materially. If overhead is bad,
+   coarser segments (larger decode gap, less overhead) may be the
+   forced compromise -- write down the real trade curve, don't assume
+   a segment size.
+3. **Standing risk carried forward, not yet resolved:** the un-root-
+   caused <2048-chunk-size quality bug is a signal of general fragility
+   somewhere in the prefill path's cache-offset/boundary-indexing logic.
+   Layer-level segmentation SHOULD be orthogonal to it (chunk shape is
+   unchanged) but "should" is not proof for a bug that was never
+   root-caused. Before trusting layer-interleaved prefill in production,
+   re-run the SAME 500K coherence check (needle-in-haystack or
+   equivalent) with layer-interleaved prefill + concurrent decode
+   active, not just single-request layer-interleaved prefill alone.
+
+**Updated verdict:** finding 1 is closed (retracted, no action needed).
+Finding 2's chunk-alternation mechanism (Phase 2 design mechanism item
+3, above) is SUPERSEDED by the intra-chunk layer-boundary approach --
+the "one new `tick()` rung, alternates 1:1" mechanism as originally
+written should not be implemented; it structurally cannot meet the
+"doesn't starve concurrent decode" requirement regardless of tuning.
+Finding 3 (state-machine work) gets STRICTLY BIGGER under this revision
+-- instead of a per-chunk phase transition, the state machine now needs
+a per-LAYER-SEGMENT resumption point within a single logical chunk, a
+real budgeting/measurement pass (items 1-2 above) before any code, and
+the same real mirror-validation build-out finding 3 already called for,
+now scoped to segment boundaries instead of chunk boundaries.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
