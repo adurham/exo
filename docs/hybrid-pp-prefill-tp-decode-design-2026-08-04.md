@@ -2148,9 +2148,62 @@ pass into layer segments (kernel-fusion loss, extra `mx.eval`/sync
 cost per boundary) against the current 93-95%-GPU-utilized baseline.
 This requires real layer-segmentation code to exist before it can be
 measured -- it is not derivable from existing data the way the per-
-layer estimate above is. This is now the SOLE remaining blocking
-unknown before implementation; the decode-tick number and the per-
-layer estimate are both now on record.
+layer estimate above is.
+
+**Real measurement #2 (eval-boundary overhead) — DONE, 2026-08-06, same
+session, LOCAL disposable benchmark, no cluster relaunch.** Per this
+project's own established discipline (Phase 0's local-tooling-first
+precedent, `pp_batched_correctness.py`), and per this project's own
+prior hard-won lesson about not trusting unvalidated timing data (facts
+1017/1018 -- an earlier PP-vs-TP throughput regression turned out to be
+thermal contamination, not architectural): built and ran a synthetic
+22-layer transformer-shaped MLX benchmark
+(`/tmp/eval_boundary_bench3.py`, disposable, not committed) on the
+local machine (a MacBook Pro M4 Max, NOT one of the two Mac Studio
+cluster nodes) -- hidden=4096, 32-head attention, RMSNorm, SwiGLU FFN
+(4x), 512-token chunk, 22 layers (matching this cluster's real per-rank
+layer count). Measured wall time with `mx.eval()` forced at segment
+boundaries of [never (baseline), 8, 4, 3, 2, 1] layers, 5 timed reps
+each after a full warmup pass across every config (first attempt
+without proper warmup/`mx.clear_cache()` produced garbage data with
+outliers up to 4x the median -- discarded, not reported, redone
+properly rather than accepting noisy numbers).
+
+**Clean result: eval-boundary overhead is UNMEASURABLE (within +/-1.7%
+noise, no monotonic trend) even at segment=1 (eval every single
+layer, 22 sync boundaries in one forward pass)** against a ~0.99s
+median baseline. This rules out the specific failure mode the design
+pivot was most worried about -- MLX losing meaningful kernel fusion or
+paying a real fixed cost per `eval()` call at this scale.
+
+**Honest scope of what this does and does NOT prove (consult-reviewed
+framing, 2026-08-06):** this eliminates one candidate failure mode; it
+does NOT validate the full design. Two of the three fidelity gaps bias
+the benchmark toward OVERSTATING overhead, which strengthens the null
+result rather than weakening it: (1) 512-token chunks vs production's
+2048 means less compute per segment in the benchmark, so any real fixed
+per-boundary cost would show up MORE clearly here, not less; (2) a
+dense synthetic layer stack has less per-layer compute than
+DeepSeek-V4-Flash's real MoE+MLA layers, again making a fixed boundary
+cost a LARGER fraction of segment time in the benchmark than it would
+be in production. **What remains genuinely untested, not favorably
+biased, and is now the concrete gating item for the next real-cluster
+step:** (a) whether a mid-forward `mx.eval()` on one rank interacts
+badly with the `mx.distributed` PP send/recv path or RDMA-side
+buffering -- the actual distributed sync semantics were never exercised
+by this single-process benchmark, and this is the single biggest
+remaining unknown; (b) whether DeepSeek-V4-Flash's MoE data-dependent
+routing interacts with eval boundaries differently than this
+benchmark's dense compute; (c) whether interleaving a real decode tick
+INTO these boundaries (not just measuring the boundaries in isolation)
+actually delivers the estimated ~280-430ms worst-case gap from the
+per-layer math above, once real concurrent contention is involved --
+zero measured boundary overhead is necessary but not sufficient for
+that claim. Do not cite this benchmark as proof that "intra-chunk
+interruption has negligible overhead" for the real system -- it is
+proof the `mx.eval()` mechanism ITSELF is cheap on this hardware/model
+scale locally; the distributed-cluster question is still open and
+gates the next real-hardware step.
 
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
