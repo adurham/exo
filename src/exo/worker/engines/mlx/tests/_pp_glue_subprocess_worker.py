@@ -130,6 +130,20 @@ def main() -> int:
         prompt_b = mx.random.randint(0, vocab_size, shape=(4,))
         cache_b, first_token_b = _prefill(model, prompt_b, vocab_size)
 
+        # Request C: prefilled BEFORE the layer swap too (matching A/B's
+        # own discipline), admitted into slot 0 AFTER A vacates it --
+        # this is the exact real-hardware scenario that surfaced the
+        # 2026-08-06 stuck-DRAINING bug: nothing in production called
+        # RankOneMirrorDriver.build_evict_ack, so rank 1's own mirror
+        # state for a slot stayed permanently DRAINING after its first
+        # eviction, invisible under EXO_MAX_CONCURRENT_REQUESTS=1 (no
+        # request could ever reuse a just-vacated slot) but exploding
+        # the instant a real N=2 test admitted a new request into a
+        # freshly-evicted slot.
+        mx.random.seed(seed + 3000)
+        prompt_c = mx.random.randint(0, vocab_size, shape=(6,))
+        cache_c, first_token_c = _prefill(model, prompt_c, vocab_size)
+
         if rank == 0:
             my_layers = list(layers[:mid])
             my_layers[0] = BatchedMetaFramedPipelineFirstLayer(
@@ -141,6 +155,7 @@ def main() -> int:
             _set_layers(cast(nn.Module, cast(Any, model)), my_layers)
             my_cache_a = cache_a[:mid]
             my_cache_b = cache_b[:mid]
+            my_cache_c = cache_c[:mid]
 
             session = BatchedDecodeSession.new(max_concurrency=2)
             adapter = BatchedDecodeResponseAdapter(
@@ -215,8 +230,40 @@ def main() -> int:
                 assert admitted_id is None
                 tokens_b.append(responses[2].token)
 
+            # submit()-shaped call #3: enqueue request C into cache_slot=0
+            # -- A's SLOT, freshly vacated by its eviction above. THIS is
+            # the exact real-hardware scenario (see module docstring) that
+            # surfaced the 2026-08-06 stuck-DRAINING bug: without
+            # build_evict_ack actually being called on rank 1, its own
+            # mirror state for slot 0 would still read DRAINING here, and
+            # the very next StepMessage referencing slot 0 would raise
+            # ProtocolViolationError on rank 1.
+            glue.enqueue_admission(
+                request_id=3,
+                cache_slot=0,
+                prefilled_cache=my_cache_c,
+                initial_token=first_token_c,
+                sampler=greedy,
+                max_tokens=50,
+            )
+
+            # tick() #8: admits C into the reused slot 0.
+            responses, admitted_id, _grant = glue.tick(model)
+            assert admitted_id == 3, f"expected admission of 3, got {admitted_id}"
+            assert responses[3].token == first_token_c
+            tokens_c: list[int] = [responses[3].token]
+
+            # tick() #9-10: B and C decode together (B in slot 1, C now
+            # occupying A's former slot 0).
+            for _ in range(2):
+                responses, admitted_id, _grant = glue.tick(model)
+                assert admitted_id is None
+                tokens_b.append(responses[2].token)
+                tokens_c.append(responses[3].token)
+
             result["tokens_a"] = tokens_a
             result["tokens_b"] = tokens_b
+            result["tokens_c"] = tokens_c
             result["ok"] = True
         else:
             my_layers = list(layers[mid:])
@@ -229,6 +276,7 @@ def main() -> int:
             _set_layers(cast(nn.Module, cast(Any, model)), my_layers)
             my_cache_a = cache_a[mid:]
             my_cache_b = cache_b[mid:]
+            my_cache_c = cache_c[mid:]
 
             session = RankOneMirrorSession.new(max_concurrency=2)
             glue = Rank1BatchedDecodeGlue(session=session, src_rank=0, group=group)
@@ -255,6 +303,22 @@ def main() -> int:
 
             for _ in range(2):
                 glue.tick(model)  # B continues solo
+
+            # submit()-shaped call #3: stage C for the REUSED slot 0 --
+            # this is the exact scenario (see rank 0's own comment
+            # above and this module's docstring) that surfaced the
+            # 2026-08-06 stuck-DRAINING bug on real hardware: if
+            # build_evict_ack was never actually called above, this
+            # rank's own mirror state for slot 0 is still DRAINING
+            # here, and the next tick() (admitting C) raises
+            # ProtocolViolationError.
+            glue.stage_local_cache(
+                request_id=3, cache_slot=0, prefilled_cache=my_cache_c
+            )
+
+            glue.tick(model)  # admits C reactively into the reused slot
+            for _ in range(2):
+                glue.tick(model)  # B+C decode together
 
             result["ok"] = True
     except BaseException as e:  # noqa: BLE001 - report, don't crash silently

@@ -301,8 +301,10 @@ class TokenGeneratedEvent:
     divergence surface this module's fail-stop design exists to avoid
     creating in the first place. A tuple (not a ``set``) preserves a
     defined iteration order matching ``_active_batch_entries``'s own
-    ``sorted(self._requests.items())`` convention -- both ranks must
-    see identical ordering for anything order-dependent.
+    CACHE_SLOT sort convention (2026-08-06: changed from request_id --
+    see ``_active_batch_entries``'s own docstring for the real bug
+    that fix closes) -- both ranks must see identical ordering for
+    anything order-dependent.
 
     Non-empty by construction (see ``__post_init__``) -- an empty
     tuple would silently mean \"a decode step advanced zero requests\",
@@ -452,7 +454,36 @@ class SchedulerCore:
         first time a multi-request sequence actually exercised it --
         the earlier single-request-only directed unit tests never had
         more than one active request at a time and so never surfaced
-        this."""
+        this.
+
+        2026-08-06 bug fix (found via a real 2-process N=2 test after
+        the admission-race fix -- see docs/batched-decode-n2-
+        admission-handoff-2026-08-05.md): sort key changed from
+        REQUEST_ID (``sorted(self._requests.items())``, sorts by dict
+        key = request_id) to CACHE_SLOT. The physical
+        ``batched_cache`` row order (built by
+        ``merge_request_caches`` in pp_batched_decode_runtime.py) and
+        ``BatchedDecodeSession.prepare_step()``'s own token-tensor row
+        order are BOTH cache_slot-ordered -- that ordering is a real,
+        physical constraint (merge_request_caches concatenates rows in
+        cache_slot order; the batched input tensor must be
+        row-aligned with the batched cache), not a convention that can
+        be changed on that side. This function's own OLD
+        request_id-based order was purely a convention with no
+        physical constraint behind it (confirmed: every consumer of
+        ``StepMessage.entries``'s order -- ``RankOneMirror
+        .validate_step``'s duplicate-slot check, ``RankOneMirrorDriver
+        .on_step_message``'s assign/advance loop -- keys off each
+        entry's own ``cache_slot``/``request_id`` fields, never
+        positional index, so realigning this side's sort key is safe
+        for every existing consumer). Under real N=2 slot reuse (a
+        NEW, higher request_id admitted into a LOWER, just-freed
+        cache_slot), request_id order and cache_slot order diverge --
+        ``BatchedDecodeSession.prepare_step()``'s own defensive check
+        (``ctx.request_uids != active_ids``) caught this divergence
+        immediately the first time a real test exercised it: "order
+        (2, 3) does not match ... (3, 2)".
+        """
         return tuple(
             BatchEntry(
                 request_id=rid,
@@ -461,7 +492,9 @@ class SchedulerCore:
                 expected_cache_len=rec.cache_len,
                 n_tokens=1 if rid in advancing_request_ids else 0,
             )
-            for rid, rec in sorted(self._requests.items())
+            for rid, rec in sorted(
+                self._requests.items(), key=lambda kv: kv[1].cache_slot
+            )
         )
 
     def handle(self, event: Event) -> list[Command]:

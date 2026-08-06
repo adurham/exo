@@ -165,7 +165,6 @@ from exo.worker.engines.mlx.pp_scheduler_wire import (
 
 if TYPE_CHECKING:
     from exo.worker.engines.mlx.pp_batched_decode_runtime import Sampler
-    from exo.worker.engines.mlx.pp_scheduler_protocol import EvictAckMessage
     from exo.worker.engines.mlx.types import KVCacheType
 
 
@@ -662,13 +661,24 @@ class Rank1BatchedDecodeGlue:
             evict_message = decode_evict_message(header)
             self.session.evict(evict_message)
             self.session.release_slot(evict_message.cache_slot)
-            from exo.worker.engines.mlx.pp_scheduler_protocol import EvictAckMessage
-
-            ack: "EvictAckMessage" = EvictAckMessage(
-                step_id=evict_message.step_id,
-                request_id=evict_message.request_id,
-                cache_slot=evict_message.cache_slot,
-            )
+            # 2026-08-06 bug fix: build_evict_ack (NOT a hand-built
+            # EvictAckMessage) is what actually transitions this
+            # rank's own RankOneMirror._slot_state from DRAINING back
+            # to FREE -- see Rank0/RankOneMirrorDriver.build_evict_ack's
+            # own docstring for the real production bug this closes
+            # (nothing called it before; a slot stayed permanently
+            # DRAINING after its first eviction, exploding the first
+            # real N=2 slot-reuse under load with a
+            # ProtocolViolationError). Called AFTER release_slot, per
+            # this method's own "free the real cache state, then ack"
+            # ordering -- release_slot only touches this glue's own
+            # cache_router bookkeeping, build_evict_ack only touches
+            # the SEPARATE mirror validator's _slot_state, so their
+            # relative order doesn't matter for correctness, but
+            # keeping "the thing that's true first" (cache genuinely
+            # freed) before "the thing that says it's safe to reuse"
+            # (mirror state FREE) is the more defensible sequencing.
+            ack = self.session.build_evict_ack(evict_message)
             send_evict_ack_message(ack, dst=self.src_rank, group=self.group)
         else:
             raise GlueError(

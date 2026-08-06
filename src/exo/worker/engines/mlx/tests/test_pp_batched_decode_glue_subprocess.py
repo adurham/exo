@@ -126,9 +126,9 @@ def _run_two_rank_glue_subprocess_test(
 
 def _golden_two_request_tokens(
     seed: int,
-) -> tuple[list[int], list[int]]:
+) -> tuple[list[int], list[int], list[int]]:
     """Independently reproduces exactly what the worker script's rank
-    0 branch does for BOTH requests via two separate serial plain
+    0 branch does for ALL THREE requests via separate serial plain
     forwards -- the golden reference this test compares the real
     2-process glue-layer result against."""
     from mlx_lm.models.llama import Model as LlamaModel
@@ -177,9 +177,21 @@ def _golden_two_request_tokens(
 
     mx.random.seed(seed + 2000)
     prompt_b = mx.random.randint(0, args.vocab_size, shape=(4,))
-    golden_b = _decode(prompt_b, n_steps=5)
+    # B's own tokens_b in the worker script accumulates across FOUR
+    # separate points: the admission response (1) + "A and B decode
+    # together" (2) + "B continues solo after A's eviction" (2) + "B
+    # and C decode together" (2) = 7 total.
+    golden_b = _decode(prompt_b, n_steps=7)
 
-    return golden_a, golden_b
+    # Request C, worker rank 0's request_id=3: prefilled+admitted into
+    # A's freshly-evicted slot, then decodes 3 steps alongside B
+    # (tick()s #8-10). n_steps=3 to match: 1 admission-response token
+    # + 2 more from the "B and C decode together" loop.
+    mx.random.seed(seed + 3000)
+    prompt_c = mx.random.randint(0, args.vocab_size, shape=(6,))
+    golden_c = _decode(prompt_c, n_steps=3)
+
+    return golden_a, golden_b, golden_c
 
 
 @pytest.mark.slow
@@ -189,16 +201,22 @@ def test_glue_layer_over_real_2process_transport_matches_plain_forwards() -> Non
     tick to decode, enqueue MID-STREAM, tick to admit the second
     request alongside the first's ongoing decode, tick both together,
     complete_request to evict the first via a real eviction
-    round-trip, tick the survivor solo) across two genuine OS
-    processes -- proving the single-writer piggyback design actually
-    works end-to-end, not just its two component sessions in
-    isolation (already proven by
-    test_pp_batched_decode_subprocess.py)."""
+    round-trip, tick the survivor solo, THEN enqueue a THIRD request
+    into the freshly-evicted slot and tick it alongside the survivor)
+    across two genuine OS processes -- proving the single-writer
+    piggyback design actually works end-to-end, not just its two
+    component sessions in isolation (already proven by
+    test_pp_batched_decode_subprocess.py), AND that a slot vacated by
+    a real eviction is genuinely safe to reuse (the exact scenario
+    that surfaced the 2026-08-06 stuck-DRAINING bug on real hardware
+    -- see _pp_glue_subprocess_worker.py's own comments on request C
+    for the full story)."""
     seed = 999
-    golden_a, golden_b = _golden_two_request_tokens(seed)
+    golden_a, golden_b, golden_c = _golden_two_request_tokens(seed)
 
     rank0_result, rank1_result = _run_two_rank_glue_subprocess_test(seed)
 
     assert rank0_result["tokens_a"] == golden_a
     assert rank0_result["tokens_b"] == golden_b
+    assert rank0_result["tokens_c"] == golden_c
     assert rank1_result["ok"] is True

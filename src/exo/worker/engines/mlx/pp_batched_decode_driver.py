@@ -60,6 +60,7 @@ from exo.worker.engines.mlx.pp_batched_cache_router import BatchedCacheRouter
 from exo.worker.engines.mlx.pp_batched_decode_layers import BatchStepContext
 from exo.worker.engines.mlx.pp_scheduler_protocol import (
     Command,
+    EvictAckMessage,
     EvictAckReceivedEvent,
     EvictMessage,
     NewRequestEvent,
@@ -278,5 +279,49 @@ class RankOneMirrorDriver:
         cache state for the slot (a real side effect this module
         deliberately does not perform itself, since freeing MLX cache
         arrays is the caller's concern, not this protocol-glue
-        driver's)."""
+        driver's).
+
+        Does NOT itself transition this rank's mirror state from
+        DRAINING to FREE -- see ``build_evict_ack`` for that (a
+        SEPARATE call, made only once the caller has ACTUALLY freed
+        its real cache state for the slot, matching this method's own
+        established "validate legality now, release later" split).
+        """
         self.mirror.validate_evict(message)
+
+    def build_evict_ack(self, message: EvictMessage) -> EvictAckMessage:
+        """Call AFTER ``on_evict_message`` accepted the eviction AND
+        the caller has genuinely freed its real cache state for the
+        slot (mirrors ``release_slot``'s own "caller's responsibility,
+        this module just tracks bookkeeping" boundary) -- transitions
+        this rank's own mirror state for the slot from DRAINING back
+        to FREE and returns the real ``EvictAckMessage`` the transport
+        layer should send back to rank 0.
+
+        2026-08-06 bug fix (found via a real cluster N=2 test after
+        the admission-race fix, see
+        docs/batched-decode-n2-admission-handoff-2026-08-05.md): this
+        method (``RankOneMirror.build_evict_ack``) already EXISTED and
+        was already fully correct and unit-tested -- but nothing in
+        production ever actually CALLED it.
+        ``Rank1BatchedDecodeGlue.tick()``'s ``MSG_KIND_EVICT`` branch
+        hand-constructed an ``EvictAckMessage`` directly instead of
+        going through this method, which meant rank 1's own
+        ``RankOneMirror._slot_state`` was NEVER transitioned back to
+        FREE after any eviction -- it stayed permanently stuck at
+        DRAINING. This was invisible under
+        ``EXO_MAX_CONCURRENT_REQUESTS=1`` (no request could ever be
+        admitted into a slot a prior request had just vacated, since
+        PP mode processed exactly one request at a time before this
+        fix's own admission-race work relaxed that cap to 2 for
+        batched-decode). The FIRST real N=2 scenario where request A
+        finishes, its slot drains, and request B then gets admitted
+        into that SAME slot immediately surfaced it: rank 1's mirror
+        still believed the slot was DRAINING, so the very next
+        ``StepMessage`` referencing it raised
+        ``ProtocolViolationError`` (this module's own \"#1 corruption
+        vector\" guard, working exactly as designed -- it caught a
+        real, previously-invisible bug the instant real N=2 traffic
+        exercised it, rather than silently corrupting cache state).
+        """
+        return self.mirror.build_evict_ack(message)
