@@ -2030,41 +2030,85 @@ class ExoBatchGenerator:
                 local_hit_length = len(all_prompt_tokens) - len(remaining_tokens)
 
                 if pp_no_coord_collective:
-                    self._prefix_hit_agree_tag += 1
-                    with T("submit.pp_prefix_hit_agreement"):
-                        prefix_hit_length = pipeline_agree_prefix_hit_length(
-                            local_hit_length,
-                            self.group,
-                            self._prefix_hit_agree_tag,
-                        )
-                    if prefix_hit_length != local_hit_length:
-                        # This rank's local match was rejected by cross-rank
-                        # agreement (mismatch, or another rank forced 0)
-                        # -- release the eviction guard on the leaf we
-                        # matched (if any) and fall through to a cold
-                        # prefill built fresh below, identically to every
-                        # other rank.
-                        if local_hit_length > 0:
-                            logger.debug(
-                                "PP prefix-cache hit REJECTED by cross-rank "
-                                f"agreement: local={local_hit_length} "
-                                f"agreed={prefix_hit_length} -- falling back "
-                                "to cold prefill on every rank."
-                            )
-                            self.kv_prefix_cache.release_active_leaf()
-                        prompt_tokens = all_prompt_tokens
-                        matched_index = None
-                        is_exact_hit = False
+                    if local_hit_length == 0:
+                        # 2026-08-06 (N=2 admission-race follow-up, see
+                        # docs/batched-decode-n2-admission-handoff-2026-08-05.md):
+                        # the cross-rank agreement in
+                        # pipeline_agree_prefix_hit_length() computes
+                        # min(every rank's local hit-length) -- when THIS
+                        # rank's own local hit-length is already 0, the
+                        # agreed result is MATHEMATICALLY GUARANTEED to
+                        # also be 0 (min() over non-negative values can
+                        # never exceed the smallest input), independent
+                        # of what any other rank reports. Skip the real
+                        # wire call entirely in this case -- it would be
+                        # both wasted round-trip latency AND, more
+                        # importantly under N=2 concurrency, a real
+                        # collision risk: this function's own docstring
+                        # states its per-process monotonic tag protocol
+                        # is only safe when
+                        # EXO_MAX_CONCURRENT_REQUESTS=1 (strict
+                        # one-request-at-a-time lockstep), a precondition
+                        # the 2026-08-06 batched-decode admission-race fix
+                        # relaxes to 2 for eligible requests. A real
+                        # cluster N=2 test surfaced exactly this: this
+                        # call's own p2p traffic raced against the NEW
+                        # tick()-driven StepMessage/PrefillMessage
+                        # traffic from a concurrently-decoding OTHER
+                        # request, producing a real tag mismatch
+                        # ("pipeline_agree_prefix_hit_length: tag
+                        # mismatch on rank 0") and a jaccl recv deadline.
+                        # This fix removes the wire call for the common
+                        # case (a genuinely cold request, which is the
+                        # normal case for two independent concurrent
+                        # conversations sharing no prompt prefix) without
+                        # weakening the real cross-rank agreement's own
+                        # safety guarantee for the REMAINING case (a
+                        # local hit_length > 0 candidate) -- that case
+                        # still calls the real wire agreement below,
+                        # unchanged, and is a documented, SEPARATE,
+                        # scoped-out follow-up gap (racing candidate
+                        # cache-hit requests under N=2 concurrency are
+                        # NOT yet closed; see this method's own
+                        # SCOPE NOTE above and the handoff doc).
+                        prefix_hit_length = 0
                         cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
-                    elif prefix_hit_length > 0:
-                        logger.info(
-                            f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} "
-                            f"tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%) "
-                            "[PP cross-rank agreed]"
-                        )
-                        prompt_tokens = remaining_tokens
                     else:
-                        cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                        self._prefix_hit_agree_tag += 1
+                        with T("submit.pp_prefix_hit_agreement"):
+                            prefix_hit_length = pipeline_agree_prefix_hit_length(
+                                local_hit_length,
+                                self.group,
+                                self._prefix_hit_agree_tag,
+                            )
+                        if prefix_hit_length != local_hit_length:
+                            # This rank's local match was rejected by cross-rank
+                            # agreement (mismatch, or another rank forced 0)
+                            # -- release the eviction guard on the leaf we
+                            # matched (if any) and fall through to a cold
+                            # prefill built fresh below, identically to every
+                            # other rank.
+                            if local_hit_length > 0:
+                                logger.debug(
+                                    "PP prefix-cache hit REJECTED by cross-rank "
+                                    f"agreement: local={local_hit_length} "
+                                    f"agreed={prefix_hit_length} -- falling back "
+                                    "to cold prefill on every rank."
+                                )
+                                self.kv_prefix_cache.release_active_leaf()
+                            prompt_tokens = all_prompt_tokens
+                            matched_index = None
+                            is_exact_hit = False
+                            cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
+                        elif prefix_hit_length > 0:
+                            logger.info(
+                                f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} "
+                                f"tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%) "
+                                "[PP cross-rank agreed]"
+                            )
+                            prompt_tokens = remaining_tokens
+                        else:
+                            cache = make_kv_cache(self.model, max_kv_size=self.max_kv_tokens)
                 else:
                     prefix_hit_length = local_hit_length
                     if prefix_hit_length > 0:
