@@ -2111,6 +2111,47 @@ real budgeting/measurement pass (items 1-2 above) before any code, and
 the same real mirror-validation build-out finding 3 already called for,
 now scoped to segment boundaries instead of chunk boundaries.
 
+**Real measurement #1 (decode-tick timing) — DONE, 2026-08-06, same
+session, no cluster relaunch needed.** Cluster was already up in
+default (non-batched) single-request PP config
+(`mlx-community/DeepSeek-V4-Flash`, 43 layers, PP split 0-22/22-43,
+both runners `RunnerReady`) -- measured directly via an ordinary
+streaming `/v1/chat/completions` request rather than speculating.
+Result: TTFT 3.307s, 24 real decode content-chunks over a short
+generation, inter-chunk deltas mean=41ms (range 0.1-108ms, one outlier
+at 108ms) => **~24.4 tok/s single-request decode, ~41ms/token typical,
+worst observed single-token gap ~108ms.** This is the real number
+finding 4's "measure decode-tick wall time" item asked for -- no longer
+an open unknown.
+
+**Derived per-layer segment math (from EXISTING real GPU-time-per-chunk
+data + the new decode-tick number above -- not yet a real layer-
+segmented implementation, so still an ESTIMATE, not a measurement):**
+this model has 43 layers total (confirmed from the live cluster's own
+`/state` shard metadata: rank 0 = layers 0-22, rank 1 = layers 22-43).
+Applying the 93-95% GPU/wall ratio already on record to the previously-
+measured per-chunk GPU times gives an estimated per-layer wall time of
+~118ms (short context) to ~161ms (500K+ context) per layer PER RANK
+(each rank only runs its own ~21-22 layers, so a 2-3 layer SEGMENT is
+2-3 of one rank's own layers, not 2-3 of the full 43). At segment=2
+layers, estimated yield-to-yield gap is ~237-321ms; plus one real
+decode tick (41-108ms measured above) gives an estimated worst-case
+decode-user interruption of **~280-430ms** -- versus the original
+4.8-6.5s whole-chunk worst case this design pivot exists to fix. At
+segment=3, ~400-590ms; at segment=4, ~510-750ms. All three are a
+qualitatively different result than the original whole-chunk number,
+consistent with the consult review's prediction.
+
+**Still not measured -- the one number this estimate cannot supply:**
+real eval-boundary overhead from ACTUALLY splitting a chunk's forward
+pass into layer segments (kernel-fusion loss, extra `mx.eval`/sync
+cost per boundary) against the current 93-95%-GPU-utilized baseline.
+This requires real layer-segmentation code to exist before it can be
+measured -- it is not derivable from existing data the way the per-
+layer estimate above is. This is now the SOLE remaining blocking
+unknown before implementation; the decode-tick number and the per-
+layer estimate are both now on record.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
