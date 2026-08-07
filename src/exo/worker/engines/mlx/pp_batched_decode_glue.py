@@ -219,24 +219,56 @@ def exchange_prefill_peer_layer_count(
     prefill critical path for a purely session-lifetime problem that
     a one-time, load-time exchange closes for free).
 
-    Uses plain point-to-point ``mx.distributed.send``/``recv_like``
-    (NOT ``all_sum``, unlike the metaframe version handshake this
-    mirrors -- ``all_sum`` only detects AGREEMENT on an already-shared
-    value; this needs each rank to actually LEARN the peer's
-    genuinely DIFFERENT value, which summing cannot express). Returns
-    the PEER's local layer count -- the caller is responsible for
-    storing it wherever the chunk-driving logic needs it (today:
-    ``Rank0BatchedDecodeGlue``'s own construction).
+    2026-08-07, REAL PRODUCTION INCIDENT, method changed from
+    point-to-point send/recv to a scatter+``all_sum`` collective: the
+    original point-to-point implementation (bare ``mx.distributed.send``
+    immediately followed by ``mx.distributed.recv_like``, mirroring
+    ``handshake_metaframe_protocol``'s call-once-at-warmup discipline
+    but NOT its actual collective mechanism) deadlocked on real
+    2-node hardware -- BOTH ranks call this function with the SAME
+    source order (``send`` then ``recv_like``), so both ranks post a
+    blocking ``send()`` before either has posted a matching ``recv()``.
+    jaccl's reliable-send path has no buffering guarantee for this
+    case; both ranks hit jaccl's own 15-second drain deadline
+    simultaneously (confirmed via real cluster logs: both ranks raised
+    ``[jaccl] send() deadline in drain`` at the identical millisecond).
+    The caller's own ``try/except Exception`` (this function's only
+    caller, ``ExoBatchGenerator.__post_init__``) caught the timeout and
+    fell back to the non-batched path per its own documented contract
+    -- but the in-flight, already-posted send on the wire was NOT
+    cancelled by that fallback, and its payload (a lone int32, this
+    rank's real layer count -- e.g. 22) landed on the SAME untagged
+    stream ``recv_metaframe`` reads from, arriving just in time to be
+    misconsumed as a corrupt metaframe header's version field by the
+    OTHER protocol's very next real recv call during warmup --
+    producing the exact ``MetaFrame protocol version mismatch:
+    received 22, this build expects 3`` crash seen on the peer rank.
+
+    Fix: use ``all_sum`` (the SAME collective ``handshake_metaframe_
+    protocol`` already uses safely at this exact call site, warmup
+    time, before ``EXO_PP_NO_COORD_COLLECTIVE`` gating applies to
+    per-request traffic) instead of point-to-point send/recv. Each
+    rank scatters its own value into its own slot of an otherwise-zero
+    ``world_size``-length vector, then ``all_sum`` gives every rank the
+    full vector in one synchronized collective call -- no per-rank
+    send/recv ordering to get wrong, no possibility of one rank's send
+    outliving a caught timeout and corrupting a later, unrelated recv,
+    because a collective either fully completes on every rank or the
+    SAME exception propagates identically on every rank (no partial/
+    one-sided failure mode to begin with). Returns the PEER's local
+    layer count -- the caller is responsible for storing it wherever
+    the chunk-driving logic needs it (today: ``Rank0BatchedDecodeGlue``'s
+    own construction).
     """
     if group.size() <= 1:
         return local_layer_count
-    local_arr = mx.array([local_layer_count], dtype=mx.int32)
-    sent = mx.distributed.send(local_arr, dst_rank, group=group)
-    mx.eval(sent)
-    peer_template = mx.zeros((1,), dtype=mx.int32)
-    peer_arr = mx.distributed.recv_like(peer_template, dst_rank, group=group)
-    mx.eval(peer_arr)
-    peer_layer_count = int(peer_arr.item())
+    world_size = group.size()
+    local_rank = group.rank()
+    scatter = mx.zeros((world_size,), dtype=mx.int32)
+    scatter[local_rank] = local_layer_count
+    summed = mx.distributed.all_sum(scatter, group=group)
+    mx.eval(summed)
+    peer_layer_count = int(summed[dst_rank].item())
     if peer_layer_count < 1:
         raise GlueError(
             f"exchange_prefill_peer_layer_count: received a peer layer "
