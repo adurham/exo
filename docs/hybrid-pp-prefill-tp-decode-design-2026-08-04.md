@@ -2432,18 +2432,103 @@ return-tuple shape changed on both classes; every real call site
 Full worker suite incl. both real 2-process subprocess tests: zero
 regressions throughout.
 
-**Explicitly NOT yet done, the actual remaining piece:** nothing in
-production calls `register_prefill_session()` yet.
-`pipeline_parallel_prefill` (`generate.py`) itself still needs its
-own generator-core split -- per an earlier consult review, this is
-NOT a "swap the inner `model(...)` call" job; the function's own
-chunk-size/dummy-iteration pipeline-bubble-fill bookkeeping needs the
-same treatment `DeepseekV4Model.__call__` already got (Stage 1b),
-so ITS OWN chunk boundaries can construct+register a session instead
-of blocking to completion. Until that exists, this entire mechanism
-is real, tested, wired machinery with nothing yet driving it in
-production -- the next real step, and real-cluster validation after
-it, both still gated on the user's own fresh explicit go-ahead.
+**REGRESSION found and fixed, same session (`exo` main commit
+`5249f223f`):** while auditing whether anything real could drive this
+machinery, found that `generate.py`'s REAL prefill()/prefill_batched()
+call sites never called `set_forward_step_info()` directly -- they
+call `auto_parallel.py`'s `set_pipeline_prefill()`/
+`set_pipeline_queue_sends()` (the same functions that used to write
+the OLD ambient `is_prefill`/`queue_sends` instance flags this whole
+`ForwardStepInfo` mechanism replaced). Stage 1's migration moved the
+READ path to the new contextvar but left those two real, pre-existing
+callers' WRITE path unchanged -- writing to now-dead attributes
+nothing reads anymore. Since `get_forward_step_info()` is called
+unconditionally, first thing, in every
+`MetaFramedPipelineLastLayer.__call__`, this meant EVERY real prefill
+call under `EXO_PP_METAFRAME=1` (with or without
+`EXO_PP_BATCHED_DECODE`) would hit a guaranteed `LookupError` -- a
+regression invisible to the full 339-test suite because no test
+exercised `set_pipeline_prefill`'s actual call shape against real
+installed metaframe layers. Fixed with a safe default (restoring
+EXACTLY the pre-migration ambient-flag construction-time default:
+`phase=DECODE, queue_sends=False`) plus partial read-modify-write
+setters (`set_forward_step_phase`/`set_forward_step_queue_sends`)
+mirroring the real non-atomic caller shape. New regression test
+(`test_pp_metaframe.py`) verified to FAIL with the exact predicted
+`LookupError` when reverted, and PASS when re-applied. Lesson
+recorded to memory: a read-path migration must audit and fix EVERY
+real production write path, not just the ones existing tests happen
+to cover.
+
+**Stage 4 part 1 (generator-core split of `pipeline_parallel_prefill`)
+— DONE, 2026-08-06, same session** (`exo` main commit `65e0b46ac`).
+Mirrors `DeepseekV4Model.__call__`'s Stage 1b split exactly, one
+level up: `pipeline_parallel_prefill`'s ~150-line body split into a
+private `_pipeline_parallel_prefill_steps` generator (byte-for-byte
+the original body, unchanged) plus a thin eager wrapper every real
+caller still goes through unchanged. Per a consult review: this
+function's own chunk/dummy-iteration pipeline-bubble-fill bookkeeping
+(leading/trailing dummy iterations for N-rank overlap,
+`real_chunk_sizes`, `processed` offset tracking) is load-bearing state
+a "just swap the inner `model(...)` call" shortcut would have
+silently duplicated or desynced -- this split keeps ALL of that
+bookkeeping exactly where it lives, changing only what happens AT
+each real chunk boundary. `interruptible=True` yields
+`("chunk", i, chunk_tokens)` -- the chunk's TOKENS, not output (the
+function already discards the forward pass's output; only the
+cache-population side effect matters) -- the caller becomes
+responsible for having already run that chunk's forward pass (eagerly
+or via a `ResumablePrefillSession`) before resuming. Verified via
+basedpyright/ruff diffed against baseline (zero new issues) and real
+module structural inspection.
+
+**Stage 4 part 2 (integration proof) — DONE, 2026-08-06, same
+session** (`exo` main commit `c4af000ba`). A real, previously-missing
+test proving `_pipeline_parallel_prefill_steps`'s chunk yields compose
+correctly with a REAL `ResumablePrefillSession` -- bitwise-identical
+KV cache output vs. the plain eager wrapper, verified against a real
+(small) `mlx_lm` Llama model with `world_size=1` (degenerates the
+dummy-iteration bubble-fill to zero, letting this run without a
+distributed transport). A synthetic per-layer-yielding wrapper stands
+in for `DeepseekV4Model._forward_steps` (needs the real 166GB
+checkpoint + a real distributed group, unavailable locally) -- a
+legitimate simplification for THIS test's specific composition
+question, not a substitute for real multi-rank validation. Verified
+the core assertion is load-bearing (not vacuous) by deliberately
+injecting a bug (skip one chunk's session advancement) and confirming
+the test fails loudly, then reverting.
+
+**Explicitly NOT yet done, the actual remaining piece (deliberately
+scoped OUT of this session -- see the design doc's own risk-framing
+below):** nothing in production calls `register_prefill_session()`
+yet. The real live wiring -- turning `run_prefill()`/`prefill()`'s
+own call chain into a suspendable coroutine that
+`ExoBatchGenerator.step()` can resume across separate real ticks
+(driving `_pipeline_parallel_prefill_steps` with `interruptible=True`
+and a real `ResumablePrefillSession` per chunk) -- was explicitly NOT
+built this session. Per a consult review that mapped the real call
+chain (`step() -> _run_deferred_prefill_for_grant() -> run_prefill()
+closure -> prefill() -> pipeline_parallel_prefill()`): this needs
+`ExoBatchGenerator` to hold an opaque suspended-generator handle
+across ticks (not re-implement the chunk loop as a step()-level state
+machine), real cancellation/abort handling for a request that dies
+mid-suspended-prefill (leaked KV cache + a registered session + a
+mid-conversation `PrefillAdvanceMessage` on the wire, unless
+`gen.close()`/`.throw()` plus session deregistration plus a wire-level
+abort are all added), explicit `StopIteration.value` return-plumbing
+so `prefill_tps`/token-count/cache-snapshot results aren't silently
+dropped, and an audit of the OTHER THREE `prefill()` call sites that
+still expect synchronous-to-completion behavior. This is a materially
+DIFFERENT risk class from everything else built this session (new,
+additive, unused-until-wired machinery vs. changing the actual
+calling convention of the real path every request goes through
+today) and deserves its own dedicated design/review round, not a
+same-session tail-end addition -- especially right after this same
+session already found and fixed one real regression by slowing down
+to audit carefully. Real-cluster validation stays gated on the user's
+own fresh explicit go-ahead, same as always, and now has an
+additional prerequisite: this live-wiring piece must exist and be
+locally verified first.
 
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
