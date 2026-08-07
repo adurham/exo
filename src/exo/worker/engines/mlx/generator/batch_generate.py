@@ -4675,56 +4675,92 @@ class ExoBatchGenerator:
     def cancel(self, uids: list[int]) -> None:
         """Cancel each uid's in-flight generation.
 
-        2026-08-07 (Phase 2 live-wiring follow-up) FAIL-STOP GUARD: a
-        cancel for a uid whose real prefill is CURRENTLY mid-chunk-drive
-        (``_deferred_prefill_by_uid[uid].drive is not None`` -- i.e. a
-        ``register_prefill_session()`` call already registered a live
-        session with this rank's glue, and that session has not yet
-        reached genuine completion) is a real, NOT-YET-DESIGNED
-        correctness gap -- explicitly flagged, not silently ignored, by
-        the design doc's own 2026-08-06 entry ("real cancellation/abort
-        handling for a request that dies mid-suspended-prefill ... is a
-        materially DIFFERENT risk class ... deserves its own dedicated
-        design/review round, not a same-session tail-end addition").
-        Silently popping ``_active_tasks``/``_mlx_gen`` here would leave
-        the glue's ``_active_prefill_session`` permanently occupied by a
-        request nothing will ever finish driving -- every SUBSEQUENT
-        ``register_prefill_session()`` call (for ANY future request,
-        not just this one) would then hit that method's own hard
-        "at most one active session" ``GlueError``, wedging the entire
-        batched-decode chunked-prefill path until process restart. Fail
-        loud HERE instead, at the actual point of the caller's mistake,
-        so the failure is attributable and immediate rather than a
-        confusing crash on some LATER, unrelated request's admission.
+        2026-08-07 (Phase 2 live-wiring follow-up) REAL cancel/abort
+        mechanism -- replaces the earlier same-day fail-stop guard
+        (which deliberately raised rather than silently corrupt glue
+        state, per the design doc's own explicit "not yet designed,
+        deserves its own dedicated review round" entry). That review
+        happened (3 `consult` rounds); this is the result.
 
-        Cancelling a uid with no active drive (the ONLY case that has
-        ever run on real production hardware to date -- see the
-        mlx-lm submodule-pin gap noted in ``prefill_interruptible_
-        start``'s own docstring) is completely unaffected by this
-        guard and behaves exactly as before.
+        RANK 0 (sole decision-maker, matching this module's own
+        established discipline throughout): for each uid whose real
+        prefill is CURRENTLY mid-chunk-drive
+        (``_deferred_prefill_by_uid[uid].drive is not None`` -- a
+        ``register_prefill_session()`` call already registered a live
+        session, not yet genuinely completed), routes to
+        ``Rank0BatchedDecodeGlue.abort_prefill_session``, which closes
+        THIS rank's own session (via ``ResumablePrefillSession.
+        abort()``, routed through its own captured
+        ``contextvars.Context`` -- never a raw ``._gen.close()``, see
+        that method's own docstring) and then sends a real,
+        blocking-acked ``PrefillAbortMessage``/``PrefillAbortAckMessage``
+        round trip so rank 1 tears down its own mirrored session too.
+
+        RANK 1: does NOT independently initiate anything here -- rank
+        1 never independently decides (this module's own discipline,
+        already covering admission/advance/eviction, now extended to
+        abort). The SAME client cancel command reaches rank 1's own
+        ``cancel_receiver`` too (both ranks run this identical method
+        against their own local generator instance), but rank 1's
+        glue-level teardown is handled REACTIVELY by
+        ``Rank1BatchedDecodeGlue.tick()``'s own
+        ``MSG_KIND_PREFILL_ABORT`` branch once rank 0's (also
+        independently firing, from the SAME cancel command) abort
+        round trip actually arrives on the wire -- this method only
+        drops rank 1's OWN local ``_deferred_prefill_by_uid`` bookkeeping
+        (which is genuinely separate state from the glue's
+        ``_active_prefill_session``, untouched here) so a stale local
+        reference doesn't linger.
+
+        Called EXCLUSIVELY from ``batch_generator.py``'s
+        ``_apply_cancellations``, itself only ever invoked from the
+        SAME cooperative single-threaded loop that drives ``step()``/
+        ``tick()`` -- never concurrently with an in-flight ``tick()``
+        call for this rank (a real precondition, not a formality: on
+        rank 0, the abort round trip does its own blocking
+        ``mx.distributed.send``/``recv_like`` pair, which would race
+        an in-flight ``tick()``'s own wire traffic if this constraint
+        were ever violated).
+
+        A ``PrefillSessionError`` from ``ResumablePrefillSession.
+        abort()`` itself (the underlying generator's cleanup path
+        raising, or ignoring ``GeneratorExit``) is swallowed and
+        logged, not propagated -- per the `consult` review: cancel
+        should be best-effort local cleanup, not a NEW failure surface
+        on top of whatever already made this request worth cancelling.
+        A ``GlueError`` (a genuine cross-rank desync, an ack mismatch,
+        or calling abort for a uid rank 0's glue never actually
+        registered) is NOT swallowed -- that is a real protocol
+        violation this fork's own established fail-stop discipline
+        demands surfacing loudly, not silently ignoring.
+
+        Cancelling a uid with no active drive is unaffected by any of
+        this and behaves exactly as before.
         """
         for uid in uids:
             deferred = self._deferred_prefill_by_uid.get(uid)
             if deferred is not None and deferred.drive is not None:
-                from exo.worker.engines.mlx.pp_batched_decode_glue import GlueError
+                if self._batched_decode_rank0_glue is not None:
+                    from exo.worker.engines.mlx.pp_prefill_session import (
+                        PrefillSessionError,
+                    )
 
-                raise GlueError(
-                    f"cancel(): uid={uid} has an active ChunkedPrefillDrive "
-                    f"mid-chunk-drive (chunk_index="
-                    f"{deferred.drive.chunk_index}) -- cancellation of a "
-                    f"request while its real prefill is suspended "
-                    f"across future ticks is NOT YET DESIGNED (see "
-                    f"docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md's "
-                    f"2026-08-06 entry: 'real cancellation/abort handling "
-                    f"... is a materially different risk class ... "
-                    f"deserves its own dedicated design/review round'). "
-                    f"Silently cancelling here would leave this rank's "
-                    f"glue permanently occupied "
-                    f"(register_prefill_session's own 'at most one active "
-                    f"session' invariant would then hard-crash the NEXT "
-                    f"unrelated request's admission instead of this one). "
-                    f"Refusing to guess at a safe cancellation."
-                )
+                    try:
+                        self._batched_decode_rank0_glue.abort_prefill_session(uid)
+                    except PrefillSessionError:
+                        logger.exception(
+                            f"cancel(): uid={uid}'s ResumablePrefillSession."
+                            f"abort() raised while closing its underlying "
+                            f"generator -- swallowed (best-effort cleanup, "
+                            f"per this method's own docstring), proceeding "
+                            f"with cancellation regardless"
+                        )
+                # Rank 1 (self._batched_decode_rank1_glue is not None):
+                # intentionally does nothing to the glue here -- see
+                # this method's own docstring's "RANK 1" section for
+                # why. Only the local bookkeeping below is dropped on
+                # either rank.
+                self._deferred_prefill_by_uid.pop(uid, None)
         self._mlx_gen.remove(uids)
         for uid in uids:
             self._active_tasks.pop(uid, None)

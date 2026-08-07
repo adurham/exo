@@ -382,6 +382,72 @@ class PrefillAdvanceMessage:
 
 
 @dataclass(frozen=True)
+class PrefillAbortMessage:
+    """Rank 0's instruction to rank 1: "abandon your own local
+    chunked-prefill session for ``request_id`` right now, do not
+    expect any further ``PrefillAdvanceMessage`` for it" --
+    2026-08-07, real cancel/abort mechanism (closes the fail-stop-only
+    gap ``ExoBatchGenerator.cancel()`` previously guarded against
+    rather than handled).
+
+    WHY A NEW MESSAGE KIND (not reused/repurposed existing ones):
+    mirrors ``PrefillAdvanceMessage``'s own "one action per tick, the
+    MESSAGE KIND received IS the instruction" reasoning exactly --
+    an abort is a FOURTH distinct thing that can happen on a
+    chunk-drive tick (alongside decode/admission/advance), so it gets
+    its own kind rather than overloading ``PrefillAdvanceMessage``
+    with an abort flag (a `consult` review explicitly flagged
+    overloading advance semantics as the wrong move: an abort-flagged
+    "advance" would still need ``max_layers``/``chunk_index`` fields
+    that mean nothing for an abort, and every existing
+    ``PrefillAdvanceMessage`` reader would need new branching to
+    ignore them).
+
+    WHY THIS NEEDS A BLOCKING ACK (``PrefillAbortAckMessage``, not
+    fire-and-forget): mirrors ``EvictMessage``/``EvictAckMessage``'s
+    own DRAINING-until-ack contract exactly, for the identical reason
+    -- rank 0 must not reuse its own ``_active_prefill_session`` slot
+    (register a NEW session, or grant a new request) until it has
+    PROOF rank 1 has genuinely freed its own mirrored slot, or the
+    exact wedge class the priority-order guard was built to prevent
+    for the grant path recurs here: rank 0 races ahead locally while
+    rank 1's glue is still occupied by state nothing will ever advance
+    again.
+
+    Only valid to send once rank 1 is CONFIRMED to hold live session
+    state for ``request_id`` -- i.e. at least one real
+    ``PrefillAdvanceMessage`` has already been sent for it (see
+    ``ResumablePrefillSession.abort()``'s own docstring and
+    ``Rank0BatchedDecodeGlue``'s cancel-handling call site for the
+    full "local-only vs needs-wire-abort" decision this message exists
+    downstream of -- an abort BEFORE rank 1 has ever registered a
+    session for this request is a pure local no-op on rank 0's side,
+    no message needed, since rank 1 holds zero state to free).
+    """
+
+    step_id: int
+    request_id: int
+
+
+@dataclass(frozen=True)
+class PrefillAbortAckMessage:
+    """Rank 1's acknowledgement that it has genuinely closed its own
+    local ``ResumablePrefillSession`` for ``request_id`` (via
+    ``ResumablePrefillSession.abort()``, routed through the session's
+    own captured ``contextvars.Context`` -- never a raw
+    ``._gen.close()`` call, see that method's own docstring) and
+    cleared its glue's ``_active_prefill_session``/
+    ``_last_prefill_advance_seq`` bookkeeping. Only after THIS is
+    received may rank 0 register a new session or grant a new
+    request -- mirrors ``EvictAckMessage``'s own "transition back to
+    FREE only after ack" contract exactly.
+    """
+
+    step_id: int
+    request_id: int
+
+
+@dataclass(frozen=True)
 class EvictMessage:
     """Explicit eviction notice for one cache slot -- the fix for Risk
     #10's cancellation-by-omission ambiguity (module docstring point

@@ -92,6 +92,8 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
     EvictAckMessage,
     EvictMessage,
     Phase,
+    PrefillAbortAckMessage,
+    PrefillAbortMessage,
     PrefillAdvanceMessage,
     PrefillMessage,
     PrefillReadyMessage,
@@ -110,6 +112,8 @@ MSG_KIND_EVICT_ACK = 3
 MSG_KIND_PREFILL = 4
 MSG_KIND_PREFILL_READY = 5
 MSG_KIND_PREFILL_ADVANCE = 6
+MSG_KIND_PREFILL_ABORT = 7
+MSG_KIND_PREFILL_ABORT_ACK = 8
 
 _HEADER_FIELDS = 5  # [version, msg_kind, step_id, field_d, field_e]
 _STEP_ROW_FIELDS = (
@@ -205,6 +209,8 @@ def _require_kind(header: WireHeader, expected: int, *, fn_name: str) -> None:
             MSG_KIND_PREFILL: "MSG_KIND_PREFILL",
             MSG_KIND_PREFILL_ADVANCE: "MSG_KIND_PREFILL_ADVANCE",
             MSG_KIND_PREFILL_READY: "MSG_KIND_PREFILL_READY",
+            MSG_KIND_PREFILL_ABORT: "MSG_KIND_PREFILL_ABORT",
+            MSG_KIND_PREFILL_ABORT_ACK: "MSG_KIND_PREFILL_ABORT_ACK",
         }
         raise SchedulerWireProtocolError(
             f"{fn_name}: expected {_names.get(expected, expected)} "
@@ -526,6 +532,76 @@ def recv_prefill_advance_message(
     docstring for the same caveat about production dispatch code)."""
     header = recv_header(src, group=group)
     return recv_prefill_advance_body(header, src, group=group)
+
+
+def send_prefill_abort_message(
+    message: PrefillAbortMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillAbortMessage`` to ``dst`` -- fits entirely in
+    the fixed header, no follow-up body (identical shape to
+    ``send_evict_message``, since both messages carry only
+    ``step_id``+``request_id``)."""
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL_ABORT,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=0,
+    )
+    send_header(header, dst, group=group)
+
+
+def decode_prefill_abort_message(header: WireHeader) -> PrefillAbortMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL_ABORT``, assemble the
+    ``PrefillAbortMessage`` -- no additional receive needed."""
+    _require_kind(
+        header, MSG_KIND_PREFILL_ABORT, fn_name="decode_prefill_abort_message"
+    )
+    return PrefillAbortMessage(step_id=header.step_id, request_id=header.field_d)
+
+
+def recv_prefill_abort_message(
+    src: int, *, group: mx.distributed.Group
+) -> PrefillAbortMessage:
+    """Convenience one-call wrapper (see ``recv_step_message``'s own
+    docstring for the same caveat about production dispatch code)."""
+    header = recv_header(src, group=group)
+    return decode_prefill_abort_message(header)
+
+
+def send_prefill_abort_ack_message(
+    message: PrefillAbortAckMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillAbortAckMessage`` to ``dst`` -- the reply rank
+    1 sends after receiving a ``PrefillAbortMessage`` + genuinely
+    closing its own local session, matching
+    ``PrefillAbortMessage``'s own DRAINING-until-ack invariant."""
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL_ABORT_ACK,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=0,
+    )
+    send_header(header, dst, group=group)
+
+
+def decode_prefill_abort_ack_message(header: WireHeader) -> PrefillAbortAckMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL_ABORT_ACK``, assemble the
+    ``PrefillAbortAckMessage``."""
+    _require_kind(
+        header, MSG_KIND_PREFILL_ABORT_ACK, fn_name="decode_prefill_abort_ack_message"
+    )
+    return PrefillAbortAckMessage(step_id=header.step_id, request_id=header.field_d)
+
+
+def recv_prefill_abort_ack_message(
+    src: int, *, group: mx.distributed.Group
+) -> PrefillAbortAckMessage:
+    """Convenience one-call wrapper (see ``recv_step_message``'s own
+    docstring for the same caveat about production dispatch code)."""
+    header = recv_header(src, group=group)
+    return decode_prefill_abort_ack_message(header)
 
 
 def send_evict_ack_message(

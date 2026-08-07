@@ -152,6 +152,7 @@ from exo.worker.engines.mlx.pp_metaframe import ForwardPhase
 from exo.worker.engines.mlx.pp_prefill_session import ResumablePrefillSession
 from exo.worker.engines.mlx.pp_scheduler_protocol import (
     PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
+    PrefillAbortAckMessage,
     PrefillAdvanceMessage,
     PrefillMessage,
     PrefillReadyMessage,
@@ -159,15 +160,18 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
 from exo.worker.engines.mlx.pp_scheduler_wire import (
     MSG_KIND_EVICT,
     MSG_KIND_PREFILL,
+    MSG_KIND_PREFILL_ABORT,
     MSG_KIND_PREFILL_ADVANCE,
     MSG_KIND_STEP,
     decode_evict_message,
+    decode_prefill_abort_message,
     recv_header,
     recv_prefill_advance_body,
     recv_prefill_body,
     recv_prefill_ready_message,
     recv_step_table,
     send_evict_ack_message,
+    send_prefill_abort_ack_message,
     send_prefill_advance_message,
     send_prefill_message,
     send_prefill_ready_message,
@@ -1135,6 +1139,75 @@ class Rank0BatchedDecodeGlue:
         self.session.on_evict_ack(request_id=request_id, cache_slot=ack.cache_slot)
         self.adapter.forget(request_id)
 
+    def abort_prefill_session(self, request_id: int) -> None:
+        """Caller (``ExoBatchGenerator.cancel()``) signals
+        ``request_id``'s chunked-prefill drive must be abandoned right
+        now -- 2026-08-07, real cancel/abort mechanism.
+
+        MUST be called from the SAME cooperative caller context that
+        drives ``tick()`` itself (mirrors ``complete_request``'s own
+        "deliberately NOT folded into tick()" discipline exactly) --
+        NEVER concurrently with an in-flight ``tick()`` call for this
+        rank. This is a real constraint, not a formality: rank 1
+        ALWAYS holds its own live mirrored session state the entire
+        time this rank's is active (both ranks register independently
+        at admission time, per a `consult` review correcting an
+        earlier, wrong assumption that only ``RANK1_DRAINING`` implied
+        rank-1 state) -- there is no local-only fast path. Every
+        abort, regardless of ``_prefill_phase``, closes this rank's
+        own session locally THEN sends a real, blocking-acked
+        ``PrefillAbortMessage``/``PrefillAbortAckMessage`` round trip,
+        exactly mirroring ``complete_request``'s own
+        ``EvictMessage``/``EvictAckMessage`` pattern.
+
+        Raises ``GlueError`` if no session is registered for
+        ``request_id`` (caller bug -- ``ExoBatchGenerator.cancel()``
+        must only route here for a uid it already confirmed has an
+        active ``ChunkedPrefillDrive``, per that method's own
+        docstring) or if the received ack's ``request_id`` mismatches
+        (identical fail-stop rationale to ``complete_request``'s own
+        ack-mismatch guard -- refusing to silently believe an ack for
+        the wrong request).
+        """
+        if self._active_prefill_session is None:
+            raise GlueError(
+                f"abort_prefill_session({request_id}): no active prefill "
+                f"session on this rank -- caller must only call this for "
+                f"a request_id it already confirmed has an active "
+                f"chunk-drive"
+            )
+        active_id, prefill_session = self._active_prefill_session
+        if active_id != request_id:
+            raise GlueError(
+                f"abort_prefill_session({request_id}): this rank's active "
+                f"session is for request_id={active_id}, not {request_id} "
+                f"-- refusing to abort the wrong request's session"
+            )
+
+        from exo.worker.engines.mlx.pp_scheduler_protocol import PrefillAbortMessage
+        from exo.worker.engines.mlx.pp_scheduler_wire import (
+            recv_prefill_abort_ack_message,
+            send_prefill_abort_message,
+        )
+
+        prefill_session.abort()
+        self._active_prefill_session = None
+        self._prefill_phase = "rank0_local"
+        self._prefill_rank1_advances_remaining = 0
+        self._prefill_step_id += 1
+        abort_message = PrefillAbortMessage(
+            step_id=self._prefill_step_id, request_id=request_id
+        )
+        send_prefill_abort_message(abort_message, dst=self.dst_rank, group=self.group)
+        ack = recv_prefill_abort_ack_message(src=self.dst_rank, group=self.group)
+        if ack.request_id != request_id:
+            raise GlueError(
+                f"abort_prefill_session({request_id}): PrefillAbortAckMessage "
+                f"mismatch -- expected request_id={request_id}, got "
+                f"request_id={ack.request_id}. Refusing to proceed on a "
+                f"mismatched ack."
+            )
+
 
 @dataclass
 class Rank1BatchedDecodeGlue:
@@ -1431,6 +1504,56 @@ class Rank1BatchedDecodeGlue:
                         output=prefill_session.output(),
                     ),
                 )
+            return None, None, None
+        if header.msg_kind == MSG_KIND_PREFILL_ABORT:
+            # 2026-08-07: real cancel/abort mechanism. Rank 0 has
+            # ALREADY closed its own local session and decided this
+            # request's chunk-drive is dead -- rank 1's job here is
+            # purely reactive: close its OWN mirrored session (never
+            # independently decided, matching every other branch in
+            # this dispatch's "rank 1 never independently decides"
+            # discipline) and ack. Per the `consult` review that
+            # corrected this design's earlier wrong assumption: rank 1
+            # ALWAYS has live session state once register_prefill_
+            # session has run on both ranks (not merely during
+            # RANK1_DRAINING), so this branch must be reachable
+            # regardless of what _prefill_phase rank 0's OWN state
+            # machine was in when it decided to abort -- there is no
+            # narrower "only valid during X" precondition to check
+            # here (unlike MSG_KIND_PREFILL_ADVANCE's phase-implicit
+            # checks above, which rely on rank 0 having already walked
+            # through rank0_local/handoff before ever sending an
+            # advance).
+            abort_message = decode_prefill_abort_message(header)
+            if self._active_prefill_session is None:
+                raise GlueError(
+                    f"tick(): received PrefillAbortMessage for "
+                    f"request_id={abort_message.request_id} but this "
+                    f"rank has no active local prefill session registered "
+                    f"-- the two ranks' control-message streams have "
+                    f"desynced (rank 0 must never send an abort for a "
+                    f"request this rank was never told to register)."
+                )
+            active_id, prefill_session = self._active_prefill_session
+            if active_id != abort_message.request_id:
+                raise GlueError(
+                    f"tick(): PrefillAbortMessage request_id mismatch -- "
+                    f"this rank's active session is for "
+                    f"request_id={active_id}, received an abort for "
+                    f"request_id={abort_message.request_id}. The two "
+                    f"ranks' control-message streams have desynced."
+                )
+            prefill_session.abort()
+            self._active_prefill_session = None
+            self._last_prefill_advance_seq = None
+            send_prefill_abort_ack_message(
+                PrefillAbortAckMessage(
+                    step_id=abort_message.step_id,
+                    request_id=abort_message.request_id,
+                ),
+                dst=self.src_rank,
+                group=self.group,
+            )
             return None, None, None
         if header.msg_kind == MSG_KIND_STEP:
             message = recv_step_table(header, self.src_rank, group=self.group)

@@ -3121,6 +3121,157 @@ needs its own explicit go-ahead per the standing rule (approving a
 code/config change is not approval to deploy/restart), not assumed
 from this pin-advance being approved.
 
+**REAL CANCEL/ABORT MECHANISM built, 2026-08-07, same follow-up
+session (user's explicit "go for it" on this item too) -- closes the
+"only a fail-stop guard exists" gap the earlier same-day
+`cancel()` entry deliberately left open pending "its own dedicated
+design/review round." That review happened: 3 `consult` rounds before
+any code changed, the first round's own framing corrected mid-design
+by the second (see below) -- matching this campaign's established
+discipline.**
+
+**Design history (worth recording -- the first framing was wrong, and
+catching that BEFORE implementation is exactly what the review process
+exists for):** round 1 proposed a local-only fast path during
+RANK0_LOCAL (reasoning: rank 1 "only learns of a chunk-drive via the
+first PrefillAdvanceMessage"). Re-checking the REAL production code
+(`_run_deferred_prefill_for_grant`) before implementing anything
+disproved this: BOTH ranks call `register_prefill_session()`
+independently as soon as EACH rank's own `tick()` returns a
+`PrefillGrant` -- driven by each rank's own local grant handling from
+the SAME `PrefillMessage`/`PrefillReadyMessage` admission handshake,
+not reactively from the first advance. Round 2 (fed the corrected
+fact) confirmed: rank 1 ALWAYS holds live session state once
+registration has run on both ranks, so a wire-level abort round trip
+is needed on EVERY active-drive cancel -- there is no local-only fast
+path once a session is registered (only "never admitted yet" and
+"already finished" remain genuinely local-only). Round 3 covered the
+generator-close context-safety hazard (below).
+
+**Mechanism (mirrors `EvictMessage`/`EvictAckMessage`'s established
+blocking-ack pattern deliberately, not a new pattern):**
+`ResumablePrefillSession.abort()` (new method,
+`pp_prefill_session.py`) closes the underlying suspended generator via
+`self._ctx.run(gen.close)` -- NEVER a bare `gen.close()` call, per
+round 3's explicit warning: `.close()` throws `GeneratorExit` at the
+suspension point and runs the generator's own cleanup path (any
+`finally`/`except` inside `_forward_steps`) in WHATEVER CONTEXT THE
+CALLER IS RUNNING UNDER -- a bare call from the glue's own `tick()`
+would run that cleanup in the ambient context, not this session's own
+captured one (the exact reentrancy hazard `pp_prefill_session.py`'s
+own module docstring point 2 exists to prevent, now applying to
+teardown as much as it already applies to resume). Wraps cleanup-path
+exceptions (a `RuntimeError` from "generator ignored GeneratorExit",
+or any other exception the `finally` block raises) as
+`PrefillSessionError`, fail-stop, matching this module's own
+established discipline throughout -- never silently swallowed at this
+layer (swallowing happens one layer up, at `cancel()`'s own call site,
+deliberately, see below).
+
+New wire protocol additions (`pp_scheduler_protocol.py`/
+`pp_scheduler_wire.py`, additive, `SCHEDULER_WIRE_PROTOCOL_VERSION`
+unchanged since both ranks always run identical code):
+`PrefillAbortMessage`/`PrefillAbortAckMessage` dataclasses,
+`MSG_KIND_PREFILL_ABORT`/`MSG_KIND_PREFILL_ABORT_ACK` constants, and
+their send/decode/recv wire functions -- both messages fit entirely in
+the fixed header (only `step_id`+`request_id`, identical shape to
+`EvictMessage`/`EvictAckMessage`), no follow-up body needed.
+
+`Rank0BatchedDecodeGlue.abort_prefill_session(request_id)` (new
+method, mirrors `complete_request`'s own "deliberately NOT folded into
+`tick()`" discipline exactly -- caller-driven, never automatic):
+closes this rank's own session locally via `session.abort()`, resets
+`_active_prefill_session`/`_prefill_phase`/
+`_prefill_rank1_advances_remaining`, THEN sends a real, blocking-acked
+`PrefillAbortMessage`/`PrefillAbortAckMessage` round trip so rank 1
+tears down its own mirrored session too -- unconditionally, for every
+call, per round 2's corrected understanding above.
+
+`Rank1BatchedDecodeGlue.tick()` gained a new `MSG_KIND_PREFILL_ABORT`
+branch (rank 1 never independently decides -- this module's own
+"single-writer, rank 0 decides" discipline, already covering
+admission/advance/eviction, now extended to abort exactly the same
+way): closes its own session reactively, clears its own bookkeeping,
+sends the ack. Fail-stop `GlueError` if no session is registered (a
+genuine cross-rank desync -- rank 0 must never send an abort for a
+request rank 1 was never told to track) or a request_id mismatch.
+
+`ExoBatchGenerator.cancel()` (`batch_generate.py`) now routes to
+`abort_prefill_session` on rank 0 for any uid whose
+`_DeferredPrefill.drive` is still active -- replacing the earlier
+same-day fail-stop guard entirely. Rank 1's OWN `cancel()` call (the
+SAME client cancel command reaches both ranks' own `cancel_receiver`
+independently) does NOT initiate anything -- only drops rank 1's local
+`_deferred_prefill_by_uid` bookkeeping; the glue-level teardown on
+rank 1 is handled reactively by the `MSG_KIND_PREFILL_ABORT` branch
+once rank 0's independently-firing abort round trip actually arrives.
+A `PrefillSessionError` from `abort()` itself is swallowed and logged
+at this call site specifically (per round 3: cancel should be
+best-effort local cleanup, not a NEW failure surface on top of
+whatever already made the request worth cancelling) -- a `GlueError`
+(genuine desync/ack-mismatch) is NOT swallowed, surfacing loudly per
+this fork's established fail-stop discipline.
+
+**A REAL bug found and fixed WHILE WRITING the rank-1 regression
+test** (not while writing production code -- worth recording
+distinctly, same discipline as the wire-ordering bug entry above): the
+first implementation of the `MSG_KIND_PREFILL_ABORT` branch called
+`recv_prefill_abort_message(self.src_rank, group=self.group)` --
+which itself calls `recv_header` AGAIN -- inside a branch that only
+runs AFTER `tick()`'s own dispatch loop has ALREADY consumed the one
+and only header via its own `recv_header` call at the top of the
+method. Every other header-only-message branch in this same dispatch
+(`MSG_KIND_EVICT`) correctly decodes from the ALREADY-received header
+via `decode_evict_message(header)`, never re-receiving a second one --
+the new abort branch didn't follow that established pattern. This
+would have deadlocked the REAL wire on real hardware (rank 1 blocking
+on a second header rank 0 never sends, since rank 0's own
+`abort_prefill_session` sends exactly one header then waits for the
+ack). Caught by a test built specifically to drive the REAL `tick()`
+dispatch with a monkeypatched `recv_header` that raises loudly on a
+SECOND call -- not caught by basedpyright/ruff (both stayed silent;
+this is a runtime protocol-shape bug, not a type error), and not
+caught by the test's OWN first draft either (which used an
+unconditionally-repeating fake `recv_header`, masking the double-call
+entirely) -- only caught once the test was hardened to assert
+call-count discipline, itself found necessary while verifying the
+test's own revert-load-bearing property. Fixed by switching to
+`decode_prefill_abort_message(header)`, matching the established
+per-header-only-message-branch pattern exactly.
+
+**Verification:** every new component (session-level `abort()`,
+wire-level encode/decode, rank0 `abort_prefill_session`, rank1's
+reactive branch, `cancel()`'s new routing) has a dedicated unit test,
+each independently verified load-bearing by reverting its specific
+fix and confirming the PREDICTED failure signature (not just "some
+test fails") before restoring -- 4 separate revert/restore cycles this
+entry alone, on top of the wire-ordering bug's own 2 from earlier the
+same session. Full worker suite `-m ""`: 366 passed (6 new), 1 skipped
+-- zero regressions. Whole-repo basedpyright (9348/9348) and ruff
+check (3856/3856) unchanged against baseline; all 5 touched production
+files individually diffed against baseline too (305/305 combined, 0
+new issues each).
+
+**Still explicitly NOT covered by this mechanism** (real, honest
+scope boundary, not silently swept under "cancellation is now done"):
+this closes the cancel-during-chunked-prefill gap specifically. It
+does NOT address cancellation racing an in-flight `tick()` call on a
+DIFFERENT thread/process boundary (the entire mechanism assumes
+`cancel()` runs from the SAME cooperative single-threaded loop that
+drives `step()`/`tick()`, matching every other caller-driven method in
+this module -- `complete_request` included -- an assumption never
+tested against real concurrent Python threads, only against the real
+cooperative single-loop shape this fork's runner architecture actually
+uses). It does NOT address what happens if the abort round trip's own
+blocking `recv_prefill_abort_ack_message` call itself times out or the
+peer rank crashes mid-round-trip (no timeout/retry logic exists here,
+matching this module's existing `complete_request`/grant-handshake
+precedent of trusting the wire rather than adding a NEW timeout
+mechanism this fork doesn't otherwise have). Both are real, but
+neither is new: they are the SAME class of gap every other blocking
+wire round trip in this module already has, not something THIS
+mechanism introduces.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure

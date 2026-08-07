@@ -261,3 +261,135 @@ def test_last_layer_index_starts_at_negative_one() -> None:
         inner_model=model, inputs=mx.array([0.0]), cache=()
     )
     assert session.last_layer_index == -1
+
+
+def test_abort_on_never_started_session_is_a_noop() -> None:
+    """2026-08-07 real cancel/abort mechanism: aborting a session
+    whose generator was never even created (no advance() call yet)
+    must be a harmless no-op -- there is nothing to close, and
+    ``.done`` correctly stays ``False`` (a never-started session is
+    not "done", merely inert -- ``abort()``'s own early-return path
+    for ``self._gen is None`` deliberately skips the ``finally:
+    self._done = True`` that every OTHER abort path sets, since
+    marking a session that was never even started as "done" would be
+    a misleading signal to any caller checking ``.done`` afterward)."""
+    model = _FakeInterruptibleModel(n_layers=5)
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=()
+    )
+    session.abort()  # must not raise
+    assert not session.done
+
+
+def test_abort_on_already_done_session_is_a_noop() -> None:
+    """Aborting a session that already reached genuine completion must
+    be a harmless no-op (matches Python's own documented ``.close()``
+    behavior on an exhausted generator)."""
+    model = _FakeInterruptibleModel(n_layers=2)
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=()
+    )
+    session.advance(max_layers=100, phase_for_pause=ForwardPhase.PREFILL_FINAL)
+    assert session.done
+    session.abort()  # must not raise
+    assert session.done
+
+
+def test_abort_mid_flight_genuinely_closes_the_generator() -> None:
+    """THE real mechanism: aborting a session paused mid-chunk (real
+    layer-boundary progress made, generator genuinely suspended)
+    closes it -- ``session.done`` becomes ``True`` (this module's own
+    established "session is now dead" signal, reused rather than
+    inventing a separate aborted/cancelled state) and a further
+    ``advance()`` call correctly raises (the pre-existing "advance on
+    an already-completed session" guard), proving the generator is
+    genuinely gone, not just flagged."""
+    model = _FakeInterruptibleModel(n_layers=10)
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=()
+    )
+    layers_advanced, done = session.advance(
+        max_layers=3, phase_for_pause=ForwardPhase.PREFILL_CONTINUE
+    )
+    assert layers_advanced == 3
+    assert not done
+    assert not session.done
+
+    session.abort()
+
+    assert session.done
+    with pytest.raises(PrefillSessionError, match="already-"):
+        session.advance(max_layers=1, phase_for_pause=ForwardPhase.PREFILL_CONTINUE)
+
+
+def test_abort_routes_generator_close_through_the_captured_context() -> None:
+    """THE specific hazard a `consult` review flagged: ``abort()``
+    must call the underlying generator's ``.close()`` INSIDE this
+    session's own captured ``contextvars.Context`` (via
+    ``self._ctx.run(...)``), never as a bare call from the caller's
+    ambient context -- otherwise any ``ForwardStepInfo`` state the
+    generator's cleanup path might read/write would leak into (or be
+    corrupted by) whatever context an interleaved caller is using,
+    exactly the reentrancy hazard this whole module's context
+    discipline exists to prevent (module docstring point 2).
+
+    Proven here with a model whose ``_forward_steps`` sets a real,
+    observable side effect INSIDE its own ``finally`` block (run when
+    ``.close()`` throws ``GeneratorExit`` at the suspension point) --
+    a plain ``contextvars.ContextVar`` set/read pair. If ``abort()``
+    ever regresses to a bare ``gen.close()`` NOT routed through
+    ``self._ctx.run(...)``, this test's own captured-in-a-different-
+    context marker would fail to observe the write (or, in a more
+    adversarial regression, could observe cross-contamination from an
+    unrelated ambient context) -- the assertion pins the CORRECT
+    behavior (write lands in THIS session's own context) as the
+    contract, not merely "it didn't crash."
+    """
+    import contextvars
+
+    marker: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+        "test_abort_marker", default=None
+    )
+
+    class _ModelWithCleanupSideEffect:
+        def __init__(self) -> None:
+            self.n_layers = 10
+
+        def _forward_steps(
+            self,
+            inputs: mx.array,
+            cache: object = None,
+            *,
+            interruptible: bool = False,
+        ) -> Iterator[ForwardStep]:
+            h = inputs
+            try:
+                for i in range(self.n_layers):
+                    h = h + mx.array([1.0])
+                    mx.eval(h)
+                    if interruptible:
+                        yield ("layer", i, h)
+                yield ("done", None, h)
+            finally:
+                # Runs on GeneratorExit (session.abort()'s .close())
+                # -- observable proof of WHICH context this write
+                # landed in.
+                marker.set("closed_inside_forward_steps_cleanup")
+
+    model = _ModelWithCleanupSideEffect()
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=()
+    )
+    session.advance(max_layers=2, phase_for_pause=ForwardPhase.PREFILL_CONTINUE)
+
+    # Ambient (test-function) context: unset before abort().
+    assert marker.get() is None
+
+    session.abort()
+
+    # The write happened INSIDE session._ctx (verified indirectly:
+    # abort() completed without raising AND the generator's own
+    # finally block ran -- read back through session._ctx itself,
+    # not the ambient context, which is the actual claim under test).
+    observed = session._ctx.run(marker.get)
+    assert observed == "closed_inside_forward_steps_cleanup"

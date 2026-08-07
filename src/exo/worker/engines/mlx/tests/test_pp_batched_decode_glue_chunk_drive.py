@@ -55,14 +55,21 @@ from exo.worker.engines.mlx.pp_batched_decode_glue import (
     GlueError,
     PrefillAdvanceCompleted,
     Rank0BatchedDecodeGlue,
+    Rank1BatchedDecodeGlue,
 )
-from exo.worker.engines.mlx.pp_batched_decode_runtime import BatchedDecodeSession
+from exo.worker.engines.mlx.pp_batched_decode_runtime import (
+    BatchedDecodeSession,
+    RankOneMirrorSession,
+)
 from exo.worker.engines.mlx.pp_metaframe import ForwardPhase, get_forward_step_info
 from exo.worker.engines.mlx.pp_prefill_session import (
     ForwardStep,
     ResumablePrefillSession,
 )
-from exo.worker.engines.mlx.pp_scheduler_protocol import PrefillAdvanceMessage
+from exo.worker.engines.mlx.pp_scheduler_protocol import (
+    PrefillAbortMessage,
+    PrefillAdvanceMessage,
+)
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -117,6 +124,68 @@ def _make_rank0_glue(*, peer_prefill_layer_count: int) -> Rank0BatchedDecodeGlue
         group=cast(mx.distributed.Group, cast(object, _RankGroupStub())),
         peer_prefill_layer_count=peer_prefill_layer_count,
     )
+
+
+def _make_rank1_glue() -> Rank1BatchedDecodeGlue:
+    session = RankOneMirrorSession.new(max_concurrency=2)
+    return Rank1BatchedDecodeGlue(
+        session=session,
+        src_rank=0,
+        group=cast(mx.distributed.Group, cast(object, _RankGroupStub())),
+    )
+
+
+def _feed_prefill_abort_message(
+    monkeypatch: pytest.MonkeyPatch, message: PrefillAbortMessage
+) -> list[PrefillAbortMessage]:
+    """Monkeypatch recv_header (the ONLY thing Rank1BatchedDecodeGlue.
+    tick() calls to learn what arrived next) to return a real
+    ``WireHeader`` encoding ``message`` -- then let the REAL
+    decode_prefill_abort_message + PrefillAbortAckMessage send path
+    run against a captured, in-process fake transport (same pattern
+    as ``_capture_sent_advances``, applied to the abort ack instead of
+    advance messages)."""
+    import exo.worker.engines.mlx.pp_scheduler_wire as wire_mod
+
+    fake_header = wire_mod.WireHeader(
+        version=wire_mod.SCHEDULER_WIRE_PROTOCOL_VERSION,
+        msg_kind=wire_mod.MSG_KIND_PREFILL_ABORT,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=0,
+    )
+
+    recv_header_call_count = [0]
+
+    def _fake_recv_header(src: int, *, group: object) -> object:
+        del src, group
+        recv_header_call_count[0] += 1
+        if recv_header_call_count[0] > 1:
+            raise RuntimeError(
+                "recv_header called a SECOND time -- the real wire has "
+                "no second header queued for a MSG_KIND_PREFILL_ABORT "
+                "branch to receive; this would deadlock on real "
+                "hardware. A correct implementation must decode the "
+                "abort message from the header tick() ALREADY received "
+                "at the top of the method, never call recv_header again."
+            )
+        return fake_header
+
+    sent_acks: list[PrefillAbortMessage] = []
+
+    def _fake_send_header(header_arr: mx.array, dst: int, *, group: object) -> None:
+        del dst, group
+        mx.eval(header_arr)
+        values = cast(list[int], header_arr.tolist())
+        # [version, msg_kind, step_id, field_d, field_e]
+        sent_acks.append(PrefillAbortMessage(step_id=values[2], request_id=values[3]))
+
+    monkeypatch.setattr(wire_mod, "recv_header", _fake_recv_header)
+    monkeypatch.setattr(wire_mod, "send_header", _fake_send_header)
+    import exo.worker.engines.mlx.pp_batched_decode_glue as glue_mod
+
+    monkeypatch.setattr(glue_mod, "recv_header", _fake_recv_header)
+    return sent_acks
 
 
 def _capture_sent_advances(
@@ -461,3 +530,72 @@ def test_no_new_prefill_granted_while_chunk_drive_active(
         "on the very next tick now that the guard condition "
         "(active_prefill_session is None) is satisfied"
     )
+
+
+def test_msg_kind_prefill_abort_closes_rank1_session_and_sends_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-08-07 real cancel/abort mechanism: rank 1's own
+    ``Rank1BatchedDecodeGlue.tick()`` reactively closes ITS local
+    session when a real ``PrefillAbortMessage`` arrives (never
+    independently decides -- this module's own established
+    discipline, per that branch's own docstring), then replies with a
+    ``PrefillAbortAckMessage`` carrying the SAME ``request_id``.
+
+    This is also the regression test for a REAL bug this test caught
+    while being written: the first implementation called
+    ``recv_prefill_abort_message(self.src_rank, group=self.group)``
+    INSIDE the branch -- but ``tick()``'s dispatch loop had ALREADY
+    consumed the header via its own earlier ``recv_header`` call at
+    the top of the method (matching every other branch's established
+    pattern: decode from the already-received header, e.g.
+    ``decode_evict_message(header)``, never re-receive a second one).
+    That bug would have deadlocked the real wire (rank 1 blocking on a
+    SECOND header rank 0 never sends) -- caught here, not on real
+    hardware, because this test drives the REAL ``tick()`` dispatch
+    with a REAL (monkeypatched-transport) header already queued for
+    ``recv_header`` to consume exactly once.
+    """
+    glue = _make_rank1_glue()
+    model = _CountingLayerModel(n_layers=6)
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=[]
+    )
+    glue.register_prefill_session(request_id=1, session=session)
+    assert glue.has_active_prefill_session()
+
+    sent_acks = _feed_prefill_abort_message(
+        monkeypatch, PrefillAbortMessage(step_id=1, request_id=1)
+    )
+
+    grant, evicted_request_id, prefill_advance_completed = glue.tick(
+        model=cast("object", model)
+    )
+
+    assert grant is None
+    assert evicted_request_id is None
+    assert prefill_advance_completed is None
+    assert not glue.has_active_prefill_session(), (
+        "rank 1's own session must be genuinely closed after receiving "
+        "the abort -- glue._active_prefill_session must be cleared, not "
+        "left permanently occupied"
+    )
+    assert len(sent_acks) == 1
+    assert sent_acks[0].request_id == 1
+
+
+def test_msg_kind_prefill_abort_for_unregistered_request_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail-stop guard: rank 1 receiving a ``PrefillAbortMessage`` for
+    a ``request_id`` it never registered a session for is a genuine
+    cross-rank desync (rank 0 must never send an abort for a request
+    rank 1 was never told to track) -- must raise ``GlueError``, not
+    silently no-op."""
+    glue = _make_rank1_glue()
+    _feed_prefill_abort_message(
+        monkeypatch, PrefillAbortMessage(step_id=1, request_id=999)
+    )
+
+    with pytest.raises(GlueError, match="no active local prefill session"):
+        glue.tick(model=cast("object", None))

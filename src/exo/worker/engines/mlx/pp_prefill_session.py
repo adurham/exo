@@ -79,7 +79,16 @@ from __future__ import annotations
 
 import contextvars
 from dataclasses import dataclass, field
-from typing import Iterator, Literal, Protocol, Tuple, Union, runtime_checkable
+from typing import (
+    Generator,
+    Iterator,
+    Literal,
+    Protocol,
+    Tuple,
+    Union,
+    cast,
+    runtime_checkable,
+)
 
 import mlx.core as mx
 
@@ -324,3 +333,81 @@ class ResumablePrefillSession:
                 "session reached completion -- check .done first"
             )
         return self._final_output
+
+    def abort(self) -> None:
+        """Genuinely close this session's suspended generator --
+        2026-08-07, real cancel/abort mechanism.
+
+        MUST be routed through ``self._ctx.run(...)``, never a bare
+        ``self._gen.close()`` -- per a `consult` review: ``.close()``
+        throws ``GeneratorExit`` at the suspension point and runs the
+        generator's cleanup path (any ``finally``/``except`` blocks
+        inside ``_forward_steps``) in WHATEVER CONTEXT THE CALL SITE
+        IS RUNNING UNDER. A bare call from the glue's own ``tick()``
+        would run that cleanup in the AMBIENT context, not this
+        session's own captured one (module docstring point 2's exact
+        reentrancy hazard, now applying to teardown as much as it
+        applies to resume) -- a silent-corruption risk if
+        ``_forward_steps``'s cleanup ever reads/writes
+        ``ForwardStepInfo`` (e.g. resetting ``defer_header``/phase
+        state), not merely a crash risk.
+
+        Idempotent-safe to call on an already-``done`` session (a
+        harmless no-op via ``.close()``'s own documented behavior on
+        an exhausted generator) or one that never started
+        (``self._gen is None`` -- nothing to close). Raises
+        ``PrefillSessionError`` (not a bare propagated exception) if
+        the generator's own cleanup path raises something OTHER than
+        ``GeneratorExit`` while closing, or if the generator
+        unexpectedly yields again during close (Python's own
+        ``RuntimeError: generator ignored GeneratorExit``) --
+        fail-stop, matching this module's own discipline throughout,
+        rather than letting an unusual cleanup-path failure propagate
+        as a confusing, differently-shaped exception from deep inside
+        this method.
+        """
+        if self._gen is None:
+            return
+        gen = self._gen
+
+        def _close() -> None:
+            # 2026-08-07: real Python generator objects always expose
+            # .close() at runtime -- the Iterator[ForwardStep] type on
+            # self._gen is deliberately the narrower Protocol-facing
+            # type (matches _InterruptibleForward._forward_steps's own
+            # declared Iterator return type, which mirrors the REAL
+            # mlx-lm _forward_steps's actual annotation exactly -- see
+            # this module's own capability-check discipline). The cast
+            # here is a type-level acknowledgment of a runtime fact
+            # already guaranteed by _start()'s own construction (this
+            # field is ALWAYS assigned a genuine generator object,
+            # never an arbitrary Iterator), not a new assumption.
+            cast("Generator[ForwardStep, None, None]", gen).close()
+
+        try:
+            self._ctx.run(_close)
+        except RuntimeError as exc:
+            raise PrefillSessionError(
+                "ResumablePrefillSession.abort(): the underlying "
+                "_forward_steps generator raised RuntimeError while "
+                "closing (most likely 'generator ignored GeneratorExit' "
+                "-- it yielded again instead of returning/raising after "
+                "receiving the close signal). This violates "
+                "_forward_steps's own documented contract."
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - fail-stop wrapper, not a
+            # swallow: re-raised immediately as a typed, attributable
+            # PrefillSessionError rather than letting an arbitrary
+            # cleanup-path exception (e.g. from a finally block inside
+            # _forward_steps) propagate in whatever shape it happened
+            # to have, matching this module's own discipline of never
+            # silently guessing at recovery.
+            raise PrefillSessionError(
+                "ResumablePrefillSession.abort(): the underlying "
+                "_forward_steps generator's cleanup path raised while "
+                "closing -- see the chained exception for the real "
+                "cause"
+            ) from exc
+        finally:
+            self._gen = None
+            self._done = True
