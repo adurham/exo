@@ -2637,6 +2637,48 @@ own fresh explicit go-ahead, same as always, and now has an
 additional prerequisite: this live-wiring piece must exist and be
 locally verified first.
 
+**Two FURTHER concrete correctness hazards found investigating this
+piece, 2026-08-06, same session** (consult-reviewed, NOT resolved --
+recorded here so the next session starts with the real problem
+statement instead of re-deriving it):
+
+1. **Caller-assumed-completion.** Today, when
+   `_run_deferred_prefill_for_grant()` returns, EVERY line of code
+   immediately after that call (`enqueue_admission`/
+   `stage_local_cache`, and everything upstream that scheduled this
+   grant assuming a completed cache) treats that return as "prefill
+   is done, cache is ready, this request can decode NOW." Swapping
+   the synchronous `deferred.run_prefill()` call for
+   `register_prefill_session()` makes that function return
+   IMMEDIATELY while the prefill is still in-progress across FUTURE
+   ticks -- but nothing else in `_run_deferred_prefill_for_grant`'s
+   own caller chain would know that. The very next lines of code in
+   the SAME function would run against a half-populated KV cache
+   unless this state ("prefill admitted but not yet complete") is
+   threaded through every downstream consumer, not just the
+   `tick()`-internal machinery.
+2. **Rank-registration skew.** Rank 0 and rank 1 each independently
+   call `register_prefill_session()` when they separately receive
+   their own copy of the grant. If one rank's registration lands
+   before the other's, that rank's `tick()` could start driving a
+   chunk (RANK0_LOCAL phase, real forward-pass work) while its PEER
+   is still running an ordinary DECODE step for a completely
+   different request in that same real tick -- reintroducing the
+   exact cross-rank interleaving hazard the whole two-phase `tick()`
+   redesign above exists to prevent, just relocated to the
+   REGISTRATION boundary instead of the advance boundary. Needs the
+   two ranks' registration to take effect at a synchronized tick
+   boundary, not independently on whenever each rank's own grant
+   message happens to arrive.
+
+Both of these are genuine state-machine-correctness problems (not
+edge cases), on top of the already-documented cancellation/abort,
+`StopIteration.value` return-plumbing, and other-3-call-sites audit
+items above. This is a real design problem needing its own dedicated
+session -- explicitly not attempted as a same-session addition after
+already shipping 3 verified fixes tonight (the chunk-drive redesign,
+the metaframe-detection gate, and the earlier regression fix).
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
