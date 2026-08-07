@@ -1,7 +1,7 @@
 """Type stubs for mlx_lm.models.deepseek_v4"""
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, Union
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -256,6 +256,18 @@ class DeepseekV4Model(nn.Module):
     hc_head: HyperHead
 
     def __init__(self, args: ModelArgs) -> None: ...
+    def _forward_steps(
+        self,
+        inputs: mx.array,
+        cache: Optional[Any] = None,
+        *,
+        interruptible: bool = False,
+    ) -> Iterator[
+        Union[
+            Tuple[Literal["layer"], int, mx.array],
+            Tuple[Literal["done"], None, mx.array],
+        ]
+    ]: ...
     def __call__(
         self,
         inputs: mx.array,
