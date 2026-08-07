@@ -4238,3 +4238,87 @@ unified at `bd5d6764`.
 
 
 
+
+## 17. Trajectory review before Phase 3 (2026-08-08, `consult` second
+opinion + user decisions) -- inserts a measurement checkpoint before
+committing Phase 3 build effort
+
+With Phases 0-2 real-hardware validated (Section 16), got a second
+opinion on whether the project is still on track toward the four hard
+requirements (Section 2.5) before starting Phase 3. Verdict: execution
+has been disciplined and there is no scope drift on requirements 1
+(concurrency) and 2 (cancellation) -- those were the genuinely hard
+architectural risks and Phases 0-2 retired them for real (evidenced by
+the real bugs found: the cross-rank admission race, the send/send
+deadlock). But requirements 3 (decode tok/s @ 500K) and 4 (prefill
+tok/s @ 500K) remain COMPLETELY UNMEASURED under the new design --
+Phases 0-2 validated correctness at short (~7K token) context only,
+never touched real depth. This is a real gap in the PLAN, not the
+execution: Phase 3 (micro-batch interleaving) was about to be built on
+zero evidence that it addresses the actual numeric target.
+
+**Four findings, with user decisions recorded:**
+
+1. **Insert a cheap measurement pass BEFORE Phase 3, not after.**
+   Micro-batch interleaving (component 4) has a hard ceiling around 2x
+   AGGREGATE throughput across concurrent streams -- if today's
+   single-session decode tok/s at 500K is already far below 30, no
+   amount of pipeline-bubble-filling closes that gap; it needs a
+   different fix entirely. **DECISION: agreed, doing this now** (this
+   section + Section 18 record the results).
+
+2. **Memory headroom at deep context with 2 resident KV caches** --
+   flagged as an untested design-level risk (Phase 2's validation used
+   ~7K-token prompts; two concurrent 500K-context caches on a 671B
+   model is a real, unverified feasibility question, not just an
+   execution detail). **DECISION: not as urgent as (1), but test it if
+   we can** -- folded into the same measurement pass (Section 18).
+
+3. **Requirement 3's definition ("30 tok/s @ 500K") was ambiguous --
+   per-session or aggregate?** This determines whether Phase 3 (which
+   raises AGGREGATE throughput via micro-batching, not a single
+   session's decode rate) is even the right lever. **DECISION,
+   confirmed by user: PER-SESSION, as defined by hermes-agent** (i.e.
+   one interactive Hermes session's own decode rate, not a sum across
+   concurrent unrelated requests). This means component 4 (micro-batch
+   interleaving) does NOT directly address requirement 3 as originally
+   hoped -- it improves aggregate/multi-request throughput, which is
+   valuable for requirement 1's concurrency story, but is orthogonal
+   to a single session hitting 30 tok/s at 500K. Requirement 3 is a
+   single-stream compute/bandwidth problem, not a pipeline-utilization
+   problem. **This changes what Phase 3 needs to be scoped as** -- see
+   Section 18's plan revision.
+
+4. **DSpark gating (component 7) may quietly conflict with requirement
+   3 under concurrency.** If PP's known-good single-request decode
+   numbers assumed DSpark speculative decode running, and DSpark gets
+   disabled at concurrency>=2 (component 7's own design, per Section
+   6.2 item 7), then the 30 tok/s bar may implicitly have assumed
+   DSpark the whole time -- unclear whether it was ever meant to hold
+   WITHOUT speculation. **DECISION: fair point, user flagged this needs
+   real thought before Phase 4's DSpark-gating work lands** -- not
+   resolved here, explicitly carried forward as open. Given (3)'s
+   per-session clarification, this is now doubly important: if
+   requirement 3 is single-session and single-session in this
+   design still runs DSpark (concurrency=1 keeps DSpark on per
+   component 7), the measurement in Section 18 should be taken WITH
+   DSpark active (today's default), matching what a real single Hermes
+   session would actually get -- not a DSpark-off number that
+   understates the design's real capability.
+
+5. **Pull the real cancel/abort-against-real-checkpoint test forward,
+   don't wait behind Phase 3.** The code path is reachable now, cheap
+   to test, and is one of the four hard requirements. **DECISION:
+   agreed.** Folded into the same working session as Section 18's
+   measurement pass.
+
+**Net effect on the phased plan:** Phase 3 is NOT cancelled or
+reordered away, but it no longer starts blind. Section 18 records the
+real per-session decode/prefill numbers at depth (today's actual
+capability, DSpark-on, single session) before any micro-batch-
+interleaving code gets written -- if the gap to 30 tok/s @ 500K turns
+out to be small, Phase 3 may need re-scoping toward single-stream
+throughput work (e.g. reducing per-step wire overhead, revisiting
+KV-cache read cost at depth) rather than the originally-planned
+multi-stream pipeline-bubble-filling, which per finding 3 targets a
+different (though still valuable) axis.
