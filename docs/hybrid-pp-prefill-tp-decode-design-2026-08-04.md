@@ -3365,6 +3365,17 @@ structural no-ops on real hardware (confirmed again, correctly, by
 the reverted gate-safety test), exactly as they were before this
 session's mlx-lm work began.
 
+**UPDATE, 2026-08-07, follow-up session: the above gap is CLOSED.**
+See Section 16 for the full writeup -- the submodule pin properly
+landed via a merge (not the cherry-pick that caused this revert), a
+real send/send deadlock in the pin-advance's OWN new code was found
+and fixed on the first real cluster launch, and the actual
+chunked-prefill-interruption mechanism (including a request genuinely
+admitted mid-chunk-drive, not deferred behind it) is now verified
+working against the real 671B checkpoint on real hardware.
+`prefill_interruptible_start`/`prefill_interruptible_advance` are NO
+LONGER structural no-ops -- they are real, exercised, and correct.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
@@ -4033,6 +4044,197 @@ correctly gated OFF pending the design work above — `EXO_MAX_CONCURRENT_REQUES
 is still forced to 1 unless `EXO_PP_BATCHED_DECODE=1` is explicitly
 set (opt-in only), so this campaign's findings do not put any
 production traffic at risk.
+
+## 16. mlx-lm submodule pin properly landed + real-hardware chunk-drive
+validation (2026-08-07, follow-up session, closes the gap left open at
+the end of Section 15)
+
+**STATUS: Phase 2's real-hardware validation gap is CLOSED.** The
+submodule pin blocker (Section 15's "SUBMODULE PIN ADVANCE REVERTED"
+entry) is properly landed via a merge, not a cherry-pick, and this
+session ran the actual chunked-prefill-interruption mechanism against
+the real 671B DeepSeek-V4-Flash checkpoint on the live 2-node cluster
+— including the specific scenario Phase 2 exists to enable (a
+concurrent request admitted and serviced WHILE a chunk-drive prefill
+is genuinely mid-flight, not deferred behind it).
+
+### 16.1 Submodule pin: the correct rebase, not a repeat of the reverted cherry-pick
+
+Section 15's revert entry scoped the correct fix explicitly: "rebasing
+`pp-layer-segment-wip`'s full 3-commit fork-native stack (`e101803`,
+`55401ac`, `26eb90f0b`) onto `origin/main` PROPERLY." A real attempt at
+exactly that rebase, this session, hit the SAME predicted conflict
+(`qwen3_5.py` vs `fe468f9`'s pipelining commit) — but a `consult`
+review caught something the rebase-vs-cherry-pick framing had missed:
+`origin/main` had ALSO ended up carrying the earlier session's reverted
+bad cherry-pick as its OWN tip (`8df20cd`), separately from exo's local
+submodule pin revert. Fixed with a clean `git revert 8df20cd` on the
+fork's own `origin/main` first (commit `8b67ef5`), establishing a safe
+base before touching anything else.
+
+With a clean base, the review then disproved the "just rebase" plan
+too: `origin/main` (18 fork-native diagnostic commits since a shared
+2026-05-04 ancestor) and the production pin's own lineage (29 commits
+since that same ancestor, including a LATER upstream resync than
+`origin/main`'s) were genuinely mutually-exclusive supersets — a
+literal rebase risks either regressing the upstream resync or, per a
+rebase's patch-id dedup behavior, silently dropping the actual target
+commit (`26eb90f0b`) if the already-reverted bad copy gets treated as
+"already applied." **Used a MERGE instead** (`git merge 55401ac` onto
+`origin/main`, one real conflict in `qwen3_5.py` resolved by hand —
+composing BOTH changes, a fork-local per-layer-eval memory
+optimization AND upstream's real pipelining feature, not picking one
+over the other), checkpointed against the production pin tree before
+cherry-picking `26eb90f0b` on top (patch-id verified byte-identical to
+the original commit). Fixed the stale `.typings/mlx_lm/models/
+deepseek_v4.pyi` stub (dated Jul 2, predated `_forward_steps` entirely
+— exactly the class of trap Section 15 already flagged once). mlx-lm's
+`origin/main` is now a single unified branch (`bd5d6764`), containing
+BOTH lineages' commits plus the target feature; old scratch branches
+deleted, safety tags left on the fork remote. exo's submodule pin
+advanced to `bd5d6764` (exo commit `525216d05`).
+
+**Verification, matching this campaign's established discipline
+throughout:** real installed venv package (not just the submodule
+checkout) confirmed `hasattr(DeepseekV4Model, "_forward_steps")` is
+`True`. basedpyright (9348 errors) and ruff (353 errors) whole-repo
+counts byte-identical before/after. Full worker suite `-m ""`: 751
+passed (750+1 new), 72 skipped, 1 pre-existing unrelated failure
+(confirmed via A/B against the old pin baseline — a local-machine
+`mx.core.distributed`/`MockGroup` mismatch, not a regression).
+
+**A real, disposable single-node-machine test that this campaign's own
+prior sessions assumed was impossible without cluster time:** this
+laptop is an M4 Max too — real `mlx` IS installed and runnable here,
+just not at full 671B scale. Built a small-but-real
+`DeepseekV4Model` (4 layers, not 43) and proved, with real MLX arrays
+on real hardware, not synthetic stand-ins: (1) `_forward_steps` drained
+fully produces output byte-identical (`mx.allclose`) to eager
+`__call__`; (2) paused mid-layer-loop, a fully independent real forward
+pass on a SEPARATE model instance run in the gap, then resumed —
+produces output identical to the undisturbed eager path. This is the
+actual mechanism prefill-chunk interruption depends on, proven correct
+before ever touching the cluster.
+
+### 16.2 REAL, PREVIOUSLY-UNDISCOVERED send/send deadlock found on the FIRST real EXO_PP_BATCHED_DECODE=1 + EXO_PP_METAFRAME=1 cluster launch
+
+With the submodule pin landed, the cluster was relaunched with both
+flags for the first time ever. Both nodes crashed on the very first
+attempt.
+
+**Root cause (confirmed via real cluster logs, not guessed):**
+`exchange_prefill_peer_layer_count()` (the one-time, model-load-time
+handshake exchanging each rank's real, confirmed-uneven local layer
+count — 22 vs 21 on this cluster) used point-to-point
+`mx.distributed.send()` immediately followed by `recv_like()`. BOTH
+ranks run identical source order, so both ranks post a blocking
+`send()` before either has posted a matching `recv()`. Confirmed:
+both ranks raised jaccl's own `[jaccl] send() deadline in drain --
+clean re-place` at the IDENTICAL millisecond. The caller's
+`try/except` caught the timeout and fell back to the non-batched path
+per its own documented contract — but the in-flight, already-posted
+send on the wire was NOT cancelled, and its payload (this rank's real
+layer count, e.g. 22) landed on the SAME untagged `mx.distributed`
+stream `recv_metaframe()` reads from, arriving just in time to be
+misconsumed as a corrupt metaframe header's version field by the
+peer's very next real recv during warmup — producing `MetaFrame
+protocol version mismatch: received 22, this build expects 3` on the
+OTHER rank (22 being exactly the sending rank's real layer count, not
+garbage — confirmed by cross-referencing the placement allocator's own
+documented 22/21 split).
+
+**Fix (`exo` commit `c7766f0ab`):** switched to a scatter+`all_sum`
+collective — the SAME mechanism `handshake_metaframe_protocol()`
+already uses safely at this exact call site (warmup time, before
+`EXO_PP_NO_COORD_COLLECTIVE` gating applies to per-request traffic).
+Each rank scatters its own value into its own slot of an
+otherwise-zero `world_size`-length vector; `all_sum` gives every rank
+the full vector in one synchronized call. No per-rank send/recv
+ordering to get wrong, and no partial/one-sided failure mode — a
+collective either completes identically on every rank or raises
+identically on every rank.
+
+New test (`test_pp_exchange_prefill_peer_layer_count_subprocess.py`,
+real 2-process, real MLX ring transport, the real production function,
+the cluster's own confirmed-asymmetric 22/21 layer counts) — with an
+HONEST documented limitation in its own docstring: verified empirically
+(not assumed) that this test does NOT reproduce the original deadlock,
+since the old point-to-point code ALSO passes cleanly under localhost
+ring transport (jaccl's RDMA-specific drain-deadline behavior doesn't
+manifest over TCP loopback). What it DOES prove: the new mechanism is
+logically correct — each rank learns the OTHER's real value, not its
+own, not corrupted data.
+
+Verification: ruff clean, basedpyright 0 new errors, full worker suite
+`-m ""` 751 passed, zero regressions. Restored cluster to known-good
+immediately after the crash (before any diagnosis began), verified via
+a real "capital of France" -> "Paris" inference, per this campaign's
+standing discipline.
+
+### 16.3 Real-hardware validation: standalone chunked-prefill + the actual concurrent-interleaving case
+
+**Standalone long-prefill chunk-drive, real 671B checkpoint, twice:**
+a real 6808-token prompt (26K chars, a numbered-list faithfulness
+probe with a checkable answer) through `prefill_interruptible_advance`
+— NOT the old synchronous `prefill()` path (confirmed: the "Chunked
+prefill complete" log line lives specifically inside
+`prefill_interruptible_advance`, not `prefill()`). Both runs: 7 real
+chunks, 268-274 tok/s prefill throughput, correct answer ("250"),
+clean `finish_reason=stop`, zero errors on either node. First-ever
+real-hardware exercise of this mechanism against the real checkpoint.
+
+**The actual interleaving case — the scenario Phase 2 exists to
+enable:** fired a long chunked-prefill request, and while its chunk 1/7
+was GENUINELY mid-flight (confirmed via precise timestamps: chunk 1
+logged at 17:38:17.548; the concurrent short decode-only request's
+task started at 17:38:18.755 -- 1.2s later, well before chunk 7/7
+completed at 17:38:38.577), fired a second, short decode-only request.
+It was admitted and began running immediately -- NOT deferred behind
+`EXO_MAX_CONCURRENT_REQUESTS`'s concurrency gate (confirmed: no
+"deferring task -- at concurrency limit" log line for this run, unlike
+an earlier same-session attempt that DID hit that gate due to stale
+queue occupancy from prior test runs -- a test-harness ordering
+artifact, not a production hazard). Both requests' `ChunkGenerated`
+events interleave turn-by-turn in the master's event log. Both
+completed correctly: long request answered "250" (`finish_reason=stop`),
+short request answered "Paris" (`finish_reason=stop`). Zero crashes,
+zero `GlueError`, zero `RunnerFailed` on either node across the entire
+validation session.
+
+**Methodology note for future sessions attempting this same
+interleaving test:** the chunk-drive window on this real checkpoint is
+narrow (~20-25s for a 7-chunk prefill) and admission timing is not
+directly controllable from the client side. Manual `curl` attempts
+with multi-second SSH-polling gaps missed the window twice (landing
+after prefill had already finished, only exercising N=2 concurrent
+DECODE — itself a real, valid confirmation of Phase 1's mechanism
+continuing to work correctly alongside today's fix, but not what this
+section is about). What worked: a small Python harness
+(`/tmp/interleave_test_v2.py`, not committed -- disposable) that (1)
+waits for the cluster to report BOTH runners `RunnerReady` before
+starting (avoids stale-queue slot contention from earlier attempts),
+(2) fires the long request in a background thread, (3) polls the
+remote `exo.log`'s last chunk-log line every 0.15s via SSH, firing the
+short request the INSTANT that line changes from baseline -- i.e. the
+instant chunk 1 (or later) is confirmed genuinely on the wire right
+now, not on a fixed sleep-based delay guess.
+
+**Real remaining gap, not yet exercised:** this validates N=2 with one
+chunked-prefill request and one ordinary decode-only request. It does
+NOT yet validate two SIMULTANEOUS chunked-prefill requests, or the
+cancel/abort mechanism (Section 15's real, wire-level
+`PrefillAbortMessage` round trip) actually firing against this real,
+now-reachable code path -- both were built and unit-tested against
+synthetic fakes/the subprocess harness, per Section 15, but neither has
+yet run a real abort against the real checkpoint now that the
+structural no-op gate is gone. `EXO_PP_BATCHED_DECODE` remains
+unset/0 in `start_cluster.sh`'s own default (opt-in only) --
+today's validation proves the mechanism works, it does not by itself
+change the production default.
+
+**Commits this entry covers:** exo `525216d05` (submodule pin merge),
+`c7766f0ab` (send/send deadlock fix). mlx-lm fork `origin/main`
+unified at `bd5d6764`.
 
 
 
