@@ -2525,27 +2525,61 @@ not admission timing). This is NOT a hypothetical: 22 vs. 21 is the
 REAL split for the REAL model on the REAL 2-node topology this
 project targets, not an edge case.
 
-**This blocks the live `step()` wiring below and must be fixed
-first.** The fix is NOT yet designed -- candidates to evaluate:
-(a) each rank tracks its OWN remaining-layer-count and only reports
-"chunk done" once BOTH ranks have independently confirmed completion
-(needs a new ack/barrier, adding wire round-trips), (b) rank 0
-computes each rank's real layer count at session-registration time
-(via the already-known PP topology) and sends a PER-RANK `max_layers`
-tailored so both ranks reach completion on the SAME advance_seq
-(requires `PrefillAdvanceMessage` to become genuinely rank-aware,
-contradicting its current "rank-agnostic count" design -- would need
-a documented, deliberate revision, not a silent change), or (c) a
-much simpler fix: since `advance_seq` is already a monotonic
-per-request counter both ranks track and validate, cap chunk
-completion to "session reports done AND rank 1 has processed AT LEAST
-advance_seq N" via an explicit completion handshake before either
-rank moves to the next chunk -- effectively making chunk-boundary
-transitions their own tiny lockstep barrier, mirroring the EXISTING
-`PrefillMessage`/`PrefillReadyMessage` admission handshake pattern
-this campaign already trusts. Whichever fix is chosen must be
-consult-reviewed and get its own dedicated test before the live
-wiring touches it, per this session's own established discipline.
+**FIXED, 2026-08-06, same session** (`exo` main commit `51603ad8b`)
+-- via a genuine two-phase redesign, not any of the three candidates
+originally listed above. During implementation, auditing WHY rank 1
+needed messaging on every tick surfaced two FURTHER real bugs in the
+same mechanism, both fixed together:
+
+1. `MetaFramedPipelineFirstLayer.__call__` BLOCKS on `recv_metaframe`
+   as the literal first op of rank 1's own first local layer -- rank
+   1 cannot make ANY progress on a chunk until rank 0 has walked its
+   ENTIRE local layer stack and actually flushed its activation onto
+   the wire. The original design (sending rank 1 a
+   `PrefillAdvanceMessage` on every one of rank 0's own advance
+   ticks) would have made rank 1's `tick()` block hard -- inside the
+   SAME single-writer call site that must also service decode and
+   admission -- for the entire remaining duration of rank 0's local
+   traversal. Exactly the multi-second freeze this whole mechanism
+   exists to prevent, just relocated onto rank 1.
+2. Nothing called `flush_prefill_sends()` after a chunked-prefill
+   session's queued activation send -- it would have sat queued
+   forever, and rank 1 would have hung on its `recv_metaframe`
+   regardless of anything else fixed.
+
+**The actual fix** (consult-reviewed twice; "message-arrival-driven
+progress, not a shared tick counter" was the guiding principle,
+adapted to exo's existing synchronous `tick()` transport since a full
+async/CQ-poll rewrite was explicitly out of scope): `tick()` now
+walks a real state machine per chunk -- RANK0_LOCAL (advance only
+this rank's own session, zero wire traffic) -> HANDOFF (single-tick:
+`flush_prefill_sends()` + compute the EXACT advance count rank 1
+needs) -> RANK1_DRAINING (send exactly that many
+`PrefillAdvanceMessage`s). A new one-time, model-load-time handshake
+(`exchange_prefill_peer_layer_count`, mirrors
+`handshake_metaframe_protocol`'s call-once-at-warmup discipline)
+exchanges each rank's REAL local layer count via plain point-to-point
+send/recv (not `all_sum` -- the two values are genuinely different,
+not something to check agreement on) -- this is what makes the
+RANK1_DRAINING advance count computable at all, closing candidate (b)
+above WITHOUT making `PrefillAdvanceMessage` itself rank-aware.
+Candidate (a)'s ack-based barrier was drafted first, then
+consult-reviewed and REJECTED in favor of the deterministic handshake
+(same correctness guarantee, zero added wire round-trips on the
+prefill critical path). `PrefillAdvanceMessage` gained a `chunk_index`
+field so a stale/misrouted advance is distinguishable from a genuine
+new chunk's first one.
+
+New `test_pp_batched_decode_glue_chunk_drive.py` (6 unit-level tests,
+no real transport needed) proves the fix directly -- zero messages
+sent before rank 0's own session completes, the exact advance count
+matches a DELIBERATELY UNEVEN peer layer count, and mirroring the
+real captured advance sequence into a second local session reaches
+`done=True` on exactly the final message. Verified load-bearing (not
+vacuous) by reverting the fix and confirming 5 of 6 tests fail
+loudly with the exact predicted failure, then re-confirming clean.
+Full worker suite: 350 passed (6 new), zero regressions; both real
+2-process subprocess tests still pass.
 
 **Explicitly NOT yet done, the actual remaining piece (deliberately
 scoped OUT of this session -- see the design doc's own risk-framing
