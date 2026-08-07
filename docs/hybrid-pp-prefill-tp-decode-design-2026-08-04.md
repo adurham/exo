@@ -3272,6 +3272,99 @@ neither is new: they are the SAME class of gap every other blocking
 wire round trip in this module already has, not something THIS
 mechanism introduces.
 
+**mlx-lm SUBMODULE PIN ADVANCE REVERTED, 2026-08-07, same session --
+a REAL production incident on the live 2-node cluster.** The pin
+advance above (`5a0cc0a12`) was deployed to both Mac Studios via
+`start_cluster.sh`, reached `READY (2/2)`, and the FIRST real smoke-test
+chat completion crashed with a 500: `GenerationBatch.Response.__init__()
+missing 2 required positional arguments: 'current_state' and
+'match_sequence'`. Root cause, confirmed directly (not guessed): the
+cherry-pick's own methodology -- `git cherry-pick -x 26eb90f0b` onto a
+fresh branch off the fork's `origin/main` -- was sound for landing
+`26eb90f0b` itself cleanly, but **`origin/main` does NOT contain the
+OLD pin's own DSpark/diagnostic commits at all** (confirmed via `git
+log --oneline origin/main..<old pin>`: 29 commits exist ONLY on the old
+pin's lineage, never merged into `origin/main` via any path -- the
+"already independently landed" assumption stated in the original
+pin-advance commit message was WRONG, not just imprecise). Advancing
+the pin to a commit built off `origin/main` therefore silently
+DROPPED every one of those 29 commits, including two genuinely
+load-bearing ones exo's own production code depends on: `86e9b35`
+("Text-based state machine for tool/reasoning parsing", which changed
+`GenerationBatch.Response`'s shape -- the crash's direct cause) and,
+found on the SECOND smoke-test attempt after a first-round fix,
+`1a51020` ("DSpark draft() accepts optional width truncation" --
+`pp_speculation.py`'s own pre-existing, unmodified-this-session
+`pp_dspark_decode_loop` calls `_dspark.draft(..., width=_draft_width)`
+unconditionally, and the reverted-pin's `draft()` has no such
+parameter at all, a SEPARATE crash with the identical root cause).
+
+First-round fix (now itself reverted, see below) patched all 6
+`GenerationBatch.Response(...)` construction sites plus what was
+INITIALLY misdiagnosed as a separate, real bug in
+`mtp_batch_generator.py`'s `_build_yielded_responses` -- a
+`gen_batch.stop_matchers[idx]`/`stop_matcher.match(state, trie, token)
+-> (state, matched: bool)` call shape that a `git log -S` search
+against the NEW pin's history found no matching commit for, leading
+to the (WRONG) conclusion that this API never existed anywhere and
+needed re-adapting to `state_machines[idx].match(state, token) ->
+(state, match_sequence, current_state)`. **Correction, confirmed
+directly against the reverted OLD pin:** `stop_matchers`/
+`StopSequenceMatcher._trie`/the 3-arg `match(state, trie, token)`
+signature are ALL real, genuine APIs on the OLD pin's `GenerationBatch`
+(an instance attribute set in `__init__`, not visible to a bare
+`hasattr()` check on the class itself -- the actual mistake in the
+original diagnosis) -- they were simply REPLACED by `state_machines`/
+`SequenceStateMachine.match(state, token)` somewhere in the 29 commits
+this pin advance dropped. `mtp_batch_generator.py`'s ORIGINAL,
+pre-session code was correct all along for the pin it was actually
+running against; reverting it (see below) restores correct behavior,
+not a regression.
+
+**Decision: revert the ENTIRE pin advance, not patch forward a second
+time.** Given a confirmed-incomplete diff of what's actually missing
+(29 commits, only 2 of which are confirmed load-bearing so far -- the
+other 27 are unaudited), continuing to whack-a-mole individual
+crashes on live production hardware was the wrong call under time
+pressure with a broken cluster. Reverted: the mlx-lm submodule gitlink
+back to `55401ac57c7d7787c4efe97852b66254da15b565` (the original,
+known-good pin), the `GenerationBatch.Response` kwargs fix (no longer
+needed -- the old pin's `Response` class doesn't have those fields, so
+passing them would ITSELF now be the crash),
+`test_prefill_interruptible_start_gate_safety.py` back to its
+pre-advance assertions (real, verified: `hasattr(DeepseekV4Model,
+"_forward_steps")` is `False` again against the reinstalled package),
+and `mtp_batch_generator.py`'s `_build_yielded_responses` -- per the
+correction above, its ORIGINAL `stop_matchers`/`match(state, trie,
+token)` code was already correct against the old pin all along, so a
+single `git revert` of the whole pin-advance commit correctly
+restored it too, not something needing separate preservation.
+Re-verified: full worker suite `-m ""` 366 passed, 1 skipped (matching
+the count before either pin change), zero regressions.
+
+**The actual, correct path to landing `26eb90f0b` remains OPEN, not
+abandoned** -- `_forward_steps` is still needed for the whole
+chunked-prefill live-wiring campaign to ever run on real hardware. The
+real fix is NOT "cherry-pick harder" -- it's rebasing
+`pp-layer-segment-wip`'s full 3-commit fork-native stack (`e101803`,
+`55401ac`, `26eb90f0b`) onto `origin/main` PROPERLY, resolving the
+real merge conflicts that full-branch rebase attempt hit earlier this
+session (aborted then, per the design doc's own earlier entry, in
+favor of the "minimal" cherry-pick that turned out to be incomplete
+rather than minimal). That full rebase needs its own dedicated
+session: enumerate what functionality each of the 29
+old-pin-only commits actually provides, confirm none of it is silently
+relied upon elsewhere in exo's own code (this incident's exact lesson
+-- a "verify basedpyright/tests pass" check is NOT sufficient when the
+type stub itself can be stale, per the earlier entry's own
+`.typings/mlx_lm/generate.pyi` finding), resolve the `qwen3_5.py`
+conflict for real, and get a genuine real-hardware smoke test (not
+just local unit tests) before calling it done. Until then:
+`prefill_interruptible_start`/`prefill_interruptible_advance` remain
+structural no-ops on real hardware (confirmed again, correctly, by
+the reverted gate-safety test), exactly as they were before this
+session's mlx-lm work began.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure

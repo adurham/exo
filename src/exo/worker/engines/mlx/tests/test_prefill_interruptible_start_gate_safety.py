@@ -2,38 +2,31 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false
 # pyright: reportArgumentType=false
 """Gate-safety regression test for ``prefill_interruptible_start``
-(2026-08-07, Phase 2 live-wiring; UPDATED 2026-08-07 same day, mlx-lm
-submodule pin advanced).
+(2026-08-07, Phase 2 live-wiring).
 
-HISTORY: the ``mlx-lm`` submodule pin was originally
-``55401ac57c7d7787c4efe97852b66254da15b565``, which did NOT include
-``DeepseekV4Model._forward_steps`` -- that generator-core split
-existed only on the fork's ``pp-layer-segment-wip`` branch (commit
-``26eb90f0b``), built off that old pin rather than the fork's
-then-current ``main`` (~20 unrelated commits diverged at the time).
-Per explicit user + `consult` direction, that gap was deliberately
-left open in the session that built the chunked-prefill live-wiring,
-to keep an unrelated submodule rebase out of the same review unit as
-two subtle hazard fixes.
+REAL PRODUCTION STATE as of 2026-08-07: the ``mlx-lm`` submodule pin
+(``55401ac57c7d7787c4efe97852b66254da15b565``) does NOT yet include
+``DeepseekV4Model._forward_steps`` -- that generator-core split exists
+only on the fork's ``pp-layer-segment-wip`` branch (commit
+``26eb90f0b``), deliberately built off the OLD pin rather than the
+fork's current ``main`` (~20 unrelated commits diverged since). See
+this session's design doc entry for the full follow-up plan to close
+that gap in a SEPARATE, dedicated session (explicit user + `consult`
+direction: do not fold an unrelated submodule rebase into this
+session's two hazard fixes).
 
-RESOLVED same day: ``git cherry-pick 26eb90f0b`` (verified
-self-contained, single-file, zero merge conflicts) landed cleanly on
-top of the fork's current ``origin/main`` at commit ``8df20cd7b``, the
-mlx-lm submodule pin was advanced to that commit, and ``exo``'s own
-submodule gitlink was bumped to match -- see this session's design doc
-entry for the full verification trail (ruff/basedpyright diffed
-against baseline pre/post cherry-pick, real module import +
-structural checks against the ACTUAL installed package, not a
-synthetic stand-in).
-
-This test now proves the OPPOSITE of its original assertion:
-``supports_chunked_prefill_interruption`` against the REAL, currently
-pinned ``DeepseekV4Model`` returns ``True``, and
-``prefill_interruptible_start`` is consequently no longer a
-structural no-op on the real, currently-pinned mlx-lm -- the
-NEXT gating item is real 2-node cluster deployment + validation
-(``start_cluster.sh``'s own documented submodule-pin re-install step),
-not a code-level gap.
+This means ``prefill_interruptible_start`` -- the new function
+production ``ExoBatchGenerator._run_deferred_prefill_for_grant`` now
+calls on every grant to decide chunked-vs-synchronous prefill -- must
+be PROVABLY safe to call against the REAL, currently-pinned model
+class, not just against synthetic test fakes. This test is that
+proof: it calls ``supports_chunked_prefill_interruption`` against a
+REAL ``mlx_lm`` model class from the ACTUALLY-INSTALLED, pinned
+version (not a synthetic stand-in), confirming it returns ``False`` --
+meaning ``prefill_interruptible_start`` genuinely returns ``None`` on
+today's real hardware, and every real request continues down the
+unmodified, already-production-proven synchronous ``prefill()`` path,
+exactly as before 2026-08-07's live-wiring change.
 """
 
 from __future__ import annotations
@@ -44,56 +37,47 @@ from exo.worker.engines.mlx.pp_prefill_session import (
 )
 
 
-def test_currently_pinned_mlx_lm_has_forward_steps_on_deepseek_v4() -> None:
-    """Direct proof the submodule-pin follow-up landed: the REAL,
-    installed ``mlx_lm`` package (matching exo's actual current
-    submodule pin, post-cherry-pick) now HAS ``_forward_steps`` on
-    ``DeepseekV4Model`` -- confirmed against the real model class, not
-    assumed. This is the reason ``prefill_interruptible_start`` is no
-    longer a guaranteed no-op for DeepSeek-V4 on real hardware (see
-    that function's own docstring). If this test ever starts FAILING
-    again (``_forward_steps`` missing), that is the signal the
-    submodule pin has regressed/been reset and needs re-investigation.
+def test_currently_pinned_mlx_lm_lacks_forward_steps() -> None:
+    """Direct proof of the gap this session's design doc entry
+    documents: the REAL, installed ``mlx_lm`` package (matching the
+    exo repo's actual submodule pin) has NO ``_forward_steps`` on its
+    model classes yet -- confirmed against a real model class, not
+    assumed. This is the reason ``prefill_interruptible_start`` is a
+    guaranteed no-op on today's real hardware (see that function's own
+    docstring for the full explanation) -- if this test ever starts
+    FAILING (i.e. ``_forward_steps`` becomes newly present), that is
+    the signal the submodule-pin follow-up has landed and this test
+    (plus ``prefill_interruptible_start``'s own docstring) should be
+    updated to reflect the new reality.
     """
-    from mlx_lm.models.deepseek_v4 import DeepseekV4Model
     from mlx_lm.models.llama import Model as LlamaModel
 
-    assert hasattr(DeepseekV4Model, "_forward_steps"), (
-        "the currently-pinned mlx_lm package unexpectedly LACKS "
-        "_forward_steps on DeepseekV4Model -- the submodule pin may "
-        "have regressed; see "
-        "docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md's "
-        "2026-08-07 entry for the expected state"
+    assert not hasattr(LlamaModel, "_forward_steps"), (
+        "the currently-pinned mlx_lm package unexpectedly HAS "
+        "_forward_steps on a real model class -- if the submodule pin "
+        "follow-up (docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md's "
+        "2026-08-07 entry) has landed, update this test and "
+        "prefill_interruptible_start's own docstring to match"
     )
-    assert supports_chunked_prefill_interruption(DeepseekV4Model) is True
-    # Llama was never part of the _forward_steps split (DSv4-only) --
-    # confirms this isn't a false-positive from some unrelated
-    # structural-check bug that would accidentally pass EVERY model.
-    assert not hasattr(LlamaModel, "_forward_steps")
     assert supports_chunked_prefill_interruption(LlamaModel) is False
 
 
-def test_prefill_interruptible_start_returns_none_for_non_pipeline_sharded_call() -> (
+def test_prefill_interruptible_start_returns_none_when_model_lacks_forward_steps() -> (
     None
 ):
-    """A SEPARATE safety guarantee from the pin-gate test above:
-    ``prefill_interruptible_start`` must return ``None`` (never raise,
-    never ``AttributeError``) when the call itself isn't eligible for
-    chunked interruption -- independent of whether the loaded model
-    class structurally supports it. Proven here by calling with
-    ``group=None`` (single-rank, the cheapest way to guarantee
-    ineligibility without needing a real distributed group or a real
-    pipeline-sharded model), confirming it short-circuits cleanly on
-    the very FIRST eligibility check
-    (``is_pipeline and num_tokens >= prefill_step_size``) without ever
-    reaching the ``supports_chunked_prefill_interruption`` check or
-    touching ``model.layers``/``get_inner_model`` at all -- the real
-    call shape ``_run_deferred_prefill_for_grant`` uses in production,
-    just with inputs guaranteed to hit the earliest possible ``None``
-    return. This guarantee holds REGARDLESS of the submodule pin's
-    ``_forward_steps`` availability (unlike the test above), since
-    single-rank/non-pipeline calls are structurally excluded before
-    that check is ever reached.
+    """The actual safety guarantee: ``prefill_interruptible_start``
+    must return ``None`` (never raise, never AttributeError) when the
+    loaded model's inner model doesn't structurally support chunked
+    interruption -- proven here by calling it with ``group=None``
+    (single-rank, the cheapest way to guarantee ineligibility without
+    needing a real distributed group or a real pipeline-sharded
+    model), confirming it short-circuits cleanly on the very FIRST
+    eligibility check (``is_pipeline and num_tokens >= prefill_step_size``)
+    without ever reaching the ``supports_chunked_prefill_interruption``
+    check or touching ``model.layers``/``get_inner_model`` at all --
+    the real call shape ``_run_deferred_prefill_for_grant`` uses in
+    production, just with inputs guaranteed to hit the earliest
+    possible ``None`` return.
     """
     import mlx.core as mx
 
@@ -121,7 +105,7 @@ def test_prefill_interruptible_start_returns_none_for_non_pipeline_sharded_call(
     )
     assert result is None, (
         "prefill_interruptible_start must return None (never raise) "
-        "for a non-pipeline-sharded/single-rank call -- this is a "
-        "SEPARATE, always-on safety net independent of the submodule "
-        "pin's _forward_steps availability"
+        "for a non-pipeline-sharded model -- this is what makes "
+        "_run_deferred_prefill_for_grant's fallback to the synchronous "
+        "run_prefill() path safe on today's real production hardware"
     )
