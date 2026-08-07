@@ -329,22 +329,65 @@ def set_pipeline_prefill(model: nn.Module, is_prefill: bool) -> None:
     # installed, never both, so this is a no-op scan when the metaframe
     # path isn't in use (the isinstance check below simply matches
     # nothing).
-    from exo.worker.engines.mlx.pp_metaframe import MetaFramedPipelineLastLayer
+    #
+    # 2026-08-06 (regression fix): the OLD ambient
+    # ``layer.is_prefill = is_prefill`` write here is now a DEAD WRITE
+    # for MetaFramedPipelineLastLayer -- that layer's __call__ was
+    # migrated (same session) to read phase/queue_sends from a
+    # ForwardStepInfo contextvar instead of an ambient instance flag.
+    # Calling set_forward_step_phase(...) here is the REAL fix,
+    # restoring this call site's actual effect -- see
+    # ForwardStepInfo's own "_FORWARD_STEP_INFO_DEFAULT" docstring in
+    # pp_metaframe.py for the full incident (a guaranteed LookupError
+    # on every metaframe forward) this closes.
+    #
+    # is_prefill=True maps to ForwardPhase.PREFILL_FINAL, not
+    # PREFILL_CONTINUE: every REAL caller of set_pipeline_prefill
+    # today (generate.py's prefill()/prefill_batched()) runs a
+    # single, complete, non-interrupted prefill from this layer's own
+    # perspective -- chunked INTERRUPTION (the only case that would
+    # ever need PREFILL_CONTINUE) is driven exclusively through
+    # ResumablePrefillSession.advance(), which calls
+    # set_forward_step_info() directly with the correct phase itself,
+    # never through this function.
+    from exo.worker.engines.mlx.pp_metaframe import (
+        ForwardPhase,
+        MetaFramedPipelineLastLayer,
+        set_forward_step_phase,
+    )
 
+    has_metaframe_layer = False
     for layer in model.layers:  # type: ignore
         if isinstance(layer, MetaFramedPipelineLastLayer):
             layer.is_prefill = is_prefill
+            has_metaframe_layer = True
+    if has_metaframe_layer:
+        set_forward_step_phase(
+            ForwardPhase.PREFILL_FINAL if is_prefill else ForwardPhase.DECODE
+        )
 
 
 def set_pipeline_queue_sends(model: nn.Module, queue_sends: bool) -> None:
     for layer in model.layers:  # type: ignore
         if isinstance(layer, PipelineLastLayer):
             layer.queue_sends = queue_sends
-    from exo.worker.engines.mlx.pp_metaframe import MetaFramedPipelineLastLayer
+    # 2026-08-06 (regression fix, same rationale as
+    # set_pipeline_prefill above): the ambient ``layer.queue_sends =
+    # queue_sends`` write below is likewise dead for
+    # MetaFramedPipelineLastLayer; set_forward_step_queue_sends(...)
+    # is the real fix.
+    from exo.worker.engines.mlx.pp_metaframe import (
+        MetaFramedPipelineLastLayer,
+        set_forward_step_queue_sends,
+    )
 
+    has_metaframe_layer = False
     for layer in model.layers:  # type: ignore
         if isinstance(layer, MetaFramedPipelineLastLayer):
             layer.queue_sends = queue_sends
+            has_metaframe_layer = True
+    if has_metaframe_layer:
+        set_forward_step_queue_sends(queue_sends)
 
 
 def get_inner_model(model: nn.Module) -> nn.Module:

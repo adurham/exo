@@ -201,6 +201,45 @@ _forward_step_info_context: ContextVar["ForwardStepInfo"] = ContextVar(
     "forward_step_info_context"
 )
 
+# 2026-08-06 (regression fix, found auditing generate.py's REAL prefill
+# call path before wiring pipeline_parallel_prefill's own generator-
+# core split): the pre-migration ambient instance flags this whole
+# mechanism replaced had SAFE PER-INSTANCE DEFAULTS --
+# ``self.is_prefill: bool = False`` / ``self.queue_sends: bool =
+# False`` at construction (git history: commit 199646566, before this
+# session's ForwardStepInfo refactor). ``generate.py``'s real
+# prefill()/prefill_batched() call sites set these two facts
+# SEPARATELY and CONDITIONALLY (``set_pipeline_prefill(is_prefill=
+# True)`` first, ``set_pipeline_queue_sends(queue_sends=True)`` only
+# sometimes, later, depending on chunking) -- never atomically, the
+# way ``ResumablePrefillSession``/``set_forward_step_info`` above
+# assumes. A "no default, fail loud" contextvar was correct for
+# CATCHING a caller that forgot to set anything, but it also broke
+# every ALREADY-CORRECT non-atomic caller that relied on the old
+# per-instance defaults to cover the gap between its two separate
+# calls -- confirmed via consult review: this was a real regression
+# (a guaranteed, unconditional LookupError on EVERY metaframe forward
+# pass, since ``MetaFramedPipelineLastLayer.__call__`` calls
+# ``get_forward_step_info()`` unconditionally, first thing), not a
+# caller bug.
+#
+# Fix: restore the OLD safe default (``phase=DECODE,
+# queue_sends=False`` -- exactly what a freshly-constructed
+# pre-migration layer instance held) as this contextvar's floor, and
+# add ``set_forward_step_phase``/``set_forward_step_queue_sends``
+# below as PARTIAL, read-modify-write setters mirroring
+# ``set_pipeline_prefill``/``set_pipeline_queue_sends``'s own existing
+# two-separate-calls shape exactly -- so ``auto_parallel.py``'s real
+# call sites can keep calling them independently, unchanged, and the
+# metaframe layers underneath now actually track the real state again
+# instead of silently no-oping. ``set_forward_step_info`` (the atomic,
+# no-default setter) stays exactly as-is for ``ResumablePrefillSession``,
+# which always knows both facts at once and should keep failing loud
+# if it doesn't.
+_FORWARD_STEP_INFO_DEFAULT = ForwardStepInfo(
+    phase=ForwardPhase.DECODE, queue_sends=False
+)
+
 
 def set_forward_step_info(*, phase: ForwardPhase, queue_sends: bool) -> None:
     """Set the current forward pass's phase/queue_sends for
@@ -215,15 +254,42 @@ def set_forward_step_info(*, phase: ForwardPhase, queue_sends: bool) -> None:
     )
 
 
+def set_forward_step_phase(phase: ForwardPhase) -> None:
+    """Partial setter: update ONLY ``phase``, preserving whatever
+    ``queue_sends`` value (or the safe default) is already current.
+    Mirrors ``set_pipeline_prefill``'s own call shape exactly -- see
+    ``_FORWARD_STEP_INFO_DEFAULT``'s docstring above for why this
+    exists alongside the atomic ``set_forward_step_info``."""
+    current = _forward_step_info_context.get(_FORWARD_STEP_INFO_DEFAULT)
+    _forward_step_info_context.set(
+        ForwardStepInfo(phase=phase, queue_sends=current.queue_sends)
+    )
+
+
+def set_forward_step_queue_sends(queue_sends: bool) -> None:
+    """Partial setter: update ONLY ``queue_sends``, preserving whatever
+    ``phase`` value (or the safe default) is already current. Mirrors
+    ``set_pipeline_queue_sends``'s own call shape exactly -- see
+    ``_FORWARD_STEP_INFO_DEFAULT``'s docstring above for why this
+    exists alongside the atomic ``set_forward_step_info``."""
+    current = _forward_step_info_context.get(_FORWARD_STEP_INFO_DEFAULT)
+    _forward_step_info_context.set(
+        ForwardStepInfo(phase=current.phase, queue_sends=queue_sends)
+    )
+
+
 def get_forward_step_info() -> ForwardStepInfo:
-    """Read the current forward pass's phase/queue_sends. Raises
-    ``LookupError`` (uncaught -- fail loud, matching this module's
-    fail-stop discipline) if no caller ever set it for this context;
-    there is deliberately NO default, since silently assuming a phase
-    (e.g. DECODE) for a caller that forgot to set it would be exactly
-    the kind of ambient-state bug this mechanism replaces, just moved
-    one layer over."""
-    return _forward_step_info_context.get()
+    """Read the current forward pass's phase/queue_sends. Returns the
+    safe default (``phase=DECODE, queue_sends=False`` --
+    ``_FORWARD_STEP_INFO_DEFAULT``, matching the pre-migration ambient
+    instance flags' own construction-time defaults) if no caller has
+    set anything for this context yet -- restored 2026-08-06 as a
+    regression fix; see ``_FORWARD_STEP_INFO_DEFAULT``'s docstring for
+    the full incident this closes. NOT a silent-guess-at-random-phase
+    default: DECODE/False is the SAME value every metaframe layer
+    instance held before ANY caller ever touched it, so this restores
+    old behavior exactly rather than inventing new semantics."""
+    return _forward_step_info_context.get(_FORWARD_STEP_INFO_DEFAULT)
 
 
 # The startup handshake asserts both ranks agree on this before any

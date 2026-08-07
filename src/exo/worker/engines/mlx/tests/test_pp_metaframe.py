@@ -846,3 +846,124 @@ def test_metaframed_last_layer_forward_send_is_evaluated_before_decode_gather_re
         "constructed but never forced to execute before its only "
         "reference was discarded by the decode-gather reassignment"
     )
+
+
+@pytest.mark.slow
+def test_set_pipeline_prefill_against_real_metaframe_layer_does_not_lookuperror() -> (
+    None
+):
+    """2026-08-06 REGRESSION TEST for a real bug found and fixed the
+    same session that built ForwardStepInfo/get_forward_step_info:
+    generate.py's REAL prefill()/prefill_batched() call sites never
+    call set_forward_step_info() directly -- they call
+    auto_parallel.py's set_pipeline_prefill()/set_pipeline_queue_sends()
+    (the SAME functions that used to write the old ambient
+    is_prefill/queue_sends instance flags this whole ForwardStepInfo
+    mechanism replaced). When those two flags' READ path moved to
+    get_forward_step_info() (no default at the time), the WRITE path
+    in set_pipeline_prefill/set_pipeline_queue_sends was left
+    unchanged -- writing to now-dead layer.is_prefill/.queue_sends
+    attributes nothing reads anymore. The result: EVERY real prefill
+    call under EXO_PP_METAFRAME=1 (with or without
+    EXO_PP_BATCHED_DECODE) would hit an unconditional LookupError
+    inside MetaFramedPipelineLastLayer.__call__'s very first line --
+    a regression that went completely undetected by the rest of this
+    session's test suite (339 passed) because NO other test drives a
+    real forward pass through set_pipeline_prefill's actual call path
+    against real installed metaframe layers -- every other test in
+    this file calls set_forward_step_info directly, bypassing
+    set_pipeline_prefill/set_pipeline_queue_sends entirely.
+
+    Fixed by restoring a safe default (matching the pre-migration
+    ambient flags' own construction-time default: phase=DECODE,
+    queue_sends=False) plus partial read-modify-write setters
+    (set_forward_step_phase/set_forward_step_queue_sends) that
+    set_pipeline_prefill/set_pipeline_queue_sends now actually call
+    for metaframe layers -- see pp_metaframe.py's
+    _FORWARD_STEP_INFO_DEFAULT docstring for the full incident.
+
+    This test exercises the EXACT call shape generate.py's prefill()
+    uses: set_pipeline_prefill(model, is_prefill=True) BEFORE any
+    forward pass (not set_forward_step_info directly), confirming a
+    real forward pass through a real installed MetaFramedPipelineLastLayer
+    succeeds without ever raising LookupError.
+    """
+    r0 = LlamaModel(_ARGS)
+    r1 = LlamaModel(_ARGS)
+    _copy_weights(_seeded_model(), r0)
+    _copy_weights(_seeded_model(), r1)
+    transport = _build_metaframe_split(r0, r1, request_uid=999)
+
+    c0 = r0.make_cache()
+    tokens = mx.array([[1, 2, 3]])
+    mx.eval(tokens)
+
+    result: dict[str, object] = {}
+    errors: dict[str, BaseException] = {}
+    clear_prefill_sends()
+
+    def _rank0() -> None:
+        _MLX_CALL_LOCK.acquire()
+        try:
+            # THE EXACT call shape generate.py's prefill() uses --
+            # set_pipeline_prefill (NOT set_forward_step_info
+            # directly), then a real forward pass, matching the
+            # real production sequence byte-for-byte.
+            set_pipeline_prefill(r0, is_prefill=True)
+            set_pipeline_queue_sends(r0, queue_sends=True)
+            out = r0(tokens, cache=c0)
+            # Match production's per-chunk discipline (generate.py's
+            # prefill loop calls flush_prefill_sends() right after
+            # every forward, unconditionally -- see _run_forward's
+            # own identical comment above for why: without this, a
+            # queue_sends=True forward's activation send stays
+            # parked in the shared _pending_prefill_sends queue
+            # forever, and rank 1's recv blocks indefinitely).
+            flush_prefill_sends()
+            mx.eval(out)
+            set_pipeline_queue_sends(r0, queue_sends=False)
+            set_pipeline_prefill(r0, is_prefill=False)
+            result["out"] = out
+        except BaseException as exc:  # noqa: BLE001 - captured for the
+            # main thread's assertion message; a bare thread exception
+            # would otherwise be silently swallowed by Python's default
+            # thread exception handling, masking exactly the
+            # LookupError this test exists to catch.
+            errors["rank0"] = exc
+        finally:
+            _MLX_CALL_LOCK.release()
+
+    def _rank1() -> None:
+        _MLX_CALL_LOCK.acquire()
+        try:
+            c1 = r1.make_cache()
+            set_pipeline_prefill(r1, is_prefill=True)
+            set_pipeline_queue_sends(r1, queue_sends=True)
+            out1 = r1(tokens, cache=c1)
+            mx.eval(out1)
+            set_pipeline_queue_sends(r1, queue_sends=False)
+            set_pipeline_prefill(r1, is_prefill=False)
+        except BaseException as exc:  # noqa: BLE001 - see _rank0's own comment
+            errors["rank1"] = exc
+        finally:
+            _MLX_CALL_LOCK.release()
+
+    with (
+        patch("mlx.core.distributed.send", transport.send),
+        patch("mlx.core.distributed.recv_like", transport.recv_like),
+    ):
+        t0 = threading.Thread(target=_rank0)
+        t1 = threading.Thread(target=_rank1)
+        t0.start()
+        t1.start()
+        t0.join(timeout=30)
+        t1.join(timeout=30)
+
+    assert not errors, (
+        f"real forward pass through set_pipeline_prefill's actual "
+        f"production call path raised: {errors} -- this IS the "
+        f"regression (a LookupError here means the fix regressed or "
+        f"was never actually applied)"
+    )
+    assert "out" in result, "rank 0's forward pass never completed"
+    assert cast(mx.array, result["out"]).shape[0] == 1
