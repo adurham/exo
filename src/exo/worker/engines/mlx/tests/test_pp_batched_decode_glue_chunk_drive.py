@@ -384,3 +384,80 @@ def test_msg_kind_prefill_advance_still_decodes_the_real_captured_messages(
         assert isinstance(message, PrefillAdvanceMessage)
         assert message.max_layers >= 1
         assert message.advance_seq >= 1
+
+
+def test_no_new_prefill_granted_while_chunk_drive_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-08-07 priority-order guard (Phase 2 live-wiring, found via
+    a `consult` review of the live-wiring design BEFORE it was
+    implemented): tick()'s fixed priority order checks "grant a new
+    prefill" (branch 2) BEFORE "advance an active chunk-drive session"
+    (branch 3) -- without an explicit guard, a SECOND pending prefill
+    could be granted mid-drive, racing request A's still-in-flight
+    chunk session against request B's brand-new one. This test proves
+    the guard: a chunk session for request 1 is registered and
+    genuinely mid-drive (NOT yet done), then a second request (2) is
+    enqueued via enqueue_prefill -- every subsequent tick() must keep
+    driving request 1's chunk session, NEVER granting request 2's
+    prefill, until request 1's drive genuinely completes and clears
+    _active_prefill_session.
+
+    Verified load-bearing: reverting the guard (dropping the
+    `self._active_prefill_session is None` condition from tick()'s
+    pending-prefill branch) makes this test fail loudly -- tick()
+    would grant request 2's PrefillMessage on an early tick, well
+    before request 1's chunk session reaches done=True.
+    """
+    _sent = _capture_sent_advances(monkeypatch)
+    glue = _make_rank0_glue(peer_prefill_layer_count=4)
+    model = _CountingLayerModel(n_layers=6)
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=[]
+    )
+    glue.register_prefill_session(request_id=1, session=session, chunk_index=0)
+    glue.enqueue_prefill(
+        request_id=2,
+        cache_slot=1,
+        n_prompt_tokens=4,
+        single_request_fallback=False,
+    )
+
+    saw_completion = False
+    for _tick in range(20):
+        assert glue.has_pending_prefills(), (
+            "request 2's prefill must remain pending -- the priority-"
+            "order guard must never let tick() reach the grant branch "
+            "while request 1's chunk-drive session is still active"
+        )
+        result = glue.tick(model=cast("object", model))
+        grant = result[2]
+        assert grant is None, (
+            f"tick() granted a new prefill (request_id="
+            f"{grant.request_id if grant else None}) while request 1's "
+            f"chunk-drive session was still active -- this is exactly "
+            f"the cross-request interleaving hazard the priority-order "
+            f"guard exists to prevent"
+        )
+        if result[3] is not None:
+            saw_completion = True
+            break
+
+    assert saw_completion, "request 1's chunk-drive session never completed"
+    assert not glue.has_active_prefill_session()
+
+    # NOW that request 1's drive is genuinely done, request 2's
+    # pending prefill must finally be REACHABLE (no longer blocked by
+    # the priority-order guard) -- checked via has_pending_prefills()
+    # staying True (never popped) combined with the guard condition
+    # itself now being satisfied, rather than driving the full
+    # PrefillMessage/PrefillReadyMessage wire round-trip (a real
+    # 2-rank handshake genuinely requiring a recv_prefill_ready_message
+    # response this single-rank test has no peer to provide -- that
+    # full handshake is already covered by
+    # test_pp_admission_race_subprocess.py's real 2-process harness).
+    assert glue.has_pending_prefills(), (
+        "request 2's prefill must still be queued, ready to be granted "
+        "on the very next tick now that the guard condition "
+        "(active_prefill_session is None) is satisfied"
+    )

@@ -2679,6 +2679,165 @@ session -- explicitly not attempted as a same-session addition after
 already shipping 3 verified fixes tonight (the chunk-drive redesign,
 the metaframe-detection gate, and the earlier regression fix).
 
+**Both Hazard 1 and Hazard 2 CLOSED, 2026-08-07 (next session,
+consult-reviewed three times before implementation -- see the three
+review rounds summarized below) -- the actual live wiring is now
+real, production code, not just designed-but-unbuilt machinery.**
+
+**Design rounds (three `consult` calls before any code was written):**
+
+Round 1 established the hazard framing and got a sound-in-principle
+design for both hazards, but round 2 (after reading the real code
+more closely -- `_DeferredPrefill.run_prefill()` calls `prefill()`'s
+full wrapper, not the bare interruptible generator, meaning setup
+work like `mx.clear_cache()`/`mx_barrier(group)`/the `is_pipeline`
+eligibility check all needed extracting too) surfaced a REAL deadlock
+risk in the first draft: constructing rank 1's first chunked-prefill
+session reactively inside `Rank1BatchedDecodeGlue.tick()`'s
+`MSG_KIND_PREFILL` branch (before sending the `PrefillReadyMessage`
+ack) would call `mx_barrier(group)` -- a full collective -- from
+inside a call site that must not block on a second, redundant
+synchronization mechanism when the existing point-to-point
+`PrefillMessage`/`PrefillReadyMessage` handshake already provides
+the identical N=2 rank-pair guarantee. Round 3 confirmed the actual
+fix: **drop `mx_barrier()`/`mx.clear_cache()`-adjacent redundant
+synchronization from the NEW interruptible-only setup path entirely**
+(keep `mx.clear_cache()` -- pure local Metal-allocator hygiene, zero
+sync content; drop only the collective `mx_barrier`), add an explicit
+`group.size() != 2` eligibility guard (this campaign's confirmed real
+scope is N=2 only), and -- critically -- **keep session registration
+for chunk 0 exactly where the EXISTING, already-hardware-verified code
+already runs it** (`_run_deferred_prefill_for_grant`, called strictly
+AFTER `PrefillReadyMessage`'s ack has already been exchanged on both
+ranks) rather than moving it earlier into `tick()`'s own call. This
+closed the need for ANY new wire message for either hazard -- both
+close via ORDERING alone, reusing existing synchronization points.
+
+**Hazard 1 fix (caller-assumed-completion):** `prefill()`'s real setup
+(`mx.clear_cache()`, the `is_pipeline`/`num_tokens >= prefill_step_size`
+eligibility check, `set_pipeline_prefill`/`set_pipeline_queue_sends`)
+was extracted into a NEW sibling function, `prefill_interruptible_start()`
+(`generate.py`) -- returns `None` (never raises) for every ineligible
+case (small prompt, non-pipeline, `group.size() != 2`, or the loaded
+model's inner model doesn't structurally support
+`supports_chunked_prefill_interruption` -- the REAL, current state of
+production as of this date, see the submodule-pin note below), or a
+new `ChunkedPrefillDrive` dataclass bundling the outer
+`_pipeline_parallel_prefill_steps(interruptible=True)` generator
+handle + the first chunk's real `ResumablePrefillSession` when
+eligible. A companion `prefill_interruptible_advance()` resumes the
+outer generator after a chunk's session reaches `done=True`, returning
+either the NEXT chunk's new session or (once the outer generator's own
+`("done", ...)` yield is reached -- AFTER its real trailing code,
+post-loop final-token forward pass, flush, eval, has already run) the
+same `(tokens_per_sec, num_tokens, snapshots)` tuple `prefill()` itself
+returns.
+
+`ExoBatchGenerator._run_deferred_prefill_for_grant()` now calls
+`deferred.try_start_chunked_prefill()` (a closure built in `submit()`,
+mirroring `run_prefill`'s own vision/remote-prefill eligibility checks)
+FIRST on every grant: if it returns a real drive, this method registers
+the first chunk's session (`register_prefill_session`) and returns
+WITHOUT calling `enqueue_admission`/`stage_local_cache` -- the
+`_DeferredPrefill` entry stays in `_deferred_prefill_by_uid` (NOT
+popped) exactly because the request's prefill is still genuinely
+in-progress. Only `_advance_chunked_prefill_drive()` -- called from
+`_step_batched_decode()` when `tick()` returns a non-`None`
+`PrefillAdvanceCompleted` -- ever calls `enqueue_admission`/
+`stage_local_cache` for a chunked request, and only once
+`prefill_interruptible_advance` reaches the real `("done", ...)`
+outer-generator yield. This makes "downstream sees completion"
+strictly synonymous with "the real outer generator reached done,"
+closing Hazard 1 by construction. The ineligible (synchronous) path is
+UNCHANGED, byte-for-byte, from before this session -- zero behavior
+change for the ONLY case that has ever run on real production hardware
+to date (see submodule-pin note below).
+
+A real priority-order bug was ALSO found and fixed during this work
+(caught by a `consult` review of the implementation, not hypothetical):
+`Rank0BatchedDecodeGlue.tick()`'s fixed priority order checks "grant a
+new prefill" (branch 2) BEFORE "advance the active chunk-drive session"
+(branch 3) -- without an explicit guard, a SECOND pending request could
+be granted mid-drive, corrupting the "at most one chunked-prefill
+session active" invariant `register_prefill_session` otherwise enforces
+only via a hard `GlueError` crash. Fixed with a one-line guard
+(`self._pending_prefill and self._active_prefill_session is None`) --
+a second pending prefill now waits gracefully until the first request's
+drive genuinely completes, instead of racing or crashing.
+
+**Hazard 2 fix (rank-registration skew):** the fix is pure ORDERING,
+requiring no new wire message. For chunk 0: rank 1's registration
+happens inside `_run_deferred_prefill_for_grant`, called strictly
+AFTER `PrefillReadyMessage`'s ack already confirmed both ranks are
+synchronized at that exact point (unchanged from the existing,
+hardware-verified handshake). For every INNER chunk boundary (chunk i
+-> i+1): `_advance_chunked_prefill_drive()` registers the NEW session
+SYNCHRONOUSLY, INLINE, before returning -- never scheduled or deferred.
+Since `tick()` is the ONLY real recv call site on either rank, and this
+method runs to completion strictly between one `tick()` return and the
+next `tick()` call in the SAME runner event loop, a peer rank
+physically CANNOT observe chunk i+1's first `PrefillAdvanceMessage`
+before this rank's own registration for it has already happened, given
+ordered wire delivery -- provably true, not merely probably true.
+
+**Verification (2026-08-07):** basedpyright/ruff check/ruff format all
+clean, diffed explicitly against pre-edit baseline across every touched
+file (zero new issues: generate.py 0 new basedpyright errors / 0 new
+ruff issues; batch_generate.py same; pp_batched_decode_glue.py same;
+whole-repo basedpyright 9348/9348, whole-repo ruff 3849/3849, both
+unchanged). Three new/updated test files targeting each hazard
+directly (`test_batch_generate_chunked_prefill_live_wiring.py`'s two
+tests for Hazard 1 and Hazard 2, a new
+`test_no_new_prefill_granted_while_chunk_drive_active` test in
+`test_pp_batched_decode_glue_chunk_drive.py` for the priority-order
+guard, plus `test_prefill_interruptible_start_gate_safety.py`'s two
+tests proving the current mlx-lm pin cleanly no-ops rather than
+crashing). All three fixes verified LOAD-BEARING by reverting each one
+independently and confirming its own test(s) fail loudly with the
+exact predicted signal, then restoring: Hazard 1 revert -> synchronous
+fallback path crashes on the fake test transport's real `mx_barrier`
+call (proving the test genuinely exercises the chunked path); Hazard 2
+revert -> `glue.has_active_prefill_session()` reads `False`
+immediately after `_advance_chunked_prefill_drive` returns, exactly
+the unsynchronized-registration window Hazard 2 describes; priority-
+order-guard revert -> `tick()` reaches the real wire-recv grant branch
+mid-drive and crashes on the fake transport (the same class of failure
+real hardware would hit as an unsynchronized cross-request race). Full
+worker suite (`-m ""`, including slow/subprocess tests): 358 passed (5
+new), 1 skipped -- zero regressions against the 353-passed/1-skipped
+baseline.
+
+**REAL PRODUCTION GAP, explicitly NOT closed this session (deliberate
+scope decision, per a `consult` review + explicit user direction):**
+the `mlx-lm` submodule pin as of 2026-08-07
+(`55401ac57c7d7787c4efe97852b66254da15b565`) does NOT include
+`DeepseekV4Model._forward_steps` -- that generator-core split exists
+ONLY on the fork's `pp-layer-segment-wip` branch (single commit
+`26eb90f0b`, dated 2026-08-06), deliberately branched off the OLD
+submodule pin per an earlier session's explicit user direction not to
+reconcile a divergence mid-task -- the fork's `origin/main` has since
+advanced ~20 unrelated commits (perf/diag work: fused softmax kernels,
+balanced causal seq-split, async eval pipelining, GPU-time tracing).
+This means `prefill_interruptible_start`/`supports_chunked_prefill_
+interruption` are a PROVEN, TESTED no-op on today's real hardware
+(`test_prefill_interruptible_start_gate_safety.py` proves this
+directly against the real, currently-pinned `mlx_lm` package) -- every
+real request continues down the unmodified, already-production-proven
+synchronous `prefill()` path, exactly as before this session's work.
+**Follow-up needed, dedicated session (explicitly NOT folded into this
+one -- rebasing 20 commits of unrelated perf work into the same review
+unit as two subtle correctness fixes would wreck bisection/review
+isolation for both):** rebase `26eb90f0b` onto the fork's current
+`origin/main`, re-run that commit's own documented verification
+(ruff/basedpyright unchanged-baseline, real module import + structural
+check, the isolated pause/resume harness) against the rebased result,
+push to `adurham/mlx-lm` main, then reset the exo submodule pin
+(`git fetch && git reset --hard <new-sha>` on each Mac Studio, per this
+repo's standing "never edit files directly on the studios" deploy
+rule) -- ONLY once real-cluster validation of everything built this
+session (and the earlier 2026-08-06 session) is separately scheduled
+and explicitly approved.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure

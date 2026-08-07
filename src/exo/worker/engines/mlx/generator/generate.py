@@ -6,6 +6,7 @@ import sys
 import time
 import uuid
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Callable, Generator, Iterator, Literal, cast, get_args
 
 import mlx.core as mx
@@ -62,6 +63,11 @@ from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.pp_metaframe import (
     MetaFramedPipelineFirstLayer,
     MetaFramedPipelineLastLayer,
+)
+from exo.worker.engines.mlx.pp_prefill_session import (
+    PrefillSessionError,
+    ResumablePrefillSession,
+    supports_chunked_prefill_interruption,
 )
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
@@ -901,6 +907,267 @@ def prefill(
             f"len(returned)={len(_final_snapshots)}"
         )
     return tokens_per_sec, num_tokens, _final_snapshots
+
+
+@dataclass
+class ChunkedPrefillDrive:
+    """Live cross-tick state for ONE request's real chunked-prefill drive
+    (2026-08-07, Phase 2 live-wiring). Bundles the outer
+    ``_pipeline_parallel_prefill_steps(interruptible=True)`` generator
+    handle plus everything ``prefill()``'s own tail logic needs once the
+    LAST real chunk's ``ResumablePrefillSession`` reaches ``done=True`` --
+    so a caller driving this across many ``ExoBatchGenerator.step()`` calls
+    gets back the SAME ``(tokens_per_sec, num_tokens, snapshots)`` shape
+    ``prefill()`` returns synchronously today, indistinguishable to any
+    downstream consumer.
+
+    Constructed by ``prefill_interruptible_start()``; advanced one real
+    prompt-chunk at a time by ``prefill_interruptible_advance()``, called
+    ONLY after the caller's current ``session`` reaches ``done=True`` (a
+    caller-side invariant this class does not itself enforce -- mirrors
+    ``ResumablePrefillSession.advance``'s own \"caller must check .done\"
+    discipline).
+    """
+
+    model: Model
+    outer_gen: "Generator[tuple[Literal['chunk'], int, mx.array] | tuple[Literal['done'], None, None], None, None]"
+    session: "ResumablePrefillSession"
+    chunk_index: int
+    cache: KVCacheType
+    num_tokens: int
+    start_time: float
+    has_ssm: bool
+    snapshots: list[CacheSnapshot]
+
+
+def prefill_interruptible_start(
+    model: Model,
+    tokenizer: TokenizerWrapper,
+    sampler: Callable[[mx.array], mx.array],
+    prompt_tokens: mx.array,
+    cache: KVCacheType,
+    group: mx.distributed.Group | None,
+    on_prefill_progress: Callable[[int, int], None] | None,
+    distributed_prompt_progress_callback: Callable[[], None] | None,
+    prefill_step_size: int | None = None,
+) -> "ChunkedPrefillDrive | None":
+    """Sibling to ``prefill()`` (2026-08-07, Phase 2 live-wiring),
+    mirroring the SAME eligibility gate ``prefill()`` itself uses
+    (``is_pipeline and num_tokens >= prefill_step_size``) plus two
+    additional, narrower checks this interruptible path specifically
+    needs -- returns ``None`` (never raises) for every case where the
+    caller must fall back to the existing, unmodified, synchronous
+    ``prefill()`` instead:
+
+    - Not eligible for ``pipeline_parallel_prefill`` at all (small
+      prompt, non-pipeline sharding) -- identical to ``prefill()``'s own
+      ``is_pipeline and num_tokens >= prefill_step_size`` branch
+      condition.
+    - ``group.size() != 2`` -- this campaign's confirmed real scope is
+      N=2 only (design doc Section 13.3); the chunk-drive machinery this
+      function feeds (``Rank0BatchedDecodeGlue``'s two-phase
+      RANK0_LOCAL/HANDOFF/RANK1_DRAINING state machine) is built and
+      tested ONLY for a 2-rank point-to-point pair. Silently falling
+      back rather than misbehaving at an untested topology.
+    - The loaded model's inner model does not structurally support
+      chunked-prefill interruption (``supports_chunked_prefill_
+      interruption`` -- i.e. no real ``_forward_steps`` generator
+      exists on this checkpoint's model class). THIS is the current,
+      real, production state: the ``mlx-lm`` submodule pin as of
+      2026-08-07 does not yet include DSv4's ``_forward_steps`` split
+      (it exists only on the fork's ``pp-layer-segment-wip`` branch,
+      not yet rebased onto the fork's current ``main`` and not yet
+      pinned) -- so on TODAY's real hardware this function always
+      returns ``None`` and every real request takes the unmodified
+      synchronous ``prefill()`` path, a provable, tested no-op until
+      that follow-up work lands (see design doc's 2026-08-07 entry).
+
+    Deliberately does NOT call ``mx_barrier(group)`` (unlike ``prefill()``,
+    which keeps it, unmodified, for every other caller) -- per a
+    ``consult`` review: for exactly N=2 (enforced above), the caller's
+    OWN pre-existing point-to-point ``PrefillMessage``/
+    ``PrefillReadyMessage`` handshake (``Rank0BatchedDecodeGlue``/
+    ``Rank1BatchedDecodeGlue.tick()``, already run before either rank
+    ever reaches this function) already provides the identical
+    rank-pair synchronization guarantee a collective ``all_sum`` barrier
+    would -- adding a SECOND, redundant collective specifically on this
+    path would reintroduce a real deadlock hazard (rank 1 blocking on a
+    collective before it has sent the very ack rank 0 is waiting to
+    receive). ``mx.clear_cache()`` IS kept (purely local Metal-allocator
+    hygiene, zero synchronization content, real memory-regression risk
+    on long prompts if dropped)."""
+    num_tokens = len(prompt_tokens)
+    if num_tokens == 0:
+        return None
+    is_pipeline = _has_pipeline_communication_layer(model)
+    if prefill_step_size is None:
+        prefill_step_size = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
+    if not (is_pipeline and num_tokens >= prefill_step_size):
+        return None
+    if group is None or group.size() != 2:
+        return None
+
+    inner_model = cast("object", get_inner_model(model))
+    if not supports_chunked_prefill_interruption(inner_model):
+        return None
+
+    has_ssm = has_non_kv_caches(cache)
+    snapshots: list[CacheSnapshot] = []
+    start_time = time.perf_counter()
+
+    def progress_callback(processed: int, total: int) -> None:
+        if has_ssm:
+            snapshots.append(snapshot_ssm_states(cache, processed))
+            if len(snapshots) > _SNAPSHOT_RETENTION:
+                snapshots.pop(0)
+        if on_prefill_progress is not None:
+            on_prefill_progress(processed, total)
+
+    mx.clear_cache()
+
+    set_pipeline_prefill(model, is_prefill=True)
+    set_pipeline_queue_sends(model, queue_sends=True)
+
+    outer_gen = cast(
+        "Generator[tuple[Literal['chunk'], int, mx.array] | tuple[Literal['done'], None, None], None, None]",
+        _pipeline_parallel_prefill_steps(
+            model,
+            prompt_tokens,
+            cache,
+            prefill_step_size,
+            KV_GROUP_SIZE,
+            KV_BITS,
+            progress_callback,
+            distributed_prompt_progress_callback,
+            group,
+            interruptible=True,
+        ),
+    )
+    try:
+        kind, idx, chunk_tokens = next(outer_gen)
+    except StopIteration as exc:
+        # Genuinely unreachable given the is_pipeline/num_tokens>=
+        # prefill_step_size check above (which guarantees at least one
+        # real chunk) -- fail loud rather than silently swallow a
+        # contract violation in _pipeline_parallel_prefill_steps.
+        set_pipeline_queue_sends(model, queue_sends=False)
+        set_pipeline_prefill(model, is_prefill=False)
+        raise RuntimeError(
+            "prefill_interruptible_start: _pipeline_parallel_prefill_steps "
+            "yielded no chunks despite num_tokens >= prefill_step_size -- "
+            "this violates that generator's own documented contract"
+        ) from exc
+    assert kind == "chunk" and idx == 0, (
+        f"prefill_interruptible_start: expected first yield to be "
+        f"('chunk', 0, ...), got ({kind!r}, {idx!r}, ...)"
+    )
+
+    session = ResumablePrefillSession(
+        inner_model=inner_model,  # type: ignore[reportArgumentType]
+        inputs=cast("mx.array", chunk_tokens),
+        cache=cache,
+    )
+    return ChunkedPrefillDrive(
+        model=model,
+        outer_gen=outer_gen,
+        session=session,
+        chunk_index=0,
+        cache=cache,
+        num_tokens=num_tokens,
+        start_time=start_time,
+        has_ssm=has_ssm,
+        snapshots=snapshots,
+    )
+
+
+def prefill_interruptible_advance(
+    drive: ChunkedPrefillDrive,
+) -> "ResumablePrefillSession | tuple[float, int, list[CacheSnapshot]]":
+    """Resume ``drive.outer_gen`` after ``drive.session`` reached
+    ``done=True`` (caller-enforced invariant -- see class docstring).
+    Two real outcomes, matching ``_pipeline_parallel_prefill_steps``'s
+    own documented yield shape:
+
+    - Another real chunk remains: constructs and returns a NEW
+      ``ResumablePrefillSession`` for it (also updates ``drive.session``/
+      ``drive.chunk_index`` in place) -- the caller must register this
+      new session (``Rank0/Rank1BatchedDecodeGlue.register_prefill_
+      session``) before this same tick's control returns, per Hazard
+      2's fix (see design doc's 2026-08-07 entry: since ``tick()`` is
+      the only recv call site on either rank, running this
+      synchronously and inline -- never scheduled/deferred -- is what
+      makes registering-before-the-next-advance-arrives provably true,
+      not merely likely).
+    - The drive is genuinely done: the outer generator's OWN trailing
+      code (the post-loop single final-token forward pass, final
+      flush/eval) has ALREADY run, byte-for-byte identical to
+      ``prefill()``'s own eager path, BEFORE this function ever sees
+      the ``(\"done\", None, None)`` yield -- see
+      ``_pipeline_parallel_prefill_steps``'s own tail. This function
+      then runs the SAME correctness-critical tail ``prefill()`` itself
+      runs (pipeline-flag reset, cache trim/rollback, tps calculation)
+      and returns the identical ``(tokens_per_sec, num_tokens,
+      snapshots)`` shape -- indistinguishable to any caller from what
+      the synchronous ``prefill()`` path would have produced for this
+      SAME request."""
+    if not drive.session.done:
+        raise PrefillSessionError(
+            "prefill_interruptible_advance: called with drive.session.done="
+            "False -- the caller must finish advancing the CURRENT "
+            "session (via its own advance() calls) before resuming the "
+            "outer generator; resuming early would desync the outer "
+            "generator's own per-chunk bookkeeping from the real forward "
+            "pass state"
+        )
+    try:
+        kind, idx, payload = drive.outer_gen.send(None)
+    except StopIteration as exc:
+        raise RuntimeError(
+            "prefill_interruptible_advance: _pipeline_parallel_prefill_steps "
+            "raised StopIteration without first yielding a ('done', ...) "
+            "step -- this violates that generator's own documented contract"
+        ) from exc
+
+    if kind == "chunk":
+        chunk_tokens = cast("mx.array", payload)
+        new_session = ResumablePrefillSession(
+            inner_model=drive.session.inner_model,
+            inputs=chunk_tokens,
+            cache=drive.cache,
+        )
+        drive.session = new_session
+        drive.chunk_index = cast(int, idx)
+        return new_session
+
+    assert kind == "done"
+    set_pipeline_queue_sends(drive.model, queue_sends=False)
+    set_pipeline_prefill(drive.model, is_prefill=False)
+
+    # Cache trim/rollback: mirrors prefill()'s own tail EXACTLY for the
+    # is_pipeline+chunked branch, where _trim_n is unconditionally 1 (the
+    # eligibility gate in prefill_interruptible_start already guarantees
+    # is_pipeline and num_tokens >= prefill_step_size, so prefill()'s own
+    # `1 if (is_pipeline and num_tokens >= prefill_step_size) else 2`
+    # always resolves to 1 on this path).
+    with mx.stream(generation_stream):
+        pre_gen = deepcopy(drive.snapshots[-2]) if drive.has_ssm else None
+        for i, c in enumerate(drive.cache):
+            if drive.has_ssm and isinstance(c, (ArraysCache, RotatingKVCache)):
+                assert pre_gen is not None
+                if pre_gen.states[i] is not None:
+                    drive.cache[i] = deepcopy(pre_gen.states[i])  # type: ignore
+            else:
+                assert not isinstance(c, (ArraysCache, RotatingKVCache))
+                c.trim(1)  # type: ignore[reportUnknownMemberType]
+
+    elapsed = time.perf_counter() - drive.start_time
+    tokens_per_sec = drive.num_tokens / elapsed if elapsed > 0 else 0.0
+    logger.debug(
+        f"Chunked prefill complete: {drive.num_tokens} tokens in "
+        f"{elapsed:.2f}s ({tokens_per_sec:.1f} tok/s)"
+    )
+    final_snapshots = drive.snapshots[:-1] if drive.snapshots else []
+    return tokens_per_sec, drive.num_tokens, final_snapshots
 
 
 def prefill_batched(

@@ -43,6 +43,7 @@ from exo.worker.engines.mlx.constants import (
     MAX_TOKENS,
 )
 from exo.worker.engines.mlx.generator.generate import (
+    ChunkedPrefillDrive,
     ban_token_ids,
     eos_ids_from_tokenizer,
     extract_top_logprobs,
@@ -604,15 +605,37 @@ class _DeferredPrefill:
     time inside ``_step_batched_decode`` -- keeps this fix a pure
     reordering of WHEN that existing, already-correct code runs, not
     a reimplementation of it.
+
+    ``drive`` (2026-08-07, Phase 2 live-wiring): when
+    ``_run_deferred_prefill_for_grant`` decides this request's real
+    prefill IS chunk-interruptible (``prefill_interruptible_start``
+    returned non-``None``), the resulting ``ChunkedPrefillDrive`` is
+    stored HERE rather than in a second, separately-keyed dict --
+    per a ``consult`` review flagging the two-dict-per-request shape
+    as a real desync risk (cancellation/failure paths only need to
+    reason about ONE bookkeeping structure per request_id/uid). Kept
+    on THIS object (not popped into ``_active_tasks``) specifically
+    because ``_DeferredPrefill`` already IS this request's single
+    source of truth for "prefill in progress, not yet admitted" --
+    ``None`` here means either "prefill hasn't started" or "this
+    request's prefill is NOT chunk-interruptible and ran/will run
+    synchronously via ``run_prefill()`` instead," matching the
+    existing ``run_prefill`` closure's own unconditional presence.
     """
 
     run_prefill: Callable[[], tuple[float, int, list[CacheSnapshot], "KVCacheType"]]
+    try_start_chunked_prefill: Callable[[], "ChunkedPrefillDrive | None"]
+    finalize_prefill: Callable[
+        [float, int, list[CacheSnapshot]],
+        tuple[float, int, list[CacheSnapshot], "KVCacheType"],
+    ]
     task_params: TextGenerationTaskParams
     last_tokens: mx.array
     sampler: Callable[[mx.array], mx.array]
     max_tokens: int
     on_generation_token: Callable[[], None] | None
     cache_slot: int
+    drive: "ChunkedPrefillDrive | None" = field(default=None, init=False)
 
 
 @dataclass
@@ -1273,6 +1296,54 @@ class ExoBatchGenerator:
 
         last_tokens = prompt_tokens[-2:]
 
+        def _finalize_prefill(
+            _prefill_tps: float,
+            _prefill_tokens: int,
+            cache_snapshots: list[CacheSnapshot],
+        ) -> tuple[float, int, list[CacheSnapshot], KVCacheType]:
+            """Shared tail for BOTH the synchronous (``run_prefill``) and
+            chunked-interruptible (``try_start_chunked_prefill`` +
+            ``_advance_chunked_prefill_drive``) real prefill paths --
+            2026-08-07, extracted verbatim (byte-for-byte, zero logic
+            change) from this closure's own pre-existing tail so both
+            paths apply the IDENTICAL RotatingKVCache clamp and
+            prefix-cache write-back, never duplicated or allowed to
+            drift apart.
+            """
+            from exo.worker.engines.mlx.trace import T
+
+            with T("submit.clamp_rotating_caches"):
+                for c in cache:
+                    if (
+                        isinstance(c, RotatingKVCache)
+                        and c.keys is not None
+                        and c.values is not None
+                        and c.keys.shape[2] > c.max_size
+                    ):
+                        trim_size = c.keys.shape[2] - c.max_size
+                        c.keys = c._trim(trim_size, c.keys)
+                        c.values = c._trim(trim_size, c.values)
+                        c._idx = c.max_size
+
+            with T("submit.save_prefix_cache"):
+                if not is_bench:
+                    min_prefix_hit_length = max(
+                        1000, system_prompt_token_count(task_params, self.tokenizer)
+                    )
+                    self._save_prefix_cache(
+                        all_prompt_tokens,
+                        list(cache),
+                        cache_snapshots,
+                        prefix_hit_length,
+                        matched_index,
+                        min_prefix_hit_length,
+                        media_regions,
+                        task_params.low_priority,
+                        task_params.high_priority,
+                    )
+
+            return _prefill_tps, _prefill_tokens, cache_snapshots, cache
+
         def run_prefill() -> tuple[float, int, list[CacheSnapshot], KVCacheType]:
             from exo.worker.engines.mlx.trace import T
 
@@ -1333,40 +1404,55 @@ class ExoBatchGenerator:
                         snapshot_offset=prefix_hit_length,
                     )
 
-            with T("submit.clamp_rotating_caches"):
-                for c in cache:
-                    if (
-                        isinstance(c, RotatingKVCache)
-                        and c.keys is not None
-                        and c.values is not None
-                        and c.keys.shape[2] > c.max_size
-                    ):
-                        trim_size = c.keys.shape[2] - c.max_size
-                        c.keys = c._trim(trim_size, c.keys)
-                        c.values = c._trim(trim_size, c.values)
-                        c._idx = c.max_size
+            return _finalize_prefill(_prefill_tps, _prefill_tokens, cache_snapshots)
 
-            with T("submit.save_prefix_cache"):
-                if not is_bench:
-                    min_prefix_hit_length = max(
-                        1000, system_prompt_token_count(task_params, self.tokenizer)
-                    )
-                    self._save_prefix_cache(
-                        all_prompt_tokens,
-                        list(cache),
-                        cache_snapshots,
-                        prefix_hit_length,
-                        matched_index,
-                        min_prefix_hit_length,
-                        media_regions,
-                        task_params.low_priority,
-                        task_params.high_priority,
-                    )
+        def try_start_chunked_prefill() -> "ChunkedPrefillDrive | None":
+            """2026-08-07, Phase 2 live-wiring: mirrors ``run_prefill``'s
+            OWN vision/remote-prefill eligibility computation exactly --
+            chunked interruption only ever applies to the LOCAL
+            ``pipeline_parallel_prefill`` path (remote prefill has no
+            layer-segment concept at all; a vision request's
+            ``patch_embed_tokens`` context manager scoping isn't
+            threaded through ``prefill_interruptible_start`` and isn't
+            needed in practice since batched-decode eligibility already
+            excludes ``has_images`` requests upstream -- checked again
+            HERE, defensively, rather than trusting that upstream gate
+            alone). Returns ``None`` for every ineligible case (never
+            raises) -- ``_run_deferred_prefill_for_grant`` falls back to
+            the unmodified, synchronous ``run_prefill()`` above whenever
+            this returns ``None``, so this function's own eligibility
+            mistakes fail SAFE (slower, synchronous path) rather than
+            unsafe.
+            """
+            if vision is not None:
+                return None
+            uncached_count = len(prompt_tokens)
+            use_remote = (
+                uncached_count > REMOTE_PREFILL_MIN_TOKENS
+                and task_params.prefill_endpoint is not None
+            )
+            if use_remote:
+                return None
+            from exo.worker.engines.mlx.generator.generate import (
+                prefill_interruptible_start,
+            )
 
-            return _prefill_tps, _prefill_tokens, cache_snapshots, cache
+            return prefill_interruptible_start(
+                self.model,
+                self.tokenizer,
+                sampler,
+                prompt_tokens[:-1],
+                cache,
+                self.group,
+                on_prefill_progress,
+                distributed_prompt_progress_callback,
+                prefill_step_size=self.prefill_step_size,
+            )
 
         self._deferred_prefill_by_uid[uid] = _DeferredPrefill(
             run_prefill=run_prefill,
+            try_start_chunked_prefill=try_start_chunked_prefill,
+            finalize_prefill=_finalize_prefill,
             task_params=task_params,
             last_tokens=last_tokens,
             sampler=sampler,
@@ -3518,13 +3604,45 @@ class ExoBatchGenerator:
         """Shared grant-fulfillment logic for both ranks
         (2026-08-06 N=2 admission-race fix): looks up the
         ``_DeferredPrefill`` this rank registered at ``submit()``
-        time for ``grant.request_id``, runs its real prefill closure
-        NOW (synchronously, still inside the SAME ``step()`` call
-        that received the grant -- never deferred to a later loop
-        iteration, so nothing else can interleave wire traffic in
-        between), and folds the result into the batch via
-        ``enqueue_admission`` (rank 0) / ``stage_local_cache``
-        (rank 1).
+        time for ``grant.request_id`` and runs its real prefill --
+        via one of TWO paths, decided fresh on every grant (2026-08-07,
+        Phase 2 live-wiring):
+
+        1. Chunk-interruptible (``deferred.try_start_chunked_prefill()``
+           returns non-None): registers the FIRST real chunk's
+           ``ResumablePrefillSession`` with this rank's own glue
+           (``register_prefill_session``) and returns WITHOUT calling
+           ``enqueue_admission``/``stage_local_cache`` -- Hazard 1's
+           fix (caller-assumed-completion): nothing downstream can
+           mistake "a session was registered" for "this request's
+           prefill is done and ready to decode" because this method's
+           own return carries no such signal; ``_deferred_prefill_by_uid``
+           keeps this request's entry (NOT popped) exactly because its
+           prefill is still genuinely in progress across FUTURE ticks.
+           ``_step_batched_decode`` only calls ``enqueue_admission``/
+           ``stage_local_cache`` for THIS request once
+           ``prefill_interruptible_advance`` -- called from
+           ``_advance_chunked_prefill_drive`` -- reaches the real
+           ("done", ...) outer-generator yield, many ticks later.
+
+        2. Synchronous (chunking ineligible -- small prompt, remote
+           prefill, or the loaded model doesn't structurally support
+           ``_forward_steps`` yet): runs ``deferred.run_prefill()`` to
+           completion NOW, exactly as this method did before
+           2026-08-07, and immediately calls ``enqueue_admission``/
+           ``stage_local_cache`` -- zero behavior change for this case
+           (the ONLY case that has ever run on real production
+           hardware to date, since the mlx-lm submodule pin as of
+           2026-08-07 doesn't yet include DSv4's real ``_forward_steps``
+           split -- see this session's design doc entry for the
+           follow-up that closes that gap).
+
+        Both paths pop ``deferred`` from ``_deferred_prefill_by_uid``
+        ONLY once this request's real prefill has genuinely, fully
+        completed -- path 2 pops immediately (below); path 1's pop
+        happens later, inside ``_advance_chunked_prefill_drive``, at
+        the SAME point ``enqueue_admission``/``stage_local_cache``
+        finally runs for that request.
 
         2026-08-06 UPDATE (prefill forward-pass race fix -- see
         ``PrefillReadyMessage``'s own docstring in
@@ -3547,7 +3665,7 @@ class ExoBatchGenerator:
         immediately rather than silently parking, matching rank 0's
         own pre-existing fail-loud behavior for the identical case.
         """
-        deferred = self._deferred_prefill_by_uid.pop(grant.request_id, None)
+        deferred = self._deferred_prefill_by_uid.get(grant.request_id)
         if deferred is None:
             from exo.worker.engines.mlx.pp_batched_decode_glue import GlueError
 
@@ -3566,12 +3684,57 @@ class ExoBatchGenerator:
                 f"to run."
             )
 
+        drive = deferred.try_start_chunked_prefill()
+        if drive is not None:
+            deferred.drive = drive
+            if is_rank1:
+                assert self._batched_decode_rank1_glue is not None
+                self._batched_decode_rank1_glue.register_prefill_session(
+                    grant.request_id, drive.session
+                )
+            else:
+                assert self._batched_decode_rank0_glue is not None
+                self._batched_decode_rank0_glue.register_prefill_session(
+                    grant.request_id, drive.session, chunk_index=drive.chunk_index
+                )
+            return
+
+        # Path 2 (synchronous, unchanged behavior) -- pop NOW, this
+        # request's real prefill is about to run to full completion in
+        # this same call.
+        self._deferred_prefill_by_uid.pop(grant.request_id, None)
+
         # cache_snapshots is already consumed inside run_prefill()'s own
         # closure (it calls _save_prefix_cache with it before returning) --
         # not needed again here, hence the underscore-prefixed discard.
         prefill_tps, _prefill_tokens, _cache_snapshots, prefilled_cache = (
             deferred.run_prefill()
         )
+        self._admit_completed_prefill(
+            grant,
+            deferred,
+            prefill_tps=prefill_tps,
+            prefilled_cache=prefilled_cache,
+            is_rank1=is_rank1,
+        )
+
+    def _admit_completed_prefill(
+        self,
+        grant: "PrefillGrant",
+        deferred: "_DeferredPrefill",
+        *,
+        prefill_tps: float,
+        prefilled_cache: "KVCacheType",
+        is_rank1: bool,
+    ) -> None:
+        """Shared tail (2026-08-07) for BOTH real-prefill-completion
+        paths (the synchronous path in ``_run_deferred_prefill_for_grant``
+        and the chunk-drive path in ``_advance_chunked_prefill_drive``):
+        folds a genuinely-completed prefill's result into the batch via
+        ``enqueue_admission`` (rank 0) / ``stage_local_cache`` (rank 1)
+        -- extracted so both paths apply the IDENTICAL admission logic,
+        never duplicated or allowed to drift apart.
+        """
         active_task = self._active_tasks.get(grant.request_id)
         if active_task is not None:
             active_task.prefill_tps = prefill_tps
@@ -3592,6 +3755,100 @@ class ExoBatchGenerator:
                 initial_token=int(deferred.last_tokens[-1].item()),
                 sampler=deferred.sampler,
                 max_tokens=deferred.max_tokens,
+            )
+
+    def _advance_chunked_prefill_drive(
+        self, request_id: int, *, is_rank1: bool
+    ) -> None:
+        """Called from ``_step_batched_decode`` ONLY when this rank's
+        ``tick()`` just returned a non-None ``PrefillAdvanceCompleted``
+        for ``request_id`` (2026-08-07, Phase 2 live-wiring) -- i.e. the
+        CURRENT chunk's ``ResumablePrefillSession`` (owned by the glue,
+        driven entirely inside ``tick()``'s own single-writer call) just
+        reached ``done=True``. Resumes the outer
+        ``_pipeline_parallel_prefill_steps`` generator via
+        ``prefill_interruptible_advance`` and handles its two real
+        outcomes:
+
+        - Another real chunk remains: registers the NEW
+          ``ResumablePrefillSession`` with this rank's glue
+          SYNCHRONOUSLY, INLINE, before this method returns -- never
+          scheduled or deferred to a later loop turn. This is Hazard
+          2's fix for the inner-chunk-boundary case: since ``tick()``
+          is the ONLY real recv call site on either rank, and this
+          method runs to completion strictly between one ``tick()``
+          return and the next ``tick()`` call in the SAME runner event
+          loop, rank 1 physically cannot observe chunk i+1's FIRST
+          ``PrefillAdvanceMessage`` before registering chunk i+1's own
+          session, given ordered wire delivery -- provably, not merely
+          probably, true.
+        - The drive is genuinely done: ``prefill_interruptible_advance``
+          returns the real ``(tokens_per_sec, num_tokens, snapshots)``
+          tuple (the outer generator's own trailing code -- final
+          forward pass, flush, eval -- already ran before this point).
+          Runs ``deferred.finalize_prefill`` (the SAME RotatingKVCache
+          clamp + prefix-cache write-back tail the synchronous path
+          runs) and THEN calls ``_admit_completed_prefill`` -- the
+          request is NOW, for the first time, genuinely ready to
+          decode. Pops ``deferred`` from ``_deferred_prefill_by_uid``
+          here -- the SAME point ``_run_deferred_prefill_for_grant``'s
+          synchronous path pops it, so both paths free this bookkeeping
+          at the identical logical moment ("prefill fully done"), never
+          earlier.
+        """
+        from exo.worker.engines.mlx.generator.generate import (
+            prefill_interruptible_advance,
+        )
+        from exo.worker.engines.mlx.pp_batched_decode_glue import (
+            GlueError,
+            PrefillGrant,
+        )
+
+        deferred = self._deferred_prefill_by_uid.get(request_id)
+        if deferred is None or deferred.drive is None:
+            raise GlueError(
+                f"_advance_chunked_prefill_drive: rank "
+                f"{1 if is_rank1 else 0} tick() reported "
+                f"PrefillAdvanceCompleted for request_id={request_id} "
+                f"but no matching in-flight ChunkedPrefillDrive is "
+                f"registered -- this rank's own glue and "
+                f"ExoBatchGenerator's drive bookkeeping have desynced"
+            )
+        drive = deferred.drive
+        result = prefill_interruptible_advance(drive)
+
+        if isinstance(result, tuple):
+            prefill_tps, num_tokens, cache_snapshots = result
+            _prefill_tps, _prefill_tokens, _cache_snapshots, prefilled_cache = (
+                deferred.finalize_prefill(prefill_tps, num_tokens, cache_snapshots)
+            )
+            deferred.drive = None
+            self._deferred_prefill_by_uid.pop(request_id, None)
+            grant = PrefillGrant(
+                request_id=request_id,
+                cache_slot=deferred.cache_slot,
+                n_prompt_tokens=num_tokens,
+                single_request_fallback=False,
+            )
+            self._admit_completed_prefill(
+                grant,
+                deferred,
+                prefill_tps=_prefill_tps,
+                prefilled_cache=prefilled_cache,
+                is_rank1=is_rank1,
+            )
+            return
+
+        # Another real chunk remains: `result` is the NEW
+        # ResumablePrefillSession -- register it synchronously, inline,
+        # per this method's own docstring (Hazard 2 fix).
+        if is_rank1:
+            assert self._batched_decode_rank1_glue is not None
+            self._batched_decode_rank1_glue.register_prefill_session(request_id, result)
+        else:
+            assert self._batched_decode_rank0_glue is not None
+            self._batched_decode_rank0_glue.register_prefill_session(
+                request_id, result, chunk_index=drive.chunk_index
             )
 
     def _step_batched_decode(self) -> list[GenerationBatch.Response]:
@@ -3658,11 +3915,15 @@ class ExoBatchGenerator:
         set matters, to trigger the existing drain path.
         """
         if self._batched_decode_rank1_glue is not None:
-            grant, evicted_request_id, _prefill_advance_completed = (
+            grant, evicted_request_id, prefill_advance_completed = (
                 self._batched_decode_rank1_glue.tick(self.model)
             )
             if grant is not None:
                 self._run_deferred_prefill_for_grant(grant, is_rank1=True)
+            if prefill_advance_completed is not None:
+                self._advance_chunked_prefill_drive(
+                    prefill_advance_completed.request_id, is_rank1=True
+                )
             if evicted_request_id is not None:
                 return [
                     GenerationBatch.Response(
@@ -3677,11 +3938,16 @@ class ExoBatchGenerator:
             return []
 
         assert self._batched_decode_rank0_glue is not None
-        classified, _admitted_id, grant, _prefill_advance_completed = (
+        classified, _admitted_id, grant, prefill_advance_completed = (
             self._batched_decode_rank0_glue.tick(self.model)
         )
         if grant is not None:
             self._run_deferred_prefill_for_grant(grant, is_rank1=False)
+            return []
+        if prefill_advance_completed is not None:
+            self._advance_chunked_prefill_drive(
+                prefill_advance_completed.request_id, is_rank1=False
+            )
             return []
 
         responses: list[GenerationBatch.Response] = []

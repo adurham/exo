@@ -787,7 +787,26 @@ class Rank0BatchedDecodeGlue:
             self._reserved_slots.discard(pending.cache_slot)
             return {pending.request_id: admit_response}, pending.request_id, None, None
 
-        if self._pending_prefill:
+        # 2026-08-07 (Phase 2 live-wiring, priority-order guard -- per a
+        # consult review flagging a real gap in this method's own fixed
+        # priority order): a new prefill must NEVER be granted while a
+        # chunked-prefill session is already active on THIS rank. Without
+        # this guard, this branch (priority 2) would still fire ahead of
+        # the chunk-drive branch (priority 3) below for a SECOND pending
+        # request even while the FIRST request's multi-chunk drive is
+        # mid-flight -- issuing a real PrefillMessage/forward pass for
+        # request B while request A's chunk-drive still owns this rank's
+        # real wire state. register_prefill_session()'s own "at most one
+        # active session" guard would eventually catch this as a hard
+        # GlueError once request B's caller tried to register ITS first
+        # session, but that is a crash, not graceful backpressure --
+        # skipping this branch here means request B's PrefillMessage
+        # simply waits (stays queued in _pending_prefill) until request
+        # A's chunk-drive genuinely completes and clears
+        # _active_prefill_session, exactly matching this module's
+        # confirmed Phase 2 scope ("at most one request mid-chunked-
+        # prefill at a time").
+        if self._pending_prefill and self._active_prefill_session is None:
             head = self._pending_prefill[0]
             # A slot already reserved FOR THIS EXACT PENDING REQUEST
             # (tracked by `head.request_id in self._prefill_ready_deadline`
