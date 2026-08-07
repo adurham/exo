@@ -3005,6 +3005,122 @@ same scope-boundary precedent as
 MACHINE composition is correct without requiring the real DSv4
 `_forward_steps` split this session's submodule-pin gap still blocks).
 
+**mlx-lm SUBMODULE PIN ADVANCED, 2026-08-07, same day as the wire-
+ordering bug fix -- the gap this doc's earlier entry deliberately
+scoped OUT of the same session is now CLOSED, on user's explicit "go
+for it" for exactly this item.** `26eb90f0b` ("generator-core split of
+DeepseekV4Model.__call__ for chunked-prefill interruption" -- the
+commit built and standalone-verified back on 2026-08-06, previously
+stranded on fork branch `pp-layer-segment-wip`, itself based off an
+OLD pin, ~20 commits behind the fork's live `origin/main`) is now
+merged onto `adurham/mlx-lm`'s real `main`.
+
+**Method: surgical cherry-pick, not a full-branch rebase.** A first
+attempt at `git rebase origin/main` on the WHOLE `pp-layer-segment-wip`
+branch (29 commits by the rebase's own count) hit a real merge
+conflict on an UNRELATED commit (`fe468f9`, "Add pipelining for Qwen
+3.5") in a file (`qwen3_5.py`) `26eb90f0b` never touches -- root cause:
+`pp-layer-segment-wip`'s history contains many earlier fork-diagnostic
+commits (DSpark config fields, MoE histogram diagnostics, XTC
+threshold changes, etc.) that had ALREADY independently landed on
+`origin/main` via a different path, so replaying the whole branch
+tried to re-apply already-satisfied changes and spuriously
+conflicted. Aborted cleanly (`git rebase --abort`, verified clean
+tree), consulted before retrying, then re-scoped to the MINIMAL
+correct move: `git cherry-pick -x 26eb90f0b` directly onto a fresh
+branch off `origin/main`. Zero conflicts (confirmed via 2 explicit
+pre-checks per the `consult` review: no commit between the merge-base
+and `26eb90f0b`'s own parent touches `deepseek_v4.py` in a way its
+diff context depends on beyond what `origin/main` already has, and
+`26eb90f0b`'s only cross-reference (`hc_head`/`HyperHead`) is the
+hyper-connection head, unrelated to the DSpark speculative-draft
+config fields that WERE a real earlier concern).
+
+**Verification (matching the original 2026-08-06 commit's own
+methodology, re-run against the REAL current `origin/main` state, not
+assumed carried-over):** `python3 -c "import ast; ast.parse(...)"`
+syntax-valid; ruff check on `deepseek_v4.py` 160/160 identical to
+`origin/main`'s own baseline (zero new issues); basedpyright
+1483/1483 identical (the original commit's own explicit
+`Iterator[Union[...]]` return-type annotation carried through the
+cherry-pick cleanly, so the "4 new basedpyright errors" the original
+commit fixed never reappeared). Real module import + structural
+inspection against the ACTUAL file (not a stand-in, not memory of
+what the commit claimed): `_forward_steps` confirmed a genuine
+generator function via `inspect.isgeneratorfunction`, `interruptible`
+defaults to `False`, `__call__` retains its original signature
+exactly.
+
+**A SEPARATE, genuinely important discovery made verifying this: the
+mlx-lm submodule checkout (`~/repos/exo/mlx-lm/`) and the venv's
+INSTALLED `mlx_lm` package are two independently-versioned copies that
+can silently diverge** -- `uv.lock` pins mlx-lm to an exact git commit
+SHA (`d46ac149...`, itself an ancestor of `origin/main` but NOT the
+same commit, and NOT the exo submodule's pinned SHA either), and a
+plain `uv sync` resolves from THAT lockfile entry, not from whatever
+is checked out in `./mlx-lm/`. The first round of post-cherry-pick
+verification actually ran against the STALE, already-installed
+site-packages copy without noticing -- caught only because `diff`ing
+the submodule file against the installed file showed a real
+difference. `start_cluster.sh` (lines ~1156-1176) already has this
+EXACT footgun documented and solved: an explicit
+`uv pip install --no-deps --force-reinstall ./mlx-lm` step, run AFTER
+`uv sync`, force-installs from the vendored submodule checkout
+specifically because uv's version-string-based "already satisfied"
+check would otherwise silently skip reinstalling a same-version,
+different-content package (the exact mechanism that caused a real
+past incident, per that script's own inline comment: an affine-DSv4
+warmup crash where "the fix... was in the submodule but not in the
+lock-pinned venv copy"). Ran that identical command locally
+(`uv pip install --no-deps --force-reinstall ./mlx-lm`) to force the
+local venv to genuinely reflect the cherry-picked submodule state
+before re-verifying -- confirmed via `mlx_lm.models.deepseek_v4.__file__`
+resolving to the real installed copy and
+`supports_chunked_prefill_interruption(DeepseekV4Model)` now returning
+`True` against it. **The submodule gitlink remains the documented
+source of truth for what mlx-lm any given exo commit was reviewed
+against (`start_cluster.sh`'s own comment); `uv.lock`'s pinned SHA is
+informational/stale-tolerant only, since the deploy script always
+overrides it.**
+
+**Gate-safety tests updated to match the new reality** (not left
+stale asserting the old gap):
+`test_prefill_interruptible_start_gate_safety.py`'s
+`test_currently_pinned_mlx_lm_lacks_forward_steps` renamed to
+`test_currently_pinned_mlx_lm_has_forward_steps_on_deepseek_v4` and
+inverted to assert the NEW state (`hasattr(DeepseekV4Model,
+"_forward_steps")` is `True`, `supports_chunked_prefill_interruption`
+returns `True`) -- with an explicit docstring noting this test
+flipping back to failing is now the signal to watch for (pin
+regression), the inverse of before. The second test
+(`_returns_none_for_non_pipeline_sharded_call`, renamed from
+`_returns_none_when_model_lacks_forward_steps`) is unchanged in
+substance -- its guarantee (single-rank calls short-circuit before
+ever reaching the `_forward_steps` check) was never dependent on the
+pin gap and still holds identically.
+
+**Full worker suite `-m ""` re-run against the new real installed
+mlx-lm (not just the old stale copy): 360 passed, 1 skipped -- zero
+regressions**, first genuine confirmation this whole campaign's
+chunked-prefill live-wiring code (built and unit-tested entirely
+against synthetic fakes and the subprocess harness's own
+one-real-forward-pass-per-chunk stand-in model) doesn't blow up when
+the REAL, `_forward_steps`-capable `DeepseekV4Model` class is actually
+importable and structurally eligible.
+
+**Still explicitly NOT done, still gating real-hardware use:** the
+Mac Studio nodes have NOT been touched -- `start_cluster.sh` has not
+been run, no `git reset --hard` on either node, no cluster restart.
+`prefill_interruptible_start`/`prefill_interruptible_advance` are now
+structurally reachable in the LOCAL dev venv but have never executed
+against the real 166GB DeepSeek-V4-Flash checkpoint, the real 2-node
+distributed group, or real concurrent-decode-tick interleaving under
+contention -- exactly the gating items the original 2026-08-06 commit
+message already flagged and this entry does not change. That step
+needs its own explicit go-ahead per the standing rule (approving a
+code/config change is not approval to deploy/restart), not assumed
+from this pin-advance being approved.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure
