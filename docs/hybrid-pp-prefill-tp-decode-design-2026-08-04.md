@@ -2886,6 +2886,125 @@ ruff format all clean, diffed against baseline (zero new issues). Full
 worker suite `-m ""`: 359 passed (1 new), 1 skipped -- zero
 regressions.
 
+**REAL, PREVIOUSLY-UNDISCOVERED WIRE-ORDERING BUG found + fixed,
+2026-08-07, same follow-up session -- discovered building the
+genuinely-independent 2-process chunk-drive subprocess regression
+test the design doc's own risk-framing called for (mirroring
+`test_pp_admission_race_subprocess.py`'s established precedent for a
+DIFFERENT hazard). This is the single most consequential finding of
+this entire follow-up session: the shipped RANK0_LOCAL -> HANDOFF ->
+RANK1_DRAINING chunk-drive state machine had never once been exercised
+against REAL `mx.distributed.send`-issuing layers before this test --
+every prior hazard test in this campaign used fake/synthetic models
+with zero real wire traffic, and the mlx-lm submodule pin's own
+missing `_forward_steps` split meant this code path was 100%
+unreachable on real hardware regardless. The bug was latent in shipped
+code the entire time, invisible to every verification method used
+until a real 2-process, real-transport test finally ran it.**
+
+**Root cause (confirmed via `consult` review + direct code
+verification, not guessed):** `Rank0BatchedDecodeGlue.tick()`'s
+RANK0_LOCAL phase drives `ResumablePrefillSession.advance()`, whose
+own `_set_phase_and_resume` closure always set `queue_sends=True`.
+When `advance()` walks past this rank's own FINAL local layer, that
+layer's real `__call__`
+(`MetaFramedPipelineLastLayer`/`BatchedMetaFramedPipelineLastLayer`'s
+outside-`batch_step_scope` fallback) sent the metaframe HEADER
+synchronously (`mx.eval`'d immediately) while only QUEUING the
+activation tensor for later `flush_prefill_sends()` -- meaning the
+header hit the real wire the INSTANT that layer's forward pass
+evaluated, mid-RANK0_LOCAL, before `tick()`'s own `if done:` check even
+ran. Then, same tick, HANDOFF called `flush_prefill_sends()` (sending
+the queued activation) BEFORE RANK1_DRAINING sent the announcing
+`PrefillAdvanceMessage`. Real wire order rank 0 sent: `[metaframe
+header] -> [metaframe activation] -> [scheduler-wire PrefillAdvanceMessage
+header] -> [advance body]`. But `Rank1BatchedDecodeGlue.tick()` (the
+ONLY recv call site on rank 1) unconditionally starts EVERY call with
+`recv_header()`, expecting the scheduler-wire format FIRST -- exactly
+reversed relative to what rank 0 actually sent. Confirmed with
+certainty (not inferred) by cross-referencing the crash: rank 1's
+`recv_header()` raised `SchedulerWireProtocolError: received 3, this
+rank expects 1` -- `3` is `METAFRAME_PROTOCOL_VERSION`'s exact value
+(`pp_metaframe.py`), meaning rank 1 had literally read a real
+metaframe header's leading int32 as a bogus scheduler-wire version
+field. `mx_distributed.send`/`recv` share one untagged ring-group
+stream between BOTH protocols (verified directly: `send_header`/
+`send_metaframe` both just call `mx.distributed.send`+`mx.eval` on the
+SAME group, zero tagging) -- so wire ORDER between the two protocols
+is a real, load-bearing invariant, not an implementation detail.
+
+**Fix (3 design rounds via `consult`, the same discipline as the rest
+of this campaign):** additive, non-breaking. `ForwardStepInfo` gained
+a new `defer_header: bool` field (default `False` -- every EXISTING
+caller, including decode's own separate, unrelated,
+already-hardware-verified use of `queue_sends=True`, is byte-for-byte
+unaffected). A new, SEPARATE queue (`_pending_prefill_metaframe_sends`
+in `auto_parallel.py`, deliberately not merged into the existing
+`_pending_prefill_sends` -- keeping them separate makes "can a
+decode-queued send and a chunk-drive deferred pair ever coexist in one
+list" trivially false by construction rather than a fact requiring
+call-site-discipline reasoning) holds the (header, table, activation)
+triple together when `defer_header=True`, flushed by a new
+`flush_prefill_metaframe_sends()` in strict FIFO order.
+`ResumablePrefillSession.advance()` (the ONLY real caller of this
+whole mechanism, per an explicit grep-confirmed audit) now sets
+`defer_header=True`. `Rank0BatchedDecodeGlue.tick()`'s HANDOFF phase
+no longer flushes anything -- the flush was MOVED to fire strictly
+AFTER RANK1_DRAINING's `send_prefill_advance_message()` call (guarded
+by a new `just_handed_off` local, so it only fires on the exact tick
+that transitions handoff->rank1_draining, never on later advance-only
+ticks within the same chunk). This restores the wire order rank 1
+already, correctly, expects: `[scheduler-wire header] -> [advance
+body] -> [metaframe header] -> [metaframe activation]`.
+
+**Verification:** BOTH halves of the fix confirmed independently
+load-bearing by reverting each ALONE and confirming a real subprocess
+crash with the EXACT predicted signature, then restoring: reverting
+`defer_header=True` back to `False` reproduces the original
+`SchedulerWireProtocolError: received 3, expects 1` crash across all 5
+seeds; reverting ONLY the flush-ordering (keeping `defer_header=True`
+but flushing at the old HANDOFF call site again) produces a DIFFERENT,
+equally clean fault (`MetaFrame protocol version mismatch: received 1,
+this build expects 3` -- the queue never drains, so the NEXT real
+chunk's metaframe reads misaligned) -- proving neither half of the fix
+alone is sufficient, exactly as a `consult` review warned. Full
+worker suite `-m ""` (including the new subprocess test, run across
+all 5 independent seeds): 360 passed (1 new), 1 skipped -- zero
+regressions. Whole-repo basedpyright (9348/9348) and ruff check
+(3849/3849) unchanged against baseline; all touched production files
+individually diffed against baseline too (0 new issues each).
+
+**Real TEST-HARNESS bugs found and fixed WHILE validating the
+production fix** (worth recording distinctly from the production bug
+above, since conflating the two would misattribute root cause): the
+new subprocess worker's own request-D admission tail on rank 1 was
+missing a `stage_local_cache()` call entirely (production's REAL
+`_admit_completed_prefill` shared tail calls it; the worker's first
+draft didn't, caught immediately by the glue's own pre-existing
+fail-loud `GlueError` -- "no staged local prefilled cache" -- which is
+exactly what that guard exists to catch); and a genuine `cache_slot`
+collision between request A (slot 0, hardcoded) and request E (also
+hardcoded to slot 0) meant E's `PrefillMessage` could never be granted
+(silently blocked forever behind the priority-order guard's own
+correct "slot busy" check) -- fixed by giving E `cache_slot=2` and
+raising `max_concurrency` to 3 (A+D+E all genuinely concurrent in this
+test's scenario). Both were real bugs in the NEW test code, not in
+anything this campaign has shipped to `main` before this session.
+
+**New test file
+`test_pp_chunk_drive_subprocess.py`/`_pp_chunk_drive_subprocess_worker.py`
+now the PERMANENT regression gate** for this wire-ordering invariant --
+mirrors `test_pp_admission_race_subprocess.py`'s own established
+"real 2-process, genuinely-independent-per-rank-schedule" pattern
+exactly, scoped to the chunk-drive registration-ordering concern
+specifically (a synthetic one-real-forward-pass-per-chunk wrapper
+around each rank's OWN real, metaframe-layer-patched half-model --
+same scope-boundary precedent as
+`test_pp_pipeline_parallel_prefill_session_integration.py`'s own
+`_InterruptibleLlamaWrapper`, proving the session/glue/wire STATE
+MACHINE composition is correct without requiring the real DSv4
+`_forward_steps` split this session's submodule-pin gap still blocks).
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure

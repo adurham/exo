@@ -138,7 +138,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 import mlx.core as mx
 
-from exo.worker.engines.mlx.auto_parallel import flush_prefill_sends
+from exo.worker.engines.mlx.auto_parallel import flush_prefill_metaframe_sends
 from exo.worker.engines.mlx.pp_batched_decode_adapter import (
     AdmitResponse,
     BatchedDecodeResponseAdapter,
@@ -947,6 +947,7 @@ class Rank0BatchedDecodeGlue:
             if advance_this_tick:
                 self._prefill_favor_decode_next = True
                 request_id, prefill_session = self._active_prefill_session
+                just_handed_off = False
 
                 if self._prefill_phase == "rank0_local":
                     # Advance ONLY this rank's own local session --
@@ -968,19 +969,33 @@ class Rank0BatchedDecodeGlue:
                     # THIS SAME tick -- no wasted tick transitioning.
 
                 if self._prefill_phase == "handoff":
-                    # Rank 0's own local forward pass for this chunk
-                    # is done -- its FINAL layer queued the activation
-                    # send (queue_sends=True, set by
-                    # ResumablePrefillSession.advance's own
-                    # set_forward_step_info call). flush_prefill_sends()
-                    # is what ACTUALLY puts it on the wire -- closes
-                    # the second real bug found in this audit (nothing
-                    # previously called this after a chunked-prefill
-                    # session's queued send; the activation would have
-                    # sat queued forever, and rank 1 would have hung
-                    # on its recv_metaframe regardless of anything else
-                    # this redesign fixes).
-                    flush_prefill_sends()
+                    # 2026-08-07 (wire-ordering bug fix, found via a
+                    # real 2-process subprocess test driving REAL
+                    # wire-sending layers through this exact path for
+                    # the first time -- no earlier test in this
+                    # campaign ever exercised a real mx.distributed.send
+                    # here, and the mlx-lm submodule pin's own missing
+                    # _forward_steps split meant this code was 100%
+                    # unreachable on real hardware regardless). This
+                    # rank's own final local layer for this chunk
+                    # ALREADY queued its header+table+activation
+                    # together (ForwardStepInfo.defer_header=True, set
+                    # by ResumablePrefillSession.advance's own
+                    # set_forward_step_info call) instead of sending
+                    # the header eagerly -- the flush that actually
+                    # puts them on the wire happens further below,
+                    # AFTER the first send_prefill_advance_message()
+                    # call, not here. Sending the metaframe BEFORE any
+                    # scheduler-wire control message announces it would
+                    # land on rank 1's wire ahead of anything its
+                    # tick() dispatcher has been told to expect --
+                    # rank 1's own recv_header() unconditionally reads
+                    # a scheduler-wire header FIRST on every tick(), so
+                    # metaframe bytes must never arrive except INSIDE
+                    # the handler that scheduler-wire message dispatches
+                    # into. See flush_prefill_metaframe_sends()'s own
+                    # docstring for the full invariant.
+                    #
                     # Ceiling division: rank 1's session needs exactly
                     # this many real advance() calls to walk its own
                     # peer_prefill_layer_count layers at
@@ -995,6 +1010,7 @@ class Rank0BatchedDecodeGlue:
                         // self._prefill_advance_max_layers
                     )
                     self._prefill_phase = "rank1_draining"
+                    just_handed_off = True
                     # Falls through to "rank1_draining" handling below
                     # on THIS SAME tick.
 
@@ -1029,6 +1045,27 @@ class Rank0BatchedDecodeGlue:
                 send_prefill_advance_message(
                     advance_message, dst=self.dst_rank, group=self.group
                 )
+                if just_handed_off:
+                    # THE fix: the metaframe (header+table+activation)
+                    # this rank's own final local layer queued back in
+                    # RANK0_LOCAL is flushed HERE -- strictly AFTER the
+                    # send_prefill_advance_message() call immediately
+                    # above -- so it lands on the wire in the exact
+                    # order rank 1's tick() dispatcher expects: the
+                    # announcing scheduler-wire header first, THEN the
+                    # metaframe. Only fires on the SAME tick that just
+                    # transitioned handoff->rank1_draining (guarded by
+                    # just_handed_off) -- every SUBSEQUENT
+                    # rank1_draining advance within a multi-advance
+                    # chunk has nothing new queued (this rank's own
+                    # local forward pass for this chunk already fully
+                    # completed back in RANK0_LOCAL; only rank 1 has
+                    # remaining local layers to walk), so calling this
+                    # unconditionally every rank1_draining tick would
+                    # be a harmless no-op in practice (the queue would
+                    # already be empty) but is guarded explicitly
+                    # anyway to keep this call site's intent legible.
+                    flush_prefill_metaframe_sends()
                 self._prefill_rank1_advances_remaining -= 1
                 if self._prefill_rank1_advances_remaining == 0:
                     # Rank 1 has now received exactly enough advances

@@ -76,6 +76,7 @@ import mlx.nn as nn
 from exo.worker.engines.mlx.auto_parallel import (
     CustomMlxLayer,
     _LayerCallable,
+    _pending_prefill_metaframe_sends,
     _pending_prefill_sends,
 )
 
@@ -190,11 +191,34 @@ class ForwardStepInfo:
     applied.
     """
 
-    __slots__ = ("phase", "queue_sends")
+    __slots__ = ("phase", "queue_sends", "defer_header")
 
-    def __init__(self, *, phase: ForwardPhase, queue_sends: bool) -> None:
+    def __init__(
+        self,
+        *,
+        phase: ForwardPhase,
+        queue_sends: bool,
+        defer_header: bool = False,
+    ) -> None:
         self.phase = phase
         self.queue_sends = queue_sends
+        # 2026-08-07 (chunk-drive wire-ordering bug fix, see
+        # MetaFramedPipelineLastLayer.__call__'s own comment at its
+        # queue_sends branch for the full incident). Additive,
+        # defaults to False everywhere it isn't explicitly set to
+        # True -- every EXISTING caller (decode's own per-step queued
+        # send, which this whole mechanism was originally built for)
+        # is completely unaffected; only ResumablePrefillSession's
+        # chunk-drive advance() call opts in. Meaningful ONLY when
+        # queue_sends is also True (mirrors a 3-state policy --
+        # queue_sends=False: send immediately; queue_sends=True,
+        # defer_header=False: header eager/activation deferred
+        # (decode's existing, unchanged behavior); queue_sends=True,
+        # defer_header=True: BOTH header and activation deferred,
+        # for a caller that itself controls exactly when the deferred
+        # pair is allowed to hit the wire -- see
+        # flush_prefill_metaframe_sends() in auto_parallel.py).
+        self.defer_header = defer_header
 
 
 _forward_step_info_context: ContextVar["ForwardStepInfo"] = ContextVar(
@@ -241,7 +265,9 @@ _FORWARD_STEP_INFO_DEFAULT = ForwardStepInfo(
 )
 
 
-def set_forward_step_info(*, phase: ForwardPhase, queue_sends: bool) -> None:
+def set_forward_step_info(
+    *, phase: ForwardPhase, queue_sends: bool, defer_header: bool = False
+) -> None:
     """Set the current forward pass's phase/queue_sends for
     ``MetaFramedPipelineLastLayer``/``BatchedMetaFramedPipelineLastLayer``
     to read. Caller's responsibility to use ``copy_context().run(...)``
@@ -250,7 +276,7 @@ def set_forward_step_info(*, phase: ForwardPhase, queue_sends: bool) -> None:
     unsafe for a paused generator sharing a thread with interleaved
     work."""
     _forward_step_info_context.set(
-        ForwardStepInfo(phase=phase, queue_sends=queue_sends)
+        ForwardStepInfo(phase=phase, queue_sends=queue_sends, defer_header=defer_header)
     )
 
 
@@ -821,7 +847,28 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
                 extra_dim=extra_dim,
             )
             dst = (self.r + 1) % self.s
-            if step_info.queue_sends:
+            if step_info.queue_sends and step_info.defer_header:
+                # 2026-08-07 (chunk-drive wire-ordering bug fix): a
+                # caller that needs this rank's LOCAL forward pass to
+                # produce ZERO wire traffic until it explicitly decides
+                # to hand off (e.g. Rank0BatchedDecodeGlue.tick()'s
+                # RANK0_LOCAL phase, which must not put ANYTHING on the
+                # wire before its own HANDOFF/RANK1_DRAINING phases
+                # have sent the announcing PrefillAdvanceMessage --
+                # found via a real 2-process subprocess test: the
+                # eager header send below would otherwise land on the
+                # wire BEFORE rank 1's tick() dispatcher has any
+                # announced control message to receive it under,
+                # corrupting rank 1's very next recv_header() call,
+                # which unconditionally expects a scheduler-wire
+                # header first). Queues header+table+activation
+                # TOGETHER; the caller is responsible for calling
+                # flush_prefill_metaframe_sends() at the correct point
+                # in ITS OWN protocol (see that function's docstring).
+                _pending_prefill_metaframe_sends.append(
+                    (header, table, output_to_send, dst, self.group)
+                )
+            elif step_info.queue_sends:
                 # Match PipelineLastLayer's queued-send semantics exactly:
                 # defer the ACTIVATION send (reusing the existing shared
                 # queue), but the metadata frame is small and must arrive

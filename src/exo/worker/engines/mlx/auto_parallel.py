@@ -148,6 +148,55 @@ def clear_prefill_sends() -> None:
     _pending_prefill_sends.clear()
 
 
+# 2026-08-07 (chunk-drive wire-ordering bug fix): a SEPARATE queue
+# from ``_pending_prefill_sends`` above, specifically for a caller
+# that needs BOTH the metaframe header AND the activation tensor
+# fully deferred together (``ForwardStepInfo.defer_header=True`` --
+# see that field's own docstring in ``pp_metaframe.py``). Kept
+# structurally separate, not merged into ``_pending_prefill_sends``,
+# for two reasons found via a `consult` review of this fix: (1)
+# ``_pending_prefill_sends`` holds bare activation tensors with an
+# implicit "the header for this was already sent eagerly" contract --
+# mixing in entries that ALSO carry their own not-yet-sent header
+# would silently break that invariant for every EXISTING caller of
+# ``flush_prefill_sends()``; (2) keeping them separate makes "can a
+# decode-queued send and a chunk-drive deferred pair ever coexist in
+# the same list" trivially false by construction, rather than a fact
+# that has to be reasoned about from call-site discipline alone.
+_pending_prefill_metaframe_sends: list[
+    tuple[mx.array, mx.array, mx.array, int, mx.distributed.Group]
+] = []
+
+
+def flush_prefill_metaframe_sends() -> None:
+    """Send every queued (header, table, activation) triple, in the
+    exact order they were queued, header-then-table-then-activation
+    per entry -- restores the wire order rank 1's ``tick()`` dispatcher
+    actually expects (metaframe bytes only ever flow while both sides
+    are inside a handler dispatched by an announced control message;
+    see ``Rank0BatchedDecodeGlue.tick()``'s RANK1_DRAINING phase,
+    which calls this only AFTER ``send_prefill_advance_message`` has
+    already put the announcing control header on the wire). Caller's
+    responsibility to call this at the correct point in its own
+    protocol -- this function has no opinion about WHEN is correct,
+    only that queued entries are sent in FIFO order relative to each
+    other."""
+    for header, table, output, dst, group in _pending_prefill_metaframe_sends:
+        sent_header = mx.distributed.send(header, dst, group=group)
+        mx.eval(sent_header)
+        sent_table = mx.distributed.send(table, dst, group=group)
+        mx.eval(sent_table)
+        sent_output = mx.distributed.send(output, dst, group=group)
+        mx.eval(sent_output)
+    _pending_prefill_metaframe_sends.clear()
+
+
+def clear_prefill_metaframe_sends() -> None:
+    # Discard queued (header, table, activation) triples (e.g. on
+    # cancellation) -- mirrors clear_prefill_sends()'s own contract.
+    _pending_prefill_metaframe_sends.clear()
+
+
 class _LayerCallable(Protocol):
     """Structural type that any compatible layer must satisfy.
 

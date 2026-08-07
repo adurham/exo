@@ -248,7 +248,19 @@ class ResumablePrefillSession:
             # into by) whatever context an interleaved decode step's
             # OWN forward pass is using on this same thread. See module
             # docstring point 2.
-            set_forward_step_info(phase=phase_for_pause, queue_sends=True)
+            #
+            # 2026-08-07 (wire-ordering bug fix): defer_header=True --
+            # this class is used EXCLUSIVELY by the chunk-drive path
+            # (never by decode's own, separate use of queue_sends=True
+            # in pp_batched_decode_runtime.py), which needs BOTH the
+            # metaframe header AND activation deferred together until
+            # Rank0BatchedDecodeGlue.tick()'s HANDOFF/RANK1_DRAINING
+            # phases explicitly decide it's safe to put them on the
+            # wire -- see ForwardStepInfo.defer_header's own docstring
+            # for the full wire-ordering invariant this closes.
+            set_forward_step_info(
+                phase=phase_for_pause, queue_sends=True, defer_header=True
+            )
             return next(gen)
 
         layers_advanced = 0
