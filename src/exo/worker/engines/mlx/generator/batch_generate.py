@@ -4673,6 +4673,58 @@ class ExoBatchGenerator:
         return results
 
     def cancel(self, uids: list[int]) -> None:
+        """Cancel each uid's in-flight generation.
+
+        2026-08-07 (Phase 2 live-wiring follow-up) FAIL-STOP GUARD: a
+        cancel for a uid whose real prefill is CURRENTLY mid-chunk-drive
+        (``_deferred_prefill_by_uid[uid].drive is not None`` -- i.e. a
+        ``register_prefill_session()`` call already registered a live
+        session with this rank's glue, and that session has not yet
+        reached genuine completion) is a real, NOT-YET-DESIGNED
+        correctness gap -- explicitly flagged, not silently ignored, by
+        the design doc's own 2026-08-06 entry ("real cancellation/abort
+        handling for a request that dies mid-suspended-prefill ... is a
+        materially DIFFERENT risk class ... deserves its own dedicated
+        design/review round, not a same-session tail-end addition").
+        Silently popping ``_active_tasks``/``_mlx_gen`` here would leave
+        the glue's ``_active_prefill_session`` permanently occupied by a
+        request nothing will ever finish driving -- every SUBSEQUENT
+        ``register_prefill_session()`` call (for ANY future request,
+        not just this one) would then hit that method's own hard
+        "at most one active session" ``GlueError``, wedging the entire
+        batched-decode chunked-prefill path until process restart. Fail
+        loud HERE instead, at the actual point of the caller's mistake,
+        so the failure is attributable and immediate rather than a
+        confusing crash on some LATER, unrelated request's admission.
+
+        Cancelling a uid with no active drive (the ONLY case that has
+        ever run on real production hardware to date -- see the
+        mlx-lm submodule-pin gap noted in ``prefill_interruptible_
+        start``'s own docstring) is completely unaffected by this
+        guard and behaves exactly as before.
+        """
+        for uid in uids:
+            deferred = self._deferred_prefill_by_uid.get(uid)
+            if deferred is not None and deferred.drive is not None:
+                from exo.worker.engines.mlx.pp_batched_decode_glue import GlueError
+
+                raise GlueError(
+                    f"cancel(): uid={uid} has an active ChunkedPrefillDrive "
+                    f"mid-chunk-drive (chunk_index="
+                    f"{deferred.drive.chunk_index}) -- cancellation of a "
+                    f"request while its real prefill is suspended "
+                    f"across future ticks is NOT YET DESIGNED (see "
+                    f"docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md's "
+                    f"2026-08-06 entry: 'real cancellation/abort handling "
+                    f"... is a materially different risk class ... "
+                    f"deserves its own dedicated design/review round'). "
+                    f"Silently cancelling here would leave this rank's "
+                    f"glue permanently occupied "
+                    f"(register_prefill_session's own 'at most one active "
+                    f"session' invariant would then hard-crash the NEXT "
+                    f"unrelated request's admission instead of this one). "
+                    f"Refusing to guess at a safe cancellation."
+                )
         self._mlx_gen.remove(uids)
         for uid in uids:
             self._active_tasks.pop(uid, None)

@@ -2838,6 +2838,54 @@ rule) -- ONLY once real-cluster validation of everything built this
 session (and the earlier 2026-08-06 session) is separately scheduled
 and explicitly approved.
 
+**Other-3-call-sites audit — CLOSED, 2026-08-07, same follow-up
+session:** confirmed by direct diff inspection (`prefill()` itself has
+ZERO changes in the 2026-08-07 commit -- only new SIBLING functions
+`prefill_interruptible_start`/`prefill_interruptible_advance` were
+added) that the three OTHER real `prefill()`/`prefill_batched()` call
+sites this design doc's own risk-framing flagged as needing an audit
+(`mlx_generate`'s decode-path prefill, `_serial_prefill_fallback`'s
+per-stream fallback inside `prefill_batched`, and
+`disaggregated/serve.py`'s standalone prefill call) all still call the
+byte-for-byte UNCHANGED, synchronous `prefill()` -- none of them were
+ever at risk of silently picking up the new interruptible calling
+convention, since only `batch_generate.py`'s own
+`try_start_chunked_prefill` closure ever calls the new function. No
+code change was needed; this item is closed by construction.
+
+**Cancellation/abort fail-stop guard — DONE (partial), 2026-08-07, same
+follow-up session (`exo` main, same commit as the audit above).** The
+FULL cancellation/abort design (deferred-cancel-at-a-real-tick-boundary,
+proper `gen.close()`/`.throw()` + session deregistration + a wire-level
+abort signal to the peer rank) remains explicitly UNDESIGNED, per this
+entry's own earlier note -- that real design work still needs its own
+dedicated `consult` review round, not attempted here. What WAS added:
+`ExoBatchGenerator.cancel()` now raises `GlueError` immediately, loud
+and attributable, if any requested uid has an active
+`_DeferredPrefill.drive` (i.e. a chunk-drive session currently
+registered with the glue, not yet reaching genuine completion) --
+closing the concrete, immediate hazard of the ABSENCE of a real design:
+silently popping `_active_tasks`/`_mlx_gen` for such a uid today would
+leave `Rank0/Rank1BatchedDecodeGlue`'s own `_active_prefill_session`
+permanently occupied by a request nothing will ever finish driving,
+so the VERY NEXT unrelated request's `register_prefill_session()` call
+would hit that method's pre-existing hard "at most one active session"
+`GlueError` -- a confusing, unattributable crash on a completely
+different, innocent request, instead of a clear failure at the actual
+call site that made the real mistake. A uid with no active drive (the
+ONLY case that has ever run on real production hardware to date, per
+the submodule-pin gap above) is completely unaffected -- `cancel()`
+behaves exactly as before. New test
+(`test_cancel_refuses_a_uid_with_an_active_chunked_prefill_drive`,
+`test_batch_generate_chunked_prefill_live_wiring.py`) verified
+load-bearing by reverting the guard and confirming it fails loudly
+(`GlueError` is not raised; the request silently vanishes from
+bookkeeping while the glue's session stays permanently occupied --
+exactly the predicted hazard), then restoring. basedpyright/ruff check/
+ruff format all clean, diffed against baseline (zero new issues). Full
+worker suite `-m ""`: 359 passed (1 new), 1 skipped -- zero
+regressions.
+
 **Phase 3 — Micro-batch interleaving for decode throughput:** Once
 correctness is established at 2 concurrent requests, add the 2-stage
 micro-batch interleaving from Section 6.2 item 4, and THEN measure

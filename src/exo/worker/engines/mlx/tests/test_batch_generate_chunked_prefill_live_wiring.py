@@ -71,6 +71,7 @@ from exo.worker.engines.mlx.pp_batched_decode_adapter import (
     BatchedDecodeResponseAdapter,
 )
 from exo.worker.engines.mlx.pp_batched_decode_glue import (
+    GlueError,
     PrefillGrant,
     Rank0BatchedDecodeGlue,
 )
@@ -457,3 +458,71 @@ def test_advance_registers_next_chunk_session_before_returning() -> None:
     assert not glue.has_active_prefill_session()
     assert uid not in gen._deferred_prefill_by_uid
     assert glue.has_pending_admissions()
+
+
+def test_cancel_refuses_a_uid_with_an_active_chunked_prefill_drive() -> None:
+    """2026-08-07 fail-stop guard (Phase 2 live-wiring follow-up):
+    ``ExoBatchGenerator.cancel()`` must raise ``GlueError`` for a uid
+    whose ``_DeferredPrefill.drive`` is still active (i.e. registered
+    with the glue, not yet reaching genuine completion) -- rather than
+    silently popping ``_active_tasks``, which would leave
+    ``glue._active_prefill_session`` permanently occupied by a request
+    nothing will ever finish driving (a real correctness gap the
+    design doc's 2026-08-06 entry explicitly flagged as NOT YET
+    DESIGNED, not silently swept under a "just cancel it" shortcut).
+
+    Verified load-bearing: reverting the guard (restoring
+    ``cancel()``'s pre-2026-08-07 unconditional
+    ``self._mlx_gen.remove(uids)``/``_active_tasks.pop`` body) makes
+    this test FAIL LOUDLY -- no ``GlueError`` is raised, and the uid's
+    entry silently disappears from every bookkeeping structure while
+    ``glue.has_active_prefill_session()`` stays permanently ``True``
+    for a session no caller will ever advance again.
+    """
+    gen, glue = _make_rank0_generator_with_glue()
+    uid = _submit_one(gen)
+
+    drive = _make_drive(n_chunks=2, n_layers_per_chunk=3)
+    deferred = gen._deferred_prefill_by_uid[uid]
+    deferred.try_start_chunked_prefill = lambda: drive
+
+    grant = PrefillGrant(
+        request_id=uid,
+        cache_slot=deferred.cache_slot,
+        n_prompt_tokens=1,
+        single_request_fallback=False,
+    )
+    gen._run_deferred_prefill_for_grant(grant, is_rank1=False)
+    assert deferred.drive is not None
+    assert glue.has_active_prefill_session()
+
+    with pytest.raises(GlueError, match="active ChunkedPrefillDrive"):
+        gen.cancel([uid])
+
+    # THE fail-loud contract: the guard must refuse BEFORE touching
+    # any bookkeeping -- both the deferred entry and the glue's active
+    # session must be completely untouched by the refused call.
+    assert uid in gen._deferred_prefill_by_uid
+    assert gen._deferred_prefill_by_uid[uid].drive is drive
+    assert glue.has_active_prefill_session()
+    assert uid in gen._active_tasks
+
+    # A uid WITHOUT an active drive must remain cancellable, exactly
+    # as before this guard existed -- the guard is scoped to the real
+    # hazard only, never a blanket refusal.
+    task_params = TextGenerationTaskParams(
+        model=ModelId("test-model"),
+        input=[],
+        max_output_tokens=5,
+        temperature=0.0,
+        seed=0,
+    )
+
+    def _identity_all_sum(x: mx.array, **_: object) -> mx.array:
+        return x
+
+    with patch("mlx.core.distributed.all_sum", side_effect=_identity_all_sum):
+        uid2 = gen.submit(task_params, "A second, unrelated request")
+    assert gen._deferred_prefill_by_uid[uid2].drive is None
+    gen.cancel([uid2])
+    assert uid2 not in gen._active_tasks
