@@ -59,6 +59,10 @@ from exo.worker.engines.mlx.constants import (
     MAX_TOKENS,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.pp_metaframe import (
+    MetaFramedPipelineFirstLayer,
+    MetaFramedPipelineLastLayer,
+)
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -360,8 +364,47 @@ class PrefillCancelled(BaseException):
 
 
 def _has_pipeline_communication_layer(model: Model):
+    """Detects whether ``model`` has ANY real cross-rank pipeline
+    communication layer installed -- gates ``prefill()``'s choice of
+    ``pipeline_parallel_prefill()`` (real distributed chunked prefill)
+    vs. ``stream_generate()`` (single-rank path).
+
+    2026-08-06 REAL bug found (not hypothetical) auditing this
+    mechanism before wiring the chunk-drive fix into live serving:
+    this check ONLY matched the LEGACY ``PipelineFirstLayer``/
+    ``PipelineLastLayer`` classes, never
+    ``MetaFramedPipelineFirstLayer``/``MetaFramedPipelineLastLayer``
+    (``pp_metaframe.py``) or their ``Batched*`` subclasses
+    (``pp_batched_decode_layers.py``) -- because
+    ``MetaFramedPipelineFirstLayer`` does NOT subclass the legacy
+    ``PipelineFirstLayer`` (confirmed via ``class
+    MetaFramedPipelineFirstLayer(CustomMlxLayer)`` -- a DIFFERENT base
+    class entirely). This meant ``is_pipeline`` was ALWAYS ``False``
+    under ``EXO_PP_METAFRAME=1``/``EXO_PP_BATCHED_DECODE=1``, so
+    ``prefill()`` ALWAYS routed through ``stream_generate()`` and
+    ``pipeline_parallel_prefill()`` -- the ONLY thing that can ever
+    yield real chunk boundaries for the whole chunked-prefill
+    interruption mechanism built this session -- was NEVER reached,
+    regardless of anything else fixed. Confirmed SAFE to broaden (not
+    just convenient): the SAME session's earlier regression fix
+    (``set_pipeline_prefill``/``set_pipeline_queue_sends`` now also
+    updating the metaframe ``ForwardStepInfo`` contextvar, not just
+    the dead legacy ambient flags) means
+    ``pipeline_parallel_prefill``'s existing forward-pass calls
+    (``model(chunk_tokens, cache=...)``) ALREADY correctly drive
+    metaframe layers once this gate lets them run -- this fix was
+    genuinely blocked on that earlier one, not independent of it.
+    """
     for layer in model.layers:
-        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+        if isinstance(
+            layer,
+            (
+                PipelineFirstLayer,
+                PipelineLastLayer,
+                MetaFramedPipelineFirstLayer,
+                MetaFramedPipelineLastLayer,
+            ),
+        ):
             return True
     return False
 
