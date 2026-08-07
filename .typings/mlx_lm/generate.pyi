@@ -367,6 +367,8 @@ class GenerationBatch:
         token: int
         logprobs: mx.array
         finish_reason: Optional[str]
+        current_state: Optional[str]
+        match_sequence: Optional[List[int]]
         prompt_cache: Optional[List[Any]]
         all_tokens: Optional[List[int]]
         ...
