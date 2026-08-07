@@ -162,7 +162,11 @@ def main() -> int:
                 session=session, eos_ids=frozenset({999999})
             )
             glue = Rank0BatchedDecodeGlue(
-                session=session, adapter=adapter, dst_rank=1, group=group
+                session=session,
+                adapter=adapter,
+                dst_rank=1,
+                group=group,
+                peer_prefill_layer_count=1,
             )
 
             # submit()-shaped call #1: enqueue request A upfront.

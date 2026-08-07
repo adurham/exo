@@ -330,20 +330,35 @@ class PrefillAdvanceMessage:
       ``max_layers``: the layer-segment size for THIS advance --
         deliberately RANK-AGNOSTIC (a count, not a specific layer
         index), since rank 0 and rank 1 hold potentially DIFFERENT
-        per-rank layer counts (an uneven PP split) and each rank maps
-        this count to its own local ``ResumablePrefillSession.advance
-        (max_layers=...)`` call independently -- this message tells
-        rank 1 HOW MANY of its own local layers to advance by, not
-        WHICH global layer index to reach. Per the consult review: if
-        a future caller ever assumes equal per-rank splits instead,
-        that assumption must be asserted loudly at session-creation
-        time, not silently baked into this field's semantics.
+        per-rank layer counts (an uneven PP split -- CONFIRMED real
+        on the real 43-layer DSv4-Flash topology: exo's own
+        placement layer allocates layers per-node by MEMORY WEIGHT,
+        ``src/exo/master/placement_utils.py``'s
+        ``_allocate_and_validate_layers``, not an even split formula)
+        and each rank maps this count to its own local
+        ``ResumablePrefillSession.advance(max_layers=...)`` call
+        independently -- this message tells rank 1 HOW MANY of its
+        own local layers to advance by, not WHICH global layer index
+        to reach.
+      ``chunk_index``: 2026-08-06 (Phase 2 chunk-completion-barrier
+        fix -- see ``PrefillAdvanceAckMessage``'s own docstring for
+        the full incident this closes). Which REAL CHUNK this advance
+        belongs to, 0-based, monotonic per request. Because ranks can
+        hold DIFFERENT layer counts (confirmed above), one rank can
+        reach its own ``ResumablePrefillSession`` completion for a
+        chunk in FEWER real advances than its peer -- this field is
+        what lets a rank tell "an advance for a chunk I've already
+        finished locally, from BEFORE the two-sided completion
+        barrier cleared" apart from "a genuinely new chunk's first
+        advance," which ``advance_seq`` alone (monotonic but chunk-
+        agnostic) cannot distinguish.
     """
 
     step_id: int
     request_id: int
     advance_seq: int
     max_layers: int
+    chunk_index: int
 
     def __post_init__(self) -> None:
         if self.advance_seq < 1:
@@ -356,6 +371,12 @@ class PrefillAdvanceMessage:
             raise ProtocolViolationError(
                 f"PrefillAdvanceMessage.max_layers={self.max_layers} must "
                 f"be >=1 -- a zero/negative-layer advance is not a real "
+                f"occurrence this message should represent"
+            )
+        if self.chunk_index < 0:
+            raise ProtocolViolationError(
+                f"PrefillAdvanceMessage.chunk_index={self.chunk_index} must "
+                f"be >=0 -- a negative chunk index is not a real "
                 f"occurrence this message should represent"
             )
 

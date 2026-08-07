@@ -292,7 +292,11 @@ def main() -> int:  # noqa: C901 - one linear scenario, split would obscure it
                 session=session, eos_ids=frozenset({999999})
             )
             rank0_glue = Rank0BatchedDecodeGlue(
-                session=session, adapter=adapter, dst_rank=1, group=group
+                session=session,
+                adapter=adapter,
+                dst_rank=1,
+                group=group,
+                peer_prefill_layer_count=1,
             )
             # submit()-equivalent for request A, before the loop starts
             # (A is the already-running request; B is the mid-stream

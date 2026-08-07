@@ -134,10 +134,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import mlx.core as mx
 
+from exo.worker.engines.mlx.auto_parallel import flush_prefill_sends
 from exo.worker.engines.mlx.pp_batched_decode_adapter import (
     AdmitResponse,
     BatchedDecodeResponseAdapter,
@@ -181,6 +182,67 @@ if TYPE_CHECKING:
 class GlueError(RuntimeError):
     """Raised on any glue-layer invariant violation -- fail-stop by
     design, matching this whole session's established discipline."""
+
+
+def exchange_prefill_peer_layer_count(
+    *, local_layer_count: int, dst_rank: int, group: mx.distributed.Group
+) -> int:
+    """One-time, model-load-time exchange of each rank's REAL local
+    layer count for the chunked-prefill completion-barrier fix
+    (2026-08-06) -- called ONCE per model load (mirrors
+    ``pp_metaframe.handshake_metaframe_protocol``'s own call-once-at-
+    warmup discipline), NEVER per-request, and NEVER from inside
+    ``tick()`` (this is explicitly NOT part of that method's "ONLY
+    call site that ever touches mx.distributed.send/recv_like for
+    this session's PER-REQUEST control traffic" invariant -- this
+    runs before any session/glue object even exists).
+
+    WHY THIS EXISTS: ``PrefillAdvanceMessage.max_layers`` is rank-
+    agnostic (each rank advances its OWN local layer count) because
+    the two ranks' real layer counts are CONFIRMED uneven on the real
+    43-layer DSv4-Flash 2-rank topology (``src/exo/master/
+    placement_utils.py``'s ``_allocate_and_validate_layers`` allocates
+    layers per-node by MEMORY WEIGHT, not an even-split formula) --
+    22 layers on rank 0, 21 on rank 1 being the real, confirmed
+    numbers on the identical-hardware 2-node cluster this project
+    targets. Without knowing the PEER's real layer count, rank 0 (the
+    sole scheduler -- ``tick()``'s own single-writer design) cannot
+    know how many real ``PrefillAdvanceMessage``s it must keep sending
+    to fully advance rank 1's session for one chunk, even after rank
+    0's OWN local session has already reached completion -- a
+    consult-reviewed alternative to a heavier per-advance ack
+    round-trip protocol (rejected: doubles wire round-trips on the
+    prefill critical path for a purely session-lifetime problem that
+    a one-time, load-time exchange closes for free).
+
+    Uses plain point-to-point ``mx.distributed.send``/``recv_like``
+    (NOT ``all_sum``, unlike the metaframe version handshake this
+    mirrors -- ``all_sum`` only detects AGREEMENT on an already-shared
+    value; this needs each rank to actually LEARN the peer's
+    genuinely DIFFERENT value, which summing cannot express). Returns
+    the PEER's local layer count -- the caller is responsible for
+    storing it wherever the chunk-driving logic needs it (today:
+    ``Rank0BatchedDecodeGlue``'s own construction).
+    """
+    if group.size() <= 1:
+        return local_layer_count
+    local_arr = mx.array([local_layer_count], dtype=mx.int32)
+    sent = mx.distributed.send(local_arr, dst_rank, group=group)
+    mx.eval(sent)
+    peer_template = mx.zeros((1,), dtype=mx.int32)
+    peer_arr = mx.distributed.recv_like(peer_template, dst_rank, group=group)
+    mx.eval(peer_arr)
+    peer_layer_count = int(peer_arr.item())
+    if peer_layer_count < 1:
+        raise GlueError(
+            f"exchange_prefill_peer_layer_count: received a peer layer "
+            f"count of {peer_layer_count} from rank {dst_rank} -- a "
+            f"zero/negative layer count is not a real occurrence; the "
+            f"two ranks' handshake has desynced or one rank sent "
+            f"malformed data. Refusing to proceed with an invalid "
+            f"chunk-completion schedule."
+        )
+    return peer_layer_count
 
 
 # 2026-08-06 fix for the prefill forward-pass race (see
@@ -355,6 +417,17 @@ class Rank0BatchedDecodeGlue:
     adapter: BatchedDecodeResponseAdapter
     dst_rank: int
     group: mx.distributed.Group
+    # 2026-08-06, chunk-drive redesign: rank 1's REAL local layer
+    # count, learned via a REAL one-time model-load-time handshake
+    # (``exchange_prefill_peer_layer_count`` -- NOT a per-request wire
+    # message; this must already be known by the time ANY chunked-
+    # prefill session is registered). Required, no default -- an
+    # un-set value here is a genuine construction bug, not a "not yet
+    # in use" state to silently tolerate, since the whole point of
+    # this field is to make the chunk-completion arithmetic possible
+    # AT ALL (see ``_prefill_phase``'s own field comment for the full
+    # two-phase design this enables).
+    peer_prefill_layer_count: int
     _pending: list[_PendingAdmission] = field(default_factory=list)
     _pending_prefill: list[_PendingPrefill] = field(default_factory=list)
     # Slots a PrefillGrant has been issued for but whose matching
@@ -424,6 +497,60 @@ class Rank0BatchedDecodeGlue:
     # session's first advance always starts back at 1, matching
     # PrefillAdvanceMessage's own documented 1-based convention.
     _prefill_advance_seq: int = field(default=0, init=False)
+    # 2026-08-06, chunk-drive redesign: which chunk (0-based) this
+    # glue's OWN local session belongs to -- tagged on every
+    # PrefillAdvanceMessage this glue sends so rank 1 can distinguish
+    # "an advance for the chunk it's currently working on" from a
+    # stale/misrouted one.
+    _prefill_chunk_index: int = field(default=0, init=False)
+    # 2026-08-06, REAL bug found (not hypothetical) auditing this
+    # mechanism before wiring it into live serving, closed by this
+    # two-phase redesign: ``MetaFramedPipelineFirstLayer.__call__``
+    # (pp_metaframe.py) BLOCKS on ``recv_metaframe`` as the literal
+    # first op of rank 1's own first local layer -- rank 1 cannot make
+    # ANY progress on a chunk until rank 0 has walked its ENTIRE local
+    # layer stack for that chunk and its activation has actually been
+    # flushed onto the wire (``flush_prefill_sends()`` -- a SECOND real
+    # bug found in the same audit: nothing previously called it after
+    # a session's queued send). The original design sent rank 1 a
+    # ``PrefillAdvanceMessage`` on EVERY one of rank 0's own advance
+    # ticks, which would have made rank 1's tick() block hard, inside
+    # the SAME single-writer call site that must also service decode
+    # and admission, for the ENTIRE remaining duration of rank 0's
+    # local-layer traversal -- exactly the multi-second freeze this
+    # whole mechanism exists to prevent, just relocated onto rank 1.
+    #
+    # Fix (consult-reviewed: message-arrival-driven progress, not a
+    # shared tick counter, per that review's core principle -- adapted
+    # to exo's existing synchronous tick() transport rather than a
+    # full async/CQ-poll rewrite, which was explicitly out of scope):
+    # split ONE chunk's drive into two REAL phases rank 0's tick()
+    # walks through explicitly, never conflating them:
+    #   RANK0_LOCAL: tick() advances ONLY this rank's own local
+    #     session, sending NO PrefillAdvanceMessage at all -- rank 1
+    #     has nothing to do yet and must not be told otherwise.
+    #   HANDOFF: the instant rank 0's own session reaches done=True,
+    #     tick() calls flush_prefill_sends() (closes bug #2) so the
+    #     queued activation ACTUALLY reaches rank 1's blocking recv,
+    #     THEN computes exactly how many advances rank 1's session
+    #     needs from peer_layer_count (closes bug #1's the two ranks'
+    #     layer counts differ problem) and transitions to draining.
+    #   RANK1_DRAINING: tick() sends rank 1 EXACTLY the precomputed
+    #     number of PrefillAdvanceMessages, one per real tick (still
+    #     respecting the existing decode-interleave alternation) --
+    #     rank 1's own recv_metaframe has ALREADY unblocked by this
+    #     point (real data arrived in HANDOFF), so each advance now
+    #     makes REAL progress instead of hanging.
+    _prefill_phase: Literal["rank0_local", "handoff", "rank1_draining"] = field(
+        default="rank0_local", init=False
+    )
+    # Set at the RANK0_LOCAL -> HANDOFF transition: the exact number
+    # of PrefillAdvanceMessages RANK1_DRAINING must still send before
+    # this chunk is genuinely complete on BOTH ranks. Decremented by
+    # 1 on every advance sent; the chunk is done when this reaches 0
+    # (NOT when rank 0's own local session reaches done -- that only
+    # means rank 0's HALF is done, per the whole point of this fix).
+    _prefill_rank1_advances_remaining: int = field(default=0, init=False)
     # Layer-segment size for EVERY advance() call this glue drives --
     # module docstring's own "this glue does mechanics, not real
     # scheduling-fairness tuning" boundary: a fixed default here, not
@@ -442,7 +569,7 @@ class Rank0BatchedDecodeGlue:
     _prefill_favor_decode_next: bool = field(default=False, init=False)
 
     def register_prefill_session(
-        self, request_id: int, session: ResumablePrefillSession
+        self, request_id: int, session: ResumablePrefillSession, *, chunk_index: int
     ) -> None:
         """Register a live, not-yet-advanced ``ResumablePrefillSession``
         for ``tick()`` to drive -- the real caller (the not-yet-built
@@ -456,12 +583,29 @@ class Rank0BatchedDecodeGlue:
         call site that ever touches mx.distributed.send/recv_like"
         invariant, now extended to cover chunked-prefill advances too).
 
+        ``chunk_index``: the 0-based real chunk this session belongs
+        to, matching ``_pipeline_parallel_prefill_steps``'s own chunk
+        loop index exactly (the real caller drives that generator and
+        MUST pass its own current chunk index here, not guess). Tagged
+        onto every ``PrefillAdvanceMessage`` this glue sends for this
+        session so rank 1 can distinguish "an advance for the chunk
+        I'm currently working on" from a stale/misrouted one.
+
+        Resets this glue's chunk-drive state machine to
+        ``"rank0_local"`` -- see that phase's own field comment above
+        for the full two-phase design (RANK0_LOCAL -> HANDOFF ->
+        RANK1_DRAINING) this closes.
+
         Raises ``GlueError`` if a session is already registered and
         still in flight -- per the confirmed Phase 2 scope (module
         docstring above), at most ONE chunked prefill session may be
         active at a time; a second registration while one is already
         pending is a caller bug, not a real occurrence to silently
-        queue or overwrite.
+        queue or overwrite. Also raises if ``peer_layer_count`` was
+        never set on this glue (via the real model-load-time
+        ``exchange_prefill_peer_layer_count`` handshake) -- without it,
+        RANK1_DRAINING has no way to compute how many real advances
+        rank 1's session needs.
         """
         if self._active_prefill_session is not None:
             active_id, _ = self._active_prefill_session
@@ -472,8 +616,22 @@ class Rank0BatchedDecodeGlue:
                 f"(confirmed Phase 2 scope), refusing to silently queue "
                 f"or overwrite a second one"
             )
+        if self.peer_prefill_layer_count < 1:
+            raise GlueError(
+                f"register_prefill_session({request_id}): "
+                f"peer_prefill_layer_count="
+                f"{self.peer_prefill_layer_count} -- the real cross-rank "
+                f"layer-count handshake (exchange_prefill_peer_layer_count, "
+                f"called ONCE at model-load time) must run and set this "
+                f"field on the glue BEFORE any session is registered; "
+                f"RANK1_DRAINING cannot compute rank 1's real advance "
+                f"count without it."
+            )
         self._active_prefill_session = (request_id, session)
         self._prefill_advance_seq = 0
+        self._prefill_chunk_index = chunk_index
+        self._prefill_phase = "rank0_local"
+        self._prefill_rank1_advances_remaining = 0
 
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
@@ -751,22 +909,17 @@ class Rank0BatchedDecodeGlue:
                     None,
                 )
 
-        # 2026-08-06, Phase 2 Stage 3: if a chunked-prefill session is
-        # active, this tick either advances it by one real layer-
-        # segment (sending a PrefillAdvanceMessage) or runs a decode
-        # step -- alternating between the two when BOTH are available,
-        # for the exact same reason branch 2 above outranks decode for
-        # ADMISSION but must not starve it forever: an advance-always-
-        # wins policy would mean a long chunk's segment count (tens of
-        # advances) starves decode for the ENTIRE chunk, defeating
-        # this whole mechanism's purpose (the "prefill hogs the pipe
-        # for the whole chunk" problem this design exists to fix in
-        # the first place). Alternation is a placeholder policy --
-        # this glue does mechanics, not real scheduling-fairness
-        # tuning (module docstring's own boundary) -- a real caller
-        # may want a smarter ratio (e.g. N decode ticks per advance)
-        # once real hardware latency numbers are available; that
-        # tuning knob is deliberately NOT hardcoded here.
+        # 2026-08-06, chunk-drive redesign (see _prefill_phase's own
+        # field comment above for the full incident/design): drives
+        # a chunked-prefill session through TWO REAL PHASES, never
+        # conflating them -- RANK0_LOCAL (this rank's own layers only,
+        # NO wire traffic to rank 1 yet) then RANK1_DRAINING (rank 1's
+        # session, now that its recv_metaframe has REAL data to
+        # unblock on). HANDOFF is the single-tick transition between
+        # them: flush the queued activation send, compute exactly how
+        # many advances rank 1 needs from the real cross-rank layer-
+        # count handshake, and fall through into the first drain send
+        # on the SAME tick (no wasted tick doing nothing).
         if self._active_prefill_session is not None:
             has_decode_work = self.session.has_active_requests()
             advance_this_tick = (
@@ -775,23 +928,96 @@ class Rank0BatchedDecodeGlue:
             if advance_this_tick:
                 self._prefill_favor_decode_next = True
                 request_id, prefill_session = self._active_prefill_session
+
+                if self._prefill_phase == "rank0_local":
+                    # Advance ONLY this rank's own local session --
+                    # rank 1 has nothing to do yet (its first layer's
+                    # recv_metaframe has no data to unblock on) and
+                    # sending it a PrefillAdvanceMessage here would
+                    # make its tick() block hard for the ENTIRE rest
+                    # of this rank's local-layer traversal -- the
+                    # exact bug this redesign closes.
+                    _layers_advanced, done = prefill_session.advance(
+                        max_layers=self._prefill_advance_max_layers,
+                        phase_for_pause=ForwardPhase.PREFILL_CONTINUE,
+                    )
+                    if done:
+                        self._prefill_phase = "handoff"
+                    else:
+                        return {}, None, None, None
+                    # Falls through to "handoff" handling below on
+                    # THIS SAME tick -- no wasted tick transitioning.
+
+                if self._prefill_phase == "handoff":
+                    # Rank 0's own local forward pass for this chunk
+                    # is done -- its FINAL layer queued the activation
+                    # send (queue_sends=True, set by
+                    # ResumablePrefillSession.advance's own
+                    # set_forward_step_info call). flush_prefill_sends()
+                    # is what ACTUALLY puts it on the wire -- closes
+                    # the second real bug found in this audit (nothing
+                    # previously called this after a chunked-prefill
+                    # session's queued send; the activation would have
+                    # sat queued forever, and rank 1 would have hung
+                    # on its recv_metaframe regardless of anything else
+                    # this redesign fixes).
+                    flush_prefill_sends()
+                    # Ceiling division: rank 1's session needs exactly
+                    # this many real advance() calls to walk its own
+                    # peer_prefill_layer_count layers at
+                    # _prefill_advance_max_layers per call -- the real
+                    # cross-rank layer-count handshake
+                    # (exchange_prefill_peer_layer_count, model-load
+                    # time) is what makes this computable AT ALL (see
+                    # peer_prefill_layer_count's own field comment for
+                    # why the two ranks' real layer counts differ).
+                    self._prefill_rank1_advances_remaining = -(
+                        -self.peer_prefill_layer_count
+                        // self._prefill_advance_max_layers
+                    )
+                    self._prefill_phase = "rank1_draining"
+                    # Falls through to "rank1_draining" handling below
+                    # on THIS SAME tick.
+
+                # self._prefill_phase == "rank1_draining" (either
+                # arrived here directly, or fell through from
+                # "handoff" above on this same tick).
+                if self._prefill_rank1_advances_remaining <= 0:
+                    # Genuinely unreachable in correct operation --
+                    # the transition into "rank1_draining" above
+                    # always sets a >=1 value (peer_prefill_layer_count
+                    # is validated >=1 at construction/handshake time),
+                    # and this branch decrements to 0 and exits via the
+                    # `done` return below on the SAME tick that reaches
+                    # 0. A defensive fail-loud guard, not a real
+                    # occurrence.
+                    raise GlueError(
+                        f"tick(): reached RANK1_DRAINING with "
+                        f"_prefill_rank1_advances_remaining="
+                        f"{self._prefill_rank1_advances_remaining} -- "
+                        f"the chunk-drive state machine has a real bug, "
+                        f"refusing to send a meaningless advance"
+                    )
                 self._prefill_advance_seq += 1
                 advance_message = PrefillAdvanceMessage(
                     step_id=self._prefill_step_id + 1,
                     request_id=request_id,
                     advance_seq=self._prefill_advance_seq,
                     max_layers=self._prefill_advance_max_layers,
+                    chunk_index=self._prefill_chunk_index,
                 )
                 self._prefill_step_id += 1
                 send_prefill_advance_message(
                     advance_message, dst=self.dst_rank, group=self.group
                 )
-                _layers_advanced, done = prefill_session.advance(
-                    max_layers=self._prefill_advance_max_layers,
-                    phase_for_pause=ForwardPhase.PREFILL_CONTINUE,
-                )
-                if done:
+                self._prefill_rank1_advances_remaining -= 1
+                if self._prefill_rank1_advances_remaining == 0:
+                    # Rank 1 has now received exactly enough advances
+                    # to have walked its own full local layer stack
+                    # for this chunk -- the chunk is genuinely done on
+                    # BOTH ranks, not just this one.
                     self._active_prefill_session = None
+                    self._prefill_phase = "rank0_local"
                     return (
                         {},
                         None,

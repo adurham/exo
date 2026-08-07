@@ -1027,6 +1027,31 @@ class ExoBatchGenerator:
                     self._batched_decode_eos = set(
                         eos_ids_from_tokenizer(self.tokenizer)
                     )
+                    # 2026-08-06, chunk-drive redesign: BOTH ranks need
+                    # to know the PEER's real local layer count for the
+                    # chunk-completion arithmetic (see
+                    # Rank0BatchedDecodeGlue.peer_prefill_layer_count's
+                    # own field comment for the full incident this
+                    # closes -- the two ranks' real layer counts are
+                    # CONFIRMED uneven on the real 43-layer DSv4-Flash
+                    # topology). Run this ONE-TIME handshake here, at
+                    # model-load time, regardless of which rank this
+                    # is -- both sides of the exchange must run or the
+                    # other blocks forever on its own recv.
+                    from exo.worker.engines.mlx.auto_parallel import (
+                        get_inner_model,
+                        get_layers,
+                    )
+                    from exo.worker.engines.mlx.pp_batched_decode_glue import (
+                        exchange_prefill_peer_layer_count,
+                    )
+
+                    local_layer_count = len(get_layers(get_inner_model(self.model)))
+                    peer_layer_count = exchange_prefill_peer_layer_count(
+                        local_layer_count=local_layer_count,
+                        dst_rank=1 if rank == 0 else 0,
+                        group=group,
+                    )
                     if rank == 0:
                         from exo.worker.engines.mlx.pp_batched_decode_adapter import (
                             BatchedDecodeResponseAdapter,
@@ -1047,6 +1072,7 @@ class ExoBatchGenerator:
                             adapter=adapter,
                             dst_rank=1,
                             group=group,
+                            peer_prefill_layer_count=peer_layer_count,
                         )
                         logger.info(
                             "Phase 1 batched-decode ENABLED (rank 0, "

@@ -116,7 +116,7 @@ _STEP_ROW_FIELDS = (
     5  # [request_id, cache_slot, phase_ordinal, expected_cache_len, n_tokens]
 )
 _PREFILL_BODY_FIELDS = 2  # [request_id, flags]
-_PREFILL_ADVANCE_BODY_FIELDS = 1  # [advance_seq]
+_PREFILL_ADVANCE_BODY_FIELDS = 2  # [advance_seq, chunk_index]
 
 _PHASE_TO_ORDINAL: dict[Phase, int] = {Phase.PREFILL: 0, Phase.DECODE: 1}
 _ORDINAL_TO_PHASE: dict[int, Phase] = {v: k for k, v in _PHASE_TO_ORDINAL.items()}
@@ -464,20 +464,22 @@ def encode_prefill_advance_message(
     message: PrefillAdvanceMessage,
 ) -> tuple[mx.array, mx.array]:
     """Build the (header, body) int32 array pair for a
-    ``PrefillAdvanceMessage`` -- 2026-08-06, Phase 2 Stage 3. Shape
-    mirrors ``encode_prefill_message`` deliberately (header first,
-    small fixed-shape follow-up body second): ``request_id`` and
-    ``max_layers`` fit in the header's two free fields
-    (``field_d``/``field_e``); ``advance_seq`` follows in a 1-int32
-    body, since three real fields cannot fit in the header's two free
-    slots alongside ``step_id``."""
+    ``PrefillAdvanceMessage`` -- 2026-08-06, Phase 2 Stage 3 (extended
+    2026-08-06 for the chunk-completion-barrier fix: ``chunk_index``
+    added to the body). Shape mirrors ``encode_prefill_message``
+    deliberately (header first, small fixed-shape follow-up body
+    second): ``request_id`` and ``max_layers`` fit in the header's two
+    free fields (``field_d``/``field_e``); ``advance_seq`` and
+    ``chunk_index`` follow in a 2-int32 body, since four real fields
+    cannot fit in the header's two free slots alongside ``step_id``.
+    """
     header = _encode_header(
         msg_kind=MSG_KIND_PREFILL_ADVANCE,
         step_id=message.step_id,
         field_d=message.request_id,
         field_e=message.max_layers,
     )
-    body = mx.array([message.advance_seq], dtype=mx.int32)
+    body = mx.array([message.advance_seq, message.chunk_index], dtype=mx.int32)
     return header, body
 
 
@@ -498,7 +500,7 @@ def recv_prefill_advance_body(
 ) -> PrefillAdvanceMessage:
     """Given an already-received ``header`` with
     ``msg_kind == MSG_KIND_PREFILL_ADVANCE`` (see ``recv_header``),
-    receive the fixed 1-int32 follow-up body and assemble the full
+    receive the fixed 2-int32 follow-up body and assemble the full
     ``PrefillAdvanceMessage``. Raises ``SchedulerWireProtocolError``
     if ``header`` is not actually a prefill-advance header (identical
     rationale to ``recv_step_table``/``recv_prefill_body``)."""
@@ -507,12 +509,13 @@ def recv_prefill_advance_body(
     body = mx.distributed.recv_like(body_template, src, group=group)
     mx.eval(body)
     body_values = cast(list[int], body.tolist())
-    (advance_seq,) = (int(v) for v in body_values)
+    advance_seq, chunk_index = (int(v) for v in body_values)
     return PrefillAdvanceMessage(
         step_id=header.step_id,
         request_id=header.field_d,
         advance_seq=advance_seq,
         max_layers=header.field_e,
+        chunk_index=chunk_index,
     )
 
 

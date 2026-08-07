@@ -504,27 +504,27 @@ def test_real_dispatch_pattern_handles_prefill_kind() -> None:
 
 def test_encode_prefill_advance_message_shapes() -> None:
     """Pure encode test, no I/O -- pins the exact header field mapping
-    (field_d=request_id, field_e=max_layers) plus the fixed 1-int32
-    [advance_seq] body, so a future field-order change can't silently
-    pass round-trip tests alone."""
+    (field_d=request_id, field_e=max_layers) plus the fixed 2-int32
+    [advance_seq, chunk_index] body, so a future field-order change
+    can't silently pass round-trip tests alone."""
     message = PrefillAdvanceMessage(
-        step_id=9, request_id=42, advance_seq=3, max_layers=2
+        step_id=9, request_id=42, advance_seq=3, max_layers=2, chunk_index=5
     )
     header, body = encode_prefill_advance_message(message)
     assert header.shape == (5,)
-    assert body.shape == (1,)
+    assert body.shape == (2,)
     header_values = header.tolist()
     assert header_values[0] == SCHEDULER_WIRE_PROTOCOL_VERSION
     assert header_values[1] == MSG_KIND_PREFILL_ADVANCE
     assert header_values[2] == 9
     assert header_values[3] == 42  # request_id
     assert header_values[4] == 2  # max_layers
-    assert body.tolist() == [3]  # advance_seq
+    assert body.tolist() == [3, 5]  # advance_seq, chunk_index
 
 
 def test_prefill_advance_message_roundtrip_over_real_transport() -> None:
     message = PrefillAdvanceMessage(
-        step_id=4, request_id=7, advance_seq=1, max_layers=3
+        step_id=4, request_id=7, advance_seq=1, max_layers=3, chunk_index=0
     )
     received = _send_and_recv(
         lambda dst, group: send_prefill_advance_message(message, dst, group=group),
@@ -540,7 +540,7 @@ def test_prefill_advance_message_roundtrip_preserves_increasing_advance_seq() ->
     a single fixed one."""
     for seq in (1, 2, 3, 17):
         message = PrefillAdvanceMessage(
-            step_id=seq, request_id=1, advance_seq=seq, max_layers=2
+            step_id=seq, request_id=1, advance_seq=seq, max_layers=2, chunk_index=0
         )
         received = _send_and_recv(
             lambda dst, group, m=message: send_prefill_advance_message(
@@ -553,12 +553,23 @@ def test_prefill_advance_message_roundtrip_preserves_increasing_advance_seq() ->
 
 def test_prefill_advance_message_zero_advance_seq_raises_at_construction() -> None:
     with pytest.raises(ProtocolViolationError, match=">=1"):
-        PrefillAdvanceMessage(step_id=1, request_id=1, advance_seq=0, max_layers=1)
+        PrefillAdvanceMessage(
+            step_id=1, request_id=1, advance_seq=0, max_layers=1, chunk_index=0
+        )
 
 
 def test_prefill_advance_message_zero_max_layers_raises_at_construction() -> None:
     with pytest.raises(ProtocolViolationError, match=">=1"):
-        PrefillAdvanceMessage(step_id=1, request_id=1, advance_seq=1, max_layers=0)
+        PrefillAdvanceMessage(
+            step_id=1, request_id=1, advance_seq=1, max_layers=0, chunk_index=0
+        )
+
+
+def test_prefill_advance_message_negative_chunk_index_raises_at_construction() -> None:
+    with pytest.raises(ProtocolViolationError, match=">=0"):
+        PrefillAdvanceMessage(
+            step_id=1, request_id=1, advance_seq=1, max_layers=1, chunk_index=-1
+        )
 
 
 def test_recv_prefill_advance_message_rejects_evict_kind() -> None:
@@ -580,7 +591,7 @@ def test_recv_step_message_rejects_prefill_advance_kind() -> None:
     NEW kind cleanly instead of misreading the advance header's
     field_d (request_id) as a num_entries row count."""
     advance = PrefillAdvanceMessage(
-        step_id=1, request_id=1, advance_seq=1, max_layers=2
+        step_id=1, request_id=1, advance_seq=1, max_layers=2, chunk_index=0
     )
     with pytest.raises(SchedulerWireProtocolError, match="expected MSG_KIND_STEP"):
         _send_and_recv(
