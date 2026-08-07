@@ -137,6 +137,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, cast
 
 import mlx.core as mx
+from loguru import logger
 
 from exo.worker.engines.mlx.auto_parallel import flush_prefill_metaframe_sends
 from exo.worker.engines.mlx.pp_batched_decode_adapter import (
@@ -668,6 +669,12 @@ class Rank0BatchedDecodeGlue:
         self._prefill_chunk_index = chunk_index
         self._prefill_phase = "rank0_local"
         self._prefill_rank1_advances_remaining = 0
+        # TEMP DIAGNOSTIC (2026-08-08, chasing the real advance_seq
+        # desync bug found at chunk 51/69 of a 100K-token prefill -- see
+        # design doc Section 17/18). Remove once root-caused.
+        logger.info(
+            f"[PREFILL_REGISTER_R0] request_id={request_id} chunk_index={chunk_index}"
+        )
 
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
@@ -1078,6 +1085,15 @@ class Rank0BatchedDecodeGlue:
                     chunk_index=self._prefill_chunk_index,
                 )
                 self._prefill_step_id += 1
+                # TEMP DIAGNOSTIC (2026-08-08, chasing the real advance_seq
+                # desync bug found at chunk 51/69 of a 100K-token prefill --
+                # see design doc Section 17/18). Remove once root-caused.
+                logger.info(
+                    f"[PREFILL_ADVANCE_SEND] chunk_index={self._prefill_chunk_index} "
+                    f"advance_seq={self._prefill_advance_seq} "
+                    f"remaining_before_send={self._prefill_rank1_advances_remaining} "
+                    f"just_handed_off={just_handed_off}"
+                )
                 send_prefill_advance_message(
                     advance_message, dst=self.dst_rank, group=self.group
                 )
@@ -1323,6 +1339,10 @@ class Rank1BatchedDecodeGlue:
             )
         self._active_prefill_session = (request_id, session)
         self._last_prefill_advance_seq = None
+        # TEMP DIAGNOSTIC (2026-08-08, chasing the real advance_seq
+        # desync bug found at chunk 51/69 of a 100K-token prefill -- see
+        # design doc Section 17/18). Remove once root-caused.
+        logger.info(f"[PREFILL_REGISTER_R1] request_id={request_id}")
 
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
@@ -1510,6 +1530,14 @@ class Rank1BatchedDecodeGlue:
             # divergence as an IMMEDIATE loud assertion here, rather
             # than as a silent multi-tick-later jaccl/RDMA hang.
             expected_seq = (self._last_prefill_advance_seq or 0) + 1
+            # TEMP DIAGNOSTIC (2026-08-08, chasing the real advance_seq
+            # desync bug found at chunk 51/69 of a 100K-token prefill --
+            # see design doc Section 17/18). Remove once root-caused.
+            logger.info(
+                f"[PREFILL_ADVANCE_RECV] chunk_index={advance_message.chunk_index} "
+                f"received_seq={advance_message.advance_seq} "
+                f"expected_seq={expected_seq}"
+            )
             if advance_message.advance_seq != expected_seq:
                 raise GlueError(
                     f"tick(): PrefillAdvanceMessage.advance_seq="
