@@ -2498,6 +2498,55 @@ the core assertion is load-bearing (not vacuous) by deliberately
 injecting a bug (skip one chunk's session advancement) and confirming
 the test fails loudly, then reverting.
 
+**REAL UNRESOLVED CORRECTNESS GAP found before starting the live
+wiring (2026-08-06, same session) -- blocks that work, not yet
+fixed:** `PrefillAdvanceMessage.max_layers`'s own docstring flagged
+"if a future caller assumes equal per-rank splits, that assumption
+must be asserted loudly, not silently baked in" as an open item --
+this was never actually closed. Checked the REAL numbers: DSv4-Flash
+has `num_hidden_layers=43` (confirmed in the vendored
+`deepseek_v4.py`), and `mlx_lm`'s own `PipelineMixin.pipeline()` split
+logic gives each rank `len(layers) // pipeline_size` layers plus one
+extra to the lowest-numbered ranks that need it -- so on the REAL
+2-rank production topology, rank 0 holds 22 layers and rank 1 holds
+21. Sending the SAME `max_layers` value to both ranks (today's only
+implemented behavior) means they will NOT necessarily reach
+`("done", ...)` on the same advance -- rank 1 (21 layers) can finish
+a chunk one real `PrefillAdvanceMessage` before rank 0 (22 layers)
+does. Since each rank's `tick()` independently detects its OWN
+session's completion from its OWN local `ResumablePrefillSession`
+and immediately clears it (`pp_batched_decode_glue.py`'s
+`_active_prefill_session = None` on `done=True`), a rank finishing
+early would move on to registering the NEXT chunk's session while the
+peer rank is still mid-chunk on the current one -- a real cross-rank
+desync, the exact deadlock class the entire N=2 admission-race
+campaign exists to close, one level deeper (chunk-completion timing,
+not admission timing). This is NOT a hypothetical: 22 vs. 21 is the
+REAL split for the REAL model on the REAL 2-node topology this
+project targets, not an edge case.
+
+**This blocks the live `step()` wiring below and must be fixed
+first.** The fix is NOT yet designed -- candidates to evaluate:
+(a) each rank tracks its OWN remaining-layer-count and only reports
+"chunk done" once BOTH ranks have independently confirmed completion
+(needs a new ack/barrier, adding wire round-trips), (b) rank 0
+computes each rank's real layer count at session-registration time
+(via the already-known PP topology) and sends a PER-RANK `max_layers`
+tailored so both ranks reach completion on the SAME advance_seq
+(requires `PrefillAdvanceMessage` to become genuinely rank-aware,
+contradicting its current "rank-agnostic count" design -- would need
+a documented, deliberate revision, not a silent change), or (c) a
+much simpler fix: since `advance_seq` is already a monotonic
+per-request counter both ranks track and validate, cap chunk
+completion to "session reports done AND rank 1 has processed AT LEAST
+advance_seq N" via an explicit completion handshake before either
+rank moves to the next chunk -- effectively making chunk-boundary
+transitions their own tiny lockstep barrier, mirroring the EXISTING
+`PrefillMessage`/`PrefillReadyMessage` admission handshake pattern
+this campaign already trusts. Whichever fix is chosen must be
+consult-reviewed and get its own dedicated test before the live
+wiring touches it, per this session's own established discipline.
+
 **Explicitly NOT yet done, the actual remaining piece (deliberately
 scoped OUT of this session -- see the design doc's own risk-framing
 below):** nothing in production calls `register_prefill_session()`
