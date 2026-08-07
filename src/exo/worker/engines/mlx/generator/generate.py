@@ -6,7 +6,7 @@ import sys
 import time
 import uuid
 from copy import deepcopy
-from typing import Any, Callable, Generator, Literal, cast, get_args
+from typing import Any, Callable, Generator, Iterator, Literal, cast, get_args
 
 import mlx.core as mx
 from mlx_lm.generate import (
@@ -366,7 +366,7 @@ def _has_pipeline_communication_layer(model: Model):
     return False
 
 
-def pipeline_parallel_prefill(
+def _pipeline_parallel_prefill_steps(
     model: Model,
     prompt: mx.array,
     prompt_cache: KVCacheType,
@@ -376,26 +376,48 @@ def pipeline_parallel_prefill(
     prompt_progress_callback: Callable[[int, int], None],
     distributed_prompt_progress_callback: Callable[[], None] | None,
     group: mx.distributed.Group,
-) -> None:
-    """Prefill the KV cache for pipeline parallel with overlapping stages.
+    *,
+    interruptible: bool = False,
+) -> "Iterator[tuple[Literal['chunk'], int, mx.array] | tuple[Literal['done'], None, None]]":
+    """2026-08-06 (Phase 2 Stage 4, generator-core split, consult-
+    reviewed before implementation): the ORIGINAL ``pipeline_parallel_
+    prefill`` body, byte-for-byte unchanged, EXCEPT for one new yield
+    point per REAL chunk (only reached when ``interruptible=True``)
+    and the final fall-through becoming ``yield ("done", None, None)``.
+    ``pipeline_parallel_prefill`` (below) stays a thin eager wrapper
+    that drains this generator to completion -- EVERY existing caller
+    goes through it unchanged and is structurally atomic, mirroring
+    ``DeepseekV4Model._forward_steps``/``__call__``'s own Stage 1b
+    split exactly (same rationale: a generator's yield that a given
+    call path never reaches simply never fires).
 
-    Each rank processes the full prompt through its real cache, offset by leading
-    and trailing dummy iterations.
+    Per a consult review: this function's own chunk/dummy-iteration
+    pipeline-bubble-fill bookkeeping (leading/trailing dummy
+    iterations for N-rank overlap, ``real_chunk_sizes``, ``processed``
+    offset tracking) is the load-bearing state a "just swap the inner
+    model(...) call" shortcut would have silently duplicated or
+    desynced -- this split keeps ALL of that bookkeeping exactly where
+    it already lives, unmodified, and only changes what happens AT
+    each real chunk boundary.
 
-    Total iterations per rank = N_real_chunks + world_size - 1:
-      - rank r leading dummies  (skip_pipeline_io, throwaway cache)
-      - N_real_chunks real      (pipeline IO active, real cache)
-      - (world_size-1-r) trailing dummies (skip_pipeline_io, throwaway cache)
-
-    e.g.
-    Timeline (2 ranks, 3 chunks of 10240 tokens @ step=4096):
-        iter 0: R0 real[0:4096]     R1 dummy
-        iter 1: R0 real[4096:8192]  R1 real[0:4096]
-        iter 2: R0 real[8192:10240] R1 real[4096:8192]
-        iter 3: R0 dummy            R1 real[8192:10240]
-
-    This function is designed to match mlx_lm's stream_generate exactly in terms of
-    side effects (given the same prefill step size)
+    ``interruptible=True`` does NOT itself drive a
+    ``ResumablePrefillSession`` -- it only marks each real chunk's
+    boundary as a yield point (``("chunk", i, chunk_tokens)``,
+    yielding the chunk's TOKENS, not output -- pipeline_parallel_
+    prefill's own call to ``model(...)`` discards the output already;
+    only the cache-population side effect matters). The CALLER
+    receives this yield, decides HOW to actually run that chunk's
+    forward pass (eagerly via ``model(...)``, unchanged, OR via a
+    ``ResumablePrefillSession`` it constructs and drives to completion
+    across real ``tick()`` calls), and resumes this generator via
+    ``send(None)`` once the chunk's cache-populating side effect has
+    genuinely happened -- this generator does NOT touch the cache
+    itself when interruptible, that becomes the caller's
+    responsibility for that one chunk. Every OTHER per-chunk step
+    (quantize, flush_prefill_sends, eval_cache, contiguous-breaking,
+    memory logging, progress callback) still runs HERE, unchanged,
+    immediately after the resume -- only the forward pass itself
+    moves to the caller when interruptible.
     """
     prefill_step_size = prefill_step_size // min(4, group.size())
 
@@ -446,10 +468,23 @@ def pipeline_parallel_prefill(
             for i in range(n_real):
                 chunk_size = real_chunk_sizes[i]
                 _t_fwd = time.perf_counter()
-                model(
-                    prompt[processed : processed + chunk_size][None],
-                    cache=_prompt_cache,
-                )
+                # 2026-08-06 (Phase 2 Stage 4): the ONLY yield point in
+                # this generator. Reached after EVERY real chunk's
+                # forward pass when interruptible=True -- the caller
+                # is responsible for having ALREADY run (eagerly or
+                # via a ResumablePrefillSession) the forward pass that
+                # populates _prompt_cache for THIS chunk before
+                # send()-ing control back here; this generator resumes
+                # straight into quantize/flush/eval, exactly as if the
+                # eager model(...) call below had just returned. Never
+                # reached at all when interruptible=False (every
+                # existing eager caller), so this line changes NOTHING
+                # about their behavior.
+                chunk_tokens = prompt[processed : processed + chunk_size][None]
+                if interruptible:
+                    yield ("chunk", i, chunk_tokens)
+                else:
+                    model(chunk_tokens, cache=_prompt_cache)
                 quantize_cache_fn(_prompt_cache)
                 request_trace.record(f"prefill.chunk{i}.forward({chunk_size}tok)", _t_fwd)
                 processed += chunk_size
@@ -517,6 +552,42 @@ def pipeline_parallel_prefill(
         f"[R{rank}] Prefill: {n_real} real + {n_leading}+{n_trailing} dummy iterations, "
         f"Processed {processed} tokens in {(time.perf_counter() - t_start) * 1000:.1f}ms"
     )
+    yield ("done", None, None)
+
+
+def pipeline_parallel_prefill(
+    model: Model,
+    prompt: mx.array,
+    prompt_cache: KVCacheType,
+    prefill_step_size: int,
+    kv_group_size: int | None,
+    kv_bits: int | None,
+    prompt_progress_callback: Callable[[int, int], None],
+    distributed_prompt_progress_callback: Callable[[], None] | None,
+    group: mx.distributed.Group,
+) -> None:
+    """Thin eager wrapper (2026-08-06, Phase 2 Stage 4, consult-
+    reviewed) -- drains ``_pipeline_parallel_prefill_steps`` to
+    completion with ``interruptible=False`` (the default), matching
+    this function's ORIGINAL (pre-refactor) behavior and side effects
+    exactly, byte-for-byte. Every existing caller (the four real
+    ``prefill()``/``prefill_batched()`` call sites) is unaffected by
+    this refactor -- see ``_pipeline_parallel_prefill_steps``'s own
+    docstring for the full rationale, mirroring
+    ``DeepseekV4Model.__call__``'s identical Stage 1b split."""
+    for _kind, _idx, _payload in _pipeline_parallel_prefill_steps(
+        model,
+        prompt,
+        prompt_cache,
+        prefill_step_size,
+        kv_group_size,
+        kv_bits,
+        prompt_progress_callback,
+        distributed_prompt_progress_callback,
+        group,
+        interruptible=False,
+    ):
+        pass
 
 
 def prefill(
