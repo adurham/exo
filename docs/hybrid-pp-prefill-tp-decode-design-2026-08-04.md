@@ -2581,6 +2581,30 @@ loudly with the exact predicted failure, then re-confirming clean.
 Full worker suite: 350 passed (6 new), zero regressions; both real
 2-process subprocess tests still pass.
 
+**SECOND real bug found and fixed, same session** (`exo` main commit
+`d151496f1`): `generate.py`'s `_has_pipeline_communication_layer` --
+the gate `prefill()` uses to choose `pipeline_parallel_prefill()`
+(real distributed chunked prefill) vs. `stream_generate()` (single-
+rank path) -- only ever matched the LEGACY `PipelineFirstLayer`/
+`PipelineLastLayer` classes. `MetaFramedPipelineFirstLayer`/
+`MetaFramedPipelineLastLayer` do NOT subclass those legacy classes
+(confirmed: a completely different base, `CustomMlxLayer`). This
+meant `is_pipeline` was ALWAYS `False` under
+`EXO_PP_METAFRAME=1`/`EXO_PP_BATCHED_DECODE=1`, so `prefill()` ALWAYS
+routed through `stream_generate()` -- `pipeline_parallel_prefill()`,
+the ONLY function that can ever yield real chunk boundaries for the
+entire chunked-prefill interruption mechanism built this session, was
+NEVER REACHED, regardless of the tick()-side fix above or any future
+`ExoBatchGenerator.step()` wiring. Confirmed safe to broaden (not
+just convenient): the earlier `set_pipeline_prefill`/
+`set_pipeline_queue_sends` regression fix (commit `5249f223f`) already
+means `pipeline_parallel_prefill`'s existing forward-pass calls
+correctly drive metaframe layers once this gate lets them run -- the
+two fixes were genuinely chained, not independent. 3 new tests
+(`test_has_pipeline_communication_layer.py`), verified load-bearing
+by revert-then-reapply. Full suite: 353 passed (3 new), zero
+regressions.
+
 **Explicitly NOT yet done, the actual remaining piece (deliberately
 scoped OUT of this session -- see the design doc's own risk-framing
 below):** nothing in production calls `register_prefill_session()`
