@@ -4322,3 +4322,97 @@ throughput work (e.g. reducing per-step wire overhead, revisiting
 KV-cache read cost at depth) rather than the originally-planned
 multi-stream pipeline-bubble-filling, which per finding 3 targets a
 different (though still valuable) axis.
+
+## 18. Real jaccl transport bug found running Section 17's own
+measurement pass (2026-08-08) -- a genuine gap in Phase 2's "real-
+hardware validation complete" claim, root-caused, not yet fixed
+
+Running the very first pre-Phase-3 measurement Section 17 called for
+(`bench/phase3_precheck_depth_throughput.py`, a single 100K-token
+prompt, single session, no concurrency) crashed the cluster on the
+first attempt. This is a REAL, PREVIOUSLY-UNDISCOVERED bug -- every
+earlier Phase 2 validation (Section 16) used <=7-chunk prefills;
+today's 100K-token prompt is the first time the chunk-drive mechanism
+has ever run deep enough (~69 chunks, ~700+ real advance-message
+sends over ~4 minutes) to hit this.
+
+**Symptom:** rank 1's `tick()` raised its own fail-loud tripwire
+(added specifically for this class of hazard, see `pp_batched_decode_
+glue.py`'s own comment on `_last_prefill_advance_seq`): `"PrefillAdvanceMessage.advance_seq=1
+... does not match this rank's own expected next seq=5"`. Reproduced
+TWICE, both times mid-request (chunk ~51-60 of ~69), never at the
+start.
+
+**Root cause, confirmed via targeted instrumentation (exo commit
+`012d1482e`, temp diagnostic logging on both ranks' send/recv/register
+call sites) -- NOT guessed:** a genuine stale/duplicate message
+redelivery at the jaccl transport layer. Direct log evidence: chunk
+index 6's advances 1-11 were sent and received cleanly and in
+real-time at 18:39:56-58 (every send/recv pair logged, matching
+seq numbers, zero gaps). Then, **3 minutes 39 seconds later**, at
+18:43:37.041 -- while both ranks had long since moved on to chunk
+~60 -- rank 1 received ANOTHER message on the wire claiming to be
+`chunk_index=6, advance_seq=1`, the exact same payload as ~700 real
+sends earlier in the same session. This is jaccl's own C++ transport
+(confirmed to have a dedicated retry/retransmit protocol --
+`p2p_retry_barrier`, bounded retry rounds, in
+`mlx/mlx/distributed/jaccl/lib/jaccl/mesh_impl.h`) redelivering a
+long-stale message, not an exo Python logic bug. A `consult` review
+correctly identified the diagnostic signature (a BACKWARDS sequence
+number, not a forward gap) as ruling out ordinary message loss and
+pointing at either premature local completion or transport-level
+stale redelivery -- the direct evidence (chunk_index literally
+reverting to a value from 4 minutes and ~54 chunks earlier) confirms
+the latter.
+
+**Why this never surfaced before today:** every prior Phase 0-2
+validation used short (<=7-chunk) prefills. This class of bug --
+apparently some receive-buffer/retransmit-tracking state in jaccl not
+correctly aging out or disambiguating "already delivered and
+consumed, do not redeliver" over a long, high-volume single session --
+structurally cannot manifest at shallow depth. It required exactly
+the kind of real, sustained-load, real-depth test Section 17's review
+called for to surface at all.
+
+**Cluster impact:** both times, self-healed automatically (supervisor
+re-place), verified via a real post-recovery inference each time --
+no data loss, no stuck state, the tripwire did exactly its job
+(converting what would otherwise be a silent, much-harder-to-diagnose
+corruption or hang into a loud, attributable, immediately-actionable
+crash). `EXO_PP_BATCHED_DECODE=1` traffic that stays SHORT (single
+requests, decode-only, or short chunked prefills like Section 16's
+own <=7-chunk validation) is unaffected -- this is specifically a
+long-single-session-duration hazard.
+
+**NOT YET FIXED.** This is a genuine jaccl C++ transport-layer bug,
+not a quick exo-side patch -- fixing it correctly needs its own
+dedicated jaccl-focused investigation (reading the retransmit/ack
+tracking logic in `mesh_impl.h` closely, understanding exactly how
+call_ids/buffer slots get reused and whether there's a real collision
+window under sustained load), not something to rush at the end of an
+already-long session. Temp diagnostic logging (commit `012d1482e`)
+is left in place for the next session to pick this up with -- NOT yet
+removed, despite its own comments saying "remove once root-caused"
+(root cause is now understood at the mechanism level -- stale
+redelivery -- but the EXACT jaccl-internal reason it happens is not
+yet pinned down to a specific line of C++).
+
+**Consequence for Phase 3 and the requirement-3 measurement:** the
+100K/300K/500K depth-throughput measurement Section 17 called for
+is BLOCKED until this transport bug is fixed or worked around --
+any request deep enough to exercise real depth (which is the entire
+point of the measurement) risks hitting this. Phase 3 build work can
+still proceed in parallel if desired (the transport bug is orthogonal
+to Phase 3's own code), but the actual per-session decode-tok/s-at-
+500K number Fable's review said was needed BEFORE committing to
+Phase 3's specific mechanism remains unmeasured, now for a NEW reason
+(a transport bug) rather than the original reason (hadn't tried yet).
+
+**Cluster state at end of session:** healthy, `RunnerReady` x2,
+verified via a real "capital of France" -> "Paris" inference,
+`EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` still active (safe for
+short-session traffic; the standing "no cluster restart without
+explicit go-ahead" rule applies to any further changes). Section 17's
+remaining items (2-cache memory headroom check, real cancel/abort
+against real hardware) were not reached this session -- explicitly
+deferred, not silently dropped.
