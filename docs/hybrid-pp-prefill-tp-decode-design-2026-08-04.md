@@ -4416,3 +4416,101 @@ explicit go-ahead" rule applies to any further changes). Section 17's
 remaining items (2-cache memory headroom check, real cancel/abort
 against real hardware) were not reached this session -- explicitly
 deferred, not silently dropped.
+
+## 20. jaccl fix deployed and validated on real hardware (2026-08-08,
+same session continued) -- Section 19's remaining gap now closed,
+with two real mistakes made and corrected along the way
+
+**Deploy attempt 1 (mlx `bdf78e752`, the jaccl fix alone): FAILED to
+build.** A genuinely unrelated, pre-existing bug: `mlx/backend/metal/
+kernels/steel/attn/kernels/steel_attention.metal`'s bq=16/wm=1/bd=512
+attention kernel instantiation (added 2026-07-16, commit `21008ab1a`,
+"SDPA D=512 bq=16 spike" -- an abandoned same-day A/B experiment,
+gated behind an env var never set in production) is mathematically
+guaranteed to fail its own `static_assert(TQ==1)` -- `TQ = BQ /
+(WM*WN*kFragSize) = 16/(1*1*8) = 2`, confirmed by direct arithmetic,
+not guessed. This kernel could never have compiled, on any toolchain,
+since the moment that commit landed -- it just never got exercised
+because every mlx build since then reused an already-compiled cached
+wheel. Tonight's jaccl-fix deploy was the first genuinely fresh Metal
+recompile in over three weeks, which is why a 3-week-old dead-on-
+arrival bug surfaced now.
+
+**MISTAKE #1 (self-caught, corrected same session): the emergency
+revert went too far back.** On the build failure, I reverted the mlx
+pin to `ac73d0c9` (uv.lock's previous recorded state) to restore
+service -- without checking whether that SHA itself predated other
+critical fixes. It did: `ac73d0c9` (2026-07-11) predates `c168e2f4b`
+(2026-07-17), the real fix for a 100%-reproducible jaccl PP warmup
+stall ("[jaccl] recv STALLED... UC completion lost", a genuine UC-
+drop race in ack_sync_pre/recv-buffer-posting ordering -- see this
+project's own warm memory facts 1022/1122 for the original root-
+cause). Rolling back to `ac73d0c9` silently REINTRODUCED that
+already-fixed bug. Confirmed the hard way: three consecutive real
+cluster launches at the reverted pin all hit the identical
+deterministic failure (`call_id=17`, both ranks, every time) --
+including after a full node reboot, which does NOT fix a code-level
+race (only clears stuck link/protection-domain state, a different
+fault class this was briefly mistaken for). Root-caused via `git
+merge-base --is-ancestor` (not guessed) and corrected by re-applying
+the pin bump to `bdf78e752` -- confirmed via the same command to be a
+strict superset of both the UC-drop fix AND the earlier-tonight
+known-good state.
+
+**Lesson recorded for next time:** an emergency revert under time
+pressure needs the SAME rigor as a forward pin bump -- verify the
+target SHA against known critical-fix commits via `git merge-base
+--is-ancestor`, don't just grab "whatever uv.lock said before."
+
+**Real fix for the actual build failure:** removed the dead bq=16
+kernel instantiation (mlx commit `b1e1ae09b`) and made the
+now-orphaned env-var dispatch branch fail loudly instead of silently
+referencing a missing kernel string. Zero production impact -- the
+env var was never set by anything in this deployment, and the
+sibling bq=8 D=512 kernel (the actual production path) is untouched.
+
+**Deploy attempt 2 (mlx `b1e1ae09b` = jaccl fix + dead-kernel
+removal): SUCCEEDED.** Full rebuild completed cleanly on both nodes.
+Verified: both nodes confirmed on the correct SHA (`git log` +
+`git submodule status`, not assumed), both `RunnerReady`, real
+inference clean ("Paris", `finish_reason=stop`).
+
+**Real-hardware re-validation of the actual jaccl fix:** re-ran the
+same class of long chunked-prefill request that crashed twice in
+Section 18 (a ~72K-token prompt, ~35+ real chunks -- deliberately
+well past the chunk 51-60 range both prior crashes hit). Two
+consecutive runs, both completed with ZERO desyncs and ZERO crashes,
+confirmed via direct log inspection (matched `advance_seq`/
+`expected_seq` pairs at every step through chunk 76, `RunnerReady`
+with no `RunnerFailed`/`GlueError`/"does not match this rank" entries
+anywhere in either node's log across the whole test window). The
+stale-message discard path (the fix's own self-healing branch) never
+fired in this test -- meaning either the race window wasn't hit this
+specific run, or it's now correctly absorbed when it is; either way,
+zero crashes is the load-bearing result.
+
+**Unrelated finding during validation (not investigated further,
+explicitly deferred):** one decode-phase request stalled for 20+
+minutes with zero token output and no error -- confirmed via
+`ChunkGenerated` event timestamps, not assumed. Not a crash, not
+related to the jaccl fix (occurred well after prefill/chunk-drive had
+already finished cleanly). Runner was killed and cluster relaunched
+rather than diagnosed in-depth -- flagged as a real, separate,
+unresolved issue for a future session, not silently dropped. Possible
+causes not yet investigated: interaction with `EXO_PP_BATCHED_DECODE`
+decode-phase scheduling, or something specific to that request's
+content (a reasoning-heavy arithmetic question) triggering runaway
+generation without hitting `max_tokens`.
+
+**Cluster state at end of this update:** healthy, `RunnerReady` x2,
+running mlx `b1e1ae09b` (jaccl stale-message fix + dead-kernel
+removal), `EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` active, real
+inference verified. Section 18's jaccl transport bug is now closed
+end-to-end: found, root-caused, fixed, deployed, and validated on
+real hardware at real depth.
+
+**Still not done, explicitly deferred, not silently dropped:**
+Section 17's memory-headroom check (2 concurrent deep-context KV
+caches) and real cancel/abort against the live chunk-drive path on
+real hardware. The unrelated decode-stall found during validation
+also needs its own investigation.
