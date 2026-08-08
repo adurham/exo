@@ -4701,3 +4701,172 @@ confirm no crash. Also still open: Section 17's memory-headroom check
 and a genuine cancel/abort test on real hardware (both deferred again
 this session, now for the third time, each time displaced by a real
 new discovery rather than skipped).
+
+## 23. Section 22's fix deployed and validated -- REAL STALL FOUND, root cause NOT yet identified (2026-08-08, next-session continuation)
+
+**Deploy (step 1 from the prior session's handoff): SUCCEEDED cleanly.**
+Both studios git-reset to `cbad76dc0` (Section 22's fix, `ee7fae663`,
+plus the handoff doc commit). Pure Python change, no mlx/mlx-lm rebuild
+needed -- verified via `git submodule status` unchanged (mlx `b1e1ae09b`,
+mlx-lm `bd5d6764`). Basic smoke test clean ("Paris", `finish_reason=stop`)
+on a plain relaunch.
+
+**First "validation" was a false pass -- caught before being trusted.**
+The prior handoff's step 2 (re-run a ~72K-token chunk-drive prefill) was
+first attempted with a bare `./start_cluster.sh` (no env overrides). Two
+full runs completed cleanly (needle found, `finish_reason=stop`, zero
+errors) -- but log inspection on both nodes showed **zero**
+`PREFILL_REGISTER`/`chunk_index`/`PrefillChunkDoneAck` activity anywhere
+in the test window. Root cause: `EXO_PP_BATCHED_DECODE` defaults to `0`
+in `start_cluster.sh` (line ~1846) -- opt-in only, NOT the "active in
+production" state the prior handoff's step 1 summary implied. The prior
+session's real jaccl validation (Sections 18-20) evidently ran with an
+explicit override that this session's plain relaunch didn't reproduce.
+**Lesson: a clean/successful-looking generation is not evidence a
+specific code path executed -- always grep the runner log for that
+path's own marker lines before trusting a green run as validation of
+anything path-specific.**
+
+**Second attempt: `EXO_PP_BATCHED_DECODE=1` alone -- still didn't reach
+Section 22's code.** Relaunched with the flag explicitly set, confirmed
+live via `ps -axo command | grep EXO_PP_BATCHED_DECODE` on both nodes.
+Still zero chunk-drive log activity. Root cause: `EXO_PP_BATCHED_DECODE=1`
+is NOT self-sufficient -- `install_batched_decode_pipeline_layers` (which
+installs `BatchedMetaFramedPipelineLastLayer`, the class
+`get_batched_pipeline_info` looks for to construct
+`Rank0BatchedDecodeGlue`/`Rank1BatchedDecodeGlue` at all) only runs
+inside the `EXO_PP_METAFRAME=1` branch in `utils_mlx.py` (~line 462).
+`EXO_PP_METAFRAME` ALSO defaults to `0`. Both flags are required
+together; this project's own code comments say so explicitly
+(`utils_mlx.py`: "REQUIRES EXO_PP_METAFRAME=1 -- batched decode is built
+ON TOP of the metaframe wire format, not a replacement for it") but nothing
+in the prior handoff surfaced this as a launch requirement.
+
+**Third attempt: both flags set together -- REAL CHUNK-DRIVE ACTIVITY,
+REAL STALL.** Relaunched with `EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1`
+explicitly. `start_cluster.sh` itself printed a warning on this launch:
+*"EXO_PP_METAFRAME=1 -- metadata-framed PP transport ACTIVE ... this is
+the FIRST real cluster run of this path"* -- i.e. this specific
+combination had never actually been exercised on real 2-node hardware
+before tonight, despite the prior handoff's confidence that
+`EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` were "active in production."
+Sent a ~72K-token needle-in-haystack prompt (same class as Sections
+18/20's validation, `/tmp/section22_validate.py`, not committed --
+throwaway script, see below):
+
+- Chunk 0's full 11-advance sequence completed cleanly on both ranks
+  (`PREFILL_ADVANCE_SEND`/`PREFILL_ADVANCE_RECV` matched seq 1-11,
+  identical on both nodes' logs, confirmed via direct timestamp
+  correlation).
+- Immediately after the 11th advance, BOTH ranks logged
+  `[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1` followed by
+  `[mlx scheduler] captured St13runtime_error ... [jaccl] recv() deadline
+  in drain -- clean re-place`, then `[jaccl] reconnect_fresh` (device
+  contexts closed and rebuilt, completed cleanly on both sides,
+  `IOConnectUnmapMemory failed: kr=0xe00002c2` lines are expected/benign
+  noise from that rebuild per existing project convention).
+- After the reconnect completed cleanly on both nodes, **zero further
+  log activity, zero further advances, zero token output** for 8+
+  minutes (test was killed at that point, not run to the 30-minute
+  `MLX_EVENT_WAIT_TIMEOUT_MS=1800000` self-abort ceiling). GPU
+  confirmed idle via `powermetrics` (`GPU Power: 23 mW`, ~6% active
+  residency) on m4-1 during the stall -- not compute-bound, genuinely
+  stuck.
+
+**This is exactly the chunk-boundary interaction Section 22 exists to
+fix (rank 0 finished sending all 11 advances, rank 1 hadn't necessarily
+finished processing them) -- but the observed failure mode is NOT "rank
+0 raced ahead" (the bug Section 22 targeted). It's a full jaccl
+transport-level stall/reconnect immediately following the last advance,
+and then NO recovery at all afterward -- not even a slow one. Two
+live possibilities, NEITHER confirmed yet:**
+
+1. The reconnect itself is real and clean, but whatever `tick()` call
+   was supposed to notice "reconnect finished, resume driving this
+   chunk" never fires -- a real gap in Section 22's own design (the
+   docstring's bounded blocking recv assumes jaccl's own
+   StallWatch/deadline machinery is the sole backstop; if a
+   `reconnect_fresh` mid-flight silently drops the specific in-flight
+   ack this recv was waiting on rather than surfacing a fresh error the
+   Python layer can catch and retry, the recv blocks forever with no
+   Python-visible signal that anything went wrong).
+2. This may be unrelated to Section 22's own logic at all -- a raw
+   jaccl-level intermittent stall (the project's `warm memory` notes
+   real recurring TB/RDMA flakiness this cluster has hit before,
+   unrelated to any specific code path) that happened to land at
+   exactly the first chunk boundary by coincidence, and Section 22's
+   bounded-blocking-recv is simply exposing a pre-existing transport
+   reliability gap that the old fire-and-forget "rank 0 doesn't wait for
+   anything" behavior never surfaced (because rank 0 never blocked on
+   anything after sending, so a similar jaccl reconnect on the OLD code
+   path would have been invisible/harmless).
+
+**NOT diagnosed further tonight** -- deliberately stopped rather than
+guessing. Cluster torn down cleanly (both nodes verified zero exo
+processes, zero screen sessions) rather than left in the stalled state
+or blind-relaunched into a guessed fix.
+
+**Evidence preserved:** `/tmp/section22_stall_evidence/m4-1_stall_window.log`
+and `m4-2_stall_window.log` (both nodes' runner stderr, the 18:18-18:2x
+window covering all three launch attempts) -- copy these into the repo
+or a durable location before `/tmp` gets cleared if they're needed for
+deeper analysis later; they are NOT currently committed anywhere.
+Validation script used: `/tmp/section22_validate.py` (self-written
+throwaway, NOT `bench/context_stress.py` -- that script is hardcoded to
+`mlx-community/Qwen3.5-397B-A17B-4bit`, a model not loaded on this
+cluster's current placement, and 404s against DeepSeek-V4-Flash. Worth
+fixing or parameterizing `context_stress.py`'s model field if this
+class of test gets run again, or just reuse `/tmp/section22_validate.py`
+if it survives -- copy it into `bench/` if keeping it long-term).
+
+**Next session's concrete starting point (in order):**
+
+1. Before touching code: reproduce the stall ONE more time, deliberately,
+   with `EXO_PROFILER=spans` or additional jaccl-level tracing enabled
+   (NOTE: per existing skill pitfalls, `EXO_PROFILER=spans` has a real
+   perf cost -- span-boundary syncs -- so only add it for this specific
+   diagnostic run, not as a standing default) to determine which side of
+   the two hypotheses above is real: does `Rank0BatchedDecodeGlue`'s
+   bounded recv actually resume after `reconnect_fresh` completes (just
+   very slowly), or does it never observe the reconnect at all (a
+   structural gap, needs a real fix in the recv-after-reconnect
+   handshake)? A `MLX_EVENT_WAIT_TIMEOUT_MS=60000` (1 minute instead of
+   30) override on a throwaway diagnostic run would also shorten the
+   "confirm it never self-recovers" cycle without waiting the full 30
+   minutes.
+2. If hypothesis 1 (Section 22's own gap): the fix is almost certainly
+   in `Rank0BatchedDecodeGlue.tick()`'s `recv_prefill_chunk_done_ack_message`
+   call (`pp_batched_decode_glue.py` ~line 1150) -- it needs to either
+   retry the recv after a `reconnect_fresh` event it can detect, or the
+   jaccl-level reconnect itself needs to guarantee any recv that was
+   in-flight at the time of the stall gets cleanly resurfaced as a
+   catchable exception on the Python side (matching the "clean re-place"
+   language in the jaccl log line, which implies the C++ layer THINKS
+   it's handling this cleanly -- worth checking whether "clean re-place"
+   actually propagates up through `mx.distributed.recv_like`'s Python
+   binding as a raised exception, or silently returns/hangs).
+3. If hypothesis 2 (pre-existing jaccl flakiness, unrelated to Section
+   22): this becomes a jaccl reliability investigation, not a
+   Section-22-specific bug -- check the jaccl reconnect_fresh code path
+   itself (mlx submodule, C++) for what happens to any recv that was
+   blocked at the moment of reconnect; likely needs a mlx-side fix, not
+   an exo-side one.
+4. Section 22's fix should NOT be considered validated or safe to leave
+   default-on until this stall is root-caused and fixed -- if scoping
+   real fix work turns out to be large, that's fine, but "revert to
+   Section 20's already-validated state (EXO_PP_METAFRAME=0
+   EXO_PP_BATCHED_DECODE=0, the safe default both flags already fall
+   back to)" is NOT a regression -- that's simply the currently-proven
+   config, unaffected by any of tonight's new findings.
+5. Section 17's memory-headroom check and real cancel/abort test remain
+   still-deferred, now for a fourth session in a row -- each deferral so
+   far has been displaced by a genuinely new, real discovery (not
+   skipped), consistent with this project's standing practice, but worth
+   flagging the streak explicitly since it's now four in a row.
+
+**Cluster state at end of this update:** torn down cleanly (zero exo
+processes, zero screen sessions on both nodes, verified via `pgrep`
++ `screen -ls`) at the user's explicit request ("leave it as-is and
+write up findings only") -- NOT relaunched into any config, including
+the previously-safe one. Next session needs its own explicit
+relaunch go-ahead per the standing rule, same as always.
