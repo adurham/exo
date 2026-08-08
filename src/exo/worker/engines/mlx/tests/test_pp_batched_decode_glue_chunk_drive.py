@@ -208,6 +208,38 @@ def _capture_sent_advances(
         mx.eval(arr)
         return arr
 
+    def _fake_mx_recv_like(
+        x: mx.array, src: int, *, group: object
+    ) -> mx.array:
+        # 2026-08-08, real production incident fix (design doc
+        # Section 21/22): tick()'s RANK1_DRAINING completion branch
+        # now does a real bounded blocking recv for
+        # PrefillChunkDoneAckMessage before returning
+        # PrefillAdvanceCompleted -- this test harness previously
+        # never needed to stub mx.distributed.recv_like at all
+        # (rank 0's tick() was send-only during RANK1_DRAINING before
+        # this fix). Echo back the request_id/chunk_index of the
+        # MOST RECENTLY captured PrefillAdvanceMessage -- that IS the
+        # advance whose completion triggered this recv (tick()'s own
+        # call ordering: send the last advance, THEN recv its ack, on
+        # the same call), so `sent[-1]` always holds exactly the
+        # right values, correct across multiple chunks/requests
+        # within one test with no separate stateful bookkeeping
+        # needed here.
+        del src, group
+        last = sent[-1]
+        header = mx.array(
+            [
+                wire_mod.SCHEDULER_WIRE_PROTOCOL_VERSION,
+                wire_mod.MSG_KIND_PREFILL_CHUNK_DONE_ACK,
+                last.step_id,
+                last.request_id,
+                last.chunk_index,
+            ],
+            dtype=x.dtype,
+        )
+        return header
+
     captured_headers: list[mx.array] = []
 
     def _fake_send_header(header: mx.array, dst: int, *, group: object) -> None:
@@ -217,6 +249,7 @@ def _capture_sent_advances(
 
     monkeypatch.setattr(wire_mod, "send_header", _fake_send_header)
     monkeypatch.setattr(mx.distributed, "send", _fake_mx_send)
+    monkeypatch.setattr(mx.distributed, "recv_like", _fake_mx_recv_like)
 
     orig_send_prefill_advance_message = wire_mod.send_prefill_advance_message
 
@@ -599,3 +632,53 @@ def test_msg_kind_prefill_abort_for_unregistered_request_raises(
 
     with pytest.raises(GlueError, match="no active local prefill session"):
         glue.tick(model=cast("object", None))
+
+
+def test_chunk_done_ack_mismatch_raises_instead_of_silently_registering_next_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-08-08 real production incident fix (design doc Section
+    21/22): rank 0's own "chunk complete" decision (all advances
+    SENT) does not mean rank 1 has finished PROCESSING them -- a
+    real, reproduced-on-hardware race where rank 1's own local Metal
+    compute for a chunk's tail layers was still running when rank 0
+    would previously have raced ahead into the next chunk. This test
+    proves the actual fail-loud fix: if the ``PrefillChunkDoneAckMessage``
+    rank 0 blocks for arrives with a MISMATCHED request_id/chunk_index
+    (standing in for a genuinely desynced ack -- the class of bug a
+    real transport bug or a genuine control-stream desync would
+    produce), ``tick()`` must raise ``GlueError`` rather than silently
+    trusting the wrong ack and declaring the wrong chunk done."""
+    sent = _capture_sent_advances(monkeypatch)
+    glue = _make_rank0_glue(peer_prefill_layer_count=4)
+    model = _CountingLayerModel(n_layers=1)
+    session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=[]
+    )
+    glue.register_prefill_session(request_id=1, session=session, chunk_index=0)
+
+    import exo.worker.engines.mlx.pp_scheduler_wire as wire_mod
+
+    def _mismatched_recv_like(x: mx.array, src: int, *, group: object) -> mx.array:
+        # Deliberately wrong request_id -- standing in for a genuine
+        # cross-rank desync, not the happy-path echo the shared
+        # _capture_sent_advances helper normally returns.
+        del src, group
+        return mx.array(
+            [
+                wire_mod.SCHEDULER_WIRE_PROTOCOL_VERSION,
+                wire_mod.MSG_KIND_PREFILL_CHUNK_DONE_ACK,
+                sent[-1].step_id if sent else 0,
+                999,  # wrong request_id
+                sent[-1].chunk_index if sent else 0,
+            ],
+            dtype=x.dtype,
+        )
+
+    monkeypatch.setattr(mx.distributed, "recv_like", _mismatched_recv_like)
+
+    with pytest.raises(GlueError, match="PrefillChunkDoneAckMessage mismatch"):
+        for _tick in range(20):
+            result = glue.tick(model=cast("object", model))
+            if result[3] is not None:
+                break

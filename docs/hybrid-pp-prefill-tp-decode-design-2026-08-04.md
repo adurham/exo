@@ -4615,3 +4615,89 @@ runners, clean relaunch), running the Section 20 fix (`b1e1ae09b`,
 jaccl stale-message fix + dead-kernel removal) -- unchanged from
 Section 20's end state, since tonight's Section 21 work was
 design-only, deliberately not deployed.
+
+## 22. Section 21's chunk-boundary race: FIXED (bounded blocking
+wait), implemented and tested, NOT YET DEPLOYED (2026-08-08, same
+session continued)
+
+Second `consult` review found Section 21's naive blocking-in-tick()
+design was unsafe, and its own recommended non-blocking poll-across-
+ticks alternative requires message-pump/demux infrastructure this
+codebase's transport (raw `mx.distributed` collectives over jaccl
+RDMA, no non-blocking recv primitive) does not have. Rather than
+build that infrastructure blind, got a decisive product call from
+Fable on the actual tradeoff: **bounded blocking wait, ship it, with
+real timeout semantics and instrumentation** -- reasoning: this is a
+2-node cluster (non-blocking recv machinery pays off at a scale this
+project isn't at), non-blocking/callback-based recv in a hybrid
+scheduler is exactly where distributed-systems bugs live, and a
+blocking wait is the reversible choice (can migrate to async later if
+real wait-time metrics ever justify it -- don't build it speculatively
+now).
+
+**The actual fix, once the "how" was resolved by that framing:**
+rank 1's own `tick()` is ALREADY synchronously blocked on
+`ResumablePrefillSession.advance()`'s real GPU forward pass when
+processing a chunk's final advance -- that block IS the 14-second
+stall Section 21 found. So rank 1 can send its completion ack
+EAGERLY, from inside that same `tick()` call, immediately after its
+own real compute finishes (no separate round-trip needed on rank 1's
+side at all). Rank 0 then does exactly ONE bounded blocking recv for
+that ack before declaring the chunk done -- mirroring the
+`_PREFILL_READY_MAX_WAIT_SECONDS` bounded-wait pattern this exact
+file already uses at the admission handshake, and relying on the
+underlying jaccl transport's own real deadline/StallWatch mechanisms
+as the backstop (no separate Python-level timeout wrapper reinvented
+-- consistent with how every other blocking recv in this class, e.g.
+the abort-ack round trip, already works).
+
+**What shipped this session (code, not deploy):**
+- `Rank1BatchedDecodeGlue.tick()`'s `MSG_KIND_PREFILL_ADVANCE`
+  handler: sends `PrefillChunkDoneAckMessage` immediately after
+  `prefill_session.advance()` returns `done=True`.
+- `Rank0BatchedDecodeGlue.tick()`'s RANK1_DRAINING completion branch:
+  blocks on `recv_prefill_chunk_done_ack_message` before declaring
+  the chunk done; raises `GlueError` on any request_id/chunk_index
+  mismatch rather than silently trusting a wrong ack (matching this
+  module's own established fail-loud discipline throughout).
+- Test infrastructure fix: `_capture_sent_advances`'s shared test
+  helper (used by 6 existing chunk-drive tests) now also stubs
+  `mx.distributed.recv_like` to echo back the correct ack for
+  whatever `PrefillAdvanceMessage` was most recently sent -- these 6
+  tests previously never needed to stub `recv_like` at all, since
+  rank 0's `tick()` was pure send-only during RANK1_DRAINING before
+  this fix.
+- New regression test,
+  `test_chunk_done_ack_mismatch_raises_instead_of_silently_registering_next_chunk`:
+  proves the fail-loud guard actually fires on a deliberately
+  mismatched ack, not just that the happy path still works.
+
+**Verified:** basedpyright/ruff clean on all touched files, full mlx
+engine test suite 310 passed (309 existing + 1 new), zero
+regressions.
+
+**Explicitly NOT deployed tonight.** This is a genuinely new
+synchronization primitive on the hot chunk-drive path -- the real
+tradeoff (any OTHER concurrently-decoding request now stalls for
+however long rank 1's real remaining chunk-tail compute takes, at
+each chunk boundary) needs its own real-hardware validation before
+going live, not just unit-test confidence. Given tonight's session
+already included two real deploy mistakes and three real crashes
+(Sections 20/21), a fourth deploy cycle was deliberately deferred to
+a fresh session with a clear head, per the standing "cluster restart
+needs its own explicit go-ahead" rule.
+
+**Cluster state:** unchanged, still running Section 20's fix
+(`b1e1ae09b`) -- this session's Section 22 work is committed to the
+repo but not yet reflected in the live deployed pin.
+
+**Next session's concrete starting point:** deploy this fix (same
+mlx-pin-bump + full-rebuild workflow as Sections 19/20), re-run the
+same class of long chunk-drive request that triggered Section 21's
+crash (ideally under real memory-pressure conditions similar to what
+produced the original 14-second stall, to actually exercise the new
+blocking-wait path rather than just the never-stalls happy path), and
+confirm no crash. Also still open: Section 17's memory-headroom check
+and a genuine cancel/abort test on real hardware (both deferred again
+this session, now for the third time, each time displaced by a real
+new discovery rather than skipped).

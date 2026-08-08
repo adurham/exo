@@ -155,6 +155,7 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
     PREFILL_FLAG_SINGLE_REQUEST_FALLBACK,
     PrefillAbortAckMessage,
     PrefillAdvanceMessage,
+    PrefillChunkDoneAckMessage,
     PrefillMessage,
     PrefillReadyMessage,
 )
@@ -169,11 +170,13 @@ from exo.worker.engines.mlx.pp_scheduler_wire import (
     recv_header,
     recv_prefill_advance_body,
     recv_prefill_body,
+    recv_prefill_chunk_done_ack_message,
     recv_prefill_ready_message,
     recv_step_table,
     send_evict_ack_message,
     send_prefill_abort_ack_message,
     send_prefill_advance_message,
+    send_prefill_chunk_done_ack_message,
     send_prefill_message,
     send_prefill_ready_message,
     send_step_message,
@@ -1124,6 +1127,49 @@ class Rank0BatchedDecodeGlue:
                     # to have walked its own full local layer stack
                     # for this chunk -- the chunk is genuinely done on
                     # BOTH ranks, not just this one.
+                    #
+                    # 2026-08-08, real production incident fix (design
+                    # doc Section 21/22, `consult`-reviewed decision:
+                    # bounded blocking wait, not non-blocking polling
+                    # -- see PrefillChunkDoneMessage's own docstring
+                    # for the full incident and rationale). "Sent all
+                    # 11 advances" does NOT mean "rank 1 finished
+                    # PROCESSING them" -- rank 1's own local Metal
+                    # compute for this chunk's tail layers can still
+                    # genuinely be running (confirmed on real
+                    # hardware: a 14-second Event::wait stall).
+                    # BLOCK here for rank 1's real completion ack
+                    # before declaring this chunk done -- rank 1 sends
+                    # it EAGERLY, from inside its own tick() call,
+                    # immediately after its own advance() forward pass
+                    # genuinely finishes (see that call site's own
+                    # comment), so this recv resolves as soon as rank
+                    # 1's real compute is done, not on some separate
+                    # round-trip. Bounded by the underlying jaccl
+                    # transport's own real deadline mechanisms (the
+                    # StallWatch/drain-deadline machinery already
+                    # covering every other recv in this module) --
+                    # deliberately no separate Python-level timeout
+                    # wrapper here, mirroring how every other blocking
+                    # recv in this class (e.g. the abort-ack round
+                    # trip) already relies on that same backstop
+                    # rather than reimplementing one.
+                    ack = recv_prefill_chunk_done_ack_message(
+                        src=self.dst_rank, group=self.group
+                    )
+                    if (
+                        ack.request_id != request_id
+                        or ack.chunk_index != self._prefill_chunk_index
+                    ):
+                        raise GlueError(
+                            f"tick(): PrefillChunkDoneAckMessage mismatch "
+                            f"-- expected request_id={request_id} "
+                            f"chunk_index={self._prefill_chunk_index}, got "
+                            f"request_id={ack.request_id} chunk_index="
+                            f"{ack.chunk_index}. Refusing to proceed on a "
+                            f"mismatched ack rather than silently "
+                            f"registering the wrong chunk."
+                        )
                     self._active_prefill_session = None
                     self._prefill_phase = "rank0_local"
                     return (
@@ -1556,6 +1602,31 @@ class Rank1BatchedDecodeGlue:
             if done:
                 self._active_prefill_session = None
                 self._last_prefill_advance_seq = None
+                # 2026-08-08, real production incident fix (see
+                # PrefillChunkDoneMessage's own docstring for the full
+                # incident/design decision -- bounded blocking wait,
+                # not non-blocking polling, per that decision's own
+                # rationale). Send the ack EAGERLY, from right here,
+                # inside this SAME tick() call -- prefill_session.
+                # advance() above is a real, synchronous, blocking
+                # Metal forward pass; by the time this line runs, this
+                # rank's own compute for this chunk has GENUINELY
+                # finished (not merely "message received"). No
+                # separate round-trip needed on THIS rank's side --
+                # rank 0 is the one that blocks, waiting to receive
+                # this ack, mirroring the established
+                # _PREFILL_READY_MAX_WAIT_SECONDS bounded-wait pattern
+                # this same file already uses at the admission
+                # handshake.
+                send_prefill_chunk_done_ack_message(
+                    PrefillChunkDoneAckMessage(
+                        step_id=advance_message.step_id,
+                        request_id=advance_message.request_id,
+                        chunk_index=advance_message.chunk_index,
+                    ),
+                    dst=self.src_rank,
+                    group=self.group,
+                )
                 return (
                     None,
                     None,
