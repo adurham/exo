@@ -4416,3 +4416,72 @@ explicit go-ahead" rule applies to any further changes). Section 17's
 remaining items (2-cache memory headroom check, real cancel/abort
 against real hardware) were not reached this session -- explicitly
 deferred, not silently dropped.
+
+## 19. jaccl transport fix implemented + locally verified (2026-08-08,
+same session continued) -- NOT YET DEPLOYED/RE-VALIDATED on real
+hardware
+
+Root-caused Section 18's transport bug down to the actual C++
+mechanism: `send()`/`recv()`'s on-wire message header (`mesh_impl.h`)
+carried ONLY the within-call chunk index, with no field anywhere
+identifying WHICH logical call a chunk's data belongs to. Combined
+with a small (`NUM_BUFFERS=8`), reused-across-every-call buffer pool,
+a stale message (most likely an orphaned retransmit from jaccl's own
+application-level retry/retransmit protocol) can land in a buffer
+slot the CURRENT call has since claimed and be silently accepted.
+
+**Fix designed via a `consult` review** (which correctly caught a
+real flaw in my first proposed fix -- tagging with the existing
+`call_id` would NOT work, since `next_call_id()` is a per-PROCESS
+global counter and the sender's/receiver's values for "the same"
+logical transfer are independent, non-agreeing counters in different
+processes): a per-(peer, direction) 16-bit sequence counter
+(`send_seq_[peer]`, `recv_seq_[peer]`), incremented once per logical
+`send()`/`recv()` call, packed into the header's existing upper 16
+bits alongside the chunk index (no header-size change). On mismatch:
+discard (do NOT touch `got[]`/`all_recv`, do NOT re-post the buffer
+directly -- the caller's own polling loop already handles buffer
+lifecycle after every `consume_recv()` call; a second re-post would
+double-post the same physical buffer slot, a real RDMA-semantics
+violation) and log loudly so a real reproduction stays traceable.
+Verified within-call retransmits are unaffected: `seq` is captured
+once per `send()` call, outside its own retry-round loop, so
+legitimate same-call retries carry the same seq and duplicate chunk
+indices -- exactly what the existing `got[]` dedup already handles.
+
+**Local verification (this machine, no cluster time used):** no unit
+test harness exists for jaccl's RDMA internals (inherently needs two
+real machines with a real Thunderbolt link -- there is no way to
+build one without the cluster). Compiled `mesh.cpp` (which
+transitively includes `mesh_impl.h`, where every change lives)
+directly with `clang++ -std=c++20 -Wall -Wextra -fsyntax-only`
+against the real SDK/include paths -- clean, zero errors, zero new
+warnings vs. the unmodified file. Confirmed the retry-loop/seq-capture
+ordering is correct by direct code read (seq captured once outside
+the per-send retry loop; no recursive `recv()` call inside `recv()`
+that would double-increment `recv_seq_`).
+
+**Deployed:** pushed to `adurham/mlx` fork's own `origin/main`
+(commit `bdf78e752`), exo's `uv.lock` re-resolved
+(`uv lock --upgrade-package mlx`) to pick up the new SHA -- per this
+campaign's own documented pitfall (a `branch = "main"` pin does NOT
+auto-track; the lock freezes an exact SHA and must be explicitly
+re-resolved or a cluster restart rebuilds the OLD code).
+
+**NOT YET DONE, explicitly not silently skipped:** the actual cluster
+deploy (`start_cluster.sh` triggers a full mlx C++ rebuild from
+source on BOTH nodes, ~20-45 min per node per this project's own
+documented cost) and the real-hardware re-validation (re-run the
+same 100K-token chunk-drive request that crashed twice in Section 18,
+confirm it now completes cleanly, confirm the new discard-log line
+appears zero times in the healthy case or handles a real stale
+message correctly if load happens to trigger one) have NOT happened
+yet -- this is compiled C++ touching the CORE RDMA transport used by
+every collective on the cluster (not scoped to chunk-drive prefill
+specifically), a materially higher-risk deploy than any Python-only
+change this session, and needs its own explicit go-ahead before
+triggering the rebuild, per the standing "no cluster restart without
+explicit go-ahead" rule.
+
+**Commits this entry covers:** mlx fork `bdf78e752` (the actual fix),
+exo `uv.lock` bump (pending commit, see repo state).
