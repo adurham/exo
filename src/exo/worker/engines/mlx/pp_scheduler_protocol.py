@@ -448,6 +448,75 @@ class PrefillAbortAckMessage:
 
 
 @dataclass(frozen=True)
+class PrefillChunkDoneMessage:
+    """Rank 0's notice to rank 1: "I have SENT all of chunk N's
+    advances -- reply once you have genuinely FINISHED PROCESSING
+    them (your own local ``ResumablePrefillSession.advance()`` calls
+    for this chunk's tail layers have actually completed), so I can
+    safely register chunk N+1" -- 2026-08-08, real production
+    incident fix (see design doc Section 21 for the full incident).
+
+    WHY THIS EXISTS (a genuine gap tonight's stale-message-seq fix did
+    NOT close): rank 0's own "chunk complete" decision
+    (``_prefill_rank1_advances_remaining == 0``) is a pure LOCAL
+    send-count decrement -- it means "I have sent 11 advances", not
+    "rank 1 has finished computing on them". Rank 1's own local
+    compute for a chunk's tail layers (the real Metal forward-pass
+    work inside ``ResumablePrefillSession.advance()``) can genuinely
+    still be running when rank 0's last advance SEND completes --
+    confirmed on real hardware via a 14-second Metal ``Event::wait``
+    stall on rank 1 immediately after receiving chunk N's final
+    advance, during which rank 0 raced ahead: registered chunk N+1
+    and began sending ITS advances before rank 1 had even registered
+    chunk N+1's session, let alone processed anything for it. Fully
+    valid, in-order, correctly-sequenced messages (tonight's earlier
+    fix's own seq-tag validation confirmed no transport desync) --
+    the actual bug is a missing cross-rank barrier at the chunk
+    boundary, a different failure class entirely from a stale/
+    duplicate wire message.
+
+    WHY THIS NEEDS A BLOCKING ACK (not fire-and-forget): mirrors
+    ``PrefillAbortMessage``/``PrefillAbortAckMessage``'s own
+    DRAINING-until-ack contract exactly, for the identical structural
+    reason -- rank 0 must not register a NEW session (reuse its own
+    ``_active_prefill_session`` slot) until it has PROOF rank 1 has
+    genuinely finished with the current one, or the exact class of
+    race this message exists to close recurs at the NEXT chunk
+    boundary too.
+
+    Deliberately a SEPARATE message kind from ``PrefillAdvanceMessage``
+    (not an "advance with a done flag") for the same reason
+    ``PrefillAbortMessage`` is separate from it: a fire-and-forget
+    advance and a genuinely-must-block completion notice are different
+    enough contracts that overloading one message shape to carry both
+    makes every reader branch on a flag that means nothing for the
+    other case.
+    """
+
+    step_id: int
+    request_id: int
+    chunk_index: int
+
+
+@dataclass(frozen=True)
+class PrefillChunkDoneAckMessage:
+    """Rank 1's acknowledgement that it has genuinely finished
+    processing chunk ``chunk_index`` (its own local
+    ``ResumablePrefillSession.advance()`` calls for this chunk's tail
+    layers have actually completed -- not merely that it received all
+    the wire messages). Only after THIS is received may rank 0
+    register chunk ``chunk_index + 1``'s session -- mirrors
+    ``PrefillAbortAckMessage``'s own "transition back to registerable
+    only after ack" contract exactly. See ``PrefillChunkDoneMessage``'s
+    own docstring for the full incident this closes.
+    """
+
+    step_id: int
+    request_id: int
+    chunk_index: int
+
+
+@dataclass(frozen=True)
 class EvictMessage:
     """Explicit eviction notice for one cache slot -- the fix for Risk
     #10's cancellation-by-omission ambiguity (module docstring point

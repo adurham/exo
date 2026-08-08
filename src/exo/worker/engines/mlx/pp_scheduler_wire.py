@@ -95,6 +95,8 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
     PrefillAbortAckMessage,
     PrefillAbortMessage,
     PrefillAdvanceMessage,
+    PrefillChunkDoneAckMessage,
+    PrefillChunkDoneMessage,
     PrefillMessage,
     PrefillReadyMessage,
     StepMessage,
@@ -114,6 +116,8 @@ MSG_KIND_PREFILL_READY = 5
 MSG_KIND_PREFILL_ADVANCE = 6
 MSG_KIND_PREFILL_ABORT = 7
 MSG_KIND_PREFILL_ABORT_ACK = 8
+MSG_KIND_PREFILL_CHUNK_DONE = 9
+MSG_KIND_PREFILL_CHUNK_DONE_ACK = 10
 
 _HEADER_FIELDS = 5  # [version, msg_kind, step_id, field_d, field_e]
 _STEP_ROW_FIELDS = (
@@ -602,6 +606,92 @@ def recv_prefill_abort_ack_message(
     docstring for the same caveat about production dispatch code)."""
     header = recv_header(src, group=group)
     return decode_prefill_abort_ack_message(header)
+
+
+def send_prefill_chunk_done_message(
+    message: PrefillChunkDoneMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillChunkDoneMessage`` to ``dst`` -- fits entirely
+    in the fixed header (identical shape rationale to
+    ``send_prefill_abort_message``: only step_id/request_id/
+    chunk_index, no follow-up body needed)."""
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL_CHUNK_DONE,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=message.chunk_index,
+    )
+    send_header(header, dst, group=group)
+
+
+def decode_prefill_chunk_done_message(header: WireHeader) -> PrefillChunkDoneMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL_CHUNK_DONE``, assemble the
+    ``PrefillChunkDoneMessage`` -- no additional receive needed."""
+    _require_kind(
+        header,
+        MSG_KIND_PREFILL_CHUNK_DONE,
+        fn_name="decode_prefill_chunk_done_message",
+    )
+    return PrefillChunkDoneMessage(
+        step_id=header.step_id,
+        request_id=header.field_d,
+        chunk_index=header.field_e,
+    )
+
+
+def recv_prefill_chunk_done_message(
+    src: int, *, group: mx.distributed.Group
+) -> PrefillChunkDoneMessage:
+    """Convenience one-call wrapper (see ``recv_step_message``'s own
+    docstring for the same caveat about production dispatch code)."""
+    header = recv_header(src, group=group)
+    return decode_prefill_chunk_done_message(header)
+
+
+def send_prefill_chunk_done_ack_message(
+    message: PrefillChunkDoneAckMessage, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send a ``PrefillChunkDoneAckMessage`` to ``dst`` -- the reply
+    rank 1 sends after receiving a ``PrefillChunkDoneMessage`` AND
+    genuinely finishing its own local compute for that chunk (never
+    sent speculatively/early -- see that dataclass's own docstring
+    for why blocking on real completion, not just message receipt, is
+    the entire point)."""
+    header = _encode_header(
+        msg_kind=MSG_KIND_PREFILL_CHUNK_DONE_ACK,
+        step_id=message.step_id,
+        field_d=message.request_id,
+        field_e=message.chunk_index,
+    )
+    send_header(header, dst, group=group)
+
+
+def decode_prefill_chunk_done_ack_message(
+    header: WireHeader,
+) -> PrefillChunkDoneAckMessage:
+    """Given an already-received ``header`` with
+    ``msg_kind == MSG_KIND_PREFILL_CHUNK_DONE_ACK``, assemble the
+    ``PrefillChunkDoneAckMessage``."""
+    _require_kind(
+        header,
+        MSG_KIND_PREFILL_CHUNK_DONE_ACK,
+        fn_name="decode_prefill_chunk_done_ack_message",
+    )
+    return PrefillChunkDoneAckMessage(
+        step_id=header.step_id,
+        request_id=header.field_d,
+        chunk_index=header.field_e,
+    )
+
+
+def recv_prefill_chunk_done_ack_message(
+    src: int, *, group: mx.distributed.Group
+) -> PrefillChunkDoneAckMessage:
+    """Convenience one-call wrapper (see ``recv_step_message``'s own
+    docstring for the same caveat about production dispatch code)."""
+    header = recv_header(src, group=group)
+    return decode_prefill_chunk_done_ack_message(header)
 
 
 def send_evict_ack_message(

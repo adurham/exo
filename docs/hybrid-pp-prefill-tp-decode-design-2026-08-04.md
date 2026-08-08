@@ -4514,3 +4514,104 @@ Section 17's memory-headroom check (2 concurrent deep-context KV
 caches) and real cancel/abort against the live chunk-drive path on
 real hardware. The unrelated decode-stall found during validation
 also needs its own investigation.
+
+## 21. Second, distinct chunk-boundary race found during cancel/abort
+testing (2026-08-08, same session continued) -- root-caused,
+NOT fixed tonight, design work only
+
+Attempting the deferred Section 17/20 items (cancel/abort test,
+memory headroom check) surfaced a THIRD real crash during the cancel
+test's setup (firing a long chunked-prefill request to get a live
+`command_id`) -- same GlueError class as Sections 18/20, but a
+DIFFERENT root cause, confirmed via precise cross-rank log
+correlation, not guessed:
+
+**Rank 0's chunk-N-complete decision is a pure LOCAL send-count
+decrement with zero confirmation rank 1 has finished PROCESSING the
+advances, only that rank 0 finished SENDING them.** Real hardware
+evidence: rank 1 received chunk 0's final advance (11/11) cleanly at
+23:20:53.065, then immediately hit a genuine 14-second local Metal
+`Event::wait` stall (its own GPU forward-pass compute for that
+chunk's tail layers, NOT a transport issue -- confirmed via the same
+seq-tag validation from Section 19/20's fix showing zero desync up to
+that point). Rank 0, meanwhile, registered chunk 1 at 23:20:53.161 (96ms
+after its last chunk-0 send) and started sending chunk 1's advances
+at 23:20:54.845 -- all while rank 1 was still mid-stall on chunk 0,
+had NOT yet registered chunk 1's session. Rank 1 finally processed the
+stall's aftermath at 23:21:07.253, received chunk 1's first advance
+against session state still tracking chunk 0, and crashed on the
+mismatch -- exactly the tripwire working as designed, just catching a
+different class of bug than Section 20's fix targets.
+
+This is a genuinely different failure than Section 18/20's stale-
+message-redelivery bug: here every message is fresh, in-order, and
+correctly sequenced (confirmed, not assumed) -- the actual gap is a
+missing CROSS-RANK BARRIER at the chunk boundary, not a transport
+message-identity problem.
+
+**Design work done tonight (not shipped):** drafted the wire protocol
+for a real fix -- `PrefillChunkDoneMessage`/`PrefillChunkDoneAckMessage`
+(new message kinds 9/10, full codec functions:
+`send_prefill_chunk_done_message`/`recv_prefill_chunk_done_ack_message`
+etc., mirroring `PrefillAbortMessage`/`PrefillAbortAckMessage`'s
+established DRAINING-until-ack pattern exactly) -- committed to
+`pp_scheduler_protocol.py`/`pp_scheduler_wire.py`. These are inert
+scaffolding: defined, tested (basedpyright/ruff clean, full 309-test
+suite passes, zero regressions), but NOT wired into `tick()`'s actual
+dispatch logic -- deliberately.
+
+**Why not wired in tonight -- a real architectural blocker found via
+two `consult` reviews, not a time-management choice:** my first
+integration attempt made rank 0's `tick()` BLOCK on the ack round-trip
+directly inside the RANK1_DRAINING completion branch. A `consult`
+review correctly flagged this as reintroducing exactly the class of
+hazard Phase 2's whole chunk-drive redesign exists to prevent -- a
+synchronous stall inside the single-threaded runner event loop for
+however long rank 1's real remaining compute takes (measured tonight:
+14 seconds), during which NO concurrently active decode request can
+make progress. A SECOND `consult` review, asked to design the correct
+non-blocking poll-across-ticks alternative, surfaced a deeper
+structural fact: this codebase's wire transport is `mx.distributed`
+collectives directly (jaccl RDMA), which has NO non-blocking/iprobe
+receive primitive -- `recv_header()` is unconditionally blocking.
+A true "poll for the ack, do other work if it hasn't arrived yet"
+design (the architecturally correct fix) requires either a demuxing
+message-pump layer with a persistent rx buffer and non-blocking
+socket-style polling (a genuinely new transport-layer capability this
+codebase does not have), or restructuring to a fundamentally different
+synchronization primitive. This is real, substantial engineering, not
+a quick patch -- correctly scoped as its own session's work, not
+something to rush at 11pm.
+
+**Current production impact:** unfixed. The race window is narrow
+under normal conditions (~100ms-1.7s per the observed traces) but
+WIDENS under real GPU memory pressure/thermal conditions (the
+14-second stall that triggered tonight's crash) -- i.e. more likely
+to bite exactly under the kind of sustained real load Phase 3/4 will
+eventually need to validate. `EXO_PP_BATCHED_DECODE=1` chunk-drive
+prefill remains real-hardware-validated for the Section 18/20 bug
+class (stale/duplicate messages) but carries this SEPARATE, known,
+unfixed race for the chunk-boundary-during-compute-stall case.
+
+**Next session's concrete starting point:** the wire protocol
+scaffolding is ready and tested. What's needed is a real design
+session (not implementation) for the actual non-blocking
+synchronization mechanism given `mx.distributed`'s blocking-only recv
+constraint -- candidate directions from tonight's second `consult`
+review: (a) determine whether the ack is even structurally necessary
+if seq/epoch tagging alone can close the ordering gap without a
+round-trip (worth checking BEFORE building polling machinery), or
+(b) a bounded, deterministic fixed-size control exchange both ranks
+execute every tick regardless of state (bounded by tick period, not
+protocol RTT) rather than a genuine async poll.
+
+Section 17's memory-headroom check and the actual cancel/abort test
+itself (interrupted by this discovery) remain undone -- deferred
+again, now for a third reason (found this bug while setting up the
+test, not before or after it).
+
+**Cluster state:** restored to healthy after the crash (killed stuck
+runners, clean relaunch), running the Section 20 fix (`b1e1ae09b`,
+jaccl stale-message fix + dead-kernel removal) -- unchanged from
+Section 20's end state, since tonight's Section 21 work was
+design-only, deliberately not deployed.
