@@ -1,0 +1,49 @@
+HANDOFF: exo chunked-prefill campaign — Section 22 fix ready to deploy, real hardware validation needed
+
+Repo: ~/repos/exo, branch main, tree clean, HEAD = ee7fae663.
+mlx submodule pinned at b1e1ae09b (jaccl stale-message-seq fix + dead-kernel removal — this IS deployed and running live).
+mlx-lm submodule pinned at bd5d6764 (unchanged this session).
+
+Two-node Mac Studio M4 Max cluster (adams-mac-studio-m4-1.local, adams-mac-studio-m4-2.local), currently deployed at mlx b1e1ae09b, healthy, RunnerReady x2, smoke-tested with real inference ("Paris", clean finish_reason=stop). EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1 active in production.
+
+IMPORTANT: the exo Python source at HEAD (ee7fae663) is AHEAD of what's actually running on the two nodes — the nodes are running an EARLIER exo commit (whatever HEAD was when b1e1ae09b was deployed, i.e. before Section 22's fix landed). Section 22's fix is a pure-Python change (no mlx/C++ rebuild needed) but the cluster won't pick it up until you deploy — check via `ssh <node> "cd ~/repos/exo && git log -1 --oneline"` before assuming it's live.
+
+=== What's done and shipped (deployed, validated on real hardware) ===
+
+Section 18/20 bug — jaccl stale-message redelivery at depth:
+- Root cause: jaccl's C++ send()/recv() wire header carried only a within-call chunk index, no per-call disambiguator; a stale/duplicate message from jaccl's own retry layer could land in a recycled buffer slot and get silently accepted as belonging to the current call.
+- Fixed with a per-(peer, direction) 16-bit sequence tag packed into the existing header (mlx commit bdf78e752, consult-reviewed — an earlier "just use call_id" idea was wrong since call_id is a per-process, non-agreeing counter).
+- ALSO required removing an unrelated, always-broken dead Metal kernel (bq=16/wm=1 D=512 attention instantiation, abandoned since 2026-07-16, mlx commit b1e1ae09b) that blocked the first fresh compile in 3 weeks.
+- Validated: two consecutive ~72K-token chunked-prefill runs, deliberately past the crash-prone chunk 51-60 depth, zero desyncs, zero crashes, confirmed via direct log correlation (matched advance_seq/expected_seq pairs).
+
+=== What's done, tested, NOT YET DEPLOYED ===
+
+Section 21/22 bug — chunk-boundary race (a DIFFERENT bug from Section 18/20, found while testing cancel/abort):
+- Root cause: rank 0's "chunk complete" decision is a pure local send-count decrement (all advances SENT), with zero confirmation rank 1 has finished PROCESSING them. Rank 1's own local Metal GPU compute for a chunk's tail layers can still be running when rank 0 races ahead and registers the next chunk. Confirmed on real hardware via a 14-second Metal Event::wait stall on rank 1, precisely correlated against rank 0's own log timeline via matched timestamps — not guessed.
+- This is NOT a transport bug (unlike Section 18/20) — messages were all fresh, in-order, correctly sequenced (Section 20's seq-tag fix confirmed zero transport desync at the point of failure). It's a missing cross-rank barrier at the chunk boundary.
+- Fix (2 consult reviews to get right): a BOUNDED BLOCKING wait, not non-blocking polling. First design (blocking directly in tick()) was correctly flagged as reintroducing the exact stall-hazard Phase 2's chunk-drive redesign exists to prevent. Second consult review found the "obviously correct" non-blocking poll-across-ticks alternative isn't buildable on this codebase's transport (mx.distributed/jaccl has no non-blocking recv primitive — would need new message-pump infrastructure). Got a decisive product call from Fable (reference model): bounded blocking wait is the right call for a 2-node cluster — non-blocking recv machinery is exactly where distributed-systems bugs live, and blocking-then-migrate-later is the reversible choice; don't build async infra speculatively.
+- Actual fix: rank 1's tick() is ALREADY synchronously blocked on the real GPU forward pass (ResumablePrefillSession.advance()) when processing a chunk's final advance — that block IS the stall. So rank 1 sends a new PrefillChunkDoneAckMessage EAGERLY from inside that same tick() call, right after its own compute genuinely finishes (no round-trip on rank 1's side). Rank 0 does exactly ONE bounded blocking recv for that ack before declaring the chunk done, mirroring the existing _PREFILL_READY_MAX_WAIT_SECONDS pattern already in this file, relying on jaccl's own real StallWatch/deadline mechanisms as the timeout backstop (no reinvented Python timeout wrapper).
+- New wire protocol: PrefillChunkDoneMessage/PrefillChunkDoneAckMessage (message kinds 9/10), mirroring PrefillAbortMessage/PrefillAbortAckMessage's established pattern exactly. Full codec functions in pp_scheduler_wire.py, dataclasses in pp_scheduler_protocol.py, wired into both ranks' tick() in pp_batched_decode_glue.py.
+- Test infra updated: shared _capture_sent_advances test helper (6 existing chunk-drive tests) now also stubs mx.distributed.recv_like for the new ack round-trip. New regression test test_chunk_done_ack_mismatch_raises_instead_of_silently_registering_next_chunk proves the fail-loud guard actually fires on a deliberately mismatched ack, not just that the happy path works.
+- Verified: basedpyright/ruff clean, full mlx engine test suite 310 passed (309 existing + 1 new), zero regressions.
+- NOT DEPLOYED: this changes the hot chunk-drive path's real runtime behavior — any OTHER concurrently-decoding request now stalls at each chunk boundary for however long rank 1's real remaining chunk-tail compute takes. That tradeoff needs real-hardware validation (does it actually work under real memory pressure, what's the real observed stall duration distribution, does anything time out under jaccl's existing deadlines), not just unit-test confidence.
+
+=== CRITICAL — mistakes made and corrected this session, do not repeat ===
+
+1. An emergency revert-under-pressure went too far back. When the first jaccl-fix deploy attempt failed to build (the unrelated dead-kernel bug above), I reverted uv.lock's mlx pin to ac73d0c9 without checking whether that SHA itself predated other critical fixes. It did — ac73d0c9 (2026-07-11) predates c168e2f4b (2026-07-17), the real fix for a 100%-reproducible jaccl PP warmup stall ("[jaccl] recv STALLED... UC completion lost", a genuine UC-drop race — see warm memory facts 1022/1122 for the original incident). This silently REINTRODUCED that already-fixed bug. Caught it via three consecutive identical crashes (including surviving a full node reboot, which does NOT fix a code-level race — a different fault class this was briefly mistaken for). LESSON: an emergency revert needs the SAME rigor as a forward pin bump — verify the target SHA against known critical-fix commits via `git merge-base --is-ancestor <fix-sha> <target-sha>` before trusting "whatever uv.lock said before" as safe.
+
+2. Real, ongoing WiFi/network flakiness this session caused multiple spurious "cluster is stuck" scares (intermittent SSH timeouts to the raw 192.168.86.201/.202 IPs the launcher hardcodes, even while hostname-based SSH worked fine seconds apart). Not a code issue — just be aware start_cluster.sh launches can fail on real transient network blips and simply retrying (2-4x) usually clears it. Don't over-diagnose a network blip as a cluster bug.
+
+3. A genuinely separate decode-phase stall (20+ min, zero token output, no crash, no error) occurred once during validation — killed the runner and moved on rather than diagnosing blind. Flagged as unresolved, never investigated. Possible causes not yet explored: interaction with EXO_PP_BATCHED_DECODE's decode-phase scheduling, or something specific to a reasoning-heavy arithmetic prompt triggering runaway generation without hitting max_tokens.
+
+=== Next session's concrete priorities, in order ===
+
+1. Deploy Section 22's fix. This is a pure Python source change (exo src, git-deployed via `git reset --hard origin/main` on the nodes) — NOT an mlx C++ rebuild, so it should be a fast, low-risk restart (no 20-45min rebuild). Verify both nodes pick up commit ee7fae663 (or later) via `git log -1` post-restart.
+
+2. Real-hardware validation of the Section 22 fix specifically: re-run a long chunk-drive prefill (the same ~72K-token class of request used for Section 20's validation) and confirm no crash. Ideally also try to reproduce something like the original 14-second-stall conditions (real memory pressure, maybe run it back-to-back with other load) to actually exercise the new blocking-wait path, not just the never-stalls happy case. Watch for: does the bounded wait actually resolve promptly in the normal case (no visible latency regression on short single requests), and does a concurrent SECOND request visibly stall at chunk boundaries during a long first request's chunk-drive (expected, per the accepted tradeoff — confirm it's bounded, not runaway).
+
+3. THEN, once Section 22 is validated: the still-deferred Section 17 items — memory headroom check (2 concurrent deep-context KV caches) and a real cancel/abort test on real hardware (attempted twice this session, interrupted both times by genuine new discoveries, never actually completed).
+
+4. The unresolved decode-phase stall (item 3 under "mistakes/findings" above) — investigate if it recurs, don't chase it speculatively if it doesn't.
+
+Standing rules for this repo, unchanged: working tree must stay clean, commit+push immediately after every verified change. Any cluster restart needs its own fresh explicit go-ahead per turn — approving code is not approval to deploy. Full incident details for everything above are in docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md, Sections 18 through 22 (search for "SUBMODULE PIN ADVANCE" or the section headers directly — the doc is long, these are the newest entries at the bottom).
