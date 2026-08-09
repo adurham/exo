@@ -1,0 +1,39 @@
+Thread 0x0000000171f47000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 395 in _recv
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 430 in _recv_bytes
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/connection.py", line 216 in recv_bytes
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py", line 101 in get
+  File "/Users/adam.durham/repos/exo/src/exo/utils/channels.py", line 337 in receive
+  File "/Users/adam.durham/repos/exo/src/exo/utils/channels.py", line 374 in __next__
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 262 in loop
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x0000000170f3b000 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 359 in wait
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py", line 249 in _feed
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Thread 0x000000016ff2f000 (most recent call first):
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 196 in loop
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 995 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1044 in _bootstrap_inner
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 1015 in _bootstrap
+
+Current thread 0x0000000205a4fb40 (most recent call first):
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/threading.py", line 303 in __enter__
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/queue.py", line 191 in get
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/queue.py", line 231 in get_nowait
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 739 in handle_generation_tasks
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 415 in handle_first_task
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/runner.py", line 327 in main
+  File "/Users/adam.durham/repos/exo/src/exo/worker/runner/bootstrap.py", line 337 in entrypoint
+  File "/Users/adam.durham/repos/exo/src/exo/utils/async_process.py", line 267 in _run_with_captured_stdio
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 108 in run
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/process.py", line 313 in _bootstrap
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 135 in _main
+  File "/Users/adam.durham/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 122 in spawn_main
+  File "<string>", line 1 in <module>

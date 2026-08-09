@@ -5275,3 +5275,213 @@ another guess.
    ever recurs despite this fix, the Private-Wi-Fi-Address root cause
    analysis above is the first thing to re-check, not a re-diagnosis
    from scratch.
+
+## 27. Section 17 attempt #6: memory-headroom check ran clean (PASS on
+memory, FAIL on the bench script's own HTTP layer), the concurrency-
+wedge bug fully ROOT-CAUSED with two real faulthandler dumps -- a
+structural cancellation gap in the batched-decode path, not a race
+(2026-08-09, next session)
+
+**Pre-flight housekeeping, real and new:** the studios' global
+`~/.gitconfig` had a blanket `url."ssh://git@github.com/".insteadOf =
+https://github.com/` rewrite rule that silently forced ALL anonymous
+public-repo clones (including MLX's own CMakeLists.txt `FetchContent`
+pulls of `fmt`, `nanobind`, `gguflib` -- none of which need auth) onto
+SSH port 22, whose DNS/connect path proved measurably less reliable
+than HTTPS:443 under the concurrent load of a `-j16` parallel cmake
+build (reproduced directly: 8 concurrent `host` lookups timed out
+while `nc`/mDNSResponder-backed lookups succeeded). This caused FOUR
+consecutive full mlx-rebuild failures tonight before being caught.
+Root-caused and FIXED (not worked around) on both nodes: replaced the
+blanket rule with two narrowly-scoped rules
+(`ssh://git@github.com/adurham/` and `.../exo-explore/`) that only
+rewrite the two repos that actually need authenticated push access,
+leaving every other GitHub HTTPS clone (including MLX's build-time
+dependency fetches) on the reliable HTTPS path. Verified with a fresh
+`git clone --depth 1 https://github.com/fmtlib/fmt.git` succeeding
+immediately post-fix. This is unrelated to the already-fixed Section 26
+Private-Wi-Fi-Address ARP issue -- a second, independent network
+footgun found the same night, now also closed.
+
+**Faulthandler correctly armed from a fresh launch this time**
+(`/tmp/exo_faulthandler_enabled` touched on both nodes BEFORE
+`start_cluster.sh`, confirmed via `"faulthandler registered on SIGUSR1"`
+in both runner logs before any bench traffic).
+
+**Section 17's actual memory-headroom question: ANSWERED, PASS.**
+2x concurrent 150K-token requests were sent after a clean single-token
+warm-up request (jaccl connections pre-stabilized per the Section
+23-25 pattern). Peak resident memory across the whole run stayed at
+87.3GB (node1) / 84.1GB (node2) -- comfortably under the 115GB/node
+`iogpu.wired_limit_mb` ceiling, with over 25GB of headroom to spare on
+each node even at the very start of two concurrent 150K-token prefills.
+Wired memory itself barely moved (3.1-3.5GB the entire run) -- all of
+the resident growth is in `active` pages (KV cache + activations), which
+is expected and was already the theorized shape. **Verdict: two
+concurrent ~150K-token requests do NOT threaten the wired-memory
+ceiling on this 2-node topology.** This closes the memory-headroom
+question that has been open since Section 17 was first written --
+five sessions of attempts before this one couldn't even get a bench to
+reach real depth; this one did, cleanly, on the first real attempt
+once faulthandler-arming and the network fixes were in place.
+
+**However, the bench script's own HTTP client layer is broken for
+long-running batched-decode streams** -- both streams read `DONE in
+770.4s finish_reason=None error='' needle_found=False`: the memory
+data collected throughout that 770s is real and directly answers
+Section 17's question, but neither stream got a clean
+`finish_reason=stop`/`needle_found=True` completion. This is a
+DIFFERENT, separate bug from the concurrency-wedge below -- the
+memory samples show real prefill+decode progress the entire 770s
+(monotonically growing then shrinking active memory as expected), so
+the model was genuinely serving both streams the whole time; the
+client-side `httpx.AsyncClient().stream()` context in
+`section17_memory_headroom_check.py` simply never received a
+terminating `data: [DONE]\n\n` SSE frame within its own accounting and
+exited its `async for line in resp.aiter_lines()` loop with
+`finish_reason` still `None`. NOT investigated further this session
+(out of scope for tonight's three explicit priorities) -- flagged as a
+bench-script fix needed before this exact bench can report a clean
+PASS/FAIL on the needle-in-haystack correctness check, not just the
+memory-headroom number.
+
+**The concurrency-wedge bug (Section 26): FULLY ROOT-CAUSED, real
+faulthandler evidence, NOT a race condition -- a structural gap.**
+
+Sequence of events, all confirmed from real evidence (task states via
+`/state`, `ps` CPU-time deltas, two independent `SIGUSR1` dumps
+captured ~30s apart on the SAME wedged process):
+
+1. The bench script's `httpx` client-side stream read hung (see the
+   bench-script bug above) and the tool ultimately lost its
+   connection/was interrupted from the orchestrating session's side
+   partway through the 770s window.
+2. exo's API layer (`src/exo/api/main.py`'s `_token_chunk_stream`)
+   caught the resulting `anyio.get_cancelled_exc_class()` and did
+   exactly what it's designed to do: sent a `TaskCancelled` COMMAND
+   (`src/exo/shared/types/commands.py`) to the master. This command
+   updates the MASTER's own event-sourced cluster state only --
+   `src/exo/master/main.py`'s handler for `TaskCancelled` sets
+   `TaskStatusUpdated(task_status=TaskStatus.Cancelled)` and nothing
+   else.
+3. The master's own planner (`src/exo/worker/plan.py`'s
+   `_cancel_tasks`) correctly sees the now-`Cancelled` task and DOES
+   dispatch a real `CancelTask` TASK (a different type from the
+   `TaskCancelled` COMMAND above -- confusingly similar names, genuinely
+   different types/paths) to the worker, which correctly reaches
+   `src/exo/worker/main.py`'s `CancelTask` handler, which correctly
+   calls `RunnerSupervisor.cancel_task()`, which correctly sends the
+   `task_id` down the real `cancel_receiver` multiprocessing pipe into
+   the runner subprocess. This is why `/state` legitimately shows both
+   `TextGeneration` tasks as `Cancelled` AND both `CancelTask` tasks as
+   `Complete` -- every step up to and including delivery into the
+   runner's own `cancel_receiver` queue worked exactly as designed.
+4. **The gap: nothing on the batched-decode code path ever reads
+   `cancel_receiver`.** Confirmed by exhaustive grep, not inference --
+   `agree_on_cancellations`, `agree_on_cancellations_fast`,
+   `_cancelled_tasks`, and `cancel_receiver` all appear ZERO times
+   across `_step_batched_decode`
+   (`generator/batch_generate.py:3854-3938`) and the entire
+   `pp_batched_decode_glue.py` / `pp_batched_decode_runtime.py` /
+   `pp_batched_decode_driver.py` module set. Those four names DO
+   appear -- but only inside `_start_task`/`_batched_start_task`'s
+   `on_generation_token`/`distributed_prompt_progress_callback`
+   closures (`batch_generator.py` lines ~340-360 and ~858-877), which
+   are wired into the LEGACY per-task generator path
+   (`SequentialGenerator`/non-batched `BatchGenerator._start_task`),
+   never into `_step_batched_decode`'s own decode loop. The queued
+   cancellation just sits in `cancel_receiver`'s OS pipe buffer
+   forever, never drained, because nothing on this path ever calls
+   `.collect()` on it.
+5. With the cancellation never actually reaching the batched-decode
+   session, `BatchedDecodeSession`/`Rank0BatchedDecodeGlue.tick()` keep
+   calling the model forward pass every cycle exactly as if the client
+   were still attached and consuming tokens -- which is precisely the
+   observed symptom: `runner.py`'s outer `while self.active_tasks:`
+   loop (line 588) never exits because `self.active_tasks` is runner-
+   local state that ALSO never learns about the cancellation (nothing
+   pops it -- the popping logic at line 649 only fires on a genuine
+   `FinishedResponse`/`CancelledResponse` coming back from
+   `results = self.generator.step()`, which `_step_batched_decode`
+   will only ever produce via its own EOS/max-tokens/degeneration
+   eviction path, never via an external cancel). The two independent
+   SIGUSR1 dumps (rank 1 caught inside `get_coord_group` mid-`step()`,
+   ~30s later caught at the `active_tasks.pop()` line just after a
+   step returned) prove the SAME thread cycling through the SAME live
+   decode loop over and over -- not blocked, not deadlocked on a wire
+   read, genuinely busy-looping on real (wasted) GPU compute. Both
+   runners burned 400+ CPU-minutes (matching 6.5+ hours of wall clock
+   almost exactly, i.e. continuously pinned at ~99-100% the entire
+   time) between the interrupted bench and this session picking the
+   investigation back up.
+
+**This is a real, previously-undiscovered structural gap in Phase 1's
+batched-decode design, not a bug in the N=2 admission-race fix chain
+Sections 15/18 already closed.** Every prior admission/prefix-cache/
+eviction race this campaign root-caused (the long "bug #1 through #7"
+chain in `exo-cluster-deployment`'s pitfalls) was about two ranks
+disagreeing or racing on a decision they both needed to make together.
+This is different in kind: it's a single-rank code path (rank 0's own
+`tick()`-driven decode loop) that was simply never wired to check an
+input (`cancel_receiver`) it has always had available. The existing
+`complete_request()` eviction protocol (real `EvictMessage`/
+`EvictAckMessage` round trip, already correctly used for EOS/max-
+tokens/degeneration evictions) is architecturally the RIGHT mechanism
+to route an external cancellation through too -- it already handles
+tearing down both ranks' session state and freeing the cache slot
+correctly. The fix is very likely: poll `cancel_receiver` (or reuse the
+existing `agree_on_cancellations`/`_cancelled_tasks` bookkeeping
+already built for the legacy path) from inside `_step_batched_decode`
+itself, and route any newly-cancelled `request_id` through
+`Rank0BatchedDecodeGlue.complete_request()` exactly like a natural
+EOS eviction -- NOT a new wire message, NOT a new protocol, just
+wiring an existing, already-correct signal into a loop that currently
+ignores it. **Not yet implemented or reviewed this session** -- this
+section documents the root cause with full evidence; the fix itself
+and its `consult` review are next-session work.
+
+**Practical mitigation used tonight (not a fix):** the wedged
+processes were left running rather than killed blind, to preserve the
+exact state for the two SIGUSR1 captures above. Cluster is being torn
+down and relaunched clean after this section is written, since the
+wedge cannot self-resolve (confirmed: 6.5+ hours of continuous 100%
+CPU with zero task-state change).
+
+**Real cancel/abort test against a live chunk-drive session: STILL not
+run** -- this session's investigation IS itself indirect evidence that
+cancellation is broken for the batched-decode path specifically (the
+`abort_prefill_session`/chunked-prefill-drive cancel mechanism from
+Section 26's own prior work is a DIFFERENT code path -- it only fires
+for a request whose PREFILL is still chunk-driving, never for a
+request already in steady-state decode, which is what actually
+happened here). The originally-planned "real cancel/abort test" for
+requirement 2 should be re-scoped next session to explicitly cover
+BOTH cases: (a) cancel during chunked-prefill drive (the already-unit-
+tested path, still never run on real hardware) and (b) cancel during
+batched-decode steady state (newly proven broken tonight, real
+hardware, real evidence).
+
+**Next session's concrete starting point, in order:**
+
+1. Fix the batched-decode cancellation gap found above: wire
+   `cancel_receiver` polling (or the existing `agree_on_cancellations`
+   bookkeeping) into `_step_batched_decode`, routing any cancelled
+   `request_id` through the existing `complete_request()` eviction
+   protocol. Get a `consult` review before landing -- this touches the
+   same single-writer `tick()` hot path every prior bug in this chain
+   has lived in.
+2. Fix `bench/section17_memory_headroom_check.py`'s HTTP client so a
+   long-running (770s+) batched-decode stream reports a clean
+   `finish_reason`/`needle_found` result instead of silently exiting
+   its read loop with `finish_reason=None` -- the memory data it
+   collects is already correct and useful, only the completion
+   detection is broken.
+3. Once (1) is fixed and verified, re-run the real cancel/abort test
+   for BOTH the chunked-prefill-drive case (already unit-tested, never
+   run on hardware) and the newly-identified batched-decode-steady-
+   state case -- this is requirement 2 and has now been deferred
+   across seven sessions.
+4. Git-config housekeeping note: if a `FetchContent`/anonymous-clone
+   failure over SSH:22 ever recurs on either studio despite tonight's
+   scoped-`insteadOf` fix, check `git config --global --list | grep
+   url` first -- do not re-diagnose from scratch.
