@@ -204,6 +204,7 @@ from exo.shared.types.events import (
     IndexedEvent,
     InstanceDeleted,
     NodeGatheredInfo,
+    TaskStatusUpdated,
     TracesMerged,
 )
 from exo.shared.types.instance_link import InstanceLink, InstanceLinkId
@@ -214,6 +215,10 @@ from exo.shared.types.tasks import (
 )
 from exo.shared.types.tasks import (
     ImageGeneration as ImageGenerationTask,
+)
+from exo.shared.types.tasks import (
+    TaskId,
+    TaskStatus,
 )
 from exo.shared.types.tasks import (
     TextGeneration as TextGenerationTask,
@@ -2348,6 +2353,11 @@ class API:
                     self._close_streams_for_instance(event.instance_id)
                 if isinstance(event, TracesMerged):
                     self._save_merged_trace(event)
+                if (
+                    isinstance(event, TaskStatusUpdated)
+                    and event.task_status == TaskStatus.Failed
+                ):
+                    self._fail_stream_for_task(event.task_id)
 
     def _record_chunk_metrics(self, event: ChunkGenerated) -> None:
         chunk = event.chunk
@@ -2391,6 +2401,52 @@ class API:
             ):
                 return task.instance_id
         return None
+
+    def _fail_stream_for_task(self, task_id: TaskId) -> None:
+        """Surface a worker-side task failure (``TaskStatus.Failed``) to the
+        HTTP client waiting on this command's stream, and stop the stream.
+
+        Without this, a task that fails AFTER the runner already accepted it
+        (e.g. an in-place jaccl transport reconnect recovers the RDMA link
+        but drops all in-flight sequences, per
+        ``ExoBatchGenerator.reset_after_reconnect``'s own docstring) leaves
+        the client's ``_token_chunk_stream`` awaiting a chunk that will never
+        arrive on ``_text_generation_queues``/``_image_generation_queues`` --
+        those queues are ONLY ever fed by real ``ChunkGenerated`` events, and
+        a plain ``TaskStatusUpdated(Failed)`` transition was previously never
+        translated into either an ``ErrorChunk`` or a queue close, so the
+        client's request hangs indefinitely with no timeout of its own
+        (confirmed on real 2-node hardware, 2026-08-08: a jaccl reconnect
+        correctly failed the task at the worker level -- runner returned to
+        idle, ``/state`` showed ``TaskStatus.Failed`` -- but the client that
+        submitted the request received nothing, ever). This method closes
+        that gap generically for ANY worker-side task failure, not just the
+        jaccl-reconnect path -- the runner has many other `send_task_status
+        (..., TaskStatus.Failed)` call sites and all of them had the same
+        silent-hang bug before this fix.
+        """
+        task = self.state.tasks.get(task_id)
+        if task is None or not isinstance(
+            task, (TextGenerationTask, ImageGenerationTask, ImageEditsTask)
+        ):
+            return
+        command_id = task.command_id
+        error_message = task.error_message or "Task failed"
+        model = ModelId(task.task_params.model)
+        if sender := self._text_generation_queues.pop(command_id, None):
+            error_chunk = ErrorChunk(model=model, error_message=error_message)
+            with contextlib.suppress(
+                BrokenResourceError, ClosedResourceError, anyio.WouldBlock
+            ):
+                sender.send_nowait(error_chunk)
+            sender.close()
+        if sender := self._image_generation_queues.pop(command_id, None):
+            error_chunk = ErrorChunk(model=model, error_message=error_message)
+            with contextlib.suppress(
+                BrokenResourceError, ClosedResourceError, anyio.WouldBlock
+            ):
+                sender.send_nowait(error_chunk)
+            sender.close()
 
     def _close_streams_for_instance(self, instance_id: InstanceId) -> None:
         """Close any active generation streams for commands running on the given instance."""

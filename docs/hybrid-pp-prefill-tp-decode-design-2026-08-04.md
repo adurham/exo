@@ -4870,3 +4870,154 @@ processes, zero screen sessions on both nodes, verified via `pgrep`
 write up findings only") -- NOT relaunched into any config, including
 the previously-safe one. Next session needs its own explicit
 relaunch go-ahead per the standing rule, same as always.
+
+## 24. Root cause of Section 23's stall found and FIXED -- structural gap in the API layer, NOT Section 22's own logic (2026-08-08, same session continued)
+
+**Diagnostic method:** static code reading first, then a targeted live
+reproduction with real Python-level tooling once the code trail ran cold.
+No blind cluster relaunches -- one clean relaunch with
+`EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` (Section 23's exact repro
+config) plus the project's own `/tmp/exo_faulthandler_enabled` marker
+file (armed a pre-existing SIGUSR1 `faulthandler.dump_traceback` hook,
+`bootstrap.py` ~line 253, built during an earlier PP+DSpark stall
+investigation) to get a real Python-level thread dump on both nodes at
+the exact moment of the stall, rather than reasoning from `sample`'s
+opaque native-only stack frames.
+
+**Reproduced Section 23's exact failure signature again, deterministically**
+(chunk 0's 11 advances complete cleanly -> `[jaccl] recv() deadline in
+drain` on both ranks -> `reconnect_fresh COMPLETE` on both ranks -> then
+silence). Confirmed this is NOT a one-off flake -- three separate launches
+across two sessions hit the identical stall at the identical point.
+
+**The faulthandler dump on BOTH nodes showed the exact same, boring, correct
+state:** the runner's main thread parked cleanly at `runner.py:317`'s
+`self._work_queue.get()` inside `main()`'s outer task-dispatch loop --
+i.e. NOT stuck inside `generator.step()`, NOT stuck inside the bounded
+recv, NOT deadlocked in any C++/MLX/jaccl code at all. The runner had
+already: caught the jaccl fault in `step()`'s exception handler, called
+`group.reconnect()` (the `reconnect_fresh COMPLETE` log lines are this
+succeeding), called `generator.reset_after_reconnect()` (drops all
+in-flight sequences), called `send_task_status(task_id, TaskStatus.Failed)`
+for the affected task, and returned cleanly to idle, ready to serve new
+work. **Every single piece of Section 22/the runner's own jaccl-recovery
+design worked EXACTLY as designed.** Confirmed independently via
+`/state`: the `TextGeneration` task's `taskStatus` was `Failed`, not
+stuck in any intermediate state.
+
+**So why did the HTTP client hang for 8+ minutes with zero response?**
+Traced `src/exo/api/main.py`'s `_apply_state()` event-processing loop --
+the ONLY code that ever writes into `_text_generation_queues[command_id]`,
+the per-request channel the HTTP handler's `_token_chunk_stream()` awaits
+chunks from. It reacts to exactly four event types: `ChunkGenerated`,
+`NodeGatheredInfo`, `InstanceDeleted`, `TracesMerged`. **It never reacted
+to `TaskStatusUpdated` at all.** So when the runner sent
+`TaskStatusUpdated(task_id, TaskStatus.Failed)`, that event correctly
+updated `state.tasks[task_id].task_status` (confirmed via `/state`) but
+had ZERO path to ever reach the HTTP client -- no `ErrorChunk` was ever
+sent, the command's queue was never closed, and
+`_token_chunk_stream()`'s `async for chunk in token_chunks:` blocked
+forever waiting for a chunk that could structurally never arrive. Nothing
+about this loop has any timeout of its own either.
+
+**This bug is NOT specific to jaccl, chunk-drive, or Section 22 at all.**
+It is a pre-existing structural gap in the master's event-apply loop that
+would silently hang the HTTP client for ANY worker-side task failure that
+happens after the runner has already accepted and started a request --
+not just a jaccl reconnect. `runner.py` has several `send_task_status(...,
+TaskStatus.Failed)` call sites; every single one of them shared this same
+silent-hang defect before tonight's fix. Section 22's bounded-blocking-ack
+design simply happened to be the first code path in a live validation run
+to genuinely trigger a mid-stream task failure via this route -- the OLD
+fire-and-forget chunk-drive design never produced a task-level failure
+this way, so the pre-existing API-layer gap was never exercised or
+noticed before.
+
+There is also a real, separately-defined-but-never-emitted `TaskFailed`
+event type (`events.py`, with its own `apply_task_failed` state-apply
+function in `apply.py` that stores `error_type`/`error_message` onto the
+task) that nothing in the codebase ever actually constructs and sends --
+worth a note for whoever eventually consolidates task-failure signaling,
+but NOT touched by tonight's fix (the fix hooks the event that actually
+IS sent, `TaskStatusUpdated`, rather than wiring up the unused one).
+
+**Fix (committed, tested, NOT yet deployed to the live cluster):**
+`API._apply_state()` now also reacts to
+`isinstance(event, TaskStatusUpdated) and event.task_status ==
+TaskStatus.Failed` by calling a new `API._fail_stream_for_task(task_id)`
+method (`src/exo/api/main.py`, alongside the existing sibling
+`_close_streams_for_instance`): looks up the task by id, builds an
+`ErrorChunk(model=..., error_message=task.error_message or "Task
+failed")`, sends it (best-effort, `contextlib.suppress` on
+`BrokenResourceError`/`ClosedResourceError`/`anyio.WouldBlock` --
+mirrors the existing pattern the `ChunkGenerated` handler already uses a
+few lines above) to BOTH `_text_generation_queues` and
+`_image_generation_queues` (covers `TextGeneration`, `ImageGeneration`,
+`ImageEdits` tasks alike), then closes and evicts the queue either way --
+matching `_close_streams_for_instance`'s own established two-step
+send-then-close discipline.
+
+Five new unit tests, `src/exo/api/tests/test_task_failed_stream_error.py`
+(direct sibling/pattern-match of the existing
+`test_instance_deleted_stream_cleanup.py`): text-gen and image-gen happy
+paths (ErrorChunk sent + queue closed + evicted), unrelated-command
+isolation (failing one task doesn't touch another's open stream), and two
+no-op-safety cases (no queue open, unknown task_id) -- all real
+implementation calls against a minimal `API` instance + `MagicMock`
+sender, not a mocked-out `_fail_stream_for_task` itself.
+
+**Verified:** `ruff check` clean on both changed files (zero errors).
+`basedpyright` on `main.py`: 5 pre-existing errors, unchanged count AND
+unchanged error text before/after this diff (confirmed via `git stash` A/B
+-- all 5 are in code this diff never touches, lines 2364/2512/2523 in the
+new numbering). Full `src/` test suite: 990 passed, 2 pre-existing failures
+(also confirmed unchanged via the same `git stash` A/B -- an MLX
+`all_min()`/`MockGroup` type mismatch in `test_event_ordering.py` and the
+already-known `test_batch_generate_batched_decode_flag_off_smoke.py`
+test-order-pollution issue from Section 23's own deploy validation), zero
+new failures. `nix fmt` unavailable on this machine (`nix: command not
+found` -- matches the `direnv` warning already printed at every
+`start_cluster.sh` launch this session); `ruff format --check` used as
+the closest available substitute, confirmed the only reformat-needed
+lines are pre-existing and untouched by this diff.
+
+**NOT yet deployed or re-validated on real hardware tonight** -- this fix
+needs its own clean git-coherent deploy (same workflow as always: commit,
+push, `git reset --hard` on both studios) and then a genuine end-to-end
+re-run of Section 23's exact repro scenario (`EXO_PP_METAFRAME=1
+EXO_PP_BATCHED_DECODE=1`, 72K-token chunk-drive prompt, force the same
+jaccl stall) to confirm the CLIENT now actually receives a clean HTTP-level
+error response instead of hanging -- that is the real acceptance bar for
+this fix, not just the unit tests passing. Per the standing rule, deploying
+this to the live cluster needs its own explicit go-ahead, separate from
+this commit.
+
+**Section 22's own status, reassessed given tonight's full finding:**
+Section 22's bounded-blocking-ack chunk-boundary fix is validated as
+correct end-to-end at the WORKER level (chunk-drive completes cleanly,
+jaccl faults are caught, reconnect succeeds, task-failure bookkeeping is
+accurate) -- the only thing standing between "Section 22 validated" and
+"Section 22 NOT validated" was this separate, now-fixed API-layer gap.
+Section 22 itself required no code changes tonight. Once this fix is
+deployed and the end-to-end re-validation above passes (client receives a
+real HTTP error instead of hanging), Section 22 can be marked fully
+validated for the first time.
+
+**Next session's concrete starting point, in order:**
+
+1. Deploy tonight's `src/exo/api/main.py` fix (pure Python, git-coherent,
+   same clean deploy workflow as always).
+2. Re-run Section 23's EXACT repro scenario end-to-end
+   (`bench/section22_chunk_drive_validate.py`, both
+   `EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` set) and confirm the CLIENT
+   receives a real HTTP-level error response (not just that `/state` shows
+   `TaskStatus.Failed` -- that part was already proven working tonight).
+   This closes Section 22's validation loop for real.
+3. THEN, once both of the above are confirmed: Section 17's memory-headroom
+   check and the real cancel/abort test on real hardware, now deferred for
+   a fifth session running (still each time displaced by a genuinely new,
+   real discovery worth chasing immediately rather than skipped -- but the
+   streak itself is worth a hard look if it continues into session six).
+4. Worth a follow-up, not urgent: the unused `TaskFailed` event type +
+   `apply_task_failed` noted above -- either wire it up somewhere real or
+   remove the dead code, but out of scope for tonight's fix.
