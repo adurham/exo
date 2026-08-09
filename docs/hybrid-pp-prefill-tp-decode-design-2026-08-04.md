@@ -5132,3 +5132,146 @@ decision).
    EXO_PP_BATCHED_DECODE=1` should become the new production default now
    that both the worker-level and client-level recovery paths are proven
    correct, or whether it stays opt-in pending more real-world soak time.
+
+## 26. Section 17 attempt #5: real network root-cause fixed, a genuine NEW concurrency-wedge bug found (2026-08-09, same session continued)
+
+**Context:** picked up Section 17's top-priority item (memory-headroom
+check for 2 concurrent deep-context KV caches + real cancel/abort test)
+per the prior handoff's explicit "start here" instruction. This is the
+fifth session this item has been attempted/deferred.
+
+**Real network root cause found and fixed, NOT a workaround.** Every
+`start_cluster.sh` launch attempt tonight (6+ attempts, spanning ~1.5
+hours) hit intermittent, unpredictable SSH timeouts specifically on the
+hardcoded raw IPs (`192.168.86.201`/`.202`) the launcher and `~/.ssh/config`
+both use -- while `.local` mDNS hostnames worked reliably the entire
+time. Root-caused via direct routing-table inspection on both studios:
+this MacBook's Wi-Fi network ("4D4C") has macOS's Private Wi-Fi Address
+feature enabled, which periodically rotates this machine's MAC address.
+The studios' ARP caches held a STALE MAC for this machine's IP
+(`192.168.86.74`) from before a rotation, so `ping`/`ssh` to the raw
+static IPs from the studio's side genuinely failed with
+`sendto: No route to host` until the stale ARP entry happened to expire
+and re-resolve -- explaining the maddening intermittent pattern (never a
+clean "always fails" or "always works," varying attempt to attempt).
+
+Two real fixes landed, no workarounds:
+1. `start_cluster.sh`'s `sudo xcode-select -s ...` step was ALSO
+   independently broken -- it hangs forever waiting on a password prompt
+   that can never arrive over non-interactive SSH when no cached sudo
+   credential exists (confirmed neither studio has one). This alone
+   silently stalled 3+ of tonight's launch attempts for 10+ minutes each
+   before being traced (via `ps aux` showing zero remote build activity
+   despite the launcher appearing "stuck mid-build"). Fixed: `sudo -n`
+   fails fast instead of hanging (commit `cc90a3d5`) -- `xcode-select -p`
+   was already confirmed correct on both nodes, so the sudo call was a
+   no-op in practice anyway; this fix is purely about failing fast.
+2. `~/.ssh/config`'s `macstudio-m4-1`/`macstudio-m4-2` aliases (which
+   `start_cluster.sh` uses via `ssh "$NODE"`) were hardcoded to the same
+   flaky raw IPs. Repointed both to the reliable `.local` mDNS hostnames
+   (user made this edit directly, per the standing rule that credential/
+   SSH config files are not agent-editable). Confirmed fix: the very next
+   launch attempt sailed through every previously-flaky step (Thunderbolt
+   discovery, RDMA checks, git sync) with zero timeouts, reaching
+   `READY (2/2)` cleanly in ~3 minutes -- a complete contrast to the prior
+   6 attempts.
+
+Also disabled Wi-Fi entirely on both studios (`networksetup
+-setnetworkserviceenabled Wi-Fi off`) since neither needs it (dedicated
+wired Ethernet for LAN/SSH, Thunderbolt for cluster RDMA) -- both studios
+were unexpectedly dual-homed (Ethernet `en0` correctly static at
+`.201`/`.202`, but Wi-Fi `en1` ALSO DHCP-leased a second IP each,
+`.21`/`.101`), which was contributing extra mDNS resolution noise even
+though it turned out not to be the primary root cause (the client-side MAC
+rotation was). Not required for tonight's actual fix but a correctness
+cleanup while investigating, and removes one less thing to reason about
+next time connectivity looks flaky.
+
+**Real cluster launch succeeded cleanly** with
+`EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` (Section 22-25's now-fully-
+validated config), commit `cc90a3d5` confirmed on both nodes, smoke test
+clean.
+
+**Attempted the actual memory-headroom check** -- 2 concurrent
+150K-token requests via a new script,
+`bench/section17_memory_headroom_check.py` (polls real `vm_stat`
+active+wired memory on both nodes throughout, per warm memory fact 650's
+warning that dashboard "used%" is misleading). Both streams hit the SAME
+jaccl transport fault Sections 23-25 already characterized (chunk 0,
+`recv() deadline in drain`, clean `reconnect_fresh`) almost immediately --
+this specific run did NOT reach real depth, so does not yet answer
+Section 17's actual memory question. However, both streams correctly
+received a fast HTTP error via Section 24's fix (confirming that fix
+generalizes under concurrency too, not just single-request) -- a genuine,
+useful confirmation even though it wasn't the intended test.
+
+**NEW real bug found while retrying:** after the concurrent-fault
+recovery above, one `TextGeneration` task was left permanently stuck in
+`Running` state (confirmed via `/state`, unchanged across repeated
+polls), and a second, unrelated small request submitted afterward sat
+`Pending` forever behind it -- the runner's admission gate was
+permanently occupied by a task that would never complete or fail. The
+runner subprocess itself was ALIVE and burning 100% CPU continuously
+(confirmed via `ps`, 6+ minutes elapsed with zero forward progress) --
+genuinely wedged, not just slow. A `sample` capture of the wedged PID
+(preserved: `docs/incidents/2026-08-09-section17-concurrency-wedge-sample.txt`,
+trimmed excerpt of the full 200KB raw dump) shows the main thread
+actively executing real Python bytecode -- heavy `unicode_encode`/
+`bytes_decode`/dict-attribute-store activity across a deeply-fanned call
+tree -- but `sample`'s native-only stack frames can't show WHICH Python
+function this is (matches the known limitation from Section 24's
+investigation: `sample` cannot resolve Python frame names, only
+`faulthandler.dump_traceback` via SIGUSR1 can, and that requires having
+been armed at process START, not retrofittable onto an already-running
+process). Attempting to arm-and-signal the ALREADY-running wedged
+process accidentally killed it (SIGUSR1's default disposition is
+terminate when no handler is registered yet) -- lost the chance to get a
+real Python traceback for this specific occurrence.
+
+**This is a genuinely separate, real bug from anything Sections 21-25
+already found and fixed** -- distinguishable because: (a) it happened
+AFTER a jaccl reconnect had already completed cleanly (not during one),
+(b) it burned real, sustained CPU rather than sitting idle/blocked like
+every previously-found stall, and (c) it manifested specifically as a
+permanently-stuck task-admission-gate slot, a different failure surface
+than the client-visible-hang bug Section 24 fixed (that one was about the
+CLIENT never hearing back despite the WORKER being healthy and idle;
+this one is the WORKER itself never reaching a terminal state at all).
+
+**NOT root-caused tonight** -- ran out of good diagnostic options once
+the wedged process was accidentally killed, and re-arming faulthandler +
+re-triggering the exact wedge conditions again would have consumed
+significant additional session time chasing a bug that, while real, may
+be rare/narrow (only observed once, immediately after a concurrent-
+request jaccl fault, a fairly specific precondition). Cluster torn down
+cleanly rather than left in a broken state or blindly relaunched into
+another guess.
+
+**Next session's concrete starting point, in order:**
+
+1. Section 17's actual memory-headroom measurement STILL not done --
+   now needs its OWN clean run: relaunch cleanly, let jaccl connections
+   warm up with a trivial request FIRST (confirmed pattern from Sections
+   23-25: the very first heavy chunk-drive activity on freshly-established
+   connections is disproportionately likely to hit the jaccl fault), THEN
+   fire the 2-concurrent-150K-token test. `bench/section17_memory_headroom_check.py`
+   is ready and committed -- just needs a cluster in a state that lets it
+   actually reach depth.
+2. The new concurrency-wedge bug found above needs a dedicated
+   reproduction attempt with faulthandler ARMED FROM A FRESH LAUNCH
+   (touch `/tmp/exo_faulthandler_enabled` on both nodes BEFORE
+   `start_cluster.sh`, not retrofitted after the fact) so a real SIGUSR1
+   dump can be captured the moment CPU pegs at 100% with zero forward
+   progress after a jaccl fault. Do NOT signal an unarmed process again --
+   confirm `"faulthandler registered on SIGUSR1"` appears in the runner
+   log before relying on it.
+3. Real cancel/abort test against a live chunk-drive session remains
+   fully undone -- unit-tested (real monkeypatched-transport coverage
+   confirmed present, `test_msg_kind_prefill_abort_closes_rank1_session_and_sends_ack`)
+   but never exercised on real hardware, now for a sixth session running.
+4. Network-fix housekeeping: confirm `~/.ssh/config`'s hostname-based
+   aliases remain stable across future sessions (should, since `.local`
+   mDNS resolution is what's actually reliable) -- if raw-IP flakiness
+   ever recurs despite this fix, the Private-Wi-Fi-Address root cause
+   analysis above is the first thing to re-check, not a re-diagnosis
+   from scratch.

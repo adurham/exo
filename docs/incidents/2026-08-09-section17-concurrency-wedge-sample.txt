@@ -1,0 +1,139 @@
+6:Process:         python3.13 [18261]
+77:    +                 ! : 70 slot_tp_init  (in libpython3.13.dylib) + 296  [0x10259af74]
+86:    +                 ! : | + 4 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 260  [0x10234e3e0]
+87:    +                 ! : | + ! 4 store_instance_attr_lock_held.llvm.17785759610767016943  (in libpython3.13.dylib) + 2156,24,...  [0x1022a5fc0,0x1022a576c,...]
+88:    +                 ! : | + 2 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 436,704  [0x10234e490,0x10234e59c]
+89:    +                 ! : | + 1 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 124  [0x10234e358]
+96:    +                 ! : | + 1 dict_dealloc  (in libpython3.13.dylib) + 48  [0x1025893f0]
+98:    +                 ! : | + 1 dict_dealloc  (in libpython3.13.dylib) + 1584  [0x1025899f0]
+101:    +                 ! : 3 slot_tp_init  (in libpython3.13.dylib) + 0,324  [0x10259ae4c,0x10259af90]
+102:    +                 ! : 2 slot_tp_init  (in libpython3.13.dylib) + 244  [0x10259af40]
+104:    +                 ! : 1 slot_tp_init  (in libpython3.13.dylib) + 72  [0x10259ae94]
+119:    +                 ! 76 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 288  [0x102575b18]
+165:    +                 ! 2 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 44,316  [0x102575a24,0x102575b34]
+167:    +                 ! 1 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 64  [0x102575a38]
+257:    +                 ! 69 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 400  [0x102575b88]
+260:    +                 ! : | 12 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 260  [0x10234e3e0]
+261:    +                 ! : | + 6 store_instance_attr_lock_held.llvm.17785759610767016943  (in libpython3.13.dylib) + 1136  [0x1022a5bc4]
+263:    +                 ! : | + ! 2 dict_dealloc  (in libpython3.13.dylib) + 88,200  [0x102589418,0x102589488]
+264:    +                 ! : | + 5 store_instance_attr_lock_held.llvm.17785759610767016943  (in libpython3.13.dylib) + 20,52,...  [0x1022a5768,0x1022a5788,...]
+265:    +                 ! : | + 1 dict_dealloc  (in libpython3.13.dylib) + 1608  [0x102589a08]
+266:    +                 ! : | 8 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 36,236,...  [0x10234e300,0x10234e3c8,...]
+275:    +                 ! : | 4 method_vectorcall_VARARGS_KEYWORDS.llvm.11042529475825813929  (in libpython3.13.dylib) + 144  [0x1022ab74c]
+284:    +                 ! : | 1 method_vectorcall_VARARGS_KEYWORDS.llvm.11042529475825813929  (in libpython3.13.dylib) + 72  [0x1022ab704]
+286:    +                 ! : | 1 method_vectorcall_VARARGS_KEYWORDS.llvm.11042529475825813929  (in libpython3.13.dylib) + 88  [0x1022ab714]
+294:    +                 ! : 1 method_vectorcall_VARARGS_KEYWORDS.llvm.11042529475825813929  (in libpython3.13.dylib) + 276  [0x1022ab7d0]
+295:    +                 ! 2 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 60,360  [0x102575a34,0x102575b60]
+299:    +                 ! 51 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 288  [0x102575b18]
+302:    +                 ! : | 7 PyObject_GenericGetAttr  (in libpython3.13.dylib) + 1700  [0x1022d73f4]
+307:    +                 ! : | 4 PyObject_GenericGetAttr  (in libpython3.13.dylib) + 56,876,...  [0x1022d6d88,0x1022d70bc,...]
+327:    +                 ! 2 method_vectorcall.llvm.17525315810188957000  (in libpython3.13.dylib) + 276  [0x102575b0c]
+Sampling process 18261 for 3 seconds with 1 millisecond of run time between samples
+Sampling completed, processing symbols...
+Sample analysis of process 18261 written to file /tmp/python_2026-08-09_003242_8qtC.sample.txt
+
+Analysis of sampling python (pid 18261) every 1 millisecond
+Process:         python3.13 [18261]
+Path:            /Users/USER/*/python3.13
+Load Address:    0x100e64000
+Identifier:      python3.13
+Version:         ???
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.13 [18213]
+Target Type:     live task
+
+Date/Time:       2026-08-09 00:32:42.099 -0500
+Launch Time:     2026-08-09 00:25:26.204 -0500
+OS Version:      macOS 27.0 (26A5388g)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         85.5G
+Physical footprint (peak):  87.3G
+Idle exit:                  untracked
+----
+
+Call graph:
+    1995 Thread_1383550   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 1995 start  (in dyld) + 6688  [0x19fc07bec]
+    +   1995 Py_BytesMain  (in libpython3.13.dylib) + 36  [0x10245f598]
+...
+    1995 Thread_1383550   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 1995 start  (in dyld) + 6688  [0x19fc07bec]
+    +   1995 Py_BytesMain  (in libpython3.13.dylib) + 36  [0x10245f598]
+    +     1995 pymain_main  (in libpython3.13.dylib) + 468  [0x10245f778]
+    +       1995 Py_RunMain  (in libpython3.13.dylib) + 892  [0x10246b38c]
+    +         1995 _PyRun_SimpleStringFlagsWithName  (in libpython3.13.dylib) + 280  [0x1024aba94]
+    +           1995 run_mod.llvm.10714050291724855542  (in libpython3.13.dylib) + 148  [0x1022b3c04]
+    +             1995 run_eval_code_obj  (in libpython3.13.dylib) + 144  [0x1022b4690]
+    +               1995 PyEval_EvalCode  (in libpython3.13.dylib) + 132  [0x1022b47e8]
+    +                 1056 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 162048,162084,...  [0x10231cb7c,0x10231cba0,...]
+    +                 101 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 74188  [0x102307448]
+    +                 ! 39 unicode_encode  (in libpython3.13.dylib) + 156  [0x102398884]
+    +                 ! : 19 PyUnicode_AsEncodedString  (in libpython3.13.dylib) + 376  [0x102398b18]
+    +                 ! : | 12 PyBytes_FromStringAndSize  (in libpython3.13.dylib) + 224  [0x1022e94a0]
+    +                 ! : | + 12 _platform_memmove  (in libsystem_platform.dylib) + 428,436,...  [0x19ffe7f0c,0x19ffe7f14,...]
+    +                 ! : | 3 PyBytes_FromStringAndSize  (in libpython3.13.dylib) + 120,196  [0x1022e9438,0x1022e9484]
+    +                 ! : | 3 unicode_encode_utf8.llvm.12649867960081654419  (in libpython3.13.dylib) + 36,56  [0x102399100,0x102399114]
+    +                 ! : | 1 PyBytes_FromStringAndSize  (in libpython3.13.dylib) + 132  [0x1022e9444]
+    +                 ! : |   1 _PyObject_Malloc  (in libpython3.13.dylib) + 88  [0x10253f00c]
+    +                 ! : 17 PyUnicode_AsEncodedString  (in libpython3.13.dylib) + 148,184,...  [0x102398a34,0x102398a58,...]
+    +                 ! : 3 PyUnicode_AsEncodedString  (in libpython3.13.dylib) + 72  [0x1023989e8]
+    +                 ! :   2 unicode_check_encoding_errors.llvm.12649867960081654419  (in libpython3.13.dylib) + 0  [0x102398f00]
+    +                 ! :   1 unicode_check_encoding_errors.llvm.12649867960081654419  (in libpython3.13.dylib) + 40  [0x102398f28]
+    +                 ! :     1 _tlv_get_addr  (in libdyld.dylib) + 20  [0x19fbb6e5c]
+    +                 ! 19 bytes_decode  (in libpython3.13.dylib) + 208  [0x1025734ac]
+    +                 ! : 13 PyUnicode_Decode  (in libpython3.13.dylib) + 172,48,...  [0x1022bce60,0x1022bcde4,...]
+    +                 ! : 4 PyUnicode_DecodeUTF8Stateful  (in libpython3.13.dylib) + 376,380  [0x102287cc8,0x102287ccc]
+    +                 ! : 2 PyUnicode_Decode  (in libpython3.13.dylib) + 1368  [0x1022bd30c]
+    +                 ! :   2 PyUnicode_DecodeUTF8Stateful  (in libpython3.13.dylib) + 16,48  [0x102287b60,0x102287b80]
+    +                 ! 7 unicode_encode  (in libpython3.13.dylib) + 44,108,...  [0x102398814,0x102398854,...]
+    +                 ! 6 unicode_encode  (in libpython3.13.dylib) + 108  [0x102398854]
+    +                 ! : 6 PyUnicode_AsUTF8AndSize  (in libpython3.13.dylib) + 40,44,...  [0x10226a8c8,0x10226a8cc,...]
+    +                 ! 5 PyUnicode_AsUTF8AndSize  (in libpython3.13.dylib) + 168  [0x10226a948]
+    +                 ! 5 bytes_decode  (in libpython3.13.dylib) + 300  [0x102573508]
+    +                 ! : 3 _platform_strlen  (in libsystem_platform.dylib) + 56  [0x19ffe4b78]
+    +                 ! : 2 DYLD-STUB$$strlen  (in libpython3.13.dylib) + 4  [0x102ba7bec]
+    +                 ! 5 bytes_decode  (in libpython3.13.dylib) + 52,68,...  [0x102573410,0x102573420,...]
+    +                 ! 5 unicode_encode  (in libpython3.13.dylib) + 308  [0x10239891c]
+    +                 ! : 5 PyUnicode_AsUTF8AndSize  (in libpython3.13.dylib) + 40,44,...  [0x10226a8c8,0x10226a8cc,...]
+    +                 ! 3 PyUnicode_Decode  (in libpython3.13.dylib) + 1028  [0x1022bd1b8]
+    +                 ! 3 unicode_encode  (in libpython3.13.dylib) + 320  [0x102398928]
+    +                 ! : 3 _platform_strlen  (in libsystem_platform.dylib) + 80,56  [0x19ffe4b90,0x19ffe4b78]
+    +                 ! 2 unicode_encode  (in libpython3.13.dylib) + 120  [0x102398860]
+    +                 ! : 2 _platform_strlen  (in libsystem_platform.dylib) + 52,80  [0x19ffe4b74,0x19ffe4b90]
+    +                 ! 1 PyUnicode_AsEncodedString  (in libpython3.13.dylib) + 480  [0x102398b80]
+    +                 ! 1 bytes_decode  (in libpython3.13.dylib) + 152  [0x102573474]
+    +                 !   1 DYLD-STUB$$strlen  (in libpython3.13.dylib) + 4  [0x102ba7bec]
+    +                 87 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 75928  [0x102307b14]
+    +                 ! 76 type_call  (in libpython3.13.dylib) + 148  [0x102598d4c]
+    +                 ! : 70 slot_tp_init  (in libpython3.13.dylib) + 296  [0x10259af74]
+    +                 ! : | 39 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 162048,162472,...  [0x10231cb7c,0x10231cd24,...]
+    +                 ! : | 8 _PyFunction_Vectorcall  (in libpython3.13.dylib) + 196,56,...  [0x102574c94,0x102574c08,...]
+    +                 ! : | 7 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 51952  [0x102301d6c]
+    +                 ! : | + 7 builtin_getattr  (in libpython3.13.dylib) + 52  [0x1025c0bc0]
+    +                 ! : | +   5 PyObject_GetOptionalAttr  (in libpython3.13.dylib) + 1140  [0x102276b6c]
+    +                 ! : | +   ! 5 member_get  (in libpython3.13.dylib) + 0,16,...  [0x1025780bc,0x1025780cc,...]
+    +                 ! : | +   2 PyObject_GetOptionalAttr  (in libpython3.13.dylib) + 12,168  [0x102276704,0x1022767a0]
+    +                 ! : | 7 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 255484  [0x102333878]
+    +                 ! : | + 4 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 260  [0x10234e3e0]
+    +                 ! : | + ! 4 store_instance_attr_lock_held.llvm.17785759610767016943  (in libpython3.13.dylib) + 2156,24,...  [0x1022a5fc0,0x1022a576c,...]
+    +                 ! : | + 2 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 436,704  [0x10234e490,0x10234e59c]
+    +                 ! : | + 1 PyObject_GenericSetAttr  (in libpython3.13.dylib) + 124  [0x10234e358]
+    +                 ! : | +   1 _tlv_get_addr  (in libdyld.dylib) + 20  [0x19fbb6e5c]
+    +                 ! : | 4 _PyFunction_Vectorcall  (in libpython3.13.dylib) + 348  [0x102574d2c]
+    +                 ! : | + 4 _platform_memset  (in libsystem_platform.dylib) + 208,180  [0x19ffe7b60,0x19ffe7b44]
+    +                 ! : | 2 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 54960  [0x10230292c]
+    +                 ! : | + 2 __bzero  (in libsystem_platform.dylib) + 0  [0x19ffe7a30]
+    +                 ! : | 2 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 61536  [0x1023042dc]
+    +                 ! : | + 1 dict_dealloc  (in libpython3.13.dylib) + 48  [0x1025893f0]
+    +                 ! : | + ! 1 _tlv_get_addr  (in libdyld.dylib) + 20  [0x19fbb6e5c]
+    +                 ! : | + 1 dict_dealloc  (in libpython3.13.dylib) + 1584  [0x1025899f0]
+    +                 ! : | 1 _PyFunction_Vectorcall  (in libpython3.13.dylib) + 64  [0x102574c10]
+    +                 ! : |   1 _tlv_get_addr  (in libdyld.dylib) + 12  [0x19fbb6e54]
+    +                 ! : 3 slot_tp_init  (in libpython3.13.dylib) + 0,324  [0x10259ae4c,0x10259af90]
+    +                 ! : 2 slot_tp_init  (in libpython3.13.dylib) + 244  [0x10259af40]
+    +                 ! : | 2 _platform_memmove  (in libsystem_platform.dylib) + 12,460  [0x19ffe7d6c,0x19ffe7f2c]
+    +                 ! : 1 slot_tp_init  (in libpython3.13.dylib) + 72  [0x10259ae94]
+    +                 ! :   1 _tlv_get_addr  (in libdyld.dylib) + 12  [0x19fbb6e54]
