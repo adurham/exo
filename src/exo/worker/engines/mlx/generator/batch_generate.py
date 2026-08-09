@@ -4857,24 +4857,66 @@ class ExoBatchGenerator:
         clients retry). The model weights stay resident — only per-request state
         is cleared. Returns the uids that were dropped.
 
-        2026-08-09 (design doc Section 27/28, real hardware finding): this
-        method used to ONLY clear ``_active_tasks``/``_mlx_gen`` -- the
-        legacy per-sequence bookkeeping. It never touched EITHER rank's
-        batched-decode chunk-drive state (``Rank0/Rank1BatchedDecodeGlue``'s
-        ``_active_prefill_session``/``_prefill_phase``/
-        ``_prefill_rank1_advances_remaining``) or ``_deferred_prefill_by_uid``'s
-        orphaned ``.drive`` objects for a request whose chunked prefill was
-        mid-flight when the fault hit. Confirmed on real hardware: the NEXT
-        request's ``register_prefill_session`` call then ran into corrupted
-        leftover state and tripped the ``RANK1_DRAINING`` fail-loud guard
-        (``GlueError: reached RANK1_DRAINING with
-        _prefill_rank1_advances_remaining=0``) -- a full runner crash, not
-        merely a dropped request. Now also resets both glues' local
-        chunk-drive state (purely local, no wire round-trip -- the wire is
-        exactly what just failed and is being rebuilt by the caller) and
-        drops any ``_deferred_prefill_by_uid`` entry whose ``.drive`` was
-        in-flight (its MLX arrays reference the now-stale pre-reconnect
-        device context and can never be resumed).
+        2026-08-09 (design doc Section 32, real hardware finding, 3rd
+        incident of this exact bug CLASS in this campaign -- see below):
+        this method RECREATES the batched-decode glue objects from their
+        own constructors rather than resetting individual fields.
+
+        History of why: this method used to ONLY clear
+        ``_active_tasks``/``_mlx_gen`` (the legacy per-sequence
+        bookkeeping). Real-hardware testing found it missing state THREE
+        separate times, each in a DIFFERENT object:
+          1. (Section 27/28) Never cleared ``_active_prefill_session``/
+             ``_prefill_phase``/``_prefill_rank1_advances_remaining``
+             (chunk-drive prefill state) -- fixed by adding
+             ``reset_chunk_drive_state_after_reconnect()`` field-by-field
+             clears on both glue objects.
+          2. (Section 29) Separately, cancellation-observation latency
+             was miscalibrated -- a different bug class, not a state-
+             reset gap, fixed independently.
+          3. (Section 32, THIS fix) Never cleared
+             ``BatchedDecodeSession``/``RankOneMirrorSession``'s own
+             ``SchedulerCore``/``RankOneMirrorDriver`` per-request
+             bookkeeping (``_requests``, admitted-slot state) -- a
+             THIRD, separate object from #1's chunk-drive state.
+             Confirmed on real hardware: a request that survived an
+             in-place recovery (never itself faulted, just happened to
+             be active when the OTHER rank's connection wedged) got
+             treated as stale by the wire protocol on the next decode
+             tick, tripping ``ProtocolViolationError: TokenGeneratedEvent
+             for request_ids=[N] which is not active`` -- ANOTHER full
+             runner crash, immediately after an otherwise-successful
+             recovery.
+
+        Three separate real-hardware discoveries of "reset_after_reconnect
+        is missing a different piece of state" is a pattern, not
+        independent bad luck -- field-by-field reset requires enumerating
+        every stateful object in the batched-decode stack and is silently
+        wrong the instant anyone adds a new field without also adding it
+        here. A `consult` review (2026-08-09) confirmed this diagnosis and
+        recommended the structural fix applied here: instead of
+        enumerating fields to clear, DISCARD the glue objects entirely and
+        RECREATE them via the exact same constructor call this class's
+        __post_init__ batched-decode setup uses at model-load time. A
+        field nobody remembered to reset cannot survive an object that no
+        longer exists -- this converts an unenforced "did we reset
+        everything" question into "does the already-proven-correct
+        constructor produce valid initial state", which is trivially true
+        by construction. Model weights are NOT touched (only the light
+        per-request/session Python objects are discarded and rebuilt);
+        the constructor call itself is a few dict/set allocations, not a
+        model reload.
+
+        NOTE: this does NOT (yet) add the epoch-stamped-event or
+        automatic-fallback-to-re-place safety nets the same review also
+        recommended as complementary hardening -- those are real
+        additional value but are separate, larger changes; this fix
+        specifically closes the enumerated-reset gap that caused all
+        three real incidents above. Any state OUTSIDE these recreated
+        objects (module-level globals, the MeshGroup itself, anything
+        registered in callbacks) is explicitly OUT of this fix's scope
+        and was NOT audited here -- flagged as a known limitation, not
+        silently assumed clean.
         """
         uids = list(self._active_tasks.keys())
         if uids:
@@ -4886,29 +4928,87 @@ class ExoBatchGenerator:
                 self._active_tasks.pop(uid, None)
             self._update_fence_arming()
 
-        dropped_chunk_drive_uids: list[int] = []
+        # Every request that was in ANY batched-decode-tracked state
+        # (admitted+decoding via the glue's session, OR mid-chunk-drive
+        # prefill) is unresumable post-reconnect -- collect uids AND
+        # run each glue's own chunk-drive cleanup (which calls
+        # ResumablePrefillSession.abort(), a real resource-release step
+        # worth keeping even though the glue itself is about to be
+        # discarded) BEFORE discarding the old objects.
+        dropped_uids: list[int] = []
         if self._batched_decode_rank0_glue is not None:
-            dropped = (
+            try:
+                dropped_uids.extend(
+                    self._batched_decode_rank0_glue.session.admitted_request_ids()
+                )
+            except Exception as e:
+                logger.warning(
+                    f"reset_after_reconnect: could not enumerate rank0 glue's "
+                    f"admitted requests before recreation: {e!r}"
+                )
+            dropped_prefill_r0 = (
                 self._batched_decode_rank0_glue.reset_chunk_drive_state_after_reconnect()
             )
-            if dropped is not None:
-                dropped_chunk_drive_uids.append(dropped)
+            if dropped_prefill_r0 is not None and dropped_prefill_r0 not in dropped_uids:
+                dropped_uids.append(dropped_prefill_r0)
         if self._batched_decode_rank1_glue is not None:
-            dropped = (
+            dropped_prefill_r1 = (
                 self._batched_decode_rank1_glue.reset_chunk_drive_state_after_reconnect()
             )
-            if dropped is not None and dropped not in dropped_chunk_drive_uids:
-                dropped_chunk_drive_uids.append(dropped)
-        for uid in dropped_chunk_drive_uids:
+            if dropped_prefill_r1 is not None and dropped_prefill_r1 not in dropped_uids:
+                dropped_uids.append(dropped_prefill_r1)
+
+        # RECREATE (not reset) the glue objects -- see this method's own
+        # docstring for the full rationale. Uses the exact same
+        # construction call as the original model-load-time setup
+        # (mirrors the branch in __post_init__ that first builds these).
+        if self._batched_decode_rank0_glue is not None:
+            old_glue = self._batched_decode_rank0_glue
+            from exo.worker.engines.mlx.pp_batched_decode_adapter import (
+                BatchedDecodeResponseAdapter,
+            )
+            from exo.worker.engines.mlx.pp_batched_decode_glue import (
+                Rank0BatchedDecodeGlue,
+            )
+            from exo.worker.engines.mlx.pp_batched_decode_runtime import (
+                BatchedDecodeSession,
+            )
+
+            new_session = BatchedDecodeSession.new(max_concurrency=2)
+            new_adapter = BatchedDecodeResponseAdapter(
+                session=new_session, eos_ids=frozenset(self._batched_decode_eos)
+            )
+            self._batched_decode_rank0_glue = Rank0BatchedDecodeGlue(
+                session=new_session,
+                adapter=new_adapter,
+                dst_rank=old_glue.dst_rank,
+                group=old_glue.group,
+                peer_prefill_layer_count=old_glue.peer_prefill_layer_count,
+            )
+        if self._batched_decode_rank1_glue is not None:
+            old_glue_r1 = self._batched_decode_rank1_glue
+            from exo.worker.engines.mlx.pp_batched_decode_glue import (
+                Rank1BatchedDecodeGlue,
+            )
+            from exo.worker.engines.mlx.pp_batched_decode_runtime import (
+                RankOneMirrorSession,
+            )
+
+            new_mirror_session = RankOneMirrorSession.new(max_concurrency=2)
+            self._batched_decode_rank1_glue = Rank1BatchedDecodeGlue(
+                session=new_mirror_session,
+                src_rank=old_glue_r1.src_rank,
+                group=old_glue_r1.group,
+            )
+
+        for uid in dropped_uids:
             deferred = self._deferred_prefill_by_uid.pop(uid, None)
             if deferred is not None:
                 deferred.drive = None
         # Any OTHER _deferred_prefill_by_uid entry with an in-flight
-        # .drive (not the one just cleared above, if the glue's
-        # bookkeeping and this dict ever desync for some other reason)
-        # is equally unresumable post-reconnect -- its MLX arrays
-        # reference the pre-reconnect device context. Fail-loud would
-        # be wrong here (this IS the recovery path itself); clear
+        # .drive is equally unresumable post-reconnect -- its MLX
+        # arrays reference the pre-reconnect device context. Fail-loud
+        # would be wrong here (this IS the recovery path itself); clear
         # defensively rather than leave a landmine for the next tick.
         stale_drive_uids = [
             uid
@@ -4918,16 +5018,16 @@ class ExoBatchGenerator:
         for uid in stale_drive_uids:
             logger.warning(
                 f"reset_after_reconnect: dropping orphaned in-flight "
-                f"chunk-drive for request_id={uid} not covered by either "
-                f"glue's own active-session bookkeeping -- clearing "
+                f"chunk-drive for request_id={uid} not covered by the "
+                f"recreated glues' own bookkeeping -- clearing "
                 f"defensively rather than leaving stale MLX arrays "
                 f"referencing the pre-reconnect device context"
             )
             del self._deferred_prefill_by_uid[uid]
-            if uid not in dropped_chunk_drive_uids:
-                dropped_chunk_drive_uids.append(uid)
+            if uid not in dropped_uids:
+                dropped_uids.append(uid)
 
-        return uids + [u for u in dropped_chunk_drive_uids if u not in uids]
+        return uids + [u for u in dropped_uids if u not in uids]
 
     def close(self) -> None:
         self._mlx_gen.close()

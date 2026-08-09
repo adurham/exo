@@ -6086,3 +6086,197 @@ precisely, shipped a verified partial mitigation) but did not close.
 4. Re-run `bench/section27_cancel_abort_test.py` 5x per the
    established target once either fix lands; require a clean `OVERALL:
    PASS` (not just no-crash) before marking Section 2.5 CLOSED.
+
+## 32. STRUCTURAL fix: ExoBatchGenerator.reset_after_reconnect() now
+    RECREATES the batched-decode glue objects instead of enumerating
+    fields to clear -- closes the pattern behind 3 separate real-
+    hardware "missing state" discoveries, not just the 3rd instance
+    (2026-08-09, same-session continuation of Section 31)
+
+Immediately after Section 31 was written, ran the cancel test again on
+the (still Section 30-fix-deployed) live cluster to continue chasing
+the jaccl crash class. Run 1 got a genuinely clean `OVERALL: PASS`
+(zero jaccl faults at all -- confirms the crash is non-deterministic,
+not "always reproduces"). Run 2 hit a jaccl fault, recovered cleanly
+(`reconnect_fresh rank=0 COMPLETE` logged), and then ~13-83s later --
+matching Section 31's flagged "second fault shortly after first
+recovery" pattern exactly -- crashed AGAIN, but this time with a
+DIFFERENT, more informative failure: not a transport timeout, a
+protocol-layer exception:
+
+```
+ProtocolViolationError: TokenGeneratedEvent for request_ids=[3] which
+is not active -- stale/duplicate event, refusing to process (this
+would otherwise silently create a phantom cache-length increment for
+a slot no request owns)
+```
+
+Traced precisely: `SchedulerCore._requests` (inside
+`BatchedDecodeSession.driver.core`, owned by `Rank0BatchedDecodeGlue.
+session`) is a THIRD object holding per-request state that
+`reset_after_reconnect()` never cleared -- completely separate from
+`_active_prefill_session` (the chunk-drive prefill state Section
+27/28 already fixed). A request that was already admitted and
+decoding normally when the OTHER rank's connection wedged survived
+the reconnect with its admission bookkeeping fully intact in the OLD
+session object; the wire protocol then correctly refused a stale
+event for it on the next tick, exactly as its own fail-loud design is
+supposed to -- but that meant a full runner crash instead of the
+graceful "this uid was already dropped" outcome the caller should get.
+
+### The real pattern, named explicitly
+
+This is the THIRD separate real-hardware discovery that
+`reset_after_reconnect()` is missing some piece of state, each time in
+a DIFFERENT object:
+  1. Section 27/28: `_active_prefill_session`/`_prefill_phase`/
+     `_prefill_rank1_advances_remaining` (chunk-drive prefill state).
+  2. Section 29: cancellation-observation latency (different bug
+     class entirely, not a state-reset gap).
+  3. This session: `SchedulerCore._requests` (steady-state admitted-
+     request bookkeeping).
+
+Three real crashes discovering three different missing pieces of
+state is a pattern, not bad luck. The user asked directly: "is there
+something more fundamentally wrong here that's causing these stalls
+and failures and we're just patching it up each time we see it?" --
+yes. Field-by-field reset requires perfectly enumerating every
+stateful object in the batched-decode stack, and is silently wrong
+the instant anyone adds a new field without also remembering to add
+it to this one method. Continuing to patch each newly-discovered
+object was correctly diagnosed as non-convergent.
+
+### The structural fix (consult-reviewed before implementing)
+
+Got a second opinion via `consult` on exactly this question before
+touching code: keep patching enumerated fields, do a comprehensive
+one-time audit + build a canonical reset, or give up on in-place
+recovery entirely and always force a full ~90s re-place? The review
+identified a 4th option and recommended it: **RECREATE the stateful
+objects from their own constructors on every in-place recovery,
+rather than resetting fields on the existing ones.** A field nobody
+remembered to reset cannot survive an object that no longer exists --
+this converts an unenforced "did we clear everything" question into
+"does the already-proven-correct constructor produce valid initial
+state," which is trivially true by construction (it's the SAME
+construction call `__post_init__` uses at real model-load time).
+
+Implemented in `ExoBatchGenerator.reset_after_reconnect()`
+(`src/exo/worker/engines/mlx/generator/batch_generate.py`): instead of
+calling `reset_chunk_drive_state_after_reconnect()` alone (which is
+kept, since it also runs `ResumablePrefillSession.abort()` -- a real
+resource-release step worth preserving), the method now discards
+`self._batched_decode_rank0_glue`/`_batched_decode_rank1_glue`
+entirely and reconstructs fresh `Rank0BatchedDecodeGlue`/
+`Rank1BatchedDecodeGlue` objects (fresh `BatchedDecodeSession`/
+`RankOneMirrorSession`, fresh `BatchedDecodeResponseAdapter`) via the
+exact same constructor call the model-load-time `__post_init__` branch
+uses, carrying over only the immutable identity fields (`dst_rank`,
+`group`, `peer_prefill_layer_count`) from the old glue. Model weights
+are untouched -- only the lightweight per-request/session Python
+objects are discarded and rebuilt (a handful of dict/set allocations,
+not a model reload).
+
+Added a public `BatchedDecodeSession.admitted_request_ids()` accessor
+(`pp_batched_decode_runtime.py`) so the recovery path can enumerate
+what's about to be dropped for logging/return-value purposes without
+reaching into `SchedulerCore._requests` directly (kept `pyright`
+clean -- zero new `reportPrivateUsage` errors, verified against the
+pre-change baseline).
+
+### Verification
+
+- `basedpyright` on all 3 touched files: 305 pre-existing errors
+  (baseline, unrelated to this change, confirmed via `git stash`
+  A/B) both before and after -- zero new errors introduced.
+- `ruff check`: 8 pre-existing errors both before and after (same
+  A/B methodology) -- zero new errors introduced.
+- Full existing `src/exo/worker/engines/mlx/tests/` suite: 320/320
+  passed before this change, 322/322 passed after (320 existing +
+  2 new) -- zero regressions.
+- Wrote 2 new regression tests
+  (`test_reset_after_reconnect_recreates_glue.py`): one constructs a
+  REAL `ExoBatchGenerator` + `Rank0BatchedDecodeGlue`, admits a real
+  request into the session (simulating exactly the request class that
+  crashed on real hardware), calls `reset_after_reconnect()`, and
+  proves (a) the request is reported as dropped, (b) the glue object
+  itself was REPLACED (new Python identity, not merely mutated --
+  proving this is a genuine recreate, not a reset that happened to
+  cover this one case), and (c) the NEW session correctly has zero
+  memory of the dropped request while the OLD session object (as a
+  sanity check the test setup landed somewhere real) still shows it.
+  Confirmed this test genuinely catches the real bug, not a
+  tautology: ran it against the PRE-fix code via `git stash` A/B --
+  failed with `assert 42 in []`, the exact real-hardware failure
+  signature (request silently never dropped) -- then restored the fix
+  and confirmed it passes.
+- Committed and pushed as a real, structural fix (not another
+  enumerated-field patch) -- see git log for the exact commit hash.
+
+### What this fix does NOT (yet) cover -- explicitly flagged, not
+    silently assumed
+
+The same `consult` review recommended two complementary safety nets
+NOT implemented this session (deliberately scoped out as separate,
+larger changes):
+  - **Epoch-stamped events**: tag wire events with a recovery
+    generation counter so a stale callback/reference from before a
+    recreation gets dropped as a clean, logged no-op instead of
+    tripping a fail-loud exception at all. Would have converted
+    tonight's crash into a harmless log line even without the
+    recreate fix.
+  - **Post-recovery invariant check + automatic fallback to full
+    re-place**: if in-place recovery can't prove itself clean (e.g. a
+    protocol violation fires within some window post-recovery),
+    escalate automatically to the ~90s full reload instead of
+    crashing. Bounds the cost of any residual missed edge case to 90s
+    instead of an outage.
+  - Also NOT audited: state OUTSIDE the recreated glue objects
+    (module-level globals, the `MeshGroup` itself, anything
+    registered in callbacks/event subscriptions elsewhere in the
+    stack) -- the review flagged this as the one place recreation
+    doesn't automatically protect against a 4th "missing state"
+    discovery. A dedicated fault-injection test harness (kill the RDMA
+    transport mid-decode on demand, exercise recovery with requests in
+    every lifecycle stage) was also recommended as the right way to
+    find any such gap BEFORE it's found on real hardware again, rather
+    than continuing to rely on production incidents as the discovery
+    mechanism.
+
+### Session-end state
+
+Fix implemented, tested (unit-level, both A/B-verified against the
+real pre-fix failure and against the full existing suite), committed,
+and pushed to the mlx-adjacent exo repo -- NOT YET deployed to the
+live studios or verified against real hardware in this session (that
+is next session's first step, following the same git-coherent-deploy
++ clean-teardown + cancel-test discipline this whole campaign has
+used throughout). Section 2.5 remains open. This is a genuine
+structural improvement over the last 3 sessions' pattern of
+individually patching each newly-discovered missing-state object --
+whether it fully closes the jaccl-crash class on the next real-
+hardware run is still to be verified, not assumed.
+
+### Next session's concrete starting point
+
+1. Deploy this fix to both studios (standard git-coherent-deploy:
+   confirm no `uv.lock`/submodule drift before touching the studios,
+   clean teardown, faulthandler armed, relaunch, `/state` clean,
+   one warm-up request).
+2. Run the cancel test 5x per the established target; specifically
+   watch for whether the "second fault shortly after a clean first
+   recovery" pattern (2-for-3 across recent sessions) still occurs,
+   and if so, whether it now recovers gracefully instead of crashing.
+3. If it still crashes: capture full faulthandler dumps + exact
+   traceback immediately (this session's own methodology) -- a NEW
+   crash location after this fix would itself be informative (either
+   a 4th missed object -- meaning the recreate fix needs to cover
+   more objects/find the leak point outside the recreated layer -- or
+   a genuinely different bug).
+4. If it passes cleanly 5/5: implement the two complementary safety
+   nets (epoch-stamped events, invariant-check-then-fallback-to-
+   re-place) as real hardening before declaring Section 2.5 CLOSED --
+   a single clean 5/5 run is necessary but the `consult` review's own
+   recommendation was not to treat it as sufficient on its own, given
+   this bug class's history of passing several real-hardware runs
+   before a rarer path was found.

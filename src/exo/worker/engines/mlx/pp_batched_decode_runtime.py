@@ -435,6 +435,16 @@ class BatchedDecodeSession:
     def has_active_requests(self) -> bool:
         return any(not rec.done for rec in self._requests.values())
 
+    def admitted_request_ids(self) -> list[int]:
+        """All request_ids currently admitted into this session's
+        steady-state batched decode (real per-request generation state
+        exists). 2026-08-09 (design doc Section 32, in-place-reconnect
+        recreate fix): lets the recovery path enumerate what's about to
+        be dropped BEFORE discarding this session in favor of a fresh
+        one, without reaching into ``_requests`` directly.
+        """
+        return list(self._requests.keys())
+
     def has_request(self, request_id: int) -> bool:
         """True iff ``request_id`` is a currently-admitted request in
         this session (has real per-request generation state -- sampler,
