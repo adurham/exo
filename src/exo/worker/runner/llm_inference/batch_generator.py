@@ -654,6 +654,47 @@ class BatchGenerator(Engine):
         with T("batch_gen.agree_on_tasks"):
             self.agree_on_tasks()
 
+        # 2026-08-09 (design doc Section 29, real-hardware finding): also
+        # run the FAST cancellation check unconditionally, right here,
+        # every single step() call — mirroring agree_on_tasks()'s own
+        # unconditional-with-internal-mx_any-gate pattern immediately
+        # above (proven safe/cheap at decode rate on this exact call
+        # site). This is the ONLY place in this class provably symmetric
+        # across both ranks every step (agree_on_tasks already lives
+        # here), unlike the per-decode-token callback closures inside
+        # ExoBatchGenerator's response loop, which are NOT reliably
+        # symmetric for the batched-decode path (rank 1's mirror-only
+        # tick() never builds real per-request response/callback state
+        # the way rank 0's does) — a per-rank-asymmetric collective call
+        # site is a deadlock risk, strictly worse than the bug being
+        # fixed here (a `consult` review flagged this distinction before
+        # landing; the token-callback's own counter-gated
+        # agree_on_cancellations() calls are left in place as a harmless,
+        # redundant backstop, not removed).
+        #
+        # Root cause this closes: `check_for_cancel_every` (up to 100) is
+        # calibrated ONCE at warmup time against a fast, near-empty-
+        # context decode. Real decode throughput under a large resident
+        # KV cache (30K+ tokens, PP + batched-decode forward pass) can be
+        # 30-100x slower per token than that warmup measurement — so the
+        # OLD counter-gated check (full agree_on_cancellations(), fired
+        # only every `check_for_cancel_every` decode tokens from inside
+        # the per-token callback) could leave a real client cancellation
+        # sitting unobserved for 80+ decode tokens, measured directly at
+        # 133.7s/136.4s (rank0/rank1) on real hardware before this fix —
+        # the runner kept burning real GPU compute serving a request the
+        # client had already disconnected from, matching the shape of
+        # the now-fixed 717523cb6/94fc04a4d bugs closely enough to be
+        # mistaken for a regression of either. This fix bounds
+        # cancellation-observation latency to ~1 decode step (the
+        # request's uid is flagged in `self._cancelled_tasks` here, then
+        # actually evicted via `_apply_cancellations()` at the end of
+        # THIS SAME step() call after `self._gen.step()` returns — so at
+        # most one extra forward pass runs post-cancel, not up to
+        # `check_for_cancel_every`).
+        with T("batch_gen.agree_on_cancellations_fast"):
+            self.agree_on_cancellations_fast()
+
         # Submit any queued tasks to the engine. When EXO_DSV4_BATCHED_PREFILL
         # is on AND the queue has 2+ tasks, run a single batched-prefill pass
         # over them so they share the prefill phase instead of serializing.
