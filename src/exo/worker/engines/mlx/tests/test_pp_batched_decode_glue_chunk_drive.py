@@ -208,9 +208,7 @@ def _capture_sent_advances(
         mx.eval(arr)
         return arr
 
-    def _fake_mx_recv_like(
-        x: mx.array, src: int, *, group: object
-    ) -> mx.array:
+    def _fake_mx_recv_like(x: mx.array, src: int, *, group: object) -> mx.array:
         # 2026-08-08, real production incident fix (design doc
         # Section 21/22): tick()'s RANK1_DRAINING completion branch
         # now does a real bounded blocking recv for
@@ -682,3 +680,87 @@ def test_chunk_done_ack_mismatch_raises_instead_of_silently_registering_next_chu
             result = glue.tick(model=cast("object", model))
             if result[3] is not None:
                 break
+
+
+def test_reset_chunk_drive_state_after_reconnect_clears_stuck_rank0_session() -> None:
+    """Regression test for the 2026-08-09 real-hardware finding (design
+    doc Section 27/28): a jaccl transport fault mid-chunk-drive used to
+    leave Rank0BatchedDecodeGlue's _active_prefill_session/_prefill_phase/
+    _prefill_rank1_advances_remaining stuck exactly where the fault
+    interrupted them, because ExoBatchGenerator.reset_after_reconnect()
+    only ever cleared _active_tasks/_mlx_gen -- never either glue's own
+    chunk-drive state. Confirmed on real hardware: the NEXT request's
+    register_prefill_session() call then either hit the "already active"
+    guard against a session no client would ever complete, or ran into a
+    corrupted state combination that tripped the RANK1_DRAINING
+    fail-loud guard (a full runner crash).
+
+    This proves reset_chunk_drive_state_after_reconnect() genuinely
+    clears the stuck state -- register_prefill_session() for a NEW
+    request must succeed afterward instead of raising "already active"."""
+    glue = _make_rank0_glue(peer_prefill_layer_count=4)
+    model = _CountingLayerModel(n_layers=7)
+    stuck_session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=[]
+    )
+    # Simulate a fault hitting mid-drive: register a session and advance
+    # it partway (RANK0_LOCAL, not yet handed off) -- standing in for
+    # whatever real _prefill_phase a fault could interrupt at, since the
+    # reset method's job is to unconditionally clear ALL of them, not
+    # just this one.
+    glue.register_prefill_session(request_id=1, session=stuck_session, chunk_index=0)
+    assert glue.has_active_prefill_session()
+
+    dropped_id = glue.reset_chunk_drive_state_after_reconnect()
+
+    assert dropped_id == 1
+    assert not glue.has_active_prefill_session()
+    assert glue._prefill_phase == "rank0_local"
+    assert glue._prefill_rank1_advances_remaining == 0
+
+    # THE key proof: a genuinely NEW request can now register without
+    # hitting the "already active" guard -- this is exactly what a
+    # runner crash on real hardware looked like before this fix (the
+    # guard either fired, or the corrupted state tripped RANK1_DRAINING).
+    new_model = _CountingLayerModel(n_layers=7)
+    new_session = ResumablePrefillSession(
+        inner_model=new_model, inputs=mx.array([0.0]), cache=[]
+    )
+    glue.register_prefill_session(request_id=2, session=new_session, chunk_index=0)
+    assert glue.has_active_prefill_session()
+
+
+def test_reset_chunk_drive_state_after_reconnect_is_a_noop_when_idle() -> None:
+    """No active session -- the reset must return None and touch nothing,
+    matching the real call site's usage (called unconditionally on every
+    jaccl reconnect, whether or not a chunk-drive was actually active)."""
+    glue = _make_rank0_glue(peer_prefill_layer_count=4)
+    assert not glue.has_active_prefill_session()
+
+    dropped_id = glue.reset_chunk_drive_state_after_reconnect()
+
+    assert dropped_id is None
+    assert not glue.has_active_prefill_session()
+
+
+def test_reset_chunk_drive_state_after_reconnect_clears_stuck_rank1_session() -> None:
+    """Rank 1's mirror of the rank-0 test above."""
+    glue = _make_rank1_glue()
+    model = _CountingLayerModel(n_layers=5)
+    stuck_session = ResumablePrefillSession(
+        inner_model=model, inputs=mx.array([0.0]), cache=[]
+    )
+    glue.register_prefill_session(request_id=1, session=stuck_session)
+    assert glue.has_active_prefill_session()
+
+    dropped_id = glue.reset_chunk_drive_state_after_reconnect()
+
+    assert dropped_id == 1
+    assert not glue.has_active_prefill_session()
+
+    new_model = _CountingLayerModel(n_layers=5)
+    new_session = ResumablePrefillSession(
+        inner_model=new_model, inputs=mx.array([0.0]), cache=[]
+    )
+    glue.register_prefill_session(request_id=2, session=new_session)
+    assert glue.has_active_prefill_session()

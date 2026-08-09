@@ -4856,6 +4856,25 @@ class ExoBatchGenerator:
         partial forward/KV state is discarded (the requests are failed and the
         clients retry). The model weights stay resident — only per-request state
         is cleared. Returns the uids that were dropped.
+
+        2026-08-09 (design doc Section 27/28, real hardware finding): this
+        method used to ONLY clear ``_active_tasks``/``_mlx_gen`` -- the
+        legacy per-sequence bookkeeping. It never touched EITHER rank's
+        batched-decode chunk-drive state (``Rank0/Rank1BatchedDecodeGlue``'s
+        ``_active_prefill_session``/``_prefill_phase``/
+        ``_prefill_rank1_advances_remaining``) or ``_deferred_prefill_by_uid``'s
+        orphaned ``.drive`` objects for a request whose chunked prefill was
+        mid-flight when the fault hit. Confirmed on real hardware: the NEXT
+        request's ``register_prefill_session`` call then ran into corrupted
+        leftover state and tripped the ``RANK1_DRAINING`` fail-loud guard
+        (``GlueError: reached RANK1_DRAINING with
+        _prefill_rank1_advances_remaining=0``) -- a full runner crash, not
+        merely a dropped request. Now also resets both glues' local
+        chunk-drive state (purely local, no wire round-trip -- the wire is
+        exactly what just failed and is being rebuilt by the caller) and
+        drops any ``_deferred_prefill_by_uid`` entry whose ``.drive`` was
+        in-flight (its MLX arrays reference the now-stale pre-reconnect
+        device context and can never be resumed).
         """
         uids = list(self._active_tasks.keys())
         if uids:
@@ -4866,7 +4885,49 @@ class ExoBatchGenerator:
             for uid in uids:
                 self._active_tasks.pop(uid, None)
             self._update_fence_arming()
-        return uids
+
+        dropped_chunk_drive_uids: list[int] = []
+        if self._batched_decode_rank0_glue is not None:
+            dropped = (
+                self._batched_decode_rank0_glue.reset_chunk_drive_state_after_reconnect()
+            )
+            if dropped is not None:
+                dropped_chunk_drive_uids.append(dropped)
+        if self._batched_decode_rank1_glue is not None:
+            dropped = (
+                self._batched_decode_rank1_glue.reset_chunk_drive_state_after_reconnect()
+            )
+            if dropped is not None and dropped not in dropped_chunk_drive_uids:
+                dropped_chunk_drive_uids.append(dropped)
+        for uid in dropped_chunk_drive_uids:
+            deferred = self._deferred_prefill_by_uid.pop(uid, None)
+            if deferred is not None:
+                deferred.drive = None
+        # Any OTHER _deferred_prefill_by_uid entry with an in-flight
+        # .drive (not the one just cleared above, if the glue's
+        # bookkeeping and this dict ever desync for some other reason)
+        # is equally unresumable post-reconnect -- its MLX arrays
+        # reference the pre-reconnect device context. Fail-loud would
+        # be wrong here (this IS the recovery path itself); clear
+        # defensively rather than leave a landmine for the next tick.
+        stale_drive_uids = [
+            uid
+            for uid, deferred in self._deferred_prefill_by_uid.items()
+            if deferred.drive is not None
+        ]
+        for uid in stale_drive_uids:
+            logger.warning(
+                f"reset_after_reconnect: dropping orphaned in-flight "
+                f"chunk-drive for request_id={uid} not covered by either "
+                f"glue's own active-session bookkeeping -- clearing "
+                f"defensively rather than leaving stale MLX arrays "
+                f"referencing the pre-reconnect device context"
+            )
+            del self._deferred_prefill_by_uid[uid]
+            if uid not in dropped_chunk_drive_uids:
+                dropped_chunk_drive_uids.append(uid)
+
+        return uids + [u for u in dropped_chunk_drive_uids if u not in uids]
 
     def close(self) -> None:
         self._mlx_gen.close()

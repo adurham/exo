@@ -682,6 +682,60 @@ class Rank0BatchedDecodeGlue:
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
 
+    def reset_chunk_drive_state_after_reconnect(self) -> int | None:
+        """Purely LOCAL chunk-drive state reset after a jaccl in-place
+        reconnect (2026-08-09, design doc Section 27/28 -- real hardware
+        finding: a request whose prefill was mid-chunk-drive when a
+        transport fault hit left this rank's ``_active_prefill_session``/
+        ``_prefill_phase``/``_prefill_rank1_advances_remaining`` stuck
+        exactly where the fault interrupted them, because
+        ``ExoBatchGenerator.reset_after_reconnect()`` only ever cleared
+        ``_active_tasks``/``_mlx_gen`` -- it never touched EITHER rank's
+        glue chunk-drive state or ``_deferred_prefill_by_uid``'s
+        orphaned ``.drive`` objects. The NEXT request's
+        ``register_prefill_session`` call then either hit the
+        "already active" guard against a session that no live client
+        was ever going to complete, or -- worse, confirmed on real
+        hardware -- proceeded into a corrupted ``_prefill_phase``/
+        ``_prefill_rank1_advances_remaining`` combination that tripped
+        the ``RANK1_DRAINING`` fail-loud guard
+        (``GlueError: reached RANK1_DRAINING with
+        _prefill_rank1_advances_remaining=0``).
+
+        UNLIKE ``abort_prefill_session()``, this does NOT attempt any
+        wire round-trip (no ``PrefillAbortMessage``/ack) -- the wire
+        itself is exactly what just failed and is being rebuilt by the
+        caller's ``grp.reconnect()``; any partial in-flight
+        cross-rank prefill state is being unconditionally discarded on
+        BOTH ranks by the SAME jaccl-fault recovery path (this method
+        is called identically on rank 0 and rank 1's glue, from
+        ``ExoBatchGenerator.reset_after_reconnect()``, immediately
+        after ``grp.reconnect()`` succeeds), so there is no
+        "one side thinks it's aborted, the other still expects a
+        message" split-brain risk the way an isolated single-request
+        cancel would have.
+
+        Returns the request_id that was dropped, or None if no session
+        was active."""
+        if self._active_prefill_session is None:
+            return None
+        dropped_id, prefill_session = self._active_prefill_session
+        try:
+            prefill_session.abort()
+        except Exception as e:
+            logger.warning(
+                f"reset_chunk_drive_state_after_reconnect: "
+                f"session.abort() for request_id={dropped_id} raised "
+                f"{e!r} -- continuing to clear local state regardless, "
+                f"since the underlying MLX arrays are already stale "
+                f"post-reconnect device-context rebuild"
+            )
+        self._active_prefill_session = None
+        self._prefill_phase = "rank0_local"
+        self._prefill_rank1_advances_remaining = 0
+        self._prefill_favor_decode_next = False
+        return dropped_id
+
     def enqueue_admission(
         self,
         request_id: int,
@@ -1468,6 +1522,35 @@ class Rank1BatchedDecodeGlue:
 
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
+
+    def reset_chunk_drive_state_after_reconnect(self) -> int | None:
+        """Rank 1's mirror of ``Rank0BatchedDecodeGlue``'s own
+        identically-named method -- see that method's docstring for
+        the full incident/rationale (design doc Section 27/28, real
+        hardware finding, 2026-08-09). Called identically on both
+        ranks' glues from ``ExoBatchGenerator.reset_after_reconnect()``
+        immediately after ``grp.reconnect()`` succeeds -- purely local,
+        no wire round-trip (the wire is exactly what just failed and
+        is being rebuilt by the caller).
+
+        Returns the request_id that was dropped, or None if no session
+        was active."""
+        if self._active_prefill_session is None:
+            return None
+        dropped_id, prefill_session = self._active_prefill_session
+        try:
+            prefill_session.abort()
+        except Exception as e:
+            logger.warning(
+                f"reset_chunk_drive_state_after_reconnect: "
+                f"session.abort() for request_id={dropped_id} raised "
+                f"{e!r} -- continuing to clear local state regardless, "
+                f"since the underlying MLX arrays are already stale "
+                f"post-reconnect device-context rebuild"
+            )
+        self._active_prefill_session = None
+        self._last_prefill_advance_seq = None
+        return dropped_id
 
     def mark_prefill_registered(self, request_id: int) -> None:
         """Called from ``ExoBatchGenerator.submit()`` the moment this
