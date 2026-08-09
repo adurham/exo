@@ -5930,3 +5930,159 @@ not required for correctness.
    up to one deadline window as hypothesized) or something else is
    wrong -- pursue the bounded-retry / proactive-peer-wake ideas noted
    above as the next real attack vector, not a deadline bump.
+
+## 31. Section 30's fix DEPLOYED and tested on real hardware: confirmed
+    active, but the deeper mechanism is worse than hypothesized --
+    detection skew is NOT bounded by one data-path deadline window, it
+    can be UNBOUNDED. Fix is a real, honest partial mitigation, not a
+    closure. (2026-08-09, same-session continuation)
+
+Deployed `444452be9` to both studios via the standard git-coherent
+workflow (`uv lock --upgrade-package mlx` first, since `uv.lock` was
+still pinned to the pre-fix SHA and would have silently reinstalled the
+stale mlx build otherwise -- caught and fixed before deploy, committed
+as `33039449f`). Clean teardown, faulthandler armed on both nodes,
+`start_cluster.sh` relaunch rebuilt mlx from `444452be9` from source
+(confirmed in the build log), `READY (2/2)`, `/state` clean, one
+warm-up request.
+
+### The fix IS active and measurably changed behavior
+
+Every crash log line in this session shows `retry deadline 150s
+exceeded` (up from the old hardcoded `60s`) for the coordinator/
+recovery handshake specifically, while the ordinary data-path faults
+still show `retry deadline 60s exceeded` -- confirming the scoping
+(`side_channel_` only, not `p2p_channel_`) deployed exactly as
+designed and is measurably distinguishing the two paths in production.
+
+### But two full test runs both still ended in a hard crash + re-place
+
+**Run 1:** First jaccl fault self-recovered cleanly in <1s (the known
+soft ~15s-class fault, self-heals via `reconnect_fresh` same as
+always). A SECOND fault then occurred ~83s after a fresh request began
+decoding; rank0's recovery handshake attempt this time ran the full
+extended budget and STILL timed out -- `no progress for 167.43s, retry
+deadline 150s exceeded`. Crash, re-place (~90s), cluster came back
+healthy afterward (confirmed via curl).
+
+**Run 2:** Same pattern -- clean sub-second self-recovery on the first
+fault, a fresh request started ~13s later, hit a SECOND fault ~70s
+into real decode. This time the evidence is sharper: captured
+faulthandler dumps from BOTH ranks mid-stall (`kill -USR1` on each PID,
+verified via a bounded CPU-time poll loop, not a blind sleep) show
+rank0 blocked exactly where expected -- inside `grp.reconnect()`'s
+`side_channel_` recv, i.e. the recovery handshake. **rank1's dump shows
+it was NOT blocked on any jaccl/RDMA call at all** -- its current
+thread was actively looping through `agree_on_cancellations_fast()`'s
+LOCAL multiprocessing-queue IPC check (`channels.py`'s
+`receive_nowait`), i.e. rank1 was still genuinely doing real decode
+work with zero visible awareness that rank0 had faulted, for the
+entire ~156s window before rank0's handshake gave up and crashed.
+
+### Why this invalidates the original "bounded by one deadline window"
+    assumption -- and why the fix is still worth keeping
+
+Section 30's fix was sized on the assumption that the worst-case
+cross-rank detection skew is bounded by one full data-path deadline
+window (~60s) -- i.e. that the slower-to-detect rank is ALSO blocked
+on its OWN `recv()` somewhere, just started its clock later. Run 2's
+faulthandler evidence disproves this: rank1 wasn't blocked on any
+`recv()` call, jaccl or otherwise -- it was live, working, and simply
+never touched the specific wedged connection during that window. If a
+rank's own fault detection is gated on it happening to call `recv()`
+on the affected connection, and its current workload doesn't require
+that, there is NO bounded worst-case skew -- rank1 could in principle
+go arbitrarily long without detecting, independent of any deadline
+value picked for `side_channel_`. Gotten a second opinion on this
+before writing it up (a `consult` review): confirmed the reasoning is
+sound, not an overread of two data points -- one clean disproof of a
+universally-quantified assumption is sufficient, and the faulthandler
+dump is a direct observation of the mechanism, not an inference.
+
+**Consequently: the deployed fix should NOT be described as closing or
+even reliably mitigating the jaccl hard-crash.** Across both post-
+deploy test runs, zero recoveries were observed in the 60-150s window
+the fix specifically extended the budget to cover -- every crash that
+occurred either finished within the OLD 60s budget's shadow (Run 1's
+167s over 150s -- would have failed even harder/faster under the old
+60s deadline, so the extension did buy real, if insufficient, margin)
+or happened during an interval where the peer was never going to detect
+regardless of deadline size (Run 2). The honest claim is: the fix
+raises the deadline's own robustness margin against the SPECIFIC skew
+class it was sized for (a rank blocked on `recv()` starting its own
+clock late), which is a real, verified improvement and worth leaving
+deployed -- but it does not address, and cannot single-handedly fix,
+the deeper mechanism Run 2 exposes, where the peer may never
+self-detect at all absent its own recv() activity on the faulted path.
+
+### The second-opinion review's suggested real fix (not implemented
+    this session -- next session's target)
+
+Push-based fault notification, serviced independently of whatever the
+peer's compute thread happens to be doing: when a rank detects a
+jaccl fault (its OWN `recv()` throwing), it should signal the peer via
+a channel/mechanism NOT gated on the peer's current workload noticing
+it -- e.g. a dedicated background listener thread on each rank that
+watches for an explicit "peer entering recovery, please join" message
+completely independent of `agree_on_cancellations_fast()`'s
+decode-loop-driven local IPC polling. This decouples fault detection
+from "did the peer happen to call recv() on the wedged path", which is
+the actual gap Run 2's faulthandler evidence exposes. Options
+considered and NOT chosen this session:
+- Hooking a side-channel poll into `agree_on_cancellations_fast()`'s
+  loop directly: cheaper, but fragile -- every other busy-loop in the
+  codebase that could similarly starve detection would need the same
+  hook, an ongoing maintenance burden rather than a structural fix.
+- Connection-level keepalives: bounds IDLE-detection time, but doesn't
+  help the case (Run 2, confirmed) where the peer is BUSY and simply
+  not scheduling any operation on the specific wedged connection.
+
+### A second, independent hypothesis worth investigating FIRST (cheaper
+    than the notification-thread rework, might make it moot)
+
+Both post-deploy runs show a SECOND fault landing shortly (13-83s)
+after a clean first `reconnect_fresh` recovery, always during a fresh
+request's real decode. Two-for-two on this pattern is suggestive
+(not yet proven) that the first recovery may be leaving some piece of
+state subtly inconsistent, which then induces the second, harder
+fault under real decode load -- rather than the second fault being a
+fully independent, unrelated transport hiccup. If true, fixing
+whatever `reconnect_fresh()` leaves behind could eliminate this
+specific failure mode without needing the larger notification-thread
+rework at all. This should be checked BEFORE investing in the bigger
+fix: instrument or log-audit `reconnect_fresh()`'s post-recovery state
+(QP counts, buffer pool state, ack bookkeeping) across several clean
+recoveries and see whether anything measurably differs between
+recoveries that stay healthy afterward vs. ones followed by a second
+fault within ~100s.
+
+### Session-end state
+
+Cluster is running, healthy (confirmed via a clean chat completion +
+`/state` check), on the fix commit (`33039449f` / mlx `444452be9`) on
+both studios. `/state` shows 2 stale `Pending` tasks from the two
+crash-induced re-places this session -- non-blocking (cluster is
+serving fine) but worth a clean teardown/relaunch before the next
+attempt, per this campaign's own established discipline. Section 2.5's
+cancellation requirement remains OPEN (now a NINTH deferral) -- the
+cancellation-latency bug itself (Section 29) is still confirmed fixed;
+what's blocking a clean overall `PASS` is this jaccl hard-crash class,
+which this session made real, deployable progress on (root-caused
+precisely, shipped a verified partial mitigation) but did not close.
+
+### Next session's concrete starting point
+
+1. Clean teardown/relaunch (clear the 2 stale `Pending` tasks).
+2. FIRST, cheaper check: audit `reconnect_fresh()`'s post-recovery
+   state for anything that could explain the "second fault shortly
+   after first recovery" pattern (both runs this session). If found
+   and fixable, that may be enough on its own.
+3. If the state-audit doesn't explain it (or fixing it doesn't stop
+   the second-fault pattern): implement the push-based fault
+   notification mechanism described above -- a dedicated listener
+   thread per rank, decoupled from the compute thread's own workload,
+   so a peer can be told to enter recovery even when its current work
+   never touches the wedged connection.
+4. Re-run `bench/section27_cancel_abort_test.py` 5x per the
+   established target once either fix lands; require a clean `OVERALL:
+   PASS` (not just no-crash) before marking Section 2.5 CLOSED.
