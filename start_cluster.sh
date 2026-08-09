@@ -1131,7 +1131,15 @@ for NODE in "${NODES[@]}"; do
     printf -v "KILL_EPOCH_${NODE//-/_}" '%s' "$(date +%s)"
 
     echo "Ensuring Xcode developer directory on $NODE..."
-    ssh "$NODE" "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true"
+    # -n (non-interactive): fail fast instead of hanging on a password
+    # prompt that can never arrive over a non-interactive SSH session --
+    # discovered 2026-08-08 when this line silently blocked launches for
+    # 10+ minutes each on both studios (no cached sudo credential over
+    # SSH, no TTY to type a password into). xcode-select -p already
+    # confirmed correct on both nodes at the time, so this call was a
+    # no-op in effect anyway -- the fix is purely about failing fast
+    # rather than hanging, not about actually needing sudo to succeed.
+    ssh "$NODE" "sudo -n xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true"
     
     # Update and Build Logic
     # main IS the verified production config (fix/c2-serving-hardening merged
