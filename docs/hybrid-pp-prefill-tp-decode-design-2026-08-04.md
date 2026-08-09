@@ -5021,3 +5021,114 @@ validated for the first time.
 4. Worth a follow-up, not urgent: the unused `TaskFailed` event type +
    `apply_task_failed` noted above -- either wire it up somewhere real or
    remove the dead code, but out of scope for tonight's fix.
+
+## 25. Section 24's API fix validated end-to-end on real hardware -- CLOSES Section 22's validation loop (2026-08-08, same session continued)
+
+**Deployed Section 24's fix** (`7a945e5d`, `_fail_stream_for_task`) to both
+studios via clean git reset. Both nodes confirmed on the fix commit.
+
+**Real-hardware confirmation, three separate angles:**
+
+1. Six consecutive clean 72K-token chunk-drive runs on a warm cluster
+   (post-first-launch) all completed correctly -- chunk-drive genuinely
+   works when the transport self-heals via jaccl's own soft-RC retransmit
+   layer (`[jaccl] soft-RC RETRANSMIT ... attempt=1`), which happened
+   several times across these runs without ever escalating to a full
+   `reconnect_fresh`. Needle recall 6/6, `finish_reason=stop` 6/6, zero
+   errors. This is itself a real, useful confirmation that Section 22's
+   chunk-drive path is robust under ordinary transient link hiccups, not
+   just the specific hard-fault path Section 23/24 focused on.
+
+2. **The actual target scenario -- reproduced the EXACT hard-reconnect
+   signature from Section 23 on a fresh cold-start relaunch** (the
+   condition that produced the fault 3/3 times in earlier attempts):
+   chunk 0's 11 advances complete, both ranks hit `[jaccl] recv() deadline
+   in drain`, `reconnect_fresh COMPLETE` on both sides. This time, instead
+   of an 8+ minute silent hang, the raw HTTP client received a proper
+   `200 OK` response with an SSE `data: {"error":{"message":"Task
+   failed",...}}` event in **19.7 seconds** -- confirmed via a direct
+   `httpx` client reading raw response lines (not the higher-level test
+   script, to see the exact wire-level payload). `error_message` fell
+   through to `_fail_stream_for_task`'s `"Task failed"` default (the
+   runner's `TaskStatusUpdated` event carries no message text on this
+   particular fault path -- a possible small follow-up: have the
+   jaccl-reconnect path in `runner.py` set a real `error_message` on the
+   task before marking it Failed, so the client sees something more
+   diagnostic than the generic default; not done tonight, low priority,
+   the STRUCTURE of the fix is what mattered and that's proven).
+
+3. **Cross-checked timing**: 19.7s is consistent with the fault's own
+   real timeline (11 advances ~1.6s + `[Event::wait]` 3s detection +
+   `reconnect_fresh` device-context rebuild, all real, necessary work) --
+   not a suspiciously-fast false green.
+
+**Incidental finding, NOT part of tonight's fix, flagged for a future
+session:** an oversized test prompt (~459K tokens, an accidental
+copy-paste-loop-count bug in a throwaway diagnostic script, NOT
+`bench/section22_chunk_drive_validate.py`'s real 72K path) surfaced a
+DIFFERENT, genuine bug: `GlueError: tick(): reached RANK1_DRAINING with
+_prefill_rank1_advances_remaining=0 -- the chunk-drive state machine has a
+real bug, refusing to send a meaningless advance`. This IS Section 22's
+own chunk-drive code (`pp_batched_decode_glue.py`) hitting a real invariant
+violation at some large-context boundary -- but it was caught cleanly
+(the glue's own fail-loud guard fired as designed, not a hang), and
+Section 24's fix ALSO correctly surfaced this one to the client (same
+`_fail_stream_for_task` path, different underlying error). Worth
+investigating on its own terms in a future session -- what context size
+or chunk count actually triggers `_prefill_rank1_advances_remaining=0` at
+`RANK1_DRAINING`, and whether that's a real chunk-count-vs-advance-count
+mismatch bug or an artifact of the test script accidentally sending a
+prompt 6x the size it meant to (459K tokens is genuinely unusual, not
+representative of real traffic) -- not chased further tonight since it's
+outside Section 22-24's actual scope and the fail-loud + now-surfaced-to-
+client behavior is itself correct regardless of root cause.
+
+**Section 22's validation status: CLOSED.** All of the following are now
+confirmed on real 2-node hardware, together:
+- Chunk-drive completes correctly under normal operation (Sections 18/20,
+  re-confirmed tonight via 6 clean runs).
+- The bounded-blocking-ack chunk-boundary fix works correctly at the
+  worker level when a genuine jaccl transport fault occurs mid-chunk-drive
+  (Section 23's original finding, re-confirmed identically tonight on a
+  fresh cold-start).
+- The client-visible outcome of that worker-level recovery is now correct
+  too (tonight's fix + validation) -- a real HTTP error in ~20s, not an
+  indefinite hang.
+
+**Cluster state at end of this update:** torn down cleanly (zero exo
+processes, zero screen sessions on both nodes, verified via `pgrep` +
+`screen -ls`). Both `EXO_PP_METAFRAME=1` and `EXO_PP_BATCHED_DECODE=1`
+remain OFF by default in `start_cluster.sh` -- deploying this validated
+combination as the new production default (vs. keeping it opt-in) is a
+separate decision not made tonight; the fixes are proven correct but this
+session did not evaluate whether flipping the defaults is warranted yet
+(that would want its own throughput/stability comparison against the
+Section 20 baseline, plus explicit user sign-off on the tradeoff --
+`start_cluster.sh` already warns c>=2 concurrent requests deadlock under
+`EXO_PP_NO_COORD_COLLECTIVE=1`, a pre-existing PP-mode constraint
+unrelated to tonight's work but relevant context for that future
+decision).
+
+**Next session's concrete starting point, in order:**
+
+1. Section 17's memory-headroom check and the real cancel/abort test on
+   real hardware -- now deferred for a FIFTH session running. Each
+   deferral has genuinely been displaced by new, real, higher-priority
+   discoveries (not skipped) -- but flag this streak explicitly to
+   whoever picks this up; if it happens a sixth time, that itself is a
+   signal something about how these sessions get planned needs to change
+   (start with Section 17 FIRST next time, before opening any new
+   investigation, unless something breaks loudly enough to demand
+   immediate attention).
+2. Optional, low-priority: give `_fail_stream_for_task`'s ErrorChunk a
+   more diagnostic message on the jaccl-reconnect path specifically
+   (currently falls through to the generic "Task failed" default).
+3. Optional, separate investigation: the `RANK1_DRAINING` /
+   `_prefill_rank1_advances_remaining=0` state-machine guard found
+   incidentally above -- confirm whether it's a real chunk-count bug at
+   very large context or purely an artifact of the malformed 459K-token
+   test prompt that triggered it.
+4. Decide (with the user) whether `EXO_PP_METAFRAME=1
+   EXO_PP_BATCHED_DECODE=1` should become the new production default now
+   that both the worker-level and client-level recovery paths are proven
+   correct, or whether it stays opt-in pending more real-world soak time.
