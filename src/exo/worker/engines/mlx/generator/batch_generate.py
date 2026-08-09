@@ -4736,6 +4736,46 @@ class ExoBatchGenerator:
 
         Cancelling a uid with no active drive is unaffected by any of
         this and behaves exactly as before.
+
+        2026-08-09 (design doc Section 27 -- external cancellation
+        during BATCHED-DECODE, a real, hardware-confirmed gap distinct
+        from the chunk-drive-abort case above): a uid can ALSO be
+        cancelled while it is (a) still queued, not yet admitted into
+        the batched-decode session (``_pending``/``_pending_prefill``
+        in ``Rank0BatchedDecodeGlue``), or (b) already admitted and
+        decoding in steady state (a real entry in
+        ``Rank0BatchedDecodeGlue.session._requests``). Neither case
+        involves a live ``deferred.drive`` (chunk-drive is a THIRD,
+        separate lifecycle stage this method already handled above),
+        so BOTH were previously silently dropped: this method's only
+        prior effect for such a uid was the unconditional
+        ``self._mlx_gen.remove(uids)`` below, which only touches
+        mlx-lm's own generic sequence-batch bookkeeping -- NOT the
+        separate ``BatchedDecodeSession`` object's own ``_requests``/
+        cache-slot state -- so the batched-decode session kept
+        decoding a uid the runner's OWN ``active_tasks``/
+        ``_active_tasks`` no longer tracked, forever (confirmed via
+        two real SIGUSR1 faulthandler dumps on live hardware, runner
+        pinned at ~100% CPU for 7+ hours with zero forward progress on
+        the cancellation). Fixed by routing through the SAME real,
+        already-tested mechanisms this module uses for every other
+        termination reason: ``cancel_pending_prefill()`` (pure
+        in-memory queue removal, zero wire I/O) for case (a), and
+        ``complete_request()`` (the SAME real EvictMessage/
+        EvictAckMessage protocol ``_step_batched_decode()`` already
+        uses for a natural EOS/max-tokens eviction) for case (b). Safe
+        to call from here for the identical reason it's safe from
+        there: this call site (via ``_apply_cancellations`` ->
+        ``BatchGenerator.step()``) only ever runs AFTER
+        ``ExoBatchGenerator.step()`` (and therefore any in-flight
+        ``tick()``) has already returned for this iteration -- never
+        concurrently with one. Rank 1 needs NO new handling for
+        either case: case (a) never reached rank 1 (no wire message
+        was sent for a still-queued request), and case (b)'s real
+        EvictMessage is handled entirely by
+        ``Rank1BatchedDecodeGlue.tick()``'s existing, already-tested
+        MSG_KIND_EVICT branch the instant it arrives -- identical to
+        how a natural EOS eviction already reaches rank 1 today.
         """
         for uid in uids:
             deferred = self._deferred_prefill_by_uid.get(uid)
@@ -4761,6 +4801,49 @@ class ExoBatchGenerator:
                 # why. Only the local bookkeeping below is dropped on
                 # either rank.
                 self._deferred_prefill_by_uid.pop(uid, None)
+            elif self._batched_decode_rank0_glue is not None:
+                # Cases (a)/(b) from this method's own docstring above --
+                # a batched-decode uid with no active chunk-drive. Check
+                # queued-but-not-admitted FIRST and use its return value
+                # to gate the admitted-session check, so this code never
+                # needs to assume which state is true -- it asks each
+                # mechanism directly and only calls the one that applies.
+                removed_from_queue = (
+                    self._batched_decode_rank0_glue.cancel_pending_prefill(uid)
+                )
+                if not removed_from_queue and (
+                    self._batched_decode_rank0_glue.has_admitted_request(uid)
+                ):
+                    from exo.worker.engines.mlx.pp_batched_decode_glue import (
+                        GlueError,
+                    )
+                    from exo.worker.engines.mlx.pp_batched_decode_runtime import (
+                        BatchedDecodeSessionError,
+                    )
+
+                    try:
+                        self._batched_decode_rank0_glue.complete_request(uid)
+                    except BatchedDecodeSessionError:
+                        logger.exception(
+                            f"cancel(): uid={uid}'s complete_request() "
+                            f"raised BatchedDecodeSessionError -- the "
+                            f"request was reported admitted a moment ago "
+                            f"but evict_request() no longer finds it "
+                            f"(already evicted via a natural EOS/"
+                            f"max-tokens completion racing this same "
+                            f"cancel -- a benign, expected timing window, "
+                            f"not a protocol violation); swallowed, "
+                            f"proceeding with cancellation regardless"
+                        )
+                    except GlueError:
+                        # A genuine EvictAckMessage mismatch IS a real
+                        # cross-rank desync -- this method's own
+                        # established discipline (see the
+                        # PrefillSessionError-vs-GlueError distinction in
+                        # the chunk-drive branch above) demands this
+                        # propagate loudly, not get swallowed alongside
+                        # the benign race handled above.
+                        raise
         self._mlx_gen.remove(uids)
         for uid in uids:
             self._active_tasks.pop(uid, None)

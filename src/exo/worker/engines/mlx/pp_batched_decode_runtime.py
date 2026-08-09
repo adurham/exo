@@ -435,6 +435,19 @@ class BatchedDecodeSession:
     def has_active_requests(self) -> bool:
         return any(not rec.done for rec in self._requests.values())
 
+    def has_request(self, request_id: int) -> bool:
+        """True iff ``request_id`` is a currently-admitted request in
+        this session (has real per-request generation state -- sampler,
+        next_token, cache slot). 2026-08-09: added for the external-
+        cancellation fix (design doc Section 27) -- lets a caller
+        distinguish "this uid is genuinely running in steady-state
+        batched-decode, route it through the real evict_request()
+        protocol" from "this uid is still only a queued/deferred
+        prefill that never got admitted, handle it differently" without
+        reaching into ``_requests`` directly from outside this module.
+        """
+        return request_id in self._requests
+
 
 @dataclass(frozen=True)
 class _EvictionInfo:

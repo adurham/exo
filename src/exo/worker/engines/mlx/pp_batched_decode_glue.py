@@ -746,6 +746,82 @@ class Rank0BatchedDecodeGlue:
     def has_pending_prefills(self) -> bool:
         return bool(self._pending_prefill)
 
+    def has_admitted_request(self, request_id: int) -> bool:
+        """True iff ``request_id`` is genuinely running in this
+        session's steady-state batched decode (real per-request
+        generation state exists -- sampler, next_token, cache slot).
+        2026-08-09 (design doc Section 27, external-cancellation fix):
+        distinguishes this from a uid that is merely queued in
+        ``_pending``/``_pending_prefill`` (not yet admitted) -- a
+        caller must route those two cases through different removal
+        paths (``complete_request()`` for an admitted request,
+        ``cancel_pending_prefill()`` for a queued one).
+        """
+        return self.session.has_request(request_id)
+
+    def cancel_pending_prefill(self, request_id: int) -> bool:
+        """Drop ``request_id`` from the pending-admission /
+        pending-prefill queues if it is sitting in either one,
+        WITHOUT having been admitted into the session yet. Pure
+        in-memory removal -- no wire I/O, so this is safe to call
+        from any thread/call site, unlike ``complete_request()``
+        (which does real blocking wire I/O and must never be called
+        for a request this method already removed). Returns True iff
+        something was actually removed (the caller uses this to know
+        whether it must ALSO call ``complete_request()`` for the same
+        request_id, or whether removal from the queue was sufficient).
+
+        2026-08-09 (design doc Section 27, external-cancellation fix):
+        a request can be cancelled by the client at ANY point in its
+        lifecycle -- including before ``tick()`` ever admits it (still
+        sitting in ``_pending`` waiting for its target slot to free, or
+        in ``_pending_prefill`` waiting for its PrefillMessage/
+        PrefillReadyMessage round trip). Neither queue entry has a
+        counterpart in ``self.session._requests`` yet, so
+        ``complete_request()``'s real ``evict_request()``/
+        ``EvictMessage`` protocol has nothing to evict and would raise
+        ``BatchedDecodeSessionError``. Dropping the queue entry here is
+        the correct, minimal removal for this case -- there is no
+        cross-rank state to reconcile since rank 1 never received a
+        PrefillMessage for a request still sitting in ``_pending``
+        (the ``_pending`` queue is for ALREADY-PREFILLED admissions
+        awaiting a free slot -- see ``enqueue_admission``'s own
+        docstring), and if a ``PrefillMessage`` for a
+        ``_pending_prefill`` entry has ALREADY been sent (this
+        request is ``head`` and rank 1 already ACKed readiness), the
+        caller is responsible for NOT calling this after that grant
+        was issued -- ``tick()`` pops an entry from ``_pending_prefill``
+        and hands the caller a ``PrefillGrant`` in the SAME call, so by
+        the time the caller could observe the grant, the entry is
+        already gone from this queue and this method is a correct
+        no-op for it (the caller must instead let the deferred prefill
+        run to completion and cancel via the NORMAL
+        ``abort_prefill_session``/``complete_request`` paths once it
+        has real session state).
+        """
+        removed = False
+        before = len(self._pending)
+        self._pending = [p for p in self._pending if p.request_id != request_id]
+        removed = removed or len(self._pending) != before
+
+        before = len(self._pending_prefill)
+        # A reserved slot for a NOW-cancelled pending prefill must be
+        # released too, or that slot leaks forever (never re-offered to
+        # any future request) -- mirrors this class's own established
+        # "every reservation has an explicit release" discipline (see
+        # the ``_reserved_slots.discard`` call in the admission branch
+        # of ``tick()`` above).
+        for p in self._pending_prefill:
+            if p.request_id == request_id:
+                self._reserved_slots.discard(p.cache_slot)
+        self._pending_prefill = [
+            p for p in self._pending_prefill if p.request_id != request_id
+        ]
+        removed = removed or len(self._pending_prefill) != before
+
+        self._prefill_ready_deadline.pop(request_id, None)
+        return removed
+
     def tick(
         self, model: object
     ) -> tuple[
