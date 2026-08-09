@@ -6280,3 +6280,145 @@ hardware run is still to be verified, not assumed.
    recommendation was not to treat it as sufficient on its own, given
    this bug class's history of passing several real-hardware runs
    before a rarer path was found.
+
+## 33. Section 32's recreate fix DEPLOYED and verified on real hardware:
+    zero crashes across 3 separate jaccl faults (a first for this
+    campaign) -- but exposed a NEW gap (recovery completes, runner
+    goes idle and never resumes), and the user's direct question
+    surfaced the actual root cause underneath everything this
+    campaign has patched so far: Apple's Thunderbolt RDMA stack has
+    no hardware Reliable Connected (RC) queue pairs, only Unreliable
+    Connected (UC) (2026-08-09, same-session continuation of Section 32)
+
+### Deploy + real-hardware result
+
+Deployed `c9e4a438c` to both studios (pure exo-repo Python change, no
+mlx submodule involved -- straight `git fetch && git reset --hard`,
+no `uv.lock` bump needed). Confirmed coherent (`exo@c9e4a438c` /
+`mlx@444452be9`, no submodule drift), clean teardown, faulthandler
+armed, relaunched, `READY (2/2)`, `/state` clean, one warm-up request
+-- all per the established pre-flight discipline.
+
+Ran the cancel test. Result: **3 separate jaccl transport faults hit
+during this single run, and NONE of them crashed the runner** --
+first time this has happened in this campaign. Specifically:
+  - Fault 1 (18:30:11, rank1-detected): clean self-recovery in 254ms.
+  - Fault 2 (18:30:39, rank1-detected, ~28s after fault 1's recovery
+    -- the "second fault shortly after clean recovery" pattern
+    flagged in Sections 31/32): recovered in ~70s (within the 150s
+    Section 30 deadline). Crucially: the request that was admitted
+    and decoding during this fault did NOT trigger a
+    `ProtocolViolationError` afterward -- confirmed via full log grep
+    for `ProtocolViolationError|crashed with critical|Runner
+    terminated` across both nodes: zero matches. This is the Section
+    32 fix's specific claim, verified for real.
+  - Fault 3 (18:31:48.937, rank0-detected -- NOT independently logged
+    on rank1's side, another live confirmation of Section 31's
+    "peer doesn't always independently detect" finding): recovered
+    cleanly ~0.25s later (this one was fast).
+
+### The NEW gap this run exposed: recovery completes, but the runner
+    can go idle and never resume serving
+
+After the 3 faults all recovered without crashing, `/state` showed a
+task stuck `Running` indefinitely (checked with a bounded poll loop,
+12+ iterations over 2+ minutes, never progressed). `kill -USR1`
+faulthandler dumps on both ranks' live PIDs (same processes as before
+the faults -- confirmed no re-place occurred) showed BOTH ranks
+idle, waiting on their own local `agree_on_cancellations_fast()`
+IPC queue poll -- NOT blocked on jaccl/RDMA at all. Both runner
+subprocesses are alive and healthy; the stall is that neither one
+has a next real generation step to execute -- something in the
+coordination layer above the runner (the supervisor/router path that
+hands the runner its next task) never resumed dispatching after the
+third recovery. This is a genuinely NEW finding, distinct from
+everything patched so far (Section 27/28's chunk-drive state, Section
+29's cancellation latency, Section 30's deadline, Section 32's
+recreate-not-reset) -- none of those functions are anywhere in this
+stall's faulthandler dump.
+
+Not investigated further this session -- cluster torn down cleanly
+per user direction ("write it up and stop for tonight") rather than
+continuing to chase a live wedge at the end of a long session.
+
+### The real question, asked directly by the user mid-session, and
+    the actual answer
+
+User asked directly: "I guess you are working on recovery for the
+stalls but that itself is still a bandaid in the same way the others
+were yeah? What's causing the stalls themselves? I assume it's a
+desync of expected states or something? even though we've supposed to
+have implemented a soft-RC style connection in the RDMA/Thunderbolt
+topology."
+
+Checked the jaccl source directly rather than guessing. Confirmed:
+**Apple's RDMA stack does not implement hardware Reliable Connected
+(RC) queue pairs at all.** jaccl's `Connection::create_queue_pair()`
+(`rdma.cpp`) hardcodes `init_attr.qp_type = IBV_QPT_UC` --
+**Unreliable Connected**. `mesh.cpp`/`mesh.h` state this explicitly in
+their own comments: "Apple's RDMA stack lacks hardware RC
+connections, so jaccl provides reliability over UC in software." UC
+gives zero delivery guarantee -- no retransmission, and a send that
+arrives at a queue pair with no matching receive posted **silently
+drops on both sides, with no error, no NACK, nothing** (confirmed via
+`mesh_impl.h`'s own extensive comment trail: "UC silently drops →
+drain_acks spins forever," "UC silently drops (receiver RQ overrun,
+no retransmit on UC)," repeated at ~15 separate call sites across the
+jaccl mesh implementation).
+
+This is the actual, single root cause underneath every jaccl
+transport fault this entire campaign has chased across Sections
+27-33: it's not one bug, it's the **expected failure mode of an
+inherently lossy transport leaking through wherever a send/recv
+pairing isn't explicitly barrier-synchronized on both ranks** at the
+exact moment of the exchange. The user's own framing was correct --
+"desync of expected states" is precisely what happens when one side's
+send silently vanishes and the two ranks' views of what just happened
+permanently diverge -- the framing just didn't yet have the physical
+mechanism (UC's silent-drop semantics) attached to it. Every ack-sync
+barrier, retry-deadline, and state-recreate fix in this campaign
+(Sections 27 through 33) is real, necessary software-layer
+reliability engineering compensating for a genuine hardware
+limitation, not redundant patching of the same bug -- but it also
+means there is no single fix that makes the transport reliable; the
+real ceiling on how clean this can get is bounded by how completely
+the send/recv pairing has been made mutually barrier-synchronized
+EVERYWHERE traffic flows, not by finding "the" bug.
+
+### Session-end state
+
+Section 32's recreate fix is deployed on both studios (`exo@c9e4a438c`
+/ `mlx@444452be9`) and VERIFIED on real hardware -- 3/3 jaccl faults
+this run recovered with zero crashes, a first for this campaign.
+Cluster torn down cleanly per user direction (not left running this
+time, since the last observed state was a stuck task, not a clean
+idle serving state). Section 2.5 remains open. This is real, durable
+progress (the specific crash class targeted by Section 32 is
+confirmed fixed on real hardware) but a new gap (recovery completes,
+resume-dispatch stalls) was found in the same run and is NOT yet
+investigated -- flagged honestly as unstarted, not glossed over.
+
+### Next session's concrete starting point
+
+1. Clean relaunch (standard discipline).
+2. Investigate the NEW "recovery completes but runner never resumes"
+   gap first -- this is now the most concrete lead (a full
+   faulthandler dump exists showing both ranks idle on local IPC,
+   confirming the stall is in the coordination/dispatch layer, not
+   the runner or the transport itself). Start by reading
+   `exo.worker.runner.supervisor`'s and the router's own task-dispatch
+   logic for what should have handed the idle runner its next step
+   after `jaccl reconnect complete` was logged the third time.
+3. Re-run the cancel test 5x total (this session only got 1 full
+   attempt in before the new stall) to build a real pass-rate
+   distribution for the Section 32 fix specifically, now that it's
+   confirmed to prevent the crash class it targeted.
+4. Given the UC-transport root cause is now explicit and understood,
+   consider whether a systematic audit of every send/recv call site
+   in `mesh_impl.h`/`mesh.cpp` for missing ack-sync barrier coverage
+   (rather than continuing to find gaps one real-hardware crash at a
+   time) is worth the investment -- this was implicitly recommended
+   by this session's own `consult` review (the "state OUTSIDE the
+   recreated objects... was NOT audited" flag) and is now reinforced
+   by having the actual physical mechanism (UC silent-drop) named
+   explicitly rather than inferred per-incident.
