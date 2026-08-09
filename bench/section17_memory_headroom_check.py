@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import random
 import subprocess
 import time
@@ -121,54 +122,122 @@ async def run_request(
     }
     start = time.perf_counter()
     content_chunks: list[str] = []
-    finish_reason = None
-    error_message = None
+    reasoning_chunks: list[str] = []
+    finish_reason: str | None = None
+    error_message: str | None = None
+    saw_done = False
+    data_frames = 0
+    comment_frames = 0
+    last_comment: str | None = None
     print(f"[{label}] Prompt ~{len(prompt) // 4:,} tokens, sending...")
     try:
-        async with httpx.AsyncClient() as client, client.stream(
-            "POST", f"{base_url}/v1/chat/completions", json=body, timeout=1200.0
+        # No total-request cap: a 150K-token prefill + decode legitimately runs
+        # 700s+. Only bound the gap BETWEEN reads -- the server emits an SSE
+        # keep-alive comment every 10s (src/exo/api/keepalive.py), so a 120s
+        # read gap means the server really went silent, not that it is slow.
+        timeout = httpx.Timeout(connect=30.0, read=120.0, write=60.0, pool=30.0)
+        async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
+            "POST", f"{base_url}/v1/chat/completions", json=body
         ) as resp:
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data_str = line[6:]
-                if data_str.strip() == "[DONE]":
-                    break
-                import json as _json
-
-                try:
-                    chunk = _json.loads(data_str)
-                except _json.JSONDecodeError:
-                    continue
-                if "error" in chunk:
-                    error_message = chunk["error"].get("message", str(chunk["error"]))
-                    break
-                choices = chunk.get("choices", [])
-                if choices:
-                    delta = choices[0].get("delta", {})
-                    text = delta.get("content") or ""
-                    if text:
-                        content_chunks.append(text)
-                    fr = choices[0].get("finish_reason")
-                    if fr:
+            if resp.status_code != 200:
+                await resp.aread()
+                error_message = f"HTTP {resp.status_code}: {resp.text[:500]}"
+            else:
+                async for line in resp.aiter_lines():
+                    if not line or line.isspace():
+                        continue
+                    # exo emits SSE COMMENT frames (": keep-alive",
+                    # ": prefill_progress {...}", ": generation_stats {...}").
+                    # They are not terminal, but they are the only liveness
+                    # signal during a multi-minute prefill -- record them.
+                    if line.startswith(":"):
+                        comment_frames += 1
+                        last_comment = line[:120]
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].lstrip()
+                    if data_str == "[DONE]":
+                        saw_done = True
+                        break
+                    data_frames += 1
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    if "error" in chunk:
+                        err = chunk["error"]
+                        error_message = (
+                            err.get("message", str(err))
+                            if isinstance(err, dict)
+                            else str(err)
+                        )
+                        break
+                    choices = chunk.get("choices") or []
+                    for choice in choices:
+                        delta = choice.get("delta") or {}
+                        # DSv4-Flash streams thinking tokens as
+                        # `reasoning_content`, NOT `content`
+                        # (src/exo/api/adapters/chat_completions.py:208-211).
+                        # Only reading `content` silently discarded the entire
+                        # answer for a reasoning model, which is why
+                        # needle_found was False even on healthy runs.
+                        if text := (delta.get("content") or ""):
+                            content_chunks.append(text)
+                        if think := (delta.get("reasoning_content") or ""):
+                            reasoning_chunks.append(think)
+                        if fr := choice.get("finish_reason"):
+                            finish_reason = fr
+                    # Defensive: accept a terminal frame that carries
+                    # finish_reason at the top level or on an empty choices
+                    # list rather than inside choices[0].
+                    if not choices and (fr := chunk.get("finish_reason")):
                         finish_reason = fr
     except Exception as e:
-        error_message = str(e)
+        error_message = f"{type(e).__name__}: {e}"
 
     elapsed = time.perf_counter() - start
     content = "".join(content_chunks)
-    needle_found = needle.split(":")[-1].strip().rstrip(".") in content
+    reasoning = "".join(reasoning_chunks)
+
+    # ROOT CAUSE of the 770s "silent success" result: the server-side SSE
+    # generator can end WITHOUT emitting a terminal frame. generate_chat_stream
+    # only emits `data: [DONE]` when it sees a chunk with a finish_reason or an
+    # ErrorChunk; if the underlying per-command queue is dropped instead
+    # (API._apply_state pops it on BrokenResourceError/ClosedResourceError,
+    # src/exo/api/main.py:2337-2346; _close_streams_for_instance on
+    # InstanceDeleted; cancel_command's sender.close(), main.py:836), the
+    # generator simply stops and the HTTP body ends cleanly. aiter_lines() then
+    # raises StopAsyncIteration and the old loop fell through with
+    # finish_reason=None and error=None -- indistinguishable from success.
+    # Treat a stream that ended without [DONE]/finish_reason/error as the
+    # FAILURE it is, and say so loudly.
+    if error_message is None and not saw_done and finish_reason is None:
+        error_message = (
+            f"stream ended after {elapsed:.1f}s with no [DONE], no finish_reason "
+            f"and no error frame -- server-side SSE generator terminated without "
+            f"a terminal frame ({data_frames} data frames, {comment_frames} "
+            f"comment frames, last comment={last_comment!r})"
+        )
+
+    answer_text = content or reasoning
+    needle_found = needle.split(":")[-1].strip().rstrip(".") in answer_text
     print(
         f"[{label}] DONE in {elapsed:.1f}s finish_reason={finish_reason} "
+        f"done={saw_done} frames={data_frames}/{comment_frames} "
         f"error={error_message!r} needle_found={needle_found}"
     )
     return {
         "label": label,
         "elapsed": elapsed,
         "finish_reason": finish_reason,
+        "saw_done": saw_done,
+        "data_frames": data_frames,
+        "comment_frames": comment_frames,
         "error": error_message,
         "needle_found": needle_found,
         "content": content,
+        "reasoning": reasoning,
     }
 
 
@@ -233,6 +302,8 @@ async def main() -> None:
     for r in results:
         print(
             f"  {r['label']}: elapsed={r['elapsed']:.1f}s finish_reason={r['finish_reason']} "
+            f"saw_done={r['saw_done']} frames={r['data_frames']}data/"
+            f"{r['comment_frames']}comment "
             f"error={r['error']!r} needle_found={r['needle_found']}"
         )
 
