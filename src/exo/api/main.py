@@ -245,6 +245,16 @@ ONBOARDING_COMPLETE_FILE = EXO_CACHE_HOME / "onboarding_complete"
 # than this only re-reads the same stale state.
 _JIT_PLACEMENT_POLL_SECONDS = 2.0
 
+# How long cancel_command() waits for the worker's own real cancellation
+# path (TaskCancelled -> planner's next ~100ms tick -> synthesized
+# CancelTask -> runner.cancel_task() -> ExoBatchGenerator.cancel(), which
+# fixes the request's batched-decode session and lets the token stream end
+# NATURALLY) before falling back to a force-close of the stream. Generous
+# relative to the worker planner's own ~100ms poll interval so this isn't a
+# second, narrower version of the same race -- a genuinely hung/crashed
+# runner is the only case expected to ever hit this fallback.
+CANCEL_ACK_TIMEOUT_SECONDS = 5.0
+
 
 class JitPlacementUnavailableError(Exception):
     """No admissible JIT placement config right now.
@@ -822,7 +832,55 @@ class API:
         )
 
     async def cancel_command(self, command_id: CommandId) -> CancelCommandResponse:
-        """Cancel an active command by closing its stream and notifying workers."""
+        """Cancel an active command: notify the worker, then let the
+        cancellation actually take effect before finishing the command.
+
+        2026-08-09 (real-hardware finding, design doc Section 27): this
+        method used to send ``TaskCancelled`` and then IMMEDIATELY call
+        ``sender.close()`` in the same breath. Closing the sender makes
+        ``_token_chunk_stream``'s ``async for chunk in token_chunks:``
+        end via a normal ``StopAsyncIteration`` (NOT the
+        ``anyio.get_cancelled_exc_class()`` except branch -- that only
+        fires when the CLIENT disconnects, not when the SERVER closes
+        the queue), so its ``finally:`` block unconditionally sent
+        ``TaskFinished`` essentially synchronously afterward. The
+        master's ``TaskFinished`` handler pops ``command_task_mapping``
+        and emits ``TaskDeleted`` with NO check of the task's current
+        status -- deleting the task from tracked state before
+        ``worker/main.py``'s ``plan_step()`` (a plain 100ms poll loop,
+        confirmed by reading it -- NOT event-triggered) ever got a
+        chance to observe ``TaskStatus.Cancelled`` and call
+        ``worker/plan.py``'s ``_cancel_tasks()`` to synthesize a real
+        ``CancelTask`` task for the worker. Confirmed via real hardware
+        logs: `grep 'Worker plan: CancelTask'` returned ZERO matches
+        across three separate live cancel attempts, while `grep
+        'Worker plan: TextGeneration'` fired reliably for every real
+        generation task -- proving this specific task class never once
+        reached the worker's own planner dispatch, a hard (not rare)
+        race given the near-zero latency between the two commands vs.
+        the 100ms poll interval. The runner therefore never received
+        ANY cancellation signal on this path, and kept decoding to
+        natural completion every time.
+
+        Fix: do NOT eagerly close the sender / finish the command here.
+        Send ``TaskCancelled`` and return -- the planner's own next
+        tick sees the task genuinely still tracked as ``Cancelled``,
+        dispatches the real ``CancelTask``, the runner stops
+        generating, and the token stream ends NATURALLY through the
+        exact same ``_token_chunk_stream`` teardown path every other
+        completion already uses (no protocol change, no new call
+        sites, ``TaskFinished``'s existing shared semantics at its
+        other 2 call sites are untouched).
+
+        Safety-valve fallback (a genuinely hung/dead runner is
+        precisely when a user most wants cancel to actually work):
+        after sending ``TaskCancelled``, wait up to
+        ``CANCEL_ACK_TIMEOUT_SECONDS`` for the task to actually leave
+        tracked state (``self.state.tasks``) via the real completion
+        path. If it hasn't by then, fall back to the OLD eager-close
+        behavior so the client's HTTP call still returns promptly
+        rather than hanging forever on a stuck worker.
+        """
         sender = self._text_generation_queues.get(
             command_id
         ) or self._image_generation_queues.get(command_id)
@@ -832,7 +890,30 @@ class API:
                 detail="Command not found or already completed",
             )
 
+        task_id = self._find_task_for_command(command_id)
         await self._send(TaskCancelled(cancelled_command_id=command_id))
+
+        if task_id is not None:
+            deadline = time.monotonic() + CANCEL_ACK_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                if task_id not in self.state.tasks:
+                    # The real completion path already ran: the runner
+                    # genuinely stopped, _token_chunk_stream ended
+                    # naturally, and TaskFinished/TaskDeleted already
+                    # fired through the normal flow. Nothing left to do.
+                    return CancelCommandResponse(
+                        message="Command cancelled.",
+                        command_id=command_id,
+                    )
+                await anyio.sleep(0.05)
+            logger.warning(
+                f"cancel_command({command_id}): task {task_id} did not "
+                f"reach a terminal state within "
+                f"{CANCEL_ACK_TIMEOUT_SECONDS}s of TaskCancelled -- "
+                f"falling back to force-closing the stream so this HTTP "
+                f"call doesn't hang on an apparently-stuck runner."
+            )
+
         sender.close()
 
         return CancelCommandResponse(
@@ -2400,6 +2481,25 @@ class API:
                 and task.command_id == command_id
             ):
                 return task.instance_id
+        return None
+
+    def _find_task_for_command(self, command_id: CommandId) -> TaskId | None:
+        """Mirrors ``_find_instance_for_command`` -- the API layer has no
+        direct access to the master's own ``command_task_mapping`` dict
+        (that lives on the master process, not the API process), so a
+        command's ``task_id`` is found the same way its instance is:
+        scanning ``self.state.tasks`` for the matching ``command_id``.
+        Used by ``cancel_command`` to poll for the real cancellation path
+        (TaskCancelled -> worker planner -> CancelTask -> runner) actually
+        completing, per that method's own docstring."""
+        for task in self.state.tasks.values():
+            if (
+                isinstance(
+                    task, (TextGenerationTask, ImageGenerationTask, ImageEditsTask)
+                )
+                and task.command_id == command_id
+            ):
+                return task.task_id
         return None
 
     def _fail_stream_for_task(self, task_id: TaskId) -> None:
