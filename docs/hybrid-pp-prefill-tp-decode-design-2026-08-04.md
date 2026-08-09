@@ -5485,3 +5485,253 @@ hardware, real evidence).
    failure over SSH:22 ever recurs on either studio despite tonight's
    scoped-`insteadOf` fix, check `git config --global --list | grep
    url` first -- do not re-diagnose from scratch.
+
+## 29. Cancellation-observation-latency bug found, fixed, and verified
+    on real hardware; a SEPARATE, genuinely new jaccl transport
+    regression discovered while validating it -- Section 2.5's
+    cancellation requirement remains OPEN, deferred an EIGHTH session
+    (2026-08-09, next-session continuation)
+
+**Housekeeping done clean, as instructed:** cluster torn down and
+relaunched with `EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1`,
+`/tmp/exo_faulthandler_enabled` touched on both nodes BEFORE launch
+(confirmed `"faulthandler registered on SIGUSR1"` in both `exo.log`s),
+`/state` confirmed 0 non-`Complete` tasks before touching anything,
+exactly ONE trivial warm-up request sent and allowed to fully complete
+(HTTP 200, ~3s) before any other traffic -- last session's noisy
+concurrent-warm-up mistake was not repeated.
+
+### Section 27/28's three landed fixes: re-verified real and correctly
+    described (not re-derived, per this session's own instructions)
+
+`git log` confirms 717523cb6 / 94fc04a4d / 415bab42f are real, pushed,
+on `origin/main`, and match their own commit messages' descriptions --
+read all three diffs directly rather than trusting the prior session's
+prose summary. One correction worth noting for doc hygiene: Section 27
+itself (the section these three commits' messages all cite) is the
+"root-caused, not yet fixed" writeup from two sessions ago -- the
+fixes were never actually written up as their own numbered section
+(no "Section 28" existed on disk before this one). This section is
+therefore doing double duty: documenting Section 27's three fixes
+briefly, AND being the "Section 28" that should have existed, AND
+being genuinely new "Section 29" material. Not renumbering retroactively
+(this doc's own convention is append-only) -- just flagging the gap so
+a future reader isn't confused hunting for a standalone Section 28.
+
+### First real hardware run of `bench/section27_cancel_abort_test.py`:
+    a genuinely NEW bug found, root-caused with real evidence, fixed,
+    and unit-tested
+
+`--target-tokens 30000 --n-tokens-before-cancel 15
+--post-cancel-window-seconds 90` (exactly per spec) against the freshly
+deployed 415bab42f build: **FAIL**, and NOT the known ~15s
+self-recovering jaccl transport fault this campaign has documented and
+retried past many times before (Sections 23-25) -- ground-truth CPU-TIME
+polling (not noisy %CPU) showed BOTH ranks' runner processes still
+monotonically GROWING CPU time at the full 90s window boundary, never
+converging to idle. Confirmed with a real faulthandler SIGUSR1 dump
+30s into the busy window and a second dump 30s after that: byte-for-byte
+IDENTICAL live stack on both captures --
+
+```
+rank0: pp_batched_decode_glue.py:1319 tick() -> pp_batched_decode_runtime.py:318
+       run_forward() -> deepseek_v4.py model forward -> pp_batched_decode_layers.py:283
+rank1: pp_batched_decode_glue.py:1885 tick() -> pp_batched_decode_runtime.py:565
+       step() -> pp_metaframe.py:650 recv_metaframe()
+```
+
+-- proving a genuinely busy decode loop (real GPU compute happening
+every cycle), not a deadlock/wedge. This is a REAL finding, distinct
+from the 717523cb6/94fc04a4d/415bab42f bugs this campaign already
+fixed (which were about cancellation never reaching the runner at all,
+or leftover state after a jaccl fault) -- here, cancellation WAS
+reaching the runner and WAS eventually acted on, just far too slowly.
+
+**Root cause, traced through real code, not guessed:**
+`BatchGenerator`'s per-decode-token callback closures
+(`_make_on_generation_token` for the batched path, the equivalent in
+`_build_generator` for the legacy single-stream path) only called the
+full, expensive `agree_on_cancellations()` collective once every
+`check_for_cancel_every` decode tokens (`src/exo/worker/runner/llm_inference/batch_generator.py`
+lines ~954-969 / ~346-356). `check_for_cancel_every` (up to 100, logged
+as exactly 100 on both nodes this run) is calibrated ONCE at warmup
+time against a fast, near-empty-context decode
+(`generate.py:warmup_inference`, `min(ceil(tokens_generated/elapsed),
+100)`). Real decode throughput under a 30K-token resident KV cache (PP
++ batched-decode forward pass) measured ~1.5-1.6s/token here -- 30-100x
+slower than the near-instant warmup measurement assumed. The math
+closes almost exactly against BOTH measured convergence times across
+two separate hardware runs: ~85 remaining tokens to the next 100-token
+counter boundary × ~1.5-1.6s/token real decode latency = 127-136s,
+matching 133.7s/136.4s (run 1) and (after the fix, for comparison) the
+sub-1s convergence of runs 2 onward.
+
+**Fix (commit `12a84b077`, `consult`-reviewed before landing):**
+`BatchGenerator.step()` now also calls `agree_on_cancellations_fast()`
+UNCONDITIONALLY every step, immediately next to the existing
+`agree_on_tasks()` call, mirroring that call's own already-proven-safe
+unconditional-with-internal-`mx_any`-gate pattern. A `consult` review
+flagged that `step()` -- not the per-decode-token callback closures --
+is the ONLY place in this class provably symmetric across both ranks
+every iteration (both ranks call `step()` in lockstep; the token
+callbacks are NOT reliably symmetric for the batched-decode path,
+since rank 1's mirror-only `tick()` never builds the same per-request
+callback state rank 0's does), so adding the new collective there
+would have risked a real deadlock -- strictly worse than the latency
+bug being fixed. This bounds cancellation-observation latency to ~1
+decode step. The old counter-gated `agree_on_cancellations()` calls in
+the token callbacks were left in place as a harmless, redundant
+backstop, not removed. Incidentally also closes a latent cross-rank
+divergence hazard the `consult` review flagged: `check_for_cancel_every`
+is computed per-node from local warmup timing with no cross-rank
+agreement step, so nothing ever guaranteed both ranks would land on
+the same value -- had they diverged, the old counter-gated
+`all_gather` would have fired at different token counts per rank, a
+real distributed hang. The new unconditional call has no counter to
+diverge.
+
+Verified: `basedpyright`/`ruff` clean on both changed files (1
+pre-existing unrelated `reportRedeclaration` error in
+`batch_generator.py`, confirmed byte-identical pre/post via `git
+stash`), 3 new regression tests (`unconditional-per-step call proven
+both when idle and when actively decoding`, plus a
+revert-and-confirm-predicted-failure test per this campaign's own
+established discipline), 323/323 existing worker + mlx-engine unit
+tests pass, zero regressions. Committed, pushed to `origin/main`
+(`12a84b077`).
+
+### Re-running the same real-hardware test against the fix: cancellation
+    latency IS fixed (5/5 clean, zero busy-looping), but a SEPARATE,
+    genuinely NEW jaccl hard-crash now blocks a clean overall PASS
+
+Five separate real-hardware runs of the exact same test against the
+fix (clean teardown/relaunch before each, exactly one warm-up request
+each time, faulthandler armed each time) all show the SAME clean
+result for the thing this session's fix targets: runner CPU time
+converges to idle almost immediately post-cancel (flat within a few
+seconds, not 90+ seconds) -- **the original bug is genuinely fixed,
+confirmed 5/5, not a fluke.**
+
+But in 4 of those 5 runs (and, critically, also in a 5th run against
+the PRE-fix build -- see the A/B test below), the SAME real jaccl
+transport crash then hit a few seconds to a couple minutes later,
+independent of the cancel test's own pass/fail state:
+
+```
+[jaccl] Recv failed with errno=35 n=-1 fd=54 remaining=16 flags=0x2
+nonblock=0 (no progress for 70.004s, retry deadline 60s exceeded)
+```
+
+This is NOT the already-documented, self-recovering ~15s jaccl
+drain-deadline fault from Sections 23-25 (that fault's signature is a
+short stall that resolves cleanly via `grp.reconnect()`, logged as
+`"jaccl reconnect complete... resumed serving with model resident"`,
+zero re-places). This is a HARDER variant: the stall itself runs
+70.004s (past the 60s retry deadline baked into jaccl's own C++
+`tcp.cpp`), and `runner.py`'s own in-place-reconnect recovery path
+(`handle_generation_tasks`'s `grp.reconnect()` call, added by an
+earlier session specifically to avoid a full re-place on the softer
+fault) ALSO fails with the byte-identical `RuntimeError`, forcing a
+genuine runner crash + re-place (`~90s` reload, confirmed via PID
+changing and a fresh `git rev-parse HEAD`/faulthandler-registration
+cycle each time). Real evidence, not inferred: `grep -c "jaccl
+reconnect complete"` (the soft-fault success marker) returned **0**
+across this session's entire final relaunch's `exo.log` -- every
+single jaccl fault this run was the hard 70s variant, a real shift
+from the historically-documented mostly-soft-fault behavior.
+
+**A real, controlled A/B test (per a `consult` review's explicit
+recommendation, not skipped) rules out this session's own fix as the
+cause:**
+
+1. `git revert --no-edit 12a84b077` locally, pushed as `1fdf681fe`,
+   deployed clean (teardown/relaunch, confirmed `git rev-parse HEAD`
+   on both nodes matches the revert).
+2. Ran the identical test scenario against the REVERTED (no-fix)
+   build. The test itself failed fast (`cancel was never issued --
+   stream ended/errored before reaching the token threshold`, 19.7s)
+   -- but more importantly, a plain follow-up health-check request to
+   the REVERTED build ALSO hit `HTTP:000` (connection never
+   established) minutes later, and `exo.log` showed the SAME
+   `"no progress for 70.004s, retry deadline 60s exceeded"` /
+   `"jaccl reconnect failed"` / `"crashed with critical exception"`
+   sequence, this time during ordinary warmup/health-check traffic
+   with **no cancellation involved at all** -- proving this crash
+   class is reachable independent of both the cancel test AND this
+   session's fix.
+3. `git revert --no-edit 1fdf681fe` (re-applying the real fix) as
+   `89e9833c2`, pushed, redeployed, re-verified `git rev-parse HEAD`
+   on both nodes. This is the commit left live/deployed at session end.
+
+**Conclusion: the jaccl hard-crash is REAL, REPRODUCIBLE (5/6 total
+attempts across both the fix and its revert), and NOT caused by this
+session's cancellation-latency fix.** It is a separate, previously
+undocumented failure mode of the jaccl transport that appears to have
+gotten meaningfully worse partway through this session (the 0/9
+soft-recovery rate this run vs. the historically-mostly-soft-recovering
+behavior in Sections 23-25) -- plausibly a genuine transport-state
+degradation accumulating over this long-running cluster's ~1.5-day
+uptime (`uptime` showed `1 day, 16:16` on node1 at time of
+investigation), though this is a hypothesis, not yet confirmed by
+evidence, and is explicitly flagged as such rather than stated as
+fact. No thermal throttling observed (`pmset -g therm`: no warning
+levels recorded on either node), ruling out the most obvious
+alternative explanation.
+
+**Section 2.5's cancellation requirement: STILL NOT CLOSED.** The
+cancellation-LATENCY bug this session targeted is genuinely fixed and
+verified (5/5 clean CPU-convergence results). But the test's own
+`OVERALL: FAIL` verdict on 4 of those 5 runs (from the separate jaccl
+crash corrupting the post-cancel health-check step) means the test
+script itself never once reported a clean, complete `OVERALL: PASS`
+against a fully-healthy post-cancel cluster this session. Declaring
+the requirement closed on the strength of "the CPU-convergence signal
+we were chasing is fixed" while the test's own overall verdict says
+FAIL would be exactly the kind of self-serving redefinition-of-success
+this campaign's own discipline exists to prevent.
+
+**Practical state at session end:** cluster is deployed at `89e9833c2`
+(the real fix, live), was healthy and serving a clean single-token
+request at last check, left RUNNING (not torn down) per this
+section's own next-step below -- next session should NOT immediately
+retry the same 30K-token cancel test cold; the jaccl fragility needs
+its own dedicated root-cause attempt FIRST (see below), or every retry
+of the cancel test will keep getting eaten by this separate crash
+exactly like tonight did, 4 times in a row.
+
+**Next session's concrete starting point, in order:**
+
+1. Root-cause the jaccl hard-crash BEFORE touching the cancel test
+   again. Concrete angles, none yet tried this session: (a) check
+   whether `~1.5-day cluster uptime` correlates with fault hardness --
+   a controlled test would be a FRESH `start_cluster.sh` from a full
+   node reboot (not just a process relaunch) run through the same 30K-
+   token cancel scenario immediately, vs. the same scenario after
+   letting the freshly-rebooted cluster sit idle for a comparable
+   ~1.5 days, to see if idle uptime alone reproduces the hardening; (b)
+   grep both nodes' `exo.log` across the FULL session (not just the
+   final relaunch) for the exact moment the soft-recoverable variant
+   stopped appearing and the hard variant started, to bound a
+   time-of-onset; (c) check `ibv_devinfo`/RDMA queue-pair counts on
+   both nodes for QP exhaustion or a leak across repeated
+   relaunches/reconnects (each `reconnect_fresh` cycle closes and
+   rebuilds device contexts -- confirm this is actually leak-free
+   across many cycles, not just correctness-verified once).
+2. Once the jaccl fragility is either fixed or convincingly ruled
+   environmental (e.g. reproduces identically on a freshly-rebooted
+   cluster with zero prior uptime, pointing at something other than
+   accumulated state), re-run
+   `bench/section27_cancel_abort_test.py --target-tokens 30000
+   --n-tokens-before-cancel 15 --post-cancel-window-seconds 90` and
+   require a clean `OVERALL: PASS` (not just a clean CPU-convergence
+   sub-result) before marking Section 2.5's cancellation requirement
+   CLOSED.
+3. If the jaccl hard-crash proves stubborn, consider re-scoping the
+   cancel test itself to tolerate a KNOWN-separate transport fault
+   without failing the whole run (e.g. detect the jaccl crash
+   signature specifically in the post-cancel health check and report
+   it as a distinct `TRANSPORT_FAULT` verdict rather than folding it
+   into the same boolean `cluster healthy post-cancel` the
+   cancellation-latency check also depends on) -- but only as a
+   LAST resort if real root-causing genuinely stalls, not as a
+   first move to manufacture a green checkmark.
