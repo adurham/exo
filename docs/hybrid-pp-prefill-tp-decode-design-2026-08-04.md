@@ -6422,3 +6422,116 @@ investigated -- flagged honestly as unstarted, not glossed over.
    recreated objects... was NOT audited" flag) and is now reinforced
    by having the actual physical mechanism (UC silent-drop) named
    explicitly rather than inferred per-incident.
+
+## 34. CORRECTION to Section 33's "root cause": the soft-RC layer is
+    real, engaged, and doing its job -- "no hardware RC" is why it
+    exists, not an explanation for why faults still happen. The real
+    open question is narrower and unanswered: is the retry protocol's
+    bounded retry budget failing to converge under real load, or is
+    there a specific reconciliation bug? (2026-08-09, same session)
+
+User pushed back hard and correctly on Section 33's framing: "I know
+apple doesn't have hardware support for RC. That's the ENTIRE point
+of the soft-RC that we built." Right -- reporting "no hardware RC" as
+THE root cause was answering a different question than the one that
+matters. The absence of hardware RC is the reason the soft-RC layer
+had to be built; it explains nothing about why THAT layer's own
+retry/ack logic is failing to make faults fully transparent.
+
+### What was actually checked this time (not re-asserted)
+
+1. Confirmed `MeshGroup::send`/`recv` (what `mx.distributed.send`/
+   `recv_like` calls into from Python, e.g. `pp_metaframe.py`'s
+   `send_metaframe`/`recv_metaframe`) route through `mesh_.send`/
+   `mesh_.recv` (`mesh_impl.h` ~line 1518/1704) -- the SAME functions
+   with the sliding-window recv, retransmit rounds, and
+   `p2p_retry_barrier` bitmask reconciliation. Not raw unacked UC
+   posts.
+2. Confirmed `MeshGroup::all_sum`/`all_gather` (TP collectives) route
+   through `reliable_all_reduce`/`reliable_all_reduce_v2` -- the same
+   reliable/ack-synced path, not a separate bypass.
+3. Checked `jaccl_ack_sync_pre_enabled()` (`mesh_impl.h` line 24-38):
+   source-level DEFAULT is OFF, described in its own comment as
+   "closes the inter-lambda window where peer SEND lands at our empty
+   data-QP recv FIFO and UC silently drops -> permanent wedge...
+   gated behind a runtime env for A/B testing." Looked like a real
+   candidate for "the sync gap." BUT: `start_cluster.sh` (lines
+   1701-1721) OVERRIDES this to `MLX_JACCL_ACK_SYNC_PRE=1` by default
+   on every real launch (both the initial coordinator env and the
+   reconnect env). So the actual deployed behavior has this barrier
+   ON, not off -- this specific candidate is ruled out for the
+   real cluster's actual behavior, not by assumption but by reading
+   the launch script's own default.
+
+### What this means: the desync is NOT from missing acknowledgment
+    machinery
+
+The retry-and-reconcile protocol IS real, IS engaged for both p2p and
+collective traffic, and IS running (confirmed via the "recv() deadline
+in drain -- clean re-place" log line itself, which only fires AFTER
+the full retry loop -- up to 40 rounds, 500ms apart, capped at 15s
+wall-clock -- has already been exhausted without recovering the
+missing chunks). So "recv() deadline in drain" does NOT mean "a
+packet got dropped and nobody noticed" -- it means the drop was
+noticed and the retry protocol tried to recover it and STILL failed
+within its bounded budget.
+
+### The real, still-open question (correctly narrower than Section 33)
+
+Whether that failure-to-converge is because:
+  (a) the retry budget itself (500ms retransmit interval, 40 rounds,
+      15s deadline) is genuinely undersized for real production
+      conditions (30K-token decode, real GPU contention) -- i.e. the
+      protocol IS working, just not fast enough to fit its own
+      deadline under real load, or
+  (b) the peer's own thread responsible for SERVICING retransmits is
+      itself stalled/starved when the fault hits (plausible given
+      faulthandler evidence from earlier THIS session showing
+      asymmetric CPU activity between ranks during a wedge -- one
+      rank busy, one nearly idle) -- i.e. the protocol can't run
+      because its own execution context is blocked elsewhere, or
+  (c) a genuine bug in the `p2p_retry_barrier` bitmask reconciliation
+      itself causes the two ranks' "got" state to permanently diverge
+      (a real DESYNC, in the sense the user meant) rather than
+      converge across retry rounds.
+
+None of these three is yet distinguished by evidence -- this is a
+correction of Section 33's premise, not yet an answer to the deeper
+question. `JACCL_TRACE_PROGRESS=1` (gated via `jaccl_progress_enabled()`,
+`mesh_impl.h` line 45) provides exactly the round-by-round evidence
+(`[jaccl-prog] ... POLL/CQE/DRAINED` lines) needed to distinguish (a),
+(b), (c) -- NOT enabled during tonight's cluster runs, so this
+session has zero round-by-round evidence either way. Also available:
+`JACCL_TRACE_CALLS=1` (per-call trace file at
+`/tmp/jaccl_trace_rank_<N>_color<C>_pid<P>.log`).
+
+### Session-end state
+
+Stopped here per user direction rather than doing another teardown/
+relaunch cycle tonight. Section 33's "no hardware RC" framing is
+retracted as an answer to "what's causing the stalls" -- it's real
+background context, not the causal explanation. The Section 32 fix's
+real-hardware verification (3/3 jaccl faults recovered without a
+crash) and the new resume-after-recovery gap both still stand as
+genuine findings from tonight, unaffected by this correction. Cluster
+remains torn down.
+
+### Next session's concrete starting point (supersedes Section 33's
+    "audit send/recv call sites" suggestion -- that presupposed
+    missing coverage, which is now shown not to be the mechanism)
+
+1. Relaunch with `JACCL_TRACE_PROGRESS=1` (and optionally
+   `JACCL_TRACE_CALLS=1`) on both nodes.
+2. Reproduce a real jaccl fault (same cancel-test workload as this
+   session).
+3. Capture the full `[jaccl-prog]` round-by-round trace from BOTH
+   ranks during the fault's drain/retry window, correlated by
+   `call_id` and timestamp.
+4. Read the trace to distinguish the three hypotheses above: are
+   retransmit rounds making partial progress and running out of
+   time (a)? Is one rank's servicing thread not polling its CQ at all
+   during the window (b)? Do the two ranks' reported "got" bitmasks
+   ever actually disagree in a way that persists across rounds (c)?
+5. Only after that evidence exists, decide the real fix: bigger
+   retry budget (if a), fixing whatever's starving the servicing
+   thread (if b), or a genuine bitmask-reconciliation bug fix (if c).
