@@ -5735,3 +5735,198 @@ exactly like tonight did, 4 times in a row.
    cancellation-latency check also depends on) -- but only as a
    LAST resort if real root-causing genuinely stalls, not as a
    first move to manufacture a green checkmark.
+
+## 30. jaccl hard-crash root-caused precisely: NOT uptime hardening --
+    a real cross-rank asymmetric fault-detection timing race in the
+    recovery handshake. Root-cause + surgical fix committed and pushed;
+    NOT yet built/deployed to the live cluster (2026-08-09, continuation
+    of the same session, picked back up after a session resume)
+
+Section 29 left the jaccl hard-crash's cause as an unconfirmed
+hypothesis ("may correlate with cluster uptime, next session should
+test a freshly-rebooted cluster"). This session read the ACTUAL log
+evidence from both nodes side-by-side for the exact captured incident
+and found the real mechanism -- uptime is not it.
+
+### The evidence
+
+Both nodes' full `exo.log` for the incident session were read in
+parallel, timestamp-aligned. The relevant fault:
+
+- **rank0 (node1):** `jaccl transport fault in generator.step()` at
+  `13:44:02.705` (original data-path RDMA fault, fd=54). Immediately
+  entered `reconnect_fresh rank=0 ENTER` at `13:44:02.706` -- device
+  contexts torn down and reopened successfully (confirmed via
+  subsequent `[jaccl] recv EAGAIN, retrying` heartbeat lines showing
+  the NEW connection actively polling). Then blocked on `side_channel_`
+  waiting for rank1's fresh QP info as part of `reconnect_fresh()`'s
+  own recovery handshake. Timed out and THREW at `13:45:12.939`:
+  `"jaccl reconnect failed (RuntimeError('[jaccl] Recv failed with
+  errno=35 ... no progress for 70.0019s, retry deadline 60s
+  exceeded'))"` -- the traceback shows this throw is literally INSIDE
+  `grp.reconnect()` itself (the recovery handshake's own TCP recv on
+  `side_channel_`), not the original data path. Runner crashed, forced
+  a full re-place (~90s reload).
+- **rank1 (node2):** did NOT log its OWN `"jaccl transport fault"`
+  until `13:45:13.904` -- **71 seconds after rank0's original fault**,
+  and only ~1 second after rank0 had already given up and crashed.
+  rank1's traceback shows it was blocked the entire time inside
+  `_batched_decode_rank1_glue.tick()` -> `recv_header()` ->
+  `mx.eval(header)` -- rank1's "mirror" polling loop waiting for the
+  next header from rank0, a logically different queue/direction than
+  whatever stalled first on rank0's side.
+
+Both ranks' faults share the exact same 60s
+`MLX_JACCL_RECV_RETRY_DEADLINE_SECS` no-progress deadline
+(`tcp.cpp`'s `TCPSocket::recv()`). The task active during this window
+was itself mid-cancellation (a real user cancel request at
+`13:42:49.893`, task `384d53b1...`, `did not reach a terminal state
+within 5.0s of TaskCancelled` at `13:42:54.920`) -- consistent with,
+though not proven to require, elevated cross-rank timing pressure
+around a cancel, not "the cluster has been up too long."
+
+### The mechanism (confirmed via code read, not just log correlation)
+
+`MeshGroup::reconnect()` / `reconnect_fresh()`
+(`mlx/distributed/jaccl/lib/jaccl/mesh.cpp`) reuse `side_channel_` -- a
+plain TCP connection, NOT part of the RDMA data path, constructed once
+in `MeshGroup`'s ctor and never rebuilt -- as the cross-rank RECOVERY
+handshake: both ranks re-exchange fresh QP info over it and barrier
+before resuming. `side_channel_`'s `recv()` calls go through the exact
+same `TCPSocket::recv()` as every other jaccl socket, which enforces
+`MLX_JACCL_RECV_RETRY_DEADLINE_SECS` (default 60.0s) as an ELAPSED
+no-progress deadline (`tcp.cpp` line ~207, pre-fix).
+
+This means: **the recovery handshake's own timeout budget was
+identical to, not longer than, the per-rank fault-DETECTION deadline
+it has to outlast.** In a topology where rank0 drives decode and rank1
+mirrors it via a differently-timed polling loop, the two ranks'
+independent data-path `recv()` calls can (and, per this incident, do)
+detect a shared underlying transport fault up to a full deadline
+window apart. Whichever rank detects first begins its OWN recovery
+immediately and enters the shared `side_channel_` handshake -- but the
+other rank hasn't even started its OWN fault handling yet, so it isn't
+listening on `side_channel_` for a handshake that hasn't begun on its
+side. The first rank's handshake attempt has, at most, ~60s of budget
+to wait for a peer that itself may take up to ~60s just to NOTICE
+there's a fault to recover from. When the skew exceeds the handshake's
+own budget (as it did here: rank0's handshake timed out at t=70s;
+rank1 didn't detect until t=71s), the first rank crashes before the
+second rank ever gets a chance to participate -- destroying the entire
+point of the in-place-recovery path (avoiding a ~90s re-place) for the
+exact case (real fault, real skew) it exists to handle.
+
+This is a design invariant violation, not a mistuned constant: a
+recovery timeout that is structurally no longer than the detection
+latency it has to outlast can never reliably work once cross-rank
+detection timing diverges by any meaningful fraction of the deadline
+window -- which the rank0-drives/rank1-mirrors batched-decode topology
+makes likely, not exceptional. (Consulted a second opinion on this
+mechanism before committing to it as the root cause; confirmed sound,
+with one useful refinement -- see "what a bounded-retry follow-up
+could add" below.)
+
+This also fully explains why the OLDER, historically-documented ~15s
+self-recovering jaccl fault (Sections 23-25) never showed this
+failure mode: it survives only because both ranks' detection clocks
+happened to start close enough together, not because anything in the
+recovery protocol enforced it.
+
+### The fix (committed and pushed, NOT yet built/deployed)
+
+`adurham/mlx@444452be9`, four files:
+
+1. **`tcp.h`/`tcp.cpp`**: new `TCPSocket::set_recv_retry_deadline_secs(double)`
+   -- a per-socket override of the elapsed no-progress deadline `recv()`
+   enforces, independent of the `MLX_JACCL_RECV_RETRY_DEADLINE_SECS` env
+   var / 60.0 hardcoded default (which remain the fallback when unset,
+   `-1.0` sentinel). `recv()`'s existing deadline math is otherwise
+   completely unchanged.
+2. **`rdma.h`**: new `SideChannel::set_recv_retry_deadline_secs(double)`
+   -- applies the override to every socket in a `SideChannel`.
+3. **`mesh.cpp`**: `MeshGroup`'s ctor now calls
+   `side_channel_->set_recv_retry_deadline_secs(...)` ONCE right after
+   construction, computed as `2 * data_path_deadline + 30.0` (default
+   150.0s with the stock 60.0s data-path deadline) -- enough to cover
+   the worst-case one-full-deadline-window cross-rank detection skew
+   PLUS real `reconnect_fresh()` device teardown/reopen work.
+   Overridable via `MLX_JACCL_COORD_RECV_RETRY_DEADLINE_SECS` for
+   diagnostics.
+
+**Deliberately scoped to `side_channel_` only, NOT `p2p_channel_`** (the
+hot-path `send()`/`recv()` retry-barrier channel used by ordinary PP
+p2p traffic) -- that channel should keep failing fast on the data
+path's own deadline; only the coordinator/recovery path needed the
+longer budget. Verified this scoping is correct by reading
+`MeshGroup`'s ctor and confirming `side_channel_` and `p2p_channel_`
+are genuinely separate `SideChannel` instances (`p2p_channel_` is
+built later, in `rebuild_p2p_channel()`, and is never touched by this
+change).
+
+**What a bounded-retry follow-up could add** (not implemented this
+session, flagged for later if the deadline-headroom fix alone proves
+insufficient): the second-opinion review also suggested (a) making
+`reconnect_fresh()`'s device-context teardown itself close the peer's
+socket loudly enough to wake a still-undetecting rank's blocked
+`recv()` immediately (closing the skew gap at its source, rather than
+just tolerating it), and (b) wrapping the handshake in a bounded retry
+(2-3 attempts with backoff) instead of a single fatal throw, since
+rank0's real handshake attempt was only ~1s away from rank1 joining
+when it gave up. Both are real, complementary hardening ideas -- not
+implemented here because the deadline-headroom fix alone directly
+targets the confirmed mechanism and is the minimal change that
+structurally closes the gap; the other two are optimizations on top,
+not required for correctness.
+
+### Verification status
+
+- All 4 changed files pass `g++ -fsyntax-only -std=c++20` using the
+  project's real include path (`-I` pointed at
+  `mlx/distributed/jaccl/lib/`) -- confirms syntactic and header-
+  resolution correctness of the diff itself.
+- Full project build via the existing `build/compile_commands.json`
+  was attempted but blocked: that file references a pre-refactor
+  source layout (`mlx/distributed/jaccl/mesh.cpp` instead of the
+  current `mlx/distributed/jaccl/lib/jaccl/mesh.cpp`) and needs a
+  fresh `cmake` reconfigure before it's usable again -- not attempted
+  this session since a full rebuild happens naturally via
+  `start_cluster.sh`'s normal deploy path anyway.
+- **NOT yet built, deployed, or verified on the live cluster.**
+  Deploying requires `git fetch && git reset --hard 444452be9` on
+  both studios (per the standing git-coherent-deploy rule -- no direct
+  studio edits) followed by a `start_cluster.sh` relaunch (rebuilds
+  mlx from source), which is itself a live-cluster-affecting action
+  requiring its own explicit go-ahead per standing rule, separate from
+  approval of the code change itself. Asked; no response arrived in
+  turn, so relaunch was deliberately NOT performed this session.
+  Cluster was left running, untouched, at the pre-fix commit
+  (`89e9833c2`), confirmed healthy via a clean single-token request
+  before and after this session's investigation.
+
+### Next session's concrete starting point
+
+1. Get explicit go-ahead, then deploy `444452be9`: `git fetch origin &&
+   git reset --hard 444452be9` in `~/repos/exo/mlx` on BOTH studios,
+   then `start_cluster.sh` relaunch with
+   `EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1` (rebuilds mlx from the
+   now-clean submodule per the deploy contract).
+2. Send exactly one warm-up request, confirm clean.
+3. Re-run `bench/section27_cancel_abort_test.py --target-tokens 30000
+   --n-tokens-before-cancel 15 --post-cancel-window-seconds 90`
+   repeatedly (aim for the same 5x this campaign has used before) --
+   watching specifically for whether the jaccl hard-crash signature
+   ("no progress for ... retry deadline ... exceeded" INSIDE
+   `grp.reconnect()`, not just in the original data-path fault) still
+   appears. If the fix works, either the crash stops recurring
+   entirely, or (if a fault still occurs) it should now show a clean
+   `"jaccl reconnect_fresh rank=N COMPLETE"` self-recovery instead of
+   a runner crash + re-place.
+4. If clean across enough real runs: mark Section 2.5's cancellation
+   requirement CLOSED (the cancellation-latency bug was already fixed
+   and verified in Section 29; this closes the remaining jaccl
+   regression that was blocking a clean overall test PASS).
+5. If the crash still recurs even with the longer coordinator
+   deadline: that would mean the skew itself is unbounded (not merely
+   up to one deadline window as hypothesized) or something else is
+   wrong -- pursue the bounded-retry / proactive-peer-wake ideas noted
+   above as the next real attack vector, not a deadline bump.
