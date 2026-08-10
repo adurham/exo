@@ -7364,3 +7364,144 @@ exo@625d0f32b pushed to origin/main.
    silent drop that neither side's liveness check catches (distinct
    from Section 38's p2p_retry_barrier deadline, which was observed
    succeeding throughout the original hang).
+
+## 41. CORRECTION to Section 36: jaccl's TCP control-plane does NOT
+    ride Thunderbolt -- it deterministically rides plain Ethernet
+    (en0), confirmed 3/3 across fresh relaunches. Section 37's whole
+    migration premise (TCP starving under RDMA load on a SHARED
+    physical link) does not hold as stated. Re-scoping the
+    investigation before any implementation work. (2026-08-09/10,
+    same session as Section 40, picked up mid-investigation into
+    Section 37 Phase 1)
+
+### What was checked, and why
+
+Before starting Section 37's implementation (migrating
+`p2p_retry_barrier`'s got-bitmask off TCP onto RDMA-native UC), did a
+sanity pass on the live cluster and found the runner process's actual
+open TCP sockets via `lsof -i -P -n -p <runner_pid>`:
+
+```
+192.168.86.201:64177->192.168.86.202:65407 (ESTABLISHED)
+192.168.86.201:64178->192.168.86.202:65408 (ESTABLISHED)
+```
+
+`192.168.86.x` is `en0` -- genuine Ethernet, confirmed via
+`networksetup -listallhardwareports` on both studios. This is exactly
+two sockets, matching the expected count precisely
+(`side_channel_`/bootstrap+recovery, `coordinator_` aliases
+`side_channel_` post-bootstrap so needs no separate socket, and
+`p2p_channel_`/retry-barrier).
+
+This directly contradicts Section 36, which found the live coordinator
+address was `192.168.200.1:53369` (the `en3` Thunderbolt bridge) on
+2026-08-09. Re-verified via two independent full teardown+relaunch
+cycles tonight (clean `pkill`+`screen -wipe` on both nodes,
+`start_cluster.sh` from scratch, checked the fresh runner PID's
+sockets each time): **BOTH fresh relaunches ALSO landed on en0/
+Ethernet, 192.168.86.201<->192.168.86.202, identical pattern.** 3/3
+across this session (original relaunch + 2 explicit test relaunches).
+Confirmed the interface-selection code itself
+(`find_ip_prioritised`/`_get_interface_types_from_networksetup` in
+`src/exo/master/placement_utils.py`/`system_info.py`) has not changed
+since a 2025-12-30 commit -- no code regression explains the
+discrepancy between last night and tonight.
+
+### Likely explanation for Section 36's different observation
+
+Found a second, GENUINELY DISTINCT mechanism that also carries a
+Thunderbolt IP and could easily be mistaken for jaccl's own
+coordinator address if grepped for casually: `EXO_DISCOVERY_PEERS`
+(`start_cluster.sh`'s zenoh bootstrap-peer env var, e.g.
+`/ip4/192.168.200.2/tcp/52415/p2p/<peer_id>`) is zenoh's OWN
+mesh-discovery bootstrap address -- completely unrelated to jaccl's
+`MeshGroup`/`coordinator_addr_`, but it DOES deliberately use the
+Thunderbolt IP (by `start_cluster.sh`'s own explicit IP-detection
+logic, lines ~720-748) and lives in the exact same log stream. This is
+the most likely (though not certain) explanation for what Section 36
+actually observed: `192.168.200.1:53369` was very plausibly zenoh's
+discovery-peer address, not jaccl's `p2p_channel_`/`side_channel_`
+coordinator, conflated during a fast live-log grep. Not verified with
+100% certainty (Section 36's original session isn't reproducible after
+the fact), but consistent with every piece of evidence available now.
+
+### What this means for Section 37's plan
+
+Section 36/37's whole justification for migrating off TCP was "TCP and
+RDMA share one physical Thunderbolt link, RDMA traffic starves the
+kernel TCP path under load." With jaccl's TCP control-plane confirmed
+on a SEPARATE physical NIC (en0 Ethernet) from the RDMA data path
+(en3/Thunderbolt), that specific starvation mechanism cannot be what
+was causing Section 35's confirmed real-hardware `p2p_retry_barrier`
+stalls. The RDMA-native UC migration itself is NOT wrong or wasted
+engineering in the abstract, but it was scoped to fix a root cause
+that does not appear to be the actual one -- proceeding with it now,
+as designed, would very plausibly not fix the real problem, on top of
+carrying genuine correctness risk a `consult` review flagged
+independently (see below).
+
+### Second input: a `consult` review of the Section 37 design itself,
+    obtained before this discrepancy was found
+
+Before finding the interface discrepancy, got a review of the OR-merge
+got-bitmask design (Section 37's concrete plan). Independent of the
+interface question, the review flagged real correctness concerns
+worth recording regardless of which direction this goes next:
+  - The proposed OR-merge is safe WITHIN one epoch (bitmask state is
+    genuinely monotonic), but a frame from a STALE epoch arriving late
+    and being merged into the CURRENT epoch's bitmask before an epoch
+    check runs would be silent data corruption (falsely marking a
+    chunk delivered, causing the sender to omit it from
+    retransmission) -- not just a stall, a genuine correctness bug.
+    Requires the epoch check to run before merge, on a stable
+    (copy-then-repost) buffer.
+  - "Reuse `drain_acks()`'s retry loop verbatim" is not actually
+    appropriate: `drain_acks` uses a `need_recv` COUNTER because with
+    ONE expected completion, duplicates are trivially absorbable.
+    With N variable-length bitmask frames, a counter double-counts
+    duplicates and can report "all frames received" while some
+    chunk_index never arrived -- needs a received-frames BITMAP, not a
+    counter, plus explicit handling for the fact the expected frame
+    count changes per call (proportional to `num_chunks`).
+  - The termination/release signal design (self-terminating via
+    mutual-bitmask-echo, Section 37's option (i)) is directionally
+    right but doesn't fully escape the two-generals problem -- the
+    LAST confirming message is still unackable; needs explicit
+    handling for a rank that's satisfied its own exit condition while
+    the peer is still retransmitting into a now-stale epoch.
+
+### Session-end state
+
+No code changed for Section 37's migration -- correctly stopped before
+implementing against a root-cause premise that doesn't hold, per this
+session's own established discipline (verify before building). Cluster
+relaunched twice for this verification, left running (healthy, same
+diagnostic tracing from Section 39/40 still live) at end of session.
+
+### Next session's concrete starting point
+
+1. Re-open the ACTUAL root-cause question for `p2p_retry_barrier`'s
+   TCP stalls, now that link-sharing/contention is ruled out. Section
+   34/35's own earlier evidence ("the peer's own thread wasn't there
+   to service its side of the barrier exchange within the deadline")
+   is MORE consistent with ordinary CPU/thread-scheduling contention
+   on a heavily-loaded Metal/MLX compute process than with network
+   link contention -- worth revisiting directly with that framing
+   now that the link-sharing hypothesis is off the table.
+2. If CPU/scheduling contention is confirmed as the real mechanism,
+   Section 38/39's fixes (longer deadline, non-fatal retry cap) are
+   likely the CORRECT class of fix after all (tolerate a genuinely
+   busy peer rather than assume it's dead) -- this would validate
+   rather than undermine that work, just for a different underlying
+   reason than originally assumed.
+3. Section 37's RDMA-native UC migration design should be shelved
+   (not deleted -- the design work and the consult review's
+   correctness flags are still valuable if a genuine link-contention
+   case is found elsewhere) until/unless a concrete mechanism
+   actually implicating the shared Thunderbolt link is found. Do not
+   resume implementing it on the current premise.
+4. If pursuing the CPU/scheduling-contention hypothesis, a `Event::
+   wait`/thread-priority/QoS-class investigation of the runner
+   process during a real stall (already-available levers: `EXO_
+   RUNNER_QOS`, thread priority APIs) is a more promising next
+   avenue than any further transport-layer change.
