@@ -1804,6 +1804,133 @@ def pipeline_agree_prefix_hit_length(
     return agreed_min if agreed_min == agreed_max else 0
 
 
+def pipeline_agree_cancel(
+    local_cancel: bool,
+    group: mx.distributed.Group | None,
+    request_tag: int,
+    cycle_n: int = -1,
+) -> bool:
+    """Agree on a single cancel/abort decision across all PP ranks, IN-BAND
+    with the exchange schedule -- i.e. this call itself is the synchronization
+    point both ranks rendezvous at before either one is allowed to decide the
+    round is over. Section 43 root cause (2026-08-11): PP-spec decode-loop
+    cancellation was previously decided UNILATERALLY per rank (each rank's
+    ExoBatchGenerator.cancel() independently called ._close_pp_spec_gen(),
+    which runs a purely-local `finally:` cleanup with zero wire I/O). That is
+    safe ONLY if both ranks are guaranteed to be at the identical point in the
+    per-cycle exchange schedule when they decide to stop -- which they are
+    NOT: MLX's lazy graph dispatch means a rank can have ALREADY POSTED the
+    next cycle's recv (its compute graph is one step ahead) by the time the
+    cancel command is observed, while the peer rank is still finishing the
+    PREVIOUS cycle and, on seeing cancel, quiesces without ever sending that
+    already-posted recv's matching frame. Confirmed on real 2-node RDMA
+    hardware: rank1 sent its last frame at seq=90, cleanly went idle
+    ("runner idle: reclaimed MLX allocator pool") the same tick a cancel was
+    processed; rank0 had already posted a recv for seq=91 one exchange round
+    earlier and was left spin-polling inside MLX's interruptible Event::wait
+    for up to MLX_EVENT_WAIT_TIMEOUT_MS (1800s in PP mode) waiting for a frame
+    that would never arrive -- CPU never converged to idle, and the runner
+    was left in a state where the NEXT request's warmup handshake also
+    stalled (jaccl drain_acks_exchange STALLED, generic 8s timeout), followed
+    by SIGKILL + re-place, surfacing as an HTTP 500 on the health-check
+    request.
+
+    Fix: cancellation must be an IN-BAND, AGREED decision made at a shared
+    checkpoint BEFORE either rank commits to a wire op for the NEXT cycle --
+    exactly analogous to ``pipeline_agree_prefix_hit_length`` above (same
+    module, same raw send/recv-over-pp_group pattern, same tag-mismatch
+    hard-fault discipline), not the coord-subgroup mx_any/agree_on_* path
+    (disabled in PP mode via EXO_PP_NO_COORD_COLLECTIVE -- see
+    ``get_coord_group``'s docstring -- and even if it were enabled, a
+    SEPARATE collective wouldn't help: the race is about ORDERING relative to
+    the p2p exchange's own lazy-dispatched graph nodes on THIS SAME group,
+    not about visibility of the cancel signal itself).
+
+    MUST be called by BOTH ranks at the START of every decode cycle, before
+    either rank issues ANY send/recv for that cycle's batch exchange -- so
+    if either rank wants to stop, BOTH ranks agree to stop at the SAME
+    round boundary and neither posts a wire op the other won't match.
+
+    Wire format: fixed-shape ``(3,)`` int32 ``[request_tag, cycle_n,
+    local_cancel]``. Same tag-mismatch-raises invariant as
+    ``pipeline_agree_prefix_hit_length`` (a request_tag mismatch means the
+    p2p channel is desynced between ranks -- a hard fault, not something to
+    silently paper over). cycle_n is an ADDITIONAL tripwire specific to this
+    function (2026-08-11 `consult` review): every one of this decode loop's
+    three variants runs a plain ``while n < max_tokens:`` with a single
+    Python-level iteration per exchange cycle, so both ranks SHOULD reach
+    this checkpoint with an identical ``n`` every time -- but if any future
+    change to the consume-cycle / draft-ahead-yield logic ever makes one
+    rank's loop iterate an extra (or fewer) times than its peer for the same
+    logical cycle, a cycle_n mismatch converts what would otherwise be a
+    SILENT desync (this call's own fixed-shape (request_tag, cancel) payload
+    would still tag-match and get silently consumed by the wrong logical
+    cycle, reintroducing a variant of the very race this function exists to
+    close) into an IMMEDIATE, loud RuntimeError instead. Callers that don't
+    track a meaningful per-rank cycle count can pass the default -1 on both
+    ranks, which always matches and disables this specific check (falls back
+    to request_tag-only verification) -- but every current caller in this
+    codebase DOES track it (the decode loops' own ``n``) and passes it.
+
+    Returns True iff EITHER rank wants to cancel (OR-reduce) -- if either
+    side is done, both stop together at this boundary rather than one rank
+    trying to keep going alone.
+    """
+    if group is None or group.size() <= 1:
+        return local_cancel
+
+    rank = group.rank()
+    world_size = group.size()
+
+    def _send(val: bool, dst: int) -> None:
+        wire = mx.array([request_tag, cycle_n, int(val)], dtype=mx.int32)
+        mx.eval(wire)
+        sent = mx.distributed.send(wire, dst, group=group)
+        mx.eval(sent)
+
+    def _recv(src: int) -> bool:
+        wire = mx.distributed.recv_like(mx.zeros(3, dtype=mx.int32), src, group=group)
+        mx.eval(wire)
+        raw = cast(list[int], wire.tolist())
+        tag, recv_cycle_n, val = (int(v) for v in raw)
+        if tag != request_tag:
+            raise RuntimeError(
+                f"pipeline_agree_cancel: tag mismatch on rank {rank} "
+                f"(expected {request_tag}, got {tag}) -- p2p channel desync "
+                "between ranks; treating as a hard fault rather than "
+                "silently proceeding with a possibly-mispaired value."
+            )
+        if cycle_n != -1 and recv_cycle_n != -1 and recv_cycle_n != cycle_n:
+            raise RuntimeError(
+                f"pipeline_agree_cancel: cycle_n mismatch on rank {rank} "
+                f"(local cycle_n={cycle_n}, peer cycle_n={recv_cycle_n}, "
+                f"request_tag={request_tag}) -- the two ranks' decode loops "
+                "have desynced on which logical exchange cycle this is, "
+                "even though the request_tag matched; treating as a hard "
+                "fault rather than silently agreeing to cancel at "
+                "mismatched cycle boundaries."
+            )
+        return bool(val)
+
+    # Same linear-reduce (leaves -> rank 0) + broadcast (rank 0 -> leaves)
+    # shape as pipeline_agree_prefix_hit_length, OR instead of min/max.
+    agreed = local_cancel
+    if rank != world_size - 1:
+        agreed = agreed or _recv(rank + 1)
+    if rank != 0:
+        _send(agreed, rank - 1)
+
+    if rank == 0:
+        if world_size > 1:
+            _send(agreed, 1)
+    else:
+        agreed = _recv(rank - 1)
+        if rank != world_size - 1:
+            _send(agreed, rank + 1)
+
+    return agreed
+
+
 def prewarm_coord_group(group: mx.distributed.Group | None) -> None:
     """Eagerly create the coord subgroup at a known lockstep sync point
     (typically end of runner warmup) so both ranks call split() in

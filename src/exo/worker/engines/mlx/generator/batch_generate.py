@@ -743,6 +743,29 @@ class ExoBatchGenerator:
     # tag mismatch on receipt is detectable (protocol-invariant check,
     # not a real request id — never sent anywhere else).
     _prefix_hit_agree_tag: int = field(init=False, default=0)
+    # Section 43 root-cause fix (2026-08-11): uids whose PP-spec generator
+    # has been asked to cancel but has NOT yet actually stopped. cancel()
+    # only ADDS to this set (cheap, local, zero wire I/O) -- it no longer
+    # calls _close_pp_spec_gen() directly for a uid in _pp_spec_gen_by_uid,
+    # because doing so was the exact unilateral, per-rank cancel decision
+    # that caused the original bug (see pipeline_agree_cancel's docstring
+    # in utils_mlx.py for the full race). The generator itself observes
+    # this flag via its cancel_check callback at its own next in-band,
+    # cross-rank-AGREED checkpoint (start of its next decode cycle) and
+    # stops there -- both ranks together, never one alone. Entries are
+    # removed by _close_pp_spec_gen once the generator has actually
+    # finished. NOTE: this means a uid stays in _pp_spec_gen_by_uid (and
+    # therefore _submit_pp_spec's entry guard keeps rejecting a new PP-spec
+    # submission) for up to one more decode cycle after cancel() -- a
+    # narrow, bounded window, same class of clean/retryable rejection
+    # PPSpecAlreadyActiveError already exists for, not a new failure mode.
+    _pp_spec_cancel_requested: set[int] = field(init=False, default_factory=set)
+    # Monotonic per-process counter, incremented once per PP-spec submit()
+    # call, tagging every pipeline_agree_cancel() round trip for that
+    # request's decode loop (same tag-mismatch-detects-desync discipline
+    # as _prefix_hit_agree_tag above -- see pipeline_agree_cancel's
+    # docstring).
+    _pp_spec_cancel_agree_tag: int = field(init=False, default=0)
 
     # Phase 1 batched-decode (design doc, Section 9) -- opt-in,
     # EXO_PP_BATCHED_DECODE=1 + real BatchedMetaFramedPipelineFirstLayer/
@@ -3354,6 +3377,21 @@ class ExoBatchGenerator:
         # two ranks' independent EOS/max_tokens decisions against each
         # other (see EXO_PP_SPEC_FINISH_LOG below).
         self._pp_rank_for_log = pp_rank
+        # uid + cancel-agree tag assigned BEFORE constructing the decode-loop
+        # generator (2026-08-11, Section 43 root-cause fix) so the DSpark
+        # loop's cancel_check closure can reference this exact uid/tag from
+        # birth -- previously uid was assigned only after generator
+        # construction, which worked fine for the dict-keying use but left
+        # no way to give the generator itself a live handle to its own
+        # cancellation flag at construction time.
+        self._uid_counter += 1
+        uid = self._uid_counter
+        self._pp_spec_cancel_agree_tag += 1
+        _cancel_tag = self._pp_spec_cancel_agree_tag
+
+        def _cancel_check(_uid: int = uid) -> bool:
+            return _uid in self._pp_spec_cancel_requested
+
         if _has_dspark:
             logger.info("PP speculation using DSpark (rank1-owned draft+verify)")
             _pp_spec_gen = pp_dspark_decode_loop(
@@ -3364,6 +3402,8 @@ class ExoBatchGenerator:
                 pp_rank=pp_rank,
                 pp_world_size=pp_world_size,
                 pp_group=pp_group,
+                cancel_check=_cancel_check,
+                cancel_agree_tag=_cancel_tag,
             )
         elif _chain_k > 1 and _pp_mtp is not None and hasattr(_pp_mtp, "predict"):
             logger.info(f"PP speculation using chained MTP draft, k={_chain_k}")
@@ -3379,6 +3419,8 @@ class ExoBatchGenerator:
                 pp_group=pp_group,
                 mtp_predictor=_pp_mtp,
                 chain_k=_chain_k,
+                cancel_check=_cancel_check,
+                cancel_agree_tag=_cancel_tag,
             )
         else:
             _pp_spec_gen = pp_speculative_decode_loop(
@@ -3395,14 +3437,15 @@ class ExoBatchGenerator:
                 pp_world_size=pp_world_size,
                 pp_group=pp_group,
                 mtp_predictor=_pp_mtp,
+                cancel_check=_cancel_check,
+                cancel_agree_tag=_cancel_tag,
             )
 
-        self._uid_counter += 1
-        uid = self._uid_counter
         # Dict write (2026-07-31, see _pp_spec_gen_by_uid's class-level
         # comment): the entry guard at the top of this method already
         # ensures the dict is empty here, so this is always a fresh
-        # single-entry insert, never an overwrite.
+        # single-entry insert, never an overwrite. uid was already assigned
+        # above (2026-08-11, needed earlier for the cancel_check closure).
         self._pp_spec_gen_by_uid[uid] = _pp_spec_gen
 
         # Store first token to yield on first step()
@@ -3590,8 +3633,17 @@ class ExoBatchGenerator:
         class-level comment) rather than reading a singular instance
         attribute -- pops exactly the entry this call site is finishing,
         so it can never accidentally clear a DIFFERENT uid's state.
+
+        Also discards ``uid`` from ``_pp_spec_cancel_requested`` (2026-08-11,
+        Section 43 root-cause fix) -- that flag's only job is to reach the
+        generator's own next cancel_check() call; once the generator has
+        actually finished (this call), the flag has no further purpose and
+        left-behind entries would just accumulate harmlessly forever
+        otherwise. discard() is a no-op if the uid was never flagged (the
+        normal EOS/max-tokens completion paths that also call this method).
         """
         gen = self._pp_spec_gen_by_uid.pop(uid, None)
+        self._pp_spec_cancel_requested.discard(uid)
         if gen is not None:
             try:
                 gen.close()
@@ -4778,52 +4830,58 @@ class ExoBatchGenerator:
         how a natural EOS eviction already reaches rank 1 today.
         """
         for uid in uids:
-            # PP speculative-decode cleanup (2026-08-11, Section 43
-            # investigation, real hardware finding): a uid can ALSO be
-            # cancelled while it is mid-flight in PP spec-decode mode
+            # PP speculative-decode cancellation (2026-08-11, Section 43
+            # ROOT-CAUSE FIX, supersedes the 2026-08-09 fix this comment
+            # used to describe): a uid can be cancelled while it is
+            # mid-flight in PP spec-decode mode
             # (self._pp_spec_gen_by_uid[uid] populated by
             # _submit_pp_spec -- a FOURTH lifecycle stage, distinct
             # from chunk-drive/batched-decode-queued/batched-decode-
-            # admitted above). Prior to this fix, cancel() had NO
-            # handling for this state: cancel() itself returned
-            # HTTP 200 successfully, but _pp_spec_gen_by_uid[uid]
-            # stayed populated forever. The NEXT submitted request then
-            # hit _submit_pp_spec's entry guard and raised
-            # PPSpecAlreadyActiveError -- which despite that
-            # exception's own docstring claiming it "surfaces as a
-            # clean task failure the caller can retry, not an
-            # uncaught crash" was observed on real 2-node hardware to
-            # be exactly that: an uncaught crash, full runner process
-            # exit (exitcode=0), requiring supervisor relaunch. Since
-            # DSpark speculation is ON by default in this cluster's
-            # launch config, essentially every real decode runs
-            # through this path -- meaning most real client
-            # cancellations during PP-spec decode hit this gap.
+            # admitted above).
             #
-            # Fix is LOCAL cleanup only (self._close_pp_spec_gen,
-            # already-tested and used by all 3 existing call sites --
-            # EOS/max-tokens/first-token-EOS, all in _step_pp_spec),
-            # NOT a new cross-rank wire handshake, for the same
-            # structural reason those 3 existing call sites don't need
-            # one either: pp_dspark_decode_loop/pp_speculative_decode_
-            # loop/pp_chained_decode_loop's `finally:` blocks only call
-            # _configure_layers(spec_first, spec_last) (pure local
-            # mode-flag reset on THIS rank's own layer objects) -- no
-            # wire I/O happens in any generator's finally: block, so
-            # closing this rank's own generator can never leave a
-            # peer blocked mid-recv waiting on a message this rank
-            # was about to send. Both ranks independently detect their
-            # own uid's cancellation via the SAME cooperative
-            # single-threaded step()/cancel() cycle (per this
-            # method's own docstring's rank-symmetry discipline) and
-            # each closes only its own local generator -- structurally
-            # identical to how EOS is already detected and closed
-            # asymmetrically per-rank today (each rank's own inner
-            # decode generator independently observes EOS from its own
-            # local token stream), not a new failure mode this fix
-            # introduces.
+            # PRIOR APPROACH (2026-08-09, now known WRONG): called
+            # self._close_pp_spec_gen(uid) directly here, reasoning that
+            # because each decode-loop generator's `finally:` block only
+            # does local, non-wire cleanup (_configure_layers -- pure
+            # mode-flag reset on THIS rank's own layer objects), closing
+            # THIS rank's own generator unilaterally could never leave a
+            # peer blocked mid-recv. That reasoning addressed the wrong
+            # half of the problem: the finally: block itself is indeed
+            # wire-free, but gen.close() can only run the finally: block
+            # from wherever the generator's `while` loop was CURRENTLY
+            # suspended -- and MLX's lazy graph dispatch means the two
+            # ranks are not guaranteed to be suspended at the same cycle
+            # boundary when cancel() fires independently on each. This
+            # was CONFIRMED on real 2-node RDMA hardware (Section 43,
+            # 2026-08-11): rank1 sent its last frame and quiesced cleanly
+            # the same tick cancel() ran, while rank0 had ALREADY posted a
+            # recv for the NEXT frame one exchange round earlier (its
+            # compute graph ran ahead) -- rank0 was left spin-polling
+            # MLX's interruptible Event::wait for up to
+            # MLX_EVENT_WAIT_TIMEOUT_MS (1800s in PP mode) for a message
+            # that would now never arrive, corrupting the runner's RDMA/
+            # GPU-stream state badly enough that the NEXT request's
+            # warmup handshake also failed (500 on the health check).
+            #
+            # FIX: don't decide here. Only FLAG the request
+            # (self._pp_spec_cancel_requested) -- cheap, local, zero wire
+            # I/O, so this method's fast/synchronous contract is
+            # unchanged. The decode-loop generator itself (both ranks,
+            # symmetrically) observes the flag via its cancel_check
+            # callback at its OWN next in-band checkpoint (start of its
+            # next decode cycle, BEFORE any wire op for that cycle) and
+            # calls pipeline_agree_cancel() there -- a real p2p round trip
+            # on the SAME pp_group the exchange itself uses, so both
+            # ranks are GUARANTEED to agree on the identical stopping
+            # round rather than each independently guessing. See
+            # pipeline_agree_cancel's docstring (utils_mlx.py) for the
+            # full mechanism. self._close_pp_spec_gen(uid) still runs --
+            # just from inside _step_pp_spec's steady-state branch, once
+            # the generator's own StopIteration surfaces after the
+            # agreed-cancel return, exactly like every other termination
+            # path already handled there (EOS/max-tokens).
             if uid in self._pp_spec_gen_by_uid:
-                self._close_pp_spec_gen(uid)
+                self._pp_spec_cancel_requested.add(uid)
             deferred = self._deferred_prefill_by_uid.get(uid)
             if deferred is not None and deferred.drive is not None:
                 if self._batched_decode_rank0_glue is not None:

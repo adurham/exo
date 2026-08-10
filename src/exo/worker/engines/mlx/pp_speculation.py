@@ -674,6 +674,8 @@ def pp_speculative_decode_loop(
     pp_world_size: int,
     pp_group: mx.distributed.Group,
     mtp_predictor: Any | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_agree_tag: int = 0,
 ) -> Generator[tuple[int, mx.array], None, None]:
     """PP decode loop with idle-time speculation. Yields (token_id, logprobs).
 
@@ -837,6 +839,14 @@ def pp_speculative_decode_loop(
     try:
         n = 0
         while n < max_tokens:
+            if cancel_check is not None:
+                from .utils_mlx import pipeline_agree_cancel
+
+                if pipeline_agree_cancel(
+                    cancel_check(), pp_group, cancel_agree_tag, cycle_n=n
+                ):
+                    _log(f"n={n} cancel agreed cross-rank -- stopping cleanly")
+                    return
             _loop_tic = time.perf_counter()
 
             # ==== RANK 0: compute + send hidden ====
@@ -1249,6 +1259,8 @@ def pp_chained_decode_loop(
     pp_group: mx.distributed.Group,
     mtp_predictor: Any,
     chain_k: int,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_agree_tag: int = 0,
 ) -> Generator[tuple[int, mx.array], None, None]:
     """PP decode loop with k-token chained MTP draft + batched verify.
 
@@ -1326,6 +1338,14 @@ def pp_chained_decode_loop(
     try:
         n = 0
         while n < max_tokens:
+            if cancel_check is not None:
+                from .utils_mlx import pipeline_agree_cancel
+
+                if pipeline_agree_cancel(
+                    cancel_check(), pp_group, cancel_agree_tag, cycle_n=n
+                ):
+                    _log(f"n={n} cancel agreed cross-rank -- stopping cleanly")
+                    return
             # ==== RANK 0: draft k-1 tokens via cheap MTP-head-only chain ====
             draft_ids: list[int] = []
             if is_rank0 and _mtp_seed_hidden is not None:
@@ -1659,6 +1679,8 @@ def pp_dspark_decode_loop(
     pp_rank: int,
     pp_world_size: int,
     pp_group: mx.distributed.Group,
+    cancel_check: Callable[[], bool] | None = None,
+    cancel_agree_tag: int = 0,
 ) -> Generator[tuple[int, mx.array], None, None]:
     """PP decode loop with DSpark draft+verify entirely owned by rank1.
 
@@ -1672,6 +1694,19 @@ def pp_dspark_decode_loop(
     never populates under PP (get_dspark_ctx returns None every cycle --
     draft() still runs, just without ctx conditioning, degrading
     quality/acceptance rather than crashing).
+
+    cancel_check / cancel_agree_tag (2026-08-11, Section 43 root-cause fix):
+    optional in-band cross-rank cancellation checkpoint. When cancel_check is
+    provided, it's called (cheap, local, no wire I/O -- reads a flag set by
+    the runner's cancel-command handling) at the START of every cycle,
+    BEFORE either rank issues any send/recv for that cycle's exchange. Its
+    result is combined across ranks via ``pipeline_agree_cancel`` (real p2p
+    round trip on the SAME pp_group, see that function's docstring for the
+    full race this closes) so both ranks stop at the SAME round boundary --
+    never one rank quiescing while the other is left waiting on a message
+    that will now never come. When cancel_check is None (e.g. tests that
+    construct this generator directly), the checkpoint is skipped entirely
+    -- purely additive, zero behavior change for existing callers.
     """
     from mlx_lm.models.deepseek_v4 import get_dspark_ctx
 
@@ -2034,6 +2069,25 @@ def pp_dspark_decode_loop(
             _t_after_draft = _cycle_t0  # default for rank0 (never set on that branch)
             _t_after_verify = _cycle_t0  # default for rank0 (outlier-log safety)
             _recv_wait_this_cycle = 0.0  # default for rank0 (outlier-log safety)
+            # ==== Section 43 root-cause fix (2026-08-11): in-band, agreed
+            # cancellation checkpoint -- MUST run before either rank issues
+            # ANY send/recv for this cycle's exchange (msg1/msg1b/spec-fwd/
+            # trim below all post wire ops). See pipeline_agree_cancel's
+            # docstring for the full race this closes: a purely-local,
+            # per-rank cancel decision let one rank quiesce while the peer
+            # had already posted a recv for the message that quiescing rank
+            # would now never send, wedging the peer in a 30-min GPU-event
+            # poll. Skipped entirely when no cancel_check was supplied
+            # (e.g. direct unit-test construction of this generator) --
+            # zero behavior change for those callers.
+            if cancel_check is not None:
+                from .utils_mlx import pipeline_agree_cancel
+
+                if pipeline_agree_cancel(
+                    cancel_check(), pp_group, cancel_agree_tag, cycle_n=n
+                ):
+                    _log(f"n={n} cancel agreed cross-rank -- stopping cleanly")
+                    return
             # ==== STEP 3b: consume-cycle activation (top of cycle) ====
             # If the previous cycle was a HIT and _draft_ahead_yield is
             # on, activate consume mode for THIS cycle: skip the normal
