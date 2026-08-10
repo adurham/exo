@@ -7213,3 +7213,154 @@ established discipline) next session.
    correction, not the full scope of either design doc section.
 
 
+
+## 40. Section 39's mutual-deadlock: ONE hypothesis disproven with real
+    evidence -- the bug itself remains UNFIXED and UNREPRODUCED this
+    session. Do not read this section as "resolved."
+    (2026-08-09/10, session picked up via the handoff doc, ~35 min of
+    live testing against the deployed Section 38+39 fix)
+
+### What this session actually did (and did not do)
+
+Section 39's handoff left one concrete, unresolved bug: a real mutual
+deadlock at the scheduler-protocol layer (pp_scheduler_wire.py /
+pp_batched_decode_glue.py) -- both ranks recv()ing from each other
+simultaneously, neither sending, no longer force-cleared by jaccl's
+removed crude timeout. Evidence from that session: call_id=411 stuck
+21+ minutes, p2p_retry_barrier succeeding every round (transport
+genuinely healthy), faulthandler dumps on both nodes showing rank0
+blocked in `recv_prefill_chunk_done_ack_message` -> `recv_header`
+while rank1 was blocked at the top of its own `tick()`'s `recv_header`.
+
+This session formed ONE concrete hypothesis from static analysis of
+that evidence (no cluster running yet): rank 0's chunk-drive handoff
+computes an advance budget as `ceil(peer_prefill_layer_count /
+_prefill_advance_max_layers)` (pp_batched_decode_glue.py's HANDOFF
+transition) and sends exactly that many `PrefillAdvanceMessage`s
+before blocking on rank 1's completion ack. If rank 1's real
+`ResumablePrefillSession.advance()` genuinely needed MORE real
+layer-boundary yields to reach `done=True` than that ceiling-division
+budget assumed -- e.g. because `local_layer_count` (measured via
+`len(get_layers(get_inner_model(model)))` at the model-load-time
+handshake) didn't actually match the real yield count `_forward_steps`
+produces for that rank's segment -- rank 0 would stop sending one
+message short of what rank 1 needed, and both ranks would end up
+waiting on each other with nothing left to send. This fit the original
+evidence exactly (last night's stack traces show precisely this pair
+of blocking points).
+
+### The test performed
+
+Added four TEMP DIAGNOSTIC log lines (no control-flow changes) to
+pp_batched_decode_glue.py, committed+pushed as exo@625d0f32b:
+`LAYER_COUNT_EXCHANGE` (both ranks' local/peer layer counts at the
+model-load handshake), `RANK0_LOCAL_ADVANCE` (rank 0's own local
+layers_advanced/done per call), `HANDOFF_BUDGET` (the exact
+ceiling-division `advances_budgeted` for each chunk), and
+`PREFILL_ADVANCE_APPLIED` (rank 1's real layers_advanced/done per
+received advance).
+
+Deployed to both studios via the standard git-coherent-deploy
+discipline, relaunched with `DSV4_SHARDING=Pipeline EXO_PP_METAFRAME=1
+EXO_PP_BATCHED_DECODE=1 JACCL_TRACE_PROGRESS=1`. Confirmed via /state
+the real PP split is exactly 22 layers (rank 0, layers 0-22) / 21
+layers (rank 1, layers 22-43), matching the design doc's long-standing
+assumption. Ran `bench/section27_cancel_abort_test.py` 10 times in a
+row across ~35 minutes of real, sustained chunk-drive traffic.
+
+### The result: hypothesis DISPROVEN, bug NOT reproduced, NOT fixed
+
+`LAYER_COUNT_EXCHANGE` showed the two ranks agree exactly (rank 0
+knows peer_layer_count=21, rank 1 knows peer_layer_count=22) -- the
+handshake itself is correct, ruling out a stale/wrong exchange as the
+mechanism. Across every observed chunk in all 10 runs (dozens of
+chunks per run, several hundred total `advance()` calls),
+`HANDOFF_BUDGET`'s `advances_budgeted` matched `PREFILL_ADVANCE_
+APPLIED`'s real completion point EXACTLY every single time (e.g. 10
+advances x 2 layers + 1 final advance x 1 layer = 21, precisely
+`peer_prefill_layer_count`) -- rank 0's budget was never short. This
+specific hypothesis is disproven by direct measurement, not
+assumption.
+
+9 of 10 test runs PASSed cleanly with the SAME runner PIDs held
+steady across runs 2-10 (no crash, no re-place). The 1 FAIL (run 1)
+was NOT the target bug -- it was a genuine, separate jaccl transport
+fault (`[jaccl] Recv failed... no progress for 315.014s, retry
+deadline 300s exceeded`) that correctly triggered `reconnect_fresh`
+and a clean crash+re-place per Section 38's own liveness-deadline
+design; this is the mechanism Section 38/39 are SUPPOSED to allow
+(a genuinely dead peer still fails, just not a merely-slow one) and
+is unrelated to the deadlock this section is chasing.
+
+**The original call_id=411 signature -- a silent, non-fatal hang where
+p2p_retry_barrier keeps succeeding every round for many minutes with
+neither rank ever sending -- did NOT occur once in this session's
+~35 minutes of testing.** This is NOT evidence the bug is fixed. No
+code change was made to the deadlock mechanism itself this session --
+only diagnostic logging, which has zero effect on runtime behavior.
+The bug is exactly as unresolved as before this session; one
+plausible-sounding theory about its cause has been eliminated with
+real measurement, nothing more.
+
+### Why non-reproduction here is weak evidence, not a clean bill of health
+
+1. The original occurrence took 21+ minutes of sustained runtime to
+   surface, and per the prior session's own account, that was well
+   into an EXTENDED session, not near the start of a fresh relaunch --
+   this session's ~35 minutes of testing may simply not be long
+   enough, or not the right load shape, to hit the same race window.
+2. This session only exercised ONE load pattern end-to-end (repeated
+   cancel-and-restart of a single long chunked prefill via the cancel
+   test). The original deadlock may need concurrency=2, a specific
+   chunk-boundary/wire-ordering timing, or a genuine transport fault
+   arriving mid-chunk-drive (as opposed to the clean fault this
+   session's run 1 hit, which happened between chunk-drive attempts,
+   not inside one) to trigger.
+3. N=10 non-reproductions of a race condition that took 21+ minutes
+   to surface once is not statistically meaningful either way.
+
+### Session-end state
+
+Cluster left RUNNING (not torn down), same runner PIDs as the 9
+successful test runs, idle/healthy at end of session, diagnostic
+tracing from this section still live and deployed. Repo clean,
+exo@625d0f32b pushed to origin/main.
+
+### Next session's concrete starting point
+
+1. Do NOT treat this section as closing the deadlock investigation --
+   the mechanism is still completely unknown; only one hypothesis
+   about it has been ruled out.
+2. Extend the soak duration significantly beyond ~35 minutes -- the
+   original bug needed extended runtime to surface once. A multi-hour
+   passive soak (real traffic, or the cancel test looped for hours
+   rather than ~35 min) is the natural next attempt, watching
+   specifically for the call_id-stuck signature: `all_recv` partial
+   count repeating for hundreds/thousands of rounds with `elapsed_us`
+   climbing into the tens of minutes, on BOTH ranks simultaneously.
+3. Consider whether concurrency=2 (two simultaneous chunked-prefill
+   sessions, if the code path allows it) or deliberately injecting a
+   transport fault MID-chunk-drive (rather than between attempts) is
+   a more targeted way to hit the timing window than passive soak.
+4. If the deadlock does reproduce with the new tracing active, the
+   four TEMP DIAGNOSTIC log lines from this section
+   (LAYER_COUNT_EXCHANGE / RANK0_LOCAL_ADVANCE / HANDOFF_BUDGET /
+   PREFILL_ADVANCE_APPLIED) are already live and will show exactly
+   where the two ranks' advance counts/state diverge, if that is in
+   fact the mechanism after all (this session only ruled it out for
+   the runs that happened not to hit the race).
+5. If reproduced and the layer-count/advance-budget theory is
+   confirmed after all, the fix is either: correcting whatever makes
+   `local_layer_count` disagree with `_forward_steps`'s real yield
+   count for the affected rank, or making the handoff arithmetic
+   robust to disagreement (e.g. rank 1 signalling its own completion
+   explicitly rather than rank 0 computing a budget upfront).
+6. If reproduced and this theory is ALSO ruled out by the live
+   tracing, the next investigation should read the FULL tick()
+   dispatch state machine on both ranks (not just the advance/budget
+   arithmetic) for other places a genuine mutual-wait could arise --
+   e.g. a MSG_KIND dispatch mismatch, an eviction/admission race
+   overlapping with an in-flight chunk-drive, or a genuine jaccl-layer
+   silent drop that neither side's liveness check catches (distinct
+   from Section 38's p2p_retry_barrier deadline, which was observed
+   succeeding throughout the original hang).
