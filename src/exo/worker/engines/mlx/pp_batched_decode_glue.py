@@ -273,6 +273,20 @@ def exchange_prefill_peer_layer_count(
     summed = mx.distributed.all_sum(scatter, group=group)
     mx.eval(summed)
     peer_layer_count = int(summed[dst_rank].item())
+    # TEMP DIAGNOSTIC (2026-08-10, chasing the real mutual-deadlock bug
+    # found at call_id=411 -- see design doc Section 39/handoff for the
+    # full incident. Hypothesis: local_layer_count (measured via
+    # len(get_layers(get_inner_model(model))) at the call site) may not
+    # equal the real number of "layer" yields _forward_steps produces
+    # for THIS rank's local segment, which would silently desync rank
+    # 0's ceil(peer_prefill_layer_count/max_layers) advance budget from
+    # what rank 1 actually needs to reach done=True). Remove once
+    # root-caused.
+    logger.info(
+        f"[LAYER_COUNT_EXCHANGE] local_rank={local_rank} "
+        f"local_layer_count={local_layer_count} dst_rank={dst_rank} "
+        f"peer_layer_count={peer_layer_count}"
+    )
     if peer_layer_count < 1:
         raise GlueError(
             f"exchange_prefill_peer_layer_count: received a peer layer "
@@ -1137,6 +1151,21 @@ class Rank0BatchedDecodeGlue:
                         max_layers=self._prefill_advance_max_layers,
                         phase_for_pause=ForwardPhase.PREFILL_CONTINUE,
                     )
+                    # TEMP DIAGNOSTIC (2026-08-10, chasing the real
+                    # mutual-deadlock bug found at call_id=411 -- see
+                    # design doc Section 39/handoff for the full
+                    # incident). Confirms rank 0's own local layer
+                    # count/yield-count agreement before the handoff
+                    # arithmetic below ever runs. Remove once
+                    # root-caused.
+                    logger.info(
+                        f"[RANK0_LOCAL_ADVANCE] chunk_index="
+                        f"{self._prefill_chunk_index} "
+                        f"requested_max_layers="
+                        f"{self._prefill_advance_max_layers} "
+                        f"layers_advanced={_layers_advanced} done={done} "
+                        f"last_layer_index={prefill_session.last_layer_index}"
+                    )
                     if done:
                         self._prefill_phase = "handoff"
                     else:
@@ -1184,6 +1213,25 @@ class Rank0BatchedDecodeGlue:
                     self._prefill_rank1_advances_remaining = -(
                         -self.peer_prefill_layer_count
                         // self._prefill_advance_max_layers
+                    )
+                    # TEMP DIAGNOSTIC (2026-08-10, chasing the real
+                    # mutual-deadlock bug found at call_id=411 -- see
+                    # design doc Section 39/handoff for the full
+                    # incident). The exact ceiling-division budget
+                    # rank 0 computed for this chunk -- compare against
+                    # how many [PREFILL_ADVANCE_APPLIED] lines rank 1
+                    # actually logs with done=True to confirm/refute
+                    # the layer-count-mismatch hypothesis. Remove once
+                    # root-caused.
+                    logger.info(
+                        f"[HANDOFF_BUDGET] chunk_index="
+                        f"{self._prefill_chunk_index} "
+                        f"peer_prefill_layer_count="
+                        f"{self.peer_prefill_layer_count} "
+                        f"prefill_advance_max_layers="
+                        f"{self._prefill_advance_max_layers} "
+                        f"advances_budgeted="
+                        f"{self._prefill_rank1_advances_remaining}"
                     )
                     self._prefill_phase = "rank1_draining"
                     just_handed_off = True
@@ -1757,6 +1805,20 @@ class Rank1BatchedDecodeGlue:
             _layers_advanced, done = prefill_session.advance(
                 max_layers=advance_message.max_layers,
                 phase_for_pause=ForwardPhase.PREFILL_CONTINUE,
+            )
+            # TEMP DIAGNOSTIC (2026-08-10, chasing the real mutual-
+            # deadlock bug found at call_id=411 -- see design doc
+            # Section 39/handoff for the full incident). Confirms
+            # whether rank 1's own layer-boundary yield count matches
+            # what rank 0's advance budget (ceil(peer_prefill_layer_
+            # count/max_layers)) assumed. Remove once root-caused.
+            logger.info(
+                f"[PREFILL_ADVANCE_APPLIED] chunk_index="
+                f"{advance_message.chunk_index} advance_seq="
+                f"{advance_message.advance_seq} "
+                f"requested_max_layers={advance_message.max_layers} "
+                f"layers_advanced={_layers_advanced} done={done} "
+                f"last_layer_index={prefill_session.last_layer_index}"
             )
             if done:
                 self._active_prefill_session = None
