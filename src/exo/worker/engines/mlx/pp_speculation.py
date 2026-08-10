@@ -59,6 +59,15 @@ import loguru
 logger: "loguru.Logger" = loguru.logger
 
 _TRACE = os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1")
+# Section 43 continued (2026-08-10): piggyback on the SAME env var
+# start_cluster.sh already sets for the C++ jaccl-side [jaccl-prog]/
+# [jaccl-p2p] wire traces (JACCL_TRACE_PROGRESS=1) so a single flag
+# turns on BOTH sides of the correlation this investigation needs --
+# without this, _log() above is silent unless EXO_TRACING_ENABLED is
+# ALSO separately set, which it wasn't for the runs that produced the
+# rank0-never-idle/HTTP-500 symptom, leaving zero Python-level cycle-n
+# visibility to correlate against the C++ call_id trace.
+_TRACE = _TRACE or os.environ.get("JACCL_TRACE_PROGRESS", "0") == "1"
 
 # Real-compute-vs-wait profiling for pp_dspark_decode_loop's r1_verify_fwd
 # phase (2026-07-18): the naive wall-clock timing around model(...) on
@@ -842,9 +851,16 @@ def pp_speculative_decode_loop(
             if cancel_check is not None:
                 from .utils_mlx import pipeline_agree_cancel
 
-                if pipeline_agree_cancel(
-                    cancel_check(), pp_group, cancel_agree_tag, cycle_n=n
-                ):
+                _local_cancel_flag = cancel_check()
+                _log(
+                    f"n={n} cancel_checkpoint ENTER local_cancel={_local_cancel_flag} "
+                    f"tag={cancel_agree_tag}"
+                )
+                _agreed = pipeline_agree_cancel(
+                    _local_cancel_flag, pp_group, cancel_agree_tag, cycle_n=n
+                )
+                _log(f"n={n} cancel_checkpoint EXIT agreed={_agreed}")
+                if _agreed:
                     _log(f"n={n} cancel agreed cross-rank -- stopping cleanly")
                     return
             _loop_tic = time.perf_counter()
@@ -1341,9 +1357,16 @@ def pp_chained_decode_loop(
             if cancel_check is not None:
                 from .utils_mlx import pipeline_agree_cancel
 
-                if pipeline_agree_cancel(
-                    cancel_check(), pp_group, cancel_agree_tag, cycle_n=n
-                ):
+                _local_cancel_flag = cancel_check()
+                _log(
+                    f"n={n} cancel_checkpoint ENTER local_cancel={_local_cancel_flag} "
+                    f"tag={cancel_agree_tag}"
+                )
+                _agreed = pipeline_agree_cancel(
+                    _local_cancel_flag, pp_group, cancel_agree_tag, cycle_n=n
+                )
+                _log(f"n={n} cancel_checkpoint EXIT agreed={_agreed}")
+                if _agreed:
                     _log(f"n={n} cancel agreed cross-rank -- stopping cleanly")
                     return
             # ==== RANK 0: draft k-1 tokens via cheap MTP-head-only chain ====
@@ -2083,9 +2106,16 @@ def pp_dspark_decode_loop(
             if cancel_check is not None:
                 from .utils_mlx import pipeline_agree_cancel
 
-                if pipeline_agree_cancel(
-                    cancel_check(), pp_group, cancel_agree_tag, cycle_n=n
-                ):
+                _local_cancel_flag = cancel_check()
+                _log(
+                    f"n={n} cancel_checkpoint ENTER local_cancel={_local_cancel_flag} "
+                    f"tag={cancel_agree_tag}"
+                )
+                _agreed = pipeline_agree_cancel(
+                    _local_cancel_flag, pp_group, cancel_agree_tag, cycle_n=n
+                )
+                _log(f"n={n} cancel_checkpoint EXIT agreed={_agreed}")
+                if _agreed:
                     _log(f"n={n} cancel agreed cross-rank -- stopping cleanly")
                     return
             # ==== STEP 3b: consume-cycle activation (top of cycle) ====
