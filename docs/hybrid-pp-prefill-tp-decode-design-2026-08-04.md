@@ -7494,14 +7494,124 @@ diagnostic tracing from Section 39/40 still live) at end of session.
    busy peer rather than assume it's dead) -- this would validate
    rather than undermine that work, just for a different underlying
    reason than originally assumed.
-3. Section 37's RDMA-native UC migration design should be shelved
-   (not deleted -- the design work and the consult review's
-   correctness flags are still valuable if a genuine link-contention
-   case is found elsewhere) until/unless a concrete mechanism
-   actually implicating the shared Thunderbolt link is found. Do not
-   resume implementing it on the current premise.
+3. CORRECTED by Section 42 below (2026-08-09/10, same session): the
+   RDMA-native UC migration itself is NOT shelved -- only its
+   original stated justification (link-sharing/contention) is
+   retracted. See Section 42 for the standing rationale.
 4. If pursuing the CPU/scheduling-contention hypothesis, a `Event::
    wait`/thread-priority/QoS-class investigation of the runner
    process during a real stall (already-available levers: `EXO_
    RUNNER_QOS`, thread priority APIs) is a more promising next
-   avenue than any further transport-layer change.
+   avenue than any further transport-layer change -- but this is
+   ADDITIVE to Section 37's migration, not a replacement for it (see
+   Section 42): the migration removes TCP as a stall vector
+   regardless of what's ultimately found to be causing today's
+   stalls specifically.
+
+## 42. CORRECTION to Section 41's "shelve Section 37" call: the RDMA
+    migration is NOT shelved. Only its original stated justification
+    (link-sharing/contention) is retracted -- the migration stands on
+    independent merits and remains the plan. User pushback: "don't
+    you think full RDMA migration is a good idea?? cause I disagree
+    personally if so." (2026-08-09/10, same session, end of session)
+
+### What Section 41 got right vs. overreached on
+
+Section 41's finding stands: jaccl's TCP control-plane is confirmed
+on Ethernet (en0), not Thunderbolt, so the SPECIFIC claim "TCP stalls
+because it's starved by RDMA traffic sharing one physical link" is
+not supported by current evidence. That correction is real and stays.
+
+But Section 41 then concluded "shelve the RDMA migration until a
+link-contention case is found" -- that conclusion does NOT follow
+from the finding, and was an overreach the user correctly caught.
+Disproving ONE justification for a design decision is not the same
+as disproving the design decision itself.
+
+### Why the RDMA-native UC migration remains the right call,
+    independent of the link-contention question
+
+1. **Removes an entire class of TCP-specific stall vectors, not
+   just link-contention ones.** A blocking `recv()` syscall over
+   plain TCP is vulnerable to ordinary kernel scheduling jitter and
+   thread-scheduling contention on a heavily-loaded Metal/MLX compute
+   process -- which is Section 41's OWN new leading hypothesis for
+   what's actually causing the stalls (Section 34/35's "peer's thread
+   wasn't there to service the barrier" evidence). An RDMA-native
+   exchange modeled on `drain_acks()` is poll-based with soft-RC
+   retry, not a blocking syscall waiting on the kernel scheduler to
+   reschedule a thread -- moving off blocking TCP recv is very
+   plausibly still the right fix even if CPU contention, not link
+   contention, turns out to be the actual mechanism.
+2. **Architectural consistency.** jaccl's data path (real RDMA verbs,
+   completion queues, soft-RC) and its own control/coordination path
+   (plain kernel TCP sockets, zero completion-queue semantics) 
+   currently use two entirely different reliability models. This is
+   a real, independent argument for consolidating onto one transport
+   with one failure-mode story -- unrelated to which physical NIC TCP
+   happens to be using today.
+3. **Proven infrastructure to extend, not build from scratch.**
+   `drain_acks()`/`ack_connections_` is real, working, already-
+   shipping code on this exact hardware.
+4. **En0 usage is a runtime classification, not a hard guarantee.**
+   `find_ip_prioritised` determines the coordinator interface based
+   on live `networksetup`/`node_network` state at placement time --
+   a future config change, NIC renaming, VPN, or topology change
+   could plausibly put jaccl's TCP control-plane back on Thunderbolt.
+   Depending on today's interface selection staying constant forever
+   is not a sound basis for permanently deprioritizing a structural
+   fix.
+
+### Standing decision
+
+**Section 37's RDMA-native UC migration is UN-SHELVED and remains the
+plan.** What changes from the original Section 37 write-up:
+  - Drop "fixes TCP-under-RDMA-load link contention" as the stated
+    justification -- that mechanism is not supported by current
+    evidence (Section 41).
+  - Keep the actual design goal: eliminate jaccl's TCP control-plane
+    dependency entirely, replacing it with the proven RDMA-native
+    self-healing pattern, for the architectural-consistency and
+    stall-vector-elimination reasons above.
+  - The CPU/thread-scheduling-contention investigation (Section 41's
+    next-step #1/#2/#4) is ADDITIVE, not a prerequisite or a
+    replacement -- it can proceed in parallel with, or independently
+    of, the RDMA migration. Confirming CPU contention as today's
+    proximate cause doesn't reduce the migration's value; it just
+    means Section 38/39's deadline/retry-cap fixes were ALSO correct,
+    for a reason other than originally assumed.
+  - The `consult` review's two correctness flags from Section 37 (the
+    stale-epoch-merge corruption risk requiring an epoch-check-before-
+    merge on a stable buffer, and the counter-vs-bitmap fix needed for
+    variable-length frame tracking) remain real design REQUIREMENTS
+    for the implementation, not reasons to avoid building it.
+
+### Session-end state
+
+No implementation work started or resumed tonight -- user explicitly
+asked to pause for the night after this correction, not continue.
+Cluster left running (healthy, same PIDs as Section 41's last
+verification), Section 39/40 diagnostic tracing and the deadlock
+watchdog cron still active. Repo clean.
+
+### Next session's concrete starting point
+
+1. Resume Section 37 Phase 1 implementation (migrate
+   `p2p_retry_barrier`'s got-bitmask exchange from TCP to a chunked,
+   self-healing UC exchange modeled on `drain_acks()`), incorporating
+   the `consult` review's two correctness requirements as
+   non-negotiable design constraints:
+   - Epoch/round tag validated BEFORE merge, on a stable
+     (copy-then-repost) buffer -- not the raw CQE-notified buffer.
+   - A received-frames BITMAP (indexed by chunk_index), not a
+     `need_recv`-style counter, to correctly handle variable-length,
+     duplicate-tolerant frame tracking.
+   - Resolve the termination/release-signal design explicitly (self-
+     terminating mutual-bitmask-echo per Section 37's option (i),
+     with explicit handling for the tail case the consult review
+     flagged: a rank satisfying its own exit condition while its peer
+     is still retransmitting into what is now a stale epoch).
+2. In parallel or as a separate track: the CPU/thread-scheduling-
+   contention investigation from Section 41 (checking runner-process
+   thread state/QoS during a real stall) remains open and independently
+   worth pursuing -- not blocked on, and not blocking, item 1.
