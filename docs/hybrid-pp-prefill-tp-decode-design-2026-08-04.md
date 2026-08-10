@@ -6973,3 +6973,112 @@ isolated). Cluster remains torn down from earlier this session; no
 hardware was touched for this section (pure design/investigation
 work, `consult`-reviewed).
 
+## 38. CORRECTION to Section 37: "fix TCP first is throwaway work" was
+    wrong. TCP-layer hardening is real, valuable, standalone work --
+    both because upstream mlx has NO reliability logic at all in
+    send()/recv() (an unbounded-hang bug on any packet loss, strictly
+    worse than exo's current TCP-based mechanism), and because exo's
+    fork should keep the TCP path correct/upstreamable regardless of
+    whether the RDMA migration (Section 37) ever ships. (2026-08-09,
+    same session)
+
+User pushed back directly: "that's not true, we should fix it for
+upstream and for the TCP style anyways... upstream doesn't have the
+soft-RC work we've done in the RDMA layer so we should be good
+citizens here even if we don't plan on using it." Checked this against
+the actual upstream source before agreeing (`ml-explore/mlx`
+`upstream/main`, via the `upstream` git remote already configured on
+this fork):
+
+**Upstream's `send()`/`recv()` (`mesh_impl.h`) has ZERO reliability
+logic.** No deadline, no timeout, no retry loop, no drop detection --
+just `while (in_flight > 0) { poll(...); }`. If a UC send silently
+drops (the exact, well-documented UC failure mode this whole
+campaign has been fighting), upstream's `send()`/`recv()` simply
+**hangs forever** -- no exception, no bounded wait, no re-place path,
+nothing. This is objectively WORSE than exo's current TCP-based
+mechanism, which at minimum detects the stall and throws within a
+bounded deadline. exo's fork has done real, substantive reliability
+work upstream never received (the entire ARQ retransmit protocol,
+`p2p_retry_barrier`, the EAGAIN-vs-fatal distinction in
+`TCPSocket::recv` -- confirmed via that function's own extensive
+2026-07-18 comment describing exactly the "transient scheduling
+jitter, not a dead peer" distinction it correctly makes).
+
+### Why "fix TCP first is throwaway" was the wrong framing
+
+It conflated two different questions: "what should exo's OWN transport
+use going forward" (a real question, Section 37's RDMA-migration
+answer stands) and "is the current TCP-based mechanism correct and
+worth hardening on its own merits" (a SEPARATE question, and the
+answer is unambiguously yes, independent of the first). Even if
+Section 37's RDMA migration fully ships, exo's fork should still:
+  1. Keep the TCP fallback path correct and robust -- it's the ONLY
+     mechanism bootstrap and reconnect-recovery will EVER use (Section
+     37's own carve-out), so it's not going away regardless of what
+     happens to the retry-barrier/collective-barrier traffic.
+  2. Contribute the reliability improvements upstream where reasonable
+     -- upstream currently has a genuine correctness bug (unbounded
+     hang on packet loss) that exo's fork already has a working fix
+     for. Being a "good citizen" here costs little and helps every
+     other jaccl user on lossy UC hardware, not just this cluster.
+
+### What "fix TCP on its own merits" concretely means, given
+    tonight's Section 35/36 evidence
+
+The `TCPSocket::recv` retry logic itself is soundly designed --
+already correctly distinguishes EAGAIN/EWOULDBLOCK (retryable, budget
+resets on any partial progress) from a genuinely fatal error (ECONNRESET
+etc., immediate throw), per its own 2026-07-18 fix comment. Tonight's
+REAL faults were not a defect in that retry logic -- they were a
+legitimately-busy peer (Section 35's confirmed finding: the OTHER rank
+simply hadn't reached its own matching `p2p_retry_barrier` call yet,
+not a bug in how EAGAIN is handled) exceeding even a correctly-
+implemented 60s bounded retry window. So "fix TCP on its own merits"
+here means specifically: either (a) give `p2p_channel_` more budget
+appropriate for real production load (analogous to Section 30's fix
+for `side_channel_`, but for the retry-barrier channel specifically --
+note this was previously ruled out for `p2p_channel_` on purpose,
+Section 30/`mesh.cpp`'s own comment: "NOT applied to p2p_channel_...
+that one should keep failing fast" -- worth re-examining whether that
+tradeoff is still right given tonight's evidence), or (b) something
+structurally better than a fixed deadline for this specific channel
+(the async/push-notification idea from Section 32/35's `consult`
+review remains relevant here too, applied to the TCP layer rather than
+as a reason to abandon it). Either fix is real, standalone, valuable
+work -- NOT throwaway relative to Section 37's separate RDMA-migration
+track.
+
+### Revised plan: TWO parallel/complementary tracks, not "fix-then-
+    replace" sequencing
+
+1. **TCP-hardening track** (this section): harden/fix
+   `p2p_retry_barrier`'s TCP-based retry-and-reconcile mechanism on
+   its own correctness merits. Keep it correct for exo's own permanent
+   TCP-only call sites (bootstrap, reconnect-recovery) and as a
+   standalone improvement worth contributing upstream regardless of
+   Section 37's migration. Concrete candidate: re-examine whether
+   `p2p_channel_` should get the same class of deadline treatment
+   Section 30 gave `side_channel_`, now that real-hardware evidence
+   (Section 35) shows it CAN legitimately need more than 60s under
+   real load, not just in pathological cases.
+2. **RDMA-migration track** (Section 37, unchanged): migrate the
+   retry-barrier's and in-collective barriers' traffic onto a
+   self-healing RDMA-native UC exchange, reusing `drain_acks()`'s
+   proven pattern, for exo's own internal transport going forward.
+   These two tracks are NOT sequenced against each other -- the TCP
+   fix is not "wasted" if the RDMA migration later supersedes that
+   SPECIFIC call site for exo's own use, because the TCP mechanism
+   remains load-bearing for bootstrap/reconnect regardless, and
+   because contributing it upstream has value independent of exo's
+   own internal architecture choices.
+
+### Session-end state
+
+No code changed yet in either track. Corrected the sequencing framing
+from Section 37 before any implementation started, per direct user
+pushback verified against real upstream source. Next session should
+be prepared to work either track (or both) rather than treating one
+as a prerequisite for the other.
+
+
