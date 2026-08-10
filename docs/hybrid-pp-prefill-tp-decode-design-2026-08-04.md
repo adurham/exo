@@ -6811,3 +6811,165 @@ in this section, purely investigative.
    oversight) in the design doc's architecture section, so this
    question doesn't need re-litigating from scratch next time it's
    asked.
+
+## 37. DESIGN DECISION: migrate jaccl's per-round control-plane traffic
+    off TCP onto RDMA-native self-healing UC exchanges (extending the
+    existing drain_acks()/ack_connections_ pattern) -- but NOT
+    everything. Bootstrap and the reconnect recovery handshake
+    correctly stay on TCP. This supersedes Section 35's
+    "async-notification" direction and Section 36's open question with
+    a concrete plan. (2026-08-09, same session, user direction:
+    "there is clearly an issue with this TCP implementation so we
+    probably should get that fixed on its own, but also I think we
+    should move these and nearly everything else to the RDMA path")
+
+### Full inventory of jaccl's TCP call sites (grounds the plan in the
+    real scope, not a guess)
+
+Grepped every live call site using `coordinator_->`/`side_channel_->`/
+`p2p_channel_->` across `mesh.cpp`/`mesh_impl.h`. Three logically
+distinct roles, each backed by a `SideChannel`/`TCPSocket` instance:
+  1. **`side_channel_`** (constructed FIRST in the `MeshGroup` ctor,
+     BEFORE `connections_` -- the RDMA queue pairs -- even exist):
+     bootstrap `all_gather` (topology/rank exchange, split/subgroup
+     color negotiation), and -- reused as the SAME instance, given a
+     longer deadline by Section 30's fix -- the `reconnect_fresh()`
+     recovery handshake.
+  2. **`coordinator_`** (aliases `side_channel_` once bootstrap
+     completes): `reliable_barrier()` calls inside `all_reduce`/
+     `reliable_all_reduce`, and the `confirmed_coord_barrier()` desync
+     check (`MLX_JACCL_CONFIRMED_BARRIER_PRE`/`_POST`).
+  3. **`p2p_channel_`** (dedicated, separate from `coordinator_` since
+     the 2026-07-17 fix that stopped their frames interleaving on one
+     socket): `send()`/`recv()`'s `p2p_retry_barrier()` -- the exact
+     mechanism Section 35 found stalling, called at the end of EVERY
+     retry round.
+
+### A second opinion (`consult`) on sequencing -- and why its answer
+    changed the plan from what was drafted going in
+
+Initial instinct: phase 1 = patch the TCP `p2p_retry_barrier` stall
+(bigger timeout / retry tuning) to get an immediate mitigation, phase
+2 = the larger RDMA migration as follow-up. Got a `consult` review on
+this sequencing specifically. The review's correction, verified
+against the actual code before accepting it:
+
+**"Phase 1 as drafted is throwaway work."** If phase 2 replaces
+`p2p_retry_barrier` with an RDMA-native exchange, any TCP-side tuning
+done first gets deleted, not built on -- and this campaign's own
+history (Sections 30 through 35, all TCP-deadline/tolerance patches)
+is direct evidence that tuning the TCP layer doesn't converge, because
+the likely mechanism is TCP and RDMA sharing one Thunderbolt link and
+the RDMA traffic starving the kernel TCP path under real load -- not a
+timeout being merely too small. **Corrected sequencing: make the
+`p2p_retry_barrier` migration ITSELF be phase 1** -- it's
+simultaneously the fix for the actual observed stall (Section 35) AND
+the pilot implementation for the broader migration, reusing a pattern
+this exact codebase has already proven working on this exact
+hardware (`drain_acks`).
+
+**Also corrected: NOT everything should migrate**, despite the
+initial framing of "nearly everything." Two call sites should
+deliberately stay on TCP, and checking the actual code confirms both
+reasons are structurally real, not just convenient:
+  - **Bootstrap `all_gather`** (`side_channel_`, used before RDMA
+    exists at all): confirmed in `mesh.cpp`'s `MeshGroup` ctor --
+    `side_channel_` is constructed BEFORE `connections_` (the RDMA
+    QPs). This is a genuine chicken-and-egg dependency: you need an
+    out-of-band channel to exchange the QP numbers/GIDs needed to
+    BUILD the RDMA queue pairs in the first place. It also runs once,
+    before any heavy data traffic, so it never experiences the
+    under-load starvation this whole campaign has been chasing.
+    Migrating it would buy nothing and introduce a real
+    self-bootstrapping problem.
+  - **Reconnect recovery handshake** (`side_channel_`, reused): the
+    whole POINT of `reconnect_fresh()` is that RDMA state is suspect
+    and needs rebuilding -- confirmed directly in `mesh.cpp`:
+    `reconnect_fresh()` clears `ack_connections_` (the very ack QPs
+    that would carry an RDMA-native exchange) and rebuilds them from
+    fresh `ibv_open_device` contexts as its OWN core mechanism. A
+    recovery path that depends on the thing it's recovering (the ack
+    QPs) is circular by construction. Keeping this on TCP is correct
+    precisely because TCP is independent of RDMA health, and it only
+    runs when the data path is already known to be down anyway.
+
+**The unifying principle for future call sites** (so this doesn't
+need re-litigating piecemeal): TCP is appropriate for one-shot
+exchanges when the link is otherwise idle (bootstrap, recovery-after-
+failure). It is NOT appropriate for per-round control traffic that
+has to complete WHILE the RDMA data path is under real load (the
+retry barrier, in-collective barriers) -- that's exactly the class
+this campaign's TCP-tuning sessions kept failing to fix, because the
+real problem was never "the deadline is too short," it was "TCP
+shouldn't be on this specific hot path at all."
+
+### How to actually migrate `p2p_retry_barrier`'s got-bitmask
+    (phase 1 -- the concrete next implementation)
+
+Re-examined the "no UC-safe way to exchange a got-bitmask" comment
+that originally justified TCP here (Section 36). The `consult` review
+assessed this as almost certainly an unexplored gap, not a structural
+limit -- and the got-bitmask has a property that makes it well-suited
+to UC's lossy semantics: **it's monotonic**. A design sketch, not yet
+implemented:
+  - Chunk the bitmask into fixed-size frames sized to match the
+    existing `ack_connections_`/`ACK_RECV_POOL` buffer class (so no
+    new buffer-sizing infrastructure is needed), each frame tagged
+    with `(epoch, retry_round, chunk_index)`.
+  - On receive, OR-merge each frame's bits into the local view of the
+    peer's bitmask -- safe under drops, duplicates, AND reordering,
+    since merging monotonically-growing "got" state is idempotent by
+    construction (a dropped or duplicate frame just means merging
+    happens one round later, never means merging happens WRONG).
+  - Reuse `drain_acks()`'s existing stall-detection + retransmit
+    loop verbatim for this new exchange (same `jaccl_ack_retransmit_us`
+    knob, same self-healing behavior already proven for the
+    fixed-size ACK case) -- rather than inventing new retry logic.
+  - Two design details flagged by the review as needing care, not yet
+    resolved: (1) epoch/round tagging must let a receiver reject or
+    ignore a frame from a STALE round (otherwise a straggler
+    retransmit from round N-1 could corrupt round N's merge), and
+    (2) the barrier's RELEASE condition needs an explicit signal --
+    TCP's `recv()` gave "peer has sent" implicitly via blocking
+    completion; UC has no such implicit signal, so either the peer's
+    frame must carry ITS OWN view of OUR bitmask (making the exchange
+    self-terminating once both sides see mutual completeness) or a
+    dedicated final "I'm done" frame needs its own retransmit-until-
+    acked handling, matching `drain_acks`'s own pattern for exactly
+    this problem.
+
+### Revised phased plan (this design decision, not yet implemented)
+
+1. **Phase 1**: migrate `p2p_retry_barrier`'s got-bitmask exchange
+   from `p2p_channel_` TCP to a chunked, self-healing UC exchange
+   modeled directly on `drain_acks()`. This is simultaneously the fix
+   for Section 35's confirmed real-hardware stall and the pilot for
+   the pattern used in phase 2. Test against the same real-hardware
+   cancel-test + tracing methodology this campaign has used throughout
+   (Sections 27-35) -- a clean multi-run PASS with ZERO TCP-recv-
+   deadline log lines during real faults would be the closing
+   evidence, not just "no crash."
+2. **Phase 2**: migrate `coordinator_`'s in-collective barrier traffic
+   (`reliable_barrier()`, `confirmed_coord_barrier()`) onto the same
+   pattern -- same under-load exposure as phase 1's target, same
+   justification, same reusable implementation.
+3. **Explicitly OUT of scope, by design, not oversight**: bootstrap
+   `all_gather` and the `reconnect_fresh()` recovery handshake stay on
+   `side_channel_`/TCP permanently. Document this decision inline in
+   the relevant code comments (not just this doc) so a future session
+   doesn't re-propose migrating them without re-deriving the
+   chicken-and-egg/circular-dependency reasoning from scratch.
+
+### Session-end state
+
+This section is a DESIGN DECISION with a concrete, code-verified
+rationale and phased plan -- no implementation has started yet. Phase
+1 is the correct next session's starting point, ahead of Section 35's
+async-notification-thread idea (which addressed a symptom of the same
+root TCP-under-load problem this section proposes removing at the
+source instead) and ahead of Section 34's original "audit send/recv
+call sites" suggestion (superseded once the real mechanism was
+isolated). Cluster remains torn down from earlier this session; no
+hardware was touched for this section (pure design/investigation
+work, `consult`-reviewed).
+
