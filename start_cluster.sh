@@ -1746,6 +1746,17 @@ for NODE in "${NODES[@]}"; do
     # RDMA data-recv ordering; post runs after data drains).
     [ -n "${MLX_JACCL_CONFIRMED_BARRIER_PRE:-}" ]  && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_PRE=$MLX_JACCL_CONFIRMED_BARRIER_PRE"
     [ -n "${MLX_JACCL_CONFIRMED_BARRIER_POST:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_POST=$MLX_JACCL_CONFIRMED_BARRIER_POST"
+    # MLX_JACCL_SHARDING_MODE: tells jaccl's C++ MeshGroup ctor which sharding
+    # mode this runner is in, so it allocates only the QPs that mode actually
+    # uses. The Thunderbolt RDMA HCA reports max_qp=3 (verified via
+    # `ibv_devinfo -v` on both nodes); the ctor otherwise builds FOUR dedicated
+    # QP types per peer (data + ack + pool + p2p_retry) and the 4th
+    # ibv_create_qp always fails EBUSY, which _init_jaccl_with_backoff then
+    # retries forever (that backoff was written for transient leaked-QP EBUSY,
+    # not this structural cause) -- runners hang in PREPARING. PP drops the
+    # pool QP, TP drops the p2p_retry QP; each lands at exactly 3.
+    # Mirrors DSV4_SHARDING so there is a single source of truth for the mode.
+    EXO_ENV="$EXO_ENV MLX_JACCL_SHARDING_MODE=${DSV4_SHARDING:-Tensor}"
     # MLX_JACCL_RELIABLE_DATA: reliable ARQ all_reduce data path (2-rank) — chunks
     # carry a seq header, receiver assembles + dedups + defers the reduce, and a
     # coordinator bitmask barrier retransmits missing chunks. Eliminates the
