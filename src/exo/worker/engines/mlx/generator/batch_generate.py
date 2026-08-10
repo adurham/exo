@@ -4778,6 +4778,52 @@ class ExoBatchGenerator:
         how a natural EOS eviction already reaches rank 1 today.
         """
         for uid in uids:
+            # PP speculative-decode cleanup (2026-08-11, Section 43
+            # investigation, real hardware finding): a uid can ALSO be
+            # cancelled while it is mid-flight in PP spec-decode mode
+            # (self._pp_spec_gen_by_uid[uid] populated by
+            # _submit_pp_spec -- a FOURTH lifecycle stage, distinct
+            # from chunk-drive/batched-decode-queued/batched-decode-
+            # admitted above). Prior to this fix, cancel() had NO
+            # handling for this state: cancel() itself returned
+            # HTTP 200 successfully, but _pp_spec_gen_by_uid[uid]
+            # stayed populated forever. The NEXT submitted request then
+            # hit _submit_pp_spec's entry guard and raised
+            # PPSpecAlreadyActiveError -- which despite that
+            # exception's own docstring claiming it "surfaces as a
+            # clean task failure the caller can retry, not an
+            # uncaught crash" was observed on real 2-node hardware to
+            # be exactly that: an uncaught crash, full runner process
+            # exit (exitcode=0), requiring supervisor relaunch. Since
+            # DSpark speculation is ON by default in this cluster's
+            # launch config, essentially every real decode runs
+            # through this path -- meaning most real client
+            # cancellations during PP-spec decode hit this gap.
+            #
+            # Fix is LOCAL cleanup only (self._close_pp_spec_gen,
+            # already-tested and used by all 3 existing call sites --
+            # EOS/max-tokens/first-token-EOS, all in _step_pp_spec),
+            # NOT a new cross-rank wire handshake, for the same
+            # structural reason those 3 existing call sites don't need
+            # one either: pp_dspark_decode_loop/pp_speculative_decode_
+            # loop/pp_chained_decode_loop's `finally:` blocks only call
+            # _configure_layers(spec_first, spec_last) (pure local
+            # mode-flag reset on THIS rank's own layer objects) -- no
+            # wire I/O happens in any generator's finally: block, so
+            # closing this rank's own generator can never leave a
+            # peer blocked mid-recv waiting on a message this rank
+            # was about to send. Both ranks independently detect their
+            # own uid's cancellation via the SAME cooperative
+            # single-threaded step()/cancel() cycle (per this
+            # method's own docstring's rank-symmetry discipline) and
+            # each closes only its own local generator -- structurally
+            # identical to how EOS is already detected and closed
+            # asymmetrically per-rank today (each rank's own inner
+            # decode generator independently observes EOS from its own
+            # local token stream), not a new failure mode this fix
+            # introduces.
+            if uid in self._pp_spec_gen_by_uid:
+                self._close_pp_spec_gen(uid)
             deferred = self._deferred_prefill_by_uid.get(uid)
             if deferred is not None and deferred.drive is not None:
                 if self._batched_decode_rank0_glue is not None:
