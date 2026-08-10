@@ -6692,3 +6692,122 @@ and not (per Section 34's correction) an absence of soft-RC machinery.
 3. Re-run the cancel test 5x with tracing still enabled once any fix
    for this specific mechanism lands, to confirm it against the same
    evidence-gathering standard used tonight.
+
+## 36. User challenge: "why are we doing anything over TCP here? we
+    have backend RDMA, not TCP" -- verified the physical fabric IS
+    Thunderbolt (not a misconfigured/wrong backend), but confirmed a
+    real architectural gap: jaccl's RDMA data path coexists with a
+    SEPARATE plain-TCP/IP control-plane stack riding the SAME physical
+    link, and the p2p-retry-barrier's got-bitmask exchange uses that
+    TCP stack even though the codebase already has a working,
+    self-healing RDMA-native ack mechanism it could plausibly extend
+    to instead. (2026-08-09, same session)
+
+### What was verified (not assumed)
+
+`get_mlx_jaccl_coordinators`/`find_ip_prioritised`
+(`src/exo/master/placement_utils.py`) selects the coordinator IP with
+an explicit non-ring priority order `ethernet=0, wifi=1, unknown=2,
+maybe_ethernet=3, thunderbolt=4` -- its own comment says "RDMA prefers
+ethernet coordinator." This looked, before checking, like it could
+mean the TCP control traffic was silently routing over the household
+LAN instead of the dedicated Thunderbolt link. Checked directly:
+tonight's actual coordinator address (from live logs, both ranks) was
+`192.168.200.1:53369` / rank 1 dialing that same address -- confirmed
+via `networksetup -listallhardwareports` on both studios that
+`en3` (the `192.168.200.x` interface) IS the Thunderbolt 2 hardware
+port, not en0 (the `192.168.86.x` household LAN) or en14 (link-local).
+**So the TCP control traffic genuinely does ride the Thunderbolt
+fabric** -- this is not a wrong-interface/wrong-backend bug.
+
+### The real gap: TWO independent stacks share one physical link
+
+jaccl's actual tensor data path uses real RDMA verbs (`ibv_post_send`/
+`poll`, queue pairs) over that Thunderbolt link. But its *coordination*
+layer -- specifically `p2p_retry_barrier()` (the got-bitmask exchange
+send()/recv()'s retry protocol depends on every round), the initial
+coordinator handshake, and the reconnect recovery handshake -- is
+implemented as **plain kernel TCP/IP sockets** (`tcp.cpp`'s
+`TCPSocket`), a completely separate networking stack, riding the
+identical physical cable but with none of RDMA's completion-queue
+semantics. Section 35's finding (the stall lives in
+`p2p_retry_barrier`'s blocking TCP recv) is a symptom of this: that
+TCP recv has no visibility into or coordination with the RDMA layer's
+own state, and is just as vulnerable to ordinary TCP/kernel-scheduling
+stalls as any other TCP socket, on ANY link.
+
+### Why this isn't simply "a mistake" -- but also isn't fully
+    justified either
+
+`send()`'s own comment states the reasoning explicitly: "there is no
+UC-safe way to exchange a got-bitmask" -- i.e. the bitmask itself is
+variable-length data (proportional to `num_chunks`) that would need
+ITS OWN reliable-delivery mechanism if sent over UC, seemingly a
+chicken-and-egg problem.
+
+BUT: checked the codebase's OWN existing RDMA-native ack mechanism
+(`ack_connections_`, `ack_sync_pre()`/`ack_sync_post()`,
+`drain_acks()`) used by `all_reduce`'s collective-completion
+signaling, and it already solves exactly this class of problem
+without TCP: `drain_acks()` posts ACK sends/recvs over UC on a
+dedicated ACK queue pair, and when a stall is detected (no progress
+for `jaccl_ack_retransmit_us`, default 500ms), it RETRANSMITS the
+outstanding ACK work-requests -- described in its own comment as
+turning "a silent UC drop into a self-healing collective with no
+throw / no re-place." This is a real, proven, already-shipping
+self-healing pattern for exchanging small control payloads reliably
+over UC -- and it's a FIXED-size payload (a completion signal), not
+variable-length like the got-bitmask, which is the one structural
+difference that might genuinely justify TCP over UC for THIS specific
+exchange (the ack QP's buffers are sized once at setup, not
+per-call-sized for an arbitrary bitmask). Whether that's an
+insurmountable structural blocker or just an unexplored extension
+(e.g. capping/chunking the bitmask into fixed-size ACK-QP-sized
+frames, or reusing the SAME UC-retransmit self-healing pattern for a
+purpose-built variable-length control channel) was NOT determined
+this session -- flagged honestly as unresolved, not concluded either
+way.
+
+### Session-end state
+
+Real, concrete, verified finding: TCP-over-Thunderbolt for jaccl's
+coordination layer is confirmed genuine (not misrouted), but it is a
+SEPARATE, ordinary networking stack layered under an RDMA backend,
+sharing the physical link but none of the RDMA layer's reliability
+tooling that already exists and already works for a related problem
+(`drain_acks`'s self-healing UC ack retry). This reframes Section 35's
+"peer's thread wasn't there to service the barrier" finding: the
+mechanism failing is fundamentally a plain-TCP-socket stall, on a
+control-plane stack that arguably shouldn't need to exist as a
+separate TCP stack at all, given the RDMA layer already has a working
+self-healing ack pattern for comparable (if not identical) problems.
+Not investigated further this session (time/scope) -- no code changed
+in this section, purely investigative.
+
+### Next session's concrete starting point (supersedes/refines
+    Section 35's "push-based async notification" recommendation --
+    that's still valid, but this raises an earlier, cheaper question
+    to answer first)
+
+1. Determine precisely why `p2p_retry_barrier`'s got-bitmask can't
+   reuse `ack_connections_`'s existing self-healing UC retry pattern
+   -- is the variable-length-vs-fixed-size distinction genuinely
+   structural (worth confirming/documenting explicitly if so), or is
+   it solvable by capping the bitmask to fixed-size ACK-QP frames
+   (chunking) or building a second purpose-built self-healing UC
+   control channel modeled on `drain_acks()`?
+2. If solvable: removing jaccl's coordination-layer dependency on
+   plain TCP entirely (replacing `p2p_retry_barrier`'s recv with an
+   RDMA-native, self-healing UC exchange matching `drain_acks`'s
+   proven pattern) would be a more structural fix than either Section
+   30's deadline extension or Section 35's proposed async-notification
+   thread -- it would remove the TCP stall class from this path
+   entirely rather than making the stall's timeout more forgiving or
+   the detection more tolerant.
+3. If genuinely not solvable (some real UC limitation not yet fully
+   understood): the coordinator/side-channel/p2p-retry TCP sockets
+   riding the Thunderbolt interface should at minimum be clearly
+   documented as an intentional, understood design constraint (not an
+   oversight) in the design doc's architecture section, so this
+   question doesn't need re-litigating from scratch next time it's
+   asked.
