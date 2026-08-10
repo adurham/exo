@@ -235,7 +235,7 @@ async def verify_cluster_healthy(base_url: str, model: str) -> bool:
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://adams-mac-studio-m4-1.local:52415")
-    ap.add_argument("--model", default="mlx-community/DeepSeek-V4-Flash")
+    ap.add_argument("--model", default="deepseek-ai/DeepSeek-V4-Flash-0731")
     ap.add_argument("--target-tokens", type=int, default=30000)
     ap.add_argument("--n-tokens-before-cancel", type=int, default=15)
     ap.add_argument(
