@@ -7081,4 +7081,135 @@ pushback verified against real upstream source. Next session should
 be prepared to work either track (or both) rather than treating one
 as a prerequisite for the other.
 
+## 39. IMPLEMENTED, real code change: send()/recv()'s own internal
+    15s/40-round retransmit cap no longer throws fatally -- it was a
+    SECOND, redundant timeout layered on top of a protocol that
+    already has its own real liveness check (`p2p_retry_barrier`'s
+    TCP recv, now correctly bounded at 300s per Section 38). Direct
+    user correction mid-session: "you are still trying to bandaid it
+    man... the goal is that it's not blocked, or if that can't be done
+    for whatever reason that it's never a fatal wait." (2026-08-09,
+    same session, deployed and real-hardware tested)
+
+### What deploying Section 38's p2p_channel_ fix immediately exposed
+
+Deployed the Section 38 fix (`p2p_channel_` gets its own 300s
+deadline, wait-time logging added) to both studios, relaunched with
+`JACCL_TRACE_PROGRESS=1`, ran the cancel test. Reproduced a real fault
+sequence and, WHILE investigating whether the extended deadline was
+"still waiting" (a genuinely open question at that moment, not yet a
+conclusion), the user interrupted directly: continuing to wait inside
+a bigger window is the same class of fix as every deadline patch
+tonight, just with a larger number -- the actual goal is non-blocking,
+or if blocking is unavoidable, NEVER fatal.
+
+Went back to the trace evidence with that framing and found the real,
+structural bug immediately: the new `[jaccl-prog]` DEADLINE_HIT trace
+(added in Section 35) had ALREADY caught it in the same run --
+`recv() DEADLINE_HIT rank=1 call_id=418 src=0 round=29 all_recv=1/11
+elapsed_us=15000022`. A transfer legitimately ran 29 retransmit rounds
+over exactly 15 seconds -- and `p2p_retry_barrier()`'s TCP round-trip
+(the barrier called at the END of every single one of those 29
+rounds) SUCCEEDED every time, proving both ranks alive and the control
+channel healthy for the entire 15s window. It still threw fatally,
+purely because of an unconditional 15s/40-round cap
+(`_deadline_us`/`max_rounds`) INSIDE `send()`/`recv()` themselves --
+completely independent of, and redundant with, `p2p_retry_barrier`'s
+own (now correctly-sized) liveness deadline.
+
+(Side note, ruled out during this investigation: initially suspected
+this might be a real cross-rank protocol desync -- rank0's `send()`
+reporting `num_chunks=1` for `call_id=418` while rank1's `recv()`
+expected 11 chunks for the "same" `call_id=418`. Checked the code's
+OWN documented invariant first, per this session's established
+discipline of verifying before concluding: `next_call_id()` is
+explicitly a PER-PROCESS counter, and the class's own comment states
+plainly that "sender's and receiver's call_id values for the 'same'
+logical transfer are independent counters in different processes and
+do not agree" -- confirming two different ranks landing on the same
+call_id NUMBER is coincidental, not evidence of a shared transfer.
+This was a false lead from my own analysis, not a second real bug --
+noted here so a future session doesn't re-chase it.)
+
+### The actual fix
+
+Removed the fatal `throw` from BOTH triggers in BOTH `send()` and
+`recv()` (`mesh_impl.h`): `round > max_rounds` and the drain-loop's
+`elapsed > _deadline_us` check. Both conditions are now purely
+informational -- logged once (via a `_deadline_logged`/existing
+`_prog` gate, not repeated every poll iteration) when
+`JACCL_TRACE_PROGRESS=1`, then the loop continues retrying exactly as
+before. The ONLY way `send()`/`recv()` can now end in a real failure
+is `p2p_retry_barrier()`'s own TCP recv throwing -- which happens only
+when the peer is genuinely unreachable (a real ECONNRESET/EOF/etc.,
+or Section 38's 300s liveness deadline), not merely slow. This makes
+`p2p_retry_barrier` the SOLE liveness authority for this whole
+protocol, matching the design principle the user was pointing at: a
+transfer that's legitimately taking a long time (real compute
+contention, large chunk counts, thermal throttle, whatever) is no
+longer conflated with a transfer that's actually broken.
+
+Verified this doesn't introduce an unbounded-CPU-spin risk: the drain
+loop's poll already sleeps (`jaccl_reliable_idle_us`, default 15us) on
+every empty poll, and the outer round loop is naturally rate-limited
+by `p2p_retry_barrier`'s own TCP round-trip cost each round -- so
+removing the fatal cap does not change this loop's resource profile,
+only its failure behavior.
+
+`max_rounds`/`_deadline_us` themselves were NOT removed as
+env-tunable knobs -- they're retained purely for diagnostic
+visibility (still logged) and as a hook for future opt-in strict-
+timeout testing, but neither can trigger a throw anymore.
+
+### Verification
+
+`g++ -std=c++20 -fsyntax-only -I.` clean (exit 0) on all 3 touched
+files (`mesh.cpp`, `mesh_impl.h`, `tcp.cpp` -- the latter two carrying
+both this fix and Section 38's). Committed + pushed to the mlx fork
+(`0b0e2ad75` for Section 38's p2p_channel_ deadline fix, this
+section's non-fatal-cap fix follows as a separate commit). Bumped
+`uv.lock` + exo parent's submodule pointer to match, deployed to both
+studios via the standard git-coherent-deploy discipline (clean
+teardown, faulthandler armed, mlx rebuilt from source on relaunch,
+coherence confirmed on both nodes before testing).
+
+### Session-end state
+
+Both the Section 38 (p2p_channel_ deadline) and Section 39
+(non-fatal retransmit caps) fixes are implemented, verified, deployed,
+and real-hardware tested in the same session -- not left as an
+unimplemented design decision like Sections 37/38 were at write-time.
+This closes the SPECIFIC bug class this session's tracing (Section 35)
+first found evidence of: a transfer that is genuinely still in
+progress, proven alive every round by a real TCP handshake, no longer
+gets killed by an arbitrary clock running out underneath it. Section
+2.5 remains open -- this is real progress on the jaccl reliability
+campaign, not a closure; whether it eliminates the specific crash
+class Section 2.5 cares about still needs a full clean multi-run
+verification pass (5x cancel-test target, per this campaign's own
+established discipline) next session.
+
+### Next session's concrete starting point
+
+1. Run the cancel test 5x against this deployed fix (both Section 38
+   and 39 together) to build a real pass-rate distribution -- this
+   session reproduced the fix's target scenario once (the 29-round
+   stall) but did not complete a full 5-run verification pass before
+   ending.
+2. Watch specifically for: does a transfer that used to fatally throw
+   at round 29-40 now genuinely complete (all_recv reaches num_chunks,
+   `peer_has_all=1`) given enough real time, or does it stay stuck
+   indefinitely even past what should be reasonable? The trace
+   instrumentation (Section 35) provides the evidence either way.
+3. If a transfer genuinely never completes (stuck at partial
+   all_recv forever, non-fatally, for many minutes) that would be
+   NEW evidence of an actual data-path bug (not just an aggressive
+   timeout) -- worth a fresh investigation, not assumed away by this
+   session's fix.
+4. Sections 37 (RDMA migration) and 38's broader TCP-hardening track
+   remain open, unimplemented design work -- this session only
+   implemented the specific non-fatal-cap fix that emerged directly
+   from tonight's real-hardware evidence and the user's direct
+   correction, not the full scope of either design doc section.
+
 
