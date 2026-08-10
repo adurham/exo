@@ -434,6 +434,20 @@ class BatchGenerator(Engine):
         ],
     ] = field(default_factory=dict, init=False)
     _jaccl_step_count: int = field(default=0, init=False)
+    # Section 43 continued (2026-08-10): uids whose cancel() was flagged
+    # but whose underlying PP-spec generator (ExoBatchGenerator's
+    # _pp_spec_gen_by_uid) hasn't actually finished yet. See
+    # _apply_cancellations()'s docstring for the full race this closes --
+    # a naive "flag cancel, immediately report CancelledResponse" let the
+    # RUNNER (runner.py's `while self.active_tasks:`) go idle before the
+    # generator was ever driven to its own next agreed-cancel checkpoint,
+    # leaving _pp_spec_gen_by_uid[uid] permanently populated and every
+    # subsequent request for that runner rejected with
+    # PPSpecAlreadyActiveError. Maps uid -> the TaskId to report once the
+    # generator actually closes.
+    _pending_pp_spec_cancel: dict[int, TaskId] = field(
+        default_factory=dict, init=False
+    )
     _jaccl_step_handle: BinaryIO | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
@@ -829,15 +843,73 @@ class BatchGenerator(Engine):
                 output.append((task.task_id, parsed))
 
             # check if original response was terminal and append a Finished()
-            if response.finish_reason is not None:
+            #
+            # Section 43 continued (2026-08-10): if this uid is parked in
+            # self._pending_pp_spec_cancel (cancel() was flagged, waiting
+            # for the generator to actually agree-and-close), do NOT emit
+            # FinishedResponse or delete _active_tasks here even though
+            # finish_reason is now set -- that would race with
+            # _drain_pending_pp_spec_cancellations() below (called via
+            # step()'s return chain) emitting a CancelledResponse for the
+            # SAME task_id once it observes the generator gone from
+            # _pp_spec_gen_by_uid, producing two contradictory terminal
+            # responses for one request. The pending-cancel path is the
+            # sole finalizer for these uids; this branch just lets the
+            # response continue flowing through queue/output_generator
+            # above (so any partial streamed output up to this point is
+            # still captured) without also terminating the task here.
+            if response.finish_reason is not None and uid not in self._pending_pp_spec_cancel:
                 output.append((task.task_id, FinishedResponse()))
                 del self._active_tasks[uid]
 
-        return itertools.chain(output, self._apply_cancellations())
+        return itertools.chain(
+            output,
+            self._drain_pending_pp_spec_cancellations(),
+            self._apply_cancellations(),
+        )
 
     def _apply_cancellations(
         self,
     ) -> Iterator[tuple[TaskId, CancelledResponse]]:
+        """Report CancelledResponse for tasks the client asked to cancel.
+
+        Section 43 continued (2026-08-10) -- PP-spec deferred-finalize fix:
+        for a uid whose PP speculative-decode generator is still live
+        (``self._gen._pp_spec_gen_by_uid``), do NOT immediately report
+        CancelledResponse or delete it from ``self._active_tasks`` here.
+        ``self._gen.cancel(uids)`` only sets a cheap local flag
+        (``_pp_spec_cancel_requested``) -- the generator itself only
+        actually observes that flag and finishes (via its own
+        ``pipeline_agree_cancel()`` cross-rank checkpoint, then
+        StopIteration, then ``_close_pp_spec_gen()`` popping it from
+        ``_pp_spec_gen_by_uid``) on the NEXT call to ``self._gen.step()``.
+
+        Reporting CancelledResponse before that happens is a real bug, not
+        just early: runner.py's `while self.active_tasks:` loop pops its
+        own tracking entry the moment it sees CancelledResponse and, once
+        empty, exits immediately -- so the runner goes idle ("runner idle:
+        reclaimed MLX allocator pool") while the generator is still
+        alive and never driven, permanently occupying
+        ``_pp_spec_gen_by_uid[uid]``. Every subsequent request then fails
+        with PPSpecAlreadyActiveError, confirmed on real 2-node hardware.
+
+        Fix: park such uids in ``self._pending_pp_spec_cancel`` instead of
+        finalizing them here. ``step()`` checks that dict on every call
+        (after ``self._gen.step()`` has run, so the generator has had a
+        chance to reach its checkpoint) and finalizes any uid whose
+        generator has actually finished (no longer in
+        ``_pp_spec_gen_by_uid``) via ``_drain_pending_pp_spec_cancellations()``.
+        This also keeps ``self._active_tasks`` (and therefore runner.py's
+        own tracking dict) populated for as many extra step() calls as it
+        takes the generator to agree-and-close, which is exactly what
+        keeps the runner's outer loop alive long enough to drive it there
+        -- no separate has_work/loop-condition change needed, since
+        ``ExoBatchGenerator.has_work`` already returns True while
+        ``_pp_spec_gen_by_uid`` is non-empty.
+
+        Non-PP-spec uids (TP/plain batched decode) are unaffected --
+        finalized immediately, exactly as before.
+        """
         if not self._cancelled_tasks:
             return iter([])
 
@@ -845,22 +917,58 @@ class BatchGenerator(Engine):
 
         uids_to_cancel: list[int] = []
         results: list[tuple[TaskId, CancelledResponse]] = []
+        pp_spec_gen_by_uid = getattr(self._gen, "_pp_spec_gen_by_uid", {})
 
         for uid, (task, _, _) in list(self._active_tasks.items()):
             if task.task_id in self._cancelled_tasks or cancel_all:
                 uids_to_cancel.append(uid)
-                results.append((task.task_id, CancelledResponse()))
-                del self._active_tasks[uid]
+                if uid in pp_spec_gen_by_uid:
+                    # Defer: park it, DO NOT delete from _active_tasks or
+                    # report CancelledResponse yet -- the generator hasn't
+                    # actually finished.
+                    self._pending_pp_spec_cancel[uid] = task.task_id
+                else:
+                    results.append((task.task_id, CancelledResponse()))
+                    del self._active_tasks[uid]
 
         if uids_to_cancel:
             self._gen.cancel(uids_to_cancel)
 
         already_cancelled = {tid for tid, _ in results}
+        pending_task_ids = set(self._pending_pp_spec_cancel.values())
         for tid in self._cancelled_tasks:
-            if tid != CANCEL_ALL_TASKS and tid not in already_cancelled:
+            if (
+                tid != CANCEL_ALL_TASKS
+                and tid not in already_cancelled
+                and tid not in pending_task_ids
+            ):
                 results.append((tid, CancelledResponse()))
 
         self._cancelled_tasks.clear()
+        return iter(results)
+
+    def _drain_pending_pp_spec_cancellations(
+        self,
+    ) -> Iterator[tuple[TaskId, CancelledResponse]]:
+        """Finalize any parked PP-spec cancellations whose generator has
+        actually finished since they were flagged. See
+        ``_apply_cancellations``'s docstring for the full race this closes.
+        Called every ``step()`` (after ``self._gen.step()`` has run, giving
+        the generator a chance to reach its agreed-cancel checkpoint).
+        """
+        if not self._pending_pp_spec_cancel:
+            return iter([])
+        pp_spec_gen_by_uid = getattr(self._gen, "_pp_spec_gen_by_uid", {})
+        done: list[tuple[int, TaskId]] = [
+            (uid, tid)
+            for uid, tid in self._pending_pp_spec_cancel.items()
+            if uid not in pp_spec_gen_by_uid
+        ]
+        results: list[tuple[TaskId, CancelledResponse]] = []
+        for uid, tid in done:
+            del self._pending_pp_spec_cancel[uid]
+            self._active_tasks.pop(uid, None)
+            results.append((tid, CancelledResponse()))
         return iter(results)
 
     def _send_error(self, task: TextGeneration, e: Exception) -> None:
