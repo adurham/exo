@@ -7615,3 +7615,171 @@ watchdog cron still active. Repo clean.
    contention investigation from Section 41 (checking runner-process
    thread state/QoS during a real stall) remains open and independently
    worth pursuing -- not blocked on, and not blocking, item 1.
+
+## 43. Section 37 Phase 1 deployed to real hardware: TWO real bugs found
+    and root-cause-fixed, a THIRD real bug found and NOT yet fixed
+    (2026-08-10, same session continued)
+
+Picked up Section 42's handoff (RDMA migration un-shelved, implementation
+was already written and committed at exo@e3a39694a / mlx@42cb74fc1 from
+the PRIOR session -- this session's job was deploy + verify, not write
+the initial implementation). Deployment surfaced three distinct real
+bugs, in order. Two are fixed and confirmed on real hardware. The third
+is NOT fixed -- this is the actual stopping point.
+
+### Bug 1 (FIXED, confirmed on hardware): hardware QP-budget overflow
+
+`ibv_devinfo -v` on BOTH nodes reports `max_qp=3` -- a real hardware/
+driver ceiling on the Thunderbolt RDMA HCA. jaccl's `MeshGroup` ctor
+was already at 3 QP types per peer (`connections_`/data,
+`ack_connections_`, `pool_connections_`) BEFORE Section 37; Phase 1
+added a 4th (`p2p_retry_connections_`). On this 2-node cluster the 4th
+`ibv_create_qp` always failed EBUSY ("Couldn't create queue pair").
+`_init_jaccl_with_backoff` (utils_mlx.py, written for a genuinely
+DIFFERENT transient cause -- leaked QPs from an ungracefully-killed
+runner) retried forever without ever succeeding, because this cause was
+structural, not transient. Runners looped in PREPARING permanently.
+
+Fix (mlx@49b316d5d, exo@bc6383cd5): mode-gate QP construction via a new
+`MLX_JACCL_SHARDING_MODE` env var (mirrors `DSV4_SHARDING`, exported by
+start_cluster.sh). PP mode builds `connections_` + `p2p_retry_connections_`
++ `ack_connections_` (skips `pool_connections_`). TP mode (default, for
+backward compat) builds `connections_` + `ack_connections_` +
+`pool_connections_` (skips `p2p_retry_connections_`). Both land at
+exactly 3. Same gating applied to `reconnect_fresh()` (a real gap the
+implementing subagent caught that the initial brief missed -- without
+it, every hard-recovery cycle would re-hit the same EBUSY). `all_reduce()`
+dispatch also gated so PP's one warmup collective doesn't fall into the
+v2/optimistic path that needs the now-absent pool QP.
+**Verified: relaunch showed zero "Couldn't create queue pair" errors,
+correct QP allocation confirmed via live process env
+(`MLX_JACCL_SHARDING_MODE=Pipeline`).**
+
+### Bug 2 (FIXED, confirmed on hardware): QP-sharing data corruption
+
+Bug 1's fix exposed this one immediately on the next relaunch. PP mode's
+ONE warmup-time collective (`exchange_prefill_peer_layer_count` /
+`handshake_metaframe_protocol`, both in `pp_batched_decode_glue.py` /
+`pp_metaframe.py`) calls `mx.distributed.all_sum` once at model-load
+time. With `pool_connections_` now empty in PP mode, `all_reduce()`'s
+dispatch fell through to `reliable_all_reduce` (non-v2), which posts on
+`connections_[peer]` -- the SAME QP PP's raw `send()`/`recv()` pipeline
+traffic (MetaFrame header/table exchange, called immediately after
+warmup) also uses. Confirmed on real hardware: deterministic 20/20 crash,
+`"MetaFrame protocol version mismatch: received 16256"`. 16256 = 0x3F80
+in hex -- the high half of IEEE-754 `1.0f`. Not noise: literal all_reduce
+payload landing in a MetaFrame header buffer. Same two-protocols-on-one-QP
+bug class this file has TWO PRIOR documented incidents of (the reasons
+`ack_connections_`/`pool_connections_`/`p2p_retry_connections_` each got
+their own dedicated QP in the first place).
+
+Fix (mlx@c8369ccf1, exo@7e7232445): new `ack_all_reduce_small()` runs
+PP's tiny warmup collectives over the otherwise-idle `ack_connections_`
+QP instead. Non-trivial because `post_ack_recvs(0)` already pre-posts 64
+recv WRs on that QP at ctor time (before the ctor even returns to
+Python) -- a naive fresh `post_recv` would queue BEHIND those 64 and
+still read the wrong slot. The fix instead reuses `ack_sync_pre`'s
+posting pattern and a forked `drain_acks_exchange()` that reads the
+landed payload out of `ack_recv_buffers_` BEFORE the existing
+replenish-path memsets it. Falls back to `reliable_all_reduce` for
+anything it can't service (>2 ranks, payload exceeding one FRAME_SIZE=
+4096B ack buffer) -- TP mode and `drain_acks()`'s existing callers are
+completely untouched.
+**Verified: relaunch reached READY (2/2), both runners RunnerReady, zero
+crash/mismatch errors -- first time all day the cluster came up clean.**
+
+### Bug 3 (FOUND, NOT FIXED -- this is the real stopping point)
+
+Ran the standard 5x `section27_cancel_abort_test.py` verification pass
+required before calling Section 37 Phase 1 done. Every run failed
+identically: the test script saw ZERO tokens and `command_id=None` after
+~305s, no exception surfaced to the client.
+
+Root cause (found in runner stderr, both nodes): the actual
+`p2p_retry_exchange` protocol -- Section 37 Phase 1's core deliverable,
+the thing that replaced the old TCP `p2p_retry_barrier` -- is stalling
+with **zero forward progress** and hitting its own 300s
+(`MLX_JACCL_P2P_RETRY_STALL_TIMEOUT_SECS`) watchdog:
+
+```
+[jaccl] p2p_retry_exchange STALLED rank=1 call_id=27 metric=0
+(no forward progress for >300000ms; UC completion lost — throwing
+for clean re-place)
+```
+
+Confirmed reproducible: hit on 3 separate real requests across the 5x
+run (call_id=192, then twice more at call_id=27 -- note call_id=27
+recurring across what should be logically distinct exchanges is itself
+suspicious and UNEXPLAINED, worth investigating directly). Each time,
+`MLX_JACCL_RECONNECT_FRESH=1`'s soft-recovery kicks in
+("Attempting in-place reconnect (both ranks) to avoid a re-place"),
+succeeds at the QP level (`reconnect_fresh rank=1 ENTER... closing
+device contexts and rebuilding`, benign `IOConnectUnmapMemory failed:
+kr=0xe00002c2` noise), and the cluster self-heals to `RunnerRunning` --
+but the IN-FLIGHT request is lost every time. No request can complete
+successfully in this state; the cluster is "healthy" by health-check but
+functionally unable to serve a single generation end-to-end.
+
+**This is inside p2p_retry_exchange's own send/recv bitmask retry logic
+(mesh_impl.h, the code written in the PRIOR session per Section 37/39's
+plan) -- NOT either of today's two QP-allocation fixes, which are
+confirmed working correctly up to this point.** Both of today's fixes
+should be treated as solid and NOT reverted while investigating this.
+
+### Where things stand at end of session
+
+- Repos: exo@7e7232445, mlx@c8369ccf1, both clean, both pushed.
+- Cluster: LEFT RUNNING (self-healed after the last stall), PP mode,
+  both runners RunnerRunning. PIDs: macstudio-m4-1 12916,
+  macstudio-m4-2 10662. Launched with the same env as always
+  (`DSV4_SHARDING=Pipeline EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1
+  JACCL_TRACE_PROGRESS=1`).
+- Deadlock watchdog cron (`exo-section39-deadlock-watch`,
+  `~/.hermes/watch/exo_deadlock_hit.log`) still active, still empty --
+  that's a DIFFERENT bug signature (BARRIER-line elapsed_us stall) than
+  this one (p2p_retry_exchange's own STALLED throw), so the watchdog
+  won't catch this. Consider whether it needs a second pattern for the
+  p2p_retry_exchange STALLED signature specifically, or whether the
+  existing 300s throw+reconnect is loud enough on its own (it already
+  logs to exo.log unprompted -- arguably sufficient, watchdog may not
+  add value here).
+- section27 test artifacts from today: `/tmp/section27_run1.log`,
+  `/tmp/section27_run2.log` (both show the `command_id=None` / 305s
+  failure pattern -- runs 3-5 were killed before completing once the
+  pattern was confirmed non-random).
+- User was informed of Bug 3, given three options (keep digging now /
+  revert Section 37 Phase 1 entirely / get full details first), and
+  chose: STOP HERE, write a handoff for a fresh session. No further
+  investigation into Bug 3 was done this session past locating the
+  STALLED throw site and confirming it's real/reproducible/inside
+  p2p_retry_exchange specifically.
+
+### Next session's concrete starting point
+
+1. Read `p2p_retry_exchange`'s actual implementation in mesh_impl.h
+   (search for `p2p_retry_exchange` and `P2P_RETRY_STALL_TIMEOUT` --
+   the class doc comment near its definition documents the intended
+   protocol; the STALLED throw's own construction, `metric =
+   peer_frame_seen.popcount`, is the concrete signal to trace: metric=0
+   means literally no frame was ever seen as received, from either
+   direction, for the full 300s window).
+2. Investigate the call_id=27 recurrence across what look like distinct
+   send()/recv() exchanges -- confirm whether this is expected (call_id
+   is scoped per-collective-type or something) or itself a symptom of
+   the underlying bug (e.g. a stale/reused call_id causing the receiver
+   to misclassify frames, silently discarding real progress and making
+   `peer_frame_seen` never populate).
+3. Cross-reference against the two correctness requirements Section 42's
+   `consult` review flagged for Phase 1 BEFORE it was implemented
+   (previous session): (a) epoch/round tag validated before merge on a
+   stable buffer, (b) a received-frames BITMAP not a counter. If Bug 3
+   turns out to be one of these two design requirements not actually
+   being met by the implementation as written, that would explain a
+   "genuinely zero progress ever" stall pattern (as opposed to a
+   slow-but-progressing one) -- worth checking FIRST as the most likely
+   candidate given the failure signature.
+4. Once root-caused: fix, redeploy, re-run the SAME 5x section27 pass
+   that caught this (do not skip straight to declaring success --
+   this bug was invisible until that specific verification pass ran).
+5. The CPU/thread-scheduling-contention investigation (Section 41,
+   independent track) remains open and untouched this session.
