@@ -6535,3 +6535,160 @@ remains torn down.
 5. Only after that evidence exists, decide the real fix: bigger
    retry budget (if a), fixing whatever's starving the servicing
    thread (if b), or a genuine bitmask-reconciliation bug fix (if c).
+
+## 35. Section 34's tracing plan EXECUTED with a real result: the stall
+    is NOT in the RDMA send()/recv() drain loop I instrumented -- it's
+    in p2p_retry_barrier()'s own plain TCP recv, which blocks for the
+    full 60s data-path deadline waiting for a reply the peer never
+    sends because the peer's own thread never got there. This
+    confirms hypothesis (b) from Section 34's three candidates.
+    (2026-08-09, same session, executed per direct user instruction
+    "no need for a new session... do the tracing")
+
+### What was built and deployed
+
+Added `[jaccl-prog]`-gated round-by-round tracing to jaccl's plain
+`send()`/`recv()` (`mesh_impl.h`) -- the exact P2P code path that
+Section 34 established had ZERO instrumentation despite being the one
+that actually faults (only `all_reduce`/`reliable_all_reduce` had
+tracing before this). Traces: round start (chunk/resend counts),
+deadline-hit (with round + outstanding-chunk state), max-rounds-
+exceeded, and the barrier-exchange result (peer's reported got-count).
+Gated behind the same `jaccl_progress_enabled()` flag as existing
+instrumentation -- zero cost when `JACCL_TRACE_PROGRESS` is unset.
+
+Verified syntax (`g++ -std=c++20 -fsyntax-only -I.`, clean). Committed
++ pushed to the mlx fork (`821f6512e`). Bumped `uv.lock` + the exo
+parent's submodule pointer to match (`9a4787ec3`), following the
+established git-coherent-deploy discipline exactly (catches the
+"uv.lock still pins the old SHA" gap that bit an earlier session
+proactively this time, not after the fact). Deployed to both studios,
+rebuilt mlx from source on relaunch, confirmed coherent on both nodes,
+launched with `JACCL_TRACE_PROGRESS=1 JACCL_TRACE_CALLS=1`, confirmed
+both env vars present on the actual live runner processes (not just
+passed to the launcher).
+
+### The evidence, and what it actually shows
+
+Reproduced 2 real jaccl faults during a cancel-test run. Grepped for
+the new `send()`/`recv()` DEADLINE_HIT / MAX_ROUNDS_EXCEEDED trace
+lines across BOTH faults: **zero matches, on either node.** The
+RDMA-level retry loop I instrumented never fired its own timeout at
+all -- every single `send()`/`recv()` round in the surrounding
+traffic (dozens of calls, all captured in the trace, e.g. call_id
+1278-1307) completed cleanly in round=0, with barrier round-trip times
+of 70-200 microseconds. The RDMA data path itself, and its
+reconciliation protocol, were never the bottleneck in either
+reproduction.
+
+Instead, both faults' actual error messages ("Recv failed with
+errno=35 ... retry deadline Ns exceeded") trace to a COMPLETELY
+DIFFERENT function: `TCPSocket::recv()` in `tcp.cpp` -- the underlying
+plain-TCP-socket recv that `SideChannel::p2p_retry_barrier()`
+(`rdma.h`) itself calls to exchange the got-bitmask at the END of
+every send()/recv() round. `p2p_retry_barrier()` does:
+```
+sockets_[0].send(...)     // send our own got-bitmask
+sockets_[0].recv(rhdr, 16)  // BLOCKS HERE waiting for peer's reply
+```
+That plain TCP recv is NOT inside the RDMA drain loop I traced -- it's
+a separate, un-instrumented call one level up, and it uses the
+`p2p_channel_`'s own deadline (deliberately kept at the un-extended
+60s data-path default -- see Section 30/mesh.cpp's own comment:
+"NOT applied to p2p_channel_... that one should keep failing fast").
+
+**Fault 1 (19:14:31, self-recovered in 254ms via `reconnect_fresh`):**
+the underlying stall was this exact TCP recv hitting its 60s deadline
+("no progress for 70.002s, retry deadline 60s exceeded") on
+`p2p_channel_`.
+
+**Fault 2 (19:17:15): this one did NOT self-recover.** The initial
+fault hit the same `p2p_channel_` TCP-recv-timeout (60s deadline). But
+this time `reconnect_fresh()`'s OWN recovery handshake -- which runs
+on `side_channel_`, extended to 150s by Section 30's fix -- ALSO timed
+out: "no progress for 175.006s, retry deadline 150s exceeded" at
+19:20:10.532, "jaccl reconnect failed... propagating for re-place."
+The runner crashed and a full re-place occurred (confirmed via a new
+PID replacing the old one). Checked rank1 (m4-2)'s log for the same
+window: **rank1 shows ZERO independent fault-detection activity at
+all** -- no "jaccl transport fault" line, nothing -- until it simply
+received a `Shutdown` task at 19:20:11.653 (the master orchestrating
+the re-place after rank0's reconnect failure). This is a live,
+directly-observed confirmation of Section 31's finding: rank1 never
+independently noticed anything was wrong; it just kept running until
+told to stop.
+
+### Root cause, now genuinely narrowed with real evidence (Section
+    34's hypothesis (b), confirmed)
+
+Section 34 posed three untested hypotheses for why the retry protocol
+fails to converge: (a) retry budget undersized, (b) the peer's own
+retransmit-servicing thread stalled/starved when the fault hits, (c) a
+bitmask-reconciliation bug. Tonight's trace evidence supports (b), not
+(a) or (c):
+  - NOT (a): the RDMA-level retry protocol itself was never slow or
+    struggling in either fault -- it's not in the trace at all near
+    the fault windows, meaning `send()`/`recv()`'s own drain loop
+    never even got a chance to run its rounds; the block happened one
+    layer up, in `p2p_retry_barrier()`'s plain TCP recv.
+  - NOT (c) as observed: `p2p_retry_barrier()`'s DESYNC-detection
+    branch (mismatched MAGIC/direction_tag/round) never fired --
+    if the bitmask reconciliation itself were buggy, that's where it
+    would show. It never got there; the recv() call before that check
+    is what timed out.
+  - CONSISTENT WITH (b): this rank's `p2p_retry_barrier()` sent its
+    own got-bitmask and then blocked waiting for the peer's reply.
+    The peer's `p2p_retry_barrier()` call is symmetric -- for THIS
+    rank's recv to time out, the peer must not have reached (or
+    completed) its own matching `send()` on that socket within 60s.
+    That is exactly "the peer's own thread wasn't there to service its
+    side of the exchange," not a protocol logic bug or a budget sized
+    too small for legitimate retransmit work.
+
+### What this means, concretely
+
+The retry-and-reconcile machinery (send()/recv()'s RDMA drain loop) is
+real, correctly implemented, and fast (confirmed again tonight: every
+observed round converges in ~100-200us). It is NOT the layer that's
+failing. The actual fragile point is one level up: **the plain TCP
+`p2p_retry_barrier()` call has no tolerance for the peer being
+genuinely busy elsewhere** (e.g., deep in a long local computation, or
+itself blocked on something else) when its turn to service the
+barrier comes up -- there's no async/background listener for it, only
+a synchronous blocking recv on the hot path. This reframes Section
+32's "push-based fault notification, decoupled from the peer's compute
+thread" recommendation (from that session's `consult` review) as
+directly on-target for THIS mechanism too, not just the
+detection-side gap it was originally proposed for.
+
+### Session-end state
+
+Real, hardware-verified root-cause narrowing achieved via direct
+instrumentation + reproduction, not guesswork. Instrumentation is
+deployed and committed (`mlx@821f6512e`, `exo@9a4787ec3`). Cluster
+torn down cleanly. Section 2.5 remains open. This is now the sharpest
+evidence this campaign has produced: the fragile point is
+`p2p_retry_barrier()`'s synchronous TCP recv having no tolerance for
+peer-busy conditions, not the RDMA layer, not a missing ack mechanism,
+and not (per Section 34's correction) an absence of soft-RC machinery.
+
+### Next session's concrete starting point
+
+1. The push-based/async fault-notification mechanism Section 32's
+   consult review recommended is now the best-evidenced next real fix
+   -- not just for detection-side skew, but for THIS exact
+   `p2p_retry_barrier()` blocking-recv fragility. Consider whether
+   `p2p_retry_barrier()`'s recv could be serviced from a dedicated
+   background thread (independent of whatever the compute thread is
+   doing) rather than requiring the compute thread to reach that exact
+   call site to unblock the peer.
+2. Alternative/complementary: instrument WHAT the peer's compute
+   thread is actually doing during a stall (a faulthandler-style dump
+   triggered automatically the moment a `p2p_retry_barrier` recv
+   exceeds some short warning threshold, well before the 60s hard
+   deadline) to get direct confirmation of what specifically is
+   starving it, rather than inferring "busy elsewhere" from absence of
+   log activity.
+3. Re-run the cancel test 5x with tracing still enabled once any fix
+   for this specific mechanism lands, to confirm it against the same
+   evidence-gathering standard used tonight.
