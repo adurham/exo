@@ -1914,9 +1914,32 @@ def pipeline_agree_cancel(
 
     # Same linear-reduce (leaves -> rank 0) + broadcast (rank 0 -> leaves)
     # shape as pipeline_agree_prefix_hit_length, OR instead of min/max.
+    #
+    # ROOT-CAUSE FIX (2026-08-10, Section 43 continued -- real-hardware
+    # deadlock traced to THIS exact line): `agreed = agreed or _recv(...)`
+    # is a Python short-circuit bug. `_recv()` is NOT a pure expression --
+    # it has a mandatory network side effect (posting/consuming this
+    # rank's half of the p2p_retry_exchange for that (peer, seq) pair,
+    # which the PEER's matching _send() blocks on forever until it's
+    # posted). Whenever `agreed` (seeded from `local_cancel`) is already
+    # True -- i.e. THIS rank independently wants to cancel -- `or`
+    # short-circuits and `_recv(rank + 1)` is simply never called. The
+    # peer's unconditional _send() to this rank then has no matching
+    # receive posted, ever, and retries into the void until the 300s
+    # jaccl StallWatch fires and reconnect_fresh() resets the wedge.
+    # Confirmed via full jaccl-p2p EXCHANGE_ENTER/REJECT + CQE trace on
+    # real 2-node hardware: exactly one rank's send() call for a cancel-
+    # checkpoint direction gets zero matching activity from its peer,
+    # correlated 1:1 with that peer's local_cancel already being True at
+    # entry. Fix: always call _recv() when the topology requires this
+    # rank to participate in that hop -- never let its execution depend
+    # on the running `agreed` value. `or` is only safe for combining pure
+    # booleans; a call with a required side effect must never be
+    # short-circuited away.
     agreed = local_cancel
     if rank != world_size - 1:
-        agreed = agreed or _recv(rank + 1)
+        peer_wants_cancel = _recv(rank + 1)
+        agreed = agreed or peer_wants_cancel
     if rank != 0:
         _send(agreed, rank - 1)
 
