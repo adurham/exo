@@ -316,12 +316,23 @@ def test_no_advance_sent_before_rank0_local_session_completes(
     )
 
     # peer_prefill_layer_count=4 at default max_layers=2 needs
-    # ceil(4/2)=2 total advances -- drain the remaining one.
+    # floor(4/2)+1 = 3 total advances -- drain the remaining ones.
+    #
+    # UPDATED 2026-08-15 (design doc Section 45): this asserted
+    # ceil(4/2)==2, which encoded the very off-by-one that caused the
+    # multi-session mutual deadlock. advance() only reports done=True on
+    # the call that consumes the generator's trailing ("done", ...)
+    # sentinel, so when max_layers evenly divides the peer's layer count
+    # (4 % 2 == 0 here) the layer-consuming calls all return done=False
+    # and ONE MORE advance is genuinely required. Confirmed against the
+    # real ResumablePrefillSession in
+    # test_pp_prefill_advance_budget_parity.py.
     while result[3] is None:
         result = glue.tick(model=cast("object", model))
-    assert len(sent) == 2, (
+    assert len(sent) == 3, (
         f"peer_prefill_layer_count=4 at default max_layers=2 needs "
-        f"ceil(4/2)=2 real advances to rank 1; got {len(sent)}"
+        f"floor(4/2)+1=3 real advances to rank 1 (the 3rd consumes the "
+        f"'done' sentinel); got {len(sent)}"
     )
 
 

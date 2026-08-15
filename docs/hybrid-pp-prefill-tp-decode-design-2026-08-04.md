@@ -7997,3 +7997,200 @@ still chasing when it stopped.
    independently.
 6. Section 41's CPU/thread-scheduling-contention investigation
    remains open, untouched, independent of the above.
+
+## 45. ROOT CAUSE FOUND AND FIXED: the multi-session mutual deadlock is
+an off-by-one in rank 0's chunk-drive advance budget, triggered only
+when `max_layers` evenly divides the peer's layer count. Section 40's
+"hypothesis DISPROVEN" verdict was itself wrong -- it tested the one
+parity that hides the bug. (2026-08-15)
+
+### Executive summary
+
+The mutual deadlock chased since Section 39 (`pp_scheduler_wire.py` /
+`pp_batched_decode_glue.py`, both ranks blocked in a recv, neither
+sending, no jaccl STALLED throw) is **fixed at the root**. It was never
+a transport bug, never an RDMA/driver issue, and never related to the
+`p2p_retry_exchange` work of Sections 37/43 -- it is a pure arithmetic
+off-by-one in the application-level chunk-drive protocol.
+
+`Rank0BatchedDecodeGlue.tick()`'s HANDOFF transition computed:
+
+```python
+self._prefill_rank1_advances_remaining = -(
+    -self.peer_prefill_layer_count // self._prefill_advance_max_layers
+)   # ceil(L / max)
+```
+
+That is short by EXACTLY ONE whenever `max_layers` evenly divides the
+peer's layer count.
+
+### The mechanism, precisely
+
+`ResumablePrefillSession.advance()`'s underlying `_forward_steps`
+generator yields `L` `("layer", ...)` steps followed by a **separate**
+`("done", ...)` sentinel step. `advance()`'s own loop is
+`while layers_advanced < max_layers:`, and it returns `done=True` only
+on the call that actually CONSUMES that sentinel:
+
+- **`L % max != 0`** -- the final call consumes the `r < max` remainder,
+  its loop condition is still satisfied, so it consumes the sentinel in
+  the SAME call. Here `ceil(L/max) == floor(L/max)+1`, so the old
+  formula was accidentally correct.
+- **`L % max == 0`** -- every call fills its quota exactly and returns
+  `(max, False)` without ever reaching the sentinel. One MORE call is
+  required, which consumes only the sentinel and returns `(0, True)`.
+
+The real requirement is therefore `floor(L/max) + 1` for BOTH parities.
+
+Consequence on the even parity: rank 0 exhausts its budget and blocks in
+`recv_prefill_chunk_done_ack_message()`; rank 1 has consumed every one
+of its layers but still reports `done=False`, so it never sends the ack
+and loops back to its own blocking `recv_header()` waiting for an
+advance that will never come. Neither rank sends. Deterministic, not a
+race -- which is exactly why no amount of transport-level hardening ever
+touched it.
+
+### The evidence (first time BOTH sides were captured simultaneously)
+
+Reproduced 3/3 on real hardware this session, then captured with
+`faulthandler` SIGUSR1 dumps on both nodes at the same moment (armed via
+the `/tmp/exo_faulthandler_enabled` marker file, which is why this
+worked where `py-spy` could not -- it needs root on macOS):
+
+```
+rank 0 (m4-2):  Rank0BatchedDecodeGlue.tick  (glue:1335)
+                -> recv_prefill_chunk_done_ack_message
+                -> recv_header  (pp_scheduler_wire.py:188)   [BLOCKED]
+
+rank 1 (m4-1):  Rank1BatchedDecodeGlue.tick  (glue:1723)
+                -> recv_header  (pp_scheduler_wire.py:188)   [BLOCKED]
+```
+
+And the counters close the arithmetic exactly:
+
+```
+LAYER_COUNT_EXCHANGE:  local_rank=0 local=21  peer=22
+                       local_rank=1 local=22  peer=21
+HANDOFF_BUDGET:        peer_prefill_layer_count=22
+                       prefill_advance_max_layers=2
+                       advances_budgeted=11            <-- ceil(22/2)
+rank0 PREFILL_ADVANCE_SEND:     seq=1..11, last logs remaining_before_send=1
+rank1 PREFILL_ADVANCE_APPLIED:  seq=1..11, EVERY ONE done=False,
+                                final last_layer_index=21
+                                (= all 22 of its layers consumed, 11 x 2)
+```
+
+Rank 1 needed a 12th advance to observe the sentinel. It never arrived.
+
+### Why Section 40 recorded this as "DISPROVEN"
+
+Section 40 formed **this exact hypothesis**, added the very
+`HANDOFF_BUDGET` / `PREFILL_ADVANCE_APPLIED` log lines used above,
+ran 10 live test runs, and concluded it was "disproven by direct
+measurement" -- quoting its own observation: *"10 advances x 2 layers +
+1 final advance x 1 layer = 21, precisely peer_prefill_layer_count"*.
+
+That measurement was accurate. It was taken on a driver whose peer had
+**21 layers -- the ODD parity**, the single case where `ceil()` is
+accidentally correct. The hypothesis was right all along; it was tested
+under the only layer count that hides the bug.
+
+What changed since: this session runs the **production `-0731`
+checkpoint** (Section 44 found `start_cluster.sh`'s default was still
+the stale preview), whose PP split puts **22 layers** on the driver's
+peer -- the failing parity. Same code, different layer count, bug
+becomes deterministic.
+
+This is the important methodological lesson of this whole campaign arc:
+a live-hardware measurement only ever samples whatever topology the
+current model happens to produce. It cannot, on its own, disprove a
+parity-dependent hypothesis.
+
+### The fix
+
+`pp_batched_decode_glue.py`, HANDOFF transition:
+
+```python
+self._prefill_rank1_advances_remaining = (
+    self.peer_prefill_layer_count // self._prefill_advance_max_layers
+) + 1
+```
+
+Verified safe for the new `(0, True)` sentinel-only advance that this
+now sends on the even parity (a shape which had **never executed in
+production** before, since the old budget always stopped one call
+short): rank 1's handler branches purely on `done` and only *logs*
+`layers_advanced`, and `PrefillAdvanceMessage` carries no per-layer
+payload -- just seq/max_layers/chunk_index metadata. `advance()`'s own
+completed-session `raise` guard cannot trip either, because on the even
+parity `_done` is still False when the extra advance arrives (that call
+is what sets it), and on the odd parity no extra advance is sent at all.
+
+### Hardening, so the parity can never silently regress again
+
+New `src/exo/worker/engines/mlx/tests/test_pp_prefill_advance_budget_parity.py`
+(15 tests) drives the **real** `ResumablePrefillSession` and counts
+actual `advance()` calls to `done=True`, asserting the budget formula
+matches -- across both parities, `max_layers` > segment length,
+`max_layers == 1`, and the exact production shape (22 layers @ max 2).
+It pins the driver's prediction to the follower's true semantics rather
+than restating the formula.
+
+Proven load-bearing, not vacuous: reverting the source fix to `ceil()`
+fails 8 of the 15 tests (every even-parity case); restoring it passes
+all 15.
+
+`test_old_ceil_formula_is_short_on_the_even_parity` additionally
+documents the root cause directly -- asserting against the real session
+that L=22 needs 12 advances while `ceil()` yields 11, and that L=21
+needs 11 (where both formulas agree), so the reason Section 40 saw a
+false negative is captured in an executable form.
+
+One pre-existing test (`test_no_advance_sent_before_rank0_local_session
+_completes`) asserted `ceil(4/2)==2` -- i.e. it *encoded the bug as the
+expected behaviour*, on the even parity, using the same reasoning that
+produced the defect. Updated to the correct 3 with an explanatory
+comment. Its neighbour (`test_advance_count_matches_uneven_peer_layer
+_count`, peer=5) is unaffected: `ceil(5/2) == floor(5/2)+1 == 3` -- the
+same odd-parity blind spot, now explicitly noted.
+
+### What this does and does NOT resolve
+
+RESOLVED: the Section 39/40 mutual deadlock (silent hang, both ranks
+recv-blocked, no STALLED throw). This was ALSO the true cause of the
+"post-cancel spin" symptom chased earlier this session -- rank 0's
+30-minute `[Event::wait] slow wait ... self-abort at 1800000ms` poll was
+simply this deadlock being waited on, and the cancel appearing to
+"hang" was the API's own 5s fallback (`did not reach a terminal state
+within 5.0s of TaskCancelled -- falling back to force-closing the
+stream`) masking it behind an HTTP 200.
+
+NOT resolved by this fix, still open and genuinely separate:
+
+1. The `p2p_retry_exchange STALLED ... metric=0` transport stall of
+   Sections 43/44 (post_send confirmed firing, QP healthy RTS, zero
+   ibverbs completions for 300s). The poison-WR probe was wired into
+   `p2p_retry_exchange`'s own StallWatch this session (mlx@50a23dc03,
+   exo@a824dfee3) but has NOT yet fired, because the runs since then hit
+   this deadlock instead. That probe is deployed and armed for the next
+   time the transport stall reproduces.
+2. `start_cluster.sh`'s `DSV4_MODEL_ID` default is still the stale
+   preview checkpoint (Section 44 item 5) -- must be overridden per
+   invocation until fixed at the source. NOTE this now carries extra
+   weight: the preview vs production checkpoint produce DIFFERENT PP
+   layer splits, and therefore different parity, and therefore
+   different bug exposure. Testing the wrong checkpoint is not a
+   cosmetic mistake.
+3. Section 41's CPU/thread-scheduling-contention investigation.
+
+### Next session's concrete starting point
+
+1. Re-run the full 5x `section27_cancel_abort_test.py` verification pass
+   against this fix on real hardware (the standard bar this campaign
+   requires before calling anything done). Must be run with
+   `DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731` explicitly set.
+2. If the transport stall (item 1 above) resurfaces, the poison-WR probe
+   will now fire on `p2p_retry_exchange`'s own StallWatch and print
+   `[jaccl-p2p-qp] POISON PROBE ... result=[...]` -- read it and follow
+   Section 44's decision branches.
+3. Fix `start_cluster.sh`'s `DSV4_MODEL_ID` default at the source.

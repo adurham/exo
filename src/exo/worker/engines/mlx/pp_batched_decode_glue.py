@@ -1210,19 +1210,66 @@ class Rank0BatchedDecodeGlue:
                     # time) is what makes this computable AT ALL (see
                     # peer_prefill_layer_count's own field comment for
                     # why the two ranks' real layer counts differ).
-                    self._prefill_rank1_advances_remaining = -(
-                        -self.peer_prefill_layer_count
+                    self._prefill_rank1_advances_remaining = (
+                        self.peer_prefill_layer_count
                         // self._prefill_advance_max_layers
-                    )
+                    ) + 1
+                    # ROOT-CAUSE FIX (2026-08-15, Section 45 -- the real
+                    # mutual deadlock chased since Section 39, finally
+                    # reproduced with BOTH ranks' faulthandler stacks
+                    # captured live). This was `ceil(peer_prefill_layer_
+                    # count / max_layers)`, which is short by EXACTLY ONE
+                    # whenever `max_layers` evenly divides the peer's
+                    # layer count.
+                    #
+                    # Why: ResumablePrefillSession.advance()'s underlying
+                    # generator yields L "layer" steps followed by a
+                    # SEPARATE ("done", ...) sentinel step, and advance()'s
+                    # own loop is `while layers_advanced < max_layers:`.
+                    # It therefore returns done=True only on the call that
+                    # actually CONSUMES that sentinel:
+                    #   - L % max != 0: the final call consumes the r < max
+                    #     remainder, its loop keeps going, and it consumes
+                    #     the sentinel in the SAME call -> ceil == floor+1,
+                    #     budget happens to be correct.
+                    #   - L % max == 0: every call fills its quota exactly
+                    #     and returns (max, False) WITHOUT ever reaching
+                    #     the sentinel -> one MORE call is required, which
+                    #     consumes only the sentinel and returns (0, True).
+                    # So the real requirement is floor(L/max) + 1 for BOTH
+                    # parities; ceil() only coincides on the odd case.
+                    #
+                    # Confirmed on real 2-node hardware: rank 0's peer had
+                    # 22 layers at max_layers=2 -> budget ceil=11. Rank 0
+                    # sent advances 1..11 (last logging
+                    # remaining_before_send=1), hit 0, and blocked in
+                    # recv_prefill_chunk_done_ack_message(). Rank 1 applied
+                    # all 11, consuming all 22 of its layers
+                    # (last_layer_index=21) but reporting done=False every
+                    # time -- so it never sent the ack and looped back to
+                    # its own blocking recv_header() waiting for advance
+                    # #12. Both faulthandler dumps captured simultaneously;
+                    # neither rank sends. Deterministic, not a race.
+                    #
+                    # Section 40 formed this exact hypothesis, instrumented
+                    # it with the very log lines below, and recorded it as
+                    # "DISPROVEN by direct measurement" -- because that
+                    # session's driver peer had 21 layers (ODD), the one
+                    # parity where ceil() is accidentally correct. The
+                    # hypothesis was right; it was tested under the only
+                    # layer count that hides the bug. A parity-spanning
+                    # unit test now pins this formula to advance()'s real
+                    # semantics so hardware layer counts can never hide a
+                    # regression again (see
+                    # tests/test_pp_prefill_advance_budget_parity.py).
                     # TEMP DIAGNOSTIC (2026-08-10, chasing the real
                     # mutual-deadlock bug found at call_id=411 -- see
                     # design doc Section 39/handoff for the full
-                    # incident). The exact ceiling-division budget
-                    # rank 0 computed for this chunk -- compare against
-                    # how many [PREFILL_ADVANCE_APPLIED] lines rank 1
-                    # actually logs with done=True to confirm/refute
-                    # the layer-count-mismatch hypothesis. Remove once
-                    # root-caused.
+                    # incident). The exact budget rank 0 computed for
+                    # this chunk -- compare against how many
+                    # [PREFILL_ADVANCE_APPLIED] lines rank 1 actually
+                    # logs with done=True. Root-caused in Section 45;
+                    # retained as the regression tripwire for it.
                     logger.info(
                         f"[HANDOFF_BUDGET] chunk_index="
                         f"{self._prefill_chunk_index} "
