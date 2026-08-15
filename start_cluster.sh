@@ -1142,10 +1142,56 @@ for NODE in "${NODES[@]}"; do
     ssh "$NODE" "sudo -n xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true"
     
     # Update and Build Logic
-    # main IS the verified production config (fix/c2-serving-hardening merged
-    # 2026-07-07). Override with EXO_TARGET_BRANCH for experiments only.
-    TARGET_BRANCH="${EXO_TARGET_BRANCH:-main}"
-    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && git fetch origin && git reset --hard && git checkout $TARGET_BRANCH && git reset --hard origin/$TARGET_BRANCH && git submodule update --init --recursive'" || { echo "Failed to update repo on $NODE"; exit 1; }
+    #
+    # Branch selection lives at the pre-deploy push check above
+    # (PUSH_CHECK_BRANCH / EXO_TARGET_BRANCH, ~line 997): that gate verifies
+    # this laptop's HEAD is pushed to the intended branch BEFORE anything is
+    # deployed. Since the rsync below copies this checkout's working tree
+    # verbatim, whatever branch is checked out HERE is what the studios run
+    # -- there is no separate per-node branch decision to make anymore, so
+    # the old local TARGET_BRANCH variable would be dead weight.
+    #
+    # 2026-08-15: this used to be a per-node
+    #   `git fetch origin && git reset --hard origin/$TARGET_BRANCH
+    #    && git submodule update --init --recursive`
+    # i.e. every studio independently pulled from github.com over the
+    # internet. That step failed FIVE times in a single session with
+    # "fatal: unable to access 'https://github.com/adurham/exo.git/':
+    # Could not resolve host: github.com" -- brief DNS blips on the LAN's
+    # single resolver (192.168.86.2, no fallback). Direct testing showed
+    # the resolver healthy 10/10 immediately afterwards, so these are
+    # transient, not an outage.
+    #
+    # Worse than the lost time: a failure here is PER-NODE, so a blip on
+    # one studio left the two nodes on DIFFERENT commits while the launch
+    # continued -- observed live (m4-1 on 8862ec00, m4-2 stranded on
+    # 247f3db9). That is a real correctness hazard for a 2-rank cluster
+    # where both ranks must run identical code.
+    #
+    # This laptop's checkout is already the canonical source of truth (the
+    # studios never commit -- they were `git reset --hard`ed every launch
+    # anyway), so rsync from it directly instead: no github dependency, one
+    # source for both nodes, and much faster (incremental ~instant vs a
+    # cold 2m14s).
+    #
+    # --delete keeps the old reset --hard semantics (remote-only files are
+    # removed). .git IS synced so existing git-based sanity checks (the
+    # commit-consistency verification below, `git rev-parse` health checks)
+    # keep working unchanged.
+    #
+    # CRITICAL: mlx/ and especially mlx/build (~1.0G) MUST be included.
+    # mlx is a submodule and its C++ build cache lives there -- excluding
+    # it turns every relaunch into a full MLX rebuild (~8min instead of
+    # ~3min). Only genuinely regenerable/host-specific dirs are excluded.
+    echo "Syncing repo to $NODE via rsync (canonical source: $(hostname -s))..."
+    rsync -a --delete \
+        --exclude '.venv/' \
+        --exclude '__pycache__/' \
+        --exclude '*.pyc' \
+        --exclude 'dashboard/node_modules/' \
+        --exclude '.pytest_cache/' \
+        "$HOME/repos/exo/" "$NODE:~/repos/exo/" \
+        || { echo "Failed to rsync repo to $NODE"; exit 1; }
     
     echo "Ensuring build dependencies on $NODE..."
     ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"

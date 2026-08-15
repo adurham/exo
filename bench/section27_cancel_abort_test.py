@@ -206,15 +206,46 @@ async def poll_runner_cpu_time_after_cancel(
 
 async def verify_cluster_healthy(base_url: str, model: str) -> bool:
     """A trivial post-cancel request must complete cleanly -- proves the
-    fix didn't leave the session/runner corrupted."""
+    fix didn't leave the session/runner corrupted.
+
+    2026-08-15 (design doc Sections 46-48): the prompt and token budget
+    here were "Say hello in one word." / max_tokens=10, which this
+    THINKING model can never satisfy -- it spends the whole budget inside
+    its reasoning block and returns content='' with
+    finish_reason='length', so `bool(content)` was always False and this
+    check reported the cluster unhealthy on every single run, cancel or
+    no cancel.
+
+    Verified directly against the live cluster while root-causing:
+      "Say hello in one word", max_tokens=200 -> finish=stop, content='',
+                                                 text all in reasoning_content
+      same, with thinking disabled            -> content='' as well
+      "What is 2+2? ... just the number",
+                              max_tokens=300  -> finish=stop, content='4'
+    i.e. the cluster was healthy the whole time; the probe was mis-chosen.
+
+    Fixed by asking a question this model DOES answer with real
+    non-reasoning content, and giving it enough budget to finish thinking
+    first. The assertion itself is deliberately NOT weakened -- we still
+    require finish_reason == "stop" AND real content, because a runner
+    left corrupted by a bad cancel is exactly what this must catch.
+    """
     body = {
         "model": model,
-        "messages": [{"role": "user", "content": "Say hello in one word."}],
+        "messages": [
+            {
+                "role": "user",
+                "content": "What is 2+2? Answer with just the number.",
+            }
+        ],
         "temperature": 0.0,
-        "max_tokens": 10,
+        # Generous enough for this model's reasoning block to complete and
+        # still emit its (short) real answer -- measured at ~28 reasoning
+        # tokens + a 1-token answer for this prompt.
+        "max_tokens": 300,
     }
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             resp = await client.post(f"{base_url}/v1/chat/completions", json=body)
             if resp.status_code != 200:
                 print(f"[test] post-cancel health check FAILED: HTTP {resp.status_code}")
