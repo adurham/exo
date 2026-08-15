@@ -8471,3 +8471,136 @@ it must catch.
    splits and therefore different parity, which is exactly what hid the
    Section 45 bug from Section 40.
 3. Section 41's CPU/thread-scheduling-contention investigation.
+
+## 50-51. Section 17's measurement pass FINALLY RUN (open since
+2026-08-08), plus a usage-accounting bug and a negative retransmit
+experiment (2026-08-15)
+
+### Section 17's measurement pass: DONE. Numbers at depth, needle-verified.
+
+Open since 2026-08-08 and derailed every time by the transport/
+cancellation bug chain. With that chain fixed (Sections 45-49) it
+finally ran to completion, single session, concurrency=1, production
+`-0731` checkpoint, `bench/phase3_precheck_depth_throughput.py`:
+
+```
+  100K ctx: prefill 320 tok/s | decode  0.48 tok/s | needle OK
+  300K ctx: prefill 304 tok/s | decode 18.01 tok/s | needle OK
+  500K ctx: prefill 286 tok/s | decode  0.48 tok/s | needle OK
+```
+
+**Quality holds at full 500K depth** -- the needle was found at every
+depth, so this is not a coherence-degradation story.
+
+**Prefill is healthy and near-flat with depth** (320 -> 304 -> 286
+tok/s), consistent with this cluster's known 250-300 tok/s baseline.
+
+**Decode is BIMODAL, not depth-scaling.** 0.48 tok/s appears twice --
+identically -- and 18.01 tok/s once, on the SAME cluster, config and
+session. Depth does not explain a 37x spread; a per-token stall that a
+run either hits or mostly escapes does. So the honest reading of
+requirement 3 is NOT "0.48 tok/s, 62x short of the bar". It is:
+
+> ~18 tok/s is achievable on today's code -- within ~1.7x of the 30
+> tok/s target -- with a retransmit-stall bug that intermittently
+> collapses it to 0.48.
+
+That materially changes the Phase 3 conversation: the gap to requirement
+3 is a BUG to fix, not a fundamental compute/bandwidth ceiling. Note
+this does not resurrect micro-batch interleaving as the lever -- Section
+17's per-session finding still stands; it just means the remaining
+single-stream gap is much smaller than the raw worst-case number implied.
+
+### The stall, characterized (NOT hardware, NOT the driver)
+
+From one 100K run's own logs:
+
+```
+barrier latency <100ms : 29101   (healthy path is 71-122 MICROseconds)
+barrier latency  >1s   :  1403   (4.5% of barriers)
+```
+
+Every slow barrier is the same shape on BOTH ranks: rank0 posts its send
+in ~45us, immediately sees `peer_got_count=0/1`, waits the FULL 500ms
+retransmit quiet timer, retransmits (`to_resend_count=1`), and the
+retransmit succeeds. ~1403 x 0.5s = ~700s of pure stall in a single run.
+
+Three independent lines of evidence say this is a software race, not the
+wire:
+
+1. **Not hardware.** `en3` reports `Ierrs 0 / Oerrs 0 / Coll 0`, link
+   healthy at 8X / 10.0 Gbps.
+2. **Size-specific.** EVERY retransmit is `num_chunks=1`. The bulk
+   2049-chunk transfers lose nothing -- the exact inverse of a
+   bandwidth/wire problem.
+3. **Sender-asymmetric.** rank0 (driver, races ahead) 670 retransmits vs
+   rank1 (follower, usually already parked in recv) 181 -- a 3.7x skew.
+   Wire loss would be roughly symmetric.
+
+And the codebase already names this failure. `mesh_impl.h`'s
+`ack_sync_pre` comment: *"close the inter-lambda window where peer SEND
+lands at our empty data-QP recv FIFO and UC silently drops"*. That
+mitigation is wired into COLLECTIVE lambdas -- not the p2p
+`send()`/`recv()` path PP decode actually uses.
+
+### Experiment (a): lowering the retransmit timer -- NEGATIVE, reverted
+
+`jaccl_ack_retransmit_us()` reads `MLX_JACCL_ACK_RETRANSMIT_US` via
+`std::getenv` at runtime, so this was testable with no C++ change and no
+rebuild -- the knob simply was not threaded through start_cluster.sh's
+env allowlist. Threaded it, defaulted to 10ms, re-measured:
+
+```
+                 baseline (500ms)         10ms
+  100K decode    0.48 tok/s, needle OK    0 tokens, needle NO
+  300K decode   18.01 tok/s, needle OK    0 tokens, needle NO
+```
+
+**It breaks generation outright.** At 10ms the timer fires below the real
+round-trip, so frames merely IN FLIGHT are retransmitted as though lost;
+the duplicate arrives after the receiver has advanced and is discarded
+as stale -- `recv() discarded stale message: received_seq=410
+expected_seq=411`, 184 such events versus ZERO in the baseline.
+
+**The trap worth recording:** by transport metrics this looked like a
+WIN. Retransmits fell 1403 -> 106, STALLED 0, reconnects 0. A
+throughput-or-transport-only reading would have shipped it. The
+needle-in-haystack assertion is the only thing that caught that product
+output had gone to zero -- direct payoff for having fixed the
+health-check probe rather than weakening it (Section 49).
+
+Reverted to jaccl's 500ms default with the negative result recorded
+inline at the call site. The knob stays threaded: it is correct plumbing
+and turns any future retune into a one-variable A/B. Any such retune must
+stay above the real RTT and be validated with the needle check, not a
+throughput number alone.
+
+Conclusion: the timer is the WRONG LEVER. The fix belongs at the race
+itself -- extending the proven `ack_sync_pre` pattern to the p2p
+`send()`/`recv()` path. That is jaccl soft-reliability work inside this
+fork (the same layer Section 39 already modified), not MLX core and not
+the Apple driver.
+
+### Section 50 (exo@7d14daea7): usage.prompt_tokens reported the prompt TAIL
+
+Found while running the above. The usage block is built downstream as
+`prompt_tokens = len(state.all_prompt_tokens)`, but
+`_submit_batched_decode_deferred` registered the task with
+`all_prompt_tokens=last_tokens` -- the short tail, not the prompt. The
+API therefore reported `prompt_tokens: 2` for a ~100,075-token prompt,
+which silently zeroed the harness's prefill throughput (`prompt_tokens /
+TTFT`) and would corrupt billing, metrics and `exo_prompt_tokens_total`
+alike. Fixed to use the full encoded prompt already in scope; the
+harness now correctly reports `Prompt tokens: 100,092`.
+
+The sibling `_submit_batched_decode` has the same line but no full
+prompt in scope and no callers -- left alone deliberately rather than
+changing a signature on a dead path.
+
+### Still open
+
+1. **Option (b): the p2p send-before-recv-post race.** Now the clear
+   next move for requirement 3, with the cheap shortcut ruled out.
+2. `start_cluster.sh`'s `DSV4_MODEL_ID` still defaults to the stale
+   preview checkpoint -- override explicitly until fixed at source.
+3. Section 41's CPU/thread-scheduling-contention investigation.
