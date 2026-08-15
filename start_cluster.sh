@@ -1796,7 +1796,18 @@ for NODE in "${NODES[@]}"; do
     # control frames on a dedicated QP), so a short timer mainly trades a
     # few redundant sends for a large latency win. Set to 500000 to restore
     # jaccl's historical default.
-    : "${MLX_JACCL_ACK_RETRANSMIT_US:=10000}"
+    # EXPERIMENT RESULT (2026-08-15): 10000 (10ms) was tried and REVERTED --
+    # it BREAKS generation outright. At 10ms the timer fires below the real
+    # round-trip for these transfers, so we retransmit frames that were merely
+    # IN FLIGHT, not lost. The duplicates then arrive after the receiver has
+    # advanced and are discarded as stale: 184 "recv() discarded stale
+    # message" events (baseline: ZERO), with the signature
+    # received_seq=410 expected_seq=411 -- off-by-one duplicates from the
+    # previous call. Net effect was 0 completion tokens and needle=NO at BOTH
+    # 100K and 300K, i.e. no output at all, versus a working baseline.
+    # Left at jaccl's default; any retune must stay above the real RTT and be
+    # re-validated with the needle check, not just with a throughput number.
+    : "${MLX_JACCL_ACK_RETRANSMIT_US:=500000}"
     [ -n "${MLX_JACCL_ACK_RETRANSMIT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_RETRANSMIT_US=$MLX_JACCL_ACK_RETRANSMIT_US"
     # MLX_JACCL_RECONNECT_FRESH: in-process device-context rebuild — the warmup
     # QP-flake fix (mlx e399ecfb); ~0.15s vs a 90s re-place. Validated prod default.
