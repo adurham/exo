@@ -448,6 +448,16 @@ class BatchGenerator(Engine):
     _pending_pp_spec_cancel: dict[int, TaskId] = field(
         default_factory=dict, init=False
     )
+    # Section 46 (2026-08-15): the batched-decode FOLLOWER analogue of
+    # _pending_pp_spec_cancel. A cancelled uid whose per-request state can
+    # only be released by the DRIVER's incoming EvictMessage is parked here
+    # (kept in _active_tasks, so runner.py's loop stays alive and this rank
+    # keeps pumping tick() to service that message) instead of being
+    # finalized immediately. Maps uid -> the TaskId to report once the evict
+    # has genuinely been handled.
+    _pending_batched_decode_evict: dict[int, TaskId] = field(
+        default_factory=dict, init=False
+    )
     _jaccl_step_handle: BinaryIO | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
@@ -858,15 +868,85 @@ class BatchGenerator(Engine):
             # response continue flowing through queue/output_generator
             # above (so any partial streamed output up to this point is
             # still captured) without also terminating the task here.
-            if response.finish_reason is not None and uid not in self._pending_pp_spec_cancel:
+            if (
+                response.finish_reason is not None
+                and uid not in self._pending_pp_spec_cancel
+                and uid not in getattr(self, "_pending_batched_decode_evict", {})
+            ):
                 output.append((task.task_id, FinishedResponse()))
                 del self._active_tasks[uid]
 
         return itertools.chain(
             output,
             self._drain_pending_pp_spec_cancellations(),
+            self._drain_pending_batched_decode_evictions(),
             self._apply_cancellations(),
         )
+
+    def _drain_pending_batched_decode_evictions(
+        self,
+    ) -> Iterator[tuple[TaskId, CancelledResponse]]:
+        """Finalize batched-decode FOLLOWER cancellations whose driver-sent
+        EvictMessage has actually been serviced since they were parked.
+
+        Section 46 (2026-08-15). Companion to
+        ``_drain_pending_pp_spec_cancellations`` -- same deferral pattern,
+        different completion signal.
+
+        THE BUG THIS CLOSES (confirmed on real 2-node hardware via
+        simultaneous faulthandler stacks from both ranks): a client cancel
+        reaches BOTH ranks. On the DRIVER, ``ExoBatchGenerator.cancel()``
+        calls ``complete_request()`` -> ``send_evict_message()`` and then
+        BLOCKS waiting for the EvictAck. On the FOLLOWER, this class used to
+        immediately report ``CancelledResponse`` and drop the uid from
+        ``_active_tasks`` -- which empties ``runner.py``'s
+        ``while self.active_tasks:`` loop, so the follower exits it and goes
+        idle ("runner idle" logged 5x). But the follower's ONLY handler for
+        ``MSG_KIND_EVICT`` lives inside ``Rank1BatchedDecodeGlue.tick()``,
+        which that loop is what drives. So the evict is never serviced, the
+        driver's ``send_header`` blocks forever, and the follower's KV/cache
+        slot is never released:
+
+            driver:   cancel -> complete_request -> send_evict_message
+                      -> send_header                      [BLOCKED FOREVER]
+            follower: runner.py:317 main -> queue.get     [IDLE, gone home]
+
+        Note the follower genuinely NEEDS that evict -- it is not redundant
+        post-cancel. ``cancel()``'s batched-decode branches are all gated on
+        ``_batched_decode_rank0_glue is not None`` (driver-only), so the
+        follower frees NOTHING locally; only the driver's EvictMessage runs
+        ``session.evict()`` + ``release_slot()`` on it. Skipping the evict
+        would trade a deadlock for a per-cancel KV-slot leak.
+
+        Fix: park such uids (keeping them in ``_active_tasks`` so the runner
+        loop keeps pumping ``tick()``), and finalize here once the evict has
+        genuinely been handled. The completion signal is the glue's own
+        existing ``evicted_request_id`` -> synthesized ``finish_reason``
+        path, which already fires exactly when ``MSG_KIND_EVICT`` is
+        serviced -- so this needs no new cross-rank protocol, only the
+        deferral. ``ExoBatchGenerator.has_work`` already reports True while
+        the follower glue holds the request, so the loop stays alive on its
+        own for the extra step()s this takes to converge.
+        """
+        # getattr-guarded: some tests construct BatchGenerator via
+        # object.__new__ (bypassing __post_init__/dataclass field defaults),
+        # so this attribute can legitimately be absent. Matches the
+        # defensive getattr already used for _gen's optional hooks.
+        if not getattr(self, "_pending_batched_decode_evict", None):
+            return iter([])
+
+        still_held = getattr(
+            self._gen, "batched_decode_follower_awaiting_evict", None
+        )
+        results: list[tuple[TaskId, CancelledResponse]] = []
+        for uid, task_id in list(self._pending_batched_decode_evict.items()):
+            # Finalize once the follower no longer holds the request -- i.e.
+            # the driver's evict landed and tick() released the slot.
+            if still_held is None or not still_held(uid):
+                results.append((task_id, CancelledResponse()))
+                self._pending_batched_decode_evict.pop(uid, None)
+                self._active_tasks.pop(uid, None)
+        return iter(results)
 
     def _apply_cancellations(
         self,
@@ -918,6 +998,14 @@ class BatchGenerator(Engine):
         uids_to_cancel: list[int] = []
         results: list[tuple[TaskId, CancelledResponse]] = []
         pp_spec_gen_by_uid = getattr(self._gen, "_pp_spec_gen_by_uid", {})
+        # Section 46 (2026-08-15): on the FOLLOWER rank of a batched-decode
+        # session, finalizing here is the same "runner goes idle while the
+        # peer still needs it" bug this method's own docstring describes for
+        # the PP-spec path -- see _follower_awaiting_evict()'s docstring for
+        # the full mechanism and the live stack traces that proved it.
+        follower_awaiting_evict = getattr(
+            self._gen, "batched_decode_follower_awaiting_evict", None
+        )
 
         for uid, (task, _, _) in list(self._active_tasks.items()):
             if task.task_id in self._cancelled_tasks or cancel_all:
@@ -927,6 +1015,22 @@ class BatchGenerator(Engine):
                     # report CancelledResponse yet -- the generator hasn't
                     # actually finished.
                     self._pending_pp_spec_cancel[uid] = task.task_id
+                elif follower_awaiting_evict is not None and follower_awaiting_evict(
+                    uid
+                ):
+                    # Same deferral, different reason: this rank is the
+                    # FOLLOWER and still holds real per-request state
+                    # (KV/cache slot) that only the DRIVER's incoming
+                    # EvictMessage releases. That message is serviced by
+                    # Rank1BatchedDecodeGlue.tick()'s MSG_KIND_EVICT branch,
+                    # which only runs while runner.py's `while
+                    # self.active_tasks:` loop is still alive. Finalizing now
+                    # exits that loop and strands the driver blocked forever
+                    # in its own send_evict_message(). Park instead; the
+                    # existing evicted_request_id -> finish_reason drain path
+                    # (see _step_batched_decode's rank-1 branch) finalizes it
+                    # once the evict has ACTUALLY been serviced.
+                    self._pending_batched_decode_evict[uid] = task.task_id
                 else:
                     results.append((task.task_id, CancelledResponse()))
                     del self._active_tasks[uid]
@@ -935,7 +1039,9 @@ class BatchGenerator(Engine):
             self._gen.cancel(uids_to_cancel)
 
         already_cancelled = {tid for tid, _ in results}
-        pending_task_ids = set(self._pending_pp_spec_cancel.values())
+        pending_task_ids = set(self._pending_pp_spec_cancel.values()) | set(
+            getattr(self, "_pending_batched_decode_evict", {}).values()
+        )
         for tid in self._cancelled_tasks:
             if (
                 tid != CANCEL_ALL_TASKS

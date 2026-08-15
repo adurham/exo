@@ -2065,6 +2065,34 @@ class ExoBatchGenerator:
 
         logger.info("Speculative warmup complete")
 
+    def batched_decode_follower_awaiting_evict(self, uid: int) -> bool:
+        """True iff this rank is the batched-decode FOLLOWER and still holds
+        real per-request state for ``uid`` that ONLY the driver's incoming
+        ``EvictMessage`` can release.
+
+        Section 46 (2026-08-15). Used by ``BatchGenerator._apply_cancellations``
+        to defer finalizing a cancelled uid on the follower, instead of
+        reporting ``CancelledResponse`` immediately and letting
+        ``runner.py``'s ``while self.active_tasks:`` loop exit -- which
+        strands the driver blocked forever inside its own
+        ``send_evict_message()``, because the follower's ``MSG_KIND_EVICT``
+        handler only runs from inside that loop's ``tick()``. See
+        ``_drain_pending_batched_decode_evictions``'s docstring for the full
+        mechanism and the live two-sided stack traces.
+
+        Returns False on the DRIVER rank (which owns the evict and tears
+        down synchronously) and False when batched decode isn't active at
+        all, so the caller's existing immediate-finalize path is unchanged
+        for every case except the one that actually deadlocks.
+        """
+        if self._batched_decode_rank1_glue is None:
+            return False
+        # The follower's own cache slot for this request is released by
+        # RankOneMirrorSession.evict()/release_slot() inside tick()'s
+        # MSG_KIND_EVICT branch. Until that runs, the request is still
+        # genuinely held here and the runner loop must stay alive.
+        return uid in self._active_tasks
+
     @property
     def has_work(self) -> bool:
         # New mlx-lm split BatchGenerator into _prompt_batch + _generation_batch
