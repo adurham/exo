@@ -8604,3 +8604,130 @@ changing a signature on a dead path.
 2. `start_cluster.sh`'s `DSV4_MODEL_ID` still defaults to the stale
    preview checkpoint -- override explicitly until fixed at source.
 3. Section 41's CPU/thread-scheduling-contention investigation.
+
+## 52. The UC packet loss is FIXED (4.5% -> 0%) -- and it was NOT the
+decode bottleneck. Requirement 3 re-characterized honestly. (2026-08-15)
+
+### What was built
+
+A standing pre-posted recv pool on the DATA QP (`connections_`) for the
+sz=0 (<=4096B) size class -- mlx@5a23bac2f, exo@6d61deae0. Not a new
+mechanism: the ACK QP (`post_ack_recvs`) and the p2p_retry QP
+(`post_p2p_retry_recvs`) already had exactly this, at the same three
+lifecycle sites (ctor / reconnect / reconnect_fresh) and for the same
+documented reason. The data QP was simply missing it.
+
+Gated on `MLX_JACCL_DATA_RECV_POOL` (default ON, set `=0` to A/B).
+
+### It worked, decisively
+
+|                                    | before      | after |
+|------------------------------------|-------------|-------|
+| barriers >1s                       | 1403 (4.5%) | 13 (0.27%) |
+| retransmits                        | 1403        | 88 |
+| **true lost-send stalls** (`peer_got_count=0/N`) | **1403** | **ZERO** |
+
+The last row is the one that matters. Separating "peer received NOTHING"
+(a real UC drop) from "peer received everything, we are waiting on it"
+shows the empty-FIFO drop is completely gone, not merely reduced. The
+residual 88 retransmits and 13 slow barriers are not lost first-sends.
+
+Verification bar met in full: needle found at both depths, and the
+cancel/abort suite passes **5/5** with the transport change in
+(`content='4' finish_reason=stop` on every run) -- no regression from
+touching the transport layer.
+
+### The correction: it did NOT fix decode, and 18.01 tok/s was an artifact
+
+Decode went 0.48 -> 0.54 tok/s at 100K. Essentially unmoved. Two errors
+of mine are corrected here, both worth recording:
+
+1. **Bad arithmetic across runs.** I claimed "~1403 x 0.5s = ~700s of
+   stall, this dominates decode". In the actual measured run there were
+   13 stalls = 6.5s inside a 24.2s decode. The stalls were real but were
+   never the dominant cost. I asserted the causal link before checking
+   that the numbers came from the same run.
+
+2. **18.01 tok/s did not reproduce.** The post-fix 300K run -- with
+   transport now provably perfect -- measured **0.46 tok/s** (113 tokens
+   / 245.6s), not 18. The earlier 18.01 came from a 52-token / 2.9s
+   sample, far too short to be representative. So 18.01 was the outlier,
+   **not** 0.48. My "~18 tok/s achievable, the gap is just a bug"
+   framing was wrong and should not be carried into planning.
+
+Steady state, with zero packet loss:
+
+```
+  100K: prefill 224.5 tok/s | decode 0.54 tok/s (13 tok / 24.2s)  needle OK
+  300K: prefill 213.2 tok/s | decode 0.46 tok/s (113 tok / 245.6s) needle OK
+```
+
+Per-token cost is ~1.86 s/tok at 100K and ~2.17 s/tok at 300K --
+essentially **flat with depth**, which is itself diagnostic: this is not
+a context-length scaling problem.
+
+### What actually dominates decode
+
+```
+  p50 barrier =     39 us   <- the fast path is genuinely healthy
+  p90 barrier = 189060 us   = 189 ms
+  p99 barrier = 582719 us   = 583 ms
+```
+
+And every one of the ~1010 slow barriers reports `peer_got_count>=1/1
+peer_has_all=1` -- the data had already arrived. The rank is blocked
+waiting on **the peer rank's compute**, not on the wire.
+
+That is pipeline-parallel serialization at concurrency=1: with a single
+in-flight request, rank0 idles while rank1 computes its half of the
+model and vice versa, and there is no second stream to fill the bubble.
+Transport is no longer implicated at all -- p50 of 39us proves the wire
+is fine.
+
+This is precisely the regime Section 17 finding #3 identified:
+requirement 3 is PER-SESSION, and a single session cannot fill a
+pipeline bubble by construction. Micro-batch interleaving (Phase 3)
+raises AGGREGATE throughput across concurrent streams and therefore
+still does not address it.
+
+### Honest status of requirement 3
+
+Three successive readings this session, each corrected by better data:
+1. "0.48 tok/s, 62x short" -- stall-contaminated, and I could not
+   separate bug from capability.
+2. "~18 tok/s, the gap is a bug" -- over-credited the transport fix on
+   the strength of one unrepresentative 52-token sample.
+3. **Current, best-evidenced:** ~0.5 tok/s per-session decode at depth,
+   flat in context length, with transport provably clean and the cost
+   sitting in PP serialization at concurrency=1.
+
+Requirement 3 (30 tok/s per-session @ 500K) is therefore **not reachable
+by fixing bugs in the current PP-at-concurrency-1 decode path** -- the
+remaining gap is structural, not defect-driven. Any credible route needs
+a different decode strategy (e.g. making speculation actually work under
+PP -- note the PP speculative loops are confirmed never to execute today
+despite `EXO_SPECULATIVE=1`; or a TP-style split for decode; or
+overlapping compute across the pipeline stages). That is a design
+decision, not a bug hunt, and it should be taken deliberately rather
+than assumed away.
+
+### Value delivered regardless
+
+A genuine transport defect is closed (4.5% -> 0% UC drop) with a
+zero-per-transfer-cost fix that reuses a proven in-repo pattern, and a
+real confound is removed from every future measurement. The measurement
+apparatus is also now trustworthy: `usage.prompt_tokens` reports
+correctly (Section 50), so prefill throughput computes from the API
+without manual correction.
+
+### Still open
+
+1. **Requirement 3 needs a design decision**, per above -- not more
+   bug-fixing on this path.
+2. PP speculative decode never executes despite being enabled
+   (`EXO_SPECULATIVE=1`, `EXO_DSV4_DSPARK=1`); confirmed by zero log hits
+   for the PP spec loops. Worth its own investigation, and directly
+   relevant to (1).
+3. `start_cluster.sh`'s `DSV4_MODEL_ID` still defaults to the stale
+   preview checkpoint.
+4. Section 41's CPU/thread-scheduling-contention investigation.
