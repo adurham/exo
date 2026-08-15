@@ -4911,14 +4911,29 @@ class ExoBatchGenerator:
             if uid in self._pp_spec_gen_by_uid:
                 self._pp_spec_cancel_requested.add(uid)
             deferred = self._deferred_prefill_by_uid.get(uid)
-            logger.warning(
-                f"[CANCEL_DIAG2] uid={uid} deferred={deferred is not None} "
-                f"drive={(deferred.drive is not None) if deferred else None} "
-                f"r0glue={self._batched_decode_rank0_glue is not None} "
-                f"r1glue={self._batched_decode_rank1_glue is not None} "
-                f"ppspec={uid in self._pp_spec_gen_by_uid}"
+            # Section 47 (2026-08-15): ask the GLUE whether a chunk-drive
+            # prefill is live for this uid, not the generator's
+            # _deferred_prefill_by_uid map. That map's entry is popped the
+            # moment the drive is handed to the glue, so during an ACTIVE
+            # chunk-drive `deferred` is already None -- confirmed on real
+            # hardware (both ranks logged deferred=False drive=None at cancel
+            # time while genuinely mid-prefill). Relying on it meant this
+            # branch never fired, the driver fell through to an elif gated on
+            # has_admitted_request() (also false mid-prefill), and NO teardown
+            # ran at all: zero EvictMessages/PrefillAbortMessages on the wire
+            # while the cancelled request kept right on computing. See
+            # is_prefill_session_active_for()'s docstring for the full
+            # writeup.
+            _active_glue = (
+                self._batched_decode_rank0_glue
+                if self._batched_decode_rank0_glue is not None
+                else self._batched_decode_rank1_glue
             )
-            if deferred is not None and deferred.drive is not None:
+            chunk_drive_live = (
+                _active_glue is not None
+                and _active_glue.is_prefill_session_active_for(uid)
+            )
+            if chunk_drive_live or (deferred is not None and deferred.drive is not None):
                 if self._batched_decode_rank0_glue is not None:
                     from exo.worker.engines.mlx.pp_prefill_session import (
                         PrefillSessionError,

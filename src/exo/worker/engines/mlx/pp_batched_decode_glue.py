@@ -696,6 +696,35 @@ class Rank0BatchedDecodeGlue:
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
 
+    def is_prefill_session_active_for(self, request_id: int) -> bool:
+        """True iff a chunk-drive prefill session for exactly ``request_id``
+        is live on THIS rank right now.
+
+        Section 47 (2026-08-15). ``ExoBatchGenerator.cancel()`` used to
+        detect "this uid is mid-chunk-drive" via
+        ``_deferred_prefill_by_uid[uid].drive is not None`` -- but that
+        bookkeeping entry is popped the moment the drive is handed to the
+        glue, so during an ACTIVE chunk-drive it is already gone. Proven on
+        real hardware with a targeted diagnostic: at cancel time both ranks
+        logged ``deferred=False drive=None`` while the request was genuinely
+        mid-prefill, so cancel()'s chunk-drive branch was skipped entirely
+        and the driver then fell through to an ``elif`` gated on
+        ``has_admitted_request()`` -- also false, because the request is
+        still prefilling and was never admitted to decode. Both teardown
+        paths missed it, so ZERO EvictMessages/PrefillAbortMessages ever
+        reached the wire and the cancelled request just kept computing.
+
+        The live session is owned by the glue (``_active_prefill_session``),
+        not by the generator's deferred-prefill map, so this is the
+        authoritative place to ask. Matches on the exact request_id rather
+        than ``has_active_prefill_session()``'s any-session boolean, so
+        cancelling uid A can never be mistaken for uid B's live drive.
+        """
+        if self._active_prefill_session is None:
+            return False
+        active_id, _session = self._active_prefill_session
+        return active_id == request_id
+
     def reset_chunk_drive_state_after_reconnect(self) -> int | None:
         """Purely LOCAL chunk-drive state reset after a jaccl in-place
         reconnect (2026-08-09, design doc Section 27/28 -- real hardware
@@ -1617,6 +1646,35 @@ class Rank1BatchedDecodeGlue:
 
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
+
+    def is_prefill_session_active_for(self, request_id: int) -> bool:
+        """True iff a chunk-drive prefill session for exactly ``request_id``
+        is live on THIS rank right now.
+
+        Section 47 (2026-08-15). ``ExoBatchGenerator.cancel()`` used to
+        detect "this uid is mid-chunk-drive" via
+        ``_deferred_prefill_by_uid[uid].drive is not None`` -- but that
+        bookkeeping entry is popped the moment the drive is handed to the
+        glue, so during an ACTIVE chunk-drive it is already gone. Proven on
+        real hardware with a targeted diagnostic: at cancel time both ranks
+        logged ``deferred=False drive=None`` while the request was genuinely
+        mid-prefill, so cancel()'s chunk-drive branch was skipped entirely
+        and the driver then fell through to an ``elif`` gated on
+        ``has_admitted_request()`` -- also false, because the request is
+        still prefilling and was never admitted to decode. Both teardown
+        paths missed it, so ZERO EvictMessages/PrefillAbortMessages ever
+        reached the wire and the cancelled request just kept computing.
+
+        The live session is owned by the glue (``_active_prefill_session``),
+        not by the generator's deferred-prefill map, so this is the
+        authoritative place to ask. Matches on the exact request_id rather
+        than ``has_active_prefill_session()``'s any-session boolean, so
+        cancelling uid A can never be mistaken for uid B's live drive.
+        """
+        if self._active_prefill_session is None:
+            return False
+        active_id, _session = self._active_prefill_session
+        return active_id == request_id
 
     def reset_chunk_drive_state_after_reconnect(self) -> int | None:
         """Rank 1's mirror of ``Rank0BatchedDecodeGlue``'s own
