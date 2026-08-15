@@ -4911,6 +4911,13 @@ class ExoBatchGenerator:
             if uid in self._pp_spec_gen_by_uid:
                 self._pp_spec_cancel_requested.add(uid)
             deferred = self._deferred_prefill_by_uid.get(uid)
+            logger.warning(
+                f"[CANCEL_DIAG2] uid={uid} deferred={deferred is not None} "
+                f"drive={(deferred.drive is not None) if deferred else None} "
+                f"r0glue={self._batched_decode_rank0_glue is not None} "
+                f"r1glue={self._batched_decode_rank1_glue is not None} "
+                f"ppspec={uid in self._pp_spec_gen_by_uid}"
+            )
             if deferred is not None and deferred.drive is not None:
                 if self._batched_decode_rank0_glue is not None:
                     from exo.worker.engines.mlx.pp_prefill_session import (
