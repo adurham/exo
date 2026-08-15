@@ -7783,3 +7783,217 @@ should be treated as solid and NOT reverted while investigating this.
    this bug was invisible until that specific verification pass ran).
 5. The CPU/thread-scheduling-contention investigation (Section 41,
    independent track) remains open and untouched this session.
+
+## 44. Post-power-outage recovery: continued investigation trail
+recovered from git history (uncaptured by any handoff doc), and
+current HEAD's Bug 3 fix CONFIRMED NOT SUFFICIENT on real hardware
+(2026-08-14/15)
+
+### What happened between Section 43 and the outage
+
+A whole-house power outage hit both Mac Studios at some point after
+the last commit on this branch (`543b3adae`, 2026-08-11 10:58). No
+handoff doc or design-doc section was ever written covering the work
+between `handoff-2026-08-10-section43-part2.md` and the outage --
+this section reconstructs it from `git log`/commit messages, since
+that's the only surviving record.
+
+Real, substantial progress happened in that window, entirely inside
+the mlx submodule + a few exo-side cancel-path fixes, all still
+tagged "Section 43 continued" in commit messages but never written
+into this doc:
+
+1. **`9a1a5f99c`** (exo): fixed a genuine cross-rank race in PP
+   speculative-decode cancellation -- `ExoBatchGenerator.cancel()`
+   was closing the generator unilaterally per-rank, which could
+   leave one rank spin-polling forever if the peer had already moved
+   to the next cycle. Fixed via a new in-band cross-rank
+   `pipeline_agree_cancel()` checkpoint (OR-reduced across ranks,
+   both must agree before either stops).
+2. **`a50c003ce`** (exo): fixed a related bug the above fix exposed --
+   `cancel()` was reporting `CancelledResponse` and freeing the uid
+   BEFORE the generator had actually finished draining via its new
+   checkpoint, corrupting the NEXT request with
+   `PPSpecAlreadyActiveError`. Fixed by deferring finalization until
+   the generator genuinely completes.
+3. **`67f22a1d5`** (mlx): found that Section 39's own stated liveness
+   backstop (`p2p_retry_exchange`'s StallWatch, tracking
+   `peer_frame_seen` popcount) was watching the wrong thing -- it
+   tracks the METADATA BARRIER heartbeat, not actual DATA CHUNK
+   progress. Confirmed live: a barrier round-tripped successfully
+   every ~500ms for 8+ minutes while the real data transfer
+   (`peer_got_count`) sat frozen at 0 the entire time -- the barrier
+   heartbeat kept resetting the stall timer, so `STALLED` never
+   fired and `grep -c STALLED` read 0 on both nodes despite a real,
+   total stall in progress. This is likely THE original Section 43
+   Bug 3 stall, just with its own fatal-report path silently
+   defeated by measuring the wrong signal. Added two NEW, independent
+   StallWatch instances (one for send()'s `peer_got_count`, one for
+   recv()'s own directly-observed `all_recv`), same 300s timeout,
+   explicitly reviewed to not reintroduce Section 39's false-positive
+   (this fires on genuine zero-progress only, not slow-but-gaining).
+4. **`f31d83e7d`** (exo) -- the commit this session initially treated
+   as "the fix": `pipeline_agree_cancel()`'s own implementation had a
+   Python `or` short-circuit bug --
+   `agreed = agreed or _recv(rank + 1)` -- where `_recv()` is not
+   pure; it has a mandatory RDMA side effect (posting/consuming this
+   rank's half of the handshake). Whenever `agreed` was already
+   `True`, `_recv()` was silently skipped, leaving the peer's
+   unconditional `_send()` blocked forever. Commit message calls this
+   "ROOT CAUSE of Section 43's transport stall." **This session
+   confirmed that framing was wrong, or at least incomplete -- see
+   below.**
+5. **`07b175a83`** through **`9ccf9b198`** (mlx, all diagnostic-only,
+   dated 2026-08-10 evening through 2026-08-11 10:58, i.e. AFTER
+   `f31d83e7d`'s claimed fix): a still-reproducing stall
+   (`call_id=157`) was traced progressively deeper --
+   `pipeline_agree_cancel`'s n=0 call (before any real cancel) not
+   completing → added raw ibverbs CQE tracing → found the QP itself
+   healthy (`RTS`, correct PSN) → found a deeper anomaly (600 ROUND
+   iterations logged but the QP's own `sq_psn` only reached 7,
+   suggesting `post_send()` wasn't actually firing every round it
+   claimed to) → traced `post_send()` directly and DEFINITIVELY
+   CONFIRMED it fires every round, 601/601 1:1 match, QP stays
+   healthy RTS throughout, yet **zero completions -- success or
+   error -- ever arrive for the stalled call, for 300+ seconds**.
+   Per UC semantics a signaled send should always eventually produce
+   *some* CQE. Getting neither points below the ibverbs API surface,
+   into Apple's closed `librdma.dylib`/`AppleThunderboltRDMA.kext` --
+   code this fork does not own and cannot patch directly. The last
+   commit before the outage (`9ccf9b198`) built a "poison-WR" probe
+   (post one throwaway signaled send with a deliberately invalid lkey
+   right before `reconnect_fresh` discards the QP anyway) specifically
+   to determine whether the driver is still processing WQEs at all on
+   a stuck QP, or whether the WQE pipeline itself is wedged below the
+   ibverbs boundary. **This probe was built but never run -- confirmed
+   via both nodes' exo.log (zero "poison" hits) and no `/tmp` test
+   artifacts survived on either host. The trail went cold here,
+   apparently right as the power outage hit.**
+
+### This session: redeployed current HEAD, re-ran the 5x verification
+pass -- FAILED 2/2, identical to the original Bug 3 signature
+
+Per the user's standing "STANDING RULE" (main branch stays clean,
+commit+push every turn) the repo was already coherent at
+`543b3adae` on both studios post-outage -- no lost work, no divergent
+state. Relaunched fresh with the campaign's own standard PP config:
+`DSV4_SHARDING=Pipeline EXO_PP_METAFRAME=1 EXO_PP_BATCHED_DECODE=1
+JACCL_TRACE_PROGRESS=1`, both runners reached `RunnerReady` cleanly.
+
+Also found and fixed a separate real gap discovered in the process:
+`start_cluster.sh`'s own `DSV4_MODEL_ID` default was STILL the stale
+preview checkpoint (`mlx-community/DeepSeek-V4-Flash`), not the
+production `-0731` release -- exactly the gap `2017d684b`'s own
+commit message had already flagged as unresolved
+("start_cluster.sh's own DSV4_MODEL_ID default is ALSO still the
+preview"). Relaunched with `DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731`
+explicitly overridden; confirmed via `/state` the correct model
+loaded. This means the LAST several verification runs from the
+pre-outage session (including whatever partial testing happened
+around `f31d83e7d`) may ALSO have been unknowingly run against the
+preview checkpoint -- unclear which of the pre-outage runs were
+affected, since no handoff from that window survives to check
+against.
+
+Ran `bench/section27_cancel_abort_test.py` (the standard 5x pass
+this whole campaign requires before calling any fix "done"). Stopped
+at 2 runs per direct user instruction once the pattern was
+unambiguous -- both were failures, both hit the **exact same
+signature Bug 3 originally reported**, pre-`f31d83e7d`:
+
+```
+{'command_id': None, 'tokens_seen': 0, 'cancel_issued_at': None,
+ 'cancel_response_status': None, 'cancel_response_elapsed': None,
+ 'stream_ended_elapsed': 305.46, 'finish_reason': None, 'error': None}
+=== OVERALL: FAIL -- cancel was never issued (stream ended/errored
+before reaching the token threshold) ===
+```
+
+Live exo.log on macstudio-m4-1 during Run 1/2/3 showed the
+`[jaccl-p2p] EXCHANGE_REJECT` diagnostic (added in `88291c1f0`,
+still live) firing continuously -- `recv_seq` stuck well behind
+`expected_seq` (e.g. `recv_seq=157 expected_seq=192`, `recv_seq=1
+expected_seq=27`), climbing through dozens of `slot=N` values per
+second -- and at least one confirmed
+`p2p_retry_exchange STALLED rank=1 call_id=192 metric=0 (no forward
+progress for >300000ms)` throw with a `reconnect_fresh` self-heal,
+same shape as every prior report in this section.
+
+### What this means
+
+`f31d83e7d`'s fix was a REAL bug fix (the `or`-short-circuit is a
+genuine, confirmed-real defect, independently worth having fixed)
+but it is now confirmed, on real hardware, NOT SUFFICIENT to resolve
+the underlying transport stall. This matches exactly what the
+uncaptured commit trail above already discovered but never wrote up
+here: fixing the short-circuit only exposed a DEEPER stall
+(`call_id=157`) that traces down to "QP healthy, `post_send()`
+genuinely firing, zero completions ever arrive" -- a symptom
+profile that points below this codebase's own reach, into Apple's
+closed RDMA driver stack. The four diagnostic-only commits after
+`f31d83e7d` were built specifically to characterize that deeper
+stall and were mid-investigation, not concluded, when the outage
+hit.
+
+This session's 2/2 fresh failures are fully consistent with that
+unresolved deeper stall still being present -- not a regression, not
+a new bug, the SAME stall the last session's diagnostic trail was
+still chasing when it stopped.
+
+### Honest status, not glossed over
+
+- Section 37 Phase 1 (RDMA migration of `p2p_retry_barrier` off TCP)
+  remains UNDEPLOYABLE for real production traffic under PP mode --
+  every real generation request currently fails via this stall path.
+- The investigation has now gone deeper than application code, deeper
+  than jaccl's C++ retry logic, past a confirmed-firing `post_send()`
+  with a confirmed-healthy QP, down to "zero ibverbs completions ever
+  arrive for 300+s" -- a symptom that, per the `9ccf9b198` commit's
+  own reasoning, may require the poison-WR probe (or an equivalent
+  driver-boundary test) to determine whether this is workable in
+  software at all (proactive QP health-checking / faster reconnect)
+  or a genuine Apple Thunderbolt RDMA driver limitation this fork
+  cannot fix directly.
+- Per this campaign's own standing discipline ("run a disposable test
+  before declaring impossible" -- user's May 2026 correction on a
+  separate integration that was wrongly declared impossible 3+
+  times), the poison-WR probe should be RUN, not skipped, before any
+  conclusion is drawn about whether this is fixable in our own code.
+  It was built and never executed.
+
+### Next session's concrete starting point
+
+1. Run the already-built poison-WR probe
+   (`Connection::poison_send_probe()`, `mlx@9ccf9b198`) against a
+   live reproduction of the `call_id=157`-shaped stall. Needs: a
+   live PP cluster with `JACCL_TRACE_PROGRESS=1`, a real long-context
+   cancel-test run to reproduce a stall, then triggering the probe
+   before `reconnect_fresh` would otherwise discard the stuck QP
+   (check whether this needs a manual trigger or is already wired
+   into the stall path -- read `9ccf9b198`'s diff before assuming).
+2. Interpret the result per the commit's own stated branches: poison
+   WR completes (driver still processing WQEs -> some jaccl/mlx-side
+   proactive health-check or faster reconnect may be viable) vs.
+   times out with zero completions (WQE pipeline wedged below
+   ibverbs -> software mitigation is the only lever, not a wire-level
+   fix).
+3. Given the depth this has reached (driver-boundary territory), a
+   `consult` review of the accumulated evidence (this section's full
+   commit trail) before committing to a specific next fix is likely
+   worthwhile -- this is exactly the kind of "trajectory review before
+   continuing" this campaign has used productively before (see
+   Section 17).
+4. If the poison-WR probe confirms a genuine driver-level wedge with
+   no software workaround: this would be a real, evidence-backed
+   structural finding (not a premature "impossible" claim) -- but per
+   the user's standing correction, exhaust the realistic mitigations
+   (proactive health-check + fast reconnect, alternate transport
+   fallback for just this handshake, etc.) before concluding the RDMA
+   migration itself must be abandoned or scoped down.
+5. `start_cluster.sh`'s `DSV4_MODEL_ID` default is still the stale
+   preview checkpoint -- worth fixing at the source (not just
+   overriding per-invocation) so future sessions don't have to
+   rediscover this the same way `2017d684b` and this session both did
+   independently.
+6. Section 41's CPU/thread-scheduling-contention investigation
+   remains open, untouched, independent of the above.
