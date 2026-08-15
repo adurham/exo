@@ -1133,7 +1133,13 @@ class BatchGenerator(Engine):
                 tokens_since_cancel_check = 0
                 t0 = time.perf_counter()
                 self.agree_on_cancellations()
-                if self.should_cancel(task.task_id):
+                _sc = self.should_cancel(task.task_id)
+                logger.warning(
+                    f"[CANCEL_POLL] task={task.task_id} should_cancel={_sc} "
+                    f"cancelled_set={self._cancelled_tasks} "
+                    f"every={self.check_for_cancel_every}"
+                )
+                if _sc:
                     self._cancelled_tasks.add(task.task_id)
                 self.agree_on_tasks()
                 request_trace.record("decode.agree_on_cancel_and_tasks", t0)
