@@ -8370,3 +8370,104 @@ github dependency. `start_cluster.sh:1148` is the line that would need to
 change; NOT changed yet, pending approval. Any such change must keep
 `mlx/build` (1.0G) so the C++ build cache survives -- that is what keeps
 relaunches at ~3min instead of ~8min.
+
+## 49. VERIFICATION BAR MET: 5/5 PASS, and the transport question closed
+(2026-08-15)
+
+### The result
+
+`bench/section27_cancel_abort_test.py`, 5 consecutive runs at
+exo@20ee06935 -- **5 PASS, 0 FAIL**. The first time this test has ever
+passed in this campaign.
+
+```
+post-cancel health check: content='4' finish_reason=stop
+cancel HTTP call responded:                              True
+runner CPU TIME converged to idle within the 90s window: True
+cluster healthy post-cancel:                             True
+OVERALL: PASS   (x5)
+```
+
+### The transport question is settled -- it was app-level all along
+
+Fable's outstanding ask was to verify the zero-CQE symptom directly
+before declaring the Apple-driver theory dead. Across this entire stable
+session, on BOTH nodes:
+
+```
+STALLED throws:        0
+POISON PROBE fired:    0      (probe is deployed and armed, mlx@50a23dc03)
+jaccl QP-state dumps:  0
+reconnect_fresh:       0
+```
+
+The poison-WR probe never fired because the stall it was built to
+characterize never recurred once the application-level bugs were fixed.
+That is the answer: **the "zero CQEs / wedged driver" signature was
+app-level lifecycle bugs all along** -- a rank that had stopped posting
+receives looks, from the completion queue, exactly like a driver that
+stopped delivering. Fable called this precisely; the driver theory is
+now retired, not merely demoted.
+
+The residual `EXCHANGE_REJECT` lines are confirmed BENIGN and are the
+protocol working correctly. Every one is off-by-exactly-one
+(`recv_seq=3944 expected_seq=3945`), with seq climbing steadily past
+4000 and 5016 exchanges flowing -- i.e. a single late retransmit being
+correctly discarded. Contrast the old pathological signature: a LARGE,
+CONSTANT gap (`recv_seq=157 expected_seq=192`) frozen while nothing
+progressed.
+
+### Deploy path fixed (start_cluster.sh)
+
+The per-node `git fetch`/`reset --hard` from github.com is replaced by
+an rsync of this laptop's canonical working tree. Verified end-to-end on
+the launch that produced the 5/5 run: `Syncing repo to ... via rsync`
+fired 2/2, ZERO "Could not resolve host" failures, both nodes
+byte-identical at the same commit.
+
+This removes a genuine correctness hazard, not just an annoyance: the
+old step failed FIVE times in one session on transient DNS blips, and
+because it is per-node, twice left the two ranks on DIFFERENT commits
+while the launch continued (observed: m4-1 on 8862ec00, m4-2 stranded on
+247f3db9). `mlx/build` (~1.0G) is deliberately synced so the C++ build
+cache survives -- that is what keeps relaunch at ~3min rather than ~8min.
+
+### Health-check probe fixed (not weakened)
+
+The post-cancel health check asserted `finish_reason == "stop" and
+bool(content)` against "Say hello in one word." / max_tokens=10 -- which
+this thinking model can never satisfy (whole budget consumed inside the
+reasoning block; content='' every time, cancel or no cancel). Replaced
+with "What is 2+2? Answer with just the number." at max_tokens=300,
+which returns real content. The assertion itself is UNCHANGED and still
+strict, because a runner left corrupted by a bad cancel is exactly what
+it must catch.
+
+### Full arc of this session, in order
+
+| Section | Commit | Fix |
+|---|---|---|
+| 45 | 247f3db99 | advance-budget `ceil()` off-by-one -- THE mutual deadlock. + 15-test parity suite |
+| 46 | 8862ec00d | follower stays alive to service the driver's EvictMessage |
+| 47 | 6694e3be2 | cancel() asks the glue for a live chunk-drive, not the popped deferred map |
+| 48 | 068b29bab | per-token local cancel observation (the one that turned the test green) |
+| 49 | 20ee06935 | rsync deploy + health-check prompt |
+
+### Still open (unchanged by this work)
+
+1. **Section 17's measurement pass, open since 2026-08-08 and never
+   completed**: single-session decode/prefill tok/s at 500K context.
+   Every attempt since has been derailed by the transport/cancellation
+   bug chain that is now fixed, so this is finally unblocked and is the
+   correct next priority -- it determines whether the design's core
+   requirement (30 tok/s @ 500K) is reachable at all before any further
+   Phase 3 work is built on unmeasured assumptions. Note Section 17's own
+   finding: requirement 3 is PER-SESSION throughput, not aggregate, so
+   Phase 3's micro-batch interleaving is NOT the right lever for it and
+   whatever follows the measurement needs rescoping around that.
+2. `start_cluster.sh`'s `DSV4_MODEL_ID` default is still the stale
+   preview checkpoint; must be overridden per invocation. This matters
+   more than it looks -- preview vs production produce different PP layer
+   splits and therefore different parity, which is exactly what hid the
+   Section 45 bug from Section 40.
+3. Section 41's CPU/thread-scheduling-contention investigation.
