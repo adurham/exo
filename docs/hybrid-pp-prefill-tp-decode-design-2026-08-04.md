@@ -8194,3 +8194,179 @@ NOT resolved by this fix, still open and genuinely separate:
    `[jaccl-p2p-qp] POISON PROBE ... result=[...]` -- read it and follow
    Section 44's decision branches.
 3. Fix `start_cluster.sh`'s `DSV4_MODEL_ID` default at the source.
+
+## 46-48. The cancel chain: three more bugs behind Section 45, and the
+one that finally turned the verification pass green. 5/5 CLEAN.
+(2026-08-15, same session as Section 45)
+
+### Outcome first
+
+`bench/section27_cancel_abort_test.py`, 5 consecutive runs on real
+hardware at exo@068b29bab:
+
+```
+runs completed:                5
+CPU converged to idle = True:  5     (was 0/5 before this work)
+CPU converged to idle = False: 0
+cancel HTTP responded True:    5
+STALLED throws across all 5:   0
+cluster healthy post-cancel:   False x5   <- test-prompt artifact, see below
+```
+
+Both ranks converge together every run. Zero deadlocks, zero transport
+stalls. The campaign's core bug is fixed.
+
+### Section 46 (exo@8862ec00d): the follower must stay alive to service
+the driver's EvictMessage
+
+Section 45's fix moved the hang rather than removing it. New two-sided
+faulthandler stacks:
+
+```
+driver:   cancel -> complete_request -> send_evict_message
+          -> send_header                        [BLOCKED FOREVER]
+follower: runner.py:317 main -> queue.get       [IDLE, "runner idle" x5]
+```
+
+A client cancel reaches BOTH ranks. The follower's
+`_apply_cancellations` immediately reported `CancelledResponse` and
+dropped the uid from `_active_tasks`, which empties `runner.py`'s
+`while self.active_tasks:` loop -- so the follower exits it and goes
+idle. But the follower's ONLY `MSG_KIND_EVICT` handler lives inside
+`Rank1BatchedDecodeGlue.tick()`, which that loop is what drives. The
+evict is therefore never serviced and the driver blocks forever.
+
+The evict is NOT redundant post-cancel: `cancel()`'s batched-decode
+branches are all gated on `_batched_decode_rank0_glue is not None`
+(driver-only), so the follower frees nothing locally. Skipping it would
+trade the deadlock for a per-cancel KV-slot leak.
+
+Fix mirrors the proven deferred-finalize pattern of a50c003ce: park the
+uid in `_pending_batched_decode_evict`, keep it in `_active_tasks` so
+the loop keeps pumping `tick()`, finalize once the evict is genuinely
+serviced. No new cross-rank protocol -- the glue's existing
+`evicted_request_id` -> synthesized `finish_reason` path already fires
+exactly then.
+
+### Section 47 (exo@6694e3be2): ask the GLUE whether a chunk-drive is
+live, not the already-popped deferred-prefill map
+
+Section 46 was correct but never fired. Diagnostics (not inference)
+showed why:
+
+```
+CANCEL_DIAG2:
+  uid=0 deferred=False drive=None r0glue=False r1glue=True ppspec=False
+  uid=0 deferred=False drive=None r0glue=True  r1glue=False ppspec=False
+```
+
+`cancel()` detected "mid-chunk-drive" via
+`_deferred_prefill_by_uid[uid].drive`, but that entry is popped the
+moment the drive is handed to the glue. During an ACTIVE chunk-drive it
+is already gone, so the branch was skipped; the driver then fell through
+to an `elif` gated on `has_admitted_request()`, ALSO false because the
+request is still prefilling and was never admitted to decode. Both
+teardown paths missed it -- zero EvictMessages, zero
+PrefillAbortMessages on the wire.
+
+Fix: new `is_prefill_session_active_for(request_id)` on both glues,
+reading the glue's own `_active_prefill_session` and matching the exact
+uid (not `has_active_prefill_session()`'s any-session boolean, so
+cancelling uid A can't be mistaken for uid B's drive).
+
+### Section 48 (exo@068b29bab): cancellation was ~97s LATE, not broken
+-- THIS is what turned the test green
+
+Even after 46/47, the test still failed. The decisive timeline:
+
+```
+15:07:17  request starts
+15:10:06  CancelTask received
+15:11:43  next request arrives (the test's own health check)
+15:11:46  "runner idle: reclaimed MLX allocator pool" / "runner ready"
+```
+
+The runner DOES stop and DOES go idle -- ~97s after the cancel. The
+test's window is 90s, so it missed by ~7s, and the CPU growth it then
+reported as "never converged" was substantially the health-check
+request's own compute (log: 2 chat requests + 1 cancel).
+
+Why ~97s: `CANCEL_POLL` showed the decode loop's cancellation check
+fired exactly ONCE, with `every=100` ("runner checking for cancellation
+every 100 tokens", logged at warmup). The test cancels at token ~16, so
+the request had to grind out ~84 more tokens at 30K context before it
+ever looked at the flag.
+
+Two hypotheses were disproven by measurement along the way, both mine:
+- `CANCEL_DIAG`: `_apply_cancellations` DOES fire on both ranks with the
+  uid present -> the "PP-mode `coord=None` makes `agree_on_cancellations`
+  a local no-op" theory was WRONG; cancel delivery works fine.
+- `CANCEL_KEYS`: `uid=0(int)`, `active_task_keys=[0]`, `pp_spec_keys=[]`,
+  `deferred_keys=[]`, `mlx_gen=BatchGenerator` -> no key-namespace
+  mismatch, and this request decodes through mlx-lm's own
+  `BatchGenerator`, which holds no exo-side per-request handle. The lever
+  that works there is `self._mlx_gen.remove(uids)`, which `cancel()`
+  already calls unconditionally -- precisely why it stops correctly, just
+  late. Sections 46/47 close real gaps on the chunk-drive and
+  admitted-decode paths, but were never going to move THIS test.
+
+Fix (option (b) of three): observe the LOCAL cancel signal every token;
+leave the collective cadence untouched. Verified before implementing
+that this adds ZERO cross-rank traffic --
+`cancel_receiver.collect()` is non-blocking (`receive_nowait` until
+`WouldBlock`) and `should_cancel()` is a plain set-membership test
+(`engines/base.py`). Both PP ranks independently receive the same
+`TaskCancelled`, so each can observe it locally at the same logical
+point without agreeing first.
+
+Rejected alternatives: shortening `check_for_cancel_every` (pays the
+collective cost every few tokens) and re-sizing the test's 90s window
+(~97s to honour a cancel is bad UX regardless of what the test asserts).
+
+### The one remaining `False` is a test-prompt artifact, not a fault
+
+`cluster healthy post-cancel` asserts
+`finish_reason == "stop" and bool(content)` against the prompt
+"Say hello in one word." with `max_tokens=10`. Verified directly
+against the live cluster:
+
+```
+"Say hello in one word", max_tokens=200 -> finish=stop, content='',
+                                           all text in reasoning_content
+same, thinking disabled                 -> content='' as well
+"What is 2+2? Answer with just the
+ number", max_tokens=300                -> finish=stop, content='4',
+                                           usage clean (28 reasoning tokens)
+```
+
+So the cluster answers correctly and is healthy; the health check simply
+picked a prompt this thinking model never emits non-reasoning `content`
+for. It fails identically with or without a preceding cancel, so it is
+independent of all the cancel work. The right fix is to the TEST (accept
+`reasoning_content`, or use a prompt that yields real content) -- noted
+rather than done, because weakening an assertion to go green is the
+wrong instinct without an explicit call.
+
+### Methodology note worth keeping
+
+Three fix-and-rerun cycles failed to move this test because each fix was
+aimed at a branch the failing path never took. What settled it in ONE
+run was dumping the actual map KEYS and the decode loop's own poll state,
+rather than testing membership and inferring. When a fix doesn't move the
+needle after one iteration, instrument the state directly instead of
+shipping another hypothesis. (Prompted by a `consult` review, which also
+falsified the poll-granularity theory for free from data already on
+disk.)
+
+### Deploy-path note
+
+DNS blips on the studios' single resolver killed FIVE relaunches
+mid-deploy (`Could not resolve host: github.com` during
+start_cluster.sh's per-node `git fetch`), twice leaving the two nodes on
+DIFFERENT commits -- a real correctness hazard, not just an annoyance.
+Recovered each time with a direct `rsync` from the laptop's canonical
+checkout, which is faster (incremental ~instant, cold 2m14s) and has no
+github dependency. `start_cluster.sh:1148` is the line that would need to
+change; NOT changed yet, pending approval. Any such change must keep
+`mlx/build` (1.0G) so the C++ build cache survives -- that is what keeps
+relaunches at ~3min instead of ~8min.
