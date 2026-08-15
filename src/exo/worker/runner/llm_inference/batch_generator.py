@@ -993,6 +993,11 @@ class BatchGenerator(Engine):
         if not self._cancelled_tasks:
             return iter([])
 
+        logger.warning(
+            f"[CANCEL_DIAG] _apply_cancellations ENTERED cancelled={self._cancelled_tasks} "
+            f"active_uids={list(self._active_tasks.keys())} "
+            f"follower={getattr(self._gen,'_batched_decode_rank1_glue',None) is not None}"
+        )
         cancel_all = CANCEL_ALL_TASKS in self._cancelled_tasks
 
         uids_to_cancel: list[int] = []
