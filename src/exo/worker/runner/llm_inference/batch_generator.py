@@ -993,11 +993,6 @@ class BatchGenerator(Engine):
         if not self._cancelled_tasks:
             return iter([])
 
-        logger.warning(
-            f"[CANCEL_DIAG] _apply_cancellations ENTERED cancelled={self._cancelled_tasks} "
-            f"active_uids={list(self._active_tasks.keys())} "
-            f"follower={getattr(self._gen,'_batched_decode_rank1_glue',None) is not None}"
-        )
         cancel_all = CANCEL_ALL_TASKS in self._cancelled_tasks
 
         uids_to_cancel: list[int] = []
@@ -1129,17 +1124,40 @@ class BatchGenerator(Engine):
         def on_generation_token() -> None:
             nonlocal tokens_since_cancel_check
             tokens_since_cancel_check += 1
+            # Section 48 (2026-08-15): observe a LOCALLY-known cancel every
+            # token, instead of only at the every-100-tokens collective
+            # checkpoint below.
+            #
+            # Measured on real hardware: with the collective check as the
+            # ONLY observation point, a cancel issued at token ~16 was not
+            # noticed until the request had ground out the remaining ~84
+            # tokens of the interval -- ~97 SECONDS at 30K context. The
+            # runner did stop correctly and log "runner idle" afterwards
+            # (cancellation was never broken), it was just ~97s late, which
+            # is both bad UX and what made section27_cancel_abort_test's 90s
+            # convergence window fail.
+            #
+            # This is deliberately LOCAL-ONLY and adds no cross-rank
+            # traffic: cancel_receiver.collect() is non-blocking
+            # (receive_nowait until WouldBlock) and should_cancel() is a
+            # plain set membership test (engines/base.py). Both PP ranks
+            # independently receive the same TaskCancelled command, so each
+            # one can observe it locally at the same logical point without
+            # needing to agree first. The existing collective
+            # agree_on_cancellations()/agree_on_tasks() cadence below is
+            # UNCHANGED -- it remains the authority for cross-rank
+            # agreement; this only shortens the latency before a rank
+            # notices a cancel it has already been told about directly.
+            for _cancelled_id in self.cancel_receiver.collect():
+                self._cancelled_tasks.add(_cancelled_id)
+            if self.should_cancel(task.task_id):
+                self._cancelled_tasks.add(task.task_id)
+
             if tokens_since_cancel_check >= self.check_for_cancel_every:
                 tokens_since_cancel_check = 0
                 t0 = time.perf_counter()
                 self.agree_on_cancellations()
-                _sc = self.should_cancel(task.task_id)
-                logger.warning(
-                    f"[CANCEL_POLL] task={task.task_id} should_cancel={_sc} "
-                    f"cancelled_set={self._cancelled_tasks} "
-                    f"every={self.check_for_cancel_every}"
-                )
-                if _sc:
+                if self.should_cancel(task.task_id):
                     self._cancelled_tasks.add(task.task_id)
                 self.agree_on_tasks()
                 request_trace.record("decode.agree_on_cancel_and_tasks", t0)

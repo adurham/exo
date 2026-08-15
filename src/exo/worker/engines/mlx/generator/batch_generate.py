@@ -4933,20 +4933,6 @@ class ExoBatchGenerator:
                 _active_glue is not None
                 and _active_glue.is_prefill_session_active_for(uid)
             )
-            logger.warning(
-                f"[CANCEL_KEYS] uid={uid!r}({type(uid).__name__}) "
-                f"pp_spec_keys={list(self._pp_spec_gen_by_uid.keys())} "
-                f"deferred_keys={list(self._deferred_prefill_by_uid.keys())} "
-                f"active_task_keys={list(getattr(self,'_active_tasks',{}).keys())} "
-                f"mlx_gen={type(self._mlx_gen).__name__}"
-            )
-            logger.warning(
-                f"[CANCEL_DIAG3] uid={uid} chunk_drive_live={chunk_drive_live} "
-                f"glue={type(_active_glue).__name__ if _active_glue else None} "
-                f"active_sess={getattr(_active_glue,'_active_prefill_session',None) is not None} "
-                f"sess_id={(getattr(_active_glue,'_active_prefill_session',None) or (None,None))[0]} "
-                f"deferred={deferred is not None} r0={self._batched_decode_rank0_glue is not None}"
-            )
             if chunk_drive_live or (deferred is not None and deferred.drive is not None):
                 if self._batched_decode_rank0_glue is not None:
                     from exo.worker.engines.mlx.pp_prefill_session import (
