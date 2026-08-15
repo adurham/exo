@@ -1521,7 +1521,28 @@ class ExoBatchGenerator:
         self._active_tasks[uid] = _EngineTask(
             uid=uid,
             task_params=task_params,
-            all_prompt_tokens=last_tokens,
+            # Section 50 (2026-08-15): this was `all_prompt_tokens=last_tokens`,
+            # which is the short TAIL of the prompt, not the prompt. The
+            # OpenAI-compatible usage block is built downstream as
+            # `prompt_tokens = len(state.all_prompt_tokens)` (see the Usage(...)
+            # construction in this same file), so on this path -- the deferred/
+            # chunk-drive path that PP batched decode actually uses -- the API
+            # reported `prompt_tokens: 2` for a real ~100,075-token prompt.
+            #
+            # Found while running the design doc's Section 17 measurement pass:
+            # that harness computes prefill throughput as prompt_tokens / TTFT,
+            # so a truncated numerator silently reported 0.0 tok/s prefill for a
+            # run whose REAL prefill was ~320 tok/s (recovered by recomputing
+            # from the harness's own token estimate). Anything trusting the
+            # API's usage numbers -- billing, metrics, exo_prompt_tokens_total,
+            # or a throughput benchmark -- was being handed a wrong value, so
+            # this is a correctness bug, not cosmetics.
+            #
+            # `prompt_tokens` is the full encoded prompt already in scope here
+            # (the same value used for `n_prompt_tokens=len(prompt_tokens) - 1`
+            # just above), so this is the authoritative count rather than a
+            # re-derivation.
+            all_prompt_tokens=prompt_tokens,
             prefix_hit_length=0,
             matched_index=None,
             is_exact_hit=False,
