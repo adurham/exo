@@ -1761,6 +1761,43 @@ for NODE in "${NODES[@]}"; do
     # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
     : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
     [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+    # MLX_JACCL_ACK_RETRANSMIT_US: how long a send waits before
+    # retransmitting a frame the peer hasn't acknowledged. jaccl's own
+    # default is 500000 (500ms), chosen as "far above a healthy sub-ms ACK,
+    # so it only fires on genuine loss" -- see jaccl_ack_retransmit_us() in
+    # mlx/mlx/distributed/jaccl/lib/jaccl/mesh_impl.h.
+    #
+    # 2026-08-15 (design doc Section 51): that assumption does not hold on
+    # this cluster's PP decode hot path, where the timer is NOT a rare
+    # backstop but a per-token tax. Measured over one 100K-context run:
+    #   barrier latency <100ms : 29101   (healthy path is 71-122 MICROseconds)
+    #   barrier latency  >1s   :  1403   (4.5% of barriers)
+    # Each slow one is the same shape on both ranks -- rank0 posts its send
+    # in ~45us, immediately sees peer_got_count=0/1, waits the FULL 500ms
+    # quiet timer, retransmits (to_resend_count=1), and the retransmit
+    # succeeds. That is ~1403 x 0.5s = ~700s of pure stall in a single run,
+    # and it dominated decode throughput (0.48 tok/s at 100K vs 18.01 tok/s
+    # at 300K on the identical config -- a 37x spread explained entirely by
+    # how many of these stalls a run happened to hit).
+    #
+    # The underlying loss is NOT wire loss (en3 shows Ierrs 0 / Oerrs 0 /
+    # Coll 0, link healthy 8X @ 10Gbps) -- it is a software race: every
+    # retransmit is num_chunks=1 (bulk 2049-chunk transfers lose nothing),
+    # and rank0 loses 3.7x more than rank1, i.e. the side that races ahead
+    # of its peer's recv-post. mesh_impl.h's own ack_sync_pre comment names
+    # this exact failure ("peer SEND lands at our empty data-QP recv FIFO
+    # and UC silently drops") but that mitigation is wired into COLLECTIVE
+    # lambdas, not the p2p send()/recv() path PP decode uses.
+    #
+    # Lowering this does not remove the race -- it collapses the cost of
+    # each occurrence from 500ms to a few ms. The proper root-cause fix
+    # (extending the ack_sync_pre pattern to the p2p path) is tracked
+    # separately. Retransmits are cheap and idempotent here (single-chunk
+    # control frames on a dedicated QP), so a short timer mainly trades a
+    # few redundant sends for a large latency win. Set to 500000 to restore
+    # jaccl's historical default.
+    : "${MLX_JACCL_ACK_RETRANSMIT_US:=10000}"
+    [ -n "${MLX_JACCL_ACK_RETRANSMIT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_RETRANSMIT_US=$MLX_JACCL_ACK_RETRANSMIT_US"
     # MLX_JACCL_RECONNECT_FRESH: in-process device-context rebuild — the warmup
     # QP-flake fix (mlx e399ecfb); ~0.15s vs a 90s re-place. Validated prod default.
     : "${MLX_JACCL_RECONNECT_FRESH:=1}"
