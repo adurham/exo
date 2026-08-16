@@ -13627,3 +13627,81 @@ A phase swap only makes sense if it becomes RARE (a large cold prefill
 on an otherwise-idle cluster), never per-request. That is a policy
 question worth revisiting only after the regression is fixed and TP
 prefill is measured at its real ceiling.
+
+## 106. CORRECTION to Section 105: the prefill regression is IN PP MODE.
+And PP's prefill advantage is structural to MoE, not a tuning gap.
+(2026-08-16)
+
+Two corrections to Section 105, both from the user and both verified.
+
+### 1. Why PP wins prefill: structural, not a bug in TP
+
+TP prefill is hurt by constant inter-node communication, and DSv4 being
+an **MoE model makes it worse**. Per layer, per chunk, under TP:
+
+- MoE experts are SHARDED across the two nodes (each holds half of 256),
+  so every layer's MoE output needs an `all_sum`. **43 layers = 43
+  all_sums per forward pass.**
+- The sparse-attention indexer under `EXO_DSV4_SEQ_SPLIT=1` splits
+  prefill query rows across ranks then `all_gather`s them back --
+  another per-chunk collective.
+- An explicit `mx_barrier(group)` fires EVERY prefill chunk; the code's
+  own comment calls it "the concrete mechanism behind PP's prefill
+  throughput edge".
+- Attention is **fully replicated** on both ranks (DSv4's
+  LoRA-decomposed Q/output projections cannot be head-sharded without
+  breaking `mx.quantized_matmul`), so attention gets no parallelism
+  benefit at all.
+
+PP splits LAYERS and pays only a point-to-point activation handoff at
+each pipeline-stage boundary -- **no collectives**. So Section 105's
+suggestion to "attack TP prefill's overhead" was aimed wrong: that
+overhead is the topology, not a defect. Trying to make TP prefill match
+PP is fighting the architecture.
+
+### 2. The regression is PP's, not TP's -- which changes everything
+
+Section 105 framed the 202-225 tok/s figures as a reason to prefer TP
+and fix the regression there. **Wrong.** Verified from the live runner
+environment: those measurements were taken with
+`MLX_JACCL_SHARDING_MODE=Pipeline`.
+
+```
+  PP historical:  1K 490 | 10K 512 | 94K 485 | 200K 431 | 400K 377 | 500K 364
+  PP current:     225 / 214 / 202 tok/s
+  => PP has regressed ~45% against ITS OWN baseline.
+```
+
+This is a PP-vs-PP regression. So recovering it is **not** an
+alternative to the "prefill on PP" goal -- it IS that goal, with no
+topology change, no weight swap, and no concurrency cost. It is
+unambiguously the highest-value work available:
+
+```
+  recover PP prefill   202 -> 364+  = +80%
+  the entire PP/TP delta @500K      = +14%
+```
+
+And it removes the reason Section 105 reached for TP-resident on prefill
+grounds in the first place.
+
+### Attribution tooling that already exists
+
+No new instrumentation is needed to start: **`EXO_PROFILER=spans`** dumps
+a model-side per-span breakdown of prefill -- `attn.indexer`,
+`attn.sdpa`, `attn.compressor`, `moe.*`, `attn.all_sum` (the `_ph.dump()`
+call in `generate.py` ~960-966). Section 99's attribution stalled because
+the per-chunk `request_trace` spans conflate model compute with KV
+quantize; this profiler splits the model side directly and is a launch
+env var, not a code change.
+
+### Standing plan
+
+1. Find the PP prefill regression (git archaeology + per-chunk loop
+   audit; dispatched). Explicitly test whether the "accounting-artifact
+   fix" CREATED the slowness or merely REVEALED it by correcting an
+   over-reporting measurement -- if the latter, the historical 364-512
+   numbers were inflated and the target needs restating.
+2. Recover PP prefill toward its own baseline.
+3. Only then revisit decode topology, with the requirement's own
+   framing: prefill PP, decode TP, MTP/DSpark on TP.
