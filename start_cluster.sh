@@ -319,16 +319,22 @@ fi
 # and-poolingcache-fix-2026-07-20.md, FIFTEENTH-SIXTEENTH UPDATE) — clean
 # 5-level context stress sweep (2K-250K tokens, 11 requests back-to-back),
 # zero stalls/crashes/OOM, 100% needle-recall, 27-33 tok/s decode. This
-# replaces Tensor sharding as the launch default so a plain `./start_cluster.sh`
-# and a dashboard-triggered reload both reproduce the proven-good config
-# without any manual env vars. Trade-off (see the same doc): Pipeline mode
-# is SINGLE-REQUEST-ONLY (no concurrent requests, no mid-decode
-# cancellation) — start_cluster.sh already force-sets
-# EXO_MAX_CONCURRENT_REQUESTS=1 whenever DSV4_SHARDING=Pipeline (line
-# ~1658) so this is enforced automatically, not just documented. Override
-# DSV4_SHARDING=Tensor to go back to the old concurrent-but-unvalidated-
-# recently mode.
-: "${DSV4_SHARDING:=Pipeline}"
+# was the launch default until 2026-08-16. Trade-off: Pipeline mode is
+# SINGLE-REQUEST-ONLY (no concurrent requests, no mid-decode
+# cancellation) — start_cluster.sh force-sets
+# EXO_MAX_CONCURRENT_REQUESTS=1 whenever DSV4_SHARDING=Pipeline, so that
+# is enforced automatically, not just documented.
+#
+# DEFAULT FLIPPED BACK TO Tensor 2026-08-16 (design doc Sections 107-108).
+# TP is the only layout that satisfies concurrency + cancellation +
+# MTP/DSpark + decode throughput at once, and those are stated
+# requirements. The PP-prefill/TP-decode hybrid was evaluated and
+# dropped: the two weight layouts cannot be co-resident on 128GB nodes
+# (~125.4GB of 128GB), so it would need a per-request sequential weight
+# swap costing ~18.7s/rank plus ALL cross-phase concurrency, to buy ~11%
+# on a cold 500K request and nothing at all on follow-up turns.
+# Set DSV4_SHARDING=Pipeline explicitly for single-request PP work.
+: "${DSV4_SHARDING:=Tensor}"
 # The classic small-draft-model speculation path (EXO_PP_DRAFT_MODEL,
 # Qwen3.5 0.8B) has an incompatible tokenizer with DSv4 -- drafted tokens
 # come back as gibberish when verified through DSv4 logits, so it's never
