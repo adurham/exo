@@ -11843,3 +11843,79 @@ hypothesis -- after chunked prefill the KV/cache arrays are left
 associated with a different stream than decode runs on, so every decode
 token waits on a cross-stream event that only completes when that other
 stream is serviced.
+
+## 87. The signaling side: a per-layer BLOCKING `mx.eval(y)` fence inside
+the model, already documented in this fork, with an async gate that is
+armed but not engaging. (2026-08-16)
+
+Section 86 established the ~550ms is a genuine wait and asked what
+signals the event. A read of the model implementation answers it, and
+the fork's own comments describe the mechanism precisely.
+
+`mlx-lm/mlx_lm/models/deepseek_v4.py:2859-2893`, inside
+`DeepseekV4MoE.__call__` -- the "Phase H Lever 1" fence:
+
+```python
+  if (_FENCE_ASYNC
+      and _FENCE_ASYNC_CTX["engine"]
+      and _FENCE_ASYNC_CTX["cache"]
+      and y.shape[0] <= _FENCE_ASYNC_MAX_B):
+      mx.async_eval(y)
+  else:
+      mx.eval(y)          # <-- BLOCKING, per layer
+```
+
+The comment at lines 78-89 states the cost outright:
+
+> "The Phase H Lever 1 fence below is a BLOCKING `mx.eval(y)`: the CPU
+> waits for the GPU to finish each layer before encoding the next, so a
+> decode cycle pays (graph-build + GPU) serially 44 times ... ALLSUM
+> probe: ~1.1 ms fence wall per layer"
+
+**43-44 layers x a per-layer blocking fence is the structure behind the
+~550ms**, and it is exactly where `EventImpl::wait` parks. This is a
+model-level serialization, which is why it was invisible to every
+transport-level trace this campaign ran, and why the GPU reads idle: the
+CPU is blocked waiting for layer n before it will encode layer n+1.
+
+### The gate is armed but not engaging
+
+`EXO_DSV4_FENCE_ASYNC=1` is ALREADY set by `start_cluster.sh` and
+confirmed live on both runners. But the env var only enables the
+FEATURE; the fence goes async only if BOTH runtime owner keys are also
+True (lines 100-111):
+
+- `"engine"` -- set by `batch_generate`: exactly one request active,
+  none being admitted.
+- `"cache"` -- set by `dsv4_mtp`: single-uid steady state, false around
+  any cache merge/rebuild.
+
+Both default False, so **any path that never calls
+`_set_fence_async_ok` silently keeps the blocking fence.** That is the
+open question and it is a sharp one: does the PP batched-decode path
+(`EXO_PP_BATCHED_DECODE=1`, this campaign's path) ever set those keys?
+If it does not, the async fence has never been active in any PP
+measurement, and the "44 serial blocking fences" is simply what PP
+decode does today.
+
+This also gives a natural account of the Section 85 step function that
+does not require depth at all: whichever owner sets `"cache"` plausibly
+holds it False after a chunked prefill (which merges/rebuilds cache
+state) while a plain prefill leaves the single-uid steady state intact.
+NOT yet verified -- stated as the hypothesis to test, not a finding.
+
+### Next, concretely
+
+1. Grep every `_set_fence_async_ok` call site and determine whether the
+   PP batched-decode path reaches them. Pure code question, no cluster
+   time.
+2. If it does not: that is the fix target, and it is a real one -- it
+   removes a 44x serialization rather than tuning a timeout.
+3. Only then measure, with the usual discipline (live gate toggle on one
+   build, n>=3, mode-labeled, needle-gated).
+
+Caution carried forward from the fence's own comment: async arming has
+bit-determinism and c>=2 stability requirements, and a previous
+single-flag version "left ordering holes at stream join/leave -- corrupt
+logits and rank wedges". Any change here is a correctness risk, not just
+a perf lever, and must be quality-gated end to end.
