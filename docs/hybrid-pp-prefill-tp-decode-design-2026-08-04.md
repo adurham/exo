@@ -9857,3 +9857,117 @@ build_graph / eval_logits / eval_cache
 `session_step` (`pp_batched_decode_glue.py`). Rank 1 previously emitted
 nothing at all, because the follower never enters rank 0's instrumented
 branch -- half the system was invisible.
+
+## 63. ROOT CAUSE: every decode token pays the 500 ms jaccl retransmit
+quiet timer, on both ranks. (2026-08-15)
+
+### The measurement that closes it
+
+Per-layer blocking-point attribution inside the forward pass, official
+varied-content prompt, ~14K tokens, the reproducible collapse
+(client-side 0.47 tok/s, p50 gap 2112.0 ms):
+
+```
+  RANK 0                        n     mean
+    last_layer_send            11   500.52 ms     <- FIXED
+    last_layer_body_and_eval   11   569.53 ms
+    first_layer_body           11     0.22 ms
+    gather_recv                11     0.14 ms
+
+  RANK 1
+    last_layer_body_and_eval   11   523.75 ms
+    first_layer_recv           11     0.16 ms
+    first_layer_body           11     0.46 ms
+    gather_send                11     0.18 ms
+```
+
+And the individual samples for `last_layer_send` on rank 0:
+
+```
+  500.5  500.4  500.4  500.6  500.5  500.4
+  500.6  500.6  500.7  500.5  500.5
+```
+
+**That is not variance. That is a fixed timer firing on every single
+token**, with ~0.3 ms of jitter across eleven consecutive tokens.
+
+500 ms is `MLX_JACCL_ACK_RETRANSMIT_US`, jaccl's ack retransmit quiet
+timer -- the same 500 ms constant Sections 50-52 documented, whose
+lowering to 10 ms was tried and reverted (Section 51) because it broke
+generation outright.
+
+### What is actually happening
+
+`mx.distributed.send(...)` + its forced `mx.eval` in
+`BatchedMetaFramedPipelineLastLayer.__call__` does not complete on the
+peer's ack. It waits out the full retransmit quiet period, retransmits,
+and only then returns. Every token. On both ranks.
+
+Budget reconciliation against the measured 2112 ms gap:
+
+```
+  rank0 last_layer_send        500.5 ms
+  rank1 last_layer_body_and_eval 523.8 ms
+  rank0 last_layer_body_and_eval 569.5 ms
+                               --------
+                               1593.8 ms
+```
+
+The remainder is the second rank's own send plus scheduling. Note that
+rank 1 shows no `last_layer_send` line because on a 2-rank pipeline
+`self.r == self.s - 1` for rank 1, so it takes the gather path instead
+-- its cost is inside `last_layer_body_and_eval`, which is why that
+span reads ~524 ms rather than a plausible compute figure.
+
+**Caveat, stated rather than buried:** `last_layer_body_and_eval` at
+~570 ms and ~524 ms is almost certainly NOT pure compute either. It
+wraps `self.original_layer(...)` plus an eager `mx.eval(output)`, and
+the pipeline's own cross-rank recv resolves inside that span. Given the
+GPUs measured ~5% busy (Section 59), most of that ~570 ms is very
+likely another blocked wait, plausibly the same timer observed from the
+other side. Splitting it further is the obvious next probe, but it does
+not change the headline: a fixed 500 ms timer is being paid per token
+per rank, and no amount of model-side optimisation touches it.
+
+### Why every earlier theory missed this
+
+The timer is invisible at every level above the layer wrapper. It looks
+like "the peer is slow" from the glue (Section 52's reading), like
+"compute" from `run_forward` (Section 60 attributed 99.97% there), and
+like nothing at all in the transport counters -- because from jaccl's
+perspective the send SUCCEEDS, it just succeeds late. Only splitting
+the forward pass by blocking point made the constant visible.
+
+It also explains the earlier partial signal: Section 60 found 32
+`peer_got_count=0/1` true lost sends across a run, ~16 s of a ~50 s
+window (~32%). Those are the same mechanism caught at a coarser
+granularity -- the lost first-send is exactly what makes the sender wait
+out the quiet timer.
+
+### What this means for requirement 3
+
+The ~60x shortfall is a **transport-protocol defect, not a compute or
+architecture limit**, which matches the reframe that two individually
+working components (PP alone, TP alone) should not compose to a 60x
+loss. Removing one 500 ms stall per token per rank is worth roughly
+1000 ms of a 2112 ms token; removing both plus the likely-nested wait
+inside `body_and_eval` would put per-token cost in the tens of
+milliseconds, i.e. the 24 tok/s regime the degenerate-prompt runs
+already demonstrated the hardware can reach.
+
+**This is a diagnosis, not a fix.** The fix is not lowering the timer --
+Section 51 already proved 10 ms breaks generation, because the timer
+fires below the real round-trip and retransmits frames that are merely
+in flight. The real question is why the ack for this specific send never
+arrives in time, on a link whose p50 barrier latency is 39 microseconds.
+That is the next investigation.
+
+### Instrumentation note
+
+This required instrumenting six blocking points inside the layer
+wrappers (`EXO_DECODE_PHASE_TRACE=1`, Section 63 commit). Also fixed
+en route: MLX rebuilds were re-cloning fmt/nanobind/etc. from github on
+every deploy because uv builds in a temp dir, so a transient DNS hiccup
+aborted the whole thing -- that killed three separate timed runs today.
+`FETCHCONTENT_BASE_DIR` now points at the persistent
+`mlx/build/_deps`, making rebuilds network-independent.
