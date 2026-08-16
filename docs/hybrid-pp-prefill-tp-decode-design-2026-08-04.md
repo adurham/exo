@@ -9382,3 +9382,96 @@ investigation from a branch-predicate bug.
 any performance conclusion until then -- its degenerate filler makes it
 unrepresentative. Its per-token gap INSTRUMENTATION is sound and was
 what exposed this; only its prompt is unfit.
+
+## 58. Two real findings while chasing Section 57's retraction: decode
+cost tracks prompt CONTENT at fixed length, and `PrefillCancelled`
+escapes uncaught through `step()` and kills the runner. (2026-08-15)
+
+### Finding 1: length is definitively NOT the variable
+
+First arm of a fixed-length diversity sweep
+(`bench/diversity_decode_sweep.py`, binary-searches paragraph count to
+hit a token target, pads by cycling the SAME pool so raising length
+never adds diversity):
+
+```
+  1 unique paragraph, 14,005 real tokens -> 23.58 tok/s (p50 42.4ms, 0% slow gaps)
+```
+
+Compare the official varied prompt at the same depth and config:
+
+```
+  ~14,099 real tokens, 398 unique blocks -> 0.49 tok/s (p50 2051ms, 93% slow gaps)
+```
+
+**14,005 vs 14,099 tokens. 48x throughput difference.** Token count is
+now controlled to within 0.7% and the collapse persists, so prompt
+LENGTH is eliminated as the cause. Content is the live variable. This
+also independently re-confirms Section 57's retraction: nothing about
+`EXO_PREFILL_STEP_SIZE` distinguishes these two runs.
+
+The remaining sweep arms (16 / 256 / 1024 unique) were not completed --
+see finding 2 for why.
+
+### Finding 2: `PrefillCancelled` is unhandled in the batched-decode
+`step()` path -- an uncaught exception that kills the runner process
+
+Hit while running the sweep. Real traceback, rank 1:
+
+```
+  runner.py:592           results = self.generator.step()
+  batch_generator.py:838  results = self._gen.step()
+  batch_generate.py:4155  responses = self._step_batched_decode()
+  batch_generate.py:4024  self._run_deferred_prefill_for_grant(grant, is_rank1=True)
+  batch_generate.py:3813  deferred.run_prefill()
+  batch_generate.py:1417  prefill(...)
+  generate.py:848         for _ in _sg:
+  mlx_lm/generate.py:528  prompt_progress_callback(...)
+  generate.py:776         distributed_prompt_progress_callback()
+  batch_generator.py:1119 raise PrefillCancelled()
+  -> exo...generate.PrefillCancelled   [UNCAUGHT -> process death]
+```
+
+`PrefillCancelled` is deliberately a `BaseException` rather than an
+`Exception` -- an in-tree comment (`batch_generate.py:584`) contrasts it
+with `PPSpecAlreadyActiveError`, which is *"a plain RuntimeError subclass
+(not BaseException, unlike PrefillCancelled in generate.py) so it's
+caught by the runner's existing `except Exception` handling ... and
+surfaces as a clean task failure the caller can retry, not an uncaught
+crash."* So the runner's generic handlers deliberately do NOT catch it.
+
+Both existing handlers guard SUBMIT paths only:
+`batch_generator.py:762` (batched start) and `:799` (single start).
+`generate.py:850` catches it solely to reset the pipeline flags and
+re-raises.
+
+But under batched decode, prefill is DEFERRED: it no longer runs inside
+`submit()`, it runs inside `tick()`-granted work reached from
+`step()` (`_run_deferred_prefill_for_grant`, called at
+`batch_generate.py:4024` and `:4047`). **There is no `PrefillCancelled`
+handler anywhere on that path** -- the string does not appear in
+`batch_generate.py` except in that one explanatory comment.
+
+This is a genuine structural gap introduced by the deferred-prefill
+redesign: the exception type's contract ("only the submit path handles
+me") was never updated when prefill's execution moved out of submit and
+into step. Cancelling a request whose prefill is mid-flight on the
+batched path kills the runner rather than cancelling the request.
+
+The cluster self-recovered (re-place, both runners back to
+`RunnerReady`) so this is survivable, but it is a real crash, it is
+reachable from ordinary client cancellation, and it aborted a
+measurement run.
+
+Not fixed in this commit -- recorded with the full trace so the fix is a
+deliberate piece of work rather than a reflex. The fix must decide
+whether `step()` should translate `PrefillCancelled` into the same
+"cancel this request, keep the runner alive" outcome the submit paths
+already produce.
+
+### Method note
+
+Both findings came from *aborted* work -- the sweep's first arm and the
+crash that stopped it. Neither was the thing being looked for. Worth
+recording that the diversity sweep has now paid for itself before
+completing a single full run.
