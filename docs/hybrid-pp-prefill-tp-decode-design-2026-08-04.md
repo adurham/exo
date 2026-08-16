@@ -12520,3 +12520,57 @@ where the reproduction lives. The TP/decode half runs the
 `on_generation_token` path (which DOES raise on the token cadence) and
 has not been separately reproduced or verified -- it must be tested, not
 assumed to work.
+
+## 94. Precision correction to Section 92: the stranded memory is not
+permanent, it is held until the NEXT request happens to go idle. 12.9
+minutes in the observed case. (2026-08-16)
+
+Section 92 said cancel "does not release memory" and cited rank 0 at 95
+GB footprint with zero idle-reclaims after the cancel. Both facts were
+correct at the time of measurement, but the conclusion needs a
+qualifier, so recording it before it hardens into another wrong claim.
+
+```
+  12:48:41   cancel issued
+  ...        rank0 footprint 95 GB, MLX active 86.70 GB, floor is 85.68
+             (measured repeatedly across this window -- no reclaim)
+  13:01:34   "runner idle: reclaimed MLX allocator pool"
+             <- triggered by the NEXT (unrelated, normal) request
+                finishing and going idle, NOT by the cancel
+  now        rank0 footprint 86 GB, MLX active 85.53 GB -- at the floor
+```
+
+**Memory stranded for 12.9 minutes**, then released by an unrelated
+event. So this is a *stranded-until-next-request* condition, not an
+unbounded leak, and the earlier "~9GB stranded" framing should be read
+with that bound attached. A cluster that is cancelled and then left
+alone holds the memory indefinitely; a cluster that keeps serving
+recovers on its own.
+
+**It still violates the stated requirement**, which is that cancel must
+release the memory and return to ready -- not hold ~9 GB until some
+future unrelated request happens to go idle. And the other two failures
+in Section 92 are untouched by this correction: work genuinely does not
+stop (3.45s of continued compute and a rank blocked in `Event::wait` on
+an abandoned collective), and `PREFILL_CANCELLED_PATH` genuinely never
+fires. The fix in Section 93 addresses all three; this only sharpens
+what "release the memory" is fixing.
+
+Two secondary points worth keeping:
+
+- The reclaim path itself works. `runner idle: reclaimed MLX allocator
+  pool` does return the allocator to the floor (85.53 GB measured after,
+  vs an 85.68 GB fitted floor). The defect is purely that **cancel does
+  not invoke it**; the idle transition does. That makes the memory half
+  of the Section 93 fix smaller than feared -- it is largely "call the
+  existing reclaim on the cancel path", plus the per-task drop and
+  `mx.synchronize()` ordering.
+- This also explains the asymmetry cleanly: rank 0 took the cancel and
+  stranded; rank 1 went idle normally and reclaimed once. Nothing
+  exotic.
+
+Method note, and it is the same one as Sections 89 and 93: I measured a
+real thing, then stated it slightly stronger than the measurement
+supported ("does not release" vs "does not release until an unrelated
+later event"). The measurement was a snapshot; the claim was about all
+future time. Re-checking the same metric later is what caught it.
