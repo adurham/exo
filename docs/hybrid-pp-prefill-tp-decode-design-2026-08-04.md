@@ -11745,3 +11745,101 @@ in plain text, that the fast and slow runs had 47 and 14,273 token
 prompts. **Before instrumenting anything, diff the two runs you are
 calling different modes and check what actually differed about the
 requests.**
+
+## 86. Section 85's sleep-granularity hypothesis is REFUTED by a live
+gate-toggle A/B. The 550ms is a GENUINE WAIT. Section 85's step-function
+finding stands unchanged. (2026-08-16)
+
+### The test
+
+Section 85 proposed that the ~550ms sat in `EventImpl::wait`'s
+`sleep_for(50us)` poll paying macOS's ~1ms `nanosleep` granularity, i.e.
+~550 short waits each overshooting ~20-30x. That predicts one thing
+sharply: **remove the sleep and the cost collapses.**
+
+`MLX_EVENT_WAIT_SPIN` controls how many iterations the loop spins (with
+`__asm yield`) BEFORE it ever calls `sleep_for`. Setting it high enough
+means the sleep path is never reached. Both knobs are already plumbed
+through `start_cluster.sh` (lines 2047-2048), so this is a real
+gate-toggle on the same build -- not a rebuild-vs-rebuild comparison.
+
+`MLX_EVENT_WAIT_SPIN=50000000`, one variable changed, everything else
+byte-identical to the baseline launch:
+
+```
+  prompt_tokens   baseline (spin=2000)   spin=50,000,000
+       1926               16.1ms              16.1ms
+       1930               16.2ms              16.2ms
+       2363              554.0ms             655.8ms
+       2367              550.4ms             678.2ms
+```
+
+**The slow path did not improve. It got ~20% WORSE** (the spin burns a
+core that the rest of the pipeline wants).
+
+### Verdict
+
+The sleep-granularity hypothesis is dead. `sleep_for` is merely WHERE
+THE THREAD PARKS while waiting; it is not what it is waiting FOR. The
+~550ms is a genuine wait on something that takes ~550ms to arrive, and
+the earlier "~550 waits/token" arithmetic -- which was derived FROM the
+granularity assumption, not measured -- goes with it.
+
+This also retires the proposed `MTLSharedEventListener` rewrite as a
+performance fix. A better wait primitive cannot shorten a wait whose
+duration is set by whatever signals the event. (It may still be worth
+doing on its own reliability merits; that is a separate argument and
+should not be smuggled in as a perf fix.)
+
+### What survives from Section 85, and it is the important part
+
+Everything measured, as opposed to inferred, stands:
+
+- The determinant is the **prefill code path**, not depth. 1,923 tok
+  plain = 16.1ms vs 2,365 tok chunked = 554ms: 23% more context, 34x the
+  cost, stepping exactly at `EXO_PREFILL_STEP_SIZE=2048`.
+- Past the step it is **flat** (2.9K -> 14.3K tokens, same cost), which
+  still rules out depth-scaling compute.
+- Decode is **not** transport-bound: `first_layer_recv` 0.1-0.3ms,
+  `gather_send` 0.1ms, in both modes.
+- The GPU is genuinely idle; the CPU is genuinely blocked in
+  `mx.eval -> array::wait -> EventImpl::wait`.
+
+The question is now sharper than before, not vaguer: **what signals that
+event, and why does taking the chunked prefill path make it take ~550ms
+to be signaled while the plain path takes ~16ms?**
+
+### Method notes, two of them, both mine
+
+1. **I ran an invalid A/B and caught it from the data, not from care.**
+   The first spin run silently also changed the prefill path (a 2,366-tok
+   prompt took `plain` instead of `chunked`) and emitted no
+   `[LAYER_PHASE]` lines at all. Cause: the previous cluster had been
+   launched with `EXO_PP_BATCHED_DECODE=1`, `EXO_PP_METAFRAME=1`, and
+   `EXO_DECODE_PHASE_TRACE=1` -- none of which are `start_cluster.sh`
+   defaults -- and my relaunch dropped all three. I had changed two
+   things and would have attributed the result to one.
+   **What saved it: capturing `ps eww` of the running runner BEFORE the
+   relaunch.** Diffing against that snapshot named the three missing vars
+   immediately. Do this before every relaunch; the launcher's defaults
+   are NOT the live config.
+2. Related, and it corrects the campaign's own baseline: the
+   pre-relaunch cluster was running
+   `MLX_JACCL_P2P_DRAIN_QUIET_US=500000` pinned on both nodes -- the OLD
+   500ms fixed timer, overriding the adaptive default from Sections
+   71/77/78. So measurements taken before this point were NOT on "the
+   shipped transport default", whatever the doc said. This does not
+   change any conclusion here (transport is microseconds in both modes
+   either way) but it invalidates the premise of any earlier comparison
+   that assumed the adaptive timer was live.
+
+### Next
+
+Instrument the signaling side rather than the waiting side: identify
+WHICH `mx.eval`-internal dependency the last layer's graph is blocked on
+in the chunked case, and what produces it. The leading structural
+candidate from Section 85 is unchanged and now carries the whole
+hypothesis -- after chunked prefill the KV/cache arrays are left
+associated with a different stream than decode runs on, so every decode
+token waits on a cross-stream event that only completes when that other
+stream is serviced.
