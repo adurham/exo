@@ -835,7 +835,50 @@ class BatchGenerator(Engine):
 
         self._jaccl_dump_step("pre_gen_step")
 
-        results = self._gen.step()
+        try:
+            results = self._gen.step()
+        except PrefillCancelled:
+            # Section 58/61: under batched decode, prefill is DEFERRED --
+            # it no longer runs inside submit(), it runs inside
+            # tick()-granted work reached from step()
+            # (_run_deferred_prefill_for_grant). PrefillCancelled is
+            # deliberately a BaseException (see the contrasting comment
+            # on PPSpecAlreadyActiveError in batch_generate.py) so the
+            # runner's generic `except Exception` handling does NOT
+            # catch it -- which was correct while the only way to raise
+            # it was from a submit path that already handled it
+            # explicitly. Both of those handlers still exist
+            # (_batched_start_task and _start_task above), but nothing
+            # followed the exception when prefill's execution moved
+            # into step(), so a client cancelling during an in-flight
+            # deferred prefill killed the whole runner process with an
+            # uncaught exception. Real traceback captured on hardware,
+            # design doc Section 58.
+            #
+            # The correct outcome is the one both submit-path handlers
+            # already chose: the cancelled request goes away, the runner
+            # stays alive. _apply_cancellations() is the existing
+            # mechanism for exactly that -- it is what step()'s own
+            # no-work path returns a few lines above, and it already
+            # knows how to defer finalization for requests whose
+            # generator/glue still holds state (PP-spec parking, the
+            # batched-decode follower evict handshake) rather than
+            # reporting them cancelled too early.
+            #
+            # Cross-rank safety: this is NOT a unilateral local
+            # decision. The raise site
+            # (distributed_prompt_progress_callback) calls
+            # agree_on_cancellations_fast() -- a collective -- BEFORE
+            # checking should_cancel(), so both ranks reach the same
+            # verdict on the same request and take this path in
+            # lockstep. Swallowing it on one rank only would desync;
+            # swallowing it after an agreed collective does not.
+            logger.info(
+                "prefill cancelled during a deferred (batched-decode) "
+                "prefill inside step(); reporting the cancellation and "
+                "keeping the runner alive"
+            )
+            return self._apply_cancellations()
 
         output: list[
             tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
