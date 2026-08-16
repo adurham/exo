@@ -9684,3 +9684,93 @@ produced a clean deploy with zero trace output. And loguru does not do
 `%`-style interpolation, so the first working deploy emitted twenty
 lines of literal `%.1fms` placeholders. The tracer fired correctly both
 times; only the plumbing and the formatting were wrong.
+
+## 61. `PrefillCancelled` escaping `step()` is FIXED (unit-verified, NOT
+hardware-verified) -- and prefill-phase cancellation turns out to be
+untestable by any existing harness. (2026-08-15)
+
+### The fix
+
+`BatchGenerator.step()` now guards the `self._gen.step()` call with
+`except PrefillCancelled` and routes to `_apply_cancellations()`
+(exo@14af95e3f).
+
+That is the same outcome both submit-path handlers already chose --
+`_batched_start_task` (batch_generator.py:762) and `_start_task`
+(:799): the cancelled request goes away, the runner survives.
+`_apply_cancellations()` is the right mechanism specifically because it
+already knows how to DEFER finalization for requests whose
+generator/glue still holds state (PP-spec parking, the batched-decode
+follower evict handshake) rather than reporting them cancelled too
+early -- and it is what `step()`'s own no-work path already returns a
+few lines above.
+
+**Cross-rank safety, from the code rather than assumed:** the raise
+site (`distributed_prompt_progress_callback`) calls
+`agree_on_cancellations_fast()` -- a collective -- BEFORE checking
+`should_cancel()`. Both ranks therefore reach the same verdict on the
+same request and take this path in lockstep. Swallowing after an agreed
+collective is safe; swallowing unilaterally would desync the ranks.
+
+### Verification status, stated precisely
+
+**Unit-verified with a negative control.** Three regression tests;
+reverting ONLY the guard makes 2 of 3 fail, restoring it makes 3/3
+pass. One test additionally pins that `PrefillCancelled` remains a
+`BaseException` -- if a future change demotes it to `Exception`, every
+generic `except Exception` in the runner starts swallowing agreed
+cross-rank cancellations as opaque task failures, which is a worse bug
+than the original.
+
+**NOT hardware-verified.** Three attempts to reproduce the crash
+window all failed to deliver a cancel mid-prefill:
+
+1. Client disconnect -- does not trigger cancellation at all; the
+   request ran to completion.
+2. `POST /v1/cancel/{client_supplied_uuid}` -- 404. The API assigns its
+   own `command_id`; a client-supplied one is ignored.
+3. Command id scraped from `/state` -- 404. `/state` exposes `tasks`,
+   not `commands`; those are different identifiers.
+
+Across all three runs: zero crashes, zero uncaught `PrefillCancelled`
+tracebacks, clean recovery -- **but the guard's log line never fired on
+either node.** The path was never exercised. Absence of a crash here is
+NOT evidence the fix works; it is evidence the trigger was never
+reproduced. Recording it that way deliberately: treating "no crash
+observed" as a pass would repeat the error shape that produced Section
+57's retraction.
+
+### Separate finding: prefill-phase cancellation is untestable today
+
+`bench/section27_cancel_abort_test.py` obtains `command_id` from the
+FIRST STREAMED CHUNK (line ~147, `command_id = chunk.get("id")`).
+During a long prefill no chunk has arrived yet -- so **that harness
+structurally cannot cancel during prefill.** It can only cancel once
+decode has begun.
+
+Two consequences worth tracking independently of this bug:
+
+1. It plausibly explains how this crash survived a 5/5 cancel-suite
+   pass (Section 49): the suite's cancels all land in decode, and the
+   crash lives in prefill.
+2. **Requirement 2's bar is "cancellation must work during BOTH prefill
+   and decode" -- and the prefill half has never been tested by any
+   existing suite.** Section 2.5 calls fixing prefill cancellation "a
+   strictly higher bar than what TP already does today"; that claim is
+   currently unvalidated in the prefill direction.
+
+More broadly: if a request cannot be identified until it starts
+streaming, then no client can cancel it during prefill, regardless of
+this fix. Whether that is an API gap or simply an undocumented
+id-retrieval path is unresolved -- `POST /v1/chat/completions`'s own
+response carries `command_id` for the non-streaming shape
+(`main.py:821/831`), so the plumbing may exist and simply not be
+surfaced on the streaming path before the first chunk.
+
+### Tracked follow-ups (not closed)
+
+- Hardware-validate the Section 61 guard once a mid-prefill cancel can
+  actually be issued.
+- Establish a supported way to obtain the server-assigned `command_id`
+  before the first token, then extend the cancel suite with a
+  cancel-during-prefill case.
