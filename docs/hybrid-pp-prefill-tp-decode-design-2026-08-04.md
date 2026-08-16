@@ -11116,3 +11116,86 @@ floor. Every one was caught by the needle gate and none by a throughput
 number. The rule that keeps holding: **measure at a shallow AND a deep
 point before any timing value becomes a default, and never trust tok/s
 without a verified needle.**
+
+## 79. The complete matrix: every fast config fails at depth. The
+shipped default is safe-but-slow, and that is the honest state.
+(2026-08-16)
+
+### All five configurations, every cell needle-gated
+
+```
+  config                    14K          70K       verdict
+  500ms (original)          0.47         0.47      safe, slow
+  25ms fixed                22.6-22.8    FAIL      fast shallow, broken deep
+  100ms fixed               0.65         0.59      safe, ~no gain
+  adaptive 2ms + 1ms/chunk  19.99        FAIL      fast shallow, broken deep
+  adaptive 100ms + 1/chunk  0.65         0.64      safe, ~no gain   <- SHIPPED
+```
+
+**Every configuration that is fast at 14K fails at 70K. Every
+configuration safe at 70K loses the 14K gain.** There is no setting of
+this timer that delivers both.
+
+### Why chunk-count scaling could not separate them
+
+The adaptive idea was that the quiet period should track the in-flight
+window, proxied by chunk count. Measured chunk distribution at 70K:
+
+```
+  316 calls  num_chunks=1
+   36 calls  num_chunks=5
+   15 calls  num_chunks=2049
+```
+
+The decode activation send is **5 chunks at every depth** -- 65536 bytes
+in 16380-byte pieces, independent of context length. So the transfer
+whose latency actually gates decode looks identical at 14K and 70K to a
+chunk-count heuristic. What changes with depth is elsewhere (the 2049-
+chunk transfers, the collective path, the KV cache), not in the size of
+the message this timer governs.
+
+That is why both adaptive variants behaved exactly like their floors:
+2ms floor -> behaves like 25ms fixed (fast, breaks deep); 100ms floor ->
+behaves like 100ms fixed (safe, no gain).
+
+### What is shipped, and why
+
+`adaptive 100ms + 1ms/chunk`. It is the safe-everywhere option, verified
+at both depths with the needle passing, and the per-chunk term gives
+genuinely large transfers (2049 chunks -> ~2.1s) more patience than any
+fixed value shipped so far. It is **not** a throughput win: 0.65 / 0.64
+tok/s versus the original 0.47.
+
+I am not shipping the 25ms variant despite its 35x shallow win, because
+it produces zero tokens at 70K and requirement 3 is judged at 500K. A
+default that is spectacular at a depth nobody runs and broken at the
+depth that matters is not a fix.
+
+### The corrected status of requirement 3
+
+Section 73 claimed 22.61 tok/s / 48x. That number is real but was
+obtained with a setting that **cannot be shipped**. The honest,
+shippable numbers today:
+
+```
+   14K:  0.65 tok/s
+   70K:  0.64 tok/s
+  500K:  unmeasured
+```
+
+versus 0.47 before -- roughly a 38% improvement, not 48x. The 48x figure
+should not be quoted again without the words "at 14K, with a
+configuration that breaks at depth".
+
+### What the 22.8 tok/s result still proves
+
+It is not worthless. It demonstrates the stack CAN decode at ~23 tok/s
+when frames are not being lost -- the compute, the pipeline and the
+scheduler are all capable of it. The gap to requirement 3 is entirely
+the loss-and-recovery behaviour of the transport, not a compute ceiling.
+
+The real fix is therefore still the one Section 70 named and Section 75
+could not confirm: **stop losing the first send**. The quiet period only
+ever governed how expensively we notice. Six sections of timer tuning
+have now established, by exhaustion, that the timer cannot be tuned into
+a solution.
