@@ -1479,13 +1479,11 @@ class Rank0BatchedDecodeGlue:
             if _trace:
                 _t4 = time.perf_counter()
                 logger.info(
-                    "[DECODE_PHASE] prepare=%.1fms send_step=%.1fms "
-                    "run_forward=%.1fms finish_step=%.1fms total=%.1fms",
-                    (_t1 - _t0) * 1000.0,
-                    (_t2 - _t1) * 1000.0,
-                    (_t3 - _t2) * 1000.0,
-                    (_t4 - _t3) * 1000.0,
-                    (_t4 - _t0) * 1000.0,
+                    f"[DECODE_PHASE] prepare={(_t1 - _t0) * 1000.0:.1f}ms "
+                    f"send_step={(_t2 - _t1) * 1000.0:.1f}ms "
+                    f"run_forward={(_t3 - _t2) * 1000.0:.1f}ms "
+                    f"finish_step={(_t4 - _t3) * 1000.0:.1f}ms "
+                    f"total={(_t4 - _t0) * 1000.0:.1f}ms"
                 )
             classified = self.adapter.classify_step_results(step_results)
             return dict(classified), None, None, None
