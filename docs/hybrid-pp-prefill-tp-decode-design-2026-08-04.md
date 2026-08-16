@@ -12768,3 +12768,77 @@ one) all failed to settle this because reading a call chain cannot tell
 you which of two wired paths executes. Six log lines did. When two
 readings of the code disagree about which branch runs, **instrument and
 run it** -- that was available from the start and cost one relaunch.
+
+## 97. Fix landed and HALF-VERIFIED on hardware: the cancel is now
+observed mid-prefill in 166ms (was: never). The bilateral abort does NOT
+yet fire. (2026-08-16)
+
+Commit `9d1821539`. `BatchGenerator._start_task` registers a local,
+non-blocking cancel probe (`set_prefill_cancel_probe`); the generator
+consults it immediately before rank 0's `glue.tick()` -- the quiescent
+boundary Section 93 specified -- and on a hit issues the EXISTING
+bilateral abort. No new wire protocol was needed.
+
+### What is verified
+
+```
+  13:43:43.386  CANCELPROBE[supervisor] cancel_task task_id=00e050b2...
+  13:43:43.552  PREFILL_CANCELLED_PATH: chunk-drive cancel observed at
+                chunk boundary for uid=0; issuing bilateral abort
+```
+
+`PREFILL_CANCELLED_PATH` count went **0 -> 1**. The cancel is now seen
+at the chunk boundary **166ms** after the supervisor dispatches it,
+against "never" before this commit. The observation half of Section 96
+is fixed and confirmed on real hardware.
+
+### What is NOT fixed, stated plainly
+
+```
+  13:43:46.552  [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1
+```
+
+Three seconds after the abort was "issued", a rank is still stranded --
+the exact Section 92 symptom. And searching both nodes' logs for
+`PrefillAbortMessage` / `abort_prefill_session` / `PrefillAbortAck`
+returns **nothing**: the bilateral abort never actually ran.
+
+The tell is in the marker itself: `uid=0`.
+`active_prefill_request_id()` returned 0, and `self.cancel([0])` then
+found no matching live chunk-drive to route to
+`abort_prefill_session()`, so it fell through silently. Either 0 is not
+the real request uid on this path, or the session was already retired by
+the time the probe fired. Not yet determined which -- and I am not going
+to guess a third time tonight.
+
+### Why this matters more than a wrong constant
+
+`cancel()`'s own docstring (batch_generate.py:4955-4972) documents a
+CONFIRMED prior hardware incident with precisely the signature I just
+reproduced: rank 1 quiesced cleanly on the tick cancel() ran, while
+rank 0 had already posted a recv for the NEXT frame one exchange round
+earlier, leaving rank 0 spin-polling `Event::wait` for up to
+`MLX_EVENT_WAIT_TIMEOUT_MS` (1800s in PP) for a frame that will never
+arrive -- and corrupting RDMA/GPU-stream state badly enough that the
+NEXT request's warmup handshake also failed.
+
+That is the same failure mode as the `slow wait` above. So the
+remaining work is NOT "pass the right uid" -- it is the ordering problem
+that docstring already solved once for the decode path (flag, don't
+decide; let both ranks observe at their own in-band checkpoint before
+any wire op). The prefill path needs the same treatment, and the
+Section 93 metaframe CANCEL frame (`491d5ea35`) may be exactly the
+in-band checkpoint for it.
+
+### Status
+
+- Requirement 2 observation half: **FIXED, hardware-verified.**
+- Requirement 2 teardown half: **NOT fixed.** Cancel is observed and
+  reported, but in-flight work is not torn down bilaterally, so a rank
+  still strands and memory is still held until the next idle transition
+  (Section 94's bound).
+- Regression risk of what shipped: low but non-zero. The probe is
+  local/non-blocking and the abort path it calls is pre-existing; the
+  observable change is one extra log line and an early `return []` on a
+  cancelled chunk boundary. But it has NOT been soaked, and `uid=0`
+  means the abort branch is currently a no-op rather than exercised.
