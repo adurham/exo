@@ -13332,3 +13332,121 @@ TP process decodes. The wire is now the only part that was missing, and
 it exists as of this section. Remaining work is orchestration (who owns
 which process, when the handoff fires, how the request follows it), not
 a new transport.
+
+## 103. PP-prefill -> TP-decode: the orchestration is ALREADY BUILT. The
+plan, the two real gaps, and the memory reframing that makes it cheap.
+(2026-08-16)
+
+User's direction, and it is correct: the main goal was never in place
+while this session chased bugs and inefficiencies in a decode path that
+is not even the target architecture. Architecture first, then bugs.
+
+### Nearly all of it already exists
+
+Read and confirmed, not inferred:
+
+- `ENABLE_DISAGGREGATION` env gate (`shared/constants.py:106`, default
+  false).
+- `PrefillServer`, a threading TCP server
+  (`worker/disaggregated/server.py:86`), started per-runner on
+  **device_rank 0 only** (`runner.py:221 _start_prefill_server`).
+- Its port is published into cluster state
+  (`state.prefill_server_ports`, `shared/types/state.py:69`, populated
+  via `shared/apply.py:279-283`).
+- **`state.instance_links`** carries `.prefill_instances` /
+  `.decode_instances` -- the state model already has a first-class
+  "instance A prefills FOR instance B" relation.
+- `_prefill_endpoint_for()` (`master/main.py:84-120`) walks those links,
+  load-balances across prefill instances by in-flight task count,
+  resolves an IP through the topology, returns `ip:port`, and injects it
+  as `task.prefill_endpoint` (`master/main.py:263`).
+- Decode side calls `remote_prefill(...)` whenever `prefill_endpoint is
+  not None` (`generate.py:2034`, `batch_generate.py:1401`, `:2541`).
+- The DSv4 cache codec gap is now closed (Section 102, `e3b6a0bed`).
+
+So the transport, the routing, the state model and the task plumbing are
+all done. This is not a build-from-scratch.
+
+### The memory reframing that changes the cost
+
+I had been reasoning about co-residency of two INSTANCES. Wrong frame.
+**The two WEIGHT SETS cannot coexist; the KV CACHE coexists with
+either.**
+
+```
+  one instance's weights   77.7 GB/node
+  + KV at 500K              5.85 GB  (total, both nodes)
+  + MLX runtime             8.0 GB
+  = ~92 GB/node             -- fits comfortably in 128 GB
+```
+
+So this is a **weights swap, not an instance swap**, and the PP runner
+process does NOT have to die. It becomes a weightless cache holder: free
+the weights, `mx.clear_cache()`, keep the process, the PrefillServer,
+the registered port and the pull path all alive. No holder process, no
+disk staging, no new protocol leg -- everything built in Section 102 is
+reused unchanged.
+
+### GAP 1 (real, and it is an ordering bug, not a protocol bug)
+
+`run_prefill_for_request` (`disaggregated/serve.py:20-92`) **computes**
+the prefill on demand -- it calls `mlx_prefill` (`serve.py:48-58`). It
+does not merely serve an already-computed cache. Combined with the pull
+model, that means prefill compute would run while the decode side is
+already mid-request with **TP weights loaded** -- co-residence again,
+which is exactly what does not fit.
+
+Fix, least-invasive, no wire-protocol change: **hoist the fetch**. The
+decode runner performs the remote prefill BEFORE loading its own
+weights, then signals the PP side to free weights, waits for the memory
+to actually drop, loads TP weights, and ingests. Only the decode
+runner's lifecycle ordering changes.
+
+Critically: gate the TP load on **observed free memory**, not on
+"unload returned". MLX's caching allocator retains freed buffers and
+residency can keep them wired; a TP load that "succeeds" into
+compression/swap would silently destroy the decode throughput this whole
+effort exists to get.
+
+### GAP 2 (previously unflagged anywhere -- and it means this path has
+never worked for a multi-node PP prefill)
+
+`serve_prefill` (`batch_generator.py:382-396` and `:1409+`) calls
+`run_prefill_for_request` then `write_cache_to_wire` with **this rank's
+cache only**. And `_start_prefill_server` runs on **device_rank 0
+only**.
+
+Under PP the KV cache is split BY LAYER across ranks -- rank 0 holds
+layers 0-21, rank 1 holds 22-42. TP decode replicates attention and
+needs **all 43 layers on both ranks**. Nothing in the current path
+gathers rank 1's half.
+
+So a cross-rank cache gather (~3 GB over TB5, order ~1s) is genuinely
+missing and is part of milestone 1. This is a real hole in code that
+looks complete.
+
+### Milestones (adopted)
+
+- **M0 (do first, hours):** run the whole disaggregation path with a
+  SMALL model that fits co-resident twice (~8B). Proves the
+  orchestration end to end with zero memory choreography, and will
+  immediately surface Gap 2.
+- **M1:** DSv4, tiny prompt (1-4K), one request, manually sequenced:
+  PP prefills -> cache fetched -> PP frees weights -> verify the memory
+  actually dropped -> TP loads -> decode with MTP. No automation, no
+  perf target. Correctness gate: output matches a TP-only baseline on
+  the same prompt.
+- **M2:** automate the lifecycle in the master/JIT layer, then scale to
+  500K and measure whether 30 tok/s holds -- still unmeasured at that
+  depth under ANY config, and carried as a separate risk.
+
+### Two things to confirm en route
+
+- Does the TP decode instance's 77.7 GB/node include the **MTP head
+  weights**? If MTP modules were excluded from that estimate the
+  headroom math needs redoing.
+- Per-request swap cost is ~18.7s/rank of load, twice, and it is a full
+  ~78 GiB disk read each time (page cache cannot help -- 155 GiB of
+  weights against 128 GB of RAM that is already occupied). Fine against
+  a 23-minute 500K prefill; catastrophic for short prompts. The policy
+  question of when NOT to disaggregate is real and deferred to M2.
