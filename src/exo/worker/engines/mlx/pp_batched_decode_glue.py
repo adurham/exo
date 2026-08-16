@@ -711,6 +711,20 @@ class Rank0BatchedDecodeGlue:
     def has_active_prefill_session(self) -> bool:
         return self._active_prefill_session is not None
 
+    def active_prefill_request_id(self) -> int | None:
+        """The request_id of this rank's live chunk-drive prefill
+        session, or None if none is active (design doc Section 96).
+
+        Public read-only accessor so the cancel check at the drive's
+        chunk boundary does not reach into ``_active_prefill_session``
+        directly. Deliberately returns the id rather than the session:
+        the caller's only legitimate use is to name the uid it is about
+        to abort.
+        """
+        if self._active_prefill_session is None:
+            return None
+        return self._active_prefill_session[0]
+
     def is_prefill_session_active_for(self, request_id: int) -> bool:
         """True iff a chunk-drive prefill session for exactly ``request_id``
         is live on THIS rank right now.

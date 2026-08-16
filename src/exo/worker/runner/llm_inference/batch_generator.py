@@ -1190,15 +1190,46 @@ class BatchGenerator(Engine):
         def distributed_prompt_progress_callback() -> None:
             t0 = time.perf_counter()
             self.agree_on_cancellations_fast()
-            _sc = self.should_cancel(task.task_id)
-            logger.info(
-                f"CANCELPROBE[prefill.cb] task={task.task_id} should_cancel={_sc} "
-                f"cancelled_set={[str(t) for t in self._cancelled_tasks]}"
-            )
-            if _sc:
-                logger.info("CANCELPROBE[prefill.cb] RAISING PrefillCancelled")
+            if self.should_cancel(task.task_id):
                 raise PrefillCancelled()
             request_trace.record("prefill.distributed_callback", t0)
+
+        def prefill_cancel_requested() -> bool:
+            """Cancellation probe for the INTERRUPTIBLE chunk drive
+            (design doc Section 96).
+
+            ``distributed_prompt_progress_callback`` above is the cancel
+            hook for the EAGER generator loop. Proven on hardware that
+            the interruptible drive does not use it: one 40K-token
+            prefill logged 79 ``PREFILL_ADVANCE_APPLIED`` against only 6
+            callback firings, ALL of them before the cancel arrived, so
+            ``PrefillCancelled`` was never raised and
+            ``PREFILL_CANCELLED_PATH`` never fired. Delivery, collection
+            and cross-rank agreement were all verified healthy in the
+            same run -- the id genuinely reaches ``_cancelled_tasks``;
+            nothing was asking.
+
+            Returns a plain bool and NEVER raises: the chunk driver is
+            responsible for choosing the quiescent moment to act, and an
+            exception thrown mid-drive is exactly what Section 93 rules
+            out. Local-only and non-blocking (a set membership test plus
+            a ``receive_nowait`` drain), so it adds no cross-rank traffic
+            to the prefill hot path.
+            """
+            for _cancelled_id in self.cancel_receiver.collect():
+                self._cancelled_tasks.add(_cancelled_id)
+            return self.should_cancel(task.task_id)
+
+        # Register the probe on the generator rather than threading it
+        # through submit(): the chunk drive lives behind
+        # submit() -> _submit_batched_decode_deferred() -> the glue, and
+        # the glue is what owns both the quiescent chunk boundary AND
+        # the already-built bilateral abort
+        # (Rank0BatchedDecodeGlue.abort_prefill_session -> blocking
+        # PrefillAbortMessage/ack round trip). A parameter would have to
+        # cross four layers to reach a component that can already do the
+        # work; a registered probe reaches it in one.
+        self._gen.set_prefill_cancel_probe(prefill_cancel_requested)
 
         tokens_since_cancel_check = self.check_for_cancel_every
 

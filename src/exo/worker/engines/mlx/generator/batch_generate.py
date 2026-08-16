@@ -790,6 +790,13 @@ class ExoBatchGenerator:
         init=False, default=None
     )
     _batched_decode_eos: set[int] = field(init=False, default_factory=set)
+    # Section 96: probe the chunked-prefill drive consults at each chunk
+    # boundary. Set by BatchGenerator._start_task via
+    # set_prefill_cancel_probe(); None until then and on every
+    # non-chunk-drive path, so existing behaviour is untouched.
+    _prefill_cancel_probe: "Callable[[], bool] | None" = field(
+        init=False, default=None
+    )
     # Rank-0-only: prefill work deferred until Rank0BatchedDecodeGlue's
     # tick() grants it (2026-08-06 fix, see _DeferredPrefill's own
     # docstring). Keyed by uid so _step_batched_decode can look up the
@@ -2163,6 +2170,20 @@ class ExoBatchGenerator:
         self._set_fence_async_engine(
             1 <= len(self._active_tasks) <= limit and not self._pp_spec_active
         )
+
+    def set_prefill_cancel_probe(
+        self, probe: "Callable[[], bool] | None"
+    ) -> None:
+        """Register the callable the chunked-prefill drive consults at
+        each chunk boundary (design doc Section 96).
+
+        The eager prefill loop's ``distributed_prompt_progress_callback``
+        is NOT reached by the interruptible drive -- measured on
+        hardware: 79 ``PREFILL_ADVANCE_APPLIED`` against 6 callback
+        firings, all of them before the cancel arrived. Stored, not
+        invoked, here.
+        """
+        self._prefill_cancel_probe = probe
 
     def submit(
         self,
@@ -4040,6 +4061,35 @@ class ExoBatchGenerator:
             return []
 
         assert self._batched_decode_rank0_glue is not None
+        # Section 96 (2026-08-16): THE MISSING LINK. Everything
+        # downstream of here already worked -- cancel delivery,
+        # collection, cross-rank agreement, and the bilateral
+        # abort_prefill_session() -> PrefillAbortMessage/ack round trip.
+        # What was missing is that nothing ASKED during a long prefill:
+        # _apply_cancellations() (the only caller of _gen.cancel()) is
+        # reachable only from step(), and step() is blocked inside this
+        # very drive for the whole prefill. Measured on hardware: 79
+        # chunk advances vs 6 callback firings, all before the cancel;
+        # PREFILL_CANCELLED_PATH never fired and a rank sat in
+        # Event::wait for 19s.
+        #
+        # Checked HERE, before tick() drives the next segment: the
+        # previous advance() has already mx.eval()'d its paused
+        # activation and rank 1 has not been sent a
+        # PrefillAdvanceMessage for the next one, so neither rank has
+        # work enqueued for chunk k+1 -- the quiescent boundary
+        # Section 93 specified.
+        _probe = self._prefill_cancel_probe
+        if _probe is not None:
+            _active = self._batched_decode_rank0_glue.active_prefill_request_id()
+            if _active is not None and _probe():
+                logger.info(
+                    f"PREFILL_CANCELLED_PATH: chunk-drive cancel observed "
+                    f"at chunk boundary for uid={_active}; issuing "
+                    f"bilateral abort"
+                )
+                self.cancel([_active])
+                return []
         classified, _admitted_id, grant, prefill_advance_completed = (
             self._batched_decode_rank0_glue.tick(self.model)
         )
