@@ -79,41 +79,40 @@ async def probe(
     usage: dict = {}
     finish_reason: str | None = None
 
-    async with httpx.AsyncClient() as client:
-        async with client.stream(
-            "POST", f"{base_url}/v1/chat/completions", json=body, timeout=1800.0
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                if chunk.get("usage"):
-                    usage = chunk["usage"]
-                choices = chunk.get("choices", [])
-                if not choices:
-                    continue
-                if choices[0].get("finish_reason"):
-                    finish_reason = choices[0]["finish_reason"]
-                delta = choices[0].get("delta", {})
-                content = delta.get("content")
-                reasoning = delta.get("reasoning_content")
-                if not content and not reasoning:
-                    continue
-                now = time.perf_counter()
-                if first_token_time is None:
-                    first_token_time = now
-                stamps.append(now)
-                if content:
-                    content_chunks.append(content)
-                else:
-                    reasoning_chunks.append(reasoning)
+    async with httpx.AsyncClient() as client, client.stream(
+        "POST", f"{base_url}/v1/chat/completions", json=body, timeout=1800.0
+    ) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:]
+            if payload.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+            if choices[0].get("finish_reason"):
+                finish_reason = choices[0]["finish_reason"]
+            delta = choices[0].get("delta", {})
+            content = delta.get("content")
+            reasoning = delta.get("reasoning_content")
+            if not content and not reasoning:
+                continue
+            now = time.perf_counter()
+            if first_token_time is None:
+                first_token_time = now
+            stamps.append(now)
+            if content:
+                content_chunks.append(content)
+            else:
+                reasoning_chunks.append(reasoning)
 
     end = time.perf_counter()
     text = "".join(content_chunks)
@@ -121,7 +120,7 @@ async def probe(
 
     ttft = (first_token_time - start) if first_token_time else 0.0
     # Inter-token gaps: exclude TTFT entirely, it is prefill cost not decode cost.
-    gaps = [(b - a) for a, b in zip(stamps, stamps[1:])]
+    gaps = [(b - a) for a, b in zip(stamps, stamps[1:], strict=False)]
 
     return {
         "ttft_s": ttft,

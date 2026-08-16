@@ -25,8 +25,55 @@ actually coherent, not garbage/degenerate.
 import argparse
 import asyncio
 import json
+import os
 import random
 import time
+from functools import lru_cache
+
+
+@lru_cache(maxsize=4)
+def _load_tokenizer(model: str):
+    """Load the real tokenizer for ground-truth prompt token counts.
+
+    Section 55 (2026-08-15): prefill tok/s must never be computed from a
+    server-reported token count. Returns None if the tokenizer cannot be
+    loaded, in which case the caller falls back to the old estimate and
+    LOUDLY labels the number as an estimate rather than silently
+    reporting it as measured.
+    """
+    try:
+        from transformers import AutoTokenizer
+    except ImportError:
+        return None
+
+    candidates = [model]
+    # The HF repo id and the local MLX conversion share a tokenizer; fall
+    # back to whichever DeepSeek-V4-Flash snapshot is actually on disk so
+    # this works offline and regardless of which checkpoint is served.
+    local_glob = os.path.expanduser(
+        "~/.cache/huggingface/hub/models--*DeepSeek-V4-Flash*/snapshots/*"
+    )
+    import glob
+
+    candidates.extend(sorted(glob.glob(local_glob)))
+
+    for candidate in candidates:
+        try:
+            return AutoTokenizer.from_pretrained(candidate, trust_remote_code=True)
+        except Exception:  # noqa: BLE001 - any load failure means "try the next"
+            continue
+    return None
+
+
+def count_prompt_tokens(model: str, prompt: str) -> int | None:
+    """Ground-truth token count for ``prompt``, or None if unavailable."""
+    tokenizer = _load_tokenizer(model)
+    if tokenizer is None:
+        return None
+    try:
+        return len(tokenizer.encode(prompt))
+    except Exception:  # noqa: BLE001 - never let instrumentation kill a run
+        return None
 
 import httpx
 
@@ -89,7 +136,20 @@ async def measure(base_url: str, model: str, target_tokens: int, max_tokens: int
     prompt, expected = build_prompt(target_tokens)
     prompt_chars = len(prompt)
     est_tokens = prompt_chars // 4
-    print(f"Prompt: {prompt_chars:,} chars (~{est_tokens:,} tokens)")
+    ground_truth_prompt_tokens = count_prompt_tokens(model, prompt)
+    if ground_truth_prompt_tokens is not None:
+        print(
+            f"Prompt: {prompt_chars:,} chars, {ground_truth_prompt_tokens:,} tokens "
+            f"(tokenizer ground truth; chars//4 estimate would say "
+            f"{est_tokens:,}, off by "
+            f"{est_tokens / ground_truth_prompt_tokens:.2f}x)"
+        )
+    else:
+        print(
+            f"Prompt: {prompt_chars:,} chars (~{est_tokens:,} tokens) "
+            f"-- WARNING: tokenizer unavailable, prefill tok/s will be an "
+            f"ESTIMATE and is NOT comparable to tokenizer-based runs"
+        )
 
     body = {
         "model": model,
@@ -162,17 +222,57 @@ async def measure(base_url: str, model: str, target_tokens: int, max_tokens: int
     ttft_s = (first_token_time - start) if first_token_time else 0
     total_s = end - start
     decode_s = total_s - ttft_s
-    prompt_tokens = usage.get("prompt_tokens", est_tokens)
-    completion_tokens = usage.get("completion_tokens", len(token_timestamps))
+
+    # Section 55 (2026-08-15): NEVER derive throughput from a
+    # server-reported token count. Three separate bugs in this campaign
+    # all reduce to the same root -- a tok/s number whose numerator was
+    # an API field that silently changed definition underneath it:
+    #
+    #   * usage.prompt_tokens reported the prompt TAIL (fixed 7d14daea7)
+    #   * generation_tps reported machine uptime as generation time
+    #   * this harness's own `usage.get("prompt_tokens", est_tokens)`,
+    #     which fell back to `chars // 4` whenever the field was
+    #     unusable -- and `chars // 4` overcounts this prompt by 1.42x
+    #     (real ratio ~5.68 chars/token). That single fallback produced
+    #     the phantom "30% prefill regression" between Sections 50-51
+    #     and 52; renormalized, the two run sets agreed within 0.4%.
+    #
+    # `ground_truth_prompt_tokens` is computed offline from the real
+    # tokenizer against the exact prompt string we sent, so no
+    # server-side accounting change can move a throughput number again.
+    # The API's own counts are still RECORDED (for cross-checking and to
+    # catch future accounting drift) but are never load-bearing.
+    api_prompt_tokens = usage.get("prompt_tokens")
+    prompt_tokens = (
+        ground_truth_prompt_tokens
+        if ground_truth_prompt_tokens is not None
+        else usage.get("prompt_tokens", est_tokens)
+    )
+    # Completion tokens counted locally from the stream: one increment
+    # per streamed content/reasoning delta, independent of usage.*.
+    completion_tokens = len(token_timestamps)
+    api_completion_tokens = usage.get("completion_tokens")
     reasoning_tokens = usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)
 
     found_needle = expected.lower() in response.lower() or expected.lower() in reasoning.lower()
     prefill_tps = prompt_tokens / ttft_s if ttft_s > 0 else 0
     decode_tps = completion_tokens / decode_s if decode_s > 0 else 0
 
-    print(f"\n  Prompt tokens: {prompt_tokens:,}")
+    token_source = "tokenizer" if ground_truth_prompt_tokens is not None else "ESTIMATE"
+    print(f"\n  Prompt tokens: {prompt_tokens:,} (source: {token_source})")
+    if api_prompt_tokens is not None and api_prompt_tokens != prompt_tokens:
+        print(
+            f"  WARNING: API reported prompt_tokens={api_prompt_tokens:,}, "
+            f"ground truth is {prompt_tokens:,} -- accounting drift, "
+            f"throughput below uses ground truth"
+        )
     print(f"  TTFT (prefill time): {ttft_s:.1f}s  -> prefill throughput: {prefill_tps:.1f} tok/s")
     print(f"  Completion tokens: {completion_tokens} (reasoning: {reasoning_tokens})")
+    if api_completion_tokens is not None and api_completion_tokens != completion_tokens:
+        print(
+            f"  WARNING: API reported completion_tokens={api_completion_tokens}, "
+            f"locally counted {completion_tokens}"
+        )
     print(f"  Decode time: {decode_s:.1f}s -> decode throughput: {decode_tps:.2f} tok/s")
     print(f"  Response: {response[:200]!r}")
     print(f"  Needle found: {'YES' if found_needle else 'NO'}")
@@ -181,7 +281,10 @@ async def measure(base_url: str, model: str, target_tokens: int, max_tokens: int
     return {
         "target_tokens": target_tokens,
         "prompt_tokens": prompt_tokens,
+        "prompt_token_source": token_source,
+        "api_prompt_tokens": api_prompt_tokens,
         "completion_tokens": completion_tokens,
+        "api_completion_tokens": api_completion_tokens,
         "reasoning_tokens": reasoning_tokens,
         "ttft_s": ttft_s,
         "prefill_tok_s": prefill_tps,
