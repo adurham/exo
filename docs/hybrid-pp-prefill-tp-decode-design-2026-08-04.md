@@ -11282,3 +11282,73 @@ The rule this session keeps proving, now at the cost of five retractions:
 number must be replicated on its own configuration before it is written
 down as a finding -- and given this system is bimodal, "replicated"
 means at least twice, ideally with the slow mode observed in between.
+
+## 81. Re-instrumented on the shipped build: the drain fix DID work, and
+the real bottleneck is elsewhere. (2026-08-16)
+
+### First, a probe error I made and caught
+
+The Section 80 bimodality run reported `losses=0` on every request, which
+I nearly wrote up as "the transport is clean, so the loss theory is
+dead". It was a broken probe: that cluster had `JACCL_TRACE_PROGRESS=0`,
+so the `peer_got_count` lines were never being written and my
+before/after delta was differencing a frozen historical count.
+
+Redeployed with tracing actually enabled: **144 lost sends in two runs.**
+The losses are real. A zero from an instrument you have not verified is
+worth nothing -- the same lesson as Section 74, in the opposite
+direction.
+
+### Per-token attribution on the CURRENT build
+
+```
+  last_layer_body_and_eval   662.07 ms   n=75    <- dominant
+  last_layer_send            101.50 ms   n=75    <- exactly the 100ms floor
+  first_layer_body             0.20 ms
+  gather_recv                  0.16 ms
+
+  run_forward  ~1500 ms of a ~1548 ms token (97%)
+```
+
+Two things follow, and the first is good news:
+
+**The drain fix worked.** `last_layer_send` was a fixed 500.4-500.7ms in
+Section 63; it is now 101.5ms, tracking the configured floor exactly. That
+phase is 5x cheaper and the knob does what it claims.
+
+**But it was never the dominant cost on this build.** `body_and_eval` at
+662ms is 6.5x the send phase. Even driving the send to zero would leave
+~1.4s/token.
+
+### Which reframes the whole campaign
+
+Sections 63-80 all assumed the per-token cost was *loss plus timeout
+recovery*, and tuned the timeout. That premise came from Section 63's
+trace, taken on the **widened-pool build**, where `last_layer_send` was
+genuinely 500ms and genuinely dominant. On the current build the same
+phase costs 101ms and the bottleneck has moved to `body_and_eval` --
+which is the model forward plus `mx.eval` on the last layer, not
+transport.
+
+Section 62 already measured `body_and_eval` at 569ms **with both GPUs at
+~5% utilisation**. A 662ms phase that leaves the GPU idle is not
+computing; it is blocking. The likely candidate is the cross-rank recv
+nested inside the last layer's forward, which the current
+instrumentation lumps into `body_and_eval` rather than timing
+separately.
+
+### Requirement 3, restated honestly
+
+`0.63-0.65 tok/s at both 14K and 70K`, needle-verified, stable across
+six consecutive runs (0.64, 0.64, FAIL, 0.64, 0.64, 0.75). Versus 0.47
+baseline. The improvement is real but small, and it comes from the drain
+fix trimming a phase that turned out not to be the bottleneck.
+
+### Next, and it is a different question than I have been asking
+
+Split `last_layer_body_and_eval` into its constituent parts -- local
+layer compute, the nested cross-rank recv, and the `mx.eval`
+materialisation -- exactly as Section 62 did for `run_forward`. That
+attribution has never been taken on a build where the send phase was not
+swamping everything. Until it exists, any further timer work is tuning
+the 13% while ignoring the 87%.
