@@ -9475,3 +9475,103 @@ Both findings came from *aborted* work -- the sweep's first arm and the
 crash that stopped it. Neither was the thing being looked for. Worth
 recording that the diversity sweep has now paid for itself before
 completing a single full run.
+
+## 59. DECISIVE: the decode collapse is STALL-bound, not compute-bound.
+Both GPUs sit ~95% idle at 0.48 tok/s. Also: the model is NOT
+double-loaded, and the memory scare was a `ps`/unified-memory artifact.
+(2026-08-15)
+
+### The measurement that reorders the investigation
+
+GPU utilization sampled on BOTH ranks ~1x/second during a live collapse,
+gated to begin only after the first token so this is decode and not
+prefill (official varied-content prompt, ~14K tokens,
+`EXO_PP_BATCHED_DECODE=1`):
+
+```
+  decode: 0.48 tok/s, p50 inter-token gap 2086 ms, 28/28 gaps >500ms
+
+  GPU rank0 (m4-1): mean 5.4%  median 5.0%  idle(<30%) in 44/45 samples
+  GPU rank1 (m4-2): mean 5.8%  median 5.0%  idle(<30%) in 44/45 samples
+```
+
+**Both GPUs are ~95% idle while decode crawls at ~2 seconds per token.**
+(The single 97%/96% sample is prefill's tail before sampling stabilized.)
+
+### What this kills
+
+Section 57's leading hypothesis -- that DSv4 sparse indexer attention
+(`EXO_DSV4_INDEX_TOPK=512`) makes per-token cost scale with context
+diversity -- is **not the mechanism.** Top-K attention is a COMPUTE
+cost; it would show the GPUs pinned busy. They are idle.
+
+Content diversity may still CORRELATE with the collapse (Section 58's
+fixed-length arms are real: 14,005 tok repetitive -> 23.58 tok/s vs
+14,099 tok varied -> 0.49 tok/s). But the mechanism is **waiting**, not
+computing. Varied content plausibly triggers more of whatever stalls;
+it does not make the math slower.
+
+This also independently corroborates the reframe that a 60x shortfall in
+a system whose components (PP-only, TP-only) each already work at
+reasonable throughput is a defect, not a ceiling. Composition overhead
+looks like 1.5-3x. It does not look like 60x with idle hardware.
+
+Arithmetic worth keeping: ~2 s/token against a ~40 ms/token healthy
+floor is roughly four 500 ms stalls per token. This fork has a
+documented 500 ms retransmit quiet timer (Sections 50-52). That is a
+coincidence worth chasing, not yet a finding.
+
+### The memory scare: no double load
+
+A hypothesis was raised that the hybrid design might load the model
+twice per node (once for PP structure, once for the batched/TP-style
+decode path) -- forbidden by the memory budget. **Disproven, two ways.**
+
+*Measurement.* `ps -o rss` on Apple Silicon does not report
+unified-memory GPU allocations: MLX weights land in system "active"
+pages, not process RSS. That is the entire `ps` (~2 GB) vs `top`
+(~139 GB) discrepancy, and the apparent 86GB<->134GB oscillation
+"between nodes" was the same artifact sampled at different moments.
+Nothing migrates 50 GB across Thunderbolt in 60 seconds. Real page
+counts, taken live:
+
+```
+  m4-1: free 47.8  active 70.1  inactive 6.2  wired 3.0  compressed 0.1  (GB)
+  m4-2: free 46.9  active 70.5  inactive 5.7  wired 3.0  compressed 1.1  (GB)
+```
+
+DSv4-Flash is 304B params; a PP half is ~152B, i.e. ~106 GB at 6-bit.
+Observed ~70 GB active per node is below even ONE half-model's
+full-precision footprint and nowhere near the ~140 GB+ a double load
+requires. The two nodes match each other to 0.6% -- what a correct
+symmetric PP split looks like.
+
+*Code.* `shard_and_load()` has exactly ONE call site in the tree
+(`utils_mlx.py:245`). The batched-decode path constructs no second
+model -- no `load`, no copy, no `deepcopy` of `self.model`. There is no
+second load path.
+
+*Swap.* 18.0 GB used on m4-1 / 8.9 GB on m4-2 looked alarming, but
+`memory_pressure` reported 81% and 96% free and **swapins over a live
+2-second window were ZERO on both nodes.** That is stale swap from an
+earlier high-water mark, not active thrashing, and it is not feeding the
+collapse. Note the per-node swap figures had also inverted relative to
+an earlier reading, consistent with stale artifacts rather than a live
+signal.
+
+### Correction carried forward
+
+DSv4-Flash is **304B parameters**, not 671B as stated in earlier
+sections of this document. Any memory or bandwidth arithmetic derived
+from 671B should be re-checked.
+
+### Next concrete step
+
+Attribute the ~2 s/token. Instrument the decode step to split wall time
+across (a) barrier wait, (b) recv wait, (c) real forward compute, and
+read it DURING a confirmed collapse on the varied-content prompt where
+it reproduces reliably. The transport instrumentation from Sections
+50-52 already emits barrier-latency histograms and `peer_got_count`;
+Section 52 measured p50 39us with a long tail and concluded "blocked on
+the peer's compute." **That conclusion is now untenable** -- the peer's
+GPU is idle. Something is waiting on something that is not computing.
