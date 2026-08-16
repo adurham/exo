@@ -10609,3 +10609,93 @@ the whole time. The repeated failure mode was inferring the peer's state
 from the sender's view of it. Both sides were instrumented separately;
 neither picture alone was sufficient, and the contradiction between them
 is what exposed each wrong model.
+
+## 71. FIX LANDED AND VERIFIED BY CONTROLLED A/B: split the p2p drain
+quiet period from the collective retransmit timer. 0.47 -> 23.6 tok/s.
+(2026-08-16)
+
+### The change
+
+Both p2p `send()`/`recv()` drain loops reused
+`jaccl_ack_retransmit_us()` (500ms). Split them onto a new
+`jaccl_p2p_drain_quiet_us()`, default **25ms**. The collective site
+(mesh_impl.h:1153) is deliberately unchanged.
+
+Rationale, from Section 70's measurements: healthy p2p calls complete in
+69-150us and p50 barrier latency is 39us, so 500ms was ~5000x the real
+round trip. It was never protecting against anything at that scale --
+it was purely the cost of NOTICING a dropped frame. 25ms is still ~170x
+the healthy round trip, far above any plausible in-flight window, so it
+cannot mistake "slow" for "lost".
+
+This is why it does not contradict Section 51, which found that lowering
+the GLOBAL timer to 10ms broke generation outright: that value fires
+below the real round trip for large collective transfers. The p2p drain
+loops are the only place the measured round trip is microseconds, which
+is exactly why they warrant their own knob.
+
+### The A/B -- same build, same prompt, only the knob changed
+
+```
+  MLX_JACCL_P2P_DRAIN_QUIET_US=500000 (old):
+    req 1: p50 2113.8ms ->  0.47 tok/s   slow 28/28
+    req 2: p50 2109.6ms ->  0.47 tok/s   slow 28/28
+
+  MLX_JACCL_P2P_DRAIN_QUIET_US=25000 (new default):
+    req 1: p50   42.4ms -> 23.58 tok/s   slow  5/28
+    req 2: p50   45.4ms -> 22.02 tok/s   slow 10/28
+```
+
+**50.2x and 46.9x.** Unlike Section 65's outlier, this reproduces in
+both arms, twice each -- fast is now the rule under the new value and
+slow is the rule under the old one.
+
+### Quality gated, not just throughput
+
+Official needle harness, full run to natural termination:
+
+```
+  Prompt tokens: 14,059 (tokenizer ground truth)
+  TTFT 57.1s -> prefill 246.3 tok/s   (was 219)
+  Decode 21.9s, 57 tokens -> 2.60 tok/s   (was 0.47)
+  Response: 'FALCON-MERCURY-7749'   Needle found: YES
+```
+
+Note the two metrics legitimately differ: the harness divides by TOTAL
+decode wall clock, which still includes the residual slow gaps, while
+p50 reports the typical token. Both improved. Reporting both rather than
+the flattering one -- quoting only 23.6 would overstate what a full
+request actually costs today.
+
+### What this does and does not fix
+
+**Fixes the amplifier.** A dropped frame now costs ~50ms instead of
+~1000ms. That is the 500ms receiver drain plus the 500ms sender
+retransmit wait, both cut.
+
+**Does NOT fix the drop.** Frames are still being lost -- 5-10 slow gaps
+per 28 tokens remain, they are just cheap now. The underlying selective
+first-send loss on 16380-byte UC chunks is unexplained and still open
+(Section 70's candidates: `SEND_INFLIGHT` depth, or the shared data QP
+being polled by both `send()` and `recv()` with each discarding the
+other's completions).
+
+That distinction matters for requirement 3: at ~23 tok/s typical and
+2.6 tok/s averaged over a full request, the 30 tok/s bar is now
+plausibly reachable by eliminating the remaining drops, whereas before
+it was 60x away.
+
+### Deploy note
+
+`MLX_JACCL_P2P_DRAIN_QUIET_US` was threaded through start_cluster.sh's
+runner env allowlist in the same commit as the C++ change -- per Section
+66's lesson, where `MLX_JACCL_DATA_RECV_POOL` advertised an A/B in its
+own comment that was impossible to run because nobody had wired the
+variable through. The A/B above only exists because the knob was
+testable from the start.
+
+Also: `nanobind` had to be pre-seeded into `mlx/build/_deps` by hand on
+both nodes. Section 63's `FETCHCONTENT_BASE_DIR` fix works -- fmt,
+doctest and gguflib are all cached and no longer re-cloned -- but
+nanobind had never been successfully fetched, so there was nothing to
+cache. With it seeded, the rebuild is fully network-independent.
