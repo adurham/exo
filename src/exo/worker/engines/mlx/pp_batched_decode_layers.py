@@ -92,6 +92,7 @@ from exo.worker.engines.mlx.auto_parallel import _LayerCallable
 from exo.worker.engines.mlx.pp_metaframe import (
     MetaFramedPipelineFirstLayer,
     MetaFramedPipelineLastLayer,
+    PipelineCancelReceived,
     encode_batched_decode_metaframe,
     recv_metaframe,
     send_metaframe,
@@ -202,6 +203,8 @@ class BatchedMetaFramedPipelineFirstLayer(MetaFramedPipelineFirstLayer):
         if self.r != 0:
             ctx = _require_batch_step_context()
             frame = recv_metaframe(self.r - 1, group=self.group)
+            if frame.is_cancel:
+                raise PipelineCancelReceived(frame.request_uids[0])
             if frame.batch_axis != 1:
                 raise RuntimeError(
                     f"BatchedMetaFramedPipelineFirstLayer expected a "
@@ -415,6 +418,8 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
                 )
         elif self.r == 0:
             frame = recv_metaframe(self.s - 1, group=self.group)
+            if frame.is_cancel:
+                raise PipelineCancelReceived(frame.request_uids[0])
             if tuple(frame.request_uids) != ctx.request_uids:
                 raise RuntimeError(
                     f"BatchedMetaFramedPipelineLastLayer (rank 0 gather): "

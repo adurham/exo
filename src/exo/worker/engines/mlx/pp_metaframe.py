@@ -68,7 +68,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from enum import Enum, auto
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -356,7 +356,39 @@ def get_forward_step_info() -> ForwardStepInfo:
 # 0.5's only case, still the default so v1/v2 callers upgrading to v3
 # need no behavior change), 1 = batch-axis stack (Phase 1's decode
 # batching case).
-METAFRAME_PROTOCOL_VERSION = 3
+# v4 (2026-08-16, design doc Section 93): added ``PHASE_CANCEL`` as a
+# THIRD ``phase_flag`` value. The header SHAPE is unchanged (still
+# ``_HEADER_FIELDS`` int32 values) -- verified before relying on it:
+# prior to this change ``phase_flag`` was decoded by ``recv_metaframe``
+# and stored on ``MetaFrame``, but NEVER range-validated and NEVER
+# branched on anywhere in ``src/`` (audited 2026-08-16), so widening its
+# domain cannot misparse an existing frame. The version is nonetheless
+# bumped, because a v3 receiver paired with a v4 sender would decode a
+# CANCEL frame as a prefill-chunk frame and then post an activation
+# ``recv_like`` that the v4 sender never satisfies -- a silent hang,
+# exactly the failure mode ``handshake_metaframe_protocol`` exists to
+# make loud. The handshake itself needs no code change: it already
+# encodes ``METAFRAME_PROTOCOL_VERSION`` into the value it agrees on, so
+# bumping the constant is sufficient for a mixed-version pair to fail at
+# startup instead of mid-request.
+METAFRAME_PROTOCOL_VERSION = 4
+
+# The three legal ``phase_flag`` values (header field [1]).
+#
+# PHASE_CANCEL is a header-only control frame: NO activation tensor
+# follows it on the wire. Because the metaframe is already sequenced
+# BEFORE the activation on the SAME ordered channel, a receiver that
+# decodes PHASE_CANCEL simply never posts the activation ``recv_like``
+# -- which is the entire point of making this a frame TYPE rather than a
+# boolean rider on a data frame. There is no unmatched send/recv left
+# behind and therefore no way for this to strand the peer in
+# ``Event::wait`` (design doc Section 92's observed failure).
+PHASE_PREFILL_CHUNK: Final[int] = 0
+PHASE_DECODE_STEP: Final[int] = 1
+PHASE_CANCEL: Final[int] = 2
+_LEGAL_PHASE_FLAGS: Final[frozenset[int]] = frozenset(
+    {PHASE_PREFILL_CHUNK, PHASE_DECODE_STEP, PHASE_CANCEL}
+)
 
 # Fixed-shape header, sent as one int32 array immediately before the
 # per-request table (also int32) and, in turn, immediately before the
@@ -435,6 +467,30 @@ _HEADER_FIELDS = 6
 _ROW_WIDTH = 4
 
 
+class PipelineCancelReceived(BaseException):
+    """Raised by a metaframe RECEIVER the moment it decodes a
+    ``PHASE_CANCEL`` header (design doc Section 93).
+
+    Deliberately a ``BaseException``, mirroring
+    ``generate.PrefillCancelled``'s own rationale: the runner's generic
+    ``except Exception`` handling must NOT swallow a cancellation and
+    convert it into a per-request error, because the correct outcome is
+    "this request goes away, the runner stays alive and serves the next
+    one" -- not "the runner reports a failure".
+
+    Defined HERE rather than reusing ``generate.PrefillCancelled``
+    purely to avoid an import cycle (``generate`` imports the metaframe
+    layers, not the reverse). The chunk-loop driver translates it.
+
+    SINGLE CONTROL AUTHORITY (Section 93): this is raised ONLY on
+    receipt of a real CANCEL frame from the peer -- never from a rank's
+    own local cancel state. Rank 0 is the sole decider; every other rank
+    reacts to the wire and nothing else. That is what deletes the
+    "both ranks decided at different chunks" race class outright rather
+    than trying to synchronize it.
+    """
+
+
 class MetaFrame:
     """Decoded metadata frame — the Python-side view rank 1 (or any
     receiver) constructs after reading the raw header+table int32
@@ -470,6 +526,13 @@ class MetaFrame:
         self.request_uids = request_uids
         self.seq_lens = seq_lens
         self.is_last_chunk = is_last_chunk
+
+    @property
+    def is_cancel(self) -> bool:
+        """True when this is a header-only CANCEL control frame, meaning
+        NO activation tensor follows it on the wire. A receiver that
+        sees this must NOT post the activation ``recv_like``."""
+        return self.phase_flag == PHASE_CANCEL
 
     @property
     def num_requests(self) -> int:
@@ -620,6 +683,45 @@ def encode_batched_decode_metaframe(
     return header, table
 
 
+def encode_cancel_metaframe(*, request_uid: int) -> tuple[mx.array, mx.array]:
+    """Build the (header, table) int32 array pair for a header-only
+    CANCEL control frame (design doc Section 93). NO activation tensor
+    follows this frame on the wire.
+
+    The table still carries exactly one row, naming the request being
+    cancelled, for two reasons: the receiver's table ``recv_like`` shape
+    is derived from ``num_requests`` and so must stay well-formed
+    (``recv_metaframe`` rejects ``num_requests < 1``), and the uid is
+    what lets a receiver release the RIGHT request's state rather than
+    performing a wholesale reset -- with
+    ``EXO_MAX_CONCURRENT_REQUESTS=2`` a second live request's KV must
+    survive a cancel aimed at its neighbour.
+
+    ``seq_len`` is 0 and ``is_last_chunk`` is True: there is no
+    activation, and no further frame for this request will follow.
+    ``hidden_dim``/``extra_dim`` are 0 -- a receiver must never call
+    ``activation_template_shape()`` on a CANCEL frame, and zeroing them
+    makes an accidental call produce an obviously-degenerate shape
+    rather than a plausible-looking one that would silently hang.
+    """
+    header = mx.array(
+        [METAFRAME_PROTOCOL_VERSION, PHASE_CANCEL, 1, 0, 0, 0],
+        dtype=mx.int32,
+    )
+    table = mx.array([[request_uid & 0xFFFFFFFF, 0, 1, 0]], dtype=mx.int32)
+    return header, table
+
+
+def send_cancel_metaframe(
+    request_uid: int, dst: int, *, group: mx.distributed.Group
+) -> None:
+    """Send one header-only CANCEL frame to ``dst``. Convenience wrapper
+    over ``encode_cancel_metaframe`` + ``send_metaframe`` so call sites
+    cannot accidentally follow it with an activation send."""
+    header, table = encode_cancel_metaframe(request_uid=request_uid)
+    send_metaframe(header, table, dst, group=group)
+
+
 def send_metaframe(
     header: mx.array,
     table: mx.array,
@@ -662,6 +764,16 @@ def recv_metaframe(src: int, *, group: mx.distributed.Group) -> MetaFrame:
             f"is running mismatched code; do not proceed, this would "
             f"otherwise silently misparse the table/activation that "
             f"follows"
+        )
+    if phase_flag not in _LEGAL_PHASE_FLAGS:
+        raise RuntimeError(
+            f"MetaFrame decoded phase_flag={phase_flag}, which is not one "
+            f"of {sorted(_LEGAL_PHASE_FLAGS)} (0=prefill chunk, 1=decode "
+            f"step, 2=cancel) -- malformed frame, refusing to proceed. "
+            f"Validated as of protocol v4: before CANCEL existed this "
+            f"field was decoded but never checked, so a corrupt value "
+            f"would have been carried silently into the activation "
+            f"recv that follows."
         )
     if num_requests < 1:
         raise RuntimeError(
@@ -761,6 +873,13 @@ class MetaFramedPipelineFirstLayer(CustomMlxLayer):
     def __call__(self, x: mx.array, *args: object, **kwargs: object) -> mx.array:
         if self.r != 0:
             frame = recv_metaframe(self.r - 1, group=self.group)
+            if frame.is_cancel:
+                # Header-only CANCEL frame: NO activation follows, so we
+                # must NOT post the recv below. Returning early instead
+                # of receiving is precisely why this is a frame TYPE --
+                # there is no unmatched send left on the wire and the
+                # peer cannot be stranded in Event::wait.
+                raise PipelineCancelReceived(frame.request_uids[0])
             template_shape = frame.activation_template_shape()
             x_bf16_template = mx.zeros(template_shape, dtype=mx.bfloat16)
             x_recv = mx.distributed.recv_like(
@@ -952,6 +1071,13 @@ class MetaFramedPipelineLastLayer(CustomMlxLayer):
                 mx.eval(sent)
             elif self.r == 0:
                 frame = recv_metaframe(self.s - 1, group=self.group)
+                if frame.is_cancel:
+                    # Section 93's rank1->rank0 audit: rank 0 blocks on
+                    # THIS recv for the final hidden state. If the peer
+                    # aborted, it announces via a CANCEL frame here too,
+                    # otherwise rank 0 strands on its own recv after
+                    # having decided to cancel.
+                    raise PipelineCancelReceived(frame.request_uids[0])
                 template = mx.zeros(
                     frame.activation_template_shape(), dtype=mx.bfloat16
                 )
