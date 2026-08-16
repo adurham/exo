@@ -304,7 +304,15 @@ fi
 # DeepSeek V4 Flash (~100 GB/rank at 6-bit): 158B total / 13B activated, hybrid
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
 # YARN. The cluster's primary model. Set DSV4_ENABLED=0 to skip.
-: "${DSV4_MODEL_ID:=mlx-community/DeepSeek-V4-Flash}"
+# PRODUCTION checkpoint, not the preview. Was
+# mlx-community/DeepSeek-V4-Flash (a stale PREVIEW checkpoint) until
+# 2026-08-15, which forced every real invocation to override
+# DSV4_MODEL_ID by hand and silently ran the preview whenever someone
+# forgot. That is not cosmetic: preview and production produce
+# DIFFERENT PP layer splits and therefore different cross-rank parity --
+# exactly what hid the Section 45 advance-budget deadlock from Section
+# 40's investigation (Section 49's "still open" item 2).
+: "${DSV4_MODEL_ID:=deepseek-ai/DeepSeek-V4-Flash-0731}"
 : "${DSV4_ENABLED:=1}"
 # DEFAULT ON 2026-07-23: Pipeline sharding + PP DSpark speculative decode is
 # now the validated production config (see refs/pp-dspark-required-flags-

@@ -1254,7 +1254,7 @@ class ExoBatchGenerator:
             on_generation_token=on_generation_token,
             generation_start_time=time.perf_counter(),
             prefill_tps=prefill_tps,
-            generation_time_at_start=0.0,
+            generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
             media_regions=[],
         )
         self._update_fence_arming()
@@ -1551,7 +1551,7 @@ class ExoBatchGenerator:
             on_generation_token=on_generation_token,
             generation_start_time=time.perf_counter(),
             prefill_tps=0.0,
-            generation_time_at_start=0.0,
+            generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
             media_regions=[],
         )
         self._update_fence_arming()
@@ -3512,6 +3512,7 @@ class ExoBatchGenerator:
             on_generation_token=on_generation_token,
             generation_start_time=time.perf_counter(),
             prefill_tps=prefill_tps,
+            generation_time_at_start=_mlx_gen_elapsed_seconds(self._mlx_gen),
         )
         self._update_fence_arming()
 
