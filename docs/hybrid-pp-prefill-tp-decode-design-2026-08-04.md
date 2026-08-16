@@ -10257,3 +10257,90 @@ reasoning from code structure to cause, then measuring only the
 predicted outcome. The A/B in this section took one launch and settled
 in minutes what three sections of code reading did not. **Toggle the
 gate before writing the fix.**
+
+## 67. ROOT CAUSE (evidenced): the frames ARRIVE and are DISCARDED on a
+sequence-number mismatch. Not packet loss, not buffers. (2026-08-16)
+
+### The evidence
+
+Section 66 eliminated the recv pool and named the cheapest remaining
+test: count the existing `[jaccl] recv() discarded stale message` log
+line, which distinguishes "frame never landed" from "frame landed and
+was thrown away". It is already in the code; no build required.
+
+```
+  rank 0: 29 discards
+  rank 1: 74 discards
+
+  [jaccl] recv() discarded stale message: src=0 buff=0 received_seq=1152 expected_seq=1153 chunk=0
+  [jaccl] recv() discarded stale message: src=0 buff=0 received_seq=1157 expected_seq=1158 chunk=0
+  [jaccl] recv() discarded stale message: src=0 buff=0 received_seq=1162 expected_seq=1163 chunk=0
+  [jaccl] recv() discarded stale message: src=0 buff=0 received_seq=1167 expected_seq=1168 chunk=0
+```
+
+Three things in that pattern, all consistent:
+
+1. **`received_seq == expected_seq - 1`, every single time.** The
+   receiver is exactly ONE call ahead of the frame that arrives. Not
+   drifting, not random -- a constant off-by-one.
+2. **`chunk=0` every time.** It is always the FIRST chunk of the
+   transfer that gets discarded -- exactly matching
+   `peer_got_count=0/1` (peer reports having nothing) at round 0.
+3. **The seqs step by 5**: 1152, 1157, 1162, 1167. `num_chunks=5` for
+   the decode activation send, so that is precisely one discard per
+   decode token.
+
+### The mechanism, end to end
+
+Per decode token: the sender posts chunk 0. It physically arrives. The
+receiver's `consume_recv` compares the on-wire `(seq, chunk)` header
+against its own `expected_seq`, finds `received_seq` one BEHIND, and
+discards it as a stale retransmit from a previous call -- the guard
+added by the 2026-08-08 stale-message fix. The receiver therefore
+reports `peer_got_count=0/1`. The sender concludes the frame was lost,
+waits out the full 500ms retransmit quiet timer, and retransmits. By
+then the sequence windows line up, the retransmit is accepted, and the
+barrier returns `1/1` at ~500,072us.
+
+**So the wire is fine, the buffers are fine, and the data is fine. The
+two ranks disagree about which call they are in.** The 500ms is the
+protocol correctly recovering from a desync that should not exist.
+
+### Why this was so hard to see
+
+Every symptom pointed at the transport. `peer_got_count=0/1` literally
+means "peer has none of it", which reads as loss. The retransmit
+succeeding reinforced that. And the discard is *correct behaviour* by
+the stale-message guard -- nothing is malfunctioning at the point where
+the log line fires, so it never looked like an error path.
+
+It also explains the Section 65 outlier: if the ranks happen to start a
+window in sync, a run can go 28 tokens with zero discards and hit ~23
+tok/s. That was not a fix taking effect and not noise -- it was the
+desync not having occurred yet.
+
+### What is now retired
+
+- Empty-FIFO UC drop as the cause (Section 66's A/B).
+- Pool exhaustion (Section 65).
+- Uncovered size class (Section 64).
+- All of it was the receive path. The defect is in **sequence
+  bookkeeping**, one layer up.
+
+### The open question, precisely stated
+
+Why does the receiver's `expected_seq` run one ahead of the sender's
+`send_seq` for this transfer, on every decode token, in steady state?
+
+Both counters are documented to increment in lockstep -- `send_seq_` /
+`recv_seq_`, one per logical send()/recv() pair per peer. Something in
+the batched-decode path advances one side without the other. The
+asymmetry (rank 1: 74 discards, rank 0: 29) suggests the driver and
+follower do not traverse the same number of send/recv calls per token,
+which under a shared per-peer counter would produce exactly this
+constant off-by-one.
+
+Concrete next step: log `send_seq_`/`recv_seq_` on both ranks per decode
+token and find the call that increments one side only. That is a
+targeted question with a small search space, and it does not require
+guessing at a mechanism first.
