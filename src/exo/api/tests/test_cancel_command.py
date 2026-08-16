@@ -162,8 +162,15 @@ def test_cancel_falls_back_to_force_close_if_task_never_completes() -> None:
     """The safety-valve half of the same fix: if the real completion path
     never removes the task from tracked state within
     CANCEL_ACK_TIMEOUT_SECONDS (a genuinely hung/crashed runner), the
-    method MUST still fall back to the old eager sender.close() so the
-    client's HTTP call doesn't hang forever."""
+    method still force-closes the stream so the client's HTTP call
+    doesn't hang forever -- but (2026-08-16, design doc Section 98) this
+    is a REAL NEGATIVE CONTROL: a forced stream-close is NOT a confirmed
+    cancel, so the response MUST be distinguishable from the success
+    path (test_cancel_returns_immediately_once_task_leaves_tracked_state
+    above), never a plain 200 CancelCommandResponse. A live-hardware run
+    hit exactly this fallback while the runner kept computing, and the
+    old code returned HTTP 200 anyway -- masking the failure. This test
+    fails if that masking regresses."""
     from exo.api.main import CANCEL_ACK_TIMEOUT_SECONDS
     from exo.shared.types.common import ModelId
     from exo.shared.types.state import State
@@ -191,7 +198,16 @@ def test_cancel_falls_back_to_force_close_if_task_never_completes() -> None:
 
     response = client.post(f"/v1/cancel/{cid}")
 
-    assert response.status_code == 200
+    # THE KEY ASSERTION: must NOT look like the success path. A 200 here
+    # would mean the client is told "cancelled" when the runner never
+    # confirmed it -- exactly the masking bug this fix closes.
+    assert response.status_code != 200
+    assert response.status_code == 504
+    data: dict[str, Any] = response.json()
+    assert "error" in data
+    assert "not confirmed" in data["error"]["message"].lower()
+    # The liveness guard still ran (stream force-closed so the HTTP call
+    # itself doesn't hang), even though it's not reported as success.
     sender.close.assert_called_once()
     api._send.assert_called_once()
     # Sanity: the timeout constant this test relies on staying short

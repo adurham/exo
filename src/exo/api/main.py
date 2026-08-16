@@ -906,12 +906,35 @@ class API:
                         command_id=command_id,
                     )
                 await anyio.sleep(0.05)
-            logger.warning(
+            logger.error(
                 f"cancel_command({command_id}): task {task_id} did not "
                 f"reach a terminal state within "
                 f"{CANCEL_ACK_TIMEOUT_SECONDS}s of TaskCancelled -- "
                 f"falling back to force-closing the stream so this HTTP "
-                f"call doesn't hang on an apparently-stuck runner."
+                f"call doesn't hang on an apparently-stuck runner. This is "
+                f"NOT a successful cancel: the runner never confirmed it "
+                f"stopped and may still be generating."
+            )
+            # 2026-08-16 (design doc Section 98): the force-close below is
+            # ONLY a liveness guard so this HTTP call can't hang forever on
+            # a stuck runner -- it must NEVER be reported to the client as
+            # a successful cancel, because the runner-side terminal-state
+            # signal (task_id leaving self.state.tasks, checked above) is
+            # the only thing that actually proves the runner stopped. A
+            # live-hardware run logged exactly this fallback firing while
+            # the runner kept computing, and the API still returned HTTP
+            # 200 -- masking the failure. Raise a distinguishable non-200
+            # status instead of returning CancelCommandResponse so the
+            # client (and any test harness) can tell the two cases apart.
+            sender.close()
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    f"Command {command_id} was not confirmed cancelled by "
+                    f"the runner within {CANCEL_ACK_TIMEOUT_SECONDS}s; the "
+                    f"stream was force-closed as a last resort but the "
+                    f"runner may still be running the task."
+                ),
             )
 
         sender.close()
