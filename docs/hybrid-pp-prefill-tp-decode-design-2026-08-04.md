@@ -11998,3 +11998,90 @@ the floor is roughly 43 x 0.5ms = ~21.5ms/token = ~46 tok/s, versus a
 33ms/token budget for 30 tok/s. So this lever is, for the first time in
 this campaign, plausibly SUFFICIENT rather than merely directional --
 at 14K. It says nothing yet about 500K.
+
+## 89. RETRACTION of Section 88. The MoE fence is TP-only and never runs
+in Pipeline mode at all. My own timing data already contradicted it and I
+did not check. (2026-08-16)
+
+### The error
+
+Section 88 concluded the ~550ms was 43 serial blocking `mx.eval(y)`
+fences, and that they never went async because neither owner key is set
+on the PP path. The second half is true and irrelevant, because **the
+fence block never executes in Pipeline mode in the first place.**
+
+The whole block at `deepseek_v4.py:2835-2893` is inside:
+
+```python
+  if self.sharding_group is not None:
+      with span("moe.all_sum"):
+          y = mx.distributed.all_sum(y, group=self.sharding_group)
+          ... mx.eval(y) / mx.async_eval(y) ...
+```
+
+`sharding_group` is set in exactly one place: `shard_model()` on the
+`TensorParallelShardingStrategy` subclasses (`auto_parallel.py:1065`,
+`1081`, `1121` for DSv4), and the only call site is
+`auto_parallel.py:849`, on the TENSOR-parallel path. The PIPELINE path
+is a different function: it wraps `layers[0]`/`layers[-1]` in
+`PipelineFirstLayer`/`PipelineLastLayer` (lines 536-537) and never
+constructs a sharding strategy at all.
+
+This cluster runs `DSV4_SHARDING=Pipeline`. So `self.sharding_group is
+None` on every layer, the `all_sum` never happens, and neither branch of
+the fence is reached. `EXO_DSV4_FENCE_ASYNC` is irrelevant here in both
+directions.
+
+### My own data already refuted it, twice over
+
+This is the part worth recording, because the contradiction was sitting
+in Section 86's table the whole time:
+
+1. **The fast case runs the same 43 layers.** A 1,927-token prompt
+   decodes at 16.1ms/token on the identical build and code path. If 43
+   unconditional per-layer fences cost 550ms, they would cost 550ms
+   there too. A per-layer structural cost cannot be present in one case
+   and absent in the other when the layer count is identical.
+2. **43 x ~1.1ms = ~47ms, not 550ms.** I quoted the fence comment's own
+   per-layer figure and then used it to explain a number 12x larger,
+   without doing that multiplication. The arithmetic never worked.
+
+I reached for the "12.8ms x 43" coincidence because I was already
+looking for a per-layer explanation, and stopped checking once something
+fit the shape. Both refutations were available before I wrote the
+section.
+
+### Also wrong, and worth flagging separately
+
+Section 88 quoted a budget projection (~21.5ms/token, ~46 tok/s) derived
+from removing this serialization. That number is **withdrawn entirely**
+-- it was built on a mechanism that does not run. It should not be
+carried into any planning.
+
+### What still stands
+
+Only what was measured, which is unchanged:
+
+- The step function at `EXO_PREFILL_STEP_SIZE=2048`: ~1,927 tok = 16.1ms
+  vs ~2,365 tok = 554ms, 34x for 23% more context (Section 85).
+- Flat past the step, 2.9K -> 14.3K tokens at identical cost.
+- Decode is not transport-bound (`first_layer_recv` 0.1-0.3ms).
+- The wait is real, not sleep-granularity (Section 86's spin A/B).
+- Stacks park in `mx.eval -> array::wait -> EventImpl::wait`, GPU idle.
+
+So the question returns intact to Section 86's formulation, and it is
+still the right one: **what does the last layer's graph depend on that
+takes ~550ms to be signaled, only when the request took the chunked /
+PP-batched-decode path?**
+
+### Method note
+
+The subagent that surfaced the fence flagged `sharding_group is not
+None` as unverified and named it "the single biggest unresolved fact,"
+recommending exactly the check I skipped. I promoted its Rank-1
+candidate to a confirmed root cause while dropping the caveat that came
+attached to it. **A delegated finding's stated confidence level is part
+of the finding.** Verify the gating condition of any conditional block
+before attributing measured time to it -- `grep` for where the guard is
+SET, not just where it is READ (the same lesson this campaign already
+recorded for `sq_psn` in the jaccl skill, re-learned here).
