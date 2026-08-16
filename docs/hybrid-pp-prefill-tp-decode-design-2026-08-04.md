@@ -10834,3 +10834,76 @@ honest renormalized numbers from Section 55 were 225/214/202 at
 100K/300K/500K. This is a modest improvement on a metric that was never
 the target of this work, at a depth well short of where requirement 4
 is judged. Not claiming progress on requirement 4.
+
+## 74. The shared-CQ probe was a REGRESSION, not a measurement. Fix
+reverted; hypothesis still untested. (2026-08-16)
+
+### The hypothesis (still open)
+
+`rdma.cpp:171-172` sets `init_attr.send_cq == init_attr.recv_cq`, so
+`send()` and `recv()` poll ONE completion queue per QP, and a CQE is
+consumed exactly once by whichever loop reaps it first. Both loops
+discard the other's completions with a bare `continue`. If `send()`
+reaps `recv()`'s data completion, the frame looks lost to `recv()` even
+though the wire delivered it -- which is exactly the residual-drop
+symptom.
+
+The discriminator is sound: on UC a genuine wire drop produces NO CQE at
+all, so `status == IBV_WC_SUCCESS` with the wrong `work_type` can only
+mean the transfer really happened and the notification was thrown away.
+
+### What went wrong
+
+Added a counter plus a gated `fprintf` at both discard sites, then
+deployed. Result:
+
+```
+  S71 build (b55ecd252): 22.61 tok/s   needle YES
+  S74 probe build      :  0.00 tok/s   needle NO   (twice)
+  S71 restored         : 22.84 tok/s   needle YES
+```
+
+Zero tokens, twice, with `[jaccl] drain_acks STALLED ... no forward
+progress for >8000ms; UC completion lost`. Reverting restored 22.84
+tok/s. **The build is the variable -- the probe is a regression.**
+
+The instrumentation sits inside the CQE poll loops, the hottest path in
+the transport. A flushed `stderr` write per discarded CQE is enough to
+blow the 8s `drain_acks` budget. The probe was **unmeasurable by
+construction**: observing this path at per-CQE granularity perturbs it
+enough to break it.
+
+### What the zero counters do NOT show
+
+Both `x74` counters read 0 on both ranks in the failing runs. That is
+**not** evidence against the hypothesis -- those runs never decoded, so
+the concurrent send/recv overlap the probe was built to catch never
+occurred. Recording this explicitly because a zero reading is exactly
+the kind of result that could later be mistaken for a refutation.
+
+### How to test it properly
+
+The measurement must not write in the hot loop:
+
+1. **Counter only, no I/O.** Increment the plain int at the discard
+   sites, expose it via an accessor, and print ONCE per request from a
+   cold path (e.g. alongside the existing per-token phase trace). No
+   `fprintf`, no `fflush`, nothing inside `poll()`'s inner loop.
+2. **Or skip straight to the structural fix and A/B that.** Give the QP
+   separate `send_cq` and `recv_cq` at creation. It eliminates the
+   entire bug class -- no CQE can be reaped by the wrong consumer -- with
+   no dispatch state and no shared bookkeeping, and it is a change to
+   setup code rather than the hot path. If the residual drops disappear,
+   the hypothesis is confirmed by the fix itself.
+
+(2) is the better move: it costs about the same as the probe, cannot
+perturb the steady-state path, and a controlled A/B on it is decisive
+either way.
+
+### Standing state
+
+Reverted to `b55ecd252`, re-verified at **22.84 tok/s needle YES**. The
+Section 71 fix is intact and reproducible across three separate
+deployments (22.61, 22.84, plus the 23.58/22.02 probe pair). Residual
+drops remain unexplained, with the shared-CQ hypothesis neither
+confirmed nor refuted.
