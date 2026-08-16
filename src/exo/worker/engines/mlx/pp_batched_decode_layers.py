@@ -77,6 +77,8 @@ Reviewed via two `consult` calls (2026-08-05) before writing code:
 
 from __future__ import annotations
 
+import os
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -84,6 +86,7 @@ from typing import Iterator
 
 import mlx.core as mx
 import mlx.nn as nn
+from loguru import logger
 
 from exo.worker.engines.mlx.auto_parallel import _LayerCallable
 from exo.worker.engines.mlx.pp_metaframe import (
@@ -93,6 +96,20 @@ from exo.worker.engines.mlx.pp_metaframe import (
     recv_metaframe,
     send_metaframe,
 )
+
+# Per-layer decode phase attribution, opt-in via
+# EXO_DECODE_PHASE_TRACE=1 (Section 63). Read once at import so the hot
+# path costs a single resolved bool test when disabled. Mirrors the flag
+# in pp_batched_decode_glue.py / pp_batched_decode_runtime.py.
+#
+# Section 62 narrowed the ~2.08 s/token to the model(...) call itself on
+# BOTH ranks simultaneously, with both GPUs at ~5% and the follower NOT
+# starved -- a symmetric mutual block inside the forward. These probes
+# split that call into its real blocking points (first-layer recv,
+# layer body, last-layer send, gather send/recv) to answer the one
+# question Section 62 could not: is the time spread across many small
+# synchronous stalls, or concentrated in a single blocking transfer?
+_DECODE_PHASE_TRACE: bool = os.environ.get("EXO_DECODE_PHASE_TRACE", "0") == "1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,13 +233,26 @@ class BatchedMetaFramedPipelineFirstLayer(MetaFramedPipelineFirstLayer):
                 )
             template_shape = frame.activation_template_shape()
             x_bf16_template = mx.zeros(template_shape, dtype=mx.bfloat16)
+            _t_recv = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
             x_recv = mx.distributed.recv_like(
                 x_bf16_template, self.r - 1, group=self.group
             )
             mx.eval(x_recv)
+            if _DECODE_PHASE_TRACE:
+                logger.info(
+                    f"[LAYER_PHASE] first_layer_recv="
+                    f"{(time.perf_counter() - _t_recv) * 1000.0:.1f}ms"
+                )
             x_dtype = x.dtype
             x = x_recv.astype(x_dtype) if x_dtype != mx.bfloat16 else x_recv
-        return self.original_layer(x, *args, **kwargs)
+        _t_body = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
+        _out = self.original_layer(x, *args, **kwargs)
+        if _DECODE_PHASE_TRACE:
+            logger.info(
+                f"[LAYER_PHASE] first_layer_body="
+                f"{(time.perf_counter() - _t_body) * 1000.0:.1f}ms"
+            )
+        return _out
 
 
 class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
@@ -279,8 +309,14 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
                 f"than silently misattributing rows to the wrong "
                 f"requests"
             )
+        _t_body = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
         output: mx.array = self.original_layer(x, *args, **kwargs)
         mx.eval(output)
+        if _DECODE_PHASE_TRACE:
+            logger.info(
+                f"[LAYER_PHASE] last_layer_body_and_eval="
+                f"{(time.perf_counter() - _t_body) * 1000.0:.1f}ms"
+            )
 
         if self.r != self.s - 1:
             out_dtype = output.dtype
@@ -304,6 +340,7 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
                 extra_dim=extra_dim,
             )
             dst = (self.r + 1) % self.s
+            _t_send = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
             send_metaframe(header, table, dst, group=self.group)
             sent_forward = mx.distributed.send(output_to_send, dst, group=self.group)
             # CRITICAL: force this send to execute NOW, exactly per the
@@ -315,6 +352,11 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
             # this send's lazy graph node before anything forces it to
             # run.
             mx.eval(sent_forward)
+            if _DECODE_PHASE_TRACE:
+                logger.info(
+                    f"[LAYER_PHASE] last_layer_send="
+                    f"{(time.perf_counter() - _t_send) * 1000.0:.1f}ms"
+                )
             output = sent_forward
             if out_dtype != mx.bfloat16:
                 output = output.astype(out_dtype)
@@ -341,8 +383,14 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
                 extra_dim=extra_dim,
             )
             send_metaframe(header, table, 0, group=self.group)
+            _t_g = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
             sent = mx.distributed.send(output_for_gather, 0, group=self.group)
             mx.eval(sent)
+            if _DECODE_PHASE_TRACE:
+                logger.info(
+                    f"[LAYER_PHASE] gather_send="
+                    f"{(time.perf_counter() - _t_g) * 1000.0:.1f}ms"
+                )
         elif self.r == 0:
             frame = recv_metaframe(self.s - 1, group=self.group)
             if tuple(frame.request_uids) != ctx.request_uids:
@@ -354,10 +402,16 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
                     f"gather-path order/identity mismatch"
                 )
             template = mx.zeros(frame.activation_template_shape(), dtype=mx.bfloat16)
+            _t_gr = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
             output_for_gather = mx.distributed.recv_like(
                 template, self.s - 1, group=self.group
             )
             mx.eval(output_for_gather)
+            if _DECODE_PHASE_TRACE:
+                logger.info(
+                    f"[LAYER_PHASE] gather_recv="
+                    f"{(time.perf_counter() - _t_gr) * 1000.0:.1f}ms"
+                )
         # Middle ranks (s > 2): no-op passthrough.
 
         if gather_dtype != mx.bfloat16:
