@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Generator, Iterator, Literal, cast, get_args
 
 import mlx.core as mx
+from mlx_lm.generate import generation_stream as _mlx_lm_generation_stream
 from mlx_lm.generate import (
     maybe_quantize_kv_cache,
     stream_generate,
@@ -279,7 +280,27 @@ def _log_cache_profile(tag: str, cache_list: Any) -> None:
     except Exception as e:
         logger.info(f"[MEMPROF] {tag}: profile failed: {e}")
 
-generation_stream = mx.new_stream(mx.default_device())
+# 2026-08-16 (design doc Section 101): use mlx_lm's generation stream, do
+# NOT mint a second one here.
+#
+# This line previously read `generation_stream = mx.new_stream(...)`,
+# shadowing `mlx_lm.generate.generation_stream` with a DIFFERENT stream
+# object under the same name. Decode (`batch_generate.py` imports
+# `generation_stream` from `mlx_lm.generate`) and PLAIN prefill
+# (`stream_generate`, also mlx_lm) both ran on mlx_lm's stream, while
+# CHUNKED prefill (`_pipeline_parallel_prefill_steps`, this file) ran on
+# this local one. So a cache built by chunked prefill was last produced
+# on a different stream than the one decode updates it on, and every
+# subsequent per-token in-place cache update inherited a cross-stream
+# event dependency -- an idle GPU with the CPU parked in
+# metal::EventImpl::wait.
+#
+# That is exactly the measured signature: decode eval 16.1ms after plain
+# prefill vs 554ms after chunked prefill, stepping at
+# EXO_PREFILL_STEP_SIZE=2048 (the plain-vs-chunked branch), and FLAT from
+# 2.9K to 14.3K tokens -- flat because a stream identity is a static
+# property of the code path, not a function of depth.
+generation_stream = _mlx_lm_generation_stream
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 
