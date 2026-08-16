@@ -11919,3 +11919,82 @@ bit-determinism and c>=2 stability requirements, and a previous
 single-flag version "left ordering holes at stream join/leave -- corrupt
 logits and rank wedges". Any change here is a correctness risk, not just
 a perf lever, and must be quality-gated end to end.
+
+## 88. CONFIRMED BY CODE: on the PP path the async fence can never
+engage, so decode pays 43 serial blocking `mx.eval`s per token. This is
+the 550ms. (2026-08-16)
+
+Section 87's open question -- does the PP batched-decode path ever arm
+the two owner keys? -- resolves cleanly. There are exactly two setters
+in the entire tree:
+
+```
+  src/exo/worker/engines/mlx/generator/batch_generate.py:2154,2157
+      _set_fence_async_ok(..., key="engine")
+  src/exo/worker/engines/mlx/speculative/dsv4_mtp.py:898,901
+      _set_fence_async_ok(..., key="cache")
+```
+
+`pp_batched_decode_runtime.py` and `pp_batched_decode_glue.py` reference
+**neither**. And the `"cache"` key has exactly ONE owner: `dsv4_mtp.py`,
+the MTP speculative path -- which is inert on this cluster, launched
+with `EXO_DSV4_MTP=0` (DSpark, not plain MTP, is the shipped default).
+
+`_FENCE_ASYNC_CTX` defaults to `{"engine": False, "cache": False}` and
+the async branch requires BOTH. So on the PP decode path
+`_FENCE_ASYNC_CTX["cache"]` is **permanently False**, the condition can
+never be true, and the fence takes `mx.eval(y)` -- the blocking branch
+-- on every one of the 43 layers, every token.
+
+`EXO_DSV4_FENCE_ASYNC=1` being set in `start_cluster.sh` (and confirmed
+live on both runners) is therefore misleading: the feature is enabled
+and has never once engaged on this path.
+
+### This is the whole picture, end to end
+
+```
+  chunked prefill taken (>= EXO_PREFILL_STEP_SIZE=2048)
+    -> PP batched-decode path
+      -> neither fence-async owner key is ever set
+        -> per-layer fence takes the BLOCKING mx.eval(y) branch
+          -> CPU waits for the GPU 43x serially per token
+            -> parked in EventImpl::wait -> sleep_for  (89-92% of samples)
+              -> GPU reads 5-7% idle, transport reads microseconds
+                -> ~550ms/token, 0.47 tok/s
+```
+
+Every measurement in Sections 85-87 is consistent with this and none
+requires the depth, race, or granularity stories.
+
+The honest caveat on the step function: this explains why the SLOW mode
+is slow. Why the sub-2048 plain path is FAST is not yet directly
+confirmed -- the natural reading is that it does not run the PP
+batched-decode layers at all (Section 86's accidental A/B showed a
+2,366-token prompt taking `plain` prefill when `EXO_PP_BATCHED_DECODE=0`),
+so the comparison is "PP batched decode vs not", not "chunked vs plain
+prefill" per se. That distinction matters for the fix and is the one
+thing left to nail down.
+
+### Fix direction, and what it is NOT
+
+The fix is to let the PP path arm the fence when it is genuinely in
+single-request steady state -- removing a 43x serialization. It is
+explicitly NOT another timeout/timer change, and it is not the
+`MTLSharedEventListener` rewrite (Section 86 retired that as a perf fix;
+a better wait primitive cannot shorten a wait whose length is set by a
+blocking dependency).
+
+Correctness gates are non-negotiable here, per the fence's own comment:
+a previous single-flag version "left ordering holes at stream join/leave
+-- corrupt logits and rank wedges", and arming has bit-determinism and
+c>=2 stability requirements. PP is single-request-only today, which is
+the favourable case, but this must be quality-gated end to end (needle +
+output inspection), not just measured for throughput.
+
+Budget sanity check, doing the arithmetic before the work rather than
+after: the fence comment cites ~1.1ms fence wall per layer against a
+~0.5ms weight-read floor. If async overlap removes the serialization,
+the floor is roughly 43 x 0.5ms = ~21.5ms/token = ~46 tok/s, versus a
+33ms/token budget for 30 tok/s. So this lever is, for the first time in
+this campaign, plausibly SUFFICIENT rather than merely directional --
+at 14K. It says nothing yet about 500K.
