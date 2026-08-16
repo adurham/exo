@@ -10070,3 +10070,96 @@ every healthy call? The retransmitted data arrives (peer_got_count goes
 1/1); only the confirmation is late. That asymmetry is not yet
 explained and may be a second, independent defect sitting behind the
 first.
+
+## 65. RETRACTION: the 23.32 tok/s result does not reproduce, on its own
+build. Both attempted fixes are unvalidated. (2026-08-16)
+
+### What was claimed and what is true
+
+Section 64 identified the mechanism correctly (lost first send -> 500ms
+retransmit-barrier wait). Acting on it, two changes were made:
+
+- **S64** (mlx@5c3573c87): widen the standing data-QP recv pool from
+  size class sz=0 to classes 0..3, covering the sz=2 decode activation
+  send.
+- **S65/S66** (mlx@f269d5027): additionally REPLENISH consumed pool WRs,
+  tagging them `call_id = 0xFFFF0000 + sz` so the size class survives to
+  completion time.
+
+S64 measured **23.32 tok/s** on the real varied-content prompt, p50 gap
+42.9ms, **0/28 slow gaps, zero lost first-sends** -- a 49.6x improvement
+over the 0.47 baseline. That result was reported as the fix landing.
+
+**It does not reproduce.** Full table, same prompt, same depth, same
+launch config:
+
+```
+  S64, max_tokens=30,   run A  : 23.32 tok/s    0/28 slow   <- outlier
+  S64, max_tokens=3000         :  0.48 tok/s   50/50 slow
+  S66, max_tokens=30,   req 1  :  0.48 tok/s   28/28 slow
+  S66, max_tokens=30,   req 2  :  0.47 tok/s   25/28 slow
+  S64, max_tokens=30,   req 1  :  0.48 tok/s   28/28 slow   <- same build as run A
+  S64, max_tokens=30,   req 2  :  0.47 tok/s   28/28 slow
+```
+
+One fast run out of six. **Its own build, re-deployed and re-run under
+the identical protocol, is slow.** Neither the build nor `max_tokens`
+explains it.
+
+### The reasoning errors, named
+
+1. **Attributed an effect to the variable under test while a second
+   variable moved.** Run A used `max_tokens=30`; the run that
+   contradicted it used `max_tokens=3000`. I concluded "pool exhaustion"
+   from that pair without holding run length fixed -- the exact error
+   shape that produced Section 57's retraction.
+2. **Built a fix on the unvalidated theory.** S65's replenishment work
+   was real engineering (the `call_id=0` tag genuinely did prevent
+   re-posting, and pool WRs genuinely were never replenished) but it was
+   aimed at a cause I had not established.
+3. **A second-opinion review caught a framing error I had missed**: I
+   described the situation as "S64 fast / S66 slow" when my own data
+   already showed S64 slow on the long run. The build was never the
+   discriminating variable, and I had the evidence in hand.
+
+The discriminating experiment -- same build, same `max_tokens`, two
+consecutive requests -- was cheap and should have been run before any
+code was written. It took one launch and settled the question
+immediately.
+
+### State of the code
+
+S65/S66's replenishment is **reverted** (mlx@c420d3bb8). S64's pool
+widening is **kept**: it is harmless, it is consistent with the
+documented empty-FIFO failure mode, and the 0/28-slow-gap observation
+under it is real wire-level data even if not reproducible on demand. It
+is NOT validated as a fix and must not be described as one.
+
+Note one real constraint discovered while doing this: the standing pool
+now occupies 4 classes x 8 buffers = 32 WRs, exactly `MAX_RECV_WR`, so
+there is no RQ headroom left for per-call recvs on that QP. `post_recv`
+throws on failure and no throw was observed, so posts are succeeding --
+but the pool cannot be widened further without raising the QP's recv
+depth, and crowding is a live hypothesis for why widening did not help.
+
+### What the 23.32 run actually tells us
+
+It is one observation, not a fix, but it is not noise either: 0/28 slow
+gaps and zero `peer_got_count=0/1` are wire-level facts that warm-up or
+caching cannot fabricate. Combined with the ~24 tok/s already measured
+on the degenerate repetitive prompt, it says the hardware and the
+software stack **can** run this path at ~23-24 tok/s. The loss is
+intermittent-but-usually-present rather than constant.
+
+So requirement 3's ceiling is not the issue. The open question is
+narrower and sharper than before: **why is the first send lost on
+essentially every decode token, in a system that occasionally runs a
+full 28-token window with zero losses?**
+
+### Next step
+
+Instrument the pool directly rather than inferring from throughput. A
+per-size-class pool-occupancy counter, logged per token, distinguishes
+the three remaining candidates that black-box timing cannot:
+pool drained / repost never fires / pool full but the race is lost
+anyway. That is one number and it ends the guessing.
