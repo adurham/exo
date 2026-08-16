@@ -1340,6 +1340,14 @@ for NODE in "${NODES[@]}"; do
     # MUST-be-1 note predates the 2026-07-06 pipelining patch, mlx 452fbebf).
     : "${MLX_JACCL_RELIABLE_INFLIGHT:=8}"
     [ -n "${MLX_JACCL_RELIABLE_INFLIGHT:-}" ]      && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_INFLIGHT=$MLX_JACCL_RELIABLE_INFLIGHT"
+    # MLX_JACCL_DATA_RECV_POOL: gates the standing pre-posted recv pool on the
+    # data QP (Sections 52/64). The C++ reads it via std::getenv and its own
+    # comment advertises "=0 to A/B against the old behaviour" -- but it was
+    # never threaded here, and the runner environment is an ALLOWLIST, so that
+    # A/B was not actually runnable through the deploy path. Section 52's
+    # 1403->0 result came from comparing rebuilds, not from toggling this gate.
+    # Threaded 2026-08-16 so the gate is genuinely testable.
+    [ -n "${MLX_JACCL_DATA_RECV_POOL:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_DATA_RECV_POOL=$MLX_JACCL_DATA_RECV_POOL"
     [ -n "${MLX_LOG_ARRAY_DESC_COUNT_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=$MLX_LOG_ARRAY_DESC_COUNT_INTERVAL"
     [ -n "${MLX_PER_TYPE_DUMP_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_DUMP_INTERVAL=$MLX_PER_TYPE_DUMP_INTERVAL"
     [ -n "${MLX_PER_TYPE_TRACK:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_TRACK=$MLX_PER_TYPE_TRACK"
