@@ -346,6 +346,11 @@ class RunnerSupervisor:
         await event.wait()
 
     async def cancel_task(self, task_id: TaskId):
+        logger.info(
+            f"CANCELPROBE[supervisor] cancel_task task_id={task_id} "
+            f"in_completed={task_id in self.completed} "
+            f"in_progress={list(self.in_progress.keys())}"
+        )
         if task_id in self.completed:
             logger.info(f"Unable to cancel {task_id} as it has been completed")
             self.cancelled.add(task_id)

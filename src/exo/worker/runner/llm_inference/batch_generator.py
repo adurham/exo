@@ -568,16 +568,28 @@ class BatchGenerator(Engine):
         Coord group, see ``agree_on_tasks`` rationale.
         """
         has_cancel_all = False
+        _pc: list[str] = []
+        _pd: list[str] = []
         for task_id in self.cancel_receiver.collect():
+            _pc.append(str(task_id))
             if task_id == CANCEL_ALL_TASKS:
                 has_cancel_all = True
                 continue
             if task_id in self._all_tasks:
                 self._maybe_cancel.append(self._all_tasks[task_id])
+            else:
+                _pd.append(str(task_id))
+        if _pc:
+            logger.info(
+                f"CANCELPROBE[bg.fast] collected={_pc} dropped={_pd} "
+                f"maybe={len(self._maybe_cancel)} all_tasks={[str(k) for k in self._all_tasks]}"
+            )
 
         coord = get_coord_group(self.group)
         has_anything = has_cancel_all or len(self._maybe_cancel) > 0
         if not mx_any(has_anything, coord):
+            if _pc:
+                logger.info("CANCELPROBE[bg.fast] EXIT mx_any fastpath")
             return  # Fast path: no rank has cancellations — 1 collective op total
 
         # Slow path: at least one rank has cancels — full protocol
@@ -587,6 +599,10 @@ class BatchGenerator(Engine):
         agreed, different = mx_all_gather_tasks(self._maybe_cancel, coord)
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
+        logger.info(
+            f"CANCELPROBE[bg.fast] AFTER agreed={[str(t.task_id) for t in agreed]} "
+            f"cancelled={[str(t) for t in self._cancelled_tasks]}"
+        )
 
     def _jaccl_dump_step(self, label: str) -> None:
         """Snapshot per-rank Python state once per step() call when
@@ -1174,7 +1190,13 @@ class BatchGenerator(Engine):
         def distributed_prompt_progress_callback() -> None:
             t0 = time.perf_counter()
             self.agree_on_cancellations_fast()
-            if self.should_cancel(task.task_id):
+            _sc = self.should_cancel(task.task_id)
+            logger.info(
+                f"CANCELPROBE[prefill.cb] task={task.task_id} should_cancel={_sc} "
+                f"cancelled_set={[str(t) for t in self._cancelled_tasks]}"
+            )
+            if _sc:
+                logger.info("CANCELPROBE[prefill.cb] RAISING PrefillCancelled")
                 raise PrefillCancelled()
             request_trace.record("prefill.distributed_callback", t0)
 
@@ -1288,6 +1310,11 @@ class BatchGenerator(Engine):
                     # recorded in ``_cancelled_tasks`` and applied after
                     # prefill completes via ``_apply_cancellations``.
                     self.agree_on_cancellations_fast()
+                    logger.info(
+                        f"CANCELPROBE[prefill_batched.cb] task={_task.task_id} "
+                        f"should_cancel={self.should_cancel(_task.task_id)} "
+                        f"(DEFERRED BY DESIGN - does not raise)"
+                    )
                     request_trace.record(
                         "prefill_batched.distributed_callback", t0
                     )
