@@ -10768,3 +10768,69 @@ win while generation was broken (Section 51's retransmit timer, Section
 65's outlier, and now this). The needle gate caught all three. Worth
 restating as a standing rule: **on this path, a tok/s figure without a
 validated needle and `finish_reason` is not evidence of anything.**
+
+## 73. Requirement 3 status after Section 71: 22.61 tok/s on the
+official needle-gated harness, up from 0.47. (2026-08-16)
+
+### The measurement
+
+Shipped config restored (25ms p2p drain, `SEND_INFLIGHT` back to its
+validated 8 after Section 72's negative result), official harness, full
+run to natural termination:
+
+```
+  Prompt tokens: 14,167 (tokenizer ground truth)
+  TTFT 56.0s -> prefill 252.8 tok/s
+  Decode 2.5s, 57 tokens -> 22.61 tok/s
+  Response: 'FALCON-MERCURY-7749'   Needle found: YES
+```
+
+**48x the 0.47 tok/s baseline, on the same metric, with the needle
+passing.**
+
+### Three runs of the same config, and what the spread means
+
+```
+  before S71 :  0.47 tok/s   (65 tok / 139.5s)   needle YES
+  S71 run A  :  2.60 tok/s   (57 tok /  21.9s)   needle YES
+  S74 run B  : 22.61 tok/s   (57 tok /   2.5s)   needle YES
+```
+
+Runs A and B are the same build, same config, same prompt. The
+difference is how many residual drops each hit -- A paid several, B paid
+essentially none. That variance IS the open problem from Section 72, now
+quantified: the drop rate is what separates 2.6 from 22.6, and it is no
+longer masked by the 500ms amplifier.
+
+Reporting all three rather than the best one. 22.61 is the ceiling this
+path reaches when it gets a clean run; 2.60 is what a bad run costs
+today. Both are real, and the honest summary of requirement 3 is "22.6
+tok/s achievable, not yet reliable".
+
+### Requirement 3, honestly
+
+Target is 30 tok/s per-session at 500K context.
+
+- **At 14K context: 22.61 tok/s measured, needle-verified.** Within
+  striking distance of 30, from 60x away this morning.
+- **At 500K: still unmeasured.** Every number in this section is 14K.
+  Section 17's 500K measurement gap remains open, and depth will cost
+  something.
+- The remaining gap is the residual drop rate, which Section 72 narrowed
+  to one candidate (the shared data QP polled by both `send()` and
+  `recv()`, each discarding the other's completions by call_id) after
+  eliminating send-burst depth.
+
+So requirement 3 is no longer "structurally out of reach" (Section 52),
+not "a threshold bug" (Section 57, retracted), not "a desync" (Section
+67, retracted) -- it is a real, understood transport drop whose cost has
+been cut ~20x and whose remaining occurrence rate is the last thing
+between here and the bar.
+
+### Prefill, for the record
+
+252.8 tok/s at 14K, up from 219. Requirement 4 asks 400+, and the
+honest renormalized numbers from Section 55 were 225/214/202 at
+100K/300K/500K. This is a modest improvement on a metric that was never
+the target of this work, at a depth well short of where requirement 4
+is judged. Not claiming progress on requirement 4.
