@@ -13241,3 +13241,94 @@ one build, and deployment was verified on the node before concluding.
 The pattern that keeps producing wrong answers is reasoning from a
 mechanism that FITS the evidence to a claim that it CAUSES it -- fit is
 not causation, and only the toggle settles it.
+
+## 102. PP-prefill -> TP-decode: the blocking primitive is now BUILT.
+DSv4 KV caches round-trip over the disaggregated wire. (2026-08-16)
+
+User's settled requirement, restated so it is unambiguous in this doc:
+**prefill runs through PP, decode runs through TP, and decode with MTP
+(including DSpark) runs through TP.** This is direction, not a
+hypothesis. Sections that treat "does decode need TP" as an open
+question are superseded and should not be re-opened.
+
+### What was actually in the way
+
+This fork ALREADY ships a prefill-in-one-process / decode-in-another
+wire protocol -- `run_prefill_for_request`
+(`disaggregated/serve.py:20-92`), `write_cache_to_wire` /
+`send_mlx_kv_cache` (`disaggregated/adapter.py`), and `remote_prefill()`
+(`generator/remote_prefill.py:19-76`) as the client-side receiver. That
+is architecturally exactly "prefill under PP, hand the KV cache over the
+wire, decode under TP."
+
+It did not work for DeepSeek-V4-Flash for exactly ONE reason:
+
+```
+  adapter.py:110 (before)
+      case QuantizedKVCache() | CacheList() | PoolingCache():
+          raise NotImplementedError
+```
+
+DSv4 uses `CacheList(RotatingKVCache, PoolingCache, PoolingCache)` per
+layer, so **every DSv4 layer hit that line.**
+
+### Now implemented (commit `e3b6a0bed`)
+
+Composite caches cannot be sliced into per-token `KVChunk`s, so they
+ride the EXISTING `ArraysState` message with a sub-framing:
+
+- `blob[0]` = descriptor: magic + version + a depth-first cache tree
+  (type codes, `CacheList` arity, state shape tags, full `meta_state`)
+- `blob[1..]` = tensor leaves in matching DFS order
+
+Serialization goes through the caches' own `.state`/`.meta_state`
+accessors rather than hand-rolled per-field code. **`meta_state` is
+restored BEFORE `state`**, because `PoolingCache.state`'s setter
+re-buffers the remainder via `accumulate_windows()` and needs the
+restored `ratio` first. Anything not round-trippable raises
+`UnsupportedCacheStateError` rather than guessing -- a cache arriving
+with correct tensors but wrong offsets is worse than one that fails
+loudly.
+
+`QuantizedKVCache` still raises; out of scope and correctly so.
+
+### Verified by me, not taken on report
+
+- `NotImplementedError` remains ONLY for `QuantizedKVCache`
+  (`adapter.py:413-415`); `CacheList | PoolingCache` has a real arm.
+- `uv run pytest disaggregated/tests/ -q` -> **29 passed** (11 new + 18
+  pre-existing, so the existing KVCache/Rotating/Arrays framing other
+  models depend on is proven intact).
+- **Negative control re-run by hand**: I replaced
+  `cache.meta_state = meta` (`adapter.py:335`) with a no-op and re-ran.
+  **5 of 11 tests failed** -- offsets and ratios detected as wrong. Then
+  restored and re-confirmed 29 pass with a clean tree. These tests
+  genuinely detect silent corruption, they do not merely assert "no
+  exception."
+- basedpyright 1 before / 1 after (same pre-existing
+  `reportMatchNotExhaustive`), ruff 1 before / 0 after.
+
+### Explicitly NOT verified
+
+- No cluster run. Not exercised against a REAL DSv4 cache -- tests use a
+  synthetic `CacheList(RotatingKVCache, PoolingCache, PoolingCache)`.
+- No end-to-end prefill-process -> decode-process socket run; framing was
+  exercised in-memory over `BytesIO`.
+- **Decode correctness after ingest is untested**: whether a restored
+  cache produces identical logits needs hardware. That is the next gate
+  and must not be skipped -- a cache that transfers cleanly but decodes
+  subtly wrong is the worst outcome available here.
+
+### Where this leaves the requirement
+
+The capability audit (`bench/section101_tp_decode_capability_audit.md`)
+established that sharding mode is fixed at model load and there is NO
+seam to change it live -- weights are sharded in place and the non-owned
+halves are discarded. So the transition is a PROCESS boundary, not an
+in-place re-shard. Cold shard+load measured at **~18.7s/rank**.
+
+That makes the shape: PP process prefills -> KV cache over the wire ->
+TP process decodes. The wire is now the only part that was missing, and
+it exists as of this section. Remaining work is orchestration (who owns
+which process, when the handoff fires, how the request follows it), not
+a new transport.
