@@ -1868,7 +1868,23 @@ class Rank1BatchedDecodeGlue:
         """
         from exo.worker.engines.mlx.pp_batched_decode_runtime import _ModelLike
 
+        # Section 62: how long does the follower BLOCK waiting for rank 0
+        # to announce the next step? This is the single most diagnostic
+        # number on rank 1. If this dominates, rank 1 is starved -- it is
+        # idle because rank 0 has not sent work yet, and the ~2 s/token
+        # lives upstream of the follower entirely. If instead
+        # session_step dominates, the follower's own forward is the cost.
+        # Section 59 measured BOTH GPUs at ~5%, which is consistent with
+        # a mutual wait, so this separates "waiting for the peer" from
+        # "doing work" on the side that had no instrumentation at all.
+        _t_hdr = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
         header = recv_header(self.src_rank, group=self.group)
+        if _DECODE_PHASE_TRACE:
+            logger.info(
+                f"[DECODE_PHASE_R1] recv_header_wait="
+                f"{(time.perf_counter() - _t_hdr) * 1000.0:.1f}ms "
+                f"msg_kind={header.msg_kind}"
+            )
         if header.msg_kind == MSG_KIND_PREFILL:
             prefill_message = recv_prefill_body(header, self.src_rank, group=self.group)
             ready = prefill_message.request_id in self._registered_request_ids
@@ -2092,9 +2108,22 @@ class Rank1BatchedDecodeGlue:
                 n_active = len(message.entries)
                 placeholder_tokens = mx.zeros((n_active, 1), dtype=mx.int32)
                 mx.eval(placeholder_tokens)
+                # Section 62: rank 1's half of the wall-time attribution.
+                # Rank 0's tracer showed 99.97% of a 2 s/token inside
+                # run_forward, but rank 1 emitted NOTHING -- the follower
+                # never enters rank 0's instrumented branch, so the
+                # peer-side half of the answer was invisible. Section 59
+                # measured BOTH GPUs ~5% idle, so the question is which
+                # rank is waiting on which.
+                _t_fwd = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
                 self.session.step(
                     cast("_ModelLike", model), message, placeholder_tokens
                 )
+                if _DECODE_PHASE_TRACE:
+                    logger.info(
+                        f"[DECODE_PHASE_R1] session_step="
+                        f"{(time.perf_counter() - _t_fwd) * 1000.0:.1f}ms"
+                    )
         elif header.msg_kind == MSG_KIND_EVICT:
             evict_message = decode_evict_message(header)
             self.session.evict(evict_message)

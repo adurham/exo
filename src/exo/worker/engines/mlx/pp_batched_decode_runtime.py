@@ -39,10 +39,13 @@ PP path).
 
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Protocol
 
 import mlx.core as mx
+from loguru import logger
 
 from exo.worker.engines.mlx.pp_batched_cache_router import (
     extract_request_cache,
@@ -65,6 +68,13 @@ from exo.worker.engines.mlx.pp_scheduler_protocol import (
 
 if TYPE_CHECKING:
     from exo.worker.engines.mlx.types import KVCacheType
+
+
+# Per-token decode phase attribution, opt-in via
+# EXO_DECODE_PHASE_TRACE=1 (Section 62). Read once at import so the hot
+# path costs a single resolved bool test when disabled. Mirrors the flag
+# of the same name in pp_batched_decode_glue.py.
+_DECODE_PHASE_TRACE: bool = os.environ.get("EXO_DECODE_PHASE_TRACE", "0") == "1"
 
 
 class _ModelLike(Protocol):
@@ -313,11 +323,38 @@ class BatchedDecodeSession:
         should call ``finish_step`` immediately after; callers driving
         two ranks in lockstep (real or simulated transport) call this
         AFTER handing rank 1 ``prepared.message`` (see
-        ``prepare_step``'s docstring)."""
+        ``prepare_step``'s docstring).
+
+        Section 62 instrumentation (``EXO_DECODE_PHASE_TRACE=1``, off by
+        default): Section 60 attributed 99.97% of a ~2 s decode token to
+        THIS method, and Section 59 measured both ranks' GPUs at ~5%
+        utilization -- so the time is spent inside here, waiting. Under
+        MLX's lazy evaluation the ``model(...)`` call only BUILDS the
+        graph; ``mx.eval`` is where it actually executes and where a
+        blocking cross-rank recv is really paid. Splitting the two
+        separates "graph construction / dispatch" from "materialization
+        and peer wait", which the single aggregate span could not.
+        """
+        _trace = _DECODE_PHASE_TRACE
+        _t0 = _t1 = _t2 = 0.0
         with batch_step_scope(prepared.ctx):
+            if _trace:
+                _t0 = time.perf_counter()
             logits = model(prepared.tokens, cache=self.batched_cache)
+            if _trace:
+                _t1 = time.perf_counter()
             mx.eval(logits)
+            if _trace:
+                _t2 = time.perf_counter()
             mx.eval([layer.state for layer in self.batched_cache])
+            if _trace:
+                _t3 = time.perf_counter()
+                logger.info(
+                    f"[DECODE_PHASE_FWD] build_graph="
+                    f"{(_t1 - _t0) * 1000.0:.1f}ms "
+                    f"eval_logits={(_t2 - _t1) * 1000.0:.1f}ms "
+                    f"eval_cache={(_t3 - _t2) * 1000.0:.1f}ms"
+                )
         return logits
 
     def finish_step(
