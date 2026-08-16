@@ -11199,3 +11199,86 @@ could not confirm: **stop losing the first send**. The quiet period only
 ever governed how expensively we notice. Six sections of timer tuning
 have now established, by exhaustion, that the timer cannot be tuned into
 a solution.
+
+## 80. RETRACTION: the recv-pool is not the lever either. And the real
+finding: every fast run this session has been UNREPLICATED. (2026-08-16)
+
+### What I claimed and why it was wrong
+
+A single run with `MLX_JACCL_DATA_RECV_POOL=0` at the 100ms floor gave
+**22.32 tok/s** at 14K. From that I built a mechanism: the Section 64
+widening posts 4 classes x 8 buffers = 32 WRs = exactly `MAX_RECV_WR`,
+leaving no room for the per-call `post_recv_buff()`, so on UC every
+first send finds no matching WR and is dropped silently.
+
+That story is coherent, matches the code, and explains the observed
+100%-loss `round 0: got 0/1` shape. **It is also unsupported.**
+Re-measuring the identical configuration:
+
+```
+  pool OFF, 100ms floor, 14K:  run A 22.32 tok/s | run B 0.66 tok/s
+  pool OFF, 100ms floor, 70K:  0.58 tok/s
+  pool 1 class,          14K:  0.63 tok/s | 70K 0.63 tok/s
+```
+
+Same build, same config, same prompt. The 22.32 does not reproduce. The
+pool is not the lever, and Section 80's mechanism claim is withdrawn.
+
+### The pool revert stands, on different grounds
+
+`DATA_RECV_POOL_SIZE_CLASSES` stays at 1. Not as a throughput fix -- it
+demonstrably is not one -- but because 32 standing WRs genuinely is the
+entire `MAX_RECV_WR` depth for the QP, leaving zero headroom for
+per-call receives, and 1 class is what shipped and worked before Section
+64 introduced the widening. Section 64's own justification (covering the
+sz=2 decode send) rested on the same retracted causal chain.
+
+### The pattern, which is the actual finding
+
+Every fast measurement this session has been a single run that later
+failed to replicate:
+
+```
+  Section 65:  23.32 tok/s   -> did not reproduce on its own build
+  Section 71:  23.58 / 22.02 -> config broke at depth
+  Section 73:  22.61 / 22.84 -> config broke at depth
+  Section 77:  19.99 tok/s   -> config broke at depth
+  Section 80:  22.32 tok/s   -> did not reproduce on its own config
+```
+
+Five separate "fixes", five fast readings, five failures to hold up.
+Meanwhile the slow number is remarkably stable: **0.47-0.66 tok/s across
+every configuration, every depth, and every build tested tonight.**
+
+That is not five coincidences. **The system is bimodal**: it usually
+runs at ~0.6 tok/s and occasionally runs at ~22 tok/s, and nothing I
+have changed moves the probability. Each time I changed something and
+happened to catch the fast mode, I attributed it to the change.
+
+### What this reframes
+
+The question is no longer "which knob fixes decode". It is: **what
+distinguishes a fast run from a slow run, when build, config, prompt and
+depth are all held constant?**
+
+That is a different investigation, and a tractable one -- the two modes
+differ by 35x, so whatever the discriminator is, it should be blatant in
+a side-by-side trace of one fast and one slow run. Candidates worth
+instrumenting: placement/topology at load time (which rank got which
+shard), thermal or power state, whether a prior request left the
+transport in a recovered-vs-clean state, and the KV-cache slot layout.
+
+### Honest requirement-3 status
+
+**0.63 tok/s at 14K, 0.63 at 70K**, needle-verified, on the shipped
+config. Against a 30 tok/s bar. The 0.47 baseline improves to ~0.63,
+about 34%, and every larger number on record tonight is an unreplicated
+single run.
+
+### Method
+
+The rule this session keeps proving, now at the cost of five retractions:
+**one run is not a measurement.** Any result that changes a headline
+number must be replicated on its own configuration before it is written
+down as a finding -- and given this system is bimodal, "replicated"
+means at least twice, ideally with the slow mode observed in between.
