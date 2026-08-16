@@ -10344,3 +10344,86 @@ Concrete next step: log `send_seq_`/`recv_seq_` on both ranks per decode
 token and find the call that increments one side only. That is a
 targeted question with a small search space, and it does not require
 guessing at a mechanism first.
+
+## 68. The reconnect hypothesis is REFUTED: the seq desync exists with
+zero reconnects. It is established at startup. (2026-08-16)
+
+### The test
+
+Section 67 traced the stall to `received_seq == expected_seq - 1` on
+every decode token. The leading theory was that `reconnect_fresh()`
+rebuilds `MeshImpl` -- zeroing `send_seq_`/`recv_seq_` -- on only the
+rank that faulted, while the peer keeps counting.
+
+A second-opinion review flagged a real hole before any fix was written:
+unilateral zeroing predicts an offset of *whatever the peer's counter
+happened to read* -- an arbitrary N. The measured offset is exactly 1,
+every time, in both directions. So the review's advice was to measure
+the counters at the moment of divergence rather than test the predicted
+symptom.
+
+Instrumentation added (mlx, this section): log `send_seq_`/`recv_seq_`
+PRE-rebuild in `reconnect_fresh()`, and exchange them over the side
+channel both ranks already rendezvous on, so each rank prints BOTH
+ranks' state.
+
+### The result
+
+Deployed, ran the standard 14K varied-content probe twice:
+
+```
+  FRESH-CLUSTER req 1: p50 2134.0ms -> 0.47 tok/s   slow 28/28
+  FRESH-CLUSTER req 2: p50 2123.6ms -> 0.47 tok/s   slow 28/28
+
+  [jaccl-seq68] log lines on rank 0: 0
+  [jaccl-seq68] log lines on rank 1: 0
+```
+
+**Zero.** `reconnect_fresh()` was never called in this process lifetime.
+The log is actively being written (mtime one minute old, `received_seq`
+current at 1167), and the discards are live -- so the desync is fully
+present on a cluster that has never reconnected.
+
+**Reconnect is not the cause.** The counters diverge at startup and stay
+diverged.
+
+### What that leaves
+
+The offset is exactly 1 and constant from the first tokens (Section 67's
+earliest observed discard was `received_seq=3 expected_seq=4`). Since
+both counters are plain `x++` per call, a permanent offset of exactly 1
+means **one side performs exactly ONE more `recv()` than the peer
+performs `send()` on that pair, once, early** -- and every subsequent
+token inherits it.
+
+That is a much smaller search space than "somewhere in the transport":
+it is a single unpaired call during setup or first-request admission.
+Candidates worth auditing, in order:
+
+1. A handshake/probe `recv()` with no matching counted `send()` (or vice
+   versa) in the batched-decode admission path -- note rank 1 registers
+   and ACKs prefill separately from rank 0's grant flow.
+2. The `PrefillReadyMessage` ack/NACK round trip, which rank 0 can retry
+   -- a retry would send twice while the receiver counts once, or the
+   NACK path could count on one side only.
+3. Any early `send()` whose completion is reaped by the *other* poll
+   loop (send() and recv() share the data QP and each discards the
+   other's completions by call_id).
+
+### Method note
+
+This is the fifth consecutive coherent hypothesis to be wrong, but the
+first to be killed *before* a fix was built on it -- because the
+instrumentation measured the mechanism (counter state at divergence)
+rather than the predicted symptom. The review that insisted on that
+distinction is what saved the cycle. The instrumentation stays in: it
+costs nothing when no reconnect happens, and it will answer the
+reconnect question immediately if one ever does.
+
+### Standing status of requirement 3
+
+Unchanged and still open: ~0.47 tok/s against a 30 tok/s bar, cause
+narrowed to a one-time unpaired send/recv establishing a permanent
+off-by-one, which makes every first chunk look lost and costs a full
+500ms retransmit quiet period per token. The stack demonstrably reaches
+~23-24 tok/s when the counters happen to align (Section 65).
