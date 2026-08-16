@@ -11049,3 +11049,70 @@ the point it was measured and was wrong elsewhere (Section 51's global
 three. The standing rule extends: **a timing constant is only validated
 at the depths you actually ran it at** -- and for this system that means
 at minimum a shallow and a deep point before it becomes a default.
+
+## 77-78. A fixed quiet period cannot serve both depths. Adaptive
+attempt, its failure, and the correction. (2026-08-16)
+
+### The complete measured matrix
+
+Filling in the gap Section 76 left -- 100ms was made the default but had
+never been measured at 14K:
+
+```
+  depth    25ms             100ms        500ms
+   14K     22.6-22.8 tok/s  0.65 tok/s   0.47 tok/s
+   70K     0.00 (FAIL)      0.59 tok/s   0.47 tok/s
+```
+
+This is worse than Section 76 concluded. 100ms is *safe* at both depths
+but wins almost nothing anywhere -- the entire 14K gain belongs to 25ms,
+which is catastrophic at 70K. **No fixed constant serves both ends.**
+
+### Section 77: adaptive, and why the first formula was wrong
+
+Made the quiet period a property of the TRANSFER rather than the
+cluster: `2ms floor + 1ms per chunk`, capped at the legacy 500ms.
+Reasoning: the in-flight window scales with chunk count, so the timer
+should too.
+
+At 14K it worked -- **19.99 tok/s, needle YES**, recovering nearly all
+of the fast path that fixed-100ms had lost. At 70K it produced **zero
+tokens**.
+
+The chunk-count distribution at 70K explains it:
+
+```
+  316 calls  num_chunks=1
+   36 calls  num_chunks=5
+   15 calls  num_chunks=2049
+```
+
+**Small messages dominate at depth.** A chunk-scaled period therefore
+makes exactly the traffic that matters *less* patient: 1-chunk control
+messages went from 100ms to 3ms, a 33x cut, and generation stopped. The
+formula was backwards for the common case.
+
+Note also which stall fired: `drain_acks` / `all_gather`, i.e. the
+COLLECTIVE path (mesh_impl.h:1241), which uses `jaccl_ack_retransmit_us()`
+and which my knob never touches. p2p timing still determines whether the
+collective path wedges, because both share one wire -- worth remembering
+before assuming a p2p-only change is collective-safe.
+
+### Section 78: the correction
+
+Floor raised **2ms -> 100ms**, the value already verified safe at both
+depths. The per-chunk term is kept, so it only ever ADDS patience for
+genuinely large transfers -- the direction that was always safe. Small
+messages get the proven-safe 100ms; a 2049-chunk transfer now gets
+~2.1s of patience rather than 100ms, which is strictly more robust than
+anything shipped so far.
+
+### Standing method note
+
+Four timing constants this session have looked right at the point they
+were measured and been wrong elsewhere: Section 51's global 10ms,
+Section 72's `SEND_INFLIGHT=1`, Section 76's 25ms, and Section 77's 2ms
+floor. Every one was caught by the needle gate and none by a throughput
+number. The rule that keeps holding: **measure at a shallow AND a deep
+point before any timing value becomes a default, and never trust tok/s
+without a verified needle.**
