@@ -309,13 +309,35 @@ class BatchedMetaFramedPipelineLastLayer(MetaFramedPipelineLastLayer):
                 f"than silently misattributing rows to the wrong "
                 f"requests"
             )
-        _t_body = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
+        # Section 82: split what used to be a single
+        # `last_layer_body_and_eval` timer. That phase measured 662ms and
+        # is ~87% of the per-token cost, but it lumped two very different
+        # things together:
+        #
+        #   build  = self.original_layer(...) -- under MLX's lazy
+        #            evaluation this only CONSTRUCTS the graph, so it
+        #            should be microseconds. If it is not, something in
+        #            the layer is forcing synchronous work (a .item(),
+        #            a .tolist(), a shape read, or a blocking recv).
+        #   eval   = mx.eval(output) -- where the real compute AND any
+        #            cross-rank transfer nested in the graph is actually
+        #            paid.
+        #
+        # Section 62 measured this phase at 569ms with BOTH GPUs at ~5%
+        # utilisation. A phase that long with an idle GPU is blocking,
+        # not computing, and the split says which half is doing it.
+        _t_build = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
         output: mx.array = self.original_layer(x, *args, **kwargs)
+        _t_eval = time.perf_counter() if _DECODE_PHASE_TRACE else 0.0
         mx.eval(output)
         if _DECODE_PHASE_TRACE:
+            _now = time.perf_counter()
             logger.info(
-                f"[LAYER_PHASE] last_layer_body_and_eval="
-                f"{(time.perf_counter() - _t_body) * 1000.0:.1f}ms"
+                f"[LAYER_PHASE] last_layer_build="
+                f"{(_t_eval - _t_build) * 1000.0:.1f}ms "
+                f"last_layer_eval={(_now - _t_eval) * 1000.0:.1f}ms "
+                f"last_layer_body_and_eval="
+                f"{(_now - _t_build) * 1000.0:.1f}ms"
             )
 
         if self.r != self.s - 1:
