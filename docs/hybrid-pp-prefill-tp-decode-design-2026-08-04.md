@@ -12286,3 +12286,107 @@ raw KV), which at 500K would be ~22 GB over floor rather than ~5.6 GB --
 still inside the ~39 GB of real headroom, but that is the number that
 actually matters for a long agentic session at depth, and it has NOT
 been re-measured tonight.
+
+## 92. REAL BUG, found by accident: cancel does NOT stop in-flight work
+or release memory. Three aborted runs stranded ~9GB on rank 0. This is
+requirement 2's P1, and it reproduces. (2026-08-16)
+
+Found while the cancel harness was being run for hardware verification.
+Three of those runs were killed client-side (harness aborted), which
+turned out to be a better test than the harness itself: it produced
+three real mid-prefill cancels and left observable damage.
+
+### The evidence, one cancel cycle
+
+```
+  12:48:09.670   Executing command: TextGeneration     (40K-token prompt)
+  12:48:09.685   runner running
+  12:48:13.617   [MEM] prefill chunk ...
+  12:48:33.173   [MEM] prefill chunk ...
+  12:48:41.531   TaskCancelled                          <-- cancel arrives
+  12:48:41.566   Worker plan: CancelTask                (+35ms, dispatch is FINE)
+  12:48:45.018   [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1
+  12:48:54.302   Executing command: TextGeneration      (next request)
+
+  PREFILL_CANCELLED_PATH occurrences: 0
+```
+
+Three separate failures visible in nine lines:
+
+1. **The cancel path never runs.** `PREFILL_CANCELLED_PATH` is zero
+   across all three cancels, despite the marker being wired into all
+   three handlers (`batch_generator.py:768, 807, 893`). Whatever the
+   runner does on cancel, it is not `PrefillCancelled`.
+2. **Work does not stop.** 3.45s AFTER the cancel is dispatched, a rank
+   is still blocked in `Event::wait` on a collective that will never be
+   signaled (`signaled=0 target=1`). The peer had already moved on, so
+   this rank sits waiting for a partner that is gone. Delivery is not
+   the problem -- dispatch took 35ms -- the prefill loop simply does not
+   honor it.
+3. **Memory is not released.** No `runner idle: reclaimed MLX allocator
+   pool` after the cancel, on rank 0, ever.
+
+### The memory damage is asymmetric, which is the tell
+
+```
+                       node1 (rank 0)   node2 (rank 1)
+  process footprint        95 GB            86 GB
+  IOAccelerator            93 GB            84 GB
+  MLX's own "active"     86.70 GB         83.92 GB
+  idle-reclaims post-cancel   0                1
+  fitted clean floor      85.68 GB        (same)
+```
+
+Rank 0 is **~9 GB above rank 1** and **~9 GB above the floor**, and it
+never reclaimed. Note especially that **MLX reports 86.70 GB active
+while the process holds 93 GB of IOAccelerator** -- ~6-8 GB is stranded
+in the Metal allocator that MLX itself no longer accounts for. That is
+memory MLX has lost track of, not memory it is deliberately caching, and
+it is exactly what an abandoned mid-prefill graph would leave behind.
+It also explains the dashboard reading 99.4 GB on node1 vs 90.8 GB on
+node2 -- an asymmetry a uniform standby-accounting effect cannot produce.
+
+This retroactively corrects the framing of Sections 90/91: those were
+right that there is no leak *as a function of context depth*, and the
+weights floor genuinely has not moved. But they measured a cluster whose
+rank 0 was already carrying stranded memory from aborted runs, and I
+attributed the whole residual to reclaimable standby. **The per-node
+asymmetry was the signal I should have checked and did not** -- standby
+accounting is roughly symmetric across two identical nodes running the
+same shard; a 9 GB split is not.
+
+### Required behaviour, per the user
+
+On cancel the runner must: **stop all work immediately, return to ready,
+and release the memory that work was using -- WITHOUT unloading the
+model.** Today it does none of the three: it keeps computing, blocks on
+a dead collective, and retains the allocation.
+
+### Why this is worse than a leak
+
+A leak wastes memory. This also leaves a rank blocked in a collective
+whose partner has moved on, which is a correctness/liveness hazard in a
+2-rank pipeline: the ranks are no longer in agreement about what step
+they are on. The `Event::wait` self-abort timeout is 1,800,000 ms (30
+min) on this launch, so nothing forces recovery on any useful timescale.
+It survives only because the next request happens to re-synchronize
+them.
+
+### Next
+
+1. Find why `PrefillCancelled` never fires -- the cancel reaches
+   `Worker plan: CancelTask` but does not reach the prefill loop's
+   cancellation check. `warmup_inference` logs "checking for
+   cancellation every 100 tokens"; a 40K chunked prefill should cross
+   that boundary many times, so the check is either not on this path or
+   not consulted during `pipeline_parallel_prefill`.
+2. Both ranks must agree to abort together. A unilateral rank-0 abort is
+   what strands rank 1 in `Event::wait`; the existing
+   `pipeline_agree_cancel` machinery is the obvious hook and already has
+   a documented short-circuit pitfall (see the jaccl skill's
+   `agreed = agreed or _recv(...)` entry).
+3. On abort, drop the partial graph/cache and `mx.clear_cache()` so the
+   allocator returns to the floor -- verify by fitting the intercept,
+   not by reading a single total.
+4. Re-run the harness only after 1-3; it is currently measuring a system
+   that cannot pass.
