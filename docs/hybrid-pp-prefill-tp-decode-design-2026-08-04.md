@@ -12688,3 +12688,83 @@ to whatever the real defect turns out to be, and the protocol-version
 bump to v4 is a live-cluster compatibility change that must not be
 deployed until the diagnosis is settled. Treat all three as
 provisional.
+
+## 96. ROOT CAUSE PROVEN ON HARDWARE: the interruptible chunked-prefill
+drive never invokes the cancel callback. 79 chunks advanced, callback
+fired 6 times. (2026-08-16)
+
+Instrumented the live cancel path (commit `31e6383be`, `CANCELPROBE`
+markers at supervisor dispatch, `agree_on_cancellations_fast`, and both
+prefill callbacks), redeployed, and ran a real mid-prefill cancel
+(~40K-token prompt, cancel issued at +25s with no first token streamed,
+`POST /v1/cancel/{command_id}` -> 200).
+
+### The evidence
+
+```
+  ...PREFILL_ADVANCE_APPLIED  x79     <- chunks driven by the session
+  ...CANCELPROBE[prefill.cb]   x6     <- callback fired 6x, then STOPPED
+  13:27:24.563 CANCELPROBE[supervisor] cancel_task task_id=3a8ea...
+                                          in_progress=[3a8ea...]
+  13:27:24.615 CANCELPROBE[bg.fast] collected=[3a8ea...] dropped=[] maybe=1
+  13:27:24.615 CANCELPROBE[bg.fast] AFTER agreed=[3a8ea...]
+                                          cancelled=[3a8ea...]
+  ...PREFILL_ADVANCE_APPLIED   x2     <- prefill CONTINUES after the cancel
+  13:27:44.019 slow wait              <- 19s later, rank blocked in Event::wait
+  PREFILL_CANCELLED_PATH: 0
+```
+
+Every `prefill.cb` line reads `should_cancel=False cancelled_set=[]`,
+and **all 12 of them precede the cancel**. After the cancel lands, the
+callback is never called again -- so the one place that could raise
+`PrefillCancelled` is not on the loop that is actually running.
+
+Note what this rules out: delivery works (supervisor sees it in 35ms),
+collection works (`collected=[...] dropped=[]`), agreement works
+(`agreed=[...]`), and the id genuinely lands in `_cancelled_tasks`. The
+cancel machinery is entirely healthy. The prefill loop simply never asks.
+
+### The mechanism
+
+`ResumablePrefillSession.advance()` (`pp_prefill_session.py`) drives the
+chunks when `prefill_interruptible_start()` returns a
+`ChunkedPrefillDrive`. Grep for the callback in that file: **zero
+references.** The callback is invoked inside
+`_pipeline_parallel_prefill_steps`' own chunk loop -- but under
+`interruptible=True` that generator *yields* at the chunk boundary
+(`yield ("chunk", i, chunk_tokens)`) and the SESSION runs the forward
+pass instead, then resumes the generator past the yield. The 6 callback
+firings are the leading/trailing dummy iterations and the tail; the 79
+real chunk advances go through `advance()`, which never calls it.
+
+So Section 93 was right that the callback is the cancel hook and wrong
+about which loop runs; Section 95 correctly retracted the batched-callback
+claim; this section supplies the actual answer. The static reads kept
+disagreeing because BOTH callbacks exist and BOTH are wired -- the live
+drive just doesn't use either.
+
+### The fix, now unambiguous
+
+`ResumablePrefillSession.advance()` must consult cancellation at its
+chunk boundary -- which is exactly the quiescent cut point Section 93
+already specified (after the chunk's p2p handoff materializes, before
+enqueuing k+1). The metaframe `PHASE_CANCEL` frame (`491d5ea35`) and the
+cut-point primitive (`4ff313a42`) were built for precisely this point
+and are now aimed at the right loop rather than dead code.
+
+Ordering, unchanged from Section 93: rank 0 is the single control
+authority, signals via the CANCEL frame so rank 1 never posts the
+activation recv that would strand it, then per-task drop ->
+`mx.synchronize()` -> `mx.clear_cache()`.
+
+The decode half is separately confirmed and needs no instrumentation:
+`batch_generator.py:1210-1213` observes the cancel every token and calls
+only `_cancelled_tasks.add(...)` -- it never raises or breaks the loop.
+
+### Method note
+
+Three sections of static tracing (93, 95, and the first half of this
+one) all failed to settle this because reading a call chain cannot tell
+you which of two wired paths executes. Six log lines did. When two
+readings of the code disagree about which branch runs, **instrument and
+run it** -- that was available from the start and cost one relaunch.
