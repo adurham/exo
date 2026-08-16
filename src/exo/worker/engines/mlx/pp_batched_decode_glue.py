@@ -1603,8 +1603,16 @@ class Rank0BatchedDecodeGlue:
         abort_message = PrefillAbortMessage(
             step_id=self._prefill_step_id, request_id=request_id
         )
+        logger.info(
+            f"PREFILL_ABORT_SEND request_id={request_id} "
+            f"step_id={self._prefill_step_id} dst={self.dst_rank}"
+        )
         send_prefill_abort_message(abort_message, dst=self.dst_rank, group=self.group)
         ack = recv_prefill_abort_ack_message(src=self.dst_rank, group=self.group)
+        logger.info(
+            f"PREFILL_ABORT_ACKED request_id={ack.request_id} "
+            f"(bilateral teardown complete)"
+        )
         if ack.request_id != request_id:
             raise GlueError(
                 f"abort_prefill_session({request_id}): PrefillAbortAckMessage "
@@ -2076,6 +2084,10 @@ class Rank1BatchedDecodeGlue:
             prefill_session.abort()
             self._active_prefill_session = None
             self._last_prefill_advance_seq = None
+            logger.info(
+                f"PREFILL_ABORT_RECV request_id={abort_message.request_id} "
+                f"(rank1 tearing down mirrored session)"
+            )
             send_prefill_abort_ack_message(
                 PrefillAbortAckMessage(
                     step_id=abort_message.step_id,
