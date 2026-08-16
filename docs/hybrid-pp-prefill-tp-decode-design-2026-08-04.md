@@ -9575,3 +9575,112 @@ it reproduces reliably. The transport instrumentation from Sections
 Section 52 measured p50 39us with a long tail and concluded "blocked on
 the peer's compute." **That conclusion is now untenable** -- the peer's
 GPU is idle. Something is waiting on something that is not computing.
+
+## 60. The 2 s/token is attributed: 99.97% of it is inside
+`run_forward`, with the GPU idle. Scheduling and wire-send are ~0.5ms.
+(2026-08-15)
+
+### The measurement
+
+Per-token phase attribution (`EXO_DECODE_PHASE_TRACE=1`, added this
+section) on the official varied-content prompt at ~14K tokens, the
+reliably reproducible collapse. Rank 0, twelve consecutive tokens:
+
+```
+  prepare=0.0ms  send_step=0.3ms  run_forward=2086.3ms  finish_step=0.3ms  total=2087.0ms
+  prepare=0.0ms  send_step=0.3ms  run_forward=2094.9ms  finish_step=0.3ms  total=2095.5ms
+  prepare=0.0ms  send_step=0.2ms  run_forward=2081.3ms  finish_step=0.3ms  total=2081.9ms
+  ... (all twelve within 2076-2097ms)
+```
+
+Client-side the same run measured 0.48 tok/s, p50 gap 2088.8ms, 23/23
+gaps >500ms -- so the trace accounts for essentially the entire
+inter-token interval.
+
+**Verdict: `run_forward` holds 99.97% of the wall clock.** Batch
+preparation is unmeasurable (0.0ms), the cross-rank `StepMessage` send
+is 0.2-0.3ms, sampling is 0.3ms. Every scheduling-overhead and
+wire-throughput hypothesis is eliminated. There is nothing to optimize
+in the glue.
+
+### Why this is still not "it's compute"
+
+`run_forward` is not pure compute. It is:
+
+```python
+with batch_step_scope(prepared.ctx):
+    logits = model(prepared.tokens, cache=self.batched_cache)
+    mx.eval(logits)
+    mx.eval([layer.state for layer in self.batched_cache])
+```
+
+Under PP, rank 0's `model(...)` traverses its own layers, sends
+activations to rank 1, and **blocks receiving rank 1's output**. So this
+single span contains local compute, the peer's compute, and all
+cross-rank waiting -- and `mx.eval` is where MLX's lazy graph actually
+materializes, i.e. where a blocking recv is really paid.
+
+Section 59 already established the GPUs are ~5% utilized during this
+window on BOTH ranks. Combining the two measurements: **the 2 seconds
+are spent inside `run_forward`, and they are spent waiting, not
+computing.**
+
+### Transport contribution: real, but only about a third
+
+From rank 0's own jaccl counters over the same run:
+
+```
+  peer_got_count=1/1   289   (healthy: peer already had the data)
+  peer_got_count=0/1    32   (TRUE lost send -- peer received nothing)
+  to_resend_count=1     32
+```
+
+32 genuine lost first-sends, each paying the 500ms retransmit quiet
+timer, is ~16s of stall inside a ~50s decode window (24 tokens x
+~2.08s). **~32% of the collapse is retransmit stall.**
+
+That is a real and significant finding -- and note it means Section 52's
+data-QP recv-pool fix did NOT eliminate lost sends on this path, it only
+eliminated them for the size class it covered. But it leaves ~1.4
+s/token unexplained, still inside `run_forward`, still with idle GPUs.
+
+### Honest status
+
+Narrowed hard, not closed. What is now excluded, by measurement rather
+than argument:
+
+- glue scheduling overhead (0.0ms), `StepMessage` send (0.3ms),
+  sampling (0.3ms)
+- prompt LENGTH (Section 58, controlled to 0.7%)
+- `EXO_PREFILL_STEP_SIZE` (Section 57 retraction)
+- sparse-indexer attention cost as the mechanism (Section 59: it is a
+  compute theory; the GPUs are idle)
+- model double-load and swap thrashing (Section 59)
+
+What remains, inside one span: the peer's own forward, the cross-rank
+recv, and `mx.eval` materialization -- of which ~32% is now
+attributable to lost-send retransmits.
+
+### Next step
+
+Split `run_forward` itself. The span needs to separate (a) rank 0's
+local layer traversal, (b) the blocking recv of rank 1's activations,
+and (c) `mx.eval` materialization -- and rank 1 needs equivalent
+instrumentation on its own decode path. Note rank 1 emits ZERO
+`[DECODE_PHASE]` lines because the follower never enters the rank-0
+branch that was instrumented; its own step path is a separate, uncovered
+code path and is where the peer-side half of this answer lives.
+
+The 32 lost sends deserve their own investigation regardless: they are
+the same failure shape Section 52 fixed for one size class, recurring
+here at a different one.
+
+### Instrumentation note, worth keeping
+
+Two self-inflicted delays getting this number, both now fixed in-tree:
+`start_cluster.sh`'s runner environment is an ALLOWLIST -- a var merely
+exported in the launching shell never reaches the runner, which
+produced a clean deploy with zero trace output. And loguru does not do
+`%`-style interpolation, so the first working deploy emitted twenty
+lines of literal `%.1fms` placeholders. The tracer fired correctly both
+times; only the plumbing and the formatting were wrong.
