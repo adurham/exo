@@ -146,6 +146,11 @@ def report(label: str, r: dict) -> None:
     print(f"  finish_reason:     {r['finish_reason']}")
     print(f"  needle found:      {r['needle_found']}")
     print(f"  usage (untrusted): {r['usage']}")
+    # Always show the actual generated text. A throughput number without
+    # the output it describes is exactly how this campaign shipped a
+    # "win" whose generation emitted zero tokens (Section 51).
+    print(f"  answer text:       {r['text'][:300]!r}")
+    print(f"  reasoning head:    {r['reasoning_head'][:300]!r}")
 
     if not gaps:
         print("  NO inter-token gaps -- fewer than 2 streamed events.")

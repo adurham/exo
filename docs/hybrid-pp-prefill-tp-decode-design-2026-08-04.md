@@ -9250,3 +9250,135 @@ verify the gates are wired as read: launch N=2, then grep runner logs
 for `"deferring task"` (serialization engaged) or
 `"PP speculative decode already active"` (engine rejection). Their
 ABSENCE would mean the gates are not behaving as the code reads.
+
+## 57. RETRACTION: Section 54's threshold was a PROMPT-CONTENT artifact,
+not `EXO_PREFILL_STEP_SIZE`. The causation arm disproved my own
+hypothesis. (2026-08-15)
+
+### Retract this first
+
+Section 54 claimed the decode collapse is caused by the chunked-prefill
+branch at `num_tokens >= EXO_PREFILL_STEP_SIZE` (2048), on the strength
+of a 35-token bracket (2,043 tok fast / 2,078 tok slow).
+
+**That claim is WRONG and is retracted.** The causation arm was run and
+it disproved the hypothesis. Section 54's *measurements* are real and
+reproducible; its *causal attribution* is not.
+
+### What the causation arm actually showed
+
+Relaunched with `EXO_PREFILL_STEP_SIZE=999999` (verified live in the
+runner env on BOTH ranks), `EXO_PP_BATCHED_DECODE=1` unchanged. Under
+that config, using MY probe's prompt:
+
+```
+  2,078 tok : 0.49 -> 24.09 tok/s
+  4,896 tok : 0.47 -> 24.32 tok/s
+ 12,181 tok :         23.74 tok/s
+```
+
+I reported this as causation proven. **It was not.** I changed two
+things at once and attributed the result to the one I was testing.
+
+The control that broke it: with the SAME env (999999 still live), the
+SAME cluster, and the SAME measurement tool, running the DESIGN DOC's
+OWN benchmark prompt:
+
+```
+  official prompt, ~14,099 tok : 0.49 tok/s
+    p50 gap 2051 ms, 54 of 58 gaps > 500ms, needle FOUND (FALCON-MERCURY-7749)
+```
+
+Identical to the pre-change number. The env var changed nothing. Every
+"recovery" I measured came from swapping the prompt, not the config.
+
+### The real trigger: prompt content, not prompt length
+
+Same target depth, near-identical token counts, opposite behavior:
+
+```
+                     chars    tokens   unique 200-char blocks   decode
+  official prompt   80,337    14,133            398             0.49 tok/s
+  my probe prompt   80,136    12,177             30            23.74 tok/s
+```
+
+My probe's filler is ONE sentence repeated ~1,400 times (30 unique
+blocks). The official harness assembles randomly-chosen paragraphs from
+a topic pool (398 unique blocks) -- **13x more distinct content at the
+same length.**
+
+So the "2048 threshold" was coincidence: my bisect crossed 2048 while
+holding a degenerate prompt whose repetition happens to be cheap, and I
+read the branch constant off `generate.py` because I was looking for a
+constant near 2048 and one was there.
+
+**Leading hypothesis for the real mechanism** (NOT yet proven, and I am
+not repeating the last mistake): DeepSeek-V4 uses sparse indexer
+attention, live here at `EXO_DSV4_INDEX_TOPK=512` with
+`sliding_window=128`. Top-K selection over a highly repetitive context
+collapses onto a tiny set of distinct key blocks; over varied content it
+does not. That makes per-token decode cost a function of context
+DIVERSITY, which is exactly the axis these two prompts differ on and
+exactly the axis no measurement in this campaign has controlled for.
+
+### What survives and what does not
+
+SURVIVES (measurements, all reproducible):
+- ~0.5 tok/s per-session decode at depth on realistic varied content,
+  transport provably clean. Sections 50-52's numbers were always taken
+  with the official varied-content prompt and are UNAFFECTED.
+- ~24 tok/s on degenerate repetitive content -- real, but not
+  representative of any workload we care about.
+- The needle passes at 14K depth under this config (`FALCON-MERCURY-7749`,
+  `finish_reason=stop`), so output quality is intact.
+
+DOES NOT SURVIVE:
+- Section 54's causal claim, and its conclusion that Section 52's
+  "structural" reading was "definitively dead." Section 52's conclusion
+  is BACK ON THE TABLE, not confirmed but no longer refuted.
+- The 24.6 tok/s figure as evidence that requirement 3 is nearly met. It
+  was measured on a prompt no real session resembles.
+
+### Requirement 3, honestly, again
+
+Per-session decode on realistic content remains ~0.5 tok/s at 14K-300K,
+flat with depth. Against a 30 tok/s bar that is ~60x short. This is
+where Section 52 left it. My detour did not move it -- it produced a
+measurement artifact and I over-claimed on it twice (once as "50x
+recovery", once as "causation proven") before the control caught it.
+
+### Process failure worth recording
+
+Three compounding errors:
+1. **Uncontrolled variable.** I validated a config change using a
+   different prompt than the one that produced the original
+   measurement. The single most basic control in A/B work.
+2. **Confirmation-shaped search.** I went looking for a constant near
+   2048, found one on a plausible code path, and stopped. The
+   `queue_sends`/contextvars story was coherent and in-tree -- which
+   made it persuasive rather than verified.
+3. **Reported before controlling.** I sent "CAUSATION PROVEN" upstream
+   on the strength of the arm alone, then found the contradiction while
+   running quality validation I had (correctly) refused to skip.
+
+What caught it was insisting on the needle check. The needle-gated run
+used the official prompt, disagreed 50x with my own number under the
+identical config, and that contradiction was unignorable. The discipline
+that saved this is the same one that flagged the 10ms retransmit
+experiment: never accept a throughput number without validating the
+output end-to-end, on the real workload.
+
+### Concrete next step
+
+Control for content diversity explicitly. Run a diversity sweep at FIXED
+token length (e.g. 14K) across prompts from 1 unique block to fully
+varied, on ONE config, and plot decode tok/s against unique-block count.
+If the curve tracks diversity, the sparse-indexer hypothesis is
+supported and requirement 3's real question becomes "what does top-K
+attention cost at depth on varied content", which is a very different
+investigation from a branch-predicate bug.
+
+`bench/pertoken_latency_probe.py`'s prompt builder must NOT be used for
+any performance conclusion until then -- its degenerate filler makes it
+unrepresentative. Its per-token gap INSTRUMENTATION is sound and was
+what exposed this; only its prompt is unfit.
