@@ -10427,3 +10427,83 @@ narrowed to a one-time unpaired send/recv establishing a permanent
 off-by-one, which makes every first chunk look lost and costs a full
 500ms retransmit quiet period per token. The stack demonstrably reaches
 ~23-24 tok/s when the counters happen to align (Section 65).
+
+## 69. CORRECTION to Section 67: the counters do NOT desync. The
+discarded frame is a duplicate, and the discard is a CONSEQUENCE of the
+retransmit, not its cause. (2026-08-16)
+
+### The measurement
+
+Logged every `send_seq_[dst]++` and `recv_seq_[src]++` with its call_id
+on both ranks, then diffed the paired streams:
+
+```
+  rank0 SEND -> rank1 RECV :  606 entries, IDENTICAL, zero divergence
+  rank1 SEND -> rank0 RECV :  205 entries, IDENTICAL, zero divergence
+```
+
+**The counters never diverge.** Section 67's "the two ranks disagree
+about which call they are in" is wrong.
+
+### What the discards actually are
+
+Section 67 read `received_seq=592 expected_seq=593` as proof of a
+permanent off-by-one. But the counter stream shows seq 592 was
+legitimately received in its own right (as call_id 800), and 593 as
+call_id 801. So the frame carrying 592 that gets discarded is a
+**duplicate arriving after the receiver already completed that call and
+moved on**.
+
+The stale-message guard is doing exactly its job, on exactly the traffic
+it was built for. Nothing is malfunctioning at the discard.
+
+### The causality was inverted
+
+Corrected chain:
+
+1. Sender transmits call N. It arrives and is consumed normally.
+2. For some reason the sender does not observe the completion, waits out
+   the 500ms retransmit quiet timer, and retransmits call N.
+3. By then the receiver has advanced to N+1, so the duplicate is
+   correctly discarded as stale and logged.
+
+Section 67 read step 3 as the cause of step 2. It is the other way
+round: **the discard is downstream of a retransmit that should never
+have been needed.** Every discard is evidence that a 500ms stall already
+happened, not evidence of why.
+
+That also dissolves the "constant off-by-one" that made the desync story
+so persuasive: of course `received == expected - 1` every time -- a
+duplicate of the immediately-previous call is exactly one behind, by
+construction. The pattern was a tautology, not a clue.
+
+### What survives, and what the question now is
+
+Unchanged and still measured:
+- ~2.09 s/token, `last_layer_send` a fixed 500.4-500.7ms.
+- Round 0 barrier reports `peer_got_count=0/1` at 42us; retransmit
+  posted at 43us; round 1 barrier returns at 500,072us.
+- Both GPUs ~5%. Both counter streams in perfect sync.
+- The stack reaches ~23-24 tok/s when the stall does not occur.
+
+So the real question returns to where Section 64's trace pointed, minus
+the desync detour: **why does the round-0 barrier report
+`peer_got_count=0/1` when the counter streams prove the receiver
+consumed that very call?**
+
+The receiver processes the data (its `recv_seq_` advances in lockstep),
+but the got-bitmask the sender reads back at round 0 says it has
+nothing. Those two facts are only compatible if the bitmask exchange
+itself -- `p2p_retry_exchange`, which runs on its OWN dedicated QP,
+separate from the data QP -- is reporting stale or empty state. That is
+a much narrower target than the whole transport, and it is a path
+Section 43 already found two real bugs in.
+
+### Method note
+
+Sixth hypothesis, sixth correction, but the cost was one instrumented
+run rather than a fix built on a wrong model -- and the instrumentation
+that killed it is the same instrumentation that now points at the next
+target. The pattern that keeps catching these: a symptom that looks
+"constant and clean" (exactly 1, every time) is often an artifact of how
+the measurement is constructed, not a property of the bug.
