@@ -10907,3 +10907,73 @@ Section 71 fix is intact and reproducible across three separate
 deployments (22.61, 22.84, plus the 23.58/22.02 probe pair). Residual
 drops remain unexplained, with the shared-CQ hypothesis neither
 confirmed nor refuted.
+
+## 75. Shared-CQ cross-consumption REFUTED by measurement. Both named
+candidates for the residual drops are now eliminated. (2026-08-16)
+
+### The safe probe
+
+Section 74's inline `fprintf` per discarded CQE broke the cluster. Redid
+it correctly: increment a plain int at each discard site with **no I/O
+in the loop**, and report both counters once per call on the existing
+`recv() BARRIER` line as `xconsume=<send_in_recv>/<recv_in_send>`.
+
+```
+  378 calls logged, every single one:  xconsume=0/0
+  Decode 21.7s, 57 tokens -> 2.63 tok/s
+  Response: 'FALCON-MERCURY-7749'   Needle found: YES
+```
+
+**Zero cross-consumptions, in either direction.**
+
+Critically, this is a *valid* negative where Section 74's zeros were
+not: that run never decoded, so the overlap being tested never occurred.
+This run decoded normally (needle YES, 57 tokens) AND hit residual drops
+(2.63 tok/s is a slow run, not a clean one), so the window was live and
+the counters still read zero.
+
+**Conclusion: `send()` and `recv()` never poll the shared CQ
+concurrently.** PP decode is strictly alternating per rank -- each rank
+is either sending or receiving on a given QP, never both -- so the two
+loops are never in flight together and no CQE can be reaped by the wrong
+consumer. The shared completion queue is real but harmless here.
+
+### Where that leaves the residual drops
+
+Both candidates named in Section 70 are eliminated **by measurement**:
+
+- **Send-burst depth** (Section 72): `SEND_INFLIGHT=1` removes the
+  bursts and also removes generation entirely -- `drain_acks STALLED`,
+  zero tokens. Depth 8 is load-bearing.
+- **Shared-CQ cross-consumption** (this section): measured zero across
+  378 calls on a run that was actively hitting drops.
+
+So the residual first-send loss on 16380-byte sz=2 UC chunks has no
+remaining software candidate that I have identified. It may simply be
+what it looks like: genuine, occasional packet loss on a UC transport,
+which has no flow control and no NAK by design. Section 71's fix is the
+appropriate response to that -- cap the recovery cost rather than chase
+a drop that the fabric is entitled to inflict.
+
+### A real find along the way
+
+The two pre-existing `[jaccl-cqe]` traces `fprintf`+`fflush` **once per
+completion** in both hot poll loops, gated on `JACCL_TRACE_PROGRESS`.
+Section 74 proved that budget is tight enough that one extra write per
+CQE collapses the cluster -- which means every progress-traced run in
+this entire campaign has been paying per-CQE stderr I/O, including the
+runs whose timings the last twenty sections reasoned about.
+
+Split onto its own `JACCL_TRACE_CQE` flag. `JACCL_TRACE_PROGRESS` now
+covers only the cheap per-call `ROUND`/`BARRIER` lines this
+investigation actually reads. Worth noting the measured throughput
+numbers (22.61/22.84 needle-verified) were taken WITHOUT
+`JACCL_TRACE_PROGRESS`, so they are unaffected; but any future timing
+comparison against a traced run would have been apples-to-oranges.
+
+### Standing status
+
+Section 71's fix intact and reproducible: **22.61 / 22.84 tok/s
+needle-verified**, versus 0.47 before, across separate deployments.
+Residual drops remain, cost ~50ms each instead of ~1000ms, and now have
+no identified software cause.
