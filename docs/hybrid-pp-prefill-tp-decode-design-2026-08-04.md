@@ -9091,19 +9091,49 @@ English prose through this tokenizer runs ~5.68 chars/token, not 4. The
 
 ### Renormalized onto one definition
 
-Recover TTFT from run set A (`est_tokens / reported_tps`), then divide
-the REAL token count by that same wall clock:
+**CORRECTION (same day):** the first version of this section
+renormalized by INFERRING run set A's TTFT as
+`est_tokens / reported_tps`. That inference was unnecessary -- the raw
+result JSON for both runs survives, and it settles the question
+directly and more strongly:
+
+```
+  /tmp/s17_measure_1786828861.json  (16:21, BEFORE 7d14daea7)  = run set A
+  /tmp/s52_after_1786835380.json    (18:35, AFTER  7d14daea7)  = run set B
+```
+
+Run set A's own JSON records `prompt_tokens: 2` on every row -- the
+literal tail-bug value, confirming it ran pre-fix -- and
+`prefill_tok_s: 0.0`. So the doc's 320/304/286 were never read off the
+JSON at all; they were recovered post-hoc from the harness's `chars//4`
+estimate (`100000/312.343 = 320.2`, `300000/986.671 = 304.1`,
+`500000/1748.613 = 285.9` -- exact matches).
+
+**The decisive evidence is the denominator, which the bug never
+touched:**
+
+```
+  target    A TTFT      B TTFT     change
+  100K     312.34 s    315.21 s    +0.9%
+  300K     986.67 s    991.12 s    +0.5%
+```
+
+Wall-clock prefill time is essentially IDENTICAL across the pair. A
+real 30% throughput regression would have to show up as a 30% longer
+TTFT. It does not. Only the numerator moved.
+
+Renormalizing run set A with run set B's real tokenizer counts over run
+set A's own measured TTFT:
 
 ```
               A reported   A renormalized   B measured   agreement
-  100K ctx     320 tok/s      225.0 tok/s    224.5 tok/s   0.2%
-  300K ctx     304 tok/s      214.0 tok/s    213.2 tok/s   0.4%
-  500K ctx     286 tok/s      201.5 tok/s        --         --
+  100K ctx     320 tok/s      226.6 tok/s    224.5 tok/s    0.9%
+  300K ctx     304 tok/s      214.1 tok/s    213.2 tok/s    0.5%
 ```
 
-**The two run sets agree within 0.4%.** There was never a regression.
-The transport fix did not cost prefill throughput. Both numbers were
-always the same measurement, expressed in two different units.
+**The two run sets agree within 1%.** There was never a regression, and
+the transport fix cost nothing. Both numbers were always the same
+measurement expressed in two different units.
 
 ### The real finding, which is worse than the false alarm
 
@@ -9139,3 +9169,84 @@ Note the same discipline already caught two other errors here: an 18.01
 tok/s figure from a 52-token sample (Section 52), and a retransmit
 experiment where every transport metric improved while generation
 emitted zero tokens (Section 51).
+
+## 56. Requirement 1 under the Section 53 A/B: the speculation arm would
+have satisfied requirement 3 by silently reducing concurrency to 1.
+(2026-08-15, static analysis)
+
+Recorded because it nearly cost a wrong architectural decision, and
+because it closes the "is the A/B safe" question independently of
+Section 54 having made the A/B unnecessary.
+
+### The PP-spec path is single-request by design, at two levels
+
+1. **Engine guard.** `_submit_pp_spec` raises `PPSpecAlreadyActiveError`
+   if a spec generator is already live (`batch_generate.py:3254-3264`):
+   *"a second concurrent PP-spec request is not supported by today's
+   architecture (shared rank0<->rank1 wire-link state in
+   SpecPipelineFirstLayer/SpecPipelineLastLayer)."* The dict
+   `_pp_spec_gen_by_uid` is keyed by uid but documented as never holding
+   more than one entry (`batch_generate.py:734-735`).
+
+   The reason is physical: PP-spec installs a SINGLE shared
+   `SpecPipelineFirstLayer`/`SpecPipelineLastLayer` pair onto the
+   model's persistent layer list, holding mode-flags for the ONE
+   physical rank0<->rank1 link, reconfigured per request. Two concurrent
+   spec generators would reconfigure the same shared link with no
+   atomicity between configure and use. Real concurrency needs
+   per-request wire multiplexing -- called out in-tree as *"separate,
+   larger architectural work."*
+
+2. **Runner admission gate.** `runner.py:769-777` defers a second
+   `TextGeneration` onto `_deferred_gen_tasks` once
+   `len(active_tasks) >= EXO_MAX_CONCURRENT_REQUESTS`, draining it only
+   after a task completes (`runner.py:683-687`). The comment
+   (`runner.py:753-768`) states the gate exists precisely for this:
+   *"PP mode's speculative decode path keeps per-request state in
+   singular ExoBatchGenerator instance attributes; admitting a 2nd
+   concurrent generation task while one is active silently
+   corrupts/orphans the first."*
+
+### What that means for the A/B
+
+A second concurrent request under `EXO_PP_BATCHED_DECODE=0` is
+**serialized, not deadlocked and not corrupted** -- deferred at the
+runner, or cleanly rejected at the engine. That is a better failure mode
+than feared, but it is still not concurrency: aggregate tok/s at N=2
+would be approximately single-stream tok/s, and the second request's
+latency would include the first's entire generation.
+
+So the speculation arm could have produced a headline throughput number
+that appeared to satisfy requirement 3 **while requirement 1 quietly
+regressed to N=1** -- and nothing in a decode-tok/s measurement would
+have surfaced that.
+
+### And the two subsystems cannot be combined
+
+`MSG_KIND_PREFILL` / single-writer `tick()` is not merely unreached with
+batched-decode off -- the glues are never constructed
+(`batch_generate.py:770-779`: *"Default OFF: when False, this entire
+subsystem is never constructed"*), so cross-rank admission ordering is
+absent on that path. It is also unnecessary there, because only one
+request can exist.
+
+Conversely the eligibility gate rejects any speculative request from the
+batched path outright
+(`pp_batched_decode_eligibility.py:130-133`), and `submit()` passes
+`uses_speculative_decode=hasattr(self._mlx_gen, "mtp")`
+(`batch_generate.py:2302`), making a DSpark/MTP-capable engine
+permanently ineligible.
+
+**Conclusion: requirement 1 and requirement 3 can only be satisfied
+together on the batched-decode path.** Fixing Section 54's threshold bug
+is the only route that serves both; "make PP speculation work" trades
+requirement 1 away for requirement 3.
+
+### Runtime confirmation if ever needed
+
+Note `EXO_MAX_CONCURRENT_REQUESTS` defaults to 8 (`constants.py:108`)
+and is forced to 1 for Pipeline sharding by `start_cluster.sh`. To
+verify the gates are wired as read: launch N=2, then grep runner logs
+for `"deferring task"` (serialization engaged) or
+`"PP speculative decode already active"` (engine rejection). Their
+ABSENCE would mean the gates are not behaving as the code reads.

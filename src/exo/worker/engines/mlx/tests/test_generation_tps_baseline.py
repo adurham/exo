@@ -136,19 +136,70 @@ def test_every_engine_task_sets_the_baseline_explicitly() -> None:
     )
 
 
-def test_reported_gui_figure_is_reproduced_by_a_zero_baseline() -> None:
-    """Pin the arithmetic that ties the user's report to this root cause.
+def test_reported_gui_figure_implies_an_absurd_seconds_per_token() -> None:
+    """Pin what the user's report actually determines -- and only that.
 
-    Guards against a future 'fix' that changes the number without
-    understanding it: 33 completion tokens against a 1-day-6:30 uptime
-    baseline is precisely the 0.0 tok/s / 6785033.3 ms/tok the dashboard
-    displayed.
+    CORRECTION (2026-08-15): an earlier version of this test asserted
+    "33 completion tokens against a 1-day-6:30 uptime", which was a
+    fabricated decomposition. It is also self-inconsistent: 1d6:30 is
+    109,800 s, not the 223,906 s the assertion used. Worse, the
+    assertion was circular -- it divided two invented numbers and
+    checked the quotient it had just constructed, so it would pass for
+    ANY pair with the right ratio and could never fail.
+
+    The report fixes exactly ONE quantity: the RATIO. 6,785,033.3 ms/tok
+    means 6,785.03 seconds per token. The split into (tokens, elapsed)
+    is underdetermined -- 1 token / 1.88 h, 16 tokens / 30.2 h, and
+    33 tokens / 62.2 h are all equally consistent with what was
+    displayed, and nothing in the report distinguishes them.
+
+    So assert the thing that is actually true and actually diagnostic:
+    the implied per-token cost is absurd by orders of magnitude against
+    any real decode rate this cluster produces, which is the signature
+    of an elapsed-time baseline that was never subtracted.
     """
-    completion_tokens = 33
-    uptime_seconds = 223906.1  # nodes were up 1 day, 6:30 at report time
+    reported_ms_per_token = 6785033.3
+    seconds_per_token = reported_ms_per_token / 1000.0
 
-    tps = completion_tokens / uptime_seconds
-    ms_per_token = 1000.0 / tps
+    # The fastest and slowest REAL per-token costs measured on this
+    # cluster (Section 54): ~40 ms/tok below the prefill-step-size
+    # threshold, ~2.2 s/tok above it. The report is orders of magnitude
+    # outside even the slow end.
+    slowest_real_seconds_per_token = 2.2
 
-    assert f"{tps:.1f}" == "0.0"
-    assert round(ms_per_token, 1) == 6785033.3
+    assert seconds_per_token > 1000 * slowest_real_seconds_per_token, (
+        f"{seconds_per_token:.1f} s/tok should be absurd relative to the "
+        f"slowest real measurement ({slowest_real_seconds_per_token} s/tok); "
+        f"if this ever becomes plausible the report was not the baseline bug"
+    )
+
+    # And it renders as "0.0 tok/s", which is why the bug looked like a
+    # missing value rather than a wrong one.
+    assert f"{1.0 / seconds_per_token:.1f}" == "0.0"
+
+
+def test_absolute_clock_baseline_produces_the_absurd_ratio() -> None:
+    """The mechanism, stated as a property rather than invented numbers.
+
+    Whatever the true token count was, subtracting a 0.0 baseline from
+    an absolute ``perf_counter()`` reading yields a "generation time"
+    equal to the process/host clock -- necessarily enormous relative to
+    a real request -- so tps collapses toward zero. Demonstrated across
+    a range of plausible clock values instead of asserting one.
+    """
+    completion_tokens = 20  # any realistic short-answer count
+
+    for absolute_clock_seconds in (6_785.0, 109_800.0, 223_906.1):
+        correct_elapsed = 0.8  # a real fast answer
+        correct_tps = completion_tokens / correct_elapsed
+
+        # The bug: baseline 0.0, so the delta IS the absolute clock.
+        buggy_delta = absolute_clock_seconds - 0.0
+        buggy_tps = completion_tokens / buggy_delta
+
+        assert correct_tps > 1.0, "sanity: the real rate is a normal number"
+        assert buggy_tps < 0.01, (
+            f"a 0.0 baseline against clock={absolute_clock_seconds}s must "
+            f"collapse tps toward zero, got {buggy_tps}"
+        )
+        assert f"{buggy_tps:.1f}" == "0.0"
