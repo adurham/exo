@@ -60,6 +60,9 @@ from exo.worker.engines.mlx.constants import (
     MAX_TOKENS,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.pp_cancel import (
+    abort_prefill_chunk_boundary_if_requested,
+)
 from exo.worker.engines.mlx.pp_metaframe import (
     MetaFramedPipelineFirstLayer,
     MetaFramedPipelineLastLayer,
@@ -427,6 +430,7 @@ def _pipeline_parallel_prefill_steps(
     group: mx.distributed.Group,
     *,
     interruptible: bool = False,
+    prefill_batch_request_uids: list[int] | None = None,
 ) -> "Iterator[tuple[Literal['chunk'], int, mx.array] | tuple[Literal['done'], None, None]]":
     """2026-08-06 (Phase 2 Stage 4, generator-core split, consult-
     reviewed before implementation): the ORIGINAL ``pipeline_parallel_
@@ -469,6 +473,14 @@ def _pipeline_parallel_prefill_steps(
     moves to the caller when interruptible.
     """
     prefill_step_size = prefill_step_size // min(4, group.size())
+
+    # Section 93: the set of streams this prefill is serving, used by the
+    # chunk-boundary cut point below to decide whether ALL of them are
+    # cancelled. Defaults to empty, which makes
+    # ``should_abort_all_streams`` return False -- so every caller that
+    # does not pass uids keeps today's exact behaviour (deferral via
+    # _apply_cancellations) rather than silently gaining a new abort.
+    prefill_batch_request_uids = list(prefill_batch_request_uids or [])
 
     quantize_cache_fn: Callable[..., None] = functools.partial(
         maybe_quantize_kv_cache,
@@ -564,6 +576,37 @@ def _pipeline_parallel_prefill_steps(
                         mx.eval(*[x for x in _c.cache if x is not None])
                 request_trace.record(f"prefill.chunk{i}.contiguous", _t_contig)
 
+                # 2026-08-16 (design doc Section 93): THE CUT POINT for
+                # immediate cancellation. This is the known-quiescent
+                # moment -- chunk i's p2p handoff has fully materialized
+                # on BOTH ranks (flush_prefill_sends above put it on the
+                # wire; the mx.eval of the cache state forced it), and
+                # nothing for chunk i+1 has been enqueued yet.
+                #
+                # Deliberately NOT inside distributed_prompt_progress_
+                # callback: an exception raised during MLX lazy graph
+                # construction can leave enqueued-but-unevaluated ops in
+                # an ambiguous state, and raising while the peer has a
+                # posted recv reproduces the exact signaled=0 stranding
+                # this fixes. The callback only SETS a flag
+                # (pp_cancel.request_prefill_cancel); the decision is
+                # made here, at a loop boundary, which is structurally
+                # safe.
+                #
+                # Only rank 0 decides; rank 1 aborts solely on the CANCEL
+                # frame this emits, inside the recv_metaframe it was
+                # already going to perform. A cancel that arrives after
+                # the FINAL chunk finds no next frame to ride on and
+                # simply falls through to the existing _apply_
+                # cancellations deferral -- correct, since prefill is
+                # done by then.
+                abort_prefill_chunk_boundary_if_requested(
+                    batch_request_uids=prefill_batch_request_uids,
+                    rank=rank,
+                    world_size=world_size,
+                    group=group,
+                )
+
                 # Log memory every 5 chunks for profiling
                 if i % 5 == 0 or i == n_real - 1:
                     active_gb = mx.metal.get_active_memory() / 1024**3
@@ -614,6 +657,8 @@ def pipeline_parallel_prefill(
     prompt_progress_callback: Callable[[int, int], None],
     distributed_prompt_progress_callback: Callable[[], None] | None,
     group: mx.distributed.Group,
+    *,
+    prefill_batch_request_uids: list[int] | None = None,
 ) -> None:
     """Thin eager wrapper (2026-08-06, Phase 2 Stage 4, consult-
     reviewed) -- drains ``_pipeline_parallel_prefill_steps`` to
@@ -635,6 +680,7 @@ def pipeline_parallel_prefill(
         distributed_prompt_progress_callback,
         group,
         interruptible=False,
+        prefill_batch_request_uids=prefill_batch_request_uids,
     ):
         pass
 
