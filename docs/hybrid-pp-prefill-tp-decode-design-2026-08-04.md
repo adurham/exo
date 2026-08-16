@@ -6290,6 +6290,10 @@ hardware run is still to be verified, not assumed.
     no hardware Reliable Connected (RC) queue pairs, only Unreliable
     Connected (UC) (2026-08-09, same-session continuation of Section 32)
 
+> **[SUPERSEDED — see Section 34.]** the soft-RC layer was NOT the root cause. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
+
 ### Deploy + real-hardware result
 
 Deployed `c9e4a438c` to both studios (pure exo-repo Python change, no
@@ -6702,6 +6706,10 @@ and not (per Section 34's correction) an absence of soft-RC machinery.
     TCP stack even though the codebase already has a working,
     self-healing RDMA-native ack mechanism it could plausibly extend
     to instead. (2026-08-09, same session)
+
+> **[SUPERSEDED — see Section 41.]** jaccl's TCP control-plane is on en0/Ethernet, NOT Thunderbolt. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
 
 ### What was verified (not assumed)
 
@@ -8608,6 +8616,10 @@ changing a signature on a dead path.
 ## 52. The UC packet loss is FIXED (4.5% -> 0%) -- and it was NOT the
 decode bottleneck. Requirement 3 re-characterized honestly. (2026-08-15)
 
+> **[SUPERSEDED — see Section 53, 55.]** this measured the wrong decode path, AND its prefill numbers used an inflated chars//4 token count. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
+
 ### What was built
 
 A standing pre-posted recv pool on the DATA QP (`connections_`) for the
@@ -10260,6 +10272,10 @@ gate before writing the fix.**
 
 ## 67. ROOT CAUSE (evidenced): the frames ARRIVE and are DISCARDED on a
 sequence-number mismatch. Not packet loss, not buffers. (2026-08-16)
+
+> **[SUPERSEDED — see Section 69.]** the send/recv counters do NOT desync; that pattern was a tautology. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
 
 ### The evidence
 
@@ -11924,6 +11940,10 @@ a perf lever, and must be quality-gated end to end.
 engage, so decode pays 43 serial blocking `mx.eval`s per token. This is
 the 550ms. (2026-08-16)
 
+> **[SUPERSEDED — see Section 89.]** the MoE all_sum fence is TP-ONLY and never executes under Pipeline sharding, so it cannot be the cause. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
+
 Section 87's open question -- does the PP batched-decode path ever arm
 the two owner keys? -- resolves cleanly. There are exactly two setters
 in the entire tree:
@@ -12291,6 +12311,10 @@ been re-measured tonight.
 or release memory. Three aborted runs stranded ~9GB on rank 0. This is
 requirement 2's P1, and it reproduces. (2026-08-16)
 
+> **[SUPERSEDED — see Section 94, 98.]** the stranded memory is released by the next idle transition (not a permanent leak), and the Event::wait stranding predates the cancel. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
+
 Found while the cancel harness was being run for hardware verification.
 Three of those runs were killed client-side (harness aborted), which
 turned out to be a better test than the harness itself: it produced
@@ -12394,6 +12418,10 @@ them.
 ## 93. Section 92's root cause, located exactly: the batched-prefill
 callback DELIBERATELY defers cancellation. Plus the fix design, reviewed.
 (2026-08-16)
+
+> **[SUPERSEDED — see Section 95.]** the batched callback blamed here is unreachable for a single request; the single-request path DOES raise correctly. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
 
 ### The code says it in its own comment
 
@@ -13532,6 +13560,10 @@ piece of work because every route needs it.
 ## 105. The per-request swap breaks concurrency and loses time below
 ~50-95K new tokens. And PP does not clear the prefill target anyway.
 (2026-08-16)
+
+> **[SUPERSEDED — see Section 106, 107.]** the regression discussed is in PP mode, and per Section 55 it is an accounting artifact, not a regression. The
+> analysis below is kept as a record of what was believed at the time;
+> do NOT act on its conclusions.
 
 User's objection, and it is correct on both counts: swapping weight
 layouts between phases kills the concurrency requirement, and it is
