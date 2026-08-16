@@ -12949,3 +12949,116 @@ automatically by the harness, never hand-grepped:
    decode), all passing 1-7. A single-offset pass proves timing luck.
 
 Done = all eight, both scenarios, one unattended run.
+
+## 99. Self-inflicted deadlock, caught by the new precondition gate. Plus
+three parallel tracks landed and verified. (2026-08-16)
+
+### The regression I introduced, and what caught it
+
+Section 96's fix (`9d1821539`) had the chunk-drive cancel probe call
+`self.cancel_receiver.collect()`. That bottoms out in
+`multiprocessing.Queue.get(block=False)` (`utils/channels.py:316-321`),
+which **acquires the queue's internal lock** -- called from the
+generator/chunk-drive thread while the supervisor thread drains the
+SAME queue. Two threads, one lock.
+
+Hardware signature, sampled with `/usr/bin/sample`:
+
+```
+  main thread: lock_PyThread_acquire_lock -> _PyMutex_LockTimed
+               -> _PyParkingLot_Park -> _PySemaphore_Wait
+               -> _pthread_cond_wait -> __psynch_cvwait
+  (a second thread parked identically)
+  ZERO MLX frames. ZERO jaccl frames.
+```
+
+Runner wedged 5+ minutes: no log output, zero chunk advances, a 40K
+request that never started. Reverted in `26f67b16a` -- the probe now
+does a lock-free set-membership read, which is all it ever needed since
+`agree_on_cancellations_fast()` already populates `_cancelled_tasks` on
+its own thread (hardware-verified via CANCELPROBE).
+
+**What caught it: the Section 98 precondition gate.** The test run
+printed `[INVALID] not genuinely mid-chunked-prefill (advances=0)` and
+exited 2. Before tonight that same run would have reported green --
+cancel issued, HTTP 200, done. The gate refused, and the refusal is what
+exposed the deadlock.
+
+**Method failure inside the diagnosis, worth recording:** I first
+declared "not wedged -- GPU 94% busy, API responsive." That was wrong;
+the GPU number was stale/another process. Only sampling the stack named
+the real cause. Same error shape as Sections 85/88/97: inferring from an
+adjacent metric instead of measuring the thing itself.
+
+### Three parallel tracks, each verified rather than trusted
+
+**A. API no longer reports a forced close as success** (`9b818a8d6`).
+The 5s fallback now raises `HTTPException(504)` with an explicit
+"NOT a successful cancel" log at error level; the liveness guard is
+preserved. Verified myself: `pytest test_cancel_command.py` 5/5 pass,
+including a real negative control asserting 504 (not 200) when the
+runner never reaches terminal state.
+
+**B. Section 98 harness built** (`040c01a41`), all 8 assertions, exit
+0/1/2 = PASS/FAIL/INVALID. **I found and fixed a real defect in it**
+(`364277ec2`): its `footprint` parser matched `"Physical footprint:"`,
+a string that appears on **zero** lines of real output (`grep -c` on a
+live runner = 0). The actual shape is the header
+`python [89753]: 64-bit    Footprint: 86 GB`. Assertion 5 (memory
+released) would have silently misparsed on every run -- precisely the
+silent-green this harness exists to prevent. Corrected parser verified
+against the real string (86.0 GB).
+
+Also cross-checked the concern that track A's rewrite might have broken
+track B's `MARKER_API_FORCE_CLOSE` grep: it does NOT. The message is
+split across f-string lines in source but concatenates to one line at
+runtime, so the substring matches. Verified by reconstructing the
+runtime string, not by eyeballing the source.
+
+**C. Requirement 4 (prefill degradation) -- first real measurements.**
+From a live 481-chunk / ~493K-token trace, per-chunk `forward` span
+against chunk index (n=481, rank 0):
+
+```
+  intercept  1901.4 ms      slope  +2.03 ms/chunk
+  chunk 10  1990ms    chunk 200  2290ms    chunk 400  2762ms
+  chunk 50  1998ms    chunk 300  2556ms    chunk 480  2830ms
+  => ~+53% per-chunk cost by chunk 500
+```
+
+Share of tracked time: `forward` 1148.5s (**98%**), `eval_cache` 24.15s
+(2%, and flat at +0.033ms/chunk), everything else ~0. So:
+
+- The per-chunk full-cache `mx.eval` is **measured NOT to be the
+  driver** -- a candidate this campaign has repeatedly suspected.
+- The **pipeline bubble is measured NOT to be the driver**: the R0/R1
+  per-chunk gap is flat-to-*shrinking* with depth (~150ms -> ~55ms),
+  and the leading/trailing dummy iterations are a fixed 1-iteration
+  cost, trivial against 481 chunks.
+- Growth is essentially all inside `forward`, consistent with attention
+  + the sparse indexer's score GEMM over a linearly-growing pooled KV
+  (`EXO_DSV4_INDEX_TOPK=512` bounds *selected* KV, not the pool scored
+  over). **Structural, not yet proven** -- and honestly flagged as such.
+
+**Chunk-size discrepancy RESOLVED (I checked, the subagent flagged it
+open):** the trace showed 1024-token chunks despite
+`EXO_PREFILL_STEP_SIZE=2048`. `generate.py:475` does
+`prefill_step_size // min(4, group.size())` -- 2048 / 2 ranks = 1024.
+Working as designed, not a misconfiguration.
+
+**Instrumentation gap that blocks attribution:** the `forward` span
+starts before the yield and is recorded only after
+`quantize_cache_fn(...)`, so **model compute and KV quantize are
+conflated** (`generate.py:531-550`). Splitting that span, and adding
+spans to separate indexer-score GEMM from dense attention from MoE
+dispatch, is the prerequisite for any requirement-4 fix. No fix
+proposed -- the data does not license one yet.
+
+### Standing status
+
+- Req 2 observation half: fixed, hardware-verified (166ms).
+- Req 2 teardown half: unverified. One self-inflicted deadlock found and
+  removed. Needs a relaunch onto `26f67b16a`+ before the Section 98
+  harness can produce a trustworthy verdict.
+- Req 4: first real numbers, two popular hypotheses eliminated by
+  measurement, attribution blocked on one conflated span.
