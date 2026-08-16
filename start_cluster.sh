@@ -1213,7 +1213,18 @@ for NODE in "${NODES[@]}"; do
     echo "Syncing dependencies on $NODE..."
     ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages'" || { echo "Failed to sync on $NODE"; exit 1; }
 
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx'" || { echo "Failed to rebuild MLX from source on $NODE"; exit 1; }
+    # FETCHCONTENT_BASE_DIR pins CMake's FetchContent cache to a PERSISTENT
+    # directory instead of uv's per-build temp dir. Without it every MLX
+    # rebuild re-clones fmt, nanobind, gguflib, doctest, json and metal_cpp
+    # from github.com, and a single transient DNS hiccup on any one of them
+    # aborts the whole deploy ("Could not resolve host: github.com", after
+    # CMake's own 3 retries). That failure mode killed three separate timed
+    # measurement runs on 2026-08-15 -- nanobind twice, fmt once -- despite
+    # DNS resolving fine on both nodes before and after each failure. The
+    # deps were already sitting in ~/repos/exo/mlx/build/_deps; they were
+    # simply invisible to the temp-dir build. Reusing them makes rebuilds
+    # both faster and network-independent.
+    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && export CMAKE_ARGS=\"-DFETCHCONTENT_BASE_DIR=\$HOME/repos/exo/mlx/build/_deps\" && zsh -l -c 'cd ~/repos/exo && CMAKE_ARGS=\"\$CMAKE_ARGS\" uv pip install --no-deps --force-reinstall ./mlx'" || { echo "Failed to rebuild MLX from source on $NODE"; exit 1; }
 
     # Pin mlx-lm to the vendored ./mlx-lm submodule (uv sync installs a stale copy).
     #
