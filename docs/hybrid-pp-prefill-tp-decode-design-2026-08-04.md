@@ -13062,3 +13062,113 @@ proposed -- the data does not license one yet.
   harness can produce a trustworthy verdict.
 - Req 4: first real numbers, two popular hypotheses eliminated by
   measurement, attribution blocked on one conflated span.
+
+## 100. Architecture: PP-prefill + TP-decode reassessed, and the
+bandwidth question that decides whether the requirement is reachable at
+all. (2026-08-16)
+
+User's direction tonight, verbatim: "prefill works best in PP mode,
+decode works best in TP mode, I want both." Section 7 pulled phase
+disaggregation on 2026-08-04 for a memory reason. Re-examined with
+tonight's new measurements plus a design consult.
+
+### The 2026-08-04 memory math is CONFIRMED, not overturned
+
+Recomputed independently from tonight's measured floor:
+
+```
+  uniform per-layer            155.4 GiB / 43 = 3.61 GiB/layer
+  PP rank0 (layers 0-21, all experts)        = 79.5 GiB
+  TP rank0 (all 43 layers, half experts)     = 77.7 GiB
+  UNION (co-resident, layers 0-21 full
+         + layers 22-42 half)  = 79.5 + 37.9 = 117.4 GiB
+  + ~8 GB MLX runtime                        = ~125.4 GB  of 128 GB
+  => ~2.6 GB left. Matches the doc's 2.7 GB.
+```
+
+**Simultaneous dual residency genuinely does not fit.** That part of
+Section 7 stands and should not be relitigated.
+
+### But "simultaneous" was never the only shape
+
+Section 7 killed *co-residency*, not *phase-specialized sharding*. The
+handoff cost is dominated by WEIGHTS (~38 GiB of delta), not KV (~3 GiB)
+-- which is why the viable shapes are sequential:
+
+- **Sequential swap, delta from disk.** Drop half the experts of layers
+  0-21, load half-experts of 22-42: ~38 GiB at 5-7 GB/s = ~6-8s, plus
+  ~1s of KV translation over TB5. Against a ~23-minute 500K prefill that
+  is noise. **Disqualifying risk is the transient**, not the steady
+  state: if MLX's buffer cache does not release before the new
+  allocations wire, you momentarily hit dual residency and OOM. Needs
+  strict free-then-load ordering in an allocator we do not fully control.
+- **Repartition over TB5** (rank1 already holds layers 22-42, so ranks
+  stream half-experts to each other, drop-before-receive, layer by
+  layer): ~5-8s overlapped. Same peak-memory choreography risk, plus a
+  new failure class -- a mid-swap crash leaves the cluster in an
+  undefined layout, and jaccl becomes a weight-movement path it was
+  never tested as.
+- **mmap / page-cache dual view: DISQUALIFIED.** GPU-touched pages get
+  wired; decode touches most experts within a few hundred tokens, so the
+  second view's working set converges to full dual residency anyway --
+  now with nondeterministic eviction and page-fault stalls mid-decode.
+- **The baseline every scheme must beat: TP-only, eat the prefill loss.**
+  At 500K, PP saves ~193s of prefill (1374s vs 1567s), and with prefix
+  caching only the FIRST turn pays it. So the entire value of phase
+  disaggregation is **~3 minutes, once per session**, for zero
+  engineering. Any swap scheme must justify itself against that.
+
+### The premise "decode needs TP" is CONFOUNDED
+
+The 37.5 (TP) vs 24.68 (PP) comparison is not a topology measurement:
+**TP had MTP, PP did not.** That is a speculation measurement.
+Structurally at 500K the KV term does not break the tie either -- TP
+reads full KV on both nodes concurrently, PP reads half per node
+sequentially, same wall time. TP's genuine, unarguable advantages are
+concurrency and cancellation, not single-request latency.
+
+### The bandwidth question -- and I checked the code, it is the GOOD branch
+
+The consult's blunt framing: 30 tok/s at 500K hinges entirely on whether
+decode's KV reads are DENSE or SPARSE.
+
+```
+  budget                        33.3 ms/token
+  DENSE:  500K x 11.7 KB = 5.85 GB / ~450 GB/s = 13.0 ms  (39% of budget,
+          before any weights -- would likely put 30 tok/s out of reach)
+  SPARSE: top-k=512 x head_dim 576 x 2B = 0.59 MB/layer
+          x43 layers = 25.4 MB / ~450 GB/s = 0.06 ms      (negligible)
+```
+
+**The deployed code takes the sparse path at decode.** `deepseek_v4.py:
+2356-2370`, the `L == 1` fast path, and the comment states the property
+outright:
+
+> "the reshape+gather flattens pooled to (B*P, D) ... does a 1D gather
+> -- touches only k entries per query, O(B*L*k*D). 14x faster at B=2
+> P=95000 (1.4ms vs 19.3ms) and **does NOT scale with P**."
+
+So per-token KV *gather* cost is depth-independent by construction.
+Independent corroboration from tonight: Section 85 measured decode eval
+FLAT from 2,925 to 14,273 tokens (548.8 -> 549.9ms). Depth-independent,
+exactly as the sparse path predicts.
+
+**This is the optimistic branch: 30 tok/s at 500K is NOT excluded by
+memory bandwidth.** The residual depth term is the indexer SCORE over
+the pooled set (O(P), but on compressed pooled entries, not raw KV) --
+that is the number that still needs measuring, and it is the one real
+uncertainty left on the requirement's feasibility.
+
+### Sequencing decision (consult-endorsed, and I agree)
+
+**Fix the 34x bug FIRST; do not build topology machinery yet.** Every
+argument for TP-decode currently rests on a PP decode number produced by
+a deployment running 34x slow with the GPU at 5-7%. After the fix, run
+the 2x2 that has never been run: {PP, TP} x {short, 500K}, with and
+without MTP. Those four numbers decide the topology question outright,
+and one of them (TP decode at 500K) is the requirement itself.
+
+Note also: PP's own FAST path already shows ~20 tok/s, and TP short-
+context showed 37.5 with MTP. Neither has ever been measured at 500K.
+Building a weight-swap mechanism before those measurements is building
+on a number we know is broken.
