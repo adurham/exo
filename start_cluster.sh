@@ -1967,6 +1967,13 @@ for NODE in "${NODES[@]}"; do
         : "${EXO_PP_BATCHED_DECODE:=0}"
         EXO_ENV="$EXO_ENV EXO_PP_BATCHED_DECODE=$EXO_PP_BATCHED_DECODE"
     fi
+    # Per-token decode phase attribution (Section 59/60). Diagnostic
+    # only, default off. Must be threaded explicitly: the runner
+    # environment is an ALLOWLIST, so a var that is merely exported in
+    # the launching shell silently never reaches the runner process --
+    # which is exactly how the first attempt to use this tracer produced
+    # a clean deploy with no trace output at all.
+    [ -n "${EXO_DECODE_PHASE_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PHASE_TRACE=$EXO_DECODE_PHASE_TRACE"
     # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
     # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
     # path (pp_dspark_decode_loop and friends) stores its per-request
