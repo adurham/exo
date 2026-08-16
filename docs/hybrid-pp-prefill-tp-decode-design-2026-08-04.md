@@ -12192,3 +12192,97 @@ to the standard memory-forensics sequence: **`RSS` is meaningless for
 MLX processes; use `footprint <pid>` for per-process truth and
 `memory_pressure` for system truth.** Neither the dashboard's percentage
 nor `ps`'s RSS answers the question on this hardware.
+
+## 91. Follow-up challenge: "we ran 500K at 90-95% before, so 90% at 30K
+is alarming." Measured answer: 30K and 500K SHOULD look the same, and the
+floor has not moved. (2026-08-16)
+
+Section 90's standby-accounting explanation was challenged on a specific,
+checkable empirical claim: DSv4-Flash was tested at up to 500K multiple
+times and sat at ~90-95%, so seeing ~90% at 30K suggests something is
+now consuming memory that did not before. That is the right kind of
+objection -- it is falsifiable against historical data rather than a
+matter of interpretation -- so it was tested that way instead of
+re-asserting Section 90.
+
+### The measurement
+
+Fitted MLX's own `active=` accounting across a single continuous run,
+11,264 -> 92,003 tokens, n=17 samples, one build:
+
+```
+  0-token intercept (weights + runtime) = 85.68 GB
+  slope                                 = 11.7 KB/token
+```
+
+11.7 KB/token independently reproduces the campaign's long-standing
+~12 KB/token cold-prefill figure, from data taken tonight.
+
+### Why 30K and 500K look identical: the weights dominate completely
+
+```
+    30,000 tok -> 86.0 GB    (+0.3 GB of KV over floor)
+   100,000 tok -> 86.8 GB    (+1.1 GB)
+   250,000 tok -> 88.5 GB    (+2.8 GB)
+   500,000 tok -> 91.3 GB    (+5.6 GB)
+```
+
+The constant floor is **85.68 GB = 67% of a 128 GB box, present at zero
+tokens.** Going 30K -> 500K, a **16.7x** increase in context, adds
+**5.2 GB = 4.1% of total RAM.**
+
+So the two observations are not in tension -- they are the same
+observation. Memory looks like ~90% at 30K *and* at 500K because in both
+cases it is ~86-91 GB of weights plus a few GB of KV, and the KV term is
+nearly invisible next to the weights. This is the expected shape for a
+155 GiB model on a 2x128 GB cluster, not a symptom.
+
+### The floor has not risen -- direct historical comparison
+
+The strongest available check, because it compares tonight's floor
+against a previously recorded deep-context number:
+
+```
+  historical 500K needle test (campaign notes)  ~85   GB active
+  tonight, floor from tonight's own fit          85.68 GB
+  tonight, measured at 92,003 tokens             86.63 GB
+  tonight, predicted at 500K                     91.3  GB
+```
+
+**~85 GB then, 85.7 GB now.** If something new were resident, the
+intercept would have moved; it has not. And the budget closes
+independently: 155.4 GiB card / 2 nodes = 77.7 GiB of weights + 8.0 GB
+MLX runtime = 85.7 GB, matching the fitted intercept to 0.0 GB.
+
+Also confirmed from `/state`: exactly **one** instance is loaded
+(DeepSeek-V4-Flash-0731, 2 runners). No second model, which was the
+other historical cause of an unexplained step (a co-hosted Qwen once
+added +17.5 GB/node).
+
+### Conclusion
+
+No regression and no leak. The recollection of ~90-95% at 500K is
+accurate and fully consistent with tonight: 91.3 GB predicted at 500K is
+~71% real resident, which the dashboard's naive metric renders in the
+90s once ~17 GB of reclaimable standby is added in. Both numbers are the
+same system behaving the same way.
+
+The one number that would genuinely warrant alarm is a rise in the
+**intercept**, not in the total. Track that, not the percentage:
+
+```
+  ssh <node> 'grep -oE "active=[0-9.]+ GB" ~/.exo/exo_log/exo.log'
+```
+
+and fit against token counts, rather than reading a single total at one
+depth. A single absolute reading cannot distinguish "weights" from
+"accumulated state"; the intercept can.
+
+### Caveat carried forward, unchanged
+
+This is the COLD-prefill slope. A *growing multi-turn* session was
+previously measured at ~45 KB/token (prefix-cache snapshot state, not
+raw KV), which at 500K would be ~22 GB over floor rather than ~5.6 GB --
+still inside the ~39 GB of real headroom, but that is the number that
+actually matters for a long agentic session at depth, and it has NOT
+been re-measured tonight.
