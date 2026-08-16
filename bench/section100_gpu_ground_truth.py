@@ -61,6 +61,7 @@ USAGE:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import subprocess
@@ -150,16 +151,12 @@ class NodeSampler:
             raw_lines.append(line_s)
             m_dev = re.search(r'"Device Utilization %"\s*=\s*(-?\d+(?:\.\d+)?)', line_s)
             if m_dev:
-                try:
+                with contextlib.suppress(ValueError):
                     device_util = float(m_dev.group(1))
-                except ValueError:
-                    pass
             m_ren = re.search(r'"Renderer Utilization %"\s*=\s*(-?\d+(?:\.\d+)?)', line_s)
             if m_ren:
-                try:
+                with contextlib.suppress(ValueError):
                     renderer_util = float(m_ren.group(1))
-                except ValueError:
-                    pass
 
     def stop(self) -> None:
         self._stop = True
@@ -367,8 +364,10 @@ def run_streaming_request(
     token_event_times: list[float] = []
     usage: dict[str, Any] | None = None
     n_chunks = 0
-    with httpx.Client(timeout=600.0) as client:
-        with client.stream("POST", url, json=payload) as resp:
+    with (
+        httpx.Client(timeout=600.0) as client,
+        client.stream("POST", url, json=payload) as resp,
+    ):
             resp.raise_for_status()
             for raw_line in resp.iter_lines():
                 if not raw_line or not raw_line.startswith("data:"):
@@ -486,7 +485,7 @@ def main() -> int:
     t_send = result["t_send"]
     t_first = result["t_first_token"]
     t_end = result["t_end"]
-    token_times = result["token_event_times"]
+    result["token_event_times"]
 
     print(f"[section100] usage block (AUTHORITATIVE token counts): {usage}", file=sys.stderr)
     _mode_note = (
@@ -533,7 +532,7 @@ def main() -> int:
         util_decode_r0 = summarize_util(decode_samples_r0)
         util_decode_r1 = summarize_util(decode_samples_r1)
         util_prefill_r0 = summarize_util(prefill_samples_r0)
-        util_prefill_r1 = summarize_util(prefill_samples_r1)
+        summarize_util(prefill_samples_r1)
 
         print(f"[section100] rank0 (node1={args.node1}) DECODE-phase ioreg "
               f"Device Utilization %: n={util_decode_r0.get('n')} "
