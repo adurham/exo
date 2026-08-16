@@ -132,6 +132,7 @@ single-writer channel via a new `MSG_KIND_PREFILL` control message
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, cast
@@ -185,6 +186,20 @@ from exo.worker.engines.mlx.pp_scheduler_wire import (
 if TYPE_CHECKING:
     from exo.worker.engines.mlx.pp_batched_decode_runtime import Sampler
     from exo.worker.engines.mlx.types import KVCacheType
+
+
+# Per-token decode wall-time attribution, opt-in via
+# EXO_DECODE_PHASE_TRACE=1. Read ONCE at import so the hot path costs a
+# single already-resolved bool test when disabled.
+#
+# Why this exists (Section 59): both ranks' GPUs measured ~5% utilized
+# while decode ran at ~2 s/token, so the wall clock is spent WAITING,
+# not computing. The existing aggregate barrier histograms cannot say
+# WHICH phase of a decode step holds that time, and Section 52's
+# "blocked on the peer's compute" inference is untenable now that the
+# peer is known idle. This splits one decode token into its four real
+# phases so the answer comes from measurement instead of inference.
+_DECODE_PHASE_TRACE: bool = os.environ.get("EXO_DECODE_PHASE_TRACE", "0") == "1"
 
 
 class GlueError(RuntimeError):
@@ -1438,10 +1453,40 @@ class Rank0BatchedDecodeGlue:
             self._prefill_favor_decode_next = False
 
         if self.session.has_active_requests():
+            # Section 59/60 wall-time attribution (gated on
+            # EXO_DECODE_PHASE_TRACE=1, zero cost when off). Section 59
+            # measured BOTH ranks' GPUs at ~5% utilization while decode
+            # ran at ~2 s/token, which means the time is spent WAITING,
+            # not computing -- and Section 52's "blocked on the peer's
+            # compute" reading is untenable because the peer's GPU is
+            # idle too. Aggregated barrier histograms could not say
+            # WHICH of these four phases holds the wall clock, so
+            # attribute them directly, per token, on the real workload.
+            _trace = _DECODE_PHASE_TRACE
+            _t0 = _t1 = _t2 = _t3 = 0.0
+            if _trace:
+                _t0 = time.perf_counter()
             prepared = self.session.prepare_step()
+            if _trace:
+                _t1 = time.perf_counter()
             send_step_message(prepared.message, dst=self.dst_rank, group=self.group)
+            if _trace:
+                _t2 = time.perf_counter()
             logits = self.session.run_forward(cast("_ModelLike", model), prepared)
+            if _trace:
+                _t3 = time.perf_counter()
             step_results = self.session.finish_step(prepared, logits)
+            if _trace:
+                _t4 = time.perf_counter()
+                logger.info(
+                    "[DECODE_PHASE] prepare=%.1fms send_step=%.1fms "
+                    "run_forward=%.1fms finish_step=%.1fms total=%.1fms",
+                    (_t1 - _t0) * 1000.0,
+                    (_t2 - _t1) * 1000.0,
+                    (_t3 - _t2) * 1000.0,
+                    (_t4 - _t3) * 1000.0,
+                    (_t4 - _t0) * 1000.0,
+                )
             classified = self.adapter.classify_step_results(step_results)
             return dict(classified), None, None, None
 
