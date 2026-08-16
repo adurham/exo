@@ -9774,3 +9774,86 @@ surfaced on the streaming path before the first chunk.
 - Establish a supported way to obtain the server-assigned `command_id`
   before the first token, then extend the cancel suite with a
   cancel-during-prefill case.
+
+## 62. The stall is INSIDE the forward pass, symmetric on both ranks,
+and it is NOT in `mx.eval`. Rank 1 is not starved. (2026-08-15)
+
+### The measurement
+
+`run_forward` split three ways, plus the follower instrumented for the
+first time. Official varied-content prompt, ~14K tokens, the
+reproducible collapse (client-side: 0.48 tok/s, p50 gap 2093.7ms):
+
+```
+  RANK 0 (driver)
+    build_graph  = 2068-2082 ms      <- the model(...) call itself
+    eval_logits  =    14-16 ms
+    eval_cache   =     1-4  ms
+
+  RANK 1 (follower)
+    recv_header_wait = 0.1-2.7 ms    <- NOT starved
+    session_step     = 2085-2103 ms
+```
+
+### Two findings, both inverting the expected answer
+
+**1. The cost is in the model call, not in `mx.eval`.** MLX is lazily
+evaluated: `model(...)` should merely BUILD a graph and return in
+microseconds, with `mx.eval` paying the real execution and any blocking
+recv. The opposite is true here -- 2082ms inside `model(...)`, then only
+14ms to evaluate the logits. **Something inside the forward pass is
+executing or blocking EAGERLY**, before `mx.eval` is ever reached. This
+retires the Section 60 hypothesis that `mx.eval` materialization was
+where the peer wait would land.
+
+**2. Rank 1 is NOT starved.** The follower receives its step header in
+0.1-2.7 ms -- rank 0 announces work essentially instantly -- and then
+spends ~2090 ms in its own `session_step`, matching rank 0's ~2080 ms
+almost exactly. So this is not "one rank waits for a slow peer." **Both
+ranks enter the forward pass at the same time and both spend ~2.08
+seconds inside it, with both GPUs at ~5% (Section 59).**
+
+That is the signature of a symmetric mutual block: each rank waiting on
+a cross-rank transfer embedded in the layer loop itself, not on the
+other rank's compute.
+
+### Leading candidate (identified, NOT yet proven)
+
+`pp_batched_decode_layers.py:283`, inside the wrapped layer's
+`__call__`:
+
+```python
+output: mx.array = self.original_layer(x, *args, **kwargs)
+mx.eval(output)          # <- forced synchronous materialization, PER LAYER
+```
+
+plus `mx.eval(x_recv)` at :222 and `mx.eval(sent_forward)` at :317 on
+the send/recv path. Each of these forces a synchronous
+materialization inside the per-layer loop, which would (a) explain why
+the cost appears in `build_graph` rather than the outer `mx.eval`, and
+(b) serialize every layer's cross-rank transfer instead of letting MLX
+pipeline them.
+
+**Not claiming this is the fix.** Section 57 was retracted for exactly
+this failure mode -- a coherent in-tree story that measurement had not
+actually confirmed. The next step is to measure per-layer timing inside
+the wrapper and confirm the ~2.08 s is distributed across layers (many
+small synchronous stalls) rather than concentrated in one (a single
+blocking transfer). Those two shapes imply different fixes and the
+current data cannot distinguish them.
+
+### What this eliminates
+
+Added to the already-excluded list (Sections 57-60): outer `mx.eval`
+materialization, follower starvation, and rank-0-waits-for-slow-peer.
+The remaining suspect surface is now one function -- the per-layer
+forward under `batch_step_scope` -- on both ranks simultaneously.
+
+### Instrumentation added
+
+`EXO_DECODE_PHASE_TRACE=1` now also covers: `run_forward` split into
+build_graph / eval_logits / eval_cache
+(`pp_batched_decode_runtime.py`), and rank 1's `recv_header` wait plus
+`session_step` (`pp_batched_decode_glue.py`). Rank 1 previously emitted
+nothing at all, because the follower never enters rank 0's instrumented
+branch -- half the system was invisible.
