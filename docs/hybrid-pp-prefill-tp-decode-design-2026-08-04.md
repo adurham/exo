@@ -13705,3 +13705,80 @@ env var, not a code change.
 2. Recover PP prefill toward its own baseline.
 3. Only then revisit decode topology, with the requirement's own
    framing: prefill PP, decode TP, MTP/DSpark on TP.
+
+## 107. DECISION: drop the PP-prefill/TP-decode weight swap. It buys ~11%
+on a cold 500K request and nothing on follow-ups. (2026-08-16)
+
+User's read, and the arithmetic confirms it: even with the swap working
+perfectly, it is not enough faster than simply letting TP do the prefill.
+
+### The full-request math (not just the prefill leg)
+
+Cold 500K request, 500 decode tokens at the 30 tok/s target, regression
+already fixed, one-way swap (best case in every dimension):
+
+```
+  TP-only        prefill 1567s + decode 16.7s              = 1584s
+  PP -> swap -> TP   prefill 1374s + swap 18.7s + decode 16.7s = 1409s
+  saving 175s = 11.1% of the request
+```
+
+**11% on the best case.** Follow-up turns hit the prefix cache, get ZERO
+prefill benefit, and still pay the swap. Section 105 already measured
+that shape: -36.0s net on a 2K follow-up.
+
+### What that 11% would cost
+
+- The cross-rank cache gather that has never existed (Section 103/104
+  Gap 2 -- `serve_prefill` emits only the local rank's layer-half).
+- A push-cache-before-teardown protocol leg, or partial-teardown
+  lifecycle surgery, because exo terminates the runner to free weights
+  (Section 104).
+- All cross-phase concurrency -- Requirement 1.
+- A second failure domain in the middle of every large request.
+
+### And it does not turn a miss into a hit
+
+```
+  Requirement 4 target: 400+ tok/s prefill
+    PP @400K = 377  MISS      TP @400K = 332  MISS
+    PP @500K = 364  MISS      TP @500K = 319  MISS
+```
+
+400+ is only reachable at <=200K on EITHER topology. The swap converts a
+miss into a smaller miss.
+
+### Decision
+
+**Drop the weight swap.** Run TP resident: it is the only layout that
+satisfies concurrency, cancellation, MTP/DSpark and decode throughput
+simultaneously, and its prefill deficit is ~14% at depth against a PP
+number the cluster cannot currently produce anyway.
+
+Not wasted, and worth keeping:
+- Section 102's DSv4 cache codec (`e3b6a0bed`) is a real bug fix and the
+  enabling primitive for any future prefill/decode split -- including
+  across a larger cluster where both layouts CAN be co-resident on
+  different node pairs. That is the configuration where this idea
+  actually works.
+- Sections 103/104's audit of the disaggregation machinery stands as the
+  map for that future.
+
+### The question that now matters more
+
+The 202-225 tok/s figures were measured in Pipeline mode. **Is the
+regression PP-specific, or does it hit the shared prefill code that TP
+also runs?**
+
+- If PP-specific: TP is at its historical ~319 tok/s, we run TP-only,
+  and the PP regression becomes low priority (it only mattered for a
+  topology we just dropped).
+- If shared: TP prefill is ALSO at ~200 tok/s today, the cluster is 40%
+  down on its actual serving path, and this becomes the single most
+  urgent item in the campaign.
+
+The running investigation has been re-scoped to answer exactly this:
+for each regression suspect, is the code path gated to Pipeline, or is
+it in shared code (`generate.py`'s prefill loop, `cache.py`,
+`maybe_quantize_kv_cache`, mlx-lm's `deepseek_v4.py`, the KV prefix
+cache / snapshot machinery) that both topologies execute?
