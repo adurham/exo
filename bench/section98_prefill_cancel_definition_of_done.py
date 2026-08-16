@@ -236,18 +236,25 @@ def sample_memory(host: str) -> MemorySample:
     output = ssh_run(host, f"footprint {pid} 2>/dev/null")
     gb: float | None = None
     if output:
-        # `footprint` prints a "Physical footprint:" line like
-        # "Physical footprint:                 93.1M" or "93.1G" -- parse
-        # whatever unit it reports and normalize to GB.
+        # VERIFIED against real `footprint` output on the Mac Studios
+        # 2026-08-16 (the previous "Physical footprint:" parse matched
+        # ZERO lines -- confirmed by grep -c on a live runner, which is
+        # exactly the silent-misparse this harness exists to prevent).
+        # The real shape is the header line:
+        #   python [89753]: 64-bit    Footprint: 86 GB (16384 bytes per page)
+        # Unit is spelled out and space-separated, so match that form.
         for line in output.splitlines():
-            if "Physical footprint:" in line and "peak" not in line.lower():
-                match = re.search(r"([\d.]+)([KMGT])", line.strip().split(":")[-1])
-                if match:
-                    value = float(match.group(1))
-                    unit = match.group(2)
-                    scale = {"K": 1e-6, "M": 1e-3, "G": 1.0, "T": 1e3}[unit]
-                    gb = value * scale
-                break
+            if "Footprint:" not in line:
+                continue
+            match = re.search(
+                r"Footprint:\s*([\d.]+)\s*([KMGT])B", line
+            )
+            if match:
+                value = float(match.group(1))
+                unit = match.group(2)
+                scale = {"K": 1e-6, "M": 1e-3, "G": 1.0, "T": 1e3}[unit]
+                gb = value * scale
+            break
     return MemorySample(host=host, pid=pid, physical_footprint_gb=gb, raw_footprint_output=output)
 
 
