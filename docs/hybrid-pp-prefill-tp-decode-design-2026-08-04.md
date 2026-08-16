@@ -10699,3 +10699,72 @@ both nodes. Section 63's `FETCHCONTENT_BASE_DIR` fix works -- fmt,
 doctest and gguflib are all cached and no longer re-cloned -- but
 nanobind had never been successfully fetched, so there was nothing to
 cache. With it seeded, the rebuild is fully network-independent.
+
+## 72. NEGATIVE RESULT: `SEND_INFLIGHT=1` does not fix the residual
+drops -- it breaks generation outright. (2026-08-16)
+
+### The test
+
+Section 71 fixed the amplifier (drops now cost ~50ms instead of ~1000ms)
+but left the drops themselves unexplained, with two named candidates.
+The first was send-burst depth: `MLX_JACCL_RELIABLE_INFLIGHT` defaults
+to 8 for sz<=2, so a decode activation send posts up to 8 concurrent
+16380-byte frames on a UC QP with no flow control. Plausible cause of
+selective loss, and already A/B-able with no code change.
+
+Launched with `MLX_JACCL_RELIABLE_INFLIGHT=1`, verified live in the
+runner env.
+
+### What it looked like at first
+
+```
+  INFLIGHT=1, per-token probe: p50 42.8ms -> 23.39 tok/s   slow 0/28
+```
+
+**Zero slow gaps** -- the only configuration all session to achieve
+that. Encouraging enough to be worth stating plainly, because the next
+result contradicts it.
+
+### What the quality gate showed
+
+```
+  Prompt tokens: 14,151
+  TTFT 0.0s -> prefill 0.0 tok/s
+  Completion tokens: 0
+  Decode 70.7s -> 0.00 tok/s
+  Response: ''      Needle found: NO
+```
+
+**Zero tokens generated.** And the runner log gives the mechanism:
+
+```
+  [jaccl] drain_acks STALLED rank=0 call_id=1682 metric=1
+  (no forward progress for >8000ms; UC completion lost —
+   throwing for clean re-place)
+```
+
+At depth 1 the transfer cannot make forward progress, stalls its ack
+drain, and the runner throws for a re-place. The probe's "0/28 slow
+gaps" was measuring a stream that never produced real output -- exactly
+the failure shape Section 51 documented when the global retransmit timer
+was lowered to 10ms, and exactly why the needle gate exists.
+
+### What this eliminates
+
+Send-burst depth is **not** the cause of the residual drops, and cannot
+be part of the fix -- the setting that would remove the bursts also
+removes the throughput. Depth 8 is load-bearing (its own in-tree comment
+notes depth 8 is validated for sz<=2 and the old "MUST be 1" note
+predates the 2026-07-06 pipelining patch).
+
+That leaves one named candidate from Section 70: the shared data QP
+being polled by both `send()` and `recv()`, with each discarding the
+other's completions by call_id.
+
+### Method note
+
+This is the third time this session a throughput number looked like a
+win while generation was broken (Section 51's retransmit timer, Section
+65's outlier, and now this). The needle gate caught all three. Worth
+restating as a standing rule: **on this path, a tok/s figure without a
+validated needle and `finish_reason` is not evidence of anything.**
