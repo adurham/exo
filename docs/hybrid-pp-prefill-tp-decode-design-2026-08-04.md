@@ -13976,3 +13976,92 @@ unresolved**, because the mechanism is still unidentified. It cannot be
 ruled out for the topology we are shipping. The cheapest way to find out
 is no longer a code read -- it is a TP decode timing run, which the
 pending relaunch onto TP will produce for free.
+
+## 111. TP RELAUNCH FAILS: reproducible segfault in warmup on both ranks.
+Suspected QP-budget exhaustion at the coord-subgroup split. (2026-08-16)
+
+Relaunched onto the new Tensor default (Item 1 of the PM handoff). The
+cluster **never reached READY** -- both ranks segfault in warmup, in a
+crash-retry loop.
+
+### The failure
+
+```
+  [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1
+  Fatal Python error: Segmentation fault
+  Runner terminated with signal=11 (Segmentation fault: 11)
+```
+
+Faulting stack, identical on BOTH ranks, repeating:
+
+```
+  batch_generator.py:483  in warmup
+  runner.py:445           in _warmup_with_reconnect
+  runner.py:399           in handle_first_task
+  runner.py:327           in main
+```
+
+`/state` shows `RunnerFailed: Terminated (signal=11)` alongside a
+`RunnerWarmingUp`, and the launcher reports "No cycles found with
+sufficient memory" -- which is a red herring: `memory_pressure` reports
+**97% free on both nodes** with no stale runner (RSS 0.0GB). Placement
+fails because the runners keep dying, not because memory is short.
+
+### Suspected cause: the QP budget, and it is a documented hazard
+
+`BatchGenerator.warmup()` (batch_generator.py:482-496) does:
+
+```python
+  warmup_inference(...)
+  self.agree_on_tasks()          # collective
+  self.agree_on_cancellations()  # collective
+  prewarm_coord_group(self.group)  # -> get_coord_group -> group.split()
+```
+
+Under PP all of these were inert -- `EXO_PP_NO_COORD_COLLECTIVE=1` makes
+`get_coord_group()` return `None` and `mx_any(x, None)` a local no-op
+(Section 93). **Under TP they are real collectives, and the split is a
+real `group.split()`.**
+
+The hardware ceiling, re-verified on the node just now:
+
+```
+  ibv_devinfo -v | grep max_qp:   ->   max_qp: 3   (both nodes)
+```
+
+and jaccl builds three QP vectors unconditionally (`mesh.h:167, 187,
+204`): `ack_connections_`, `pool_connections_`, `p2p_retry_connections_`
+-- plus the base `connections_`. A `group.split()` for the coord subgroup
+needs another QP on top of that. This is the exact failure mode the
+jaccl skill documents: *"a crash-loop right after a NEW QP type is
+needed is very likely budget overflow"*, and the preceding
+`Event::wait signaled=0` is consistent with a QP that was never
+successfully created.
+
+**Marked SUSPECTED, not confirmed** -- I have not yet proven the split is
+the allocation that fails. The decisive check is whether the segfault
+survives disabling the prewarm, or whether a `Couldn't create queue
+pair` / EBUSY line appears earlier in the runner log.
+
+### Why this matters more than a normal bug
+
+TP is the shipping topology as of Section 107. **The cluster currently
+cannot run it at all**, so requirement 2/3/4 work on TP is blocked until
+this is fixed. It also means the PP-vs-TP prefill comparison Section 55
+called for still cannot be taken.
+
+Note this is NOT a regression from tonight's changes: nothing in this
+session touched jaccl, `mesh.h`, or the warmup path. The last TP launch
+predates this campaign, so this has plausibly been broken since the QP
+budget was consumed -- which is consistent with PP having been made the
+default and TP going untested since.
+
+### Next
+
+1. Confirm or refute the QP-budget theory: grep the runner log for
+   `Couldn't create queue pair` / EBUSY, and check whether a launch with
+   the coord prewarm disabled gets past warmup.
+2. If confirmed, the fix is mode-conditional QP construction (the jaccl
+   skill's documented pattern: gate the QP types each mode actually
+   needs rather than building all of them unconditionally), so TP can
+   afford the coord subgroup.
