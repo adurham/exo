@@ -11590,3 +11590,158 @@ Re-run GPU sampling gated on first-token-received, so every sample is
 decode-only, and confirm 5-7% in slow mode with adequate n. Then the open
 question returns to Section 82's: what is `mx.eval` waiting on for 550ms
 inside a graph whose distributed ops all complete in microseconds?
+
+## 85. THE MODE-DETERMINANT IS THE PREFILL CODE PATH, NOT DEPTH AND NOT A
+TRANSPORT RACE. "Bimodality" was a mislabel for a step function at
+`EXO_PREFILL_STEP_SIZE`. (2026-08-16)
+
+### What was actually being measured
+
+Sections 50-84 treated decode as bimodal (~0.6 tok/s vs ~22 tok/s) and
+searched for a per-session state that selects between them. The two
+"modes" were two different requests at two different context depths,
+and the log shows them running **in the same runner process with no
+restart, reconnect, or transport reconfiguration between them**:
+
+```
+  09:55  prompt 14,273 tok  chunked prefill  last_layer_eval 549-554ms
+  10:07  prompt     47 tok  plain   prefill  last_layer_eval  15.3-16.5ms
+```
+
+Grepping every runner-lifecycle event between those timestamps returns
+nothing. Same process. The "sticky per-session state" the mode was
+attributed to never existed.
+
+### The sweep
+
+One live build, n>=2 per depth, every point depth-labeled, prompt token
+counts taken from the API's own `usage` block rather than estimated:
+
+```
+  prompt_tokens   prefill path   last_layer_eval   decode tok/s
+       91-95         plain            15.7ms          21.2
+      746-751        plain            15.9ms          20.1
+        1923         plain            16.1ms          20.0   <-- BOUNDARY
+        2365        chunked          554.0ms           0.48  <-- BOUNDARY
+        2368        chunked          550.4ms           0.47
+        2925        chunked          548.8ms           0.47
+        4412        chunked          581.6ms           0.39
+       14273        chunked          549.9ms           0.47
+```
+
+Two facts kill the depth hypothesis outright:
+
+1. **It is a step, not a curve.** 1,923 -> 2,365 tokens is a 23%
+   increase in context and a **34x** increase in per-token cost. The
+   step sits exactly at `EXO_PREFILL_STEP_SIZE=2048`, which is the
+   `prefill()` branch condition (`is_pipeline and num_tokens >=
+   prefill_step_size`, generate.py:804) selecting
+   `pipeline_parallel_prefill` over `stream_generate`.
+2. **Past the step it is FLAT.** 2,925 -> 14,273 tokens is 4.9x more
+   context at identical cost (548.8 -> 549.9ms). Depth-scaling compute
+   cannot produce that. A fixed per-token structural cost can.
+
+So the variable was never context depth and never a per-packet race. It
+is which prefill code path ran, which then makes every subsequent decode
+token ~34x more expensive.
+
+### Where the 550ms actually goes
+
+Native stacks (`/usr/bin/sample`, no install required) captured on BOTH
+ranks, with sampling **gated on the first streamed token** so the window
+is decode-only by construction -- the Section 84 error made structurally
+impossible rather than merely remembered:
+
+```
+  mlx::core::eval
+    mlx::core::array::wait()
+      mlx::core::metal::EventImpl::wait(uint64_t)
+        std::this_thread::sleep_for(...)
+          nanosleep -> __semwait_signal
+
+  rank 0:  2623 / 2949 samples  = 89%
+  rank 1:  1866 / 2028 samples  = 92%
+```
+
+The GPU is idle at 5-7% because it genuinely is idle: **the CPU is
+asleep in a userspace poll loop.** Section 82's "it is a wait" was
+right; Section 83's "it is compute" stays retracted; and the thing being
+waited on is not the peer and not the transport. In the same runs
+`first_layer_recv` is 0.1-0.3ms and `gather_send` is 0.1ms in BOTH
+modes -- the distributed ops are microseconds in slow mode too.
+
+### The mechanism, and it is fork-only
+
+`mlx/backend/metal/event.cpp:57` `EventImpl::wait` is a **fork patch**
+(tagged `exo-jaccl-fix`, 2026-07-05), not upstream MLX. Upstream calls
+Apple's `waitUntilSignaledValue`, which traps into an uninterruptible
+kernel GPU-wait; when a collective wedges, that ignores its own timeout
+and only SIGKILL frees it. The fork replaced it with a userspace poll so
+the thread stays runnable and can rethrow stream exceptions, surface
+command-buffer errors, and honor a self-abort deadline for in-place
+reconnect. **That reliability property is real and must be preserved by
+any fix.**
+
+The loop is: one `signaledValue()` read, then `MLX_EVENT_WAIT_SPIN`
+(2000) spins, then `sleep_for(MLX_EVENT_WAIT_POLL_US)`, **default 50us**.
+
+macOS `nanosleep` granularity is ~1-1.5ms, so a "50us" poll costs
+~20-30x its request. The file's own comment at lines 104-108 already
+documents this granularity error -- it was found while computing the
+timeout and fixed there with `steady_clock`, but the identical error as
+a per-wait **latency** cost was never revisited.
+
+Consequence: **lowering `MLX_EVENT_WAIT_POLL_US` is a provable no-op.**
+50us is already below the delivered floor; requesting 10us still
+delivers ~1ms. This is explicitly NOT another timer knob to tune.
+
+### What is NOT yet established
+
+The honest gap: ~550ms / ~1ms overshoot implies **~550 waits per decode
+token**, and it is not yet proven whether that is (a) hundreds of short
+waits each overshooting, or (b) a genuinely long wait where `sleep_for`
+is merely where the thread parks. A statistical stack profile cannot
+distinguish these. Everything below depends on which it is.
+
+Note the arithmetic 550 / 43 layers ~= 12.8 waits per layer per token,
+which is suggestive of a fixed per-layer structural cost rather than
+anything data-dependent -- consistent with the flatness above.
+
+Refuted along the way: the obvious leaked-flag version of this, that
+`set_pipeline_queue_sends(model, queue_sends=True)` (generate.py:807, set
+only on the chunked branch) leaks into decode. It is correctly paired
+with `queue_sends=False` at lines 851 and 855. Checked, not assumed.
+
+### Next, in order
+
+1. **Count `EventImpl::wait` calls per decode token.** This is the
+   discriminator for (a) vs (b) and everything else waits on it. dtrace
+   is unavailable (SIP enabled). `lldb` with an auto-continue breakpoint
+   gives an exact count with no rebuild, but attaching to the live 15GB
+   serving process risks the 45s hang-watchdog SIGKILL, so it needs the
+   user's approval before running against the live cluster.
+2. **Explain why the chunked path specifically triggers it.** Leading
+   candidate, and it fits the flatness: after chunked prefill the KV
+   arrays are left on a different stream/queue than decode uses, forcing
+   a constant number of cross-stream event waits per layer per token.
+   The chunk-count-scaling variant of this is already contradicted --
+   2 chunks and 7 chunks cost the same.
+3. **Fix the wait primitive** (`MTLSharedEventListener` + a heap-owned
+   {mutex, condvar, flag} the waiter blocks on, keeping a modest
+   `wait_for` tick so timeout/error-surfacing behaviour is unchanged).
+   Traps: block-outlives-waiter on the timeout path, notify-before-wait,
+   and listener-queue creation cost (must be a process-wide singleton).
+4. Budget check that matters: even a perfect wait primitive leaves
+   ~550 waits x (20-100us real signal+wakeup) = 11-55ms/token against a
+   33ms budget for 30 tok/s. **The wait COUNT probably has to come down
+   too** -- fixing only the primitive may be necessary but not
+   sufficient. Item 2 is therefore not optional polish.
+
+### Method note
+
+The measurement that cracked this cost one log grep. Sections 63-84
+tuned transport knobs for a full session; the log had already recorded,
+in plain text, that the fast and slow runs had 47 and 14,273 token
+prompts. **Before instrumenting anything, diff the two runs you are
+calling different modes and check what actually differed about the
+requests.**
