@@ -8731,3 +8731,109 @@ without manual correction.
 3. `start_cluster.sh`'s `DSV4_MODEL_ID` still defaults to the stale
    preview checkpoint.
 4. Section 41's CPU/thread-scheduling-contention investigation.
+
+## 53. CORRECTION to Section 52: we were measuring the wrong decode path.
+Requirement 3 may be a path-selection problem, not a structural ceiling.
+(2026-08-15)
+
+### Read this before acting on Section 52's conclusion
+
+Section 52 concluded that requirement 3 is "not reachable by fixing bugs
+in the current PP-at-concurrency-1 decode path -- the remaining gap is
+structural, not defect-driven." That conclusion is **premature** and
+should not be planned against until the A/B below is run.
+
+### The finding
+
+PP speculation (DSpark / MTP / classic draft-model) never executed in
+ANY measurement this session. Not because it is broken or disabled --
+because of **branch precedence in `ExoBatchGenerator.submit()`**:
+
+```
+line 2291:  if self._batched_decode_active and (...glue is not None):   -> RETURNS
+line 2639:  if self._pp_spec_active:                                     <- unreachable
+```
+
+We launch with `EXO_PP_BATCHED_DECODE=1`, so batched-decode wins and the
+speculative path is structurally unreachable. Both subsystems are
+working as designed; they are mutually exclusive and we had selected one
+without realising it excluded the other.
+
+Confirmed on hardware: `grep 'PP speculation enabled in BatchGenerator'`
+and `grep 'PP speculation using DSpark'` both return ZERO on both ranks,
+while the log shows `Phase 1 batched-decode ENABLED (rank 0,
+admission+decode glue constructed)`.
+
+This is NOT a case of speculation being unavailable. Every precondition
+is satisfied on the live cluster:
+- `EXO_SPECULATIVE=1`
+- `EXO_PP_DRAFT_MODEL` set (has a default at start_cluster.sh:1284)
+- group size 2
+- `PipelineLastLayer` present, so `get_pipeline_info()` is non-None
+- DSpark genuinely attached: `"DSpark draft head attached from
+  .../local--DeepSeek-V4-Flash-DSpark"`, and `(dspark):
+  DeepseekV4DSparkModule` is present in the model
+
+### Why this could be decisive
+
+| path | decode tok/s | provenance |
+|---|---|---|
+| batched-decode (what we measured) | ~0.5 | measured this session, 100K + 300K, needle-verified |
+| DSpark speculation | ~24 (27-33 range) | start_cluster.sh's own 2026-08-02 re-validation note |
+
+That is a 50-60x difference, and it is the difference between "the
+requirement is structurally out of reach" and "we benchmarked the wrong
+decode path for a single-session workload."
+
+**Do not treat the 24-33 tok/s figure as established at depth.** It was
+measured at SHORT context during the self-doubt-loop fix validation, not
+at 100K-500K. The honest position is that the comparison is not yet
+apples-to-apples, and Section 52's structural conclusion rests on a
+measurement of a path a single interactive session arguably should not
+be using.
+
+### The A/B (verified reachable, not yet run)
+
+Requires NO code change. `start_cluster.sh` already defaults
+`EXO_PP_BATCHED_DECODE:=0` (line ~1959) -- this session had simply been
+passing `=1` explicitly on every launch. Omitting it is sufficient.
+
+```
+DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-0731 \
+DSV4_SHARDING=Pipeline EXO_PP_METAFRAME=1 JACCL_TRACE_PROGRESS=1 \
+./start_cluster.sh                       # note: NO EXO_PP_BATCHED_DECODE
+```
+
+Then re-run `bench/phase3_precheck_depth_throughput.py` at the same
+100K/300K targets and confirm the path actually engaged by grepping the
+runner log for `"PP speculation using DSpark"`.
+
+### Correctness caveat -- this is the real risk, not throughput
+
+PP+speculation historically caused a self-doubt reasoning LOOP that
+never terminates, reproduced across ALL THREE spec mechanisms (classic
+draft-model, chained-MTP, DSpark) while plain sequential decode was
+clean. Root-caused as DeepseekV4's "L>1 batched verify != L sequential
+steps" numerics drift and fixed 2026-08-02 via `EXO_DSV4_VERIFY_ROWSEQ`
++ `EXO_DSV4_ROWSEQ_FULLBLOCK` (both default-on), re-validated with 2x
+temp=0 reruns of the original failing prompt.
+
+Checked while preparing this: `EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=0` on the
+cluster looks alarming against that note, but is CORRECT and not a
+half-disabled fix -- it was superseded by
+`EXO_DSV4_MOE_PARTS_ROWSEQ=shared`, which preserves losslessness on the
+part that matters while leaving `switch_mlp` batched for speed.
+
+A regression here manifests as **non-termination, not a slow number**.
+So the A/B must be gated on the needle check and `finish_reason`, never
+on tok/s alone -- the same discipline that caught the 10ms retransmit
+experiment shipping zero output while every transport metric said "win".
+
+### What Section 52 got right regardless
+
+The transport work stands independently: true lost-send stalls went
+1403 -> ZERO, the fix is structurally correct (proven in-repo pattern,
+no per-transfer cost, no cross-rank key matching), and it removes a
+confound from every future measurement. The measurement apparatus is
+also now trustworthy (`usage.prompt_tokens` fixed, Section 50). None of
+that depends on which decode path we ultimately select.
