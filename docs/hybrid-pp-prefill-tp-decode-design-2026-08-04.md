@@ -12390,3 +12390,133 @@ them.
    not by reading a single total.
 4. Re-run the harness only after 1-3; it is currently measuring a system
    that cannot pass.
+
+## 93. Section 92's root cause, located exactly: the batched-prefill
+callback DELIBERATELY defers cancellation. Plus the fix design, reviewed.
+(2026-08-16)
+
+### The code says it in its own comment
+
+Live engine is `BatchGenerator` (`EXO_NO_BATCH` unset,
+`EXO_MAX_CONCURRENT_REQUESTS=2` -- so `SequentialGenerator` is NOT the
+live path, which matters because the two behave differently here).
+`batch_generator.py:1286-1295`:
+
+```python
+  def distributed_prompt_progress_callback() -> None:
+      # Poll cancellations across both ranks. We DON'T raise
+      # PrefillCancelled here even if the per-task is
+      # cancelled -- the batched prefill processes all
+      # streams together and we'd waste the rest of the
+      # batch's compute. Instead, the cancellation is
+      # recorded in `_cancelled_tasks` and applied after
+      # prefill completes via `_apply_cancellations`.
+      self.agree_on_cancellations_fast()
+```
+
+That is the whole bug. Cancellation is **intentionally** deferred until
+prefill finishes. On a 40K chunked PP prefill that is tens of seconds of
+continued compute after the user cancelled, which is precisely the
+observed 3.45s-and-counting, the zero `PREFILL_CANCELLED_PATH` count,
+and the unreleased memory. `SequentialGenerator`'s sibling callback
+(line 339-342) DOES raise immediately -- the deferral is specific to the
+batched path.
+
+### A second, independent defect on the same path
+
+`EXO_PP_NO_COORD_COLLECTIVE=1` is live on both nodes. `get_coord_group()`
+returns `None` under it, and `mx_any(x, None)` returns the local bool
+(`utils_mlx.py:1601-1608`). So **`agree_on_cancellations_fast()` is a
+local-only no-op in PP mode -- there is currently NO cross-rank
+agreement on cancel at all.** Each rank decides independently.
+
+That is not incidental: coord collectives are disabled in PP for a real
+reason (they share transport with the p2p send/recv; when a p2p recv
+blocks at depth the coord all_sum cannot be sent -> `Event::wait`
+timeout -> runner crash). So the fix cannot simply re-enable them. A
+function whose name promises agreement and silently agrees on nothing is
+a landmine regardless of this bug and should log/assert.
+
+### Fix design (consult-reviewed, not yet implemented)
+
+**Where to cut.** NOT a raise from inside the callback. A raise while
+rank 1 has a posted recv reproduces the exact `signaled=0` stranding
+being fixed, and can leave an unmatched send/recv that poisons transport
+state for the NEXT request. Instead: the callback sets a flag; the chunk
+loop checks it at a known-quiescent point -- **after the current chunk's
+p2p handoff has fully materialized on both ranks, before either enqueues
+anything for chunk k+1** -- with both ranks agreeing on the same k.
+Exceptions thrown during lazy graph construction can leave
+enqueued-but-unevaluated ops in an ambiguous state; a loop-boundary
+check is structurally safe.
+
+**How the ranks agree.** Piggyback on the metaframe, which is already
+sequenced BEFORE the payload on the same ordered channel -- the receiver
+reads the header before posting the activation recv, so a CANCEL frame
+means rank 1 simply never posts the recv that would strand it. No extra
+round trip, no second transport, no new blocking point. Specifically:
+
+- **Single control authority.** Only rank 0 (where cancel arrives)
+  decides. Rank 1 acts ONLY on the frame, never on local cancel state.
+  This deletes the whole "both ranks decided at different chunks" race
+  class rather than trying to synchronize it.
+- A **frame TYPE** (DATA / CANCEL / EOS), not a boolean rider, so rank 0
+  can send a header-only cancel with no payload and rank 1's dispatch is
+  unambiguous.
+- Audit the rank1->rank0 direction (final logits/acks) for the same
+  treatment, or rank 0 can strand on its own recv after deciding.
+- Never make a network recv conditional on a local boolean -- that is
+  the `agreed = agreed or _recv(peer)` short-circuit that already cost
+  this campaign an investigation. The frame-type design avoids symmetric
+  flag exchange entirely, which is why it beats fixing
+  `pipeline_agree_cancel`.
+- Cancel arriving after the final chunk has no next frame; fall through
+  to the existing `_apply_cancellations` deferral, which is correct
+  there since prefill is already done.
+
+**Releasing the memory.** `mx.clear_cache()` alone is NOT sufficient --
+it only returns buffers already in MLX's free pool, and anything still
+referenced by live arrays (partial KV entries, prefill session state,
+arrays captured in closures -- the progress callback itself captures
+some) is untouched. Required order:
+
+1. Drop Python references to the cancelled task's KV slots / session
+   state / retained graph handles.
+2. `mx.synchronize()` -- pending async evals may still reference those
+   buffers, and a buffer JACCL is still transmitting from must not be
+   freed. The chunk-boundary cut guarantees transport quiescence.
+3. Then `mx.clear_cache()`; verify against the 85.68 GB floor and
+   `mx.get_cache_memory()`.
+
+Per-task, NOT a wholesale reset: with `EXO_MAX_CONCURRENT_REQUESTS=2` a
+second live request's KV must not be swept. And the task must not linger
+in `_cancelled_tasks` to be re-applied later down the follower deferral
+path (double-finalize risk).
+
+### Correction to my own rationale
+
+I justified raising immediately with "in PP that is the only request, so
+the waste-the-batch argument does not apply." That is **wrong**:
+`EXO_MAX_CONCURRENT_REQUESTS=2`, so the batch can hold two prompts. The
+correct condition is **"all streams in the batch are cancelled"**, with
+the existing deferral retained for a genuinely mixed batch. Caught in
+review; noting it because it is the same over-generalization pattern as
+Sections 85 and 88.
+
+### Constraints that must not be broken
+
+`_apply_cancellations` already carries two deferrals that exist for
+real, previously-debugged reasons: PP-spec generators parked in
+`_pending_pp_spec_cancel`, and the batched-decode FOLLOWER rank holding
+a KV slot released only by the DRIVER's `EvictMessage` (finalizing early
+exits runner.py's `while self.active_tasks:` loop and strands the driver
+in `send_evict_message()` forever). Neither may regress.
+
+### Scope note
+
+The requirement is cancel-in-BOTH-states: PP during prefill AND TP
+during decode. This section addresses the PP/prefill half, which is
+where the reproduction lives. The TP/decode half runs the
+`on_generation_token` path (which DOES raise on the token cadence) and
+has not been separately reproduced or verified -- it must be tested, not
+assumed to work.
