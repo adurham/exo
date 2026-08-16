@@ -196,6 +196,14 @@ def test_cancel_dispatches_complete_request_for_an_admitted_batched_decode_uid()
     gen._deferred_prefill_by_uid = {}
     gen._active_tasks = {}
     gen._mlx_gen = MagicMock()
+    # __new__ bypasses dataclass field init, so every `init=False` field
+    # cancel() touches must be seeded by hand. cancel() reads
+    # _pp_spec_gen_by_uid on its first branch; without this the test dies with
+    # AttributeError before reaching the batched-decode dispatch it exists to
+    # assert. Test-harness gap, not a production bug -- the real object gets
+    # these from the dataclass machinery.
+    gen._pp_spec_gen_by_uid = {}
+    gen._pp_spec_cancel_requested = set()
 
     glue = _make_rank0_glue()
 
@@ -241,6 +249,14 @@ def test_cancel_dispatches_cancel_pending_prefill_for_a_queued_uid_never_calling
     gen._deferred_prefill_by_uid = {}
     gen._active_tasks = {}
     gen._mlx_gen = MagicMock()
+    # __new__ bypasses dataclass field init, so every `init=False` field
+    # cancel() touches must be seeded by hand. cancel() reads
+    # _pp_spec_gen_by_uid on its first branch; without this the test dies with
+    # AttributeError before reaching the batched-decode dispatch it exists to
+    # assert. Test-harness gap, not a production bug -- the real object gets
+    # these from the dataclass machinery.
+    gen._pp_spec_gen_by_uid = {}
+    gen._pp_spec_cancel_requested = set()
 
     glue = _make_rank0_glue()
     glue.enqueue_prefill(

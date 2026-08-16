@@ -75,6 +75,14 @@ def _bare_batch_generator(*, has_work: bool = False) -> BatchGenerator:
     bg._active_tasks = {}
     bg._jaccl_step_count = 0
     bg._jaccl_step_handle = None
+    # object.__new__ bypasses dataclass field init, so every `init=False`
+    # field the code under test touches must be seeded by hand. step() ->
+    # _apply_cancellations() reads both deferred-finalize maps; without these
+    # the test dies with AttributeError before exercising the cancellation
+    # latency behaviour it exists to assert. Harness gap, not a production
+    # bug -- the real object gets these from the dataclass machinery.
+    bg._pending_pp_spec_cancel = {}
+    bg._pending_batched_decode_evict = {}
     bg.group = None  # collectives are mocked below, never touch mx.distributed
     bg.check_for_cancel_every = 100
 

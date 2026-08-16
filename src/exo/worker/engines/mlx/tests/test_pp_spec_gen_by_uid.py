@@ -44,10 +44,30 @@ from exo.worker.engines.mlx.generator.batch_generate import (
 def _bare_gen() -> ExoBatchGenerator:
     """Construct an ExoBatchGenerator without running __post_init__ (which
     needs a real model/tokenizer/group) -- just enough state for the
-    _pp_spec_gen_by_uid dict/guard mechanics under direct test."""
+    _pp_spec_gen_by_uid dict/guard mechanics under direct test.
+
+    Because this deliberately bypasses dataclass field initialization, every
+    `init=False` field that the methods under test touch must be seeded here
+    by hand. When _close_pp_spec_gen() grew its
+    `_pp_spec_cancel_requested.discard(uid)` call (2026-08-11, design doc
+    Section 43 -- so a cancelled uid can't leak its flag into a later
+    generator), this fixture was not updated, and all four close-related
+    tests began failing with
+    `AttributeError: 'ExoBatchGenerator' object has no attribute
+    '_pp_spec_cancel_requested'`.
+
+    That was a TEST-HARNESS gap, not a production bug: the real object gets
+    these fields from the dataclass machinery. But it left four permanently
+    red tests on the PP-speculation path, which is actively dangerous --
+    pre-existing failures make a genuine regression on that path
+    indistinguishable from known noise. Seeded rather than removed, so the
+    tests keep asserting what they were written to assert.
+    """
     gen = object.__new__(ExoBatchGenerator)
     gen._pp_spec_gen_by_uid = {}
     gen._uid_counter = 0
+    gen._pp_spec_cancel_requested = set()
+    gen._pp_spec_cancel_agree_tag = 0
     return gen
 
 
