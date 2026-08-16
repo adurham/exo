@@ -9971,3 +9971,102 @@ every deploy because uv builds in a temp dir, so a transient DNS hiccup
 aborted the whole thing -- that killed three separate timed runs today.
 `FETCHCONTENT_BASE_DIR` now points at the persistent
 `mlx/build/_deps`, making rebuilds network-independent.
+
+## 64. Section 63 refined: the 500 ms is the RECOVERY cost of a lost
+first send, and the lost send is the same empty-FIFO UC drop Section 52
+fixed for a different size class. (2026-08-15)
+
+### The wire trace, one decode token
+
+`JACCL_TRACE_PROGRESS=1`, rank 0, `call_id=788` -- a token that paid the
+stall, with its neighbours for contrast:
+
+```
+  call_id=786 round=0  peer_got_count=1/1   elapsed_us=68        <- healthy
+  call_id=787 round=0  peer_got_count=1/1   elapsed_us=87        <- healthy
+
+  call_id=788 round=0  to_resend_count=0    elapsed_us=0
+  call_id=788 round=0  peer_got_count=0/1   elapsed_us=42        <- PEER GOT NOTHING
+  call_id=788 round=1  to_resend_count=1    elapsed_us=43        <- retransmit POSTED
+  call_id=788 round=1  peer_got_count=1/1   elapsed_us=500072    <- 500 ms later
+
+  call_id=789 round=0  peer_got_count=1/1   elapsed_us=150       <- healthy
+  call_id=790 round=0  peer_got_count=3/3   elapsed_us=72        <- healthy
+```
+
+### Two separable facts, and the second is the surprising one
+
+**(a) First sends are being lost.** `peer_got_count=0/1` at round 0
+means the receiver got *nothing* -- not a partial or corrupted chunk.
+
+**(b) Recovery from that loss costs a fixed ~500 ms, not ~40 us.** This
+is the part Section 63 stated imprecisely. The retransmit is *posted* at
+elapsed_us=43 -- 1 microsecond after the barrier reported the loss. The
+data is on the wire essentially immediately. But the round-1 barrier
+that confirms delivery does not return until elapsed_us=500,072.
+
+So the 500 ms is **not** time spent waiting to *decide* to retransmit,
+and it is not transfer time. It is spent inside the round-1
+`p2p_retry_exchange` barrier, on a link whose healthy round trip is
+56-150 us. The retransmitted data almost certainly arrives in
+microseconds; the *acknowledgement* of it does not.
+
+Healthy calls in the same run complete in 56-150 us. **Only calls that
+lose the first send pay the 500 ms** -- confirming these are the same
+events as Section 60's 32 `peer_got_count=0/1` observations, now with
+the cost mechanism attached.
+
+### This is Section 52's bug, in a place Section 52 did not reach
+
+Section 52 fixed exactly this failure shape: a standing pre-posted recv
+pool was missing on the data QP for the sz=0 (<=4096B) size class, so a
+peer SEND landing at an empty recv FIFO was silently dropped by UC.
+`mesh_impl.h`'s own `ack_sync_pre` comment names it: *"close the
+inter-lambda window where peer SEND lands at our empty data-QP recv FIFO
+and UC silently drops."* That fix drove true lost-send stalls from 1403
+to zero -- **for the traffic it covered.**
+
+The decode path's per-token activation send is evidently NOT covered.
+Section 52 explicitly scoped the recv pool to one size class, and
+Section 60 already found 32 surviving lost first-sends after that fix
+landed. Same defect, different size class or different QP state.
+
+### Why the timer value is the wrong thing to change
+
+`MLX_JACCL_ACK_RETRANSMIT_US` is 500,000 us. Lowering it to 10 ms was
+tried in Section 51 and **broke generation outright** -- zero tokens
+emitted -- because the timer then fires below the real round trip and
+retransmits frames that are merely in flight.
+
+But note what the trace shows: the retransmit already happens at 43 us.
+The timer is not gating the retransmit. It is gating how long the
+*barrier* waits before giving up on an acknowledgement that never
+arrived. So the two candidate fixes are structural, not numeric:
+
+1. **Prevent the loss** -- extend Section 52's standing recv-pool
+   mechanism to cover the decode path's activation send. This is the
+   root-cause fix and reuses a proven in-repo pattern.
+2. **Make recovery fast** -- have the round-1 barrier complete on the
+   retransmitted data's actual arrival rather than waiting out a quiet
+   period. This is the fallback if (1) turns out not to cover every
+   loss.
+
+(1) is clearly the right first move: it is the same fix, in the same
+file, for the same failure shape, that already worked once.
+
+### Correction to Section 63
+
+Section 63 said "every decode token pays the 500 ms timer, on both
+ranks." More precisely: **every token whose first send is lost pays it**
+-- which, at the observed loss rate on this path, is most of them, but
+the distinction matters because it makes the loss (not the timer) the
+thing to fix.
+
+### Still unexplained
+
+Why does the *acknowledgement* for a successfully retransmitted chunk
+take 500 ms to surface, when the same barrier completes in 56-150 us on
+every healthy call? The retransmitted data arrives (peer_got_count goes
+1/1); only the confirmation is late. That asymmetry is not yet
+explained and may be a second, independent defect sitting behind the
+first.
