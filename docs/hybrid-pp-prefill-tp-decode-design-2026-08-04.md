@@ -12842,3 +12842,110 @@ in-band checkpoint for it.
   observable change is one extra log line and an early `return []` on a
   cancelled chunk boundary. But it has NOT been soaked, and `uid=0`
   means the abort branch is currently a no-op rather than exercised.
+
+## 98. Section 97's failure diagnosis was ALSO wrong. The abort protocol
+is safe by inspection; the real blockers are a masking API fallback and
+an unreliable harness. (2026-08-16)
+
+Three of my own claims from Section 97 do not survive checking. Recording
+all three because the pattern is the point.
+
+### Retraction 1: "the bilateral abort never ran" -- UNPROVEN
+
+I concluded this because grep found no `PrefillAbortMessage` lines.
+`abort_prefill_session()` and rank 1's handler **log nothing on the happy
+path**. I grepped for evidence that cannot exist. Added
+`PREFILL_ABORT_SEND` / `PREFILL_ABORT_RECV` / `PREFILL_ABORT_ACKED`
+(commit `090238445`) so the claim is now testable at all.
+
+### Retraction 2: "uid=0 is the bug" -- WRONG
+
+`uid=0` is legitimate. Every `PREFILL_REGISTER_R0` in the log reads
+`request_id=0`.
+
+### Retraction 3: the `Event::wait` stranding is probably NOT a cancel
+symptom
+
+There is exactly ONE `slow wait` in the whole log, it is on **rank 1**,
+and it fires at 13:55:16.084 -- **0.9s BEFORE** the cancel at 13:55:17.
+That is an ordinary PP pipeline bubble (rank 1 idle >3s waiting on
+rank 0 during a long prefill), not a teardown failure. **Section 92's
+attribution of that symptom to cancellation is withdrawn.**
+
+### The abort protocol is SAFE, established by code inspection
+
+The worry was that calling `abort_prefill_session()` (a blocking
+send/ack round trip) from inside rank 0's drive loop reproduces the
+documented incident where rank 0 stranded on an orphaned pre-posted
+recv. It does not. Three checkable conditions, all confirmed:
+
+1. **Rank 1 dispatches by message TYPE on one channel.**
+   `tick()` reads a header then branches on `header.msg_kind`
+   (`MSG_KIND_PREFILL` / `_ADVANCE` / `_ABORT` / `_STEP` / `_EVICT`).
+   `MSG_KIND_PREFILL_ABORT` is handled at glue.py:2046, in the same
+   dispatch as the advance -- so the abort **occupies the protocol slot
+   the next advance would have used.** That is precisely the prefill
+   analogue of the decode fix, already implemented.
+2. **Rank 1's abort handler waits on no data-plane transfer.** Body is
+   `prefill_session.abort()`, clear `_active_prefill_session`, clear
+   `_last_prefill_advance_seq`, send ack. No recv, nothing pending.
+3. **Rank 0 posts no recv before sending.** Order is send-abort ->
+   recv-ack.
+
+Correcting my own framing, per the consult: "a unilateral wire op from
+one rank" is NOT the incident shape. Rank 0 initiating unilaterally is
+fine **when rank 1 is guaranteed to be at a recv that can accept it**,
+which conditions 1-3 establish. The incident was an orphaned pre-posted
+recv. I was over-generalizing a lesson into rejecting a protocol that is
+already correct.
+
+### The two REAL blockers
+
+**A. The API masks the defect.** From the last run:
+
+```
+  cancel_command(...): task ... did not reach a terminal state within
+  5.0s of TaskCancelled -- falling back to force-closing the stream so
+  this HTTP call doesn't hang on an apparently-stuck runner.
+```
+
+So the **HTTP 200 my harness recorded was a forced stream close, not a
+successful cancellation.** The client is told success while the runner
+keeps working. The API's success condition must be the runner-side
+terminal-state signal; the 5s force-close should remain only as a
+liveness guard and must return a *distinguishable* status, never plain
+success.
+
+**B. The harness cannot tell a valid run from an invalid one.** That
+same run only ever prefilled **14 tokens** -- the 40K prompt never got
+through, so it cancelled an already-finished task and tested nothing,
+while reporting the same surface signals as a real run. Every "green"
+cancel run tonight is therefore untrustworthy on its own.
+
+### Definition of done (adopted, per consult)
+
+Both scenarios (cancel mid-PP-prefill, cancel mid-TP-decode), asserted
+automatically by the harness, never hand-grepped:
+
+1. **Precondition**: full prompt transmitted, >=N chunk advances / decode
+   steps logged BEFORE cancel dispatch. A 14-token prefill must FAIL as
+   INVALID, not pass.
+2. **Work stops on BOTH ranks**: <=1 in-flight chunk completes after the
+   cancel-observed timestamp, then zero.
+3. **Bilateral abort completes**: ABORT_SEND -> ABORT_RECV -> ABORT_ACKED,
+   right ranks, right request id, within ~500ms.
+4. **Terminal state via the real path**: runner terminal + READY within
+   bound, and the API force-close line ABSENT.
+5. **Memory released, model resident**: per-rank active/wired at three
+   points (post-load baseline, mid-request, post-cancel); post-cancel
+   returns to baseline on both ranks.
+6. **No stranded waits** beyond threshold after cancel.
+7. **Next-request health** -- submit a fresh full request immediately;
+   warmup succeeds, output correct, latency normal. **This is the only
+   assertion that catches an orphaned pre-posted recv**, which poisons
+   the NEXT request rather than this one.
+8. **Repetition across the race window**: >=20 cancels at randomized
+   offsets (first chunk, mid-prefill, final chunk, early decode, deep
+   decode), all passing 1-7. A single-offset pass proves timing luck.
+
+Done = all eight, both scenarios, one unattended run.
