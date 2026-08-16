@@ -9039,3 +9039,103 @@ conclusions from aggregate tok/s: an 18.01 tok/s figure from a 52-token
 sample (Section 52), and a 10ms retransmit experiment where every
 transport metric improved while generation produced zero tokens
 (Section 51). A distribution would have caught both immediately.
+
+## 55. The Section 50-51 vs 52 prefill "regression" was an accounting
+artifact. Requirement 4 is failing worse than either number implied.
+(2026-08-15)
+
+### The discrepancy
+
+Two prefill numbers for the same cluster, hours apart, both recorded in
+this doc, never compared:
+
+```
+  Sections 50-51:  100K 320 | 300K 304 | 500K 286 tok/s
+  Section 52:      100K 224.5 | 300K 213.2 tok/s
+```
+
+A ~30% drop straddling the Section 52 transport change. Left
+uninvestigated, this would have been read as a transport regression.
+
+### It is not a regression. The numerator changed definition.
+
+`bench/phase3_precheck_depth_throughput.py:165` reads
+
+```python
+prompt_tokens = usage.get("prompt_tokens", est_tokens)
+```
+
+with `est_tokens = prompt_chars // 4` (line 91) as the fallback, then
+computes `prefill_tps = prompt_tokens / ttft_s`.
+
+Before exo@7d14daea7 (Section 50), `usage.prompt_tokens` on the
+deferred/chunk-drive path reported the prompt TAIL -- literally `2` for
+a ~100K-token prompt. The harness's `usage.get(...)` therefore returned
+a garbage value or fell through to `est_tokens`; Section 50's own commit
+message records recovering ~320 tok/s "from the harness's own token
+estimate." So run set A's numerator was `chars // 4`. Run set B, taken
+after the fix, used the real token count.
+
+Measured against the actual tokenizer, `chars // 4` overcounts this
+harness's generated filler by a consistent factor:
+
+```
+  target     chars       chars//4      REAL tokens   ratio   chars/token
+  100,000    400,402     100,100        70,398       1.422      5.69
+  300,000  1,200,399     300,099       211,266       1.420      5.68
+  500,000  2,000,362     500,090       352,420       1.419      5.68
+```
+
+English prose through this tokenizer runs ~5.68 chars/token, not 4. The
+`//4` heuristic inflates by 1.42x.
+
+### Renormalized onto one definition
+
+Recover TTFT from run set A (`est_tokens / reported_tps`), then divide
+the REAL token count by that same wall clock:
+
+```
+              A reported   A renormalized   B measured   agreement
+  100K ctx     320 tok/s      225.0 tok/s    224.5 tok/s   0.2%
+  300K ctx     304 tok/s      214.0 tok/s    213.2 tok/s   0.4%
+  500K ctx     286 tok/s      201.5 tok/s        --         --
+```
+
+**The two run sets agree within 0.4%.** There was never a regression.
+The transport fix did not cost prefill throughput. Both numbers were
+always the same measurement, expressed in two different units.
+
+### The real finding, which is worse than the false alarm
+
+Requirement 4 asks for 400+ tok/s prefill. The honest, renormalized
+numbers are **225 / 214 / 202 tok/s at 100K / 300K / 500K** -- roughly
+HALF the bar, not the 320/304/286 the doc has been carrying, and
+degrading with depth rather than holding flat.
+
+The older trusted baseline (fact 1018: 1K=490, 10K=512, 94K=485,
+200K=431, 400K=377, 500K=364, fresh restart, thermally matched) is
+~2.2x higher at comparable depth. Either that baseline used a different
+counting convention too, or prefill genuinely regressed at some point
+between then and now. **This is now the largest unexplained gap in the
+campaign and is not tracked anywhere as an open item.** Section 52's
+"prefill is healthy and near-flat with depth" reading was based on the
+inflated numbers and should not be relied on.
+
+### Lesson, and the fix that prevents recurrence
+
+Two different bugs in this campaign now trace to the same root: prefill
+throughput was derived from an API-reported field
+(`usage.prompt_tokens`) whose definition silently changed underneath the
+measurement. Section 50 fixed the field; it did not fix the dependency.
+
+`bench/phase3_precheck_depth_throughput.py` should tokenize its own
+prompt offline for a ground-truth numerator and use wall clock for the
+denominator, so no server-side accounting change can ever move a
+throughput number again. Until that lands, ANY prefill tok/s figure in
+this document predating Section 55 must be checked for which numerator
+produced it before being quoted or compared.
+
+Note the same discipline already caught two other errors here: an 18.01
+tok/s figure from a 52-token sample (Section 52), and a retransmit
+experiment where every transport metric improved while generation
+emitted zero tokens (Section 51).
