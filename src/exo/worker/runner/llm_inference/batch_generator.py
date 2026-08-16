@@ -1216,8 +1216,25 @@ class BatchGenerator(Engine):
             a ``receive_nowait`` drain), so it adds no cross-rank traffic
             to the prefill hot path.
             """
-            for _cancelled_id in self.cancel_receiver.collect():
-                self._cancelled_tasks.add(_cancelled_id)
+            # DELIBERATELY does NOT drain cancel_receiver here.
+            #
+            # 2026-08-16 (Section 99): an earlier version of this probe
+            # called ``self.cancel_receiver.collect()``, which bottoms
+            # out in ``multiprocessing.Queue.get(block=False)`` --
+            # acquiring the queue's INTERNAL LOCK. This probe runs on
+            # the generator/chunk-drive thread while the supervisor
+            # thread drains the SAME queue, so the two contend that
+            # lock. Reproduced on hardware: the runner wedged with two
+            # threads parked in ``lock_PyThread_acquire_lock ->
+            # _PyMutex_LockTimed -> _PySemaphore_Wait``, no MLX and no
+            # jaccl frames anywhere in the stack, GPU idle, zero log
+            # output for 5+ minutes.
+            #
+            # ``_cancelled_tasks`` is already populated by
+            # ``agree_on_cancellations_fast()`` on the owning thread
+            # (verified on hardware: CANCELPROBE showed the id landing
+            # in the set). A plain set-membership read is lock-free and
+            # sufficient -- the drain was never this probe's job.
             return self.should_cancel(task.task_id)
 
         # Register the probe on the generator rather than threading it
