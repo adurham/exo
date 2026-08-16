@@ -1113,8 +1113,21 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
         # MTP-quality bisect 2026-05-06 (revert of 4e87391 + de10431):
         # the unshard caused MTP=1 γ=2 temp=0 decode to produce broken
         # English. Restore the same MoE-only sharding pattern as main
-        # layers — each rank holds half the experts, sum_gradients on
-        # input + all_sum on output. This is the pre-Phase-G state.
+        # layers — sum_gradients on input + all_sum on output. This is the
+        # pre-Phase-G state.
+        #
+        # CORRECTION 2026-08-16: this comment previously said "each rank
+        # holds half the experts". That is WRONG and it misled an
+        # investigation. `all_to_sharded` slices axis `max(ndim-2, 0)`
+        # (see _all_to_sharded above), and SwitchLinear.weight is
+        # (num_experts, output_dims, input_dims) — so axis 1, the
+        # INTERMEDIATE WIDTH. Both ranks hold ALL 256 experts at HALF
+        # width; experts are never partitioned by identity. Consequently
+        # the MoE all_sum reduces a fixed (B, L, hidden) tensor every
+        # layer regardless of which experts fired, and there is no
+        # token gather/scatter to expert-owning ranks — so "co-locate an
+        # expert on a node" has nothing to bind to. See
+        # bench/section108_tp_expert_locality_analysis.md.
         for j, mtp in enumerate(mtp_blocks):
             mx.eval(mtp.parameters())
 
