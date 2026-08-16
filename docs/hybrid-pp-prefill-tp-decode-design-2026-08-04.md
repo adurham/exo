@@ -12085,3 +12085,110 @@ of the finding.** Verify the gating condition of any conditional block
 before attributing measured time to it -- `grep` for where the guard is
 SET, not just where it is READ (the same lesson this campaign already
 recorded for `sq_psn` in the jaccl skill, re-learned here).
+
+## 90. Memory check: the "94GB unaccounted" gap is RSS not counting
+Metal unified memory. No leak. Both nodes at 97% free by the honest
+metric. (2026-08-16)
+
+Raised mid-session: node1's runner RSS is ~19.5GB but the OS reports
+113.3GB/128GB (89%) in use on both nodes -- a ~94GB/node residual with
+no obvious owner, and 30K tokens of KV should be trivial against a 500K
+target rather than pushing a node near its ceiling. Track A was paused
+to answer it before queueing any deeper test. Correct call: that is
+exactly the shape a real leak would have.
+
+It is not a leak, and the gap is fully accounted for.
+
+### `footprint` closes it exactly
+
+RSS does not count Metal/IOSurface unified-memory allocations, which is
+where essentially the entire model lives. `footprint <pid>` does:
+
+```
+  node1  python[69649]  Footprint: 89 GB   RSS 16.9 GB
+           86 GB  IOAccelerator (graphics)   <-- MLX Metal buffers
+         1841 MB  Malloc Large
+          320 MB  Malloc Small
+
+  node2  python[77819]  Footprint: 86 GB   RSS 17.7 GB
+           84 GB  IOAccelerator (graphics)
+```
+
+Cross-checks, three independent sources agreeing:
+
+```
+                              node1     node2
+  footprint (per-process)     89 GB     86 GB
+  OS wired+active             88.9 GB   85.8 GB
+  MLX's own active            86.7 GB      --
+```
+
+And the budget closes against the model itself: the card reports
+166,878,536,440 bytes = 155.4 GiB, pipeline-sharded two ways =
+**~77.7 GiB/node of weights**, plus ~2 GB KV (see below) plus MLX
+runtime/scratch = the ~86 GB of IOAccelerator observed. Nothing is
+missing.
+
+### The 89% figure is the known misleading metric
+
+```
+  node1: wired 2.9 + active 85.9 + inactive 17.6 + compressor 0.1 + free 20.8
+         REAL resident (wired+active) = 88.9 GB
+         naive "used" (total - free)  = 106.5 GB
+  memory_pressure: "System-wide memory free percentage: 97%"  (BOTH nodes)
+  swap used: 50.75 MB (node1) / 70.88 MB (node2)
+```
+
+macOS counts ~17.6GB of reclaimable inactive/standby as "used". The
+honest metric, `memory_pressure`, says **97% free on both nodes**, and
+swap is flat at ~50-70MB with zero swapins (also measured in Section 84).
+Real headroom is ~39 GB/node, not ~15 GB.
+
+**This trap is already in the campaign's own notes and has cost hours
+before** (2026-06-21: "burned hours chasing phantom KV/leak/session
+theories when the number itself was inflated by standby accounting").
+Recording it here again because the dashboard still shows the naive
+number, so it will keep being reported as alarming.
+
+### Leak test: flat, not monotonic
+
+The leak signature is a monotonically rising floor with context held
+constant. Across 32 `[MEM]` samples spanning tonight's deep-context runs
+(including a 92K-token request):
+
+```
+  MLX active:  first 85.52 GB  ->  last 86.73 GB  (max 86.80)
+               delta +1.21 GB, bounded
+```
+
++1.2 GB over hours of 14K-92K-token tests, and it stops rising. That is
+retained KV, not a leak: the prefix cache currently holds two leaves
+(92,005 and 46,505 tokens = ~138K tokens) which at DSv4's measured
+~12-14 KB/token is ~1.7-2 GB -- matching the delta. The session cap is
+working; earlier log lines show `KV cache evicted leaf 1 ... session cap
+4` firing as designed. `EXO_LEAF_SNAPSHOT_RETENTION` and the
+POOL_SNAPSHOT settings are therefore not accumulating unbounded state
+here.
+
+### Consequences
+
+- **No blocker for deeper-context tests.** ~39 GB/node of real headroom.
+  At the measured ~12-14 KB/token, a 500K cold context is ~6-7 GB of KV
+  and fits comfortably. The one caveat worth carrying: a *growing
+  multi-turn* session was previously measured at ~45 KB/token, which
+  would be ~22 GB at 500K -- still fits, but that is the number to watch
+  at depth, not the cold-prefill one.
+- **Not an explanation for requirement 4's prefill degradation.** With
+  39 GB free and zero swapping there is no memory pressure to blame it
+  on; that regression needs its own investigation and this rules out one
+  candidate rather than supplying one.
+
+### Method note
+
+The user's instinct to stop and demand a breakdown was right to act on
+even though the answer came back clean -- a 94GB unexplained residual
+warrants exactly that. The resolution took one `footprint` call. Add it
+to the standard memory-forensics sequence: **`RSS` is meaningless for
+MLX processes; use `footprint <pid>` for per-process truth and
+`memory_pressure` for system truth.** Neither the dashboard's percentage
+nor `ps`'s RSS answers the question on this hardware.
