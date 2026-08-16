@@ -11513,3 +11513,80 @@ widened-pool build's 500ms send), Section 80 (a frozen loss counter),
 and now Section 62's GPU-idle reading. **A measurement is only valid for
 the build and configuration it was taken on.** Re-measure before
 reasoning from it, every time.
+
+## 84. RETRACTION of Section 83, within the hour. Those 98% GPU samples
+were PREFILL. Decode really is idle, and Section 62 was right all along.
+(2026-08-16)
+
+### The error
+
+Section 83 sampled GPU across a whole request and reported "27 of 40
+samples >50%, mean 98%" as evidence that decode is compute-bound. The
+window was dominated by **prefill**, and I read its mean as a decode
+number.
+
+Run 3 of the same experiment provides the calibration that exposes it:
+
+```
+  run3: 62.2s prefill + 2.9s decode = 65.1s total -> 30 samples
+        => 2.17 s per sample
+```
+
+Re-aligning every run against that interval:
+
+```
+  run1  prefill 64.1s = samples 1-29    series 1-29:  ~98%   <- PREFILL
+        decode 133.0s = samples 30-40   series 30-40: 5-7%   <- DECODE
+  run2  prefill 64.3s                   drop at ~24, then 5-7% x16 <- DECODE
+  run3  prefill 62.2s = samples 1-29    all ~98%; decode 2.9s = 1.3
+                                        samples, too short to resolve
+```
+
+**Decode in the slow mode runs at 5-7% GPU.** The GPU is idle, exactly as
+Section 62 measured. My retraction of Section 62 was itself the error,
+and `mx.eval` at 551ms IS a wait, not compute.
+
+### Corrected reading of the three runs
+
+```
+  run1  0.47 tok/s   eval 551ms   decode GPU 5-7%   swapins 0
+  run2  0.46 tok/s   eval 552ms   decode GPU 5-7%   swapins 0
+  run3  22.32 tok/s  eval  17ms   decode GPU ~98%*  swapins 0
+                                  (*1-2 samples only)
+```
+
+So the two modes differ exactly as one would want a discriminator to:
+**fast mode computes (GPU busy, 17ms eval); slow mode waits (GPU idle,
+551ms eval).** And paging is dead in both -- zero swapins, swap flat at
+50.75 MB across all runs.
+
+### What stands, and what this costs
+
+- Section 82's conclusion stands: the 87% is inside `mx.eval`, and it is
+  a **wait**.
+- Section 83's "compute-bound" conclusion is **withdrawn entirely**.
+- The transport work still does not explain it -- every distributed op
+  is microseconds and `last_layer_send` is a separately-timed 101ms.
+  Whatever `mx.eval` waits on is inside the graph, not in a jaccl call
+  the tracing can see.
+
+### Method, and this one is on me
+
+This is the second time in one session I reasoned from a GPU number
+taken over the wrong window (Section 62's was right; Section 83's was
+mis-attributed). The specific failure: **I sampled a whole request and
+compared a mean against a per-phase claim.** The fix is trivial and I
+already had it -- an earlier probe gated sampling on the first streamed
+token so it only measured decode. I did not reuse it.
+
+Rule: **when a metric is claimed for one phase, the sampling window must
+be gated to that phase.** A whole-request average cannot support a
+per-phase claim, and prefill here is 20-45x longer than decode so it
+swamps any mean.
+
+### Next
+
+Re-run GPU sampling gated on first-token-received, so every sample is
+decode-only, and confirm 5-7% in slow mode with adequate n. Then the open
+question returns to Section 82's: what is `mx.eval` waiting on for 550ms
+inside a graph whose distributed ops all complete in microseconds?
