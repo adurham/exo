@@ -1,3 +1,35 @@
+> # ⚠️ SUPERSEDED — THIS DESIGN IS DEAD. DO NOT IMPLEMENT.
+>
+> **Decision date: 2026-08-16.** The PP-prefill -> TP-decode phase swap
+> described below was evaluated and **rejected**. The authoritative
+> decision record is
+> `docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md` **Section 107**
+> (why the swap was dropped) and **Section 108** (why expert-locality
+> placement, the follow-on idea, is also impossible).
+>
+> Why it was rejected, in short:
+> - Full-request math gives only **~11.1%** on a cold 500K request
+>   (TP-only 1584s vs PP+swap+TP 1409s), and **ZERO** on follow-up turns
+>   that hit the prefix cache while still paying the ~37.4s swap.
+> - It costs **all cross-phase concurrency** (Requirement 1) and
+>   cancellation, which TP provides natively.
+> - It needs a cross-rank cache gather that **has never existed**
+>   (`serve_prefill` emits only the local rank's layer-half) plus either
+>   partial-teardown lifecycle surgery or a new push-before-exit
+>   protocol leg.
+> - **Neither topology clears Requirement 4's 400+ tok/s at depth**
+>   (PP 364 / TP 319 at 500K), so the swap converts a miss into a
+>   smaller miss.
+>
+> **The shipped architecture is TP for BOTH prefill and decode.**
+>
+> Kept as a historical record of what was considered and why it does not
+> work. The one piece of this effort that WAS retained and shipped is the
+> DSv4 `CacheList`/`PoolingCache` wire codec (commit `e3b6a0bed`) -- a
+> real fix, and the enabling primitive should a prefill/decode split ever
+> make sense on a larger cluster where both layouts can be co-resident on
+> different node pairs.
+
 # PP-prefill → TP-decode phase swap: design (2026-08-16)
 
 **Status: design, not yet implemented. No code in `src/**`, `mlx/`, or

@@ -16,6 +16,63 @@ Cluster: 2x Mac Studio M4 Max, 128GB each, RDMA over Thunderbolt 5 (jaccl)
 Model: DeepSeek-V4-Flash (native TP and PP sharding both already exist in
 this fork; see "Prior art" below)
 
+## CURRENT STATE (read this first) — updated 2026-08-16
+
+**This document is 13,800+ lines and 100+ sections, written across a long
+campaign, and it contains 17 retractions. Do not read it front-to-back.
+The architecture question it was opened to answer is now CLOSED.**
+
+**DECISION: Tensor Parallel (TP) for BOTH prefill and decode.**
+
+- The **hybrid PP-prefill / TP-decode design is DEAD.** No weight swap,
+  no phase disaggregation. Authoritative record: **Section 107**. The two
+  weight layouts cannot be co-resident on 128GB nodes (~125.4GB of
+  128GB), so it would need a per-request sequential swap costing
+  ~18.7s/rank and ALL cross-phase concurrency, to buy ~11% on a cold
+  500K request and nothing on follow-ups. `docs/pp-prefill-tp-decode-
+  phase-swap-design-2026-08-16.md` is marked SUPERSEDED for the same
+  reason.
+- **Expert-locality placement is also DEAD.** Authoritative record:
+  **Section 108** + `bench/section108_tp_expert_locality_analysis.md`.
+  TP width-shards the experts (axis `ndim-2` of a
+  `(num_experts, out, in)` tensor), so **every rank holds all 256
+  experts at half width** — there is no expert-to-node binding to align,
+  and the MoE `all_sum` is a fixed `(B,L,hidden)` reduction independent
+  of routing.
+- **Why each topology wins its phase** (the reconciliation worth
+  keeping): PP wins prefill because each node owns whole layers — one
+  handoff, zero per-layer sync. TP wins decode because it is the only
+  topology where BOTH nodes do real work on EVERY token of EVERY layer;
+  PP structurally idles one node per single-session request. Requirement
+  3 is single-session, so TP is structurally correct for decode.
+- `DSV4_SHARDING` now defaults to **Tensor** (`start_cluster.sh`, commit
+  `10a843607`).
+
+**MEASUREMENT WARNING that invalidates many numbers in this file:**
+per **Section 55**, `bench/phase3_precheck_depth_throughput.py` divided
+by `chars // 4` as a token estimate while the real ratio is ~5.68
+chars/token — inflating every prefill tok/s figure produced that way by
+**1.42x**. Honest current prefill is **225 / 214 / 202 tok/s** at
+100K/300K/500K, roughly half of Requirement 4's 400+ bar. **Any prefill
+throughput number in this document predating Section 55 must be checked
+for which numerator produced it before being quoted or compared** — this
+includes the widely-cited PP 364-512 and TP 319-427 curves.
+
+**Open work, as of this update:**
+1. Close TP's prefill gap by attacking TP's own overheads (ranked in
+   Section 108): the `EXO_DSV4_SEQ_SPLIT` indexer all_gather is the free
+   lever — a live env toggle, A/B-able with one relaunch and no rebuild.
+2. The ~550ms/token decode stall (Sections 96-101) is **still
+   unexplained** after five refuted hypotheses. Most direct blocker on
+   Requirement 3.
+3. Cancellation teardown-half hardware verification (Sections 97-99);
+   the observation half is fixed and verified.
+
+Sections marked `[SUPERSEDED — see Section N]` carry conclusions that
+were later overturned; they are kept as a record and must not be acted
+on.
+
+
 ## 1. Motivation
 
 On this cluster, under matched thermal conditions, PP (pipeline parallel,
