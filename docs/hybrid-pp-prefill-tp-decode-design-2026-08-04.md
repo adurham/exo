@@ -12574,3 +12574,117 @@ real thing, then stated it slightly stronger than the measurement
 supported ("does not release" vs "does not release until an unrelated
 later event"). The measurement was a snapshot; the claim was about all
 future time. Re-checking the same metric later is what caught it.
+
+## 95. RETRACTION of Section 93's root cause. The callback I blamed is
+unreachable for a single request, and the path that DID run raises
+correctly. I overruled a subagent that had this right. (2026-08-16)
+
+### The correction
+
+Section 93 blamed `batch_generator.py:1286-1295` -- the batched-prefill
+`distributed_prompt_progress_callback`, whose comment says it
+deliberately defers cancellation. That callback is real and it does
+defer. **It is also unreachable for the Section 92 reproduction.**
+
+`batch_generator.py:753` gates the batched path:
+
+```python
+  agreed_slots     = mx_min_int(local_slots, coord)
+  agreed_queue_len = mx_min_int(len(self._queue), coord)
+  if agreed_slots > 1 and agreed_queue_len >= 2:
+      ... _batched_start_task(tasks_batch)   # -> the :1286 callback
+```
+
+The Section 92 repro submitted **one** request at a time. With
+`agreed_queue_len == 1` the condition is false, so control falls to the
+single-request `while` loop at :799 -> `_start_task` -> the callback at
+**:1174-1179**, which is a different function and does the right thing:
+
+```python
+  def distributed_prompt_progress_callback() -> None:
+      self.agree_on_cancellations_fast()
+      if self.should_cancel(task.task_id):
+          raise PrefillCancelled()          # <-- it DOES raise
+```
+
+And `_start_task`'s caller catches it and logs the marker (:804-809). So
+the code I called "the whole bug" was never executed in the runs that
+produced the bug.
+
+### How this happened, and it is the worst instance tonight
+
+The subagent found this, stated it precisely ("a single-request repro
+cannot reach a callback that's only wired up when `agreed_queue_len>=2`"),
+consulted independently, got agreement that stopping was correct, and
+**followed my instruction to stop and report**. I then steered it with
+"Section 93's diagnosis stands. Proceed." -- and it proceeded.
+
+My steer was not baseless, but every fact in it was answering a
+*different* question. I verified that DSv4 has `_forward_steps`, that
+the interruptible chunked path is live (3,601 `PREFILL_ADVANCE` lines),
+and that `EXO_NO_BATCH` is unset so the engine is `BatchGenerator`. All
+true, all irrelevant: `BatchGenerator` being the ENGINE does not mean
+the BATCHED SUBMIT path ran, and that distinction is the entire
+question. I pattern-matched "BatchGenerator is live" onto "the batched
+callback ran" without checking the gate 500 lines above it.
+
+I had explicitly told the subagent to stop rather than improvise around
+a wrong premise, precisely because I had already retracted two claims
+that night. It did exactly that. I overrode it, and I was the one
+improvising.
+
+**Rule, and it is a costly one to have learned twice: a delegate's
+concrete, file:line-specific objection outranks the parent's
+recollection. Verify the objection ON ITS OWN TERMS before overruling
+it** -- the answer to "is this callback reachable" is the gate condition,
+not three adjacent facts about the engine.
+
+### What is now unexplained again
+
+The Section 92 observations are unchanged and still real:
+
+- 3.45s after cancel, a rank blocked in `Event::wait signaled=0 target=1`
+- `PREFILL_CANCELLED_PATH`: **zero occurrences**
+- ~9GB stranded on rank 0 until an unrelated request went idle 12.9 min
+  later (Section 94)
+
+But the explanation is void. The single-request path *should* have
+raised and *should* have logged the marker. It did neither. So the real
+question is now sharper and genuinely open:
+
+**Why did `should_cancel(task.task_id)` return False (or the callback
+not fire at all) on the single-request path during a 40K chunked
+prefill?** Candidates, none verified:
+
+1. `agree_on_cancellations_fast()` is a local-only no-op under
+   `EXO_PP_NO_COORD_COLLECTIVE=1` (Section 93 established this and it
+   still stands). If the cancel arrives on the rank that is NOT polling,
+   or `cancel_receiver.collect()` is drained elsewhere first, the
+   `_cancelled_tasks` set never gains the id on the rank that checks.
+2. The callback may not be invoked at all during the *interruptible*
+   chunked drive. Section 93 assumed `_pipeline_parallel_prefill_steps`
+   calls it per chunk; that was read on the NON-interruptible generator.
+   `prefill_interruptible_start`/`ResumablePrefillSession.advance` is the
+   live path and must be re-read on its own terms.
+3. Task-id mismatch: `should_cancel` keys on `task.task_id`, while the
+   cancel arrives as `cancelled_command_id`. Worth confirming those are
+   the same identifier on this path.
+
+(2) is the most likely and is a pure code question. Answer it before
+writing any more code.
+
+### Code already committed, and its status
+
+Two commits landed before the timeout: `491d5ea35` (metaframe
+PHASE_CANCEL frame type, protocol v4) and `4ff313a42` (chunk-boundary
+cut point + control-authority primitive), plus an uncommitted
+`pp_cancel.py` memory-release helper.
+
+That work is **not invalidated** -- a bilateral cancel frame and a
+quiescent cut point are needed regardless of which callback is at fault,
+and the memory-release ordering is independently correct. But it is now
+built on an unproven diagnosis, it is unreachable dead code until wired
+to whatever the real defect turns out to be, and the protocol-version
+bump to v4 is a live-cluster compatibility change that must not be
+deployed until the diagnosis is settled. Treat all three as
+provisional.

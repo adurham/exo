@@ -134,3 +134,46 @@ def abort_prefill_chunk_boundary_if_requested(
     if group is not None and world_size > 1:
         send_cancel_metaframe(batch_request_uids[0], 1, group=group)
     raise PipelineCancelReceived(batch_request_uids[0])
+
+
+def release_cancelled_task_memory(
+    *,
+    request_uid: int,
+    retained_references: list[object],
+) -> None:
+    """Per-task memory release, in the ONLY order that actually works
+    (design doc Section 93).
+
+    ``mx.clear_cache()`` alone is NOT sufficient: it returns only buffers
+    already sitting in MLX's free pool. Anything still referenced by a
+    live array -- partial KV entries, prefill session state, arrays
+    captured in a progress callback's closure -- is untouched by it. The
+    Section 92 evidence for this is direct: MLX reported 86.70 GB active
+    while the process held 93 GB of IOAccelerator, i.e. ~6-8 GB the
+    allocator had lost track of entirely.
+
+    Order:
+
+    1. Drop the Python references. ``retained_references`` is the
+       caller's list of the cancelled task's KV slots / prefill session
+       state / retained graph handles; it is cleared in place so the
+       caller's own binding stops holding them too.
+    2. ``mx.synchronize()``. Pending async evals may still reference
+       those buffers, and a buffer JACCL is still transmitting from must
+       NOT be freed underneath it. The chunk-boundary cut point is what
+       guarantees transport quiescence here.
+    3. ``mx.clear_cache()``, which can now actually reclaim.
+
+    PER-TASK, never a wholesale reset: with
+    ``EXO_MAX_CONCURRENT_REQUESTS=2`` a second live request's KV must not
+    be swept. The model is NOT unloaded -- the runner returns to ready
+    and serves the next request.
+
+    Also clears this uid's pending cancel-request flag, so the task
+    cannot linger and be re-applied later down the follower-deferral
+    path (a double-finalize).
+    """
+    retained_references.clear()
+    mx.synchronize()
+    mx.clear_cache()
+    _cancel_requested_uids.discard(request_uid)
