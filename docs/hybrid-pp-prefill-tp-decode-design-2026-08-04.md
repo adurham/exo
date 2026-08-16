@@ -13871,3 +13871,108 @@ for each regression suspect, is the code path gated to Pipeline, or is
 it in shared code (`generate.py`'s prefill loop, `cache.py`,
 `maybe_quantize_kv_cache`, mlx-lm's `deepseek_v4.py`, the KV prefix
 cache / snapshot machinery) that both topologies execute?
+
+## 109. The dominant prefill cost is SHARED code, so it caps TP too. And
+the `forward`-span conflation is resolved: KV quantize is a NO-OP on this
+cluster, so the 98% is pure model compute. (2026-08-16)
+
+Two investigations landed; I verified both against the code rather than
+taking the reports.
+
+### The prefill cost is shared, not PP-specific
+
+Both drivers call `model(chunk_tokens, cache=...)` once per chunk:
+
+```
+  PP  (_pipeline_parallel_prefill_steps)  generate.py:569
+  TP  (prefill_batched)                   generate.py:1405
+```
+
+`MLX_JACCL_SHARDING_MODE` only selects the OUTER driver loop; it does not
+gate whether the forward runs. Since Section 99 measured the per-chunk
+`forward` span at **98% of tracked prefill time**, and that span is
+dominated by a call both topologies make, **TP's prefill ceiling is
+capped by the same cost.** Item 3 of the handoff is answered: SHARED, so
+it stays in scope rather than being deprioritized with PP.
+
+### CORRECTION to the subagent report, and it resolves the open question
+
+The report claimed both loops run `model(...) + maybe_quantize_kv_cache(...)`
+and that the conflation of those two is why attribution stalled. **The
+second half is wrong, checked directly:** `quantize_cache_fn` appears at
+`generate.py:570` and `:653` ONLY -- both on the PP path.
+`prefill_batched` never calls it.
+
+More decisive, it does not matter either way:
+
+```
+  constants.py:7   KV_BITS: int | None = None
+  start_cluster.sh EXO_KV_CACHE_BITS=0  (default)
+  mlx-lm/generate.py:293-295
+      def maybe_quantize_kv_cache(prompt_cache, quantized_kv_start,
+                                  kv_group_size, kv_bits):
+          if kv_bits is None:
+              return
+```
+
+**KV quantize is a no-op on this cluster.** It returns on the first line.
+
+So the "the `forward` span conflates model compute with KV quantize"
+caveat -- carried since Section 99 as the reason requirement 4's
+attribution could not proceed -- is **dissolved**. The span is not
+meaningfully conflated: the quantize half costs nothing, and on the TP
+path it is not even called. **The measured +2.03 ms/chunk growth is real
+model compute**, and the proposed "split the timer" experiment is
+unnecessary. That was the single blocking unknown on requirement 4's
+attribution.
+
+Consequence: the remaining prefill levers are the ones Section 108 already
+ranked -- the `EXO_DSV4_SEQ_SPLIT` indexer all_gather (free env toggle),
+the per-chunk `mx_barrier`, and the 43 per-layer all_sums -- plus whatever
+inside the model forward accounts for growth with depth (attention +
+indexer scoring over a growing pooled KV, which is structural).
+
+### One item genuinely unresolved
+
+Whether DSv4's live cache contains ArraysCache/SSM layers, which would
+force `prefill_batched` down a serial fallback via its `_has_arrays_cache`
+check. Not answerable by code reading; needs a runtime check. Worth
+settling before optimizing the TP prefill loop, since it determines
+whether TP even takes the batched path.
+
+## 110. The last decode-stall candidate is REFUTED: the jaccl ACK
+retransmit timer is not reachable from PP decode. (2026-08-16)
+
+`MLX_JACCL_ACK_RETRANSMIT_US` (500ms, `mesh_impl.h:174-180`) was the only
+live candidate for the ~550ms/token stall after five refutations. It is
+now closed:
+
+- DSv4's per-layer forward makes **zero** `mx.distributed.*` calls under
+  Pipeline sharding -- `sharding_group is None`, so every `all_sum` /
+  `all_gather` block is skipped. The 550ms `mx.eval` is not a nested
+  collective wait.
+- PP's only cross-rank ops are `send()`/`recv()`, and neither calls
+  `ack_sync_pre` / `drain_acks` / `jaccl_ack_retransmit_us`.
+  Structurally corroborated by `mesh.cpp`'s QP-budget logic: PP builds
+  `p2p_retry_connections_` and skips `pool_connections_`; TP does the
+  opposite. The ACK/pool machinery that owns the 500ms timer is wired
+  for TP's collective path, not PP's p2p path. PP's single
+  `ack_connections_` use is a warmup handshake that fires once at
+  process start, never per token.
+
+**Six hypotheses, six refutations.** The stall is unexplained and the
+candidate list is empty. That is an honest state, not a failure -- but
+it means the next step must be instrumentation, not another guess.
+
+### What this means for the shipping topology
+
+The ACK-retransmit path IS reachable under TP (its `all_sum`/`all_gather`
+route through `reliable_all_reduce_v2`/`reliable_all_reduce`, which read
+`jaccl_ack_retransmit_us`) -- but only as a **loss-triggered fallback**,
+not a per-token cost. So it is not a known TP blocker.
+
+Critically: **whether the 550ms mechanism itself affects TP decode is
+unresolved**, because the mechanism is still unidentified. It cannot be
+ruled out for the topology we are shipping. The cheapest way to find out
+is no longer a code read -- it is a TP decode timing run, which the
+pending relaunch onto TP will produce for free.
