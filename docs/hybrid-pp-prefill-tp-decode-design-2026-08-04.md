@@ -13172,3 +13172,72 @@ Note also: PP's own FAST path already shows ~20 tok/s, and TP short-
 context showed 37.5 with MTP. Neither has ever been measured at 500K.
 Building a weight-swap mechanism before those measurements is building
 on a number we know is broken.
+
+## 101. RETRACTION: the shadowed-`generation_stream` fix did NOT fix the
+34x decode step. Hypothesis refuted on hardware. (2026-08-16)
+
+Commit `f3573fc17` removed a genuine defect: exo's
+`generator/generate.py` defined its own
+`generation_stream = mx.new_stream(...)`, shadowing
+`mlx_lm.generate.generation_stream`. Decode (`batch_generate.py:15`,
+imported from mlx_lm) and PLAIN prefill (mlx_lm's `stream_generate`) ran
+on mlx_lm's stream; CHUNKED prefill (this file's
+`_pipeline_parallel_prefill_steps`) ran on exo's. Two different streams
+under one name.
+
+The theory: a cache built by chunked prefill was last produced on a
+different stream than decode updates it on, so every per-token in-place
+cache update inherited a cross-stream event dependency -- idle GPU, CPU
+parked in `EventImpl::wait`. It fit all three measured facts (16.1 vs
+554ms; the step exactly at the plain/chunked branch; flat with depth
+because a stream identity is a static code property).
+
+**It is wrong.** A/B on the deployed fix, same boundary as Section 85:
+
+```
+  prompt_tokens   path      eval median      tok/s
+       1925       plain        15.3ms        20.20
+       1928       plain        15.3ms        20.39
+       2364       chunked     656.7ms         0.66
+       2364       chunked     640.4ms         0.66
+```
+
+Deployment verified, not assumed: node HEAD `9e3f4ad0e`, and
+`_mlx_lm_generation_stream` present at `generate.py:13` and `:303` on
+the node itself (editable install, so the runner loads that source).
+
+The step function is intact and unchanged. **Stream identity is not the
+mechanism.** (The fix is still correct on its own merits -- two objects
+sharing one name across module boundaries is a real hazard -- so it
+stays, but it is not the cause and must not be reported as one.)
+
+### What this does to the candidate list
+
+Now eliminated by direct measurement, for the chunked-vs-plain step:
+transport, sleep granularity, depth-scaling compute, the MoE all_sum
+fence (TP-only), and now cross-stream identity.
+
+The step is still perfectly reproducible at
+`EXO_PREFILL_STEP_SIZE=2048`, so SOMETHING the chunked path leaves
+behind is responsible. The static hunt (`bench/section100_timeout_
+constant_hunt.md`) left one live candidate: `MLX_JACCL_ACK_RETRANSMIT_US`
+= 500,000us (`mesh_impl.h:174-180`), a flat depth-independent 500ms
+collective-ACK retransmit timer, whose own comments document it
+previously producing ~1.0s stalls on this exact PP batched-decode path.
+Reachability was never confirmed -- it depends on whether the last
+layer's `original_layer(...)` forward invokes a collective internally,
+which no current Python timer isolates. Note the shape fits: ~500ms
+constant, plus real work, lands near the observed 550-680ms.
+
+That is now the top candidate and it is testable as a live gate-toggle
+(the env var is already plumbed through `start_cluster.sh`) -- no
+rebuild.
+
+### Method note
+
+Fourth mechanism hypothesis for this bug, fourth refutation. What made
+this one cheap: the fix was one line, the A/B was a live gate-toggle on
+one build, and deployment was verified on the node before concluding.
+The pattern that keeps producing wrong answers is reasoning from a
+mechanism that FITS the evidence to a claim that it CAUSES it -- fit is
+not causation, and only the toggle settles it.
