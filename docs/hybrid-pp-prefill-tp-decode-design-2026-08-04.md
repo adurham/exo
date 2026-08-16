@@ -10163,3 +10163,97 @@ per-size-class pool-occupancy counter, logged per token, distinguishes
 the three remaining candidates that black-box timing cannot:
 pool drained / repost never fires / pool full but the race is lost
 anyway. That is one number and it ends the guessing.
+
+## 66. The recv-pool theory is DEAD: a controlled A/B shows the pool has
+zero effect. (2026-08-16)
+
+### The experiment that should have been run first
+
+`MLX_JACCL_DATA_RECV_POOL` gates the standing pre-posted recv pool, and
+the C++ comment has advertised "=0 to A/B against the old behaviour"
+since Section 52. **That A/B was never actually runnable**: the variable
+was never added to `start_cluster.sh`'s runner env ALLOWLIST, so setting
+it in the launching shell did nothing. Threaded it (exo commit this
+section), then toggled it with no rebuild and no other change:
+
+```
+  pool ON  (S64 widened build) : 0.48 / 0.47 tok/s   34 lost first-sends
+  pool OFF (same build, gate=0): 0.48 / 0.47 tok/s   34 lost first-sends
+```
+
+**Byte-identical.** Same throughput, same `peer_got_count=0/1` count,
+same 28/28 slow gaps. The standing recv pool -- original or widened --
+has **no measurable effect on this path**.
+
+### What this kills
+
+The empty-FIFO UC-drop explanation for the decode stall is refuted as a
+*cause*. Sections 63/64/65 all rested on it:
+
+- Section 63 named the 500ms retransmit timer correctly (that part
+  stands -- it is measured, per-token, 500.4-500.7ms).
+- Section 64 attributed the underlying lost send to an uncovered size
+  class in the recv pool. **Wrong**: disabling the pool entirely changes
+  nothing.
+- Section 65 already retracted the 23.32 tok/s result. This closes the
+  remaining question of whether the pool mattered at all. It does not.
+
+### And it puts a question mark over Section 52
+
+Section 52's headline was "true lost-send stalls 1403 -> 0" attributed
+to adding this pool. That comparison was **between rebuilds**, not a
+gate toggle -- because the gate was not wired. Whatever produced
+1403 -> 0 in that session, this measurement says it was not the pool
+mechanism per se, or the effect is specific to traffic this decode path
+does not generate. Section 52's transport work may still have been
+valuable; its *causal attribution* is now unsupported by the only
+controlled test that has ever been run on it.
+
+### What still stands
+
+Everything measured, as opposed to inferred:
+
+- ~2.09 s/token, of which `last_layer_send` is a fixed 500.4-500.7ms
+  (11 consecutive samples, ~0.3ms jitter).
+- Round 0 barrier reports `peer_got_count=0/1` at 42us; retransmit
+  posted at 43us; round 1 barrier returns at 500,072us. Healthy calls on
+  the same link: 56-150us.
+- Both GPUs ~5% utilised throughout. Rank 1 is not starved
+  (recv_header_wait 0.1-2.7ms).
+- The stack demonstrably reaches ~23-24 tok/s sometimes (Section 65's
+  outlier, and the degenerate-prompt runs).
+
+So: first sends are lost, recovery costs a fixed 500ms, and **the
+receive-side FIFO is not why**.
+
+### Where that leaves the hypothesis space
+
+The loss is on the SENDER side or in the fabric, not in receiver buffer
+availability. Candidates now, none tested:
+
+1. **Send-queue / completion handling on the sender.** `SEND_INFLIGHT`
+   depth, or a completion being reaped by the wrong poll loop -- note
+   the data QP is polled by BOTH `send()` and `recv()`, and each
+   discards the other's completions by call_id.
+2. **UC packet loss under a specific burst shape.** 5 chunks x 16380B
+   back-to-back per token, on a link that is otherwise idle. Genuine
+   wire loss would not care about recv buffers.
+3. **A sequencing bug**: the peer may be *in a different call* when the
+   frame lands -- `consume_recv` validates `(seq, chunk)` and discards
+   mismatches, which would present exactly as "peer got nothing" while
+   the wire delivered fine.
+
+(3) is the most interesting and the cheapest to test: it predicts the
+frame ARRIVES and is discarded, versus (1)/(2) where it never lands. The
+existing `[jaccl] recv() discarded stale message` log line already
+distinguishes them and can be counted directly.
+
+### Method note
+
+Four consecutive hypotheses in this campaign (Section 57's threshold,
+Section 59's sparse indexer, Section 64's size class, Section 65's pool
+exhaustion) were each coherent, in-tree, and wrong. The common failure:
+reasoning from code structure to cause, then measuring only the
+predicted outcome. The A/B in this section took one launch and settled
+in minutes what three sections of code reading did not. **Toggle the
+gate before writing the fix.**
