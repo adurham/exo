@@ -10977,3 +10977,75 @@ Section 71's fix intact and reproducible: **22.61 / 22.84 tok/s
 needle-verified**, versus 0.47 before, across separate deployments.
 Residual drops remain, cost ~50ms each instead of ~1000ms, and now have
 no identified software cause.
+
+## 76. QUALIFICATION of Section 71: the 25ms default BREAKS generation
+at depth. Raised to 100ms. (2026-08-16)
+
+### What testing at real depth found
+
+Every number in Sections 71-75 was taken at 14K context. Requirement 3
+is judged at 500K, so the first thing to do was re-measure deeper. At
+70K:
+
+```
+                      decode        needle    prefill
+   25ms (shipped)     0.00 tok/s     NO       0.0 tok/s
+  100ms               0.59 tok/s     YES      248.8 tok/s
+  500ms (original)    0.47 tok/s     YES      227.2 tok/s
+```
+
+**The 25ms default produces zero tokens at 70K**, with both ranks
+throwing `drain_acks STALLED` / `all_gather STALLED ... no forward
+progress for >8000ms; UC completion lost`.
+
+### Why, and why I should have expected it
+
+Deeper context means larger activations and more chunks per transfer, so
+the real in-flight window grows with depth. A 25ms quiet period that
+sits comfortably above the round trip at 14K sits BELOW it at 70K, so
+the drain declares live traffic lost and the recovery machinery
+thrashes.
+
+This is exactly the failure Section 51 documented when the global
+retransmit timer was lowered to 10ms -- "fires below the real round trip
+and retransmits frames that are merely in flight, producing zero
+output". I quoted that finding in Section 71's own commit message as the
+reason the p2p knob was safe to tighten, then made the same class of
+error one level down: **I validated the constant at a single operating
+point and shipped it as a global default.**
+
+### The correction
+
+Default raised to **100ms**, the tightest value verified safe at both
+depths tested. At 70K it is still 26% faster than the original 500ms; at
+14K it retains most of the amplifier reduction (still ~680x the healthy
+69-150us p2p round trip). The knob's comment now carries the measured
+table and an explicit instruction to re-verify at 70K and deeper before
+lowering it again.
+
+### What this does to the headline number
+
+Section 73's "22.61 tok/s, 48x" stands **at 14K only**, and that
+qualification now matters more than it did when I wrote it. At 70K the
+honest number is 0.59 tok/s. The decode collapse is not solved at depth
+-- it is improved 26% at 70K and dramatically at 14K, and the two are
+not the same claim.
+
+Requirement 3's bar is 30 tok/s at 500K. Measured today:
+
+```
+   14K:  22.8 tok/s   (100ms not yet re-measured here; 25ms gave this)
+   70K:   0.59 tok/s
+  500K:   still unmeasured
+```
+
+The depth trend is the story now, not the 14K peak.
+
+### Method note
+
+Third instance this session of a timing constant that looked correct at
+the point it was measured and was wrong elsewhere (Section 51's global
+10ms, Section 72's SEND_INFLIGHT=1, this). The needle gate caught all
+three. The standing rule extends: **a timing constant is only validated
+at the depths you actually ran it at** -- and for this system that means
+at minimum a shallow and a deep point before it becomes a default.
