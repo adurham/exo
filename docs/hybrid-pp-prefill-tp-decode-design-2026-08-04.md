@@ -11425,3 +11425,91 @@ Requirement 3: `0.65 tok/s` at 14K, needle YES, on the shipped build.
 The bottleneck is now a single identified call with a measured cost, an
 idle GPU, and three falsifiable hypotheses -- which is a materially
 better position than "the transport loses frames sometimes".
+
+## 83. The GPU is 98% BUSY during the slow phase. Decode is
+COMPUTE-bound, not transport-bound. The entire campaign was misaimed.
+(2026-08-16)
+
+### The measurement that overturns it
+
+Sampled GPU utilisation on rank 0 for the whole of a slow run
+(0.47 tok/s, `last_layer_eval` 551ms), alongside swap counters:
+
+```
+  GPU series: 96 0 94 98 97 98 98 99 98 98 98 98 98 98 98 0 98 96 98 97
+              98 97 98 98 98 98 97 97 97 | 7 6 6 6 6 6 6 5 5 6 6
+                                          ^ request finished here
+
+  27 of 40 samples >50%, mean of those 98%
+  swapins_delta = 0
+  swap usage    = 50.75 MB -> 50.75 MB (unchanged)
+```
+
+**The GPU is saturated during the slow phase.** The paging hypothesis is
+dead in the same measurement -- zero swapins, swap flat.
+
+### Two of my own findings are now retracted
+
+1. **"Both GPUs ~5% idle"** (Section 62, carried forward through
+   Sections 63-82 as the reason `mx.eval` "must be waiting"). That was
+   measured on the widened-pool build during a genuinely different
+   failure mode. On the current build the GPU is ~98% busy. I kept
+   quoting it without re-measuring, which is exactly the stale-evidence
+   error this doc has flagged repeatedly.
+
+2. **"The 600ms eval is a wait"** (Section 82). It is not. It is real
+   compute.
+
+### What this means
+
+`mx.eval` at 551ms with a saturated GPU is the DSv4 MoE forward actually
+running. Decode is **compute-bound**, and no amount of transport work --
+drain quiet periods, recv pools, retransmit timers, send-burst depth --
+can move it. Sections 63 through 82 were tuning a phase that is 13% of
+the token while the other 87% was compute nobody had measured.
+
+### The real question, and it is a good one
+
+The fast mode has `last_layer_eval` at **17ms**; the slow mode has it at
+**551ms**. Same model, same prompt, same build, same node. That is
+**32x more compute per token for identical work.**
+
+That is not variance, thermal throttling, or contention -- it is the
+signature of a **different code path**. Candidates, all testable:
+
+1. **Expert routing collapse.** DSv4 is MoE with a sparse indexer
+   (`EXO_DSV4_INDEX_TOPK=512`). If routing degenerates so every token
+   activates far more experts than intended, per-token FLOPs jump by
+   exactly this kind of factor while the GPU stays busy.
+2. **A dense fallback.** If the sparse-attention or MoE kernel bails to
+   a dense path on some condition (batch shape, cache length, a
+   non-contiguous tensor), the same forward costs orders of magnitude
+   more.
+3. **KV cache recompute.** If the fast path reuses cached keys/values
+   and the slow path recomputes them, the extra work is the whole
+   history rather than one token.
+
+All three predict the same observable I have not yet collected:
+**per-layer or per-op timing inside the eval**, and FLOPs/expert counts
+per token.
+
+### Corrected status
+
+Requirement 3 is a **compute** problem at 14K, not a transport one. The
+transport work still stands on its own merits (the drain fix genuinely
+cut `last_layer_send` 500ms -> 101ms, and that phase is now 13% of a
+much larger total), but it was never going to reach 30 tok/s.
+
+Measured today: 0.47-0.65 tok/s typical, 22.27 tok/s when the fast path
+is taken. The stack demonstrably reaches 22 tok/s -- so the target is
+achievable if whatever selects the slow path can be identified and
+avoided.
+
+### Method note, the fourth of the session
+
+Every wrong turn tonight traces to reusing a measurement taken under
+different conditions: Section 57 (prompt content), Section 63 (the
+widened-pool build's 500ms send), Section 80 (a frozen loss counter),
+and now Section 62's GPU-idle reading. **A measurement is only valid for
+the build and configuration it was taken on.** Re-measure before
+reasoning from it, every time.
