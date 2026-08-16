@@ -11352,3 +11352,76 @@ materialisation -- exactly as Section 62 did for `run_forward`. That
 attribution has never been taken on a build where the send phase was not
 swamping everything. Until it exists, any further timer work is tuning
 the 13% while ignoring the 87%.
+
+## 82. The 87% is localized: it is entirely inside `mx.eval`, and the
+GPU is idle while it runs. (2026-08-16)
+
+### The split
+
+Section 81 found `last_layer_body_and_eval` at 662ms, ~87% of the
+per-token cost, but that timer wrapped two unrelated operations. Split
+them:
+
+```
+  [LAYER_PHASE] last_layer_build=0.1ms last_layer_eval=634.4ms
+  [LAYER_PHASE] last_layer_build=0.1ms last_layer_eval=600.0ms
+  [LAYER_PHASE] last_layer_build=0.1ms last_layer_eval=645.1ms
+  [LAYER_PHASE] last_layer_build=0.1ms last_layer_eval=601.9ms
+```
+
+Aggregate over 41 tokens: `build` **0.11ms**, `eval` **~658ms**.
+
+**The lazy graph build is free. 100% of the cost is inside
+`mx.eval(output)`.** Nothing in the layer forces synchronous work -- no
+stray `.item()`, no shape read, no blocking call in the Python path.
+
+### What that means
+
+`mx.eval` materializes the graph, and for rank 0's LAST layer that graph
+carries the cross-rank dependency: rank 1's contribution must arrive
+before the output can be realized. Both GPUs sit at ~5% utilisation
+throughout (Section 62's ioreg sampling, 44 of 45 samples idle). A
+658ms phase with an idle GPU is not computing -- **it is waiting on the
+peer inside `mx.eval`.**
+
+Rank 1 shows the same ~660ms phase, so both ranks are blocked inside
+eval simultaneously. That is the mutual-block shape Section 62 suspected
+and could not localize; it is now pinned to a single call.
+
+### Why the transport work did not fix it
+
+Sections 63-80 tuned the send path and the retransmit timers. Those are
+real and the drain fix genuinely cut `last_layer_send` from 500ms to
+101ms. But the send phase is 13% of the token; the wait inside `mx.eval`
+is 87% and was never instrumented until now. Every timer change was
+optimizing the smaller half.
+
+### Open question, sharply stated
+
+What is `mx.eval` waiting on for ~600ms when the healthy p2p round trip
+is 69-150us and the barrier p50 is 39us?
+
+The dependency is graph-internal, so it is not visible to the jaccl
+call-level tracing that this campaign has relied on. Candidates:
+
+1. The graph nests a `mx.distributed.recv_like` whose completion is
+   gated by the same 100ms drain quiet period -- but 600ms is 6x that,
+   so it would have to fire repeatedly.
+2. MLX's own scheduler serializes the eval against the concurrent
+   `send()` on the same stream, so the wait is a local queueing artifact
+   rather than a network one.
+3. The activation the last layer needs is being recomputed rather than
+   reused, and the 600ms is genuine compute on a GPU that ioreg is
+   sampling wrong.
+
+(2) and (3) are distinguishable with an `mx.synchronize()` immediately
+before the eval and a stream-level trace; (1) is testable by varying the
+drain quiet and watching whether `last_layer_eval` moves with it -- if
+600ms is insensitive to that knob, the wait is not the drain.
+
+### Standing status
+
+Requirement 3: `0.65 tok/s` at 14K, needle YES, on the shipped build.
+The bottleneck is now a single identified call with a measured cost, an
+idle GPU, and three falsifiable hypotheses -- which is a materially
+better position than "the transport loses frames sometimes".
