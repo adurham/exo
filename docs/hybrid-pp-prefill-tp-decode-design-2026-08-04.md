@@ -8837,3 +8837,205 @@ no per-transfer cost, no cross-rank key matching), and it removes a
 confound from every future measurement. The measurement apparatus is
 also now trustworthy (`usage.prompt_tokens` fixed, Section 50). None of
 that depends on which decode path we ultimately select.
+
+## 54. THE DECODE COLLAPSE IS A THRESHOLD BUG AT
+`EXO_PREFILL_STEP_SIZE=2048`, NOT A STRUCTURAL CEILING. Sections 52 and
+53 are both superseded. (2026-08-15)
+
+### Read this first
+
+Section 52 concluded requirement 3 was structurally out of reach
+(~0.5 tok/s, "PP serialization at concurrency=1"). Section 53 corrected
+that to "premature, we measured the wrong path" and staged an A/B
+against DSpark speculation.
+
+**Both are now superseded by measurement.** The batched-decode path is
+not slow. It runs at ~25 tok/s and falls off a cliff at a single
+hardcoded constant. No relaunch was needed to find this -- the
+reproduction was sitting on the live cluster the whole time, and the
+A/B that Section 53 staged was never necessary.
+
+### The measurement
+
+Live cluster, `EXO_PP_BATCHED_DECODE=1`, production `-0731` checkpoint,
+concurrency=1, single session. Per-token inter-arrival latency measured
+directly from the SSE stream (`bench/pertoken_latency_probe.py`), NOT
+derived from `usage.*` -- that field family had a real bug (Section 50)
+and every number depending on it is suspect until re-derived.
+
+```
+  prompt_tokens    p50 inter-token gap    implied decode
+        16                39.5 ms            25.30 tok/s
+      1253                40.6 ms            24.63 tok/s
+      1618                40.6 ms            24.62 tok/s
+      2043                40.9 ms            24.45 tok/s   <- fast
+      ----------------------------------------------  2048 = EXO_PREFILL_STEP_SIZE
+      2078              2045.5 ms             0.49 tok/s   <- slow
+      2103              1644.8 ms             0.61 tok/s
+      4896              2149.1 ms             0.47 tok/s
+    300000 (S52)        2170.0 ms             0.46 tok/s
+```
+
+**A 50x throughput collapse across 35 tokens of prompt**, bracketing
+exactly 2048. This is not a curve, not depth scaling, not thermal, not
+transport. It is a branch.
+
+**The cost does not grow after the cliff.** 2,078 tokens and 300,000
+tokens cost essentially the same per token across a 145x context
+increase. Whatever this is, it is a fixed penalty switched on by a
+predicate -- a STATE problem, not a COMPUTE problem.
+
+### The branch
+
+Two sites, same constant, same predicate:
+
+```
+generate.py:806   prefill():
+                    if is_pipeline and num_tokens >= prefill_step_size:
+generate.py:1005  prefill_interruptible_start():
+                    if not (is_pipeline and num_tokens >= prefill_step_size):
+                        return None
+```
+
+`prefill_step_size` is `EXO_PREFILL_STEP_SIZE`, live value 2048
+(start_cluster.sh:72, "validated 2026-07-13, +7% prefill at all context
+levels; 4096 breaks quality").
+
+Below the threshold: prefill runs through `stream_generate`, and the
+chunked-prefill drive never engages. At or above it: prefill runs
+through `pipeline_parallel_prefill` / `ResumablePrefillSession`. Decode
+afterwards is 40 ms/token in the first case and 1.6-2.1 s/token in the
+second.
+
+### Leading mechanism: `queue_sends` leaking into decode
+
+NOT yet proven -- stated as the leading hypothesis with its disproof
+condition, not as a finding.
+
+Only the `>= prefill_step_size` branch ever sets
+`set_pipeline_queue_sends(model, queue_sends=True)` (generate.py:807,
+generate.py:1029). `queue_sends=True` makes the metaframe layer QUEUE
+its `mx.distributed.send` rather than putting it on the wire, to be
+flushed later by `flush_prefill_metaframe_sends()`
+(auto_parallel.py:171).
+
+If that state is still live during decode, every decode step's
+activation send is deferred and the peer rank blocks on data sitting in
+a local queue. **That is exactly the signature Section 52 measured and
+misread**: every slow barrier reporting `peer_got_count>=1/1
+peer_has_all=1`, which Section 52 read as "blocked on the peer's
+compute." It was never the peer's compute. It is plausibly our own send
+sitting in a queue, and p50=39us on the same link proves the wire was
+never the problem.
+
+**In-tree corroboration.** `pp_metaframe.py:180` documents a reentrancy
+bug in this exact mechanism, marked *"The FIX (not yet wired)"*: plain
+contextvars do not give a suspended generator an isolated context (PEP
+567 dropped PEP 550's generator-context isolation), so a paused prefill
+generator and an interleaved decode step share one context. The note
+states that whoever drives an interruptible prefill generator MUST
+resume it via a captured `contextvars.copy_context().run(...)`, never a
+bare `next()`/`send()`.
+
+`ResumablePrefillSession` observes this correctly (`self._ctx.run(...)`
+at pp_prefill_session.py:204, :279, :388). **The outer generator does
+not**: generate.py:1047 is a bare `next(outer_gen)` and generate.py:1123
+is a bare `drive.outer_gen.send(None)`. That is precisely the caller
+discipline the warning says is required and not yet wired -- and it
+exists only on the >=2048 path.
+
+So the hypothesis is coherent end to end: chunked prefill is reachable
+only at >=2048 tokens; it is driven through the ambient context in
+violation of a documented in-tree invariant; and the state it can
+corrupt (`queue_sends`) has exactly the observed effect.
+
+### Ruled out, by reading the code rather than assuming
+
+- **Eligibility fallback.** `is_eligible_for_batched_decode()` takes
+  only `(has_images, has_tools, uses_speculative_decode,
+  sharding_is_pipeline, batched_decode_enabled)`. Context length is not
+  an input, deliberately: it is a documented invariant that eligibility
+  is a pure function of request payload plus static config, never
+  per-rank mutable state, because an `is_prefix_cache_hit` input
+  previously caused a real cross-rank divergence bug. Requests are not
+  silently falling back at depth.
+- **Rendezvous window.** `EXO_BATCHED_PREFILL_RENDEZVOUS_MS=200` is a
+  one-time pre-first-step cost (runner.py:526), not per-token.
+
+### Causation test (needs a relaunch; not yet run)
+
+Single arm, one variable: launch with `EXO_PREFILL_STEP_SIZE=999999`,
+everything else identical, `EXO_PP_BATCHED_DECODE=1` unchanged. That
+forces every prompt below the threshold and onto the fast path.
+
+Predicted: decode holds ~25 tok/s at 4,896 and 12,181 tokens, where it
+currently measures 0.47. If it holds, causation is proven. If it does
+not, the mechanism above is wrong and should be recorded as such.
+
+**The env var is the DIAGNOSTIC, not the fix.** 999999 forces
+non-chunked prefill everywhere, which sacrifices prefill throughput at
+depth and likely breaks at 100K+. Run it at modest depths (5K-15K) to
+establish causation only. The real fix is the context-discipline repair
+at generate.py:1047/1123, and requirement 4's prefill measurement must
+NOT be taken under this config -- it is not a shippable configuration.
+
+### What this retires
+
+- **Section 52's structural conclusion.** Dead. Pipeline serialization
+  does not switch on at 2,048 prompt tokens; a 2-stage bubble exists at
+  1,618 tokens too, and there it costs 40 ms.
+- **Section 53's A/B.** Unnecessary. It was designed to answer "is
+  batched-decode the problem, or is missing speculation the problem?"
+  Batched-decode reaches 24.6 tok/s. It was never the wrong path.
+- **A "fixed per-token overhead" reading** (raised in review). Refuted:
+  a fixed cost would appear at short context. It does not.
+
+### Requirement 1 / requirement 3 interaction, now explicit
+
+Worth recording because it nearly cost us the wrong decision. Had the
+Section 53 A/B "won" on its speculation arm, it would have satisfied
+requirement 3 by REOPENING requirement 1. The batched-decode eligibility
+gate rejects speculative requests outright, and says why:
+
+> `uses_speculative_decode` -- "MTP/DSpark accept a VARIABLE token count
+> per step; the batched scheduler protocol assumes exactly 1 token per
+> active slot per step -- KNOWN INCOMPATIBLE, not a missing test."
+
+The N=2 concurrent-admission machinery (MSG_KIND_PREFILL, single-writer
+`tick()`) lives in the batched glue. Speculation and batched decode are
+mutually exclusive by construction, so "make PP speculation work" is not
+a free win for requirement 3 -- it trades requirement 1 away. Fixing
+batched decode is the only route that satisfies both.
+
+### Honest status of requirement 3
+
+24.6 tok/s measured against a 30 tok/s bar -- but **at short context, on
+the fast side of the cliff.** This is NOT a 500K number and must not be
+quoted as one. Real attention scaling past the threshold still has to be
+paid, and decode at 500K has never been measured on any working path
+(the original Section 17 gap, still open).
+
+What has changed is the size and nature of the gap: "62x short and
+structurally out of reach" was wrong by roughly two orders of magnitude.
+Fixing the cliff is necessary; it is not yet proven sufficient.
+
+### Also observed
+
+The cluster took a jaccl NIC/QP fault mid-sweep (`p2p_retry_send_bitmask:
+local send-slot completion never arrived -- NIC/QP fault, not a
+peer-liveness issue`, followed by `reconnect_fresh rank=1 ENTER`) and
+re-placed itself. It recovered clean without intervention and all
+numbers above are post-recovery. This is the Section 30/31 hard-crash
+family recurring -- still not fully closed.
+
+### New tooling
+
+`bench/pertoken_latency_probe.py` -- streams a request and reports the
+full inter-token gap DISTRIBUTION (min/p50/p90/p99/max) plus a
+uniformly-slow vs bimodal shape verdict, rather than a single mean
+throughput number. Deliberately counts tokens locally instead of
+trusting `usage.*`. Built because this campaign twice drew wrong
+conclusions from aggregate tok/s: an 18.01 tok/s figure from a 52-token
+sample (Section 52), and a 10ms retransmit experiment where every
+transport metric improved while generation produced zero tokens
+(Section 51). A distribution would have caught both immediately.
