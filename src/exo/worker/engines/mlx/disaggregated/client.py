@@ -1,12 +1,18 @@
 import socket
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import BinaryIO, cast
 
 import mlx.core as mx
 from loguru import logger
-from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
+from mlx_lm.models.cache import (
+    ArraysCache,
+    CacheList,
+    KVCache,
+    PoolingCache,
+    RotatingKVCache,
+)
 
 from exo.worker.disaggregated.protocol import (
     ArraysState,
@@ -20,6 +26,8 @@ from exo.worker.disaggregated.protocol import (
 from exo.worker.disaggregated.server import PrefillRequest, write_request
 from exo.worker.engines.mlx.disaggregated.adapter import (
     chunk_to_mlx_nhd,
+    composite_cache_offset,
+    decode_composite_cache,
     inject_arrays_cache,
     inject_kv_chunk,
     inject_rotating_kv_chunk,
@@ -105,7 +113,9 @@ def remote_prefill_fetch(
 
 def ingest_into_mlx_cache(
     result: PrefillResult,
-    caches: list[KVCache | RotatingKVCache | ArraysCache],
+    caches: Sequence[
+        KVCache | RotatingKVCache | ArraysCache | CacheList | PoolingCache
+    ],
     *,
     start_pos: int = 0,
 ) -> int:
@@ -115,7 +125,18 @@ def ingest_into_mlx_cache(
     )
     final_offset = start_pos + max_received
 
+    # Composite (DSv4-Flash CacheList/PoolingCache) layers carry no KVChunks;
+    # their token count comes from the restored cache's own offset.
+    composite_offset = 0
+
     for i, cache in enumerate(caches):
+        if isinstance(cache, CacheList | PoolingCache):
+            if i not in result.arrays:
+                continue
+            decode_composite_cache(cache, result.arrays[i])
+            composite_offset = max(composite_offset, composite_cache_offset(cache))
+            continue
+
         if i in result.kv_chunks:
             chunks = result.kv_chunks[i]
             if len(chunks) == 1:
@@ -144,4 +165,6 @@ def ingest_into_mlx_cache(
         if i in result.arrays and isinstance(cache, ArraysCache):
             inject_arrays_cache(cache, result.arrays[i])
 
+    if max_received == 0 and composite_offset > 0:
+        return composite_offset
     return final_offset
