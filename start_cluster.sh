@@ -1348,6 +1348,14 @@ for NODE in "${NODES[@]}"; do
     # 1403->0 result came from comparing rebuilds, not from toggling this gate.
     # Threaded 2026-08-16 so the gate is genuinely testable.
     [ -n "${MLX_JACCL_DATA_RECV_POOL:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_DATA_RECV_POOL=$MLX_JACCL_DATA_RECV_POOL"
+    # MLX_JACCL_P2P_DRAIN_QUIET_US: quiet period for the p2p send()/recv()
+    # drain loops only (Section 71), split out from the collective ack
+    # retransmit timer. Default 25ms in the C++. Threaded here from the
+    # start -- Section 66's lesson was that a gate nobody can toggle is a
+    # gate nobody can A/B, and MLX_JACCL_DATA_RECV_POOL sat untestable for
+    # a fortnight because of exactly that. Set to 500000 to restore the
+    # old shared-timer behaviour for comparison.
+    [ -n "${MLX_JACCL_P2P_DRAIN_QUIET_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_P2P_DRAIN_QUIET_US=$MLX_JACCL_P2P_DRAIN_QUIET_US"
     [ -n "${MLX_LOG_ARRAY_DESC_COUNT_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=$MLX_LOG_ARRAY_DESC_COUNT_INTERVAL"
     [ -n "${MLX_PER_TYPE_DUMP_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_DUMP_INTERVAL=$MLX_PER_TYPE_DUMP_INTERVAL"
     [ -n "${MLX_PER_TYPE_TRACK:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_TRACK=$MLX_PER_TYPE_TRACK"
