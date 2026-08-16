@@ -763,6 +763,11 @@ class BatchGenerator(Engine):
                     # Treat batched prefill cancellation as "all tasks
                     # cancelled" — they all go back through the cancellation
                     # path. Phase 5 stress-tests this.
+                    # Same greppable marker as the step() handler below.
+                    logger.info(
+                        "PREFILL_CANCELLED_PATH: prefill cancelled inside "
+                        "_batched_start_task (batched submit path)"
+                    )
                     uids = []
                 except Exception as e:
                     # Surface the error against the first task in the batch;
@@ -797,6 +802,11 @@ class BatchGenerator(Engine):
                 with T("batch_gen.start_task"):
                     uid = self._start_task(task)
             except PrefillCancelled:
+                # Same greppable marker as the step() handler below.
+                logger.info(
+                    "PREFILL_CANCELLED_PATH: prefill cancelled inside "
+                    "_start_task (single-task submit path)"
+                )
                 continue
             except Exception as e:
                 self._send_error(task, e)
@@ -873,10 +883,16 @@ class BatchGenerator(Engine):
             # verdict on the same request and take this path in
             # lockstep. Swallowing it on one rank only would desync;
             # swallowing it after an agreed collective does not.
+            # The "PREFILL_CANCELLED_PATH" token is a stable, greppable
+            # marker: it is the ONLY proof available to an off-box harness
+            # that a cancel landed inside the mid-prefill window rather than
+            # after prefill completed. Asserted on (in ~/exo.log) by
+            # bench/section85_prefill_cancel_hardware_test.py -- do not
+            # reword it without updating that harness.
             logger.info(
-                "prefill cancelled during a deferred (batched-decode) "
-                "prefill inside step(); reporting the cancellation and "
-                "keeping the runner alive"
+                "PREFILL_CANCELLED_PATH: prefill cancelled during a "
+                "deferred (batched-decode) prefill inside step(); "
+                "reporting the cancellation and keeping the runner alive"
             )
             return self._apply_cancellations()
 

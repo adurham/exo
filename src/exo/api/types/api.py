@@ -274,6 +274,13 @@ class ChatCompletionRequest(BaseModel):
     # prefix cache is over its session cap. Used by Hermes to tag background aux
     # calls (e.g. context compression) so they never evict a live conversation.
     service_tier: str | None = None
+    # Opaque client-supplied correlation id. Echoed verbatim into
+    # /state under tasks[...].task_params.correlation_id as soon as the
+    # master indexes the task -- before prefill, and therefore before the
+    # first streamed chunk carries the CommandId. Lets a client identify
+    # its own in-flight request (and so cancel it) mid-prefill. Not
+    # interpreted by exo and not required to be unique.
+    correlation_id: str | None = None
 
 
 class BenchChatCompletionRequest(ChatCompletionRequest):

@@ -185,6 +185,7 @@ async def chat_request_to_text_generation(
             request.service_tier is not None
             and request.service_tier.lower() in HIGH_PRIORITY_SERVICE_TIERS
         ),
+        correlation_id=request.correlation_id,
     )
 
 

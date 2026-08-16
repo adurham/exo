@@ -164,6 +164,22 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     frequency_penalty: float | None = None
     images: list[Base64Image] = Field(default_factory=list)
     image_hashes: dict[int, Base64ImageHash] = Field(default_factory=dict)
+    # Opaque client-supplied correlation id, echoed verbatim into cluster
+    # state (State.tasks[...].task_params.correlation_id) as soon as the
+    # master indexes the TextGeneration task -- i.e. BEFORE prefill runs and
+    # therefore long before the first streamed chunk exists.
+    #
+    # Why this exists: the only pre-existing way for a client to learn the
+    # CommandId of its own in-flight request was to read the ``id`` field of
+    # the first streamed SSE chunk. During prefill no chunk has been streamed
+    # yet, so a client could not name the request it wanted to cancel until
+    # prefill was already over -- making the mid-prefill cancel window (the
+    # window ``PrefillCancelled`` covers) unreachable from any test harness.
+    # With this field a client generates its own id up-front, then polls
+    # /state to resolve it to the real CommandId while the request is still
+    # prefilling. Purely informational: exo never interprets it, never keys
+    # anything on it, and does not require it to be unique.
+    correlation_id: str | None = None
 
     prefill_endpoint: str | None = None
 
