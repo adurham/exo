@@ -10507,3 +10507,105 @@ that killed it is the same instrumentation that now points at the next
 target. The pattern that keeps catching these: a symptom that looks
 "constant and clean" (exactly 1, every time) is often an artifact of how
 the measurement is constructed, not a property of the bug.
+
+## 70. Confirmed from the RECEIVER's own trace: the first send is
+genuinely lost on the wire. Both sides then burn a 500ms quiet timer.
+(2026-08-16)
+
+### The receiver-side evidence
+
+Section 69 asked how `peer_got_count=0/1` could be reported when the
+counter streams prove the receiver consumed that call. The receiver's
+own progress trace answers it -- the two facts were never in conflict,
+because they describe different calls:
+
+```
+  call_id=816  recv() ROUND   round=0  all_recv=0/1   elapsed_us=525,213
+  call_id=816  recv() BARRIER round=1  got=1/1        elapsed_us=1,025,252
+  call_id=817  recv() BARRIER round=0  got=1/1        elapsed_us=69
+  call_id=818  recv() BARRIER round=0  got=3/3        elapsed_us=150
+```
+
+On a stalled call the RECEIVER sits ~525ms at `all_recv=0/1` -- its own
+drain loop waiting out `drain_quiet_us` for a chunk that never arrives.
+Healthy calls on the same link complete in 69-150us.
+
+**So `peer_got_count=0/1` was true all along.** The bitmask was not
+stale; the receiver really had nothing. The first send is genuinely lost
+on the wire.
+
+### The full cost, both sides
+
+```
+  receiver: ~525ms   drain loop waiting for a chunk that never came
+  sender  :  500ms   retransmit quiet timer before resending
+```
+
+Both timers are `jaccl_ack_retransmit_us()` (500ms). They run
+concurrently but the recovery is serial -- the sender cannot retransmit
+until its own timer expires, and the receiver cannot report until its
+drain goes quiet. That is the ~1.0s visible in call 816's round-1
+barrier, and with the two hops per token it is the measured ~2.09
+s/token.
+
+### The chain, corrected end to end
+
+1. Sender posts chunk 0 of the decode activation send. **It is lost.**
+2. Receiver's drain loop waits `drain_quiet_us` (~525ms observed), gets
+   nothing, reports `all_recv=0/1`.
+3. Sender's round-0 barrier reads that honest `peer_got_count=0/1`,
+   waits out its own 500ms quiet timer, retransmits.
+4. Retransmit lands; receiver has meanwhile advanced past that call, so
+   the LATE ORIGINAL (if it ever shows up) is discarded as stale -- the
+   Section 67/69 discard log, which is a downstream artifact.
+
+Every layer was behaving correctly. The defect is a real, selective
+first-send loss on the data QP under UC.
+
+### What is now excluded, by measurement not argument
+
+- Counter desync (Section 69: both streams identical, 606 and 205
+  entries).
+- Stale/empty bitmask reporting (this section: the receiver's own trace
+  agrees with the bitmask).
+- Receiver buffer availability (Section 66: pool ON vs OFF byte
+  identical).
+- Reconnect (Section 68: zero reconnects, stall fully present).
+- Everything above the transport (Sections 59-62: both GPUs ~5% idle,
+  glue overhead 0.5ms, follower not starved).
+
+### Where this actually lands
+
+This is where Section 64 pointed before the desync detour, now
+established rather than inferred: **a genuine selective loss of the
+first send, on 16380-byte chunks, over UC, on an otherwise-idle
+39us-p50 link.** UC has no flow control and no NAK, so a dropped frame
+is silent by design and only the quiet timers notice.
+
+Two directions, and they are not exclusive:
+
+1. **Stop losing the frame.** Section 66 already proved the standing
+   recv pool is not the lever. Remaining candidates are send-side:
+   `SEND_INFLIGHT` depth (currently up to 8 concurrent 16KB sends for
+   sz<=2), or the shared data QP being polled by both `send()` and
+   `recv()` with each discarding the other's completions.
+2. **Stop paying 500ms to notice.** Even with the loss fixed, one
+   dropped frame anywhere costs a full second. The quiet timer is the
+   amplifier that turns a rare drop into a 60x throughput collapse.
+   Section 51 proved lowering it globally breaks generation (10ms fires
+   below the real round trip), but an explicit NACK on the p2p_retry QP
+   -- which is already a separate, working, low-latency channel -- would
+   cap recovery at ~100us without touching the timer.
+
+(2) is the more robust fix and does not require finding the drop's
+cause. (1) is the root cause but may be a genuine UC property rather
+than a bug.
+
+### Method note
+
+Seven hypotheses, six corrections, and the thing that finally settled it
+was reading the RECEIVER's existing trace -- which had been in the logs
+the whole time. The repeated failure mode was inferring the peer's state
+from the sender's view of it. Both sides were instrumented separately;
+neither picture alone was sufficient, and the contradiction between them
+is what exposed each wrong model.
