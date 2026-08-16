@@ -13450,3 +13450,180 @@ looks complete.
   weights against 128 GB of RAM that is already occupied). Fine against
   a 23-minute 500K prefill; catastrophic for short prompts. The policy
   question of when NOT to disaggregate is real and deferred to M2.
+
+## 104. CONSTRAINT CONFIRMED: co-residency is impossible for DSv4, and
+exo's lifecycle has no partial teardown -- so the cache CANNOT stay in
+the prefill process. (2026-08-16)
+
+User's direction: co-residency is off the table, and validating the path
+with a small model that DOES fit co-resident is pointless because the
+memory-choreographed path is the only one DSv4 can ever use -- plumbing
+proven that way would have to change anyway. **M0 is dropped.**
+
+### Why Section 103's weightless-holder plan does not survive contact
+
+Section 103 (following the consult) proposed keeping the PP runner
+process ALIVE with its weights freed, so the KV cache survives in-process
+and the existing pull-based `remote_prefill` works unchanged. Checked
+against exo's actual lifecycle:
+
+- `DeleteInstance` -> `delete_instance(...)` (`master/main.py:389-390`,
+  and the JIT idle path at `:600-601`) -> the worker receives a
+  per-runner stop and does `self.runners.pop(runner_id)`
+  (`worker/main.py:285-286`), terminating that runner.
+- There is **no partial-teardown path**: nothing frees weights while
+  keeping a runner alive. The only free-the-weights mechanism is ending
+  the process that owns them.
+
+So on today's code, freeing the PP weights means the PP **process ends**,
+and the KV cache dies with it. The holder design requires a lifecycle
+capability exo does not have.
+
+### The three shapes that remain, honestly stated
+
+1. **Add partial teardown** (free weights, keep the runner + its cache +
+   its PrefillServer alive). This is what makes Section 103's clean
+   design real, and it is genuinely new lifecycle engineering: a
+   "weights-released" runner state the master understands, plus proof
+   that MLX actually returns the memory (`mx.clear_cache()` retains
+   buffers; residency can keep them wired -- must be gated on OBSERVED
+   free memory, never on "unload returned").
+2. **Push the cache out before exiting.** The PP instance computes the
+   prefill and PUSHES the cache to the decode side (or to disk) as part
+   of its teardown, inverting today's pull. ~5.85 GB at 500K: ~1-2s over
+   TB5, seconds to NVMe. Reuses the Section 102 codec; needs a new
+   protocol leg and a staging owner.
+3. **Two runners per node, one loaded at a time.** Both instances exist
+   as runners from the start, but only one holds weights; the handoff is
+   a weights load/free pair rather than a runner create/destroy.
+   Structurally the same as (1) but framed as placement rather than a
+   new runner state.
+
+### The independent gap that blocks ALL THREE
+
+Restating Section 103's Gap 2 because it is unfixed and non-optional:
+`serve_prefill` (`batch_generator.py:382-396`, `:1409+`) writes **only
+the local rank's cache**, and `_start_prefill_server` runs on
+**device_rank 0 only** (`runner.py:221-223`). Under PP the KV cache is
+split BY LAYER -- rank 0 holds layers 0-21, rank 1 holds 22-42. TP decode
+replicates attention and needs **all 43 layers**. Nothing gathers rank
+1's half.
+
+**This path has never worked for a multi-node PP prefill**, regardless of
+which of the three shapes above is chosen. The cross-rank gather (~3 GB
+over TB5, order ~1s) has to be built first, and it is the correct next
+piece of work because every route needs it.
+
+### Revised milestones
+
+- **M0: DROPPED** (co-resident small-model test -- proves plumbing that
+  must change anyway).
+- **M1a (next):** build the cross-rank cache gather so a PP prefill
+  instance can emit a COMPLETE 43-layer cache. Testable offline against
+  a synthetic layer-split cache: no cluster time, no memory
+  choreography.
+- **M1b:** pick a shape from the three above (leaning (1), since it makes
+  the already-built pull path work unchanged) and prove on DSv4 with a
+  tiny prompt that memory genuinely drops before the TP load begins --
+  measured with `footprint`/`memory_pressure`, not assumed.
+- **M2:** automate in master/JIT, then 500K and the 30 tok/s
+  measurement.
+
+## 105. The per-request swap breaks concurrency and loses time below
+~50-95K new tokens. And PP does not clear the prefill target anyway.
+(2026-08-16)
+
+User's objection, and it is correct on both counts: swapping weight
+layouts between phases kills the concurrency requirement, and it is
+badly wasteful on small/follow-up prompts. The arithmetic:
+
+### Swap cost vs prefill saving
+
+Swap round trip (PP -> TP -> PP) = 2 x 18.7s = **37.4s**, and that is an
+optimistic LOWER BOUND -- it counts only the measured per-rank load
+(ranks in lockstep, so parallel) and excludes free/teardown, re-placement
+and the memory-drop verification the design requires.
+
+Break-even -- how many NEW prefill tokens PP must process to repay one
+swap:
+
+```
+  at  10K-context rates (PP 512 vs TP 379):  N >  54,566 tokens
+  at  94K-context rates (PP 485 vs TP 358):  N >  51,131 tokens
+  at 200K-context rates (PP 431 vs TP 353):  N >  72,950 tokens
+  at 500K-context rates (PP 364 vs TP 319):  N >  96,505 tokens
+```
+
+**Below ~50-95K new tokens, swapping loses time outright.** A follow-up
+turn with a prefix-cache hit (~2K new tokens) saves 1.4s of prefill and
+pays 37.4s of swap: **net -36.0s**. Exactly the waste the user named.
+
+### Concurrency is not merely degraded, it is structurally gone
+
+Cross-phase concurrency becomes impossible: while the cluster holds PP
+weights it physically cannot decode, and while it holds TP weights it
+cannot PP-prefill. Requests arriving at random times land in different
+phases, so serving them requires batching into phase windows -- a
+request that arrives during a decode window waits for the next prefill
+window. Concurrency "works" only within a phase, with tail latency that
+is unusable interactively. Requirement 1 does not survive this.
+
+### The fact that decides it
+
+Requirement 4's target is **400+ tok/s prefill**. Measured PP:
+
+```
+  PP @200K = 431 tok/s   (clears it)
+  PP @400K = 377 tok/s   (BELOW target)
+  PP @500K = 364 tok/s   (BELOW target)
+```
+
+**PP does not clear the prefill target at the depth the requirement
+actually names.** So paying 37.4s and all of concurrency to swap into PP
+for a 500K prefill buys 14% and still misses the bar.
+
+Meanwhile the CURRENT measured prefill is **225 / 214 / 202 tok/s** --
+roughly 40% below TP's own historical numbers (319-427) and 50% below
+PP's (364-512). There is a live regression that is worth far more than
+the topology choice:
+
+```
+  regression gap   202 -> 319 (TP historical)  = +58%
+  topology delta   319 -> 364 (TP -> PP @500K) = +14%
+```
+
+### Consequence for the plan
+
+The PP-prefill/TP-decode swap, as a PER-REQUEST mechanism, is not
+viable: it costs concurrency (Requirement 1) outright, is a net time
+LOSS for anything under ~50K new tokens, and does not reach the prefill
+target it exists to serve.
+
+What survives:
+
+- **Keep TP resident.** It is the only layout that satisfies
+  concurrency, cancellation, MTP/DSpark and decode throughput
+  simultaneously -- all of which are stated requirements.
+- **Attack the prefill regression, not the topology.** 202 -> 319+ is a
+  bigger, cheaper win than 319 -> 364, and it costs no concurrency. The
+  requirement-4 investigation (Section 99, track C) already measured
+  where prefill time goes and found the per-chunk `forward` span is 98%
+  of it, with the growth term unattributed because model compute and KV
+  quantize are conflated in one timer. That is the next concrete step
+  and it needs one instrumentation change, not an architecture.
+- **TP prefill overhead has named, attackable causes** if the regression
+  fix is not enough: per-layer `all_sum`, per-chunk `all_gather` for the
+  sparse indexer under `EXO_DSV4_SEQ_SPLIT`, an explicit
+  `mx_barrier(group)` EVERY prefill chunk (`generate.py:965-969`, the
+  code's own comment calls it the mechanism behind PP's edge), and fully
+  replicated attention. The barrier and the all_gather are the kind of
+  thing that can be overlapped or batched.
+- The disaggregation work already landed (Section 102's DSv4 cache
+  codec) is NOT wasted -- it is the enabling primitive for any future
+  prefill/decode split, including across a larger cluster where the two
+  layouts CAN be co-resident on different node pairs.
+
+A phase swap only makes sense if it becomes RARE (a large cold prefill
+on an otherwise-idle cluster), never per-request. That is a policy
+question worth revisiting only after the regression is fixed and TP
+prefill is measured at its real ceiling.
