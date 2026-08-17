@@ -14175,3 +14175,74 @@ treated as a strong localization, not a closed root cause.
 2. Fix the reconnect trap so TP can recover: either allow
    `reconnect_fresh()` to tear down and rebuild subgroups, or drop the
    coord subgroup under TP so `has_split_` stays false.
+
+## 113. Open question worth answering: can we use RC instead of soft-RC
+over Thunderbolt? First probe INCONCLUSIVE. (2026-08-16)
+
+The user asked the question this whole transport effort implicitly
+assumes away: **why software reliability over UC at all -- can RDMA over
+Thunderbolt just use RC?**
+
+If Apple's librdma supports `IBV_QPT_RC`, the hardware does
+retransmission, ordering and delivery guarantees itself, and a large
+amount of what this campaign has built becomes unnecessary: the soft-RC
+ACK/retransmit machinery, the standing recv pools, the drain-quiet
+timers, the ARQ chunk bitmasks, the reconnect wedge recovery -- all of it
+exists to paper over UC's silent-drop semantics.
+
+### What is established
+
+```
+  rdma.cpp:179     init_attr.qp_type = IBV_QPT_UC;   <- hardcoded, the
+                                                        ONLY qp_type in
+                                                        the tree
+  ibv_devinfo      transport: Thunderbolt (100)
+                   max_qp: 3
+                   device_cap_flags: 0x00000000      <- advertises NOTHING
+                   atomic_cap: ATOMIC_NONE
+```
+
+**There is ZERO prior art in the repo**: no comment, commit, or doc
+anywhere in `jaccl/` explains why UC was chosen, whether RC was tried,
+or whether it failed. Grepping for `IBV_QPT_RC` / "reliable connection" /
+"RC QP" returns nothing. So "RC doesn't work on this hardware" is an
+assumption this codebase has never written down, let alone tested.
+
+### The probe, and why it did not answer
+
+Wrote a standalone C probe (`/tmp/rc2.c` on rank 0) that dlopens
+`librdma.dylib` exactly as `rdma.cpp` does and calls `ibv_create_qp`
+with jaccl's own init attrs, varying ONLY `qp_type` across RC/UC/UD.
+Result with the cluster LIVE:
+
+```
+  dev0 rdma_en2   alloc_pd FAILED (errno=3   No such process)
+  dev1 rdma_en3 : RC=FAIL UC=FAIL UD=FAIL
+  dev2 rdma_en4   alloc_pd FAILED (errno=102 Operation not supported)
+  dev3 rdma_en5   alloc_pd FAILED (errno=102 Operation not supported)
+```
+
+**Inconclusive, and the reason is mundane**: `ibv_devinfo` shows only
+`rdma_en3` is `PORT_ACTIVE`; en2/en4/en5 are `PORT_DOWN`, so `alloc_pd`
+cannot succeed on them. And on en3 -- the live link -- the running
+cluster already holds all 3 of `max_qp:3`, so EVERY type fails including
+UC, which we know works. The probe measured resource exhaustion, not
+capability.
+
+**Do not read "RC=FAIL" above as evidence against RC.** UC failed in the
+same run.
+
+### How to actually answer it
+
+Run the same probe with the cluster STOPPED, so en3's QP budget is free.
+That is a ~2 minute test and it is decisive: if `RC=OK` appears, Apple's
+librdma supports reliable connections over Thunderbolt and a major
+simplification is available. If `RC=FAIL` with `UC=OK` in the same run,
+UC-only is confirmed as a hardware constraint and the soft-RC machinery
+is justified -- and that fact should be written into `rdma.cpp:179`,
+where its absence has cost this campaign real time.
+
+Worth doing before further transport work either way: the answer changes
+what is worth building. Deliberately NOT run now, since it requires
+taking the cluster down and TP has just been brought up healthy for the
+first time.
