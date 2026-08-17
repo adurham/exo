@@ -14540,3 +14540,85 @@ is guesswork without it.
 Deliberately NOT doing the obvious A/B (unplug the second cable) yet, per
 the user's call to pursue the two-link path rather than retreat to the
 known-good single-link config.
+
+## 117. The TP hang, ROOT-CAUSED by thread dump: rank 1 blocks forever in
+jaccl's TCP side-channel connect. It is a coordinator-bootstrap deadlock,
+not RDMA. (2026-08-16)
+
+Section 116 left the hang undiagnosable because the evidence was being
+destroyed. Two instrumentation fixes (exo@bde5def8a) changed that:
+`runner.py`'s task-reader now logs its exception through loguru instead of
+letting threading's default handler bury it, and the hang watchdog now
+runs `/usr/bin/sample` and writes a per-thread call graph to
+`/tmp/exo_hang_<pid>.txt` BEFORE it SIGKILLs.
+
+Both paid off immediately.
+
+### What the dump says
+
+```
+  743 jaccl::MeshGroup::MeshGroup(...)
+  743   jaccl::SideChannel::SideChannel(int, int, char const*)
+  743     jaccl::TCPSocket::connect(...)
+  743       __connect            <- blocked in the syscall
+```
+
+The runner never reaches RDMA at all. It is wedged in jaccl's **TCP side
+channel** -- the bootstrap coordinator used to exchange `Destination` QP
+info before any RDMA traffic exists.
+
+Also decisive: **`TASK_READER_DIED: 0`**. The task-reader thread did not
+die, which kills the leading hypothesis from Section 116. And the
+thousands of `IOConnectUnmapMemory failed: kr=0xe00002c2` lines were
+NOISE -- exactly the trap the jaccl skill documents.
+
+### The actual mechanism
+
+```
+  MLX_JACCL_COORDINATOR: 192.168.86.202:57603
+```
+
+That is node2's **LAN/WiFi** address (`en0`), not either Thunderbolt
+link. `find_ip_prioritised` picked the routable-everywhere path for the
+coordinator, which is reasonable in isolation.
+
+- `ping 192.168.86.202` -> OK, so the host is reachable.
+- `nc -z 192.168.86.202 57603` -> **CLOSED/filtered**.
+- node2's listeners are 52414/52415/52416 (the exo API + workers). Nothing
+  is listening on 57603.
+
+So rank 0 hands rank 1 a coordinator endpoint that nobody ever binds,
+rank 1 blocks in `connect()` with no timeout, emits no progress event, and
+45s later exo's hang watchdog SIGKILLs it (`signal=9` -- matching Section
+116's observation, and distinct from the `signal=11` segfault that is now
+fixed). Both runners do this, so placement never completes and no
+instance is ever created.
+
+Note the earlier `ping failed to discover conn=... 192.168.86.202 ...`
+DEBUG line, which I dismissed as noise in Section 116, was pointing at
+this exact address. It was a real signal.
+
+### What this does NOT change
+
+- The Section 112 segfault fix stands: **0 segfaults** across these
+  launches with the pool armed under TP.
+- The cable-pairing fix stands: exo wrote
+  `[[null,"rdma_en3"],["rdma_en4",null]]`, the correct asymmetric
+  single-cable matrix, and RDMA is never even reached before the hang.
+- QP budget is not implicated: the standalone probe shows `UC=OK` on both
+  active devices.
+
+The two-link hardware is a red herring for THIS failure. The bug is in
+coordinator endpoint selection/binding, and it would reproduce on one
+cable.
+
+### Next
+
+Find why the coordinator port is never bound at the address rank 1 is
+told to dial: either rank 0 binds on a different interface than
+`get_mlx_jaccl_coordinators` advertises, or the listener is torn down
+before rank 1 connects. `SideChannel`'s rank-0 path does
+`TCPSocket server(IBV_TAG); server.listen(IBV_TAG, address)` -- compare
+the address it binds against the string exo puts in
+`MLX_JACCL_COORDINATOR`. A blocking `connect()` with no timeout is also
+worth a bounded deadline so this fails loudly instead of hanging.
