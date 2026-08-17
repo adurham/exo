@@ -14699,3 +14699,85 @@ capture a LIVE runner's env (`ps eww` while it is still up, before the
 Note this is orthogonal to everything fixed tonight: the segfault fix
 holds (0 segfaults), the cable-pairing fix is verified, and RDMA is never
 reached. It would reproduce on a single cable.
+
+## 119. Section 118 CORRECTED: rank assignment is right, rank 0 is not
+"dialing instead of listening" -- it is stuck in allocate_buffers()
+registering memory regions. (2026-08-16)
+
+### Rank assignment is CORRECT (Section 118's premise was wrong)
+
+Read from the live launch window, not a log tail:
+
+```
+  node1: rank 1 MLX_JACCL_COORDINATOR: 192.168.86.202:56934   -> dials
+  node2: rank 0 MLX_JACCL_COORDINATOR: 0.0.0.0:56934          -> listens
+```
+
+exo assigns rank 0 to node2 and gives it `0.0.0.0`. Correct. Section
+118's claim that "the node told to bind is running the CLIENT path" was
+based on `[jaccl] Connection attempt` lines that turned out to be from a
+PREVIOUS launch -- the same append-only-log trap, for the third time
+tonight.
+
+### Why the port is never bound
+
+rank 0's own thread dump (`/tmp/exo_hang_35510.txt` on node2, captured by
+the new watchdog instrumentation):
+
+```
+  218 mlx::core::distributed::init(...)
+  218   jaccl::init(...)
+   64     jaccl::MeshGroup::MeshGroup(...)
+   22       jaccl::MeshGroup::initialize(...)
+    4         jaccl::MeshGroup::allocate_buffers()
+    4           jaccl::SharedBuffer::register_to_protection_domain(ibv_pd*)
+```
+
+rank 0 never reaches `SideChannel`'s `server.listen()` because it is
+still inside `MeshGroup`'s constructor **registering memory regions**
+(`ibv_reg_mr` -> `tbt_reg_mr` -> `ioctl_write` into the kernel). So
+nothing binds 56934 (verified live: `lsof -iTCP:56934` empty on both
+nodes), and rank 1 sits in `connect()` until the 45s watchdog fires.
+
+Both runners then die `signal=9` and the placement retries forever --
+which is the crash-loop that made every earlier snapshot inconsistent.
+
+### Why MR registration is now slow enough to matter
+
+`allocate_buffers()` registers a buffer per (size class x NUM_BUFFERS x
+peer) plus the ack/p2p-retry/ring pools -- and, as of tonight, ALSO the
+new `data_pool_recv_buffers_` (Section 112's structural fix). Every
+registration is an `ioctl` into Apple's Thunderbolt RDMA kernel driver.
+The `IOConnectUnmapMemory failed: kr=0xe00002c2` flood is coming from
+this same layer.
+
+This is a strong hint that the added allocation pushed MR registration
+past the 45s budget, and it is testable: `DATA_RECV_POOL_SIZE_CLASSES` is
+1, so the new vector adds `1 x NUM_BUFFERS(8) x size_` buffers -- small
+in count but each `FRAME_SIZE * (1 << k)` bytes and each needing its own
+kernel round trip.
+
+### Corrections to my own reasoning, worth recording
+
+1. Section 118's "both ranks dial, nobody listens" is **withdrawn**.
+   Rank assignment was never wrong.
+2. The live-env capture (`ps eww` for `MLX_RANK`) could never have
+   worked: `utils_mlx.py:186-188` sets those with `os.environ[...]`
+   INSIDE the already-running process, so they are absent from the
+   exec-time environment `ps eww` reports. Rank has to be read from the
+   log line `rank N MLX_JACCL_COORDINATOR: ...`.
+3. Sampling "the biggest python process" got the exo DAEMON, not the
+   runner (0 jaccl frames). The runner is a child that dies every ~48s,
+   so a live sample has to be caught inside that window -- or read from
+   the watchdog's own dump, which is why that instrumentation was worth
+   adding.
+
+### Next
+
+Confirm the MR-registration cost directly: time `allocate_buffers()` (or
+count `register_to_protection_domain` calls) with and without
+`data_pool_recv_buffers_`, and check whether `MLX_JACCL_DATA_RECV_POOL=0`
+-- which skips arming the pool but does NOT skip its allocation -- still
+hangs. If allocation is the cost, the fix is to allocate the pool's
+buffers lazily (only when the pool is actually armed) rather than
+unconditionally in `allocate_buffers()`.
