@@ -14622,3 +14622,80 @@ before rank 1 connects. `SideChannel`'s rank-0 path does
 the address it binds against the string exo puts in
 `MLX_JACCL_COORDINATOR`. A blocking `connect()` with no timeout is also
 worth a bounded deadline so this fails loudly instead of hanging.
+
+## 118. Section 117 refined: BOTH ranks dial the coordinator and NEITHER
+listens. The coordinator port is never bound by anyone. (2026-08-16)
+
+Section 117 established the runner blocks in `TCPSocket::connect` on
+`192.168.86.202:57603` with nothing listening there. Digging into WHY,
+with corrections to my own intermediate readings:
+
+### Coordinator assignment is CORRECT
+
+```
+  node1 (4057bb71...) received  MLX_JACCL_COORDINATOR: 192.168.86.202:57603
+  node2 (9ef7d0c8...) received  MLX_JACCL_COORDINATOR: 0.0.0.0:57603
+```
+
+`get_mlx_jaccl_coordinators` (`placement_utils.py:757-780`) hands the
+coordinator node `0.0.0.0` (bind-all) and every other node a routable IP.
+node2 got `0.0.0.0`, so node2 is the intended coordinator and SHOULD be
+listening; node1 correctly dials it. **The exo-side wiring is right.**
+
+Firewall is disabled on both nodes (`socketfilterfw --getglobalstate` =
+State 0), so nothing is dropping the SYN.
+
+### But node2 is also DIALING
+
+node2's runner log for this launch:
+
+```
+  [jaccl] Connection attempt 0 waiting 1000 ms
+  [jaccl] Connection attempt 1 waiting 2000 ms
+  [jaccl] Connection attempt 2 waiting 4000 ms
+  [jaccl] Connection attempt 3 waiting 8000 ms
+```
+
+Those lines come from `SideChannel`'s **non-zero-rank branch**
+(`rdma.cpp:361-366`) -- the `TCPSocket::connect` retry callback. The
+rank-0 branch calls `server.listen()` and prints nothing of the sort. So
+node2 -- the node exo told to bind `0.0.0.0` -- is running the CLIENT
+path.
+
+That closes the loop: **nobody ever calls `listen()`**, which is exactly
+why `nc -z 192.168.86.202 57603` reports CLOSED while the host pings
+fine and node2's only listeners are the exo API ports
+(52414/52415/52416).
+
+### Two corrections to my own intermediate readings
+
+1. I briefly concluded "node2 is rank 1, not rank 0" from `rank=` strings
+   in the log tail, then that "both ranks are on node2" from a
+   `sort | uniq -c` showing 112 `rank=0` and 85 `rank=1`. **Both readings
+   were unsound** -- `runner_log/stderr.log` is append-only across months
+   (14.5M lines), so a tail mixes sessions. This is the exact pitfall my
+   own jaccl skill documents, and it is the second time tonight it has
+   produced a wrong intermediate conclusion. The `Connection attempt`
+   lines above are trustworthy only because they are in the current
+   launch's window.
+2. `ps eww` on the surviving PIDs shows NO `MLX_RANK`/`JACCL_RANK` -- but
+   those are the exo daemons, not runners. The runners were already
+   SIGKILLed, so their env is gone. Rank attribution has to come from the
+   log window or from a live runner, not from post-mortem process state.
+
+### The open question
+
+Why does the node handed `0.0.0.0` take the client branch? `SideChannel`
+selects on the `rank` argument it is constructed with, so either the rank
+jaccl computes disagrees with the coordinator role exo assigned, or both
+runners are being constructed with a non-zero rank. `MLX_RANK` /
+`JACCL_RANK` come from exo's runner env
+(`utils_mlx.py` sets `MLX_RANK` for the ring backend; the jaccl path sets
+`MLX_IBV_DEVICES` + `MLX_JACCL_COORDINATOR`) -- so the next step is to
+capture a LIVE runner's env (`ps eww` while it is still up, before the
+45s watchdog fires) and compare its rank against which node received
+`0.0.0.0`.
+
+Note this is orthogonal to everything fixed tonight: the segfault fix
+holds (0 segfaults), the cable-pairing fix is verified, and RDMA is never
+reached. It would reproduce on a single cable.
