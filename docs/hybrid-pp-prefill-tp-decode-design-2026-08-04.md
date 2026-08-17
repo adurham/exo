@@ -14334,3 +14334,116 @@ either benefit needs a jaccl change to open a second device context and
 move `pool_connections_`/`p2p_retry_connections_` onto it. That is a real
 root-cause fix for a bug class already hit twice, and it is now unblocked
 by hardware.
+
+## 115. The second cable is a RED HERRING for the Section 112 bug -- and
+building on it first would have made that bug WORSE. Corrected plan.
+(2026-08-16)
+
+I was about to widen exo's device matrix and split
+`pool_connections_`/`p2p_retry_connections_` onto the new second
+Thunderbolt device, framed as the "structural fix" for the Section 112
+WR-collision bug. Review (consult) said bluntly that this is the wrong
+fix, and checking the code confirms it.
+
+### Why the cable does not fix it
+
+The Section 112 bug is that the p2p standing pool's work requests are
+**indistinguishable from collective WRs and land in the same buffers**.
+Moving the pool's QP to a second physical device does not change the
+second half of that sentence. Verified:
+
+```
+  mesh_impl.h:3819
+    SharedBuffer& recv_buffer(int sz, int buff, int rank) {
+      return buffers_[sz * NUM_BUFFERS * size_ + buff * size_ + rank];
+    }
+```
+
+One flat `buffers_` array, indexed only by (size-class, buffer, peer).
+**No notion of which path owns a buffer.** Physical QP isolation does not
+isolate memory: pool recvs posted on a device-1 QP would still point at
+the same `recv_buffer` slots the collective path uses on device 0, so
+the peer would DMA over cable 2 into buffers cable 1 is concurrently
+using. Same corruption -- but now with two independent links'
+timing decorrelating it, i.e. **harder to reproduce and harder to
+diagnose**. Strictly worse than today.
+
+And the converse: once the pool has its own buffers plus a distinct WR
+type, the bug is fixed **on one device**, and the second cable is not
+needed for correctness at all.
+
+### The actual fix (what jaccl-v2 already does)
+
+v2 solved this identical collision on 2026-07-17 and the pattern is in
+the file:
+
+```
+  mesh_impl.h:657   post_recv(rb, make_wr_id(0, POOL_RECV_WR, b, peer));
+  mesh_impl.h:1023  if (wt == POOL_RECV_WR && wb >= 0 && wb < NUM_BUFFERS)
+  mesh_impl.h:1034  if (wt == POOL_RECV_WR) { ... }
+```
+
+A **distinct work-request type**, and completion filtering that keys on
+it. The Section-52 p2p pool predates that and still posts generic
+`RECV_WR` (`mesh_impl.h:2973`), which is exactly why a collective's
+`consume_recv` can swallow it -- that function reads the chunk header and
+validates only `c < num_chunks`, never `call_id`.
+
+So the correctness fix is three things on the EXISTING single device:
+1. give the p2p standing pool a **distinct WR type** (mirroring
+   `POOL_RECV_WR`),
+2. give it **dedicated buffers** rather than slots in the shared
+   `buffers_` array,
+3. make `consume_recv` **validate `call_id`** and drop/re-arm anything
+   that is not its own.
+
+That is required **even in a two-device world**, which is the tell that
+it -- not the cable -- is the real fix. Section 112's PP-only gate stays
+as a belt-and-braces guard until this lands.
+
+### What the second cable IS good for (separate project, real payoff)
+
+**QP budget 3 -> 6 per peer.** `max_qp:3` is per device, and that single
+number is what forced the mode-conditional QP construction at
+`mesh.cpp:182-210` (PP and TP each get a DIFFERENT third QP because a
+fourth always failed EBUSY). With a second device both vectors could be
+built unconditionally, and the coord-subgroup `split()` that Section 112
+showed permanently disables `reconnect_fresh()` gets breathing room too.
+That is a genuine simplification -- but it is a QP-budget project, not a
+bug fix, and it must not carry the correctness weight.
+
+### Real risks to budget for IF the second device is pursued later
+
+- **Cable-identity pairing.** `devices_[rank][dst][1]` on node A must be
+  the interface on the SAME physical cable as `devices_[rank][dst][1]` on
+  node B. My planned exo change ("drop the `break`, collect all ifaces")
+  collects lists independently per node -- if enumeration order differs
+  between nodes, a QP on cable 1 gets paired with a QP on cable 2 and the
+  link is dead while every port still reads PORT_ACTIVE. The fix must
+  preserve per-connection `(source_rdma_iface, sink_rdma_iface)` pairs
+  from `get_all_connections_between`, not widen to a bag of local names.
+- **Partial link failure.** Today unplug = total failure = clean
+  reconnect. Split across two cables, unplugging one leaves collectives
+  flowing while the p2p/ARQ path is silently dead -- and if `ack_`
+  connections stay on device 0, the retransmit machinery sees a live ACK
+  channel plus a dead data channel and retries forever instead of
+  declaring the peer down. Needs an explicit rule: either port down =>
+  whole peer down, enforced by watching both ports' async events.
+- **MR/PD scope.** MRs are per-PD and PDs are per-`ibv_context`, so every
+  buffer touched by device-1 QPs needs a second `ibv_reg_mr` under
+  device-1's PD. Standard verbs allows the same VA under two PDs, but
+  this stack has already surprised us twice (no RC, no UD, max_qp=3) --
+  probe it rather than assume.
+- **Dual-context reconnect.** `reconnect`/`reconnect_fresh` would have to
+  tear down and rebuild BOTH contexts atomically; a reconnect that
+  revives device 0 while device 1's QPs are stale is a partial state the
+  current lifecycle cannot represent.
+- **Handshake version skew.** Two `Destination` sets over the TCP side
+  channel; a node on old code exchanging one against a node expecting two
+  fails confusingly. Length-prefix or version it.
+
+### Decision
+
+Do the correctness fix first, on one device. Treat the second cable as a
+separate QP-budget project with its own risk budget. The hardware is in
+place and costs nothing to leave connected.
