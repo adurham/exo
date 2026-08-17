@@ -4,6 +4,7 @@ from exo.master.placement_utils import (
     allocate_layers_proportionally,
     filter_cycles_by_memory,
     get_mlx_jaccl_coordinators,
+    get_mlx_jaccl_devices_matrix,
     get_shard_assignments,
     get_shard_assignments_for_pipeline_parallel,
     get_smallest_cycles,
@@ -21,7 +22,11 @@ from exo.shared.types.profiling import (
     NetworkInterfaceInfo,
     NodeNetworkInfo,
 )
-from exo.shared.types.topology import Connection, SocketConnection
+from exo.shared.types.topology import (
+    Connection,
+    RDMAConnection,
+    SocketConnection,
+)
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
     PipelineShardMetadata,
@@ -689,3 +694,75 @@ class TestCfgParallelPlacement:
         # First shard starts at 0, last shard ends at 57
         assert layer_ranges[0][0] == 0
         assert layer_ranges[-1][1] == 57
+
+
+def _rdma_conn(source: NodeId, sink: NodeId, source_iface: str, sink_iface: str):
+    """A single directed RDMA edge, i.e. one end's view of one cable."""
+    return Connection(
+        source=source,
+        sink=sink,
+        edge=RDMAConnection(
+            source_rdma_iface=source_iface, sink_rdma_iface=sink_iface
+        ),
+    )
+
+
+def test_jaccl_matrix_picks_the_same_cable_from_both_ends():
+    """Design doc Section 116: with TWO cables between a pair of nodes, both
+    directions must select the SAME physical link.
+
+    The two ends do NOT share a device name (measured on the real cluster:
+    node1 rdma_en3 <-> node2 rdma_en4), so selection cannot rely on names
+    matching. It must key on something direction-independent.
+
+    NEGATIVE CONTROL: the edges are deliberately inserted in OPPOSITE orders
+    for the two directions. The old implementation took the first RDMA edge it
+    found, so it picked cable A from node0's side and cable B from node1's --
+    pairing QPs across two different wires, which presents as a transport that
+    never connects while every port still reads PORT_ACTIVE. This test fails
+    against that implementation and passes with deterministic selection.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    # Cable A: node0 rdma_en3 <-> node1 rdma_en4
+    # Cable B: node0 rdma_en4 <-> node1 rdma_en3
+    topology = Topology()
+    # node0 -> node1 : cable A first
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en4", "rdma_en3"))
+    # node1 -> node0 : cable B first (opposite insertion order on purpose)
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+
+    matrix = get_mlx_jaccl_devices_matrix([node0, node1], topology)
+
+    # Each node names its OWN local iface for reaching the peer.
+    node0_iface = matrix[0][1]
+    node1_iface = matrix[1][0]
+    assert node0_iface is not None
+    assert node1_iface is not None
+
+    # The chosen pair must be the two ends of ONE cable. Cable A is
+    # (en3, en4) and cable B is (en4, en3); if the two ends disagreed we would
+    # get (en3, en3) or (en4, en4) -- both of which are NOT a real cable.
+    assert {node0_iface, node1_iface} == {"rdma_en3", "rdma_en4"}, (
+        f"ends disagreed on which cable to use: node0={node0_iface} "
+        f"node1={node1_iface}"
+    )
+
+
+def test_jaccl_matrix_still_works_with_a_single_link():
+    """Regression guard: the one-cable case must be unchanged."""
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+
+    matrix = get_mlx_jaccl_devices_matrix([node0, node1], topology)
+    assert matrix[0][1] == "rdma_en3"
+    assert matrix[1][0] == "rdma_en4"
+    assert matrix[0][0] is None
+    assert matrix[1][1] is None

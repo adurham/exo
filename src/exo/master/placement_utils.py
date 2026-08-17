@@ -565,14 +565,62 @@ def get_mlx_jaccl_devices_matrix(
             if i == j:
                 continue
 
-            for conn in cycle_digraph.get_all_connections_between(node_i, node_j):
-                if isinstance(conn, RDMAConnection):
-                    matrix[i][j] = conn.source_rdma_iface
-                    break
-            else:
+            # MULTI-LINK CORRECTNESS (2026-08-16, design doc Section 116).
+            # With a SINGLE cable between two nodes there was exactly one
+            # RDMAConnection here and taking the first was unambiguous. With
+            # TWO OR MORE cables, node i and node j each iterate their own
+            # directed edges independently -- and nothing made them agree on
+            # WHICH physical cable to use. If i picked link A while j picked
+            # link B, jaccl would pair a QP on one wire with a QP on another:
+            # every port still reads PORT_ACTIVE, ibv_devinfo looks healthy,
+            # and the transport simply never connects (observed: runners
+            # alive, zero segfaults, spinning on repeated
+            # "IOConnectUnmapMemory failed" during RDMA bring-up).
+            #
+            # Fix: order the candidate links by a key both directions compute
+            # IDENTICALLY, then take the first. The key must identify the
+            # CABLE, and it must be computed the same way regardless of which
+            # end is asking.
+            #
+            # An RDMAConnection carries both ends' iface names, and the
+            # reverse edge j->i carries the same physical cable with the roles
+            # swapped: cable A is (en3 -> en4) from i and (en4 -> en3) from j.
+            # So the UNORDERED pair is NOT a usable key -- both cables here
+            # reduce to {en3, en4} and become indistinguishable (this exact
+            # mistake picked en4 on both ends, which is not a cable at all;
+            # see the negative-control test).
+            #
+            # The ORDERED pair keyed by the lower-numbered ENDPOINT is stable:
+            # each node sorts on (iface-at-node-with-smaller-id,
+            # iface-at-the-other-node), so both ends of a given cable produce
+            # the same tuple and different cables produce different tuples.
+            #
+            # NOTE this deliberately does NOT assume the two ends share a
+            # device name -- they frequently do not (measured on this cluster:
+            # node1 rdma_en3 <-> node2 rdma_en4). Discovery already pairs by
+            # Thunderbolt domain_uuid in shared/apply.py and RDMAConnection
+            # already models the two ends separately; only this selection step
+            # was link-ambiguous.
+            rdma_conns = [
+                conn
+                for conn in cycle_digraph.get_all_connections_between(node_i, node_j)
+                if isinstance(conn, RDMAConnection)
+            ]
+            if not rdma_conns:
                 raise ValueError(
                     "Current jaccl backend requires all-to-all RDMA connections"
                 )
+            # Orient each candidate from the lexicographically smaller NodeId
+            # so both directions build an identical key for the same cable.
+            def _cable_key(
+                c: RDMAConnection, *, i_is_low: bool = node_i < node_j
+            ) -> tuple[str, str]:
+                if i_is_low:
+                    return (c.source_rdma_iface, c.sink_rdma_iface)
+                return (c.sink_rdma_iface, c.source_rdma_iface)
+
+            chosen = min(rdma_conns, key=_cable_key)
+            matrix[i][j] = chosen.source_rdma_iface
 
     return matrix
 
