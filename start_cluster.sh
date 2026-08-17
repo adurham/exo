@@ -1306,8 +1306,16 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
-    : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
-    EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
+    # PP-only: the classic small-draft-model speculation path. Was
+    # previously exported unconditionally regardless of sharding mode;
+    # gated here (2026-08-16, TP-only pivot) since it has no effect
+    # under Tensor sharding (pp_speculation.get_pipeline_info() finds no
+    # PipelineLastLayer and the whole PP-spec loop never engages) but
+    # was cluttering the live env of every TP launch.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
+        EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
+    fi
     # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
     [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
     [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
@@ -1321,7 +1329,11 @@ for NODE in "${NODES[@]}"; do
     # node's free RAM at placement time) affects prefill throughput decay.
     # The master (elected on either node) reads this from its own env, so it
     # must be in the shared EXO_ENV applied to both nodes, not runner-only.
-    [ -n "${EXO_PP_LAYER_SPLIT:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_LAYER_SPLIT=$EXO_PP_LAYER_SPLIT"
+    # PP-only concept (there is no per-rank "layer split" under Tensor
+    # sharding, every rank holds every layer) -- gated 2026-08-16.
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        [ -n "${EXO_PP_LAYER_SPLIT:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_LAYER_SPLIT=$EXO_PP_LAYER_SPLIT"
+    fi
     # MLX_JACCL_STALL_TIMEOUT_US: jaccl's collective-poll-loop stall watchdog
     # (mesh_impl.h StallWatch), default 8s. Calibrated for TP-style frequent
     # short collectives ("well under a second" per the source comment) — PP's
@@ -2244,8 +2256,12 @@ for NODE in "${NODES[@]}"; do
     # this is just DRAFT_AHEAD's own diagnostic tagging, safe and part of
     # the validated 2026-07-22 stress-sweep config. DEFAULT ON 2026-07-23
     # alongside DSV4_SHARDING=Pipeline / DSpark auto-selection above.
-    : "${EXO_PP_DSPARK_DRAFT_AHEAD:=1}"
-    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
+    # PP-only (pp_speculation.py DRAFT_AHEAD diagnostic tagging never
+    # engages under Tensor sharding -- gated 2026-08-16, TP-only pivot).
+    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+        : "${EXO_PP_DSPARK_DRAFT_AHEAD:=1}"
+        [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
+    fi
     # Draft-ahead STEP 3a (2026-07-19, commit 0ed76f74; CONFIRMED BROKEN
     # 2026-07-22 -- see exo-stall-faulthandler-breakthrough-2026-07-21
     # skill, update 14): rank0 actually runs a real speculative forward
