@@ -14447,3 +14447,96 @@ bug fix, and it must not carry the correctness weight.
 Do the correctness fix first, on one device. Treat the second cable as a
 separate QP-budget project with its own risk budget. The hardware is in
 place and costs nothing to leave connected.
+
+## 116. TP with two Thunderbolt links: the segfault is GONE, but the
+runner now hangs in bring-up and the watchdog SIGKILLs it. Cable-pairing
+fix verified correct. (2026-08-16)
+
+### Progress: the Section 112 segfault does not reproduce
+
+Launch with the structural pool fix (dedicated `data_pool_recv_buffers_`
++ `DATA_POOL_RECV_WR`, mlx@5f2b1961c) and the pool ARMED under TP
+(mlx@903aa122c):
+
+```
+  Segmentation faults since mark:  0
+  Runner exit:                     signal=9 (Killed), NOT signal=11
+```
+
+Previously this configuration segfaulted 100% of the time (3 segfaults
+across 2 launches). Different failure mode now, so the buffer-collision
+fix is holding. **Not yet a full verification** -- the cluster still does
+not reach READY.
+
+### The cable-pairing fix is verified correct on hardware
+
+exo wrote this device matrix for jaccl:
+
+```
+  [[null, "rdma_en3"], ["rdma_en4", null]]
+```
+
+i.e. node0 reaches node1 via its OWN `rdma_en3`, node1 reaches node0 via
+its OWN `rdma_en4`. That is the correct ASYMMETRIC pairing for one
+physical cable, independently corroborated by the IP layer
+(node1 en3 = 192.168.200.1 <-> node2 en4 = 192.168.200.2, ping OK).
+
+Confirms two things: the multi-link selection fix (exo@0c294af59) picks a
+single coherent cable from both ends, and exo never required matching
+device names -- discovery pairs by Thunderbolt `domain_uuid` and
+`RDMAConnection` models both ends separately.
+
+### The new failure: hang, not crash
+
+```
+  CRITICAL supervisor:_check_hang: Runner 20bd8ee5 hung:
+    1 task(s) in progress, no event for 47s (>45s)
+  -> Terminated (signal=9)
+```
+
+Both runners, repeatedly, so placement never completes and no instance is
+created. Not OOM -- `log show` for jetsam/memorystatus is empty and both
+nodes sit at 3-4% memory. The runner accepts a task, stops emitting
+progress for 45s, and exo's own hang watchdog reaps it.
+
+Underneath: one `Exception in thread task-reader:` whose traceback is
+drowned by thousands of `IOConnectUnmapMemory failed: kr=0xe00002c2`
+lines -- an RDMA mapping teardown failing in a loop.
+
+### Ruled out, by measurement not inference
+
+**QP exhaustion.** A first pass at `ioreg` output suggested QPs were
+allocated on all four devices including the two PORT_DOWN ones, implying
+leaked QPs from earlier crashed runners. **That was a bad parse** (the
+awk walked across device boundaries). The authoritative check --
+re-running the standalone `ibv_create_qp` probe -- shows both active
+devices have free budget:
+
+```
+  rdma_en2  PORT_DOWN   alloc_pd FAILED (errno=3)
+  rdma_en3  PORT_ACTIVE RC=FAIL  UC=OK  UD=FAIL
+  rdma_en4  PORT_ACTIVE RC=FAIL  UC=OK  UD=FAIL
+  rdma_en5  PORT_DOWN   alloc_pd FAILED (errno=102)
+```
+
+`UC=OK` on both devices we actually use means QPs can still be created.
+This is the jaccl skill's own documented pitfall -- *"check `ibv_devinfo`
+... before trusting"* inferred counts -- and it caught me one step before
+a wrong conclusion.
+
+### Where this leaves it
+
+The hang is in RDMA bring-up with a second PORT_ACTIVE device present,
+and it is NOT: the segfault (fixed), cable pairing (verified correct), QP
+budget (measured free), or memory (3-4% used).
+
+The `IOConnectUnmapMemory` loop is the most specific remaining signal and
+it is a KERNEL-side unmap failure, which suggests something is being torn
+down repeatedly rather than a userspace logic error. Next step is to
+capture the swallowed `task-reader` traceback -- it is the one piece of
+real evidence currently being lost, and every hypothesis past this point
+is guesswork without it.
+
+Deliberately NOT doing the obvious A/B (unplug the second cable) yet, per
+the user's call to pursue the two-link path rather than retreat to the
+known-good single-link config.
