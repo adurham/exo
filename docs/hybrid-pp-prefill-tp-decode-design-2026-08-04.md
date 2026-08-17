@@ -14065,3 +14065,113 @@ default and TP going untested since.
    skill's documented pattern: gate the QP types each mode actually
    needs rather than building all of them unconditionally), so TP can
    afford the coord subgroup.
+
+## 112. TP's warmup segfault, root-caused by live gate-toggle A/B: the
+standing data-QP recv pool. Soft-RC is already ON and does NOT save it.
+(2026-08-16)
+
+Section 111 guessed QP-budget exhaustion at the coord split. **That was
+wrong** -- no `Couldn't create queue pair`/EBUSY anywhere, and the
+faulting frame is not `prewarm_coord_group`. Real frame, from the
+crash-window slice of the runner log:
+
+```
+  utils_mlx.py:1975       in mx_barrier          <- all_sum(1.0), the
+  generate.py:1571        in warmup_inference       FIRST collective
+  batch_generator.py:483  in warmup
+  runner.py:445           in _warmup_with_reconnect
+```
+
+### The A/B (one build, live gate toggle, no rebuild-vs-rebuild)
+
+```
+  TP, MLX_JACCL_DATA_RECV_POOL default (ON) : 3 segfaults, both ranks
+                                              RunnerFailed        [n=2 launches]
+  TP, MLX_JACCL_DATA_RECV_POOL=0            : READY (2/2), 0 segfaults,
+                                              API 200, 87GB footprint
+```
+
+Toggling one env var flips the outcome deterministically. This is the
+discipline this campaign kept violating -- worth noting it finally
+produced a clean answer.
+
+### Mechanism
+
+`post_data_recv_pool()` (`mesh_impl.h:2958`) posts standing recv WRs on
+**`connections_` -- the DATA QP**, which p2p AND collectives share. It
+was built and tuned entirely against PP's p2p path across Sections
+52->80 (every commit in that chain touches `mesh_impl.h`), while TP went
+untested the whole time. Under TP the pool's WRs are consumed by the
+wrong path, so the first collective loses its completion:
+
+```
+  [jaccl] all_gather STALLED rank=0 call_id=2375 (no forward progress
+          for >8000ms; UC completion lost)
+  [jaccl] reconnect rank=0 FRESH requested but subgroups borrow our
+          contexts -- falling back to QP-only reset
+  [jaccl] reconnect rank=0 COMPLETE
+  Fatal Python error: Segmentation fault
+```
+
+### Soft-RC is already enabled and did NOT help -- measured, not assumed
+
+Both layers are prod defaults in `start_cluster.sh`:
+`MLX_JACCL_RELIABLE_DATA=1` (:1899, "validated prod default" -- ARQ over
+UC, described as making a dropped chunk "detected and re-sent instead of
+wedging (all_reduce STALLED)") and `MLX_JACCL_RELIABLE_OPTIMISTIC=1`
+(:1860, jaccl-v2).
+
+Crash-window counts with the pool ON:
+
+```
+  soft-RC RETRANSMIT ....... 0     <- ARQ never fired
+  STALLED .................. 3
+  FRESH requested but subgroups .. 3
+  reconnect COMPLETE ....... 3
+  Segmentation fault ....... 3
+```
+
+**The ARQ retransmit never engaged.** So "turn on soft-RC" is not the
+fix -- it is on, and this failure mode goes around it.
+
+### The second, independent bug: TP cannot recover from a wedge
+
+`get_coord_group()` (`utils_mlx.py:1689`) calls `group.split()` under TP.
+That sets jaccl's `has_split_`, and `reconnect()` (`mesh.cpp:770-779`)
+refuses `reconnect_fresh()` once `has_split_` is true, because
+"subgroups borrow our contexts". `reconnect_fresh()` is documented
+(`mesh.h:118-127`) as the ONLY recovery that clears a dead-UC wedge --
+"survives queue_pair_reset() ... but clears with a fresh
+ibv_open_device". So under TP the wedge is unrecoverable by construction,
+and the QP-only fallback returns "COMPLETE" on a still-dead transport,
+after which the next collective segfaults.
+
+This is a real bug independent of the pool: **any** UC wedge under TP is
+now fatal.
+
+### Status and the honest caveat
+
+`MLX_JACCL_DATA_RECV_POOL=0` is a WORKAROUND, not a root-cause fix, and
+it is not safe to ship as-is: jaccl-v2's own protocol summary
+(`mesh_impl.h:408-421`) states its reliability rests on "(a) a standing
+pre-posted recv pool that can never be 'not ready'" -- exactly what the
+flag disables. TP currently runs with one of v2's stated guarantees
+removed.
+
+Also noted, because it nearly misled me the same way twice: the code at
+`mesh_impl.h:2950-2955` records that **Section 66 already A/B'd
+pool-ON vs pool-OFF and found them identical**, which "looked like an
+exoneration. It was measured at the 500ms timer, where a full 500ms
+stall per loss swamped the difference." A single clean A/B is exactly
+the evidence that misled a previous session, so tonight's result is
+treated as a strong localization, not a closed root cause.
+
+### Next
+
+1. Scope `post_data_recv_pool()` so its WRs cannot be consumed by the
+   collective path (or post a separate pool per path). That is the
+   root-cause fix and it lets the pool stay ON, preserving v2's
+   guarantee.
+2. Fix the reconnect trap so TP can recover: either allow
+   `reconnect_fresh()` to tear down and rebuild subgroups, or drop the
+   coord subgroup under TP so `has_split_` stays false.
