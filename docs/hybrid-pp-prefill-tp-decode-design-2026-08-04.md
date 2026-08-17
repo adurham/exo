@@ -14246,3 +14246,91 @@ Worth doing before further transport work either way: the answer changes
 what is worth building. Deliberately NOT run now, since it requires
 taking the cluster down and TP has just been brought up healthy for the
 first time.
+
+## 114. Section 113 ANSWERED: RC is genuinely unsupported on Apple's
+Thunderbolt RDMA. UC-only is a hardware constraint, so the soft-RC
+machinery is justified. Plus: a second TB link is now up. (2026-08-16)
+
+### The RC question, definitively closed
+
+The user added a second Thunderbolt cable, which freed an uncontended
+RDMA device and made Section 113's probe conclusive. Same probe, same
+binary, run against all four devices on rank 0:
+
+```
+  dev0 rdma_en2   alloc_pd FAILED (errno=3   No such process)   [PORT_DOWN]
+  dev1 rdma_en3 : RC=FAIL  UC=FAIL  UD=FAIL     <- live link, QPs exhausted
+  dev2 rdma_en4 : RC=FAIL  UC=OK    UD=FAIL     <- NEW link, uncontended
+  dev3 rdma_en5   alloc_pd FAILED (errno=102)                   [PORT_DOWN]
+```
+
+`rdma_en4` is the decisive row: on a device with a free QP budget,
+**`ibv_create_qp` succeeds for UC and fails for RC and UD, in the same
+run with identical init attrs** (jaccl's own, varying only `qp_type`).
+That rules out resource exhaustion as the explanation -- which is exactly
+what made the first attempt inconclusive.
+
+**Apple's librdma over Thunderbolt supports UC only.** RC (hardware
+retransmission/ordering/delivery) is not available, and UD is not either.
+
+Consequences, now established rather than assumed:
+
+- The soft-RC machinery -- ACK/retransmit (`jaccl_ack_retransmit_us`),
+  the ARQ chunk bitmasks (`MLX_JACCL_RELIABLE_DATA`), jaccl-v2's
+  optimistic path, the standing recv pools, the drain-quiet timers, the
+  wedge recovery -- is **NOT incidental complexity**. It is the only
+  way to get reliable delivery on this hardware. None of it can be
+  deleted in favour of "just use RC".
+- `rdma.cpp:179`'s bare `init_attr.qp_type = IBV_QPT_UC;` had NO
+  explanatory comment, and this campaign burned real time rediscovering
+  why. That comment should be added.
+
+Terminology, for the record: **RC** = Reliable Connected (hardware does
+retransmit/ordering, TCP-like, needs NIC support we do not have).
+**UC** = Unreliable Connected (point-to-point, but silently drops on
+loss -- what we have). **UD** = Unreliable Datagram (connectionless,
+multi-peer from one QP, small messages only -- wrong shape anyway).
+
+### The second link: topology confirmed
+
+```
+                    node1                     node2
+  Bus 1 / Recept 2  rdma_en3  PORT_ACTIVE  <-> rdma_en3  PORT_ACTIVE
+  Bus 2 / Recept 3  rdma_en4  PORT_ACTIVE  <-> rdma_en4  PORT_ACTIVE
+```
+
+Symmetric on both nodes, and on **separate Thunderbolt buses** (independent
+controllers, not a daisy-chain off one bus) -- which is what makes it
+useful.
+
+**What it does NOT buy: bandwidth.** TP's per-token collective traffic is
+43 layers x 4096 hidden x 2 B = 344 KB, or 84.5 Mb/s at the 30 tok/s
+target, against an 80 Gb/s link -- **0.11% utilization**. Every problem
+in this campaign is latency and reliability, not bandwidth.
+
+**What it DOES buy, and why it matters:**
+
+1. **QP budget: 3 -> 6 per peer.** `max_qp:3` is PER DEVICE. That single
+   number forced the mode-conditional QP construction documented at the
+   top of `mesh.cpp` (PP and TP each get a DIFFERENT third QP because a
+   fourth always failed EBUSY), and it is entangled with the coord
+   `split()` that Section 112 showed permanently disables
+   `reconnect_fresh()`.
+2. **Physical isolation of the p2p and collective paths.** Confirmed at
+   `mesh.cpp:185`: `pool_connections_.emplace_back(data_conn.ctx,
+   owns_ctx=false)` -- every QP type borrows the DATA connection's
+   context, so all four live on ONE device today. That shared
+   `connections_` buffer array IS the Section 112 bug: the p2p standing
+   pool's WRs were consumable by the collective path because
+   `consume_recv` never checks `call_id`. Section 112 fixed it by gating
+   the pool OFF under TP -- careful avoidance. A second device makes the
+   whole bug class **structurally impossible**: p2p on one device,
+   collectives on the other, no shared buffer array, no WR cross-talk.
+
+**Status: prerequisite in place, not yet used.** jaccl takes one device
+name per PEER (`MeshGroup`'s `size_(device_names.size())`), so today the
+second link comes up PORT_ACTIVE and no code ever opens it. Realizing
+either benefit needs a jaccl change to open a second device context and
+move `pool_connections_`/`p2p_retry_connections_` onto it. That is a real
+root-cause fix for a bug class already hit twice, and it is now unblocked
+by hardware.
