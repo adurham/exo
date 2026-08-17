@@ -2,6 +2,7 @@ import codecs
 import contextlib
 import os
 import signal
+import subprocess
 import time
 from dataclasses import dataclass, field
 from os import PathLike
@@ -455,6 +456,23 @@ class RunnerSupervisor:
             f"{silent_for:.0f}s (>{HANG_TIMEOUT_SECONDS:.0f}s). SIGKILLing to "
             f"force RunnerFailed + re-placement."
         )
+        # DIAGNOSTIC (2026-08-16, design doc Section 116): capture WHERE the
+        # runner is stuck before killing it. Without this the SIGKILL destroys
+        # the only evidence -- we learn a runner hung but never which call it
+        # hung in, which is exactly the state the TP two-link bring-up hang was
+        # left in. `sample` attaches to the live process and writes a call
+        # graph for every thread; it is read-only and safe to run on a wedged
+        # process. Best-effort and time-boxed: never let diagnostics delay or
+        # prevent the kill.
+        with contextlib.suppress(Exception):
+            dump_path = f"/tmp/exo_hang_{self.runner_process.pid}.txt"
+            _ = subprocess.run(
+                ["/usr/bin/sample", str(self.runner_process.pid), "3", "-f", dump_path],
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+            logger.critical(f"[HANG_STACK] wrote thread dump to {dump_path}")
         with contextlib.suppress(Exception):
             os.kill(self.runner_process.pid, signal.SIGKILL)
 

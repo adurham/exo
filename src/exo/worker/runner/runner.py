@@ -263,6 +263,24 @@ class Runner:
                         self._work_queue.put(task)
             except (EndOfStream, ClosedResourceError):
                 pass
+            except BaseException:
+                # DIAGNOSTIC (2026-08-16, design doc Section 116): any other
+                # exception here used to propagate to threading's default
+                # handler, which writes a bare "Exception in thread
+                # task-reader:" to stderr -- and on the RDMA bring-up path
+                # that line is immediately buried under thousands of
+                # "IOConnectUnmapMemory failed: kr=0xe00002c2" lines, so the
+                # traceback is effectively lost. That left the TP two-link
+                # hang (runner accepts a task, emits no event for 45s, hang
+                # watchdog SIGKILLs it) with no diagnosable cause.
+                #
+                # Log it through loguru instead, which lands in exo.log with
+                # the full traceback and a stable prefix to grep for.
+                logger.opt(exception=True).critical(
+                    "[TASK_READER_DIED] task-reader thread raised; the runner "
+                    "will stop consuming tasks and the hang watchdog will "
+                    "SIGKILL it ~45s later"
+                )
             finally:
                 self._work_queue.put(_TaskStreamClosed())
 
