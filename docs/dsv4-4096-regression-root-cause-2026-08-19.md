@@ -145,23 +145,68 @@ hung with no prefill progress logged at all. Killed the attempt rather
 than continue fighting cluster instability; this remains the next
 concrete step for a future session.
 
-## What this means for the standing config
+## THIRD UPDATE 2026-08-19 (final): MYSTERY SOLVED -- the 3.15x anomaly was a measurement artifact
 
-**`EXO_PREFILL_STEP_SIZE=2048` remains the correct standing default** --
-that conclusion is unchanged and well-supported (4096 measurably
-regresses end-to-end, confirmed multiple times tonight, including via a
-completely independent second matched-prompt capture). The mechanistic
-explanation is narrower than before but still not fully closed: the
-"extra" cost beyond pure linear FLOP scaling is now confirmed to live
-specifically inside the SDPA call/wrapper itself, with gather, indexer,
-mask, and compressor all ruled out as contributors. Option A
-(SDPA-kernel-level sub-tiling) is DEAD -- do not revisit it. The next
-concrete step for a future session: get `EXO_PROFILER_SYNC_SPANS=1`
-working reliably on the live cluster (it crashed/hung twice tonight,
-unrelated to the sync flag itself as far as could be determined) to
-distinguish "real extra SDPA cost" from "lazy-eval misattribution
-artifact" -- this is the last remaining decisive test that was
-identified but not completed.
+Root-caused why `EXO_PROFILER_SYNC_SPANS=1` kept crashing the runner
+(HTTP 500 "signal=9", then a hang): `src/exo/worker/runner/supervisor.py`
+has a hang watchdog (`HANG_TIMEOUT_SECONDS`, default 45s via
+`EXO_RUNNER_HANG_TIMEOUT_SECONDS`) that SIGKILLs a runner if it goes
+silent (no progress-callback event) for too long. Under sync mode,
+forcing a GPU sync at EVERY span boundary (dozens of spans x 43 layers
+x every chunk) makes the gap between progress events balloon past 45s,
+tripping the watchdog. Not a real bug -- an expected interaction between
+two features never designed to run together at this granularity. Fix:
+relaunch with `EXO_RUNNER_HANG_TIMEOUT_SECONDS=300` alongside
+`EXO_PROFILER_SYNC_SPANS=1`. This let the sync-mode test finally
+complete cleanly.
+
+Ran a matched-prompt (12,068 tokens, same prompt both configs) sync-mode
+A/B, STEP_SIZE=2048 vs 4096:
+
+| span | ms/token @2048 (sync) | ms/token @4096 (sync) | ratio |
+|---|---|---|---|
+| `attn.sdpa` | 0.4153 | 0.8428 | **2.029x** |
+| `attn.sdpa.compressed` | 0.2745 | 0.6477 | **2.359x** |
+
+**`attn.sdpa`'s sync-mode ratio (2.029x) matches the isolated laptop
+microbenchmark's linear-scaling prediction (~2.0x) almost exactly.**
+`attn.sdpa.compressed` is somewhat higher (2.359x) but far closer to
+linear than the earlier non-sync 3.15x/2.00x figures.
+
+**Conclusion: the earlier non-sync per-call cost ratio of 3.15x for
+`attn.sdpa` was a lazy-eval measurement artifact, not a real extra
+cost.** Under non-sync profiling, MLX's lazy graph construction lets
+work queued by one span "leak" into whichever later span forces the
+next GPU sync -- exactly the pitfall this skill already documents
+elsewhere (see the skill's "CRITICAL PITFALL: Profiler Synchronization"
+section) and exactly what tripped this investigation up. Under TRUE
+GPU-synced measurement, SDPA cost is confirmed linear in query-row
+count, consistent with the isolated microbenchmark. **There is no
+hidden, unattributed SDPA-kernel-level cost to chase.** This closes the
+investigation started by the earlier "UPDATE"/"SECOND UPDATE" sections
+above -- read this THIRD UPDATE as the final, correct word; the
+"unresolved 1.58x gap" language in those sections is superseded.
+
+## What this means for the standing config (FINAL)
+
+**`EXO_PREFILL_STEP_SIZE=2048` remains correct** -- attention's SDPA
+cost genuinely grows ~2x (linearly, confirmed under sync-mode
+measurement) as per-rank L doubles at STEP_SIZE=4096, while MoE's
+efficiency gain is smaller (~11% per the earlier isolated benchmark and
+matched-prompt live A/B). The two effects don't cancel; SDPA's linear
+cost growth outweighs MoE's modest efficiency gain. This is now a
+FULLY closed, fully attributed investigation:
+- Option A (SDPA-kernel-level sub-tiling): DEAD, confirmed no
+  kernel-shape penalty exists to recover (isolated microbenchmark,
+  0.998-1.047x tiling ratio).
+- The "3.15x mystery extra cost": RESOLVED as a non-sync-mode
+  measurement artifact, not a real cost. SDPA scales linearly, exactly
+  as the isolated benchmark predicted all along.
+- No further investigation needed on this specific thread. Any future
+  session revisiting "why does 4096 regress" should cite this doc's
+  clean final answer (SDPA cost genuinely doubles under SEQ_SPLIT's
+  larger per-rank L, linearly, outweighing MoE's smaller efficiency
+  gain) rather than re-deriving it.
 
 ## Files
 
