@@ -83,7 +83,13 @@ def main():
     print("quantized classes:", type(glu.gate_proj).__name__, type(glu.down_proj).__name__)
 
     results = []
-    for n_tokens in (512, 2048, 8192):
+    # 1024 = real per-rank L at STEP_SIZE=2048 (SEQ_SPLIT halves nominal
+    # chunk across 2 TP ranks). 2048 = real per-rank L at STEP_SIZE=4096.
+    # Earlier tonight this loop used the NOMINAL sizes (512/2048/8192),
+    # NOT what the live 2-rank cluster actually executes -- corrected
+    # 2026-08-19 per a reference-model catch before re-attacking the
+    # 2048-vs-4096 regression. See docs/dsv4-clear-cache-interval-2-test-2026-08-19.md.
+    for n_tokens in (1024, 2048):
         idx = make_routing(n_tokens)
         x = mx.random.normal((1, n_tokens, HIDDEN)).astype(DTYPE)
         mx.eval(x, idx)
