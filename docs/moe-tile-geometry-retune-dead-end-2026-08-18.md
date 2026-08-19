@@ -1,5 +1,19 @@
 # MoE tile-geometry retune: confirmed dead end at production's real shape (2026-08-18)
 
+> **CORRECTION 2026-08-19**: the "62.6% of dense ceiling" / "~37% gap"
+> figures below use the WRONG denominator (dense fp16 GEMM, uncorrected
+> for the ~13% mxfp4 quant tax that applies even with zero MoE routing).
+> Against the correct denominator (dense mxfp4-quantized matmul at the
+> same shape), true MoE-specific efficiency is **72.0-72.5% at L=2048**
+> (28% gap, not 37%) -- see
+> `docs/moe-vs-dense-qmm-isolation-2026-08-19.md`. This doc's core
+> conclusion (tile-geometry retune is a dead end) is UNCHANGED by the
+> correction -- larger tiles still measured worse, independent of which
+> denominator you use for the headline percentage. Only the "~37% gap"
+> framing below is stale; treat "~28% gap, driven by per-expert-run
+> raggedness (median M=7-14), not tile geometry" as the corrected
+> framing.
+
 ## Context
 
 Following up on the discovery that the MoE GEMM kernels (~97% of real MoE

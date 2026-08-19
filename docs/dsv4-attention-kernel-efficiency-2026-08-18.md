@@ -1,5 +1,14 @@
 # DSv4-Flash attention sub-kernel efficiency: achieved vs ceiling (2026-08-18)
 
+> **NOTE 2026-08-19**: the MoE comparison figure this doc cites (62.6%)
+> uses the dense-fp16 denominator, later found to be ~9 points too
+> harsh (true MoE-specific efficiency vs the correct mxfp4-dense
+> denominator is 72.0-72.5% at L=2048, see
+> `docs/moe-vs-dense-qmm-isolation-2026-08-19.md`). Attention's own
+> figures below (measured against dense fp16, the correct denominator
+> for these mxfp8 kernels) are unaffected -- this note only corrects
+> the cross-reference comparison point, not this doc's own numbers.
+
 Companion to the MoE analysis (`bench/moe_production_class_bench.py`, 62.6% of
 matched-shape dense ceiling). Same methodology applied to the 4 largest
 attention sub-spans, which together are **44.3% of prefill wall time** --
