@@ -202,7 +202,9 @@ def main() -> None:
 
         # --- gathered arms (production topology) ---
         for name, glu in modules.items():
-            t, s = bench_call(lambda g=glu: g(x, idx), iters=args.iters)
+            t, s = bench_call(
+                lambda g=glu, _x=x, _i=idx: g(_x, _i), iters=args.iters
+            )
             row[f"gather_{name}_ms"] = t * 1e3
             row[f"gather_{name}_tflops"] = flops / t / 1e12
             print(

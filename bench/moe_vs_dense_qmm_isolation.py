@@ -109,12 +109,37 @@ def flops_for(m: int) -> int:
     return 2 * m * (2 * HIDDEN * INTER_PER_RANK + INTER_PER_RANK * HIDDEN)
 
 
+def bench_interleaved(fns: dict, warmup: int = WARMUP, reps: int = ITERS) -> dict:
+    """Time several closures ROUND-ROBIN within each repetition.
+
+    Benchmarking tiers sequentially (all of T1, then all of T2, ...) lets GPU
+    thermal/clock drift alias directly onto the tier comparison -- the tier that
+    happens to run last on a hot GPU looks artificially slow, and the ratios we
+    care about are exactly differences between tiers. Interleaving means every
+    tier sees the same thermal trajectory, so drift largely cancels in the ratios.
+    """
+    for fn in fns.values():
+        for _ in range(warmup):
+            mx.eval(fn())
+    mx.synchronize()
+    samples = {name: [] for name in fns}
+    for _ in range(reps):
+        for name, fn in fns.items():
+            mx.synchronize()
+            t0 = time.perf_counter()
+            mx.eval(fn())
+            mx.synchronize()
+            samples[name].append(time.perf_counter() - t0)
+    return {name: statistics.median(s) for name, s in samples.items()}
+
+
 def main():
     print("MLX:", mx.__version__)
     print(
         f"config: hidden={HIDDEN} inter/rank={INTER_PER_RANK} experts={N_EXPERTS} "
         f"top_k={TOP_K} quant={QMODE} g={GROUP_SIZE} b={BITS} dtype={DTYPE}"
     )
+    print(f"method: 4 tiers timed round-robin, {ITERS} reps, median\n")
 
     glu = SwitchGLU(HIDDEN, INTER_PER_RANK, N_EXPERTS, bias=False)
     glu.set_dtype(DTYPE)
@@ -128,11 +153,11 @@ def main():
 
     rows = []
     for n_tokens in TOKEN_COUNTS:
-        M = n_tokens * TOP_K  # total activated rows across all three GEMMs
-        fl = flops_for(M)
-        rec = {"n_tokens": n_tokens, "M": M}
+        m_rows = n_tokens * TOP_K  # total activated rows across all three GEMMs
+        fl = flops_for(m_rows)
+        rec = {"n_tokens": n_tokens, "M": m_rows}
 
-        # ---- T4: real MoE, ragged production routing ----
+        # T4 inputs: real MoE, ragged production routing
         idx = make_routing(n_tokens)
         x3 = mx.random.normal((1, n_tokens, HIDDEN)).astype(DTYPE)
         mx.eval(x3, idx)
@@ -140,43 +165,44 @@ def main():
         counts = counts.at[idx.flatten()].add(mx.ones((idx.size,), dtype=mx.uint32))
         mx.eval(counts)
         nz = [v for v in counts.tolist() if v > 0]
-        t4, _ = bench_call(lambda: glu(x3, idx))
-        rec["moe_ragged_ms"] = t4 * 1e3
-        rec["moe_ragged_tflops"] = fl / t4 / 1e12
         rec["experts_used"] = len(nz)
         rec["m_per_expert_median"] = statistics.median(nz)
         rec["m_per_expert_min"] = min(nz)
         rec["m_per_expert_max"] = max(nz)
 
-        # ---- T3: gather path, degenerate routing (all rows -> expert 0) ----
+        # T3 inputs: gather path, degenerate routing (all rows -> expert 0)
         idx0 = mx.zeros((n_tokens, TOP_K), dtype=mx.uint32)
         mx.eval(idx0)
-        t3, _ = bench_call(lambda: glu(x3, idx0))
-        rec["moe_single_expert_ms"] = t3 * 1e3
-        rec["moe_single_expert_tflops"] = fl / t3 / 1e12
 
-        # ---- T2: dense mxfp4 quantized_matmul, same M/K/N, no routing ----
-        xa = mx.random.normal((M, HIDDEN)).astype(DTYPE)
-        xb = mx.random.normal((M, INTER_PER_RANK)).astype(DTYPE)
+        # T2 inputs: dense mxfp4 quantized_matmul, same M/K/N, no routing
+        xa = mx.random.normal((m_rows, HIDDEN)).astype(DTYPE)
+        xb = mx.random.normal((m_rows, INTER_PER_RANK)).astype(DTYPE)
         mx.eval(xa, xb)
 
-        def dense_q():
-            return (qmm(xa, w_gate), qmm(xa, w_up), qmm(xb, w_down))
-
-        t2, _ = bench_call(dense_q)
-        rec["dense_mxfp4_ms"] = t2 * 1e3
-        rec["dense_mxfp4_tflops"] = fl / t2 / 1e12
-
-        # ---- T1: dense fp16 GEMM, same M/K/N ----
-        a1 = mx.random.normal((M, HIDDEN)).astype(mx.float16)
+        # T1 inputs: dense fp16 GEMM, same M/K/N
+        a1 = mx.random.normal((m_rows, HIDDEN)).astype(mx.float16)
         b1 = mx.random.normal((HIDDEN, INTER_PER_RANK)).astype(mx.float16)
         b1b = mx.random.normal((HIDDEN, INTER_PER_RANK)).astype(mx.float16)
-        a2 = mx.random.normal((M, INTER_PER_RANK)).astype(mx.float16)
+        a2 = mx.random.normal((m_rows, INTER_PER_RANK)).astype(mx.float16)
         b2 = mx.random.normal((INTER_PER_RANK, HIDDEN)).astype(mx.float16)
         mx.eval(a1, b1, b1b, a2, b2)
-        t1, _ = bench_call(lambda: (a1 @ b1, a1 @ b1b, a2 @ b2))
+
+        med = bench_interleaved({
+            "t1": lambda p=a1, q=b1, r=b1b, s=a2, u=b2: (p @ q, p @ r, s @ u),
+            "t2": lambda a=xa, b=xb: (qmm(a, w_gate), qmm(a, w_up), qmm(b, w_down)),
+            "t3": lambda x=x3, i=idx0: glu(x, i),
+            "t4": lambda x=x3, i=idx: glu(x, i),
+        })
+        t1, t2, t3, t4 = med["t1"], med["t2"], med["t3"], med["t4"]
+
         rec["dense_fp16_ms"] = t1 * 1e3
         rec["dense_fp16_tflops"] = fl / t1 / 1e12
+        rec["dense_mxfp4_ms"] = t2 * 1e3
+        rec["dense_mxfp4_tflops"] = fl / t2 / 1e12
+        rec["moe_single_expert_ms"] = t3 * 1e3
+        rec["moe_single_expert_tflops"] = fl / t3 / 1e12
+        rec["moe_ragged_ms"] = t4 * 1e3
+        rec["moe_ragged_tflops"] = fl / t4 / 1e12
 
         rec["T2_over_T1_quant_tax_pct"] = t1 / t2 * 100
         rec["T4_over_T1_pct"] = t1 / t4 * 100
@@ -186,25 +212,25 @@ def main():
         rows.append(rec)
 
         print(
-            f"\n=== L={n_tokens} (M={M} activated rows) "
+            f"=== L={n_tokens} (M={m_rows} activated rows) "
             f"experts_used={rec['experts_used']}/{N_EXPERTS} "
             f"M/expert min={rec['m_per_expert_min']} "
             f"med={rec['m_per_expert_median']:.0f} max={rec['m_per_expert_max']} ==="
         )
-        print(f"  T1 dense fp16 GEMM      {t1*1e3:8.3f} ms {rec['dense_fp16_tflops']:7.2f} TFLOPS")
-        print(f"  T2 dense mxfp4 qmm      {t2*1e3:8.3f} ms {rec['dense_mxfp4_tflops']:7.2f} TFLOPS")
-        print(f"  T3 gather, 1 expert     {t3*1e3:8.3f} ms {rec['moe_single_expert_tflops']:7.2f} TFLOPS")
-        print(f"  T4 MoE, ragged (prod)   {t4*1e3:8.3f} ms {rec['moe_ragged_tflops']:7.2f} TFLOPS")
-        print(f"  -- quant tax      T2/T1 = {rec['T2_over_T1_quant_tax_pct']:5.1f}%")
-        print(f"  -- headline       T4/T1 = {rec['T4_over_T1_pct']:5.1f}%   (the '62.6%' number)")
-        print(f"  -- TRUE MoE eff   T4/T2 = {rec['T4_over_T2_true_moe_eff_pct']:5.1f}%")
+        print(f"  T1 dense fp16 GEMM     {t1*1e3:8.3f} ms {rec['dense_fp16_tflops']:7.2f} TFLOPS")
+        print(f"  T2 dense mxfp4 qmm     {t2*1e3:8.3f} ms {rec['dense_mxfp4_tflops']:7.2f} TFLOPS")
+        print(f"  T3 gather, 1 expert    {t3*1e3:8.3f} ms {rec['moe_single_expert_tflops']:7.2f} TFLOPS")
+        print(f"  T4 MoE, ragged (prod)  {t4*1e3:8.3f} ms {rec['moe_ragged_tflops']:7.2f} TFLOPS")
+        print(f"  -- quant tax       T2/T1 = {rec['T2_over_T1_quant_tax_pct']:5.1f}%")
+        print(f"  -- headline        T4/T1 = {rec['T4_over_T1_pct']:5.1f}%   (the '62.6%' number)")
+        print(f"  -- TRUE MoE eff    T4/T2 = {rec['T4_over_T2_true_moe_eff_pct']:5.1f}%")
         print(f"  -- gather plumbing T3/T2 = {rec['T3_over_T2_gather_plumbing_pct']:5.1f}%")
-        print(f"  -- raggedness      T4/T3 = {rec['T4_over_T3_raggedness_pct']:5.1f}%")
+        print(f"  -- raggedness      T4/T3 = {rec['T4_over_T3_raggedness_pct']:5.1f}%\n")
 
     out = Path(__file__).resolve().parent / "results" / "moe_vs_dense_qmm_isolation.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"mlx": mx.__version__, "rows": rows}, indent=2))
-    print(f"\nwrote {out}")
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":
