@@ -68,17 +68,30 @@ to overlap with the wait. The two are complementary, not competing:
 quantization shrinks the wait itself; overlap hides whatever wait
 remains behind useful work.
 
-Next step
-------------
+Next step (UPDATE: already tried, reverted -- do not re-attempt this specific mechanism)
+------------------------------------------------------------------------------------------
 
-Scope a concrete plan for compute/comm overlap in the DSv4 prefill
-layer loop -- specifically: is there independent GPU work available
-to overlap with a given layer's all_sum (e.g. the NEXT layer's
-attention/indexer computation, which doesn't depend on the current
-layer's post-all_sum residual until the very end), and can MLX's lazy
-graph + async command buffer model actually express that overlap, or
-does the current code structure force a hard sync at each all_sum call
-site (the "Phase H Lever 1" comment at deepseek_v4.py:2838-2840
-suggests a DELIBERATE forced-eval immediately after all_sum -- worth
-checking whether that forced sync is itself the thing preventing
-overlap that would otherwise be possible).
+Checked the exact code: gating the forced `mx.eval()` after `moe.all_sum`
+by `_fence_every_n` (i.e. deferring the sync to let more layers' work
+queue up before flushing) was **already tried and reverted** as "OPT-7"
+(comment at `deepseek_v4.py` ~2967-2972): it made B=2 prefill 23%
+SLOWER (111 vs 144 tok/s). Root cause per the comment: without the
+per-layer eval, MLX builds a LARGER lazy graph that's more expensive to
+evaluate at the eventual fence point than doing incremental per-layer
+evals -- the anticipated overlap benefit didn't materialize, and graph-
+accumulation cost dominated instead. This is real, already-measured
+evidence against the "just remove the sync" framing of the overlap idea.
+
+**This does not kill the underlying idea, but it does kill the specific
+mechanism scoped above.** The reconciliation (GPU-busy-metric ≠
+GPU-doing-useful-work, the collective's wait is real and disguised)
+still stands and is real. What's now known NOT to work: naively
+deferring MLX's own lazy-eval fence. What remains untested: whether a
+genuinely different overlap mechanism -- e.g. restructuring the graph so
+independent NEXT-layer compute is explicitly issued/scheduled before the
+current layer's `mx.eval()` fence blocks (rather than relying on lazy-
+eval's own graph accumulation to find that overlap implicitly) -- could
+succeed where the implicit approach failed. This is a materially harder,
+more invasive change (real graph restructuring, not a one-line env-gate
+change) and should be scoped carefully, with the OPT-7 failure mode
+explicitly designed around, before attempting it.
