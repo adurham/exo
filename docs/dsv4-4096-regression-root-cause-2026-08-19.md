@@ -114,22 +114,54 @@ per-rank L from MoE's batch size" idea flagged below. Two subagents
    A/B run capturing the `attn.gather` span specifically alongside
    `attn.sdpa`, which was not preserved from the original run.
 
+## SECOND UPDATE 2026-08-19 (same day, later still): ruled out attn.gather/indexer/mask/compressor -- gap is inside SDPA itself
+
+Ran a fresh matched-prompt (41,346 tokens, same prompt as all prior runs)
+capture at STEP_SIZE=4096 with `EXO_PROFILER=spans`, specifically to
+check `attn.gather` (the OPT-11 upfront-gather step, a span SEPARATE from
+`attn.sdpa`) against `attn.sdpa`'s own numbers -- the leading unresolved
+candidate from the update above.
+
+**Result: `attn.gather` is negligible (2.17ms total, 0.0% of wall time)
+and does not explain anything.** Also checked `attn.indexer` (1622ms @
+4096 vs 1618ms @ 2048 -- essentially flat, ratio 1.002x), `attn.mask`,
+and `attn.compressor` (both <0.005ms/token) -- none of these candidates
+scale meaningfully between configs. The fresh capture also reproduced
+the original finding almost exactly (attn.sdpa total_ms ratio 1.774x,
+attn.sdpa.compressed ratio 2.001x -- both within 1% of the first run),
+confirming this is a real, stable, reproducible effect, not run-to-run
+noise.
+
+**This means the unexplained ~1.58x extra cost is genuinely INSIDE the
+SDPA kernel call itself** (or its immediate wrapper), not in any
+surrounding gather/indexer/mask step -- which directly CONTRADICTS the
+isolated laptop microbenchmark's finding that raw SDPA cost scales
+exactly linearly with query-row count. Attempted the natural next test
+(EXO_PROFILER_SYNC_SPANS=1, to rule out lazy-eval misattribution
+absorbing adjacent work into the span boundary) but it did not complete
+cleanly on the live cluster -- one attempt returned an HTTP 500 with
+"Runner shutdown before completing command (signal=9)", a second attempt
+hung with no prefill progress logged at all. Killed the attempt rather
+than continue fighting cluster instability; this remains the next
+concrete step for a future session.
+
 ## What this means for the standing config
 
 **`EXO_PREFILL_STEP_SIZE=2048` remains the correct standing default** --
 that conclusion is unchanged and well-supported (4096 measurably
-regresses end-to-end, confirmed multiple times tonight). But the
-mechanistic explanation is only PARTIALLY understood, not fully closed:
-attention's SDPA cost genuinely does grow faster than MoE's efficiency
-gain as chunk size increases (confirmed), but the exact multiplier is
-not fully attributed -- roughly half of the observed per-call cost
-increase (the "extra" 1.58x beyond pure linear FLOP scaling) is still
-unexplained. Option A (SDPA-kernel-level sub-tiling) is DEAD -- do not
-revisit it, per point 2 above. Any future investigation into recovering
-value at larger chunk sizes should target the unresolved 1.58x gap
-directly (starting with the `attn.gather` span and the per-call fixed
--overhead hypotheses above), not another attempt at kernel-level
-tiling.
+regresses end-to-end, confirmed multiple times tonight, including via a
+completely independent second matched-prompt capture). The mechanistic
+explanation is narrower than before but still not fully closed: the
+"extra" cost beyond pure linear FLOP scaling is now confirmed to live
+specifically inside the SDPA call/wrapper itself, with gather, indexer,
+mask, and compressor all ruled out as contributors. Option A
+(SDPA-kernel-level sub-tiling) is DEAD -- do not revisit it. The next
+concrete step for a future session: get `EXO_PROFILER_SYNC_SPANS=1`
+working reliably on the live cluster (it crashed/hung twice tonight,
+unrelated to the sync flag itself as far as could be determined) to
+distinguish "real extra SDPA cost" from "lazy-eval misattribution
+artifact" -- this is the last remaining decisive test that was
+identified but not completed.
 
 ## Files
 
