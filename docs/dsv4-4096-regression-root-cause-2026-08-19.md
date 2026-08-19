@@ -67,19 +67,69 @@ cancel -- attention's regression (60.7% of wall at 4096 vs 51.5% at 2048,
 i.e. a LARGER fraction of a comparable total, on top of the per-token
 figures above) dominates MoE's improvement.
 
+## UPDATE 2026-08-19 (later): the "quadratic-ish" mechanism above is WRONG -- Option A tested and killed, real cause still open
+
+A follow-up investigation designed and tested the "decouple attention's
+per-rank L from MoE's batch size" idea flagged below. Two subagents
+(code map + isolated laptop microbenchmark, see
+`docs/dsv4-sdpa-subtiling-code-map-2026-08-19.md` and
+`bench/sdpa_subtile_microbench.py`) found:
+
+1. **The sparse attention class (`SparseCompressedAttention`, emits
+   `attn.sdpa`) already internally tiles its SDPA calls** into
+   `EXO_DSV4_SPARSE_SDPA_TILE=128`-row sub-chunks (default on), with a
+   single upfront gather + per-tile dispatch + one final concatenate. So
+   "sub-tile the SDPA call" (Option A) is *already happening* for this
+   class -- there was nothing new to build here.
+2. **Isolated laptop SDPA microbenchmark (same M4 Max architecture as
+   the cluster) found SDPA cost is EXACTLY LINEAR in query-row count**,
+   not quadratic: doubling rows (1024->2048) gives ~1.86-2.00x cost
+   across every shape and KV-length tested (sparse-equivalent gathered
+   KV=512, compressed-equivalent pooled KV 2128-20128). Tiling one big
+   call into two smaller sequential calls measured 0.998-1.047x --
+   neutral to slightly worse, no recoverable kernel-shape penalty
+   exists. **This falsifies the "quadratic-ish scaling" explanation
+   given in the original Summary above and confirms Option A
+   (SDPA sub-tiling) is a dead end -- there is nothing to decouple at
+   the SDPA-kernel level.**
+3. **A real, still-unresolved discrepancy was found while cross-checking**:
+   the live cluster's raw `attn.sdpa` span data showed an average
+   per-call cost ratio of **3.15x** (95,245us/call @4096 vs 30,218us/call
+   @2048) -- not the ~2.0x pure linear-row-scaling predicts. Depth-based
+   confounds (the 4096 run's fewer/bigger calls occur at a slightly
+   greater average prefill depth than 2048's more/smaller calls, so the
+   sparse indexer's pooled-KV selection pool is marginally larger on
+   average) were checked and are too small to explain this: bounded at
+   roughly STEP/2 extra depth, ~5% effect max, nowhere near 1.58x.
+   Candidate remaining causes (not yet isolated): the per-rank-L-scaled
+   upfront gather step (`attn.gather` span, materializes a
+   `(B, L_q, 512, 512)` tensor that's 2x larger at L_q=2048, timed as a
+   SEPARATE span from `attn.sdpa` so not visible in the numbers above),
+   lazy-eval misattribution absorbing adjacent work into whichever call
+   forces the next sync, or a cluster-environment effect (memory
+   pressure/allocator threshold) not present in the isolated laptop
+   test. **This gap was not resolved before the raw log data needed to
+   investigate it further was lost to a subsequent cluster relaunch's
+   log rotation** -- re-investigating it requires a fresh matched-prompt
+   A/B run capturing the `attn.gather` span specifically alongside
+   `attn.sdpa`, which was not preserved from the original run.
+
 ## What this means for the standing config
 
-**Confirms `EXO_PREFILL_STEP_SIZE=2048` is correct, for a real,
-now-understood structural reason** -- not just "measured worse,
-unexplained." The regression is not an incidental allocator or indexer
-cost (both already ruled out earlier tonight); it is the direct,
-expected consequence of attention's per-rank sequence-length sensitivity
-under SEQ_SPLIT. Any future attempt to raise STEP_SIZE further would need
-to address the SDPA per-rank-L scaling specifically (e.g. finer-grained
-SEQ_SPLIT that keeps per-rank L bounded independent of nominal chunk
-size, decoupling attention's L from the MoE batch size the same way the
-"decouple MoE batch size from attention/indexer chunk size" idea flagged
-earlier tonight would need to work) -- not a launcher-flag change.
+**`EXO_PREFILL_STEP_SIZE=2048` remains the correct standing default** --
+that conclusion is unchanged and well-supported (4096 measurably
+regresses end-to-end, confirmed multiple times tonight). But the
+mechanistic explanation is only PARTIALLY understood, not fully closed:
+attention's SDPA cost genuinely does grow faster than MoE's efficiency
+gain as chunk size increases (confirmed), but the exact multiplier is
+not fully attributed -- roughly half of the observed per-call cost
+increase (the "extra" 1.58x beyond pure linear FLOP scaling) is still
+unexplained. Option A (SDPA-kernel-level sub-tiling) is DEAD -- do not
+revisit it, per point 2 above. Any future investigation into recovering
+value at larger chunk sizes should target the unresolved 1.58x gap
+directly (starting with the `attn.gather` span and the per-call fixed
+-overhead hypotheses above), not another attempt at kernel-level
+tiling.
 
 ## Files
 
