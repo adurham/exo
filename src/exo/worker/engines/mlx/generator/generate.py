@@ -2,6 +2,7 @@ import contextlib
 import functools
 import math
 import os
+import socket
 import sys
 import time
 import uuid
@@ -1237,6 +1238,34 @@ def prefill_interruptible_advance(
     return tokens_per_sec, drive.num_tokens, final_snapshots
 
 
+_chunk_overlap_config_logged: bool = False
+
+
+def _log_chunk_overlap_config(
+    overlap_enabled: bool, group: "mx.distributed.Group | None"
+) -> None:
+    """Log the resolved EXO_PREFILL_CHUNK_OVERLAP flag once, with rank identity.
+
+    Without this, a per-rank flag desync (e.g. a manual single-node relaunch
+    that bypasses ``start_cluster.sh``'s env fanout) would be completely
+    silent: one rank would run the overlapped chunk loop and the other the
+    serial one, diverging their collective sequences. Logging hostname +
+    rank + the resolved boolean makes that visible in logs.
+    """
+    global _chunk_overlap_config_logged
+    if _chunk_overlap_config_logged:
+        return
+    _chunk_overlap_config_logged = True
+    rank = group.rank() if group is not None else 0
+    world_size = group.size() if group is not None else 1
+    logger.info(
+        f"[PREFILL_CHUNK_OVERLAP] host={socket.gethostname()} "
+        f"rank={rank}/{world_size} EXO_PREFILL_CHUNK_OVERLAP="
+        f"{os.environ.get('EXO_PREFILL_CHUNK_OVERLAP', '<unset>')!r} "
+        f"resolved_overlap={overlap_enabled}"
+    )
+
+
 def prefill_batched(
     model: Model,
     tokenizer: TokenizerWrapper,
@@ -1414,6 +1443,7 @@ def prefill_batched(
     # ranks reading identical env state is a hard prerequisite, not
     # merely assumed.
     _overlap = os.environ.get("EXO_PREFILL_CHUNK_OVERLAP", "0") == "1"
+    _log_chunk_overlap_config(_overlap, group)
     _prev_cache_sync: object | None = None
 
     try:
@@ -1431,11 +1461,38 @@ def prefill_batched(
                     _t_fwd,
                 )
 
+                # ORDERING (2026-08-20 race fix): the PREVIOUS chunk's
+                # collectives must be fully drained BEFORE this chunk's
+                # barrier is issued. The barrier is itself a collective;
+                # if it is posted while the previous chunk's all_sums are
+                # still in flight, and it lives on a stream with no data
+                # dependency on them, the two TP ranks are not
+                # structurally guaranteed to post barrier-vs-real-
+                # collective in the same relative order run-to-run. A
+                # wire-arrival-ordered transport can then match one
+                # rank's 1-element barrier all_sum against the other
+                # rank's real attention/MoE reduction -> silent numeric
+                # corruption (wrong logits, no crash, no hang), which is
+                # exactly the anomaly observed in the 2026-08-20 live
+                # test. Draining first restores a strict happens-before.
+                if _overlap and _prev_cache_sync is not None:
+                    _t_drain = time.perf_counter()
+                    mx.eval(_prev_cache_sync)
+                    _prev_cache_sync = None
+                    request_trace.record(
+                        f"prefill_batched.chunk{chunk_idx}.drain_prev", _t_drain
+                    )
+
                 # TP-rank synchronization point — same pattern as the
                 # serial ``prefill()`` chunk loop. Guards against rank
                 # drift before the next chunk's all_sum collectives fire.
-                # Left untouched by the overlap path -- see module note
-                # above (EXO_PREFILL_CHUNK_OVERLAP).
+                # NOTE: the barrier stays on the CPU stream. Moving it onto
+                # ``generation_stream`` (the alternative fix considered) is
+                # NOT possible: the ring backend rejects a GPU-stream
+                # collective outright with ``RuntimeError:
+                # bad_variant_access`` (verified locally 2026-08-20 via
+                # ``mlx.launch -n 2 --backend ring``). The drain above is
+                # what supplies the happens-before instead.
                 _t_barrier = time.perf_counter()
                 mx_barrier(group)
                 request_trace.record(
@@ -1451,13 +1508,14 @@ def prefill_batched(
 
                 _t_eval = time.perf_counter()
                 if _overlap:
-                    # Bound in-flight depth at 1 (double buffer): before
-                    # queuing this chunk's async eval, block on the
-                    # PREVIOUS chunk's still-outstanding one. Without this
-                    # cap, every chunk's activations/comm buffers queue up
-                    # unbounded and long prefills OOM.
-                    if _prev_cache_sync is not None:
-                        mx.eval(_prev_cache_sync)
+                    # Depth-1 double buffer: dispatch this chunk's cache
+                    # sync without blocking, so its collectives can
+                    # overlap the next chunk's dependency-free GPU work.
+                    # The block-on-previous step happens at the TOP of
+                    # the next iteration (before that chunk's barrier),
+                    # which both bounds in-flight depth at 1 (otherwise
+                    # long prefills OOM) and preserves the cross-stream
+                    # happens-before described above.
                     _cache_state = [c.state for c in batched_cache]
                     mx.async_eval(_cache_state)
                     _prev_cache_sync = _cache_state
