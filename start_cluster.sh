@@ -1599,6 +1599,13 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT=$EXO_DSV4_MOE_ALLSUM_QUANT"
     [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_BITS=$EXO_DSV4_MOE_ALLSUM_QUANT_BITS"
     [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_GROUP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_GROUP=$EXO_DSV4_MOE_ALLSUM_QUANT_GROUP"
+    # 2026-08-19: shared-scale int8 all_sum (100% on jaccl's reliable
+    # all_sum path, no all_gather -- see
+    # docs/moe-allsum-quant-root-cause-and-closure-2026-08-19.md for why
+    # the EARLIER all_gather-based EXO_DSV4_MOE_ALLSUM_QUANT above was
+    # abandoned). Default OFF; unset -> byte-identical to plain all_sum.
+    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE"
+    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
     # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
