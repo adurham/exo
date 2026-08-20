@@ -426,6 +426,16 @@ class RunnerSupervisor:
 
         Gated on in_progress being non-empty so model load / idle windows (which
         legitimately emit no events) never trip it. Fires once per runner.
+
+        NOTE (2026-08-20): long-but-legitimate native recovery must signal
+        progress rather than have this timeout raised. The runner's
+        _warmup_with_reconnect() re-emits its status at reconnect START and
+        reconnect COMPLETE precisely so a multi-cycle reconnect_fresh recovery
+        (16-20 s per cycle, 60-100+ s across the retry budget) keeps bumping
+        _last_event_monotonic on VERIFIED progress. Any future path that can
+        legitimately block in native code past this window should do the same;
+        do not widen HANG_TIMEOUT_SECONDS to cover it, since that also delays
+        detection of genuinely wedged runners.
         """
         if (
             HANG_TIMEOUT_SECONDS <= 0

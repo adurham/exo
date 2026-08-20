@@ -455,6 +455,29 @@ class Runner:
         fault class the step() loop already recovers from as retryable:
         group.reconnect() (both ranks fault → both reach the reconnect
         coordinator barrier, which re-syncs them) and re-run warmup.
+
+        Watchdog interaction (2026-08-20): reconnect() now performs a FULL
+        device teardown/rebuild (reconnect_fresh), measured at 16-20 s per
+        cycle on the live cluster. A bad-luck sequence of 2-3 stall+reconnect
+        cycles is 60-100+ s of REAL recovery work, all of it inside native
+        calls that emit no events — so the supervisor's hang watchdog
+        (HANG_TIMEOUT_SECONDS, default 45 s) SIGKILLed the runner mid-recovery
+        before its own retry budget was spent (confirmed live: SIGKILL 9 s
+        after a successful second reconnect_fresh COMPLETE).
+
+        The fix is a progress signal, not a bigger timeout: each checkpoint
+        below re-emits the current status through the SAME event channel the
+        supervisor already uses to bump _last_event_monotonic. Both bump
+        points are backed by *verified* forward progress, not a blind
+        heartbeat:
+          - reconnect START: the warmup call raised, i.e. control actually
+            returned from the native collective to the interpreter. A truly
+            wedged runner never gets here.
+          - reconnect COMPLETE: a full device teardown/rebuild finished.
+        Nothing bumps the clock for a retry that stalls again without a
+        successful reconnect in between, and the loop is bounded by
+        `attempts`, so a genuinely wedged runner still dies one
+        HANG_TIMEOUT window after its last real progress.
         """
         assert isinstance(self.generator, Engine)
         attempts = int(os.environ.get("EXO_WARMUP_RECONNECT_ATTEMPTS", "2"))
@@ -487,6 +510,13 @@ class Runner:
                     "Reconnecting group and retrying warmup."
                 )
                 assert group is not None
+                # Progress checkpoint 1 (reconnect STARTING). Control returned
+                # from the native collective into the interpreter, which a
+                # wedged runner can never do. Re-emitting the current status
+                # goes out on the runner->supervisor event channel and resets
+                # the supervisor's hang clock, buying this reconnect_fresh
+                # cycle (~16-20 s measured) a full HANG_TIMEOUT window.
+                self.update_status(self.current_status)
                 try:
                     group.reconnect()  # pyright: ignore[reportAny]
                 except Exception as reconnect_err:
@@ -495,6 +525,12 @@ class Runner:
                         f"({reconnect_err!r}); propagating original fault."
                     )
                     raise warmup_err from reconnect_err
+                # Progress checkpoint 2 (reconnect COMPLETE). A full device
+                # teardown/rebuild finished — concrete evidence of forward
+                # progress, so the next warmup attempt starts with a fresh
+                # watchdog window rather than inheriting the elapsed
+                # stall + reconnect time.
+                self.update_status(self.current_status)
 
     def shutdown(self, task: Task):
         logger.info("runner shutting down")
