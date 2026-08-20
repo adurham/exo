@@ -1395,6 +1395,27 @@ def prefill_batched(
     if on_prefill_progress is not None:
         on_prefill_progress(0, max_length)
 
+    # 2026-08-20: compute/comm overlap for chunk-loop's cache eval, per
+    # the Phase 0-2 investigation (docs/lever2-seqchunk-overlap-2026-08-20.md,
+    # docs/phase0b-collective-overlap-gate-2026-08-20.md,
+    # docs/phase3-cluster-validation-blocked-resolved-2026-08-20.md).
+    # Theoretical ceiling ~10.5% (moe.all_sum = 9.5% of wall time at real
+    # 220K-token scale, docs/dsv4-220k-prefill-span-profile-2026-08-18.md).
+    # Default OFF; byte-identical to the pre-existing path when off.
+    # Consult-reviewed design: async_eval with depth-1 double-buffering
+    # (NOT independent-chunk threading -- chunk N+1 genuinely depends on
+    # chunk N's KV cache; mx.async_eval lets MLX's lazy graph express that
+    # dependency correctly while still allowing chunk N's all_sum
+    # collectives to run concurrently with chunk N+1's dependency-free GPU
+    # work). mx_barrier is left UNTOUCHED (not deferred) -- git-blame
+    # confirmed it shipped with the original prefill_batched design
+    # (2026-05-08, not a later hang-fix scar), and per-rank flag skew is
+    # the single most likely way this takes down production, so both
+    # ranks reading identical env state is a hard prerequisite, not
+    # merely assumed.
+    _overlap = os.environ.get("EXO_PREFILL_CHUNK_OVERLAP", "0") == "1"
+    _prev_cache_sync: object | None = None
+
     try:
         with mx.stream(generation_stream):
             offset = 0
@@ -1413,6 +1434,8 @@ def prefill_batched(
                 # TP-rank synchronization point — same pattern as the
                 # serial ``prefill()`` chunk loop. Guards against rank
                 # drift before the next chunk's all_sum collectives fire.
+                # Left untouched by the overlap path -- see module note
+                # above (EXO_PREFILL_CHUNK_OVERLAP).
                 _t_barrier = time.perf_counter()
                 mx_barrier(group)
                 request_trace.record(
@@ -1427,7 +1450,19 @@ def prefill_batched(
                     )
 
                 _t_eval = time.perf_counter()
-                mx.eval([c.state for c in batched_cache])
+                if _overlap:
+                    # Bound in-flight depth at 1 (double buffer): before
+                    # queuing this chunk's async eval, block on the
+                    # PREVIOUS chunk's still-outstanding one. Without this
+                    # cap, every chunk's activations/comm buffers queue up
+                    # unbounded and long prefills OOM.
+                    if _prev_cache_sync is not None:
+                        mx.eval(_prev_cache_sync)
+                    _cache_state = [c.state for c in batched_cache]
+                    mx.async_eval(_cache_state)
+                    _prev_cache_sync = _cache_state
+                else:
+                    mx.eval([c.state for c in batched_cache])
                 request_trace.record(
                     f"prefill_batched.chunk{chunk_idx}.eval_cache", _t_eval
                 )
@@ -1452,6 +1487,14 @@ def prefill_batched(
                     c.finalize()
                 mx.eval([c.state for c in batched_cache])
                 mx.clear_cache()
+        elif _overlap and _prev_cache_sync is not None:
+            # Close out the overlap pipeline: the FINAL chunk's cache
+            # state was queued via async_eval and never explicitly
+            # synced (no next chunk existed to trigger the depth-1
+            # double-buffer's block-on-previous step). Callers read
+            # cache.state immediately after this function returns, so
+            # it must be fully materialized before we get there.
+            mx.eval(_prev_cache_sync)
     except PrefillCancelled:
         set_pipeline_prefill(model, is_prefill=False)
         raise
