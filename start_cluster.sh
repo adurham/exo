@@ -1641,6 +1641,8 @@ for NODE in "${NODES[@]}"; do
     # abandoned). Default OFF; unset -> byte-identical to plain all_sum.
     [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE"
     [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS"
+    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE"
+    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
     # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
