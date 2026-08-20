@@ -1230,7 +1230,42 @@ for NODE in "${NODES[@]}"; do
     # deps were already sitting in ~/repos/exo/mlx/build/_deps; they were
     # simply invisible to the temp-dir build. Reusing them makes rebuilds
     # both faster and network-independent.
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && export CMAKE_ARGS=\"-DFETCHCONTENT_BASE_DIR=\$HOME/repos/exo/mlx/build/_deps\" && zsh -l -c 'cd ~/repos/exo && CMAKE_ARGS=\"\$CMAKE_ARGS\" uv pip install --no-deps --force-reinstall ./mlx'" || { echo "Failed to rebuild MLX from source on $NODE"; exit 1; }
+    #
+    # 2026-08-19: skip the (multi-minute, ~28-parallel-clang) rebuild when
+    # nothing that could change the compiled extension has changed since
+    # the last successful build on THIS node. Consulted + safety-checked
+    # before landing (see docs/start-cluster-mlx-rebuild-skip-2026-08-19.md):
+    #   - stamp lives INSIDE the venv (.venv/.mlx-installed-sha) so it dies
+    #     with the venv on a `uv sync --reinstall` / fresh clone -- can't go
+    #     stale relative to what's actually installed.
+    #   - dirty-tree check is on TRACKED files only (git diff --quiet +
+    #     --cached --quiet), so build/ and other untracked artifacts in the
+    #     mlx submodule don't force a rebuild every time.
+    #   - condition ALSO verifies `import mlx` succeeds in the current venv,
+    #     not just "SHA matches" -- catches a venv that lost the package
+    #     without the stamp knowing.
+    #   - stamp is written ONLY after a successful install (never on a
+    #     failed/interrupted build).
+    #   - MLX_FORCE_REINSTALL=1 escape hatch bypasses the skip entirely.
+    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c '
+      cd ~/repos/exo
+      MLX_SHA=\$(git -C mlx rev-parse HEAD)
+      STAMP=.venv/.mlx-installed-sha
+      NEED_BUILD=1
+      if [ -z \"\${MLX_FORCE_REINSTALL:-}\" ] \\
+         && git -C mlx diff --quiet \\
+         && git -C mlx diff --cached --quiet \\
+         && [ -f \"\$STAMP\" ] && [ \"\$(cat \"\$STAMP\")\" = \"\$MLX_SHA\" ] \\
+         && uv run python3 -c \"import mlx\" >/dev/null 2>&1; then
+        echo \"  mlx unchanged (sha \${MLX_SHA:0:8}, clean, importable) -- skipping rebuild\"
+        NEED_BUILD=0
+      fi
+      if [ \"\$NEED_BUILD\" = 1 ]; then
+        export CMAKE_ARGS=\"-DFETCHCONTENT_BASE_DIR=\$HOME/repos/exo/mlx/build/_deps\"
+        CMAKE_ARGS=\"\$CMAKE_ARGS\" uv pip install --no-deps --force-reinstall ./mlx \\
+          && echo \"\$MLX_SHA\" > \"\$STAMP\"
+      fi
+    '" || { echo "Failed to rebuild MLX from source on $NODE"; exit 1; }
 
     # Pin mlx-lm to the vendored ./mlx-lm submodule (uv sync installs a stale copy).
     #
