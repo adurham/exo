@@ -1592,6 +1592,13 @@ for NODE in "${NODES[@]}"; do
     : "${EXO_DSV4_ATTN_ALLSUM:=0}"
     [ -n "${EXO_DSV4_ATTN_ALLSUM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ATTN_ALLSUM=$EXO_DSV4_ATTN_ALLSUM"
     [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
+    # 2026-08-19: quantized moe.all_sum diagnostic (feat/moe-allsum-quant
+    # branch, not yet merged to mlx-lm main). Default OFF; unset ->
+    # byte-identical to the un-quantized path. See
+    # docs/moe-allsum-quant-compute-overhead-analysis-2026-08-19.md.
+    [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT=$EXO_DSV4_MOE_ALLSUM_QUANT"
+    [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_BITS=$EXO_DSV4_MOE_ALLSUM_QUANT_BITS"
+    [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_GROUP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_GROUP=$EXO_DSV4_MOE_ALLSUM_QUANT_GROUP"
     # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
     # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
     # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
