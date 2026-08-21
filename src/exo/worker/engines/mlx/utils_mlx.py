@@ -1633,11 +1633,11 @@ def mx_min_int(value: int, group: mx.distributed.Group | None) -> int:
     return int(reduced.item())
 
 
-# Per-process cache of coordination subgroups. Split off the model TP
+# Per-process cache of coordination subgroups. Built off the model TP
 # group exactly once per parent so all non-model-forward collectives
 # (agree_on_tasks, agree_on_cancellations, has_work gate, upstream uid
-# sync, MTP draft broadcast, etc.) share an isolated `next_call_id_`
-# counter / QPs / buffer pool from the model TP group.
+# sync, MTP draft broadcast, etc.) get an isolated `next_call_id_`
+# counter and an isolated transport, separate from the model TP group.
 #
 # Why: at c=2 with frequent step()s, the runner's small CPU-side mx_any
 # collectives interleave with the model forward's TP all_sum collectives
@@ -1649,34 +1649,78 @@ def mx_min_int(value: int, group: mx.distributed.Group | None) -> int:
 # bit-flipped to ~1B → 152 GB metal::malloc OOM at c=2). Diagnosed via
 # JACCL_TRACE_HASH=1 2026-05-07.
 #
-# Splitting into a sibling subgroup gives the coord traffic its own
-# next_call_id_ counter, ibv_context, PD/CQ/QPs, and buffer pool
-# (mlx@97741a86 + 73b08d67). Cross-subgroup traffic can't share UC
-# FIFOs, so model TP and coord traffic stop interfering.
+# ROOT-CAUSE FIX (2026-08-21) — this used to call ``group.split()``, which
+# builds a full RDMA-backed sibling MeshGroup with its own
+# connections_/ack_connections_ queue pairs. On this hardware that can
+# NEVER work: `ibv_devinfo -v` reports **max_qp=3 per device**, and under
+# Tensor sharding the top-level group already holds all three
+# (connections_, ack_connections_, pool_connections_). split() therefore
+# threw `[jaccl] Couldn't create queue pair` on every single call, and the
+# bare `except RuntimeError: sub = group` below silently degraded to
+# returning the PARENT group as the "coord group" — meaning every
+# coord-subgroup collective in production has always actually been running
+# on the shared model group, colliding call_ids with live forward-pass
+# traffic. That is the confirmed root cause of the deterministic warmup
+# `all_gather STALLED ... call_id=2375`, and a latent correctness hazard on
+# the per-decode-step mx_any / MTP token-count collectives that share the
+# identical mechanism.
+#
+# This is a hard hardware ceiling, not a leak — no retry or backoff can
+# make split() succeed. The fix is architectural: a coord subgroup used
+# purely for tiny control-plane collectives has no business owning queue
+# pairs at all. ``split_tcp_coord()`` (mlx: jaccl/coord_group.h) returns a
+# QP-LESS group whose all_sum/all_max/all_min/all_gather run entirely over
+# a dedicated, reliable, framed TCP socket, with its own call_id namespace
+# and an in-band per-op desync tripwire. It calls no ibverbs verb at all,
+# so it can never hit the QP ceiling in any sharding mode. It also borrows
+# no ibv_context from the parent, so — unlike split() — it does NOT set
+# jaccl's `has_split_`, and the parent keeps unrestricted
+# `reconnect_fresh()`, the only recovery that clears a dead-UC wedge.
+#
+# Every coord call site in exo moves tens-to-hundreds of bytes (a 3-int32
+# agreement vector, a per-request presence array, 36-byte task-id UUIDs, a
+# small MTP draft-token broadcast, a 1-float KV-pressure gather), so TCP is
+# entirely adequate; jaccl bounds the payload and throws on anything large
+# rather than silently becoming a throughput cliff.
 #
 # Keyed by id(parent_group). Color = 0xC00D ("coord") is just a stable
-# arbitrary value; both ranks must call split with the same color.
+# arbitrary value; both ranks must call with the same color.
 _COORD_GROUP_CACHE: dict[int, mx.distributed.Group | None] = {}
 _COORD_GROUP_COLOR: int = 0xC00D
+
+# Substring of the error jaccl/MLX raises when the active backend has no
+# TCP-only coord group at all (i.e. the ring backend, whose GroupImpl uses
+# the base-class default). Matched narrowly ON PURPOSE: the ring backend is
+# pure TCP with no RDMA and therefore no QP-budget problem, and PP mode
+# already disables coord collectives outright, so degrading to the shared
+# group there is a genuine, long-standing, safe fallback. ANY other failure
+# — including a jaccl failure — must NOT be degraded, because degrading is
+# precisely the bug this change exists to remove.
+_NO_TCP_COORD_SUPPORT = "does not support a TCP-only coord group"
 
 
 def get_coord_group(
     group: mx.distributed.Group | None,
 ) -> mx.distributed.Group | None:
-    """Return the sibling coord subgroup for ``group``, splitting once on
-    first use. Returns ``group`` itself when there's no need to split
-    (single-rank or non-TP). Both ranks must call this in matching
-    order — same code path on both ranks at the same point.
+    """Return the sibling coord group for ``group``, creating it once on
+    first use. Returns ``group`` itself when there's no need for one
+    (single-rank). Both ranks must call this in matching order — same code
+    path on both ranks at the same point.
+
+    Under jaccl this is a QP-LESS, TCP-backed group (``split_tcp_coord``);
+    see the module-level comment above for why the previous RDMA
+    ``group.split()`` could never work on this hardware and why its silent
+    fallback was actively harmful.
 
     PP mode (EXO_PP_NO_COORD_COLLECTIVE=1): returns None so that mx_any /
-    agree_on_* calls become local-only no-ops. Under MlxRing (TCP backend),
-    group.split() throws ("[ring] Group split not supported"), so coord
-    collectives would share the full PP group's TCP socket with the p2p
-    send/recv. When a p2p recv blocks (rank 0 waiting for rank 1's model
-    forward at 500K context), the coord all_sum can't be sent until the p2p
-    completes → Event::wait timeout → runner crash. Both PP ranks serve the
-    same request so the collective gate is unnecessary — the p2p handoff in
+    agree_on_* calls become local-only no-ops. Both PP ranks serve the same
+    request so the collective gate is unnecessary — the p2p handoff in
     PipelineFirstLayer/PipelineLastLayer already synchronizes the ranks.
+
+    Raises whatever the backend raises if coord-group creation fails for any
+    reason other than "this backend has no such mechanism". A failure here
+    is a real fault: silently continuing on the shared model group is the
+    bug, not the safe option.
     """
     if group is None or group.size() <= 1:
         return group
@@ -1686,20 +1730,32 @@ def get_coord_group(
     if cached is not None:
         return cached
     try:
-        sub = group.split(_COORD_GROUP_COLOR)
+        # cast: split_tcp_coord is new in the fork's mlx (jaccl/coord_group.h)
+        # and basedpyright resolves mlx's Group against whatever stub the
+        # INSTALLED wheel ships, which lags a submodule bump. The call itself
+        # is checked at runtime -- a backend without it raises RuntimeError
+        # from the C++ GroupImpl base, handled immediately below.
+        sub = cast(
+            "mx.distributed.Group",
+            cast(Any, group).split_tcp_coord(_COORD_GROUP_COLOR),
+        )
     except RuntimeError as e:
-        # DIAGNOSTIC (2026-08-20, bug #8 investigation): this except also
-        # silently swallows any OTHER RuntimeError split() can throw (e.g.
-        # the subgroup ctor's coord_channel_ SideChannel construction
-        # failing), not just the documented ring-backend
-        # "split not supported" case -- log which one actually happened so
-        # we can tell a genuine ring fallback from a real jaccl split
-        # failure that's silently defeating the coord-subgroup mechanism.
+        if _NO_TCP_COORD_SUPPORT not in str(e):
+            # Deliberately NOT swallowed. The previous bare
+            # `except RuntimeError: sub = group` is what made a hard,
+            # deterministic QP-allocation failure present as a silent
+            # degrade to the shared model group for months. If the
+            # TCP coord group genuinely can't be built, that is a real
+            # fault and the runner should fail loudly and be re-placed.
+            raise
+        # Backend has no TCP coord mechanism at all — the ring backend.
+        # Pure TCP, no RDMA, no QP budget to exhaust, and PP mode already
+        # short-circuits above; sharing the parent group here is the
+        # long-standing, intentional behaviour.
         logger.warning(
-            f"get_coord_group: group.split() raised {e!r} -- falling back "
-            "to using the full group as the coord group. If this is NOT "
-            "the expected ring-backend 'split not supported' message, the "
-            "coord subgroup mechanism just silently failed."
+            f"get_coord_group: backend has no TCP-only coord group ({e!r}); "
+            "using the full group for control-plane collectives. Expected "
+            "on the ring backend only."
         )
         sub = group
     _COORD_GROUP_CACHE[id(group)] = sub
