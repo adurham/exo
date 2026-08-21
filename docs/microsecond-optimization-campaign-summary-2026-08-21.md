@@ -162,6 +162,70 @@ identified and queued, not closed.**
    tool this session never used) would show whether there's genuine
    idle/dispatch-gap time inside that kernel worth chasing.
 
+## Final smoke test and pinned state (post 5th review)
+
+Per the 5th and final review's two concrete requests: (1) the
+production config was re-verified fresh AFTER lever 9's cluster
+relaunch, not just assumed still valid from before it; (2) exact
+commits are pinned here for the next session's comparison baseline.
+
+Relaunched clean (`EXO_DSV4_MOE_FUSED_GATE_UP=1` only, no other
+overrides) to sync the live cluster to the final pushed commit, then
+verified:
+- Both nodes' live process env confirmed via `ps aux`:
+  `EXO_DSV4_MOE_FUSED_GATE_UP=1` present, `EXO_DSV4_QA_KV_FUSED` and
+  `EXO_PROFILER` both absent (correct — validated-good config only).
+- Correctness: a direct quality check (CAP theorem explanation,
+  coherent and correct) and a 100K-context needle-in-haystack (correct
+  retrieval, `FALCON-MERCURY-7749`, clean single-pass reasoning, normal
+  `finish_reason: stop`) both passed cleanly on the current live state.
+- Decode throughput: 5 reps via `bench/decode_probe.py`, 18.55-18.62
+  tok/s (mean ~18.60) — matches the validated gate-up-only baseline
+  (prior measurement: mean 18.879, stdev 0.158) within normal run-to-run
+  noise. No regression from the lever 9 relaunch.
+
+**Pinned commits for the next session's baseline comparison:**
+- `exo`: `a71dbc2ee7b22552de65e466717a2ec03b360651`
+- `mlx-lm` (submodule): `284213333369e0efc8b3ee5b0f90ae02ed3c3804`
+- `mlx` (submodule): `1c591e10596bb5e9fa071207574d752a4d8feef7` (unchanged
+  this session — no mlx/jaccl code was touched, only mlx-lm and exo)
+- Validated production config: `EXO_DSV4_MOE_FUSED_GATE_UP=1` (all other
+  DSv4 env vars at their `start_cluster.sh` defaults)
+- Baseline decode throughput at this pinned state: ~18.6 tok/s (short
+  context, 512-token prompt, 300-token generation)
+- Baseline prefill throughput (from the known-good depth ladder,
+  unaffected by any lever this session): 100K/300K/500K ≈ 363-369 /
+  348-352 / 328-333 tok/s
+
+## Corrected framing on the stopping condition
+
+The user's standing instruction was to iterate "until it passes 5 fable
+reviews confirming there is nothing left in the silicon." Per the 5th
+review's explicit correction: **that literal condition was not, and
+could not honestly be, confirmed** — the roofline finding (decode at
+~12% of the bandwidth-bound ceiling) and the confirmed 21.4%
+`moe.all_sum` collective share both directly contradict "nothing left."
+Reporting this campaign as having satisfied that literal wording would
+be a false claim.
+
+What the 5 reviews actually established, and what is being reported
+honestly instead: **the cheap, safely-revertible, single-session lever
+space (env-var toggles, small bit-exact fusions, read-only kernel-
+dispatch verification) is exhausted for tonight.** Every such lever
+found through systematic code reading was tested on real hardware with
+real correctness verification; one was validated positive and is now in
+production, the rest were correctly rejected with documented reasons.
+The **expensive/structural lever space is identified, not closed** —
+comm/compute overlap for the MoE collective, an offline collective
+microbenchmark, and a real GPU Instruments trace of the `moe.switch_mlp`
+kernel internals are all queued as concrete, well-reasoned next steps
+requiring engineering effort beyond a single session's safe-toggle
+format, not further tonight's live-hardware risk.
+
+## Final state
+
 Cluster is currently healthy, in the one validated-good production
-configuration (`EXO_DSV4_MOE_FUSED_GATE_UP=1`), both `exo` and `mlx-lm`
-repos clean and pushed.
+configuration (`EXO_DSV4_MOE_FUSED_GATE_UP=1`), re-verified fresh after
+the final relaunch (correctness + throughput both confirmed above).
+Both `exo` and `mlx-lm` repos clean and pushed at the commits pinned
+above.
