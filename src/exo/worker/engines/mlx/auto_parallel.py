@@ -1062,6 +1062,28 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
         for i, layer in enumerate(layers):
             mx.eval(layer.parameters())
 
+            # DSv4 wq_a+wkv fusion (env-gated EXO_DSV4_QA_KV_FUSED=1,
+            # 2026-08-21). Both projections consume the SAME input x and are
+            # NOT sharded (unlike ffn.switch_mlp above) — per-rank duplicated
+            # q_lora_rank/head_dim — so this applies directly to layer.attn,
+            # no sharding-aware wrapper needed (contrast
+            # _install_fused_gate_up, which must unwrap the post-shard
+            # QuantizedSwitchLinear). Bit-equivalent math, validated at c=1
+            # only 2026-08-21 (real hardware A/B + needle correctness); the
+            # ORIGINAL bundle removal (2026-06-18) that included this fusion
+            # never isolated whether wq_a+wkv specifically caused the B>1
+            # degeneration or whether it was purely the MoE/mx.compile paths
+            # — do not assume B>1-safe until separately re-tested.
+            if os.environ.get("EXO_DSV4_QA_KV_FUSED", "0") == "1":
+                try:
+                    if hasattr(layer.attn, "fuse_qa_kv_weights"):
+                        layer.attn.fuse_qa_kv_weights()  # pyright: ignore[reportAttributeAccessIssue]
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"DSv4 wq_a+wkv fusion failed on layer {i}: {e}; "
+                        f"keeping unfused _project_qa_kv path."
+                    )
+
             layer.ffn.sharding_group = self.group  # pyright: ignore[reportAttributeAccessIssue]
             # OPT-3: enable prefill sequence-split in attention. Setting attn's
             # sharding_group activates the query-row-split + all_gather path —
