@@ -1643,6 +1643,34 @@ def _serial_prefill_fallback(
     return per_stream_tps, per_stream_tokens, list(cache_list), per_stream_snapshots
 
 
+def _diag_all_gather_with_group_identity(
+    arr: "mx.array", group: "mx.distributed.Group | None"
+):
+    """DIAGNOSTIC (2026-08-20, bug #8 investigation): wraps warmup's
+    control-plane all_gather to log which group actually gets used --
+    the coord subgroup from get_coord_group(), or (if split() silently
+    threw and was swallowed) the raw top-level model group instead. The
+    "all_gather STALLED call_id=2375" fault has been deterministic every
+    warmup even after landing a fix that should make it reachable via a
+    dedicated coordinator; this settles whether get_coord_group() is
+    actually returning a real subgroup at the point of failure or has
+    quietly fallen back to sharing the model group's own call_id counter
+    and live TP traffic.
+
+    Temporary instrumentation, not a fix. Safe to remove once bug #8 is
+    resolved.
+    """
+    coord = get_coord_group(group)
+    same_object = coord is group
+    logger.warning(
+        f"[diag-bug8] warmup control-plane all_gather: group_id={id(group)} "
+        f"coord_id={id(coord)} same_object={same_object} "
+        f"coord_rank={coord.rank() if coord is not None else None} "
+        f"coord_size={coord.size() if coord is not None else None}"
+    )
+    return mx.distributed.all_gather(arr, group=coord)
+
+
 def warmup_inference(
     model: Model,
     tokenizer: TokenizerWrapper,
@@ -1701,9 +1729,9 @@ def warmup_inference(
         # hygiene regardless (matches agree_on_tasks / mx_min_int).
         check_for_cancel_every = int(
             mx.max(
-                mx.distributed.all_gather(
+                _diag_all_gather_with_group_identity(
                     mx.array([check_for_cancel_every]),
-                    group=get_coord_group(group),
+                    group,
                 )
             ).item()
         )

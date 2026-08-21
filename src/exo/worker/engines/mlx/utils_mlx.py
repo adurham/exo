@@ -1687,9 +1687,20 @@ def get_coord_group(
         return cached
     try:
         sub = group.split(_COORD_GROUP_COLOR)
-    except RuntimeError:
-        # Ring backend doesn't support group.split(). TCP is already reliable,
-        # so the coordinator subgroup isn't needed. Use the full group.
+    except RuntimeError as e:
+        # DIAGNOSTIC (2026-08-20, bug #8 investigation): this except also
+        # silently swallows any OTHER RuntimeError split() can throw (e.g.
+        # the subgroup ctor's coord_channel_ SideChannel construction
+        # failing), not just the documented ring-backend
+        # "split not supported" case -- log which one actually happened so
+        # we can tell a genuine ring fallback from a real jaccl split
+        # failure that's silently defeating the coord-subgroup mechanism.
+        logger.warning(
+            f"get_coord_group: group.split() raised {e!r} -- falling back "
+            "to using the full group as the coord group. If this is NOT "
+            "the expected ring-backend 'split not supported' message, the "
+            "coord subgroup mechanism just silently failed."
+        )
         sub = group
     _COORD_GROUP_CACHE[id(group)] = sub
     return sub
