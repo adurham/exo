@@ -1216,8 +1216,48 @@ for NODE in "${NODES[@]}"; do
     # so we need `--extra mlx` to actually install them on darwin. Otherwise the
     # runner crashes at import-time with `ModuleNotFoundError: No module named 'mlx.nn'`.
     # --all-packages installs workspace members too (exo-tools used by bench scripts).
+    #
+    # --inexact --no-install-package mlx: mlx is EXCLUDED from this sync.
+    #
+    # pyproject.toml's [tool.uv.sources] resolves mlx on darwin from
+    # `git+https://github.com/adurham/mlx.git?branch=main`, so `uv sync` builds
+    # and installs mlx from uv's OWN internal clone of that repo, into uv's own
+    # cache -- a completely separate artifact from the ./mlx submodule checkout
+    # on disk that the block below compiles. Two competing installers, one
+    # package:
+    #   - uv sync (git clone, uv cache, NO CMAKE_ARGS/FETCHCONTENT pin)
+    #   - `uv pip install ./mlx` below (local submodule, authoritative)
+    #
+    # This is not theoretical. `uv sync --extra mlx --all-packages --dry-run`
+    # on macstudio-m4-1 (2026-08-20) reports, every single run:
+    #   - mlx==0.32.1.dev20260820+f8b77fe5a (from file:///.../repos/exo/mlx)
+    #   + mlx==0.32.1.dev20260820+f8b77fe5  (from git+.../mlx.git@f8b77fe5a...)
+    # i.e. uv sync UNINSTALLS the local-checkout build and installs its own
+    # git-cache build in its place, on every deploy.
+    #
+    # That alone is survivable while the block below always rebuilds. The real
+    # hazard is the interaction with that block's skip-check: the git-sourced
+    # build satisfies BOTH skip conditions (`git rev-parse HEAD` matches the
+    # stamp, and `import mlx` succeeds), so the skip fires and the authoritative
+    # local rebuild never runs -- leaving a correctly-labelled but
+    # differently-compiled binary in the venv. Same commit is NOT the same
+    # binary here: the git build gets no CMAKE_ARGS and no FETCHCONTENT_BASE_DIR
+    # pin, so it is a different compile of the same source.
+    #
+    # --no-install-package mlx alone is NOT enough: it makes uv sync *uninstall*
+    # mlx (leaving the venv with no mlx at all until the block below runs).
+    # --inexact is what stops uv from removing packages it wasn't asked to
+    # manage, so together they make uv sync leave mlx completely alone --
+    # neither installed nor uninstalled. The local submodule checkout is then
+    # the ONLY thing that ever installs mlx: exactly one source of truth.
+    # (--inexact also stops uv sync from clobbering the `maturin` install that
+    # the Rust-bindings step below depends on.)
+    #
+    # mlx-lm is still swapped to the git source by this sync, which is fine and
+    # intentional -- the unconditional force-reinstall from ./mlx-lm below
+    # always overwrites it (see that step's comment for why).
     echo "Syncing dependencies on $NODE..."
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages'" || { echo "Failed to sync on $NODE"; exit 1; }
+    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages --inexact --no-install-package mlx'" || { echo "Failed to sync on $NODE"; exit 1; }
 
     # FETCHCONTENT_BASE_DIR pins CMake's FetchContent cache to a PERSISTENT
     # directory instead of uv's per-build temp dir. Without it every MLX
@@ -1247,17 +1287,42 @@ for NODE in "${NODES[@]}"; do
     #   - stamp is written ONLY after a successful install (never on a
     #     failed/interrupted build).
     #   - MLX_FORCE_REINSTALL=1 escape hatch bypasses the skip entirely.
+    #   - 2026-08-20: the skip ALSO asserts PROVENANCE. Version/SHA stamps
+    #     cannot distinguish a local-checkout build from a uv-git-cache build
+    #     of the same commit, but they are not the same binary. The installed
+    #     dist-info's direct_url.json must point at THIS node's ./mlx checkout
+    #     (a `file://` dir_info install); anything else -- notably a vcs_info
+    #     entry, meaning uv installed its own git-cloned build -- forces a
+    #     rebuild from the local checkout regardless of a matching stamp.
+    #   - 2026-08-20: both probe commands use `uv run --no-SYNC`. A bare
+    #     `uv run` implicitly runs `uv sync` first, so the very act of ASKING
+    #     "is the right mlx installed?" would re-trigger the git-source swap
+    #     this step exists to prevent -- the check would corrupt the state it
+    #     is checking. Observed live: a bare `uv run python3 -c ...` probe on
+    #     macstudio-m4-1 printed "Uninstalled 1 package / Installed 1 package".
     ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c '
       cd ~/repos/exo
       MLX_SHA=\$(git -C mlx rev-parse HEAD)
       STAMP=.venv/.mlx-installed-sha
+      MLX_LOCAL_SRC=\$(cd mlx && pwd -P)
       NEED_BUILD=1
       if [ -z \"\${MLX_FORCE_REINSTALL:-}\" ] \\
          && git -C mlx diff --quiet \\
          && git -C mlx diff --cached --quiet \\
          && [ -f \"\$STAMP\" ] && [ \"\$(cat \"\$STAMP\")\" = \"\$MLX_SHA\" ] \\
-         && uv run python3 -c \"import mlx\" >/dev/null 2>&1; then
-        echo \"  mlx unchanged (sha \${MLX_SHA:0:8}, clean, importable) -- skipping rebuild\"
+         && uv run --no-sync python3 -c \"import mlx\" >/dev/null 2>&1 \\
+         && uv run --no-sync python3 -c \"
+import json, sys, pathlib, urllib.parse
+from importlib.metadata import Distribution
+raw = Distribution.from_name(\\\"mlx\\\").read_text(\\\"direct_url.json\\\") or \\\"\\\"
+info = json.loads(raw) if raw else {}
+url = info.get(\\\"url\\\", \\\"\\\")
+if \\\"dir_info\\\" not in info or not url.startswith(\\\"file://\\\"):
+    sys.exit(1)
+got = pathlib.Path(urllib.parse.unquote(urllib.parse.urlparse(url).path)).resolve()
+sys.exit(0 if got == pathlib.Path(sys.argv[1]).resolve() else 1)
+\" \"\$MLX_LOCAL_SRC\" >/dev/null 2>&1; then
+        echo \"  mlx unchanged (sha \${MLX_SHA:0:8}, clean, importable, local-checkout provenance) -- skipping rebuild\"
         NEED_BUILD=0
       fi
       if [ \"\$NEED_BUILD\" = 1 ]; then
