@@ -1,3 +1,4 @@
+import ipaddress
 import os
 from collections.abc import Generator, Mapping
 
@@ -700,6 +701,28 @@ def _find_connection_ip(
                 yield iface.ip_address
 
 
+def is_link_local_ipv4(ip_address: str) -> bool:
+    """Is this an IPv4 link-local (APIPA, 169.254.0.0/16) address?
+
+    macOS self-assigns a 169.254.x.x address to an interface that came up
+    physically but never negotiated with a peer (no DHCP, no manual config).
+    On Thunderbolt bridges this is exactly what a HALF-UP cable looks like:
+    the interface reads active and profiles as a real link, but nothing on
+    the far side ever answers on that subnet. Handing such an address to
+    jaccl as the TCP coordinator yields a connect() that hangs instead of
+    failing, so these addresses must lose to any routable alternative.
+
+    Non-IPv4 / unparsable inputs are treated as NOT link-local: they are
+    handled by the existing type-priority path and must not be demoted on
+    the strength of a parse failure.
+    """
+    try:
+        parsed = ipaddress.ip_address(ip_address)
+    except ValueError:
+        return False
+    return isinstance(parsed, ipaddress.IPv4Address) and parsed.is_link_local
+
+
 def find_ip_prioritised(
     node_id: NodeId,
     other_node_id: NodeId,
@@ -736,6 +759,20 @@ def find_ip_prioritised(
     real Thunderbolt cable usually arrives typed ``maybe_ethernet`` rather
     than ``thunderbolt``. Both must therefore outrank ``ethernet`` here --
     matching what the ring table already does.
+
+    LINK-LOCAL DEMOTION (measured on the live cluster): a Thunderbolt
+    interface whose IPv4 address is APIPA/link-local (169.254.0.0/16) has no
+    negotiated peer address -- macOS self-assigned it because the bridge
+    never came up. Advertising such an address as the jaccl coordinator
+    produces a bind/connect that can never succeed from the peer, and the
+    failure mode is a silent hang rather than a clean error. Interface TYPE
+    preference is therefore only a *secondary* key: ANY interface holding a
+    real, routable address outranks EVERY link-local one, even when the
+    link-local interface is the "faster" Thunderbolt cable and the routable
+    one is the shared home LAN. A dead fast path is worth less than a live
+    slow path. Link-local candidates are still ranked among themselves (by
+    the same type table) and still returned when they are the ONLY option,
+    so single-cable/no-LAN topologies keep working.
     """
     ips = list(
         _find_connection_ip(
@@ -775,7 +812,19 @@ def find_ip_prioritised(
         }
     # Tie-break on the address itself so a node with two equally-ranked
     # interfaces resolves identically on every evaluation.
-    return min(ips, key=lambda ip: (priority.get(ip_to_type.get(ip, "unknown"), 2), ip))
+    #
+    # Link-locality is the PRIMARY key: a 169.254.0.0/16 address means the
+    # interface never negotiated a peer, so it is unreachable no matter how
+    # fast its cable is. Only among candidates of equal link-locality does
+    # interface type decide.
+    return min(
+        ips,
+        key=lambda ip: (
+            is_link_local_ipv4(ip),
+            priority.get(ip_to_type.get(ip, "unknown"), 2),
+            ip,
+        ),
+    )
 
 
 def get_mlx_ring_hosts_by_node(
@@ -890,6 +939,15 @@ def get_mlx_jaccl_coordinators(
             prefer_thunderbolt=True,
         )
         if ip is not None:
+            if is_link_local_ipv4(ip):
+                logger.warning(
+                    f"jaccl coordinator for {n} resolved to link-local {ip}: "
+                    "every candidate interface is APIPA-addressed "
+                    "(169.254.0.0/16), meaning no cable negotiated a peer "
+                    "address and no routable path to the coordinator exists. "
+                    "The TCP side channel will most likely hang. Check the "
+                    "Thunderbolt bridge / LAN configuration on both nodes."
+                )
             logger.debug(
                 f"jaccl coordinator for {n}: {ip} "
                 f"(RDMA-reserved iface on coordinator: {reserved or 'none'})"

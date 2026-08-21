@@ -3,11 +3,13 @@ import pytest
 from exo.master.placement_utils import (
     allocate_layers_proportionally,
     filter_cycles_by_memory,
+    find_ip_prioritised,
     get_mlx_jaccl_coordinators,
     get_mlx_jaccl_devices_matrix,
     get_shard_assignments,
     get_shard_assignments_for_pipeline_parallel,
     get_smallest_cycles,
+    is_link_local_ipv4,
 )
 from exo.master.tests.conftest import (
     create_node_memory,
@@ -1109,3 +1111,257 @@ def test_jaccl_coordinator_and_rdma_matrix_agree_on_opposite_cables():
     }
     coordinator_iface = ip_to_iface[coordinators[node1].rsplit(":", 1)[0]]
     assert matrix[0][1] != coordinator_iface
+
+
+# ---------------------------------------------------------------------------
+# Link-local (APIPA, 169.254.0.0/16) demotion.
+#
+# Measured on the live cluster: a Thunderbolt bridge that comes up physically
+# but never negotiates a peer address gets a macOS self-assigned 169.254.x.x
+# address. It profiles as a real, fast link, so the Thunderbolt-first table
+# picks it -- and jaccl's TCP coordinator then hangs, because nothing on the
+# far side answers on that subnet. Reachability must outrank speed.
+# ---------------------------------------------------------------------------
+
+
+def test_link_local_loses_to_routable_lan_even_though_cable_is_faster():
+    """The core fix. A link-local Thunderbolt cable must lose to a routable
+    home-LAN address, inverting the normal prefer_thunderbolt ordering.
+
+    NEGATIVE CONTROL: drop the ``is_link_local_ipv4`` term from the sort key
+    in ``find_ip_prioritised`` and this returns 169.254.x.x (the exact live
+    failure) instead of the LAN address.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3",
+                    ip_address="169.254.212.14",
+                    interface_type="maybe_ethernet",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en4="169.254.99.7"),
+    }
+
+    chosen = find_ip_prioritised(
+        node1,
+        node0,
+        topology,
+        node_network,
+        ring=False,
+        prefer_thunderbolt=True,
+    )
+    assert chosen == "192.168.86.202", (
+        f"link-local address {chosen} beat a routable LAN address; the TCP "
+        "coordinator would hang"
+    )
+
+
+def test_link_local_demotion_applies_to_the_ring_table_too():
+    """The ring/prefer_thunderbolt table is the one that surfaced the bug, but
+    reachability is not a jaccl-specific concern -- ``ring=True`` must demote
+    link-local too, or MLX ring hosts inherit the same hang.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3",
+                    ip_address="169.254.212.14",
+                    interface_type="thunderbolt",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en4="169.254.99.7"),
+    }
+
+    assert (
+        find_ip_prioritised(node1, node0, topology, node_network, ring=True)
+        == "192.168.86.202"
+    )
+
+
+def test_link_local_still_selected_when_it_is_the_only_candidate():
+    """Regression guard: demotion is a RANKING change, not a filter. A cluster
+    wired only over an APIPA-addressed bridge must still get an address (and
+    still work if that bridge happens to be functional), not a None that
+    escalates into ``ValueError``.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+
+    node_network = {
+        node0: _tb_network(rdma_en3="169.254.212.14"),
+        node1: _tb_network(rdma_en4="169.254.99.7"),
+    }
+
+    chosen = find_ip_prioritised(
+        node1,
+        node0,
+        topology,
+        node_network,
+        ring=False,
+        prefer_thunderbolt=True,
+    )
+    assert chosen == "169.254.212.14"
+
+
+def test_routable_thunderbolt_still_beats_lan_after_the_fix():
+    """Regression guard for the PREVIOUS fix (CABLE-BEATS-LAN): demoting
+    link-local must not disturb the ordering when every candidate is
+    routable. A real 10.x Thunderbolt cable still wins over the home LAN.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3",
+                    ip_address="10.0.3.10",
+                    interface_type="maybe_ethernet",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en4="10.0.3.11"),
+    }
+
+    assert (
+        find_ip_prioritised(
+            node1,
+            node0,
+            topology,
+            node_network,
+            ring=False,
+            prefer_thunderbolt=True,
+        )
+        == "10.0.3.10"
+    )
+
+
+def test_jaccl_coordinator_end_to_end_skips_link_local_cable():
+    """The real cluster shape: dual cables where the non-RDMA one is APIPA.
+    The coordinator must land on the routable LAN rather than the dead cable.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+    topology = _dual_cable_topology(node0, node1)
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3",
+                    ip_address="169.254.212.14",
+                    interface_type="maybe_ethernet",
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en4",
+                    ip_address="169.254.44.9",
+                    interface_type="maybe_ethernet",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en3="169.254.44.11", rdma_en4="169.254.212.11"),
+    }
+
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+    assert coordinators[node0] == "0.0.0.0:5000"
+    assert coordinators[node1] == "192.168.86.202:5000"
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("169.254.0.1", True),
+        ("169.254.255.254", True),
+        ("169.254.212.14", True),
+        ("169.253.1.1", False),
+        ("169.255.1.1", False),
+        ("10.0.3.10", False),
+        ("192.168.86.202", False),
+        ("127.0.0.1", False),
+        ("fe80::1", False),  # IPv6 link-local is out of scope for this demotion
+        ("not-an-ip", False),
+        ("", False),
+    ],
+)
+def testis_link_local_ipv4_boundaries(address: str, expected: bool):
+    """Exact /16 boundaries, and no crash on junk input."""
+    assert is_link_local_ipv4(address) is expected
