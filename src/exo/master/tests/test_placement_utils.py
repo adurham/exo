@@ -702,9 +702,7 @@ def _rdma_conn(source: NodeId, sink: NodeId, source_iface: str, sink_iface: str)
     return Connection(
         source=source,
         sink=sink,
-        edge=RDMAConnection(
-            source_rdma_iface=source_iface, sink_rdma_iface=sink_iface
-        ),
+        edge=RDMAConnection(source_rdma_iface=source_iface, sink_rdma_iface=sink_iface),
     )
 
 
@@ -748,8 +746,7 @@ def test_jaccl_matrix_picks_the_same_cable_from_both_ends():
     # (en3, en4) and cable B is (en4, en3); if the two ends disagreed we would
     # get (en3, en3) or (en4, en4) -- both of which are NOT a real cable.
     assert {node0_iface, node1_iface} == {"rdma_en3", "rdma_en4"}, (
-        f"ends disagreed on which cable to use: node0={node0_iface} "
-        f"node1={node1_iface}"
+        f"ends disagreed on which cable to use: node0={node0_iface} node1={node1_iface}"
     )
 
 
@@ -793,9 +790,7 @@ def _dual_cable_topology(node0: NodeId, node1: NodeId) -> Topology:
 def _tb_network(**iface_ips: str) -> NodeNetworkInfo:
     return NodeNetworkInfo(
         interfaces=[
-            NetworkInterfaceInfo(
-                name=name, ip_address=ip, interface_type="thunderbolt"
-            )
+            NetworkInterfaceInfo(name=name, ip_address=ip, interface_type="thunderbolt")
             for name, ip in iface_ips.items()
         ]
     )
@@ -851,10 +846,15 @@ def test_jaccl_coordinator_avoids_the_rdma_reserved_cable():
     assert coordinators[node1].endswith(":5000")
 
 
-def test_jaccl_coordinator_prefers_lan_over_either_thunderbolt_cable():
-    """A real SocketConnection (home LAN) still wins: the exclusion only
-    removes an RDMA *fallback* candidate, it does not perturb the existing
-    ethernet > wifi > unknown > thunderbolt priority.
+def test_jaccl_coordinator_prefers_free_cable_over_lan():
+    """CABLE-BEATS-LAN. With two cables, the free (non-RDMA) Thunderbolt
+    cable must win over the home LAN for the TCP side channel.
+
+    This inverts the pre-fix expectation: the ``ring=False`` table ranked
+    ethernet first, so the coordinator landed on 192.168.86.202 even though
+    a dedicated, idle, switch-free cable existed. NEGATIVE CONTROL: drop
+    ``prefer_thunderbolt=True`` from ``get_mlx_jaccl_coordinators`` and this
+    test returns the LAN address and fails.
     """
     node0 = NodeId("00000000-0000-0000-0000-000000000000")
     node1 = NodeId("11111111-1111-1111-1111-111111111111")
@@ -876,11 +876,13 @@ def test_jaccl_coordinator_prefers_lan_over_either_thunderbolt_cable():
                     name="en0", ip_address="192.168.86.202", interface_type="ethernet"
                 ),
                 NetworkInterfaceInfo(
-                    name="rdma_en3", ip_address="10.0.3.10",
+                    name="rdma_en3",
+                    ip_address="10.0.3.10",
                     interface_type="thunderbolt",
                 ),
                 NetworkInterfaceInfo(
-                    name="rdma_en4", ip_address="10.0.4.10",
+                    name="rdma_en4",
+                    ip_address="10.0.4.10",
                     interface_type="thunderbolt",
                 ),
             ]
@@ -894,7 +896,163 @@ def test_jaccl_coordinator_prefers_lan_over_either_thunderbolt_cable():
         cycle_digraph=topology,
         node_network=node_network,
     )
+
+    matrix = get_mlx_jaccl_devices_matrix([node0, node1], topology)
+    rdma_iface_on_coordinator = matrix[0][1]
+    iface_to_ip = {
+        iface.name: iface.ip_address for iface in node_network[node0].interfaces
+    }
+    chosen = coordinators[node1].rsplit(":", 1)[0]
+
+    assert chosen != "192.168.86.202", (
+        "jaccl TCP coordinator took the shared home LAN while a dedicated "
+        "non-RDMA Thunderbolt cable was available"
+    )
+    assert chosen != iface_to_ip[str(rdma_iface_on_coordinator)]
+    assert chosen in {"10.0.3.10", "10.0.4.10"}
+
+
+def test_jaccl_coordinator_prefers_maybe_ethernet_cable_over_lan():
+    """macOS types Thunderbolt enX devices as ``maybe_ethernet`` (any enX
+    other than en0/en1 gets re-tagged by
+    ``_get_interface_types_from_networksetup``). The real cluster therefore
+    presents its TB cables as ``maybe_ethernet``, NOT ``thunderbolt`` -- so
+    the preference must beat ``ethernet`` for that type too, or the fix is
+    inert on the actual hardware.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+    topology = _dual_cable_topology(node0, node1)
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3",
+                    ip_address="10.0.3.10",
+                    interface_type="maybe_ethernet",
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en4",
+                    ip_address="10.0.4.10",
+                    interface_type="maybe_ethernet",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en3="10.0.4.11", rdma_en4="10.0.3.11"),
+    }
+
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+    assert coordinators[node1].rsplit(":", 1)[0] in {"10.0.3.10", "10.0.4.10"}
+
+
+def test_jaccl_coordinator_single_cable_prefers_lan_over_sharing_rdma():
+    """One cable + a home LAN: the LAN is correct here. Preferring
+    Thunderbolt must NOT re-select the RDMA-reserved wire -- the exclusion
+    outranks the preference.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3",
+                    ip_address="10.0.3.10",
+                    interface_type="maybe_ethernet",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en4="10.0.3.11"),
+    }
+
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
     assert coordinators[node1] == "192.168.86.202:5000"
+
+
+def test_jaccl_coordinator_excludes_rdma_cable_reached_via_socket_edge():
+    """The RDMA cable often ALSO carries an IP bridge, so it appears as a
+    SocketConnection as well as an RDMAConnection. Excluding only the RDMA
+    edge would let the reserved wire back in through its socket edge -- and
+    with Thunderbolt now PREFERRED, it would win. The exclusion is therefore
+    resolved to IPs and applied to socket edges too.
+
+    NEGATIVE CONTROL: restore ``_find_connection_ip`` to yield every
+    SocketConnection unconditionally and this returns 10.0.3.10.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = _dual_cable_topology(node0, node1)
+    # Both cables also carry an IP bridge (as macOS TB bridging does).
+    for ip in ("10.0.3.10", "10.0.4.10"):
+        topology.add_connection(
+            Connection(
+                source=node1,
+                sink=node0,
+                edge=SocketConnection(
+                    sink_multiaddr=Multiaddr(address=f"/ip4/{ip}/tcp/52415")
+                ),
+            )
+        )
+
+    node_network = {
+        node0: _tb_network(rdma_en3="10.0.3.10", rdma_en4="10.0.4.10"),
+        node1: _tb_network(rdma_en3="10.0.4.11", rdma_en4="10.0.3.11"),
+    }
+
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+
+    matrix = get_mlx_jaccl_devices_matrix([node0, node1], topology)
+    iface_to_ip = {
+        iface.name: iface.ip_address for iface in node_network[node0].interfaces
+    }
+    rdma_ip = iface_to_ip[str(matrix[0][1])]
+    assert coordinators[node1].rsplit(":", 1)[0] != rdma_ip
 
 
 def test_jaccl_coordinator_single_cable_shares_it_rather_than_failing():

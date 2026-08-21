@@ -659,17 +659,33 @@ def _find_connection_ip(
     work on clusters that only have RDMA connections in the topology.
 
     ``excluded_rdma_ifaces``: node_j-local interface names that must NOT be
-    yielded from the RDMA fallback. The jaccl TCP coordinator path passes the
-    interface that ``_select_rdma_cable`` reserved for RDMA, so that on
-    dual-cable hardware the coordinator resolves onto the OTHER physical
-    cable instead of contending with RDMA traffic. On single-cable hardware
-    this leaves nothing to yield, and the caller is responsible for its own
-    loud fallback -- see ``get_mlx_jaccl_coordinators``.
+    yielded AT ALL. The jaccl TCP coordinator path passes the interface that
+    ``_select_rdma_cable`` reserved for RDMA, so that on dual-cable hardware
+    the coordinator resolves onto the OTHER physical cable instead of
+    contending with RDMA traffic. On single-cable hardware this leaves
+    nothing to yield, and the caller is responsible for its own loud
+    fallback -- see ``get_mlx_jaccl_coordinators``.
+
+    NOTE the exclusion is applied to SocketConnection edges too, by resolving
+    the reserved interface names to their node_j IP addresses. A Thunderbolt
+    cable that is BOTH RDMA-capable and carries an IP bridge shows up as an
+    RDMAConnection *and* a SocketConnection; filtering only the RDMA edge
+    would let the same wire back in through the socket edge -- which matters
+    now that the coordinator path actively PREFERS Thunderbolt.
     """
+    excluded_ips: frozenset[str] = frozenset()
+    if excluded_rdma_ifaces and node_network is not None:
+        excluded_ips = frozenset(
+            iface.ip_address
+            for iface in node_network.get(node_j, NodeNetworkInfo()).interfaces
+            if iface.name in excluded_rdma_ifaces and iface.ip_address
+        )
+
     rdma_ifaces: list[str] = []
     for connection in cycle_digraph.get_all_connections_between(node_i, node_j):
         if isinstance(connection, SocketConnection):
-            yield connection.sink_multiaddr.ip_address
+            if connection.sink_multiaddr.ip_address not in excluded_ips:
+                yield connection.sink_multiaddr.ip_address
         elif isinstance(connection, RDMAConnection) and (
             connection.sink_rdma_iface not in excluded_rdma_ifaces
         ):
@@ -692,6 +708,7 @@ def find_ip_prioritised(
     ring: bool,
     *,
     excluded_rdma_ifaces: frozenset[str] = frozenset(),
+    prefer_thunderbolt: bool = False,
 ) -> str | None:
     """Find an IP address between nodes with prioritization.
 
@@ -703,6 +720,22 @@ def find_ip_prioritised(
     the RDMA link with TCP traffic, exactly the contention this split is
     meant to avoid. Callers that hit this returning None must fall back to
     a different (non-RDMA) resolution path themselves, loudly.
+
+    ``prefer_thunderbolt``: use the Thunderbolt-first table (the same one
+    ``ring=True`` uses) while keeping ``ring=False`` semantics elsewhere.
+    The jaccl TCP coordinator sets this: once the RDMA-reserved cable has
+    been excluded, any REMAINING direct Thunderbolt link is a dedicated
+    point-to-point wire and is strictly better for the bootstrap/rendezvous
+    side channel than the shared home LAN (lower latency, no switch, no
+    contention with household traffic). Without it the ``ring=False`` table
+    ranks thunderbolt/maybe_ethernet BELOW ethernet and the coordinator
+    lands on the LAN even when a dedicated cable is sitting idle.
+
+    macOS gotcha this has to survive: ``_get_interface_types_from_networksetup``
+    re-tags any ``enX`` device other than en0/en1 as ``maybe_ethernet``, so a
+    real Thunderbolt cable usually arrives typed ``maybe_ethernet`` rather
+    than ``thunderbolt``. Both must therefore outrank ``ethernet`` here --
+    matching what the ring table already does.
     """
     ips = list(
         _find_connection_ip(
@@ -722,7 +755,7 @@ def find_ip_prioritised(
 
     # Ring should prioritise fastest connection. As a best-effort, we prioritise TB.
     # TODO: Profile and get actual connection speeds.
-    if ring:
+    if ring or prefer_thunderbolt:
         priority = {
             "thunderbolt": 0,
             "maybe_ethernet": 1,
@@ -740,7 +773,9 @@ def find_ip_prioritised(
             "maybe_ethernet": 3,
             "thunderbolt": 4,
         }
-    return min(ips, key=lambda ip: priority.get(ip_to_type.get(ip, "unknown"), 2))
+    # Tie-break on the address itself so a node with two equally-ranked
+    # interfaces resolves identically on every evaluation.
+    return min(ips, key=lambda ip: (priority.get(ip_to_type.get(ip, "unknown"), 2), ip))
 
 
 def get_mlx_ring_hosts_by_node(
@@ -810,8 +845,19 @@ def get_mlx_jaccl_coordinators(
     on the same physical Thunderbolt cable. ``_select_rdma_cable`` is the
     single source of truth for which cable ``get_mlx_jaccl_devices_matrix``
     reserved for RDMA; we exclude that cable's coordinator-local interface
-    here so the resolver picks the OTHER cable (or a real LAN/ethernet edge,
-    which the ``ring=False`` priority table already prefers).
+    here so the resolver picks the OTHER cable.
+
+    CABLE-BEATS-LAN (this fix): among what remains, a dedicated
+    point-to-point Thunderbolt cable is preferred over the general home LAN.
+    The default ``ring=False`` table ranks ethernet FIRST, which is the right
+    instinct when the only Thunderbolt candidate IS the RDMA wire -- but once
+    the RDMA cable has been excluded, any surviving direct cable is a
+    private, switch-free, contention-free link and is strictly better for
+    jaccl's bootstrap/rendezvous side channel than a LAN shared with the rest
+    of the house. So this call passes ``prefer_thunderbolt=True``. Note the
+    exclusion is enforced on socket edges too (by IP), so "prefer
+    Thunderbolt" can never quietly re-select the RDMA cable via its IP
+    bridge.
 
     On single-cable hardware the exclusion leaves no candidate at all. That
     is expected, not an error: we fall back to the unrestricted resolution
@@ -841,6 +887,7 @@ def get_mlx_jaccl_coordinators(
             node_network,
             ring=False,
             excluded_rdma_ifaces=reserved,
+            prefer_thunderbolt=True,
         )
         if ip is not None:
             logger.debug(
