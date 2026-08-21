@@ -545,6 +545,38 @@ def get_shard_assignments(
             )
 
 
+def _select_rdma_cable(
+    node_i: NodeId,
+    node_j: NodeId,
+    cycle_digraph: Topology,
+) -> RDMAConnection | None:
+    """Deterministically pick ONE physical cable's RDMAConnection between
+    two nodes, when more than one exists (dual-TB-cable hardware).
+
+    Both directions (i->j and j->i) MUST agree on the same physical cable
+    -- see the MULTI-LINK CORRECTNESS comment in
+    ``get_mlx_jaccl_devices_matrix`` for why an unordered key is unsafe.
+    This is the single source of truth for "which cable is RDMA" so that
+    jaccl coordinator (TCP) selection can reliably pick the OTHER one.
+    """
+    rdma_conns = [
+        conn
+        for conn in cycle_digraph.get_all_connections_between(node_i, node_j)
+        if isinstance(conn, RDMAConnection)
+    ]
+    if not rdma_conns:
+        return None
+
+    def _cable_key(
+        c: RDMAConnection, *, i_is_low: bool = node_i < node_j
+    ) -> tuple[str, str]:
+        if i_is_low:
+            return (c.source_rdma_iface, c.sink_rdma_iface)
+        return (c.sink_rdma_iface, c.source_rdma_iface)
+
+    return min(rdma_conns, key=_cable_key)
+
+
 def get_mlx_jaccl_devices_matrix(
     selected_cycle: list[NodeId],
     cycle_digraph: Topology,
@@ -601,25 +633,11 @@ def get_mlx_jaccl_devices_matrix(
             # Thunderbolt domain_uuid in shared/apply.py and RDMAConnection
             # already models the two ends separately; only this selection step
             # was link-ambiguous.
-            rdma_conns = [
-                conn
-                for conn in cycle_digraph.get_all_connections_between(node_i, node_j)
-                if isinstance(conn, RDMAConnection)
-            ]
-            if not rdma_conns:
+            chosen = _select_rdma_cable(node_i, node_j, cycle_digraph)
+            if chosen is None:
                 raise ValueError(
                     "Current jaccl backend requires all-to-all RDMA connections"
                 )
-            # Orient each candidate from the lexicographically smaller NodeId
-            # so both directions build an identical key for the same cable.
-            def _cable_key(
-                c: RDMAConnection, *, i_is_low: bool = node_i < node_j
-            ) -> tuple[str, str]:
-                if i_is_low:
-                    return (c.source_rdma_iface, c.sink_rdma_iface)
-                return (c.sink_rdma_iface, c.source_rdma_iface)
-
-            chosen = min(rdma_conns, key=_cable_key)
             matrix[i][j] = chosen.source_rdma_iface
 
     return matrix
@@ -630,29 +648,39 @@ def _find_connection_ip(
     node_j: NodeId,
     cycle_digraph: Topology,
     node_network: Mapping[NodeId, NodeNetworkInfo] | None = None,
+    *,
+    excluded_rdma_ifaces: frozenset[str] = frozenset(),
 ) -> Generator[str, None, None]:
     """Find all IP addresses that connect node i to node j.
 
     Yields from SocketConnection edges first. If no SocketConnection exists,
-    falls back to looking up the IP address on node_j for the RDMA interface
-    (source_rdma_iface from RDMAConnection). This enables MlxRing (TCP) to
+    falls back to looking up the IP address on node_j for each RDMA interface
+    (sink_rdma_iface from RDMAConnection). This enables MlxRing (TCP) to
     work on clusters that only have RDMA connections in the topology.
+
+    ``excluded_rdma_ifaces``: node_j-local interface names that must NOT be
+    yielded from the RDMA fallback. The jaccl TCP coordinator path passes the
+    interface that ``_select_rdma_cable`` reserved for RDMA, so that on
+    dual-cable hardware the coordinator resolves onto the OTHER physical
+    cable instead of contending with RDMA traffic. On single-cable hardware
+    this leaves nothing to yield, and the caller is responsible for its own
+    loud fallback -- see ``get_mlx_jaccl_coordinators``.
     """
-    has_rdma = False
-    rdma_iface = None
+    rdma_ifaces: list[str] = []
     for connection in cycle_digraph.get_all_connections_between(node_i, node_j):
         if isinstance(connection, SocketConnection):
             yield connection.sink_multiaddr.ip_address
-        elif isinstance(connection, RDMAConnection):
-            has_rdma = True
-            rdma_iface = connection.sink_rdma_iface
+        elif isinstance(connection, RDMAConnection) and (
+            connection.sink_rdma_iface not in excluded_rdma_ifaces
+        ):
+            rdma_ifaces.append(connection.sink_rdma_iface)
 
     # Fallback: if we only have RDMA connections, derive the IP from the
-    # RDMA interface name on node_j.
-    if has_rdma and rdma_iface and node_network is not None:
+    # RDMA interface name(s) on node_j.
+    if rdma_ifaces and node_network is not None:
         other_network = node_network.get(node_j, NodeNetworkInfo())
         for iface in other_network.interfaces:
-            if iface.name == rdma_iface and iface.ip_address:
+            if iface.name in rdma_ifaces and iface.ip_address:
                 yield iface.ip_address
 
 
@@ -662,12 +690,29 @@ def find_ip_prioritised(
     cycle_digraph: Topology,
     node_network: Mapping[NodeId, NodeNetworkInfo],
     ring: bool,
+    *,
+    excluded_rdma_ifaces: frozenset[str] = frozenset(),
 ) -> str | None:
     """Find an IP address between nodes with prioritization.
 
     Priority: ethernet > wifi > unknown > thunderbolt
+
+    ``excluded_rdma_ifaces``: see ``_find_connection_ip``. jaccl's TCP
+    coordinator selection passes the interface reserved for RDMA so the
+    RDMA cable is never picked as a fallback -- that would silently share
+    the RDMA link with TCP traffic, exactly the contention this split is
+    meant to avoid. Callers that hit this returning None must fall back to
+    a different (non-RDMA) resolution path themselves, loudly.
     """
-    ips = list(_find_connection_ip(node_id, other_node_id, cycle_digraph, node_network))
+    ips = list(
+        _find_connection_ip(
+            node_id,
+            other_node_id,
+            cycle_digraph,
+            node_network,
+            excluded_rdma_ifaces=excluded_rdma_ifaces,
+        )
+    )
     if not ips:
         return None
     other_network = node_network.get(other_node_id, NodeNetworkInfo())
@@ -758,6 +803,22 @@ def get_mlx_jaccl_coordinators(
 
     Select an IP address that each node can reach for the rank 0 node. Returns
     address in format "X.X.X.X:PORT" per node.
+
+    DUAL-CABLE TOPOLOGY SPLIT: jaccl's TCP side channel (the bootstrap
+    coordinator that exchanges ``Destination`` QP info, and the rendezvous
+    channel ``reliable_all_reduce`` uses) must not contend with RDMA traffic
+    on the same physical Thunderbolt cable. ``_select_rdma_cable`` is the
+    single source of truth for which cable ``get_mlx_jaccl_devices_matrix``
+    reserved for RDMA; we exclude that cable's coordinator-local interface
+    here so the resolver picks the OTHER cable (or a real LAN/ethernet edge,
+    which the ``ring=False`` priority table already prefers).
+
+    On single-cable hardware the exclusion leaves no candidate at all. That
+    is expected, not an error: we fall back to the unrestricted resolution
+    (which may legitimately return the RDMA cable's own IP) and log a
+    WARNING, because sharing the one cable is the correct behaviour there --
+    but it is also exactly the contention profile that made this split worth
+    doing, so it must be visible in the logs rather than silent.
     """
     logger.debug(f"Selecting coordinator: {coordinator}")
 
@@ -765,11 +826,44 @@ def get_mlx_jaccl_coordinators(
         if n == coordinator:
             return "0.0.0.0"
 
+        # The coordinator-local interface that RDMA has claimed for this pair.
+        rdma_cable = _select_rdma_cable(n, coordinator, cycle_digraph)
+        reserved: frozenset[str] = (
+            frozenset({rdma_cable.sink_rdma_iface})
+            if rdma_cable is not None
+            else frozenset[str]()
+        )
+
         ip = find_ip_prioritised(
-            n, coordinator, cycle_digraph, node_network, ring=False
+            n,
+            coordinator,
+            cycle_digraph,
+            node_network,
+            ring=False,
+            excluded_rdma_ifaces=reserved,
         )
         if ip is not None:
+            logger.debug(
+                f"jaccl coordinator for {n}: {ip} "
+                f"(RDMA-reserved iface on coordinator: {reserved or 'none'})"
+            )
             return ip
+
+        if reserved:
+            # Only the RDMA cable connects these two nodes. Share it, loudly.
+            shared = find_ip_prioritised(
+                n, coordinator, cycle_digraph, node_network, ring=False
+            )
+            if shared is not None:
+                logger.warning(
+                    f"jaccl coordinator for {n} falling back onto the "
+                    f"RDMA-reserved cable ({sorted(reserved)}) at {shared}: no "
+                    "separate TCP path to the coordinator exists. TCP "
+                    "side-channel traffic will contend with RDMA on this "
+                    "link. Add a second Thunderbolt cable or a LAN route "
+                    "between these nodes to get the dedicated-cable split."
+                )
+                return shared
 
         raise ValueError(
             "Current jaccl backend requires all participating devices to be able to communicate"

@@ -18,6 +18,7 @@ from exo.shared.topology import Topology
 from exo.shared.types.backends import Backend
 from exo.shared.types.common import NodeId
 from exo.shared.types.memory import Memory
+from exo.shared.types.multiaddr import Multiaddr
 from exo.shared.types.profiling import (
     NetworkInterfaceInfo,
     NodeNetworkInfo,
@@ -766,3 +767,187 @@ def test_jaccl_matrix_still_works_with_a_single_link():
     assert matrix[1][0] == "rdma_en4"
     assert matrix[0][0] is None
     assert matrix[1][1] is None
+
+
+# ---------------------------------------------------------------------------
+# Dual-cable topology split: jaccl's TCP coordinator must resolve onto a
+# DIFFERENT physical cable than the one _select_rdma_cable reserved for RDMA.
+# ---------------------------------------------------------------------------
+
+
+def _dual_cable_topology(node0: NodeId, node1: NodeId) -> Topology:
+    """Two Thunderbolt cables between the same pair of nodes.
+
+    Cable A: node0 rdma_en3 <-> node1 rdma_en4
+    Cable B: node0 rdma_en4 <-> node1 rdma_en3
+    Both directions are present for both cables, as the real profiler emits.
+    """
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en4", "rdma_en3"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en3", "rdma_en4"))
+    return topology
+
+
+def _tb_network(**iface_ips: str) -> NodeNetworkInfo:
+    return NodeNetworkInfo(
+        interfaces=[
+            NetworkInterfaceInfo(
+                name=name, ip_address=ip, interface_type="thunderbolt"
+            )
+            for name, ip in iface_ips.items()
+        ]
+    )
+
+
+def test_jaccl_coordinator_avoids_the_rdma_reserved_cable():
+    """The whole point of the split: with two cables, the TCP coordinator
+    must NOT land on the interface RDMA claimed.
+
+    NEGATIVE CONTROL: before this wiring, ``_find_connection_ip`` took the
+    first RDMA edge it saw and yielded that interface's IP unconditionally --
+    which is the same cable ``get_mlx_jaccl_devices_matrix`` selects, so
+    coordinator TCP traffic shared the RDMA wire. This test pins the
+    coordinator IP to the OTHER interface, so that behaviour fails here.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+    topology = _dual_cable_topology(node0, node1)
+
+    node_network = {
+        node0: _tb_network(rdma_en3="10.0.3.10", rdma_en4="10.0.4.10"),
+        node1: _tb_network(rdma_en3="10.0.4.11", rdma_en4="10.0.3.11"),
+    }
+
+    # node0 is rank 0 / the coordinator.
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+
+    assert coordinators[node0] == "0.0.0.0:5000"
+
+    # Which cable did RDMA take? matrix[1][0] is node1's local iface for
+    # reaching node0; the coordinator-side end of that same cable is what
+    # must be excluded.
+    matrix = get_mlx_jaccl_devices_matrix([node0, node1], topology)
+    rdma_iface_on_coordinator = matrix[0][1]
+    assert rdma_iface_on_coordinator is not None
+    rdma_ip_on_coordinator = {
+        iface.name: iface.ip_address for iface in node_network[node0].interfaces
+    }[rdma_iface_on_coordinator]
+
+    coordinator_ip = coordinators[node1].rsplit(":", 1)[0]
+    assert coordinator_ip != rdma_ip_on_coordinator, (
+        "jaccl TCP coordinator resolved onto the SAME cable reserved for "
+        f"RDMA ({rdma_iface_on_coordinator} @ {rdma_ip_on_coordinator}); the "
+        "dual-cable split is not wired through"
+    )
+    # And it must be a real address on the other cable, not junk.
+    assert coordinator_ip in {"10.0.3.10", "10.0.4.10"}
+    assert coordinators[node1].endswith(":5000")
+
+
+def test_jaccl_coordinator_prefers_lan_over_either_thunderbolt_cable():
+    """A real SocketConnection (home LAN) still wins: the exclusion only
+    removes an RDMA *fallback* candidate, it does not perturb the existing
+    ethernet > wifi > unknown > thunderbolt priority.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+    topology = _dual_cable_topology(node0, node1)
+    topology.add_connection(
+        Connection(
+            source=node1,
+            sink=node0,
+            edge=SocketConnection(
+                sink_multiaddr=Multiaddr(address="/ip4/192.168.86.202/tcp/52415")
+            ),
+        )
+    )
+
+    node_network = {
+        node0: NodeNetworkInfo(
+            interfaces=[
+                NetworkInterfaceInfo(
+                    name="en0", ip_address="192.168.86.202", interface_type="ethernet"
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en3", ip_address="10.0.3.10",
+                    interface_type="thunderbolt",
+                ),
+                NetworkInterfaceInfo(
+                    name="rdma_en4", ip_address="10.0.4.10",
+                    interface_type="thunderbolt",
+                ),
+            ]
+        ),
+        node1: _tb_network(rdma_en3="10.0.4.11", rdma_en4="10.0.3.11"),
+    }
+
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+    assert coordinators[node1] == "192.168.86.202:5000"
+
+
+def test_jaccl_coordinator_single_cable_shares_it_rather_than_failing():
+    """Regression guard for single-cable hardware (the current cluster's
+    normal state): excluding the RDMA cable leaves nothing, so we must fall
+    back to sharing it -- NOT raise, and NOT return None.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+
+    topology = Topology()
+    topology.add_connection(_rdma_conn(node0, node1, "rdma_en3", "rdma_en4"))
+    topology.add_connection(_rdma_conn(node1, node0, "rdma_en4", "rdma_en3"))
+
+    node_network = {
+        node0: _tb_network(rdma_en3="10.0.3.10"),
+        node1: _tb_network(rdma_en4="10.0.3.11"),
+    }
+
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+    assert coordinators[node0] == "0.0.0.0:5000"
+    # Only one cable exists; sharing it is correct here.
+    assert coordinators[node1] == "10.0.3.10:5000"
+
+
+def test_jaccl_coordinator_and_rdma_matrix_agree_on_opposite_cables():
+    """End-to-end invariant across BOTH producers: for every non-coordinator
+    node, the cable jaccl uses for RDMA and the cable it uses for the TCP
+    coordinator must be different physical links.
+    """
+    node0 = NodeId("00000000-0000-0000-0000-000000000000")
+    node1 = NodeId("11111111-1111-1111-1111-111111111111")
+    topology = _dual_cable_topology(node0, node1)
+    node_network = {
+        node0: _tb_network(rdma_en3="10.0.3.10", rdma_en4="10.0.4.10"),
+        node1: _tb_network(rdma_en3="10.0.4.11", rdma_en4="10.0.3.11"),
+    }
+
+    matrix = get_mlx_jaccl_devices_matrix([node0, node1], topology)
+    coordinators = get_mlx_jaccl_coordinators(
+        coordinator=node0,
+        coordinator_port=5000,
+        cycle_digraph=topology,
+        node_network=node_network,
+    )
+
+    ip_to_iface = {
+        iface.ip_address: iface.name for iface in node_network[node0].interfaces
+    }
+    coordinator_iface = ip_to_iface[coordinators[node1].rsplit(":", 1)[0]]
+    assert matrix[0][1] != coordinator_iface
