@@ -1528,6 +1528,15 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_ARGPARTITION_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ARGPARTITION_MIN_P=$EXO_DSV4_ARGPARTITION_MIN_P"
     [ -n "$EXO_DSV4_LMHEAD_LASTROW" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_LASTROW=$EXO_DSV4_LMHEAD_LASTROW"
     [ -n "$EXO_DSV4_SEQ_SPLIT" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT=$EXO_DSV4_SEQ_SPLIT"
+    # Seq-split output reconstruction path: default (unset/1) uses a
+    # zero-padded all_sum on the TOP-LEVEL group (2x wire bytes) to work
+    # around a subgroup all_gather wedge (no TCP coordinator on subgroups
+    # -> reliable ARQ couldn't arm there, observed 2026-07-06). Tonight's
+    # 2026-08-21 jaccl fix (commit f8b77fe5a, "give subgroups their own
+    # TCP coordinator") may have retired that precondition -- set to 0 to
+    # test the real (cheaper) subgroup all_gather path. See deepseek_v4.py
+    # docstring at _SEQ_SPLIT_GATHER_VIA_ALLSUM for full context.
+    [ -n "$EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM=$EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM"
     # JIT model lifecycle (master + API read these; always forwarded so the
     # kill-switch and reserve are explicit in the runner env).
     EXO_ENV="$EXO_ENV EXO_JIT_ENABLED=$EXO_JIT_ENABLED"
