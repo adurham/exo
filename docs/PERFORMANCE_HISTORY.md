@@ -12,19 +12,21 @@ states what was tried, the real numbers, why it worked or didn't, and a
 one-line reusable lesson. Read the relevant section before starting new
 optimization work in that area.
 
-**Cross-checked (2026-08-21):** an independent second consolidation of
-the same raw source data was written separately by Claude Fable 5 —
-see `docs/PERFORMANCE_HISTORY_FABLE.md`. It was given only the raw
-per-file findings, not this document, so it's a genuine independent
-synthesis, not a review. Comparing the two: they agree on essentially
-every substantive finding (same negative results, same contradictions
-flagged — e.g. the gate+up fusion's -3.8% vs +3.01% discrepancy across
-sessions — same recurring-pattern list), which is a real corroboration
-signal. One real gap was found and fixed: this doc originally omitted
-the `mlx#3596` allocator-coalescing RSS finding (now added to §10). If
-the two docs ever diverge on a specific number, treat that as a flag to
-go re-read the cited source file directly rather than trusting either
-summary.
+**Cross-checked and merged (2026-08-21):** a second, fully independent
+consolidation of the same raw source data was separately written by
+Claude Fable 5 — given only the raw per-file findings, never this
+document, so it was a genuine independent synthesis, not a review. The
+two versions agreed on essentially every substantive finding (same
+negative results, same contradictions flagged — e.g. the gate+up
+fusion's -3.8% vs +3.01% discrepancy across sessions), which is a real
+corroboration signal, not just two summaries of the same source text.
+One real gap was found this way and fixed: this doc originally omitted
+the `mlx#3596` allocator-coalescing RSS finding (now in §10). Fable's
+independent §12.5 "cross-domain recurring patterns" cut and its
+closed-levers quick-reference table (bottom of this doc) were merged in
+directly since they added genuine, non-duplicate value beyond what this
+doc already had. The standalone Fable doc has been retired now that its
+unique content lives here — this is the single reference going forward.
 
 **How to use this doc:** find your topic area below, read the WINs to know
 what's already banked, read the NEGATIVE/DEAD-END entries to know what NOT
@@ -48,6 +50,7 @@ fully closed out.
 10. [Memory leaks](#10-memory-leaks)
 11. [Correctness bugs found during perf work](#11-correctness-bugs-found-during-perf-work)
 12. [Measurement methodology lessons (meta)](#12-measurement-methodology-lessons-meta)
+    - [12.5 Cross-domain recurring patterns](#125-cross-domain-recurring-patterns)
 13. [Open / never-finished threads](#13-open--never-finished-threads)
 
 ---
@@ -1281,6 +1284,83 @@ number:
 
 ---
 
+## 12.5 Cross-domain recurring patterns
+
+*(Consolidated in from an independent second pass over the same source
+data — see the note at the top of this doc. These are the same
+underlying facts as §12 above, but cut across topic-area boundaries
+rather than within a single measurement technique, which surfaces a few
+different groupings worth keeping.)*
+
+1. **Microbenchmark wins do not transfer end-to-end — the single most
+   common failure mode in this whole history, hit independently 4+
+   times across unrelated domains**: STEP_SIZE=4096 (isolated MoE-GEMM
+   +15% → e2e -8%, §3.3), fused-topk (5x per-call microbench → +0.13%
+   e2e, below noise, §5.1/§6.5), fused indexer kernel (dispatch-overhead
+   analysis predicted savings → 0.54x SLOWER once pipelined, §4.6),
+   TurboQuant (bandwidth-savings math → -6% to -11% measured, §7.2).
+   **No lever ships on a component-level number alone.**
+2. **"GPU is idle/busy" reasoning misleads in both directions.** A
+   2935ms GPU-idle envelope during `moe.switch_mlp` was NOT capturable
+   by naive dispatch-fusion or fence-reordering (three independent
+   failed attempts, §4.4); conversely, 96-97% GPU "utilization" telemetry
+   coexisted with `moe.all_sum` eating 61-64% of wall time, because a
+   blocked-but-scheduled submission thread still reads as "busy" (§2.6).
+   Utilization telemetry alone is neither necessary nor sufficient
+   evidence of where time actually goes.
+3. **Correctness fixes and throughput fixes are independent axes —
+   fixing one never implies the other.** Token-tree drafting (fixed,
+   zero throughput lift, §5.3), MTP c≥2 cache fix (fixed correctness,
+   throughput unchanged at 5.7 agg t/s, §9.2), shared-scale int8 all_sum
+   (correctness passed, 1.49x SLOWER, §2.5), `TOPK=160` (fast, but
+   quality-broken, §5.1). Every claimed champion needs BOTH a
+   needle/quality probe AND a σ-qualified throughput run — neither alone
+   is sufficient.
+4. **Optimization verdicts rot across time and don't transplant across
+   model/topology.** The identical MoE gate+up fusion measured -3.8%
+   on 2026-06-26 and +3.01% on 2026-08-21 (§4.4/§6) — same code pattern,
+   different codebase state, opposite sign. STEP_SIZE tuning has
+   opposite signs on Qwen3.5/PP vs DSv4/TP (§3.3/§3.5). bf16→fp16 compute
+   dtype is a ~7% win on `qwen3_5_moe` kernels but a 7x decode
+   REGRESSION on DSv4 because JACCL/RDMA lacks fp16 support (§7.5).
+   **Never trust an old result across a model, topology, or multi-week
+   code-gap boundary without re-measuring on the current state.**
+5. **Untested default-off flags are a real, recurring liability, not a
+   theoretical one.** `EXO_DSV4_FUSED_SOFTMAX` hid a genuine correctness
+   break for ~5 weeks behind a "needs A/B validation" comment before
+   anyone actually tested it (§6). `EXO_DSV4_INDEXER_PBLOCK`'s own
+   "decode pays zero overhead" docstring claim was false (§3.2).
+   DSpark Native Head was implemented and never live-A/B'd (§5.3).
+   **Either validate a flag promptly or delete it — don't let it sit
+   untested indefinitely.**
+6. **Speculative decoding's binding constraint at long context is the
+   verify-phase KV-attention floor (~30ms, independent of draft
+   width/depth) — every widening scheme loses to it.** Token-tree,
+   higher gamma, and wider L_q all failed for the same underlying reason
+   (§5.3). Every real win in this domain instead came from removing
+   overhead around an unchanged draft shape: tie-break losslessness,
+   rollback-cost fix, drain-elimination (§5.2) — never from a cleverer
+   drafting algorithm.
+7. **Exposed collectives sitting directly on the critical path are the
+   recurring transport killer — not raw bandwidth.** Eagle K=1's 16KB
+   `broadcast_from_canonical` collective with zero compute to hide
+   behind caused a 17x regression (§5.3); `moe.all_sum`'s effective ~92-96
+   MB/s (vs a realistic 6-10 GB/s wire capacity) traced to a chunking
+   config knob, not the wire itself (§2.4); the decode-fence `mx.eval`
+   is 98% of its own wait, not the jaccl poll (§2.7). **Fix collective
+   ordering/overlap/chunking-config, not the wire, when a collective
+   looks expensive.**
+8. **Concurrency-tier transitions (c=1→c≥2) break things silently and
+   repeatedly, across unrelated subsystems.** MTP caches (§9.2), output
+   quality (twice, §5.1/§9.2), request admission (§9.2), and prior
+   champion throughput claims (§5.1) all broke independently when
+   concurrency was raised. **Any change validated only at c=1 is
+   unvalidated at c≥2, and any change validated only at 100K context is
+   unvalidated at 500K — re-verify explicitly at both axes, don't
+   assume a lower-tier result generalizes upward.**
+
+---
+
 ## 13. Open / never-finished threads
 
 Things flagged in the source docs as incomplete, unresolved, or worth
@@ -1325,3 +1405,33 @@ closed:
   full relaunch) — a future session needs a different, safer measurement
   approach (dedicated `perf_counter` timing around just the collective
   call site, not a full sync-span or ablation).
+
+---
+
+## Quick-reference: closed levers, one line each
+
+*(Added from the independent second pass's appendix table — a fast
+scan-list for "has this been tried" before reading the full section.
+Every row is expanded with real numbers and the "why" in its home
+section above; use the section refs to jump there.)*
+
+| Lever | Verdict | Section |
+|---|---|---|
+| Quantized/shared-scale int8 `moe.all_sum` | Infeasible (true reduction, not gather) / measured 1.49x slower | §2.5 |
+| Token-tree speculative drafting (all variants) | Never beat linear baseline; verify-floor bound | §5.3 |
+| Hybrid PP-prefill/TP-decode phase swap | Rejected twice, independently | §3.5 |
+| TurboQuant KV compression | Every tested config regressed | §7.2 |
+| MoE tile-geometry retune (bm>16), MAXBE widening | Kernel already at/above theoretical ceiling | §3.4 |
+| Fused topk, fused indexer kernel, wq_a+wkv fusion | Noise-level or measurably slower once pipelined | §4.2, §4.6, §6 |
+| `EXO_PREFILL_STEP_SIZE=4096` on DSv4/TP | ~8% end-to-end regression, confirmed twice | §3.3 |
+| bf16→fp16 compute dtype on DSv4 | 7x decode slowdown — JACCL/RDMA lacks fp16 support | §7.5 |
+| `MLX_JACCL_RELIABLE_MAX_SZ=3` | Statistically identical to sz=2, clean null | §2.4 |
+| Expert co-location to reduce TP all_sum traffic | Traffic volume independent of expert placement | §2.1 |
+| `EXO_PREFILL_CHUNK_OVERLAP` | Correctness race fixed, but lever itself dead/closed | §2.6 |
+| DSpark FULLBLOCK at real context depth | 15.9x throughput collapse; cluster runs DSpark OFF | §5.3 |
+| `MLX_METAL_FAST_SYNCH=1` | 1.5x slower, 70x more variance | §2.3 |
+| `EXO_DSV4_FUSED_SOFTMAX` | Real correctness break (needle failure at 100K) | §6 |
+| Nesting `mx.fast.metal_kernel` inside `mx.compile` | Catastrophic 3-4x regression | §4.5 |
+| `EXO_DSV4_INDEXER_PBLOCK` (small block size) | Real decode regression at depth | §3.2 |
+| Subgroup `attn.all_gather` (vs all_sum workaround) | Still faults post-transport-fix | §8 |
+| `all_sum` NOP ablation as a live measurement technique | Unsafe — destabilizes the cluster | §13 |
