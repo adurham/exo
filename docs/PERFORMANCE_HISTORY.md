@@ -1514,7 +1514,54 @@ different groupings worth keeping.)*
 
 ## 13. Open / never-finished threads
 
-**INTERIM SYNTHESIS (2026-08-22, end of session 3):** see
+**RESOLVED (2026-08-22, end of session 3, root cause found):** the
+previous interim synthesis (below, superseded) flagged CPU profiling as
+blocked pending `py-spy` install approval. Approval was given; `py-spy`
+requires root/sudo which isn't available passwordlessly on either node,
+so built a zero-privilege in-process Python stack sampler instead (per
+a Fable consult — strictly more informative than an external sampler,
+since it can also detect GIL-held-by-native-code vs genuinely-idle via
+its own wakeup latency). **This found the actual root cause**: ~95% of
+the real compute thread's decode-time wall time is spent blocked inside
+the SYNCHRONOUS `mx.eval(y)` fence branch, not the intended
+non-blocking `mx.async_eval(y)` path, despite `EXO_DSV4_FENCE_ASYNC=1`
+being live all session. Live diagnostic logging (deployed the same
+session) confirmed why: the gate requires two owner flags
+(`"engine"` + `"cache"`) both `True`; `"cache"` is owned exclusively by
+`dsv4_mtp.py`'s MTP/DSpark-specific code, which is confirmed DEAD under
+this cluster's TP sharding mode (zero setter calls logged across a real
+request) — so the fence can structurally never arm, regardless of
+`EXO_DSV4_FENCE_ASYNC`'s value or real batch/sequence shape. See
+`docs/pysampler-blocking-eval-root-cause-2026-08-22.md` and
+`docs/async-fence-cache-owner-dead-code-root-cause-2026-08-22.md` for
+full detail, including a real self-caught-and-corrected methodology
+detour (a manual line-counting error that cost real investigation time
+before being found via careful re-verification — documented as a
+reusable lesson, not glossed over).
+
+This is very likely the single largest concrete, fixable contributor to
+decode's ~82.5-84.9% unattributed wall time identified this session —
+a real, structural code defect, not a mysterious hardware/dispatch
+limit. A fix was NOT implemented this session (would need careful
+design given this exact subsystem's documented 2026-07-02 corruption
+history around the same two-owner arming mechanism) — flagged as
+well-scoped, high-priority work for a future session with explicit
+user sign-off on a correctness-sensitive production code change.
+
+Cross-rank skew correlation (previously the other queued item) was
+assessed as superseded by this direct-evidence finding — no longer
+needed to distinguish "local stall" from "straggler wait" once a
+structural cause is confirmed. A real technical limitation was also
+found in the process: the sampler used `time.monotonic_ns()` (per-process
+clock), not directly cross-rank-comparable even with a real measured
+NTP clock-skew estimate (~1.1-1.2ms between nodes) — a future
+fix-and-validate session (testing the actual fix's real throughput
+recovery) should switch to `time.time_ns()` to get this correlation for
+free in the same relaunch, per Fable's guidance.
+
+---
+
+**Prior interim synthesis (2026-08-22, superseded by the above):** see
 `docs/decode-idle-time-investigation-interim-synthesis-2026-08-22.md`
 for the full honest status — 5 of 7 planned investigation steps
 completed with real findings this session (ruled out: `moe.all_sum`,
