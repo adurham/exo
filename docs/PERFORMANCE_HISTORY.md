@@ -374,6 +374,30 @@ but never read).
   model's call context (skew and/or CPU-dispatch/scheduling around the
   collective). See `docs/offline-collective-microbenchmark-2026-08-21.md`
   and `docs/instruments-metal-trace-real-dispatch-latency-2026-08-21.md`.
+- **Live two-rank Instruments trace of real production decode (WIN, new
+  session, 2026-08-21)** — following an independent Fable review of this
+  doc that ranked a live two-rank trace as the single highest-EV next
+  step, traced BOTH TP ranks simultaneously (not a synthetic probe) via
+  `xctrace --attach` on the real running runner PIDs during a real
+  decode request. Found and worked around a real `xctrace` bug along the
+  way: `--toc` and `remodel` fail with "Missing Template Error" on
+  attach-mode trace packages even though the trace genuinely contains
+  full Metal GPU data — direct `--xpath` export using a schema name
+  known from a working launch-mode trace succeeds cleanly regardless.
+  **Real measured GPU occupancy: 30.4% (rank0) / 28.4% (rank1), i.e.
+  ~70% genuine GPU idle time** — independently corroborates the earlier
+  roofline estimate (~12% of theoretical peak) using a completely
+  different instrument (direct Metal telemetry vs. architectural FLOPs
+  math). Idle gaps in the 1-10ms bucket cluster tightly on both ranks
+  (mean ~2909-3010µs), close to but not proven identical to the
+  `moe.all_sum` sync-span average (~4094µs) — a real, suggestive, but
+  NOT YET PROVEN correlation; queued for jaccl-internal timestamp
+  decomposition to confirm attribution rather than infer it from
+  magnitude match alone. Known limitation: the two captures used
+  independent, non-synchronized system clocks, so true cross-rank
+  wall-clock gap correlation was not attempted this session (only
+  aggregate per-rank statistics, which don't require synced clocks). See
+  `docs/live-decode-two-rank-instruments-trace-2026-08-21.md`.
 
 ---
 
