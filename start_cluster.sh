@@ -169,6 +169,15 @@ fi
 # 28.80 ± 0.10 t/s to 29.04 ± 0.07 t/s (+0.83%, Welch t=6.19, p<0.001).
 # Quality preserved (needle ✓, BOS=0, bistability=0). See
 # .hermes/plans/2026-05-24_w3_K8_norenorm_results.md.
+#
+# DORMANT IN PRODUCTION (confirmed 2026-08-22, see
+# docs/roofline-sanity-check-inputs-confirmed-2026-08-22.md): this tunes
+# the classic single-MTP-head chained draft path, which is separate from
+# DSpark (see EXO_DSV4_DSPARK above). Live production config runs
+# EXO_DSV4_MTP=0 (classic MTP disabled -- DSpark was meant to fully
+# replace it, per the comment above EXO_DSV4_DSPARK), so this K value has
+# no effect on current decode. Left at its tuned default in case classic
+# MTP is ever re-enabled as a DSpark fallback.
 : "${EXO_DSV4_MTP_EAGLE_K:=8}"
 # MTP tie-break losslessness fix: DEFAULT OFF (2026-06-09). This was a BAND-AID
 # for an upstream bug that is now fixed at the root, and on the canonical affine
@@ -1661,6 +1670,21 @@ for NODE in "${NODES[@]}"; do
     # every node (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a
     # missing dir fails rank-consistently back to MTP-1.
     # EXO_DSV4_DSPARK_DIR overrides.
+    #
+    # DORMANT UNDER TP (confirmed 2026-08-22, see
+    # docs/roofline-sanity-check-inputs-confirmed-2026-08-22.md): DSpark's
+    # actual decode loop (pp_dspark_decode_loop) is PP-only -- auto-selected
+    # in Pipeline sharding mode when DSpark is attached (see ~line 2346),
+    # but this cluster runs Tensor sharding (MLX_JACCL_SHARDING_MODE=Tensor)
+    # for decode, which has no DSpark decode path at all. The module still
+    # loads and warms its context ("DSpark ctx warmed" in the log) but its
+    # speculative decode loop never fires -- confirmed via a live log grep
+    # finding zero "PP speculation using DSpark" lines across a full
+    # session. Left ON (not disabled) because it's genuinely load-bearing
+    # for PP deployments and costs nothing extra to warm under TP; this
+    # comment exists so a future investigation doesn't re-waste time
+    # assuming DSpark is providing a decode-time speedup under TP that it
+    # is not.
     : "${EXO_DSV4_DSPARK:=1}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
