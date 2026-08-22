@@ -1718,6 +1718,41 @@ attribution (isolating `moe.switch_mlp`/`GatherQMM`) needs
 `mx.metal.start_capture()`/Xcode GPU Frame Capture, not this `xctrace`
 template. See `docs/gpu-occupancy-clock-gap-postfix-2026-08-22.md`.
 
+**NEW (2026-08-22, session 4, T3): switch_mlp/FusedSwitchGLU kernel
+achieves only 27.7% of theoretical peak bandwidth — confirmed via a
+real pipelined microbench at exact production shape/config.** Built a
+standalone microbench replicating the REAL deployed kernel exactly
+(verified before building, not assumed): `EXO_DSV4_MOE_FUSED_GATE_UP=1`
+is live (must use `FusedSwitchGLU`'s single fused gather_qmm, not
+vanilla 3-dispatch `SwitchGLU`); TP=2 shards MoE intermediate WIDTH not
+expert identity (both ranks hold all 256 experts at HALF width,
+1024 not 2048, per `auto_parallel.py`'s own 2026-08-16 corrected
+comment); expert weights are mxfp4 (group_size=32, bits=4) per
+`make_quantization_config()`. Real pipelined (300 iters,
+`mx.synchronize()`-bracketed, per the standing pipelined-not-per-call
+methodology rule) wall time: **290-312µs/call**. Real bytes touched/token
+(top_k=6, per-rank, mxfp4+scale overhead): 47.186MB. **Achieved
+bandwidth: ~151.4 GB/s vs 546GB/s M4 Max peak = 27.7% efficiency.**
+Sanity-checked against the known decode budget: 43 layers × ~300µs ≈
+12.9ms/token, which is 38.9% of post-fix short-ctx wall time (T1's
+32.15-34.25ms/token) — directly matches the historically-cited
+"~30-45% of wall time" span-breakdown figure, cross-validating the
+microbench's fidelity to real production behavior. **Decision-gate
+result**: 27.7% clearly falls in the plan's <40%-of-peak bucket —
+confirmed real, substantial headroom at this specific kernel (3.6x gap
+between theoretical and achieved bandwidth), not a "kernel already at
+its floor" dead end. Root cause of the shortfall NOT yet isolated
+(candidates: gather_sort/scatter_unsort overhead around the core
+gather_qmm call; mxfp4 dequant overhead; B=1 decode's inherently thin/
+scattered top-6-of-256 sparse-gather access pattern, most likely given
+this is fundamentally a gather not a dense read) — flagged as the
+natural next sub-step (e.g. a batch-size sweep from B=1 to B=8 to test
+whether efficiency scales with batch, which would implicate the
+access-pattern hypothesis directly). A real Metal GPU Frame Capture was
+saved (`/tmp/switch_mlp_capture_session4.gputrace`, m4-1) but not yet
+opened/analyzed in Xcode this session. See
+`docs/switch-mlp-kernel-bandwidth-efficiency-2026-08-22.md`.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
