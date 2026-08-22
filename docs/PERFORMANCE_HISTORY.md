@@ -1514,24 +1514,61 @@ different groupings worth keeping.)*
 
 ## 13. Open / never-finished threads
 
-**Current highest-priority open question (2026-08-22, sharpened by
-tonight's work, not yet answered):** decode runs at only ~12% of the
-theoretical bandwidth-bound roofline (§4.3) and ~29-30% real GPU
-occupancy on both ranks (§2.7 Instruments trace) — i.e. **~65-85% of
-decode's real per-token wall time is genuine GPU idle time or
-unattributed real compute, with no confirmed cause yet.** Tonight's
-work conclusively RULED OUT `moe.all_sum` as that cause (real transport
-cost is only 2.9-5.3% of wall time, not the 21.4% earlier tooling
-claimed — §2.7 arithmetic reconciliation) — this makes the remaining
-gap a sharper, better-defined question than before the session started,
-not a smaller one. The next real investigation should attribute that
-idle/unaccounted time to actual causes: most promising unstarted
-angles are a real Instruments trace of the `moe.switch_mlp` kernel
-internals specifically (flagged below, never done) and/or a kernel-level
-walk through the GPU command-buffer gaps already captured in tonight's
-raw Instruments trace data (only the aggregate occupancy stats were
-analyzed this session, not per-kernel attribution within the idle
-gaps).
+**Current highest-priority open question (2026-08-22, progressively
+sharpened across this session, still not fully answered):** decode runs
+at only ~12% of the theoretical bandwidth-bound roofline (§4.3) and
+~28-30% real GPU occupancy on both ranks (§2.7 Instruments trace).
+Stacking two independently-verified real measurements (real
+`moe.all_sum` cost + theoretical compute floor) against real wall time
+gives a sharper number: **82.5-84.9% of decode's real per-token wall
+time is neither the collective nor unavoidable compute-floor cost**
+(`docs/decode-time-budget-synthesis-2026-08-22.md`). Tonight's work
+conclusively RULED OUT `moe.all_sum` as the cause (real transport cost
+is only 2.9-5.3% of wall time, not the 21.4% earlier tooling claimed —
+§2.7 arithmetic reconciliation).
+
+**Further real progress this session** (`docs/gpu-idle-gap-deep-dive-2026-08-22.md`):
+computed the real GPU idle-gap length distribution from existing trace
+data (both ranks) and found gap TIME is dominated by 0.5-20ms gaps
+(83.9% of gap time combined), NOT the 50-500µs range that would signal
+pure CPU-dispatch latency — ruling out simple per-kernel dispatch
+overhead as the dominant cause. Also reconciled a real apparent
+contradiction between the Instruments occupancy figure (~30% busy) and
+a live `powermetrics` reading (100% "HW active residency", 0% "idle
+residency") — these measure different things (work-duration vs.
+power-gating state); the GPU's real 4.6-7.1W power draw during decode
+(far below a genuinely saturated workload) confirms the Instruments
+occupancy figure, not the naive powermetrics idle-residency reading.
+Found GPU clock frequency reduced to 819-1122 MHz (vs ~1.5GHz+ peak)
+during decode — a real but likely downstream SYMPTOM of the same
+bursty-low-load pattern (DVFS never ramps without sustained queue
+pressure), not an independent root cause, though it IS a real
+multiplicative amplifier while the gap pattern persists. A rough
+decomposition (occupancy × clock-fraction ≈ 0.20) doesn't fully explain
+the measured 0.12 roofline efficiency — a real, smaller, still-open
+sub-mystery (~0.08 unaccounted) likely in per-kernel bandwidth
+efficiency, not yet investigated.
+
+**Still genuinely open, not yet resolved**: (1) whether the dominant
+0.5-20ms gaps align with per-layer `moe.all_sum`/fence boundaries
+specifically — a per-token gap-rate check (~20-22 gaps/token from
+existing data) did NOT cleanly confirm the expected 43/token match, but
+this is inconclusive rather than a clean refutation (some layers' stalls
+may be too short to register as separate merged gaps in the existing
+low-granularity trace data); (2) true cross-rank skew-vs-shared-overhead
+correlation was NOT performed — the two existing traces used
+independent, non-synchronized clocks on separate machines, and a proper
+test requires a clock-synced capture that hasn't been done; (3) the
+existing `metal-gpu-intervals` trace data lacks per-kernel operation
+labels (confirmed this session — only command-buffer-level granularity,
+generic "Compute"/"Fragment"/"Vertex" channel names, no
+`gather_qmm`/`switch_mlp`/`all_sum` labels), so true kernel-level
+attribution requires a FRESH Instruments capture with a different
+template/config, not further mining of existing data. Most promising
+unstarted angles remain: a real Instruments trace of the
+`moe.switch_mlp` kernel internals specifically (flagged below, never
+done, needs the richer capture config), and/or a clock-synced two-rank
+capture for the skew test.
 
 Things flagged in the source docs as incomplete, unresolved, or worth
 future investigation — check here before assuming a topic is fully
