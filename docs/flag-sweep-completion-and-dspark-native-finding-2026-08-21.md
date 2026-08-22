@@ -97,9 +97,14 @@ quick toggle-and-check like tonight's env-var levers — and per the
 explicit "stop live-hardware testing tonight" direction from review #4,
 this was NOT tested live this session.
 
-**Flagged as a real, concrete, well-reasoned candidate for the next
-session** — with higher potential relevance than the already-closed-out
-levers, since it's pointed at directly by a code comment naming this
-exact production checkpoint, and has never been tested in either
-direction (not even a prior negative result exists for it, unlike
-several other flags checked tonight).
+**Correction (2026-08-21, same session): OUT OF SCOPE for this line of
+work.** User caught this: MTP/DSpark speculative-decode draft-head
+acceptance rate is a decode-phase-only mechanism — prefill processes
+the full prompt in one forward pass with no speculative
+drafting/verification cycle at all, so `EXO_DSV4_DSPARK_NATIVE` has
+zero mechanism to affect prefill throughput, which is the focus of this
+optimization line. Deferred, not deleted — still a real, well-reasoned,
+untested candidate for a FUTURE decode-specific session, but does not
+belong in the prefill-focused queue (items 12-14 in the campaign
+summary, all of which genuinely apply to both prefill and decode since
+`moe.all_sum`/`moe.switch_mlp` fire on every layer regardless of phase).
