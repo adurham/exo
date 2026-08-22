@@ -12,6 +12,20 @@ states what was tried, the real numbers, why it worked or didn't, and a
 one-line reusable lesson. Read the relevant section before starting new
 optimization work in that area.
 
+**Cross-checked (2026-08-21):** an independent second consolidation of
+the same raw source data was written separately by Claude Fable 5 —
+see `docs/PERFORMANCE_HISTORY_FABLE.md`. It was given only the raw
+per-file findings, not this document, so it's a genuine independent
+synthesis, not a review. Comparing the two: they agree on essentially
+every substantive finding (same negative results, same contradictions
+flagged — e.g. the gate+up fusion's -3.8% vs +3.01% discrepancy across
+sessions — same recurring-pattern list), which is a real corroboration
+signal. One real gap was found and fixed: this doc originally omitted
+the `mlx#3596` allocator-coalescing RSS finding (now added to §10). If
+the two docs ever diverge on a specific number, treat that as a flag to
+go re-read the cited source file directly rather than trusting either
+summary.
+
 **How to use this doc:** find your topic area below, read the WINs to know
 what's already banked, read the NEGATIVE/DEAD-END entries to know what NOT
 to re-attempt (or what would need genuinely new evidence to justify
@@ -1121,6 +1135,17 @@ after in-place sharding.
 ---
 
 ## 10. Memory leaks
+
+**Correction (2026-08-21, added after an independent Fable cross-check
+of this same raw data caught a real gap):** upstream MLX PR `mlx#3596`
+(metal allocation coalescing, referenced in `docs/upstream-prs.md`) was
+missing from this section entirely in the first pass. Real data: **RSS
+growth rate improved 770→155 KB/token** with the coalescing change (A/B
+throughput itself was flat at 32.1 t/s both configs — this is a memory
+footprint win, not a throughput win). Filed here since it's the same
+"Apple Silicon allocator defaults are tuned for small workloads and
+cause stalls/aborts at this scale" theme as `MLX_MAX_MB_PER_BUFFER`
+(§3.1) and the IOGPU residency abort below.
 
 Two separate, unrelated leak investigations, both eventually WIN:
 
