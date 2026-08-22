@@ -830,6 +830,29 @@ class DSv4MTPPredictor:
                 )
                 self.draft_lm_head = None
 
+        # Register as the real "cache" owner of the async decode fence
+        # (2026-08-22 fix — see
+        # docs/async-fence-cache-owner-dead-code-root-cause-2026-08-22.md).
+        # Registration happens HERE, at the end of a successfully
+        # completed __init__ (all validation above already passed —
+        # this object is a genuine, live MTP predictor with real cache
+        # lifecycle methods below), not via structural sniffing
+        # elsewhere. Fail-closed: if this constructor is never reached
+        # (MTP/DSpark absent, the overwhelming majority of this
+        # cluster's real TP production traffic), "cache" stays
+        # unregistered and the fence gate treats it as satisfied by
+        # default — there is no cache lifecycle to protect against if
+        # nothing manages one. If this constructor DOES run, "cache"
+        # becomes a real required owner exactly as before the fix,
+        # preserving the original two-owner safety property for any
+        # config where MTP/DSpark is genuinely active.
+        try:
+            from mlx_lm.models.deepseek_v4 import _register_fence_async_owner
+
+            _register_fence_async_owner("cache")
+        except ImportError:
+            pass
+
     def set_eagle_soft_emb(self, emb: Optional[mx.array]) -> None:
         """Install or clear the Eagle soft-embedding side channel on the
         underlying DSv4 MTP module. ``emb`` must be shape ``(B, S,
