@@ -825,6 +825,25 @@ IS what the original roofline calculation already used, sourced from
 real on-disk size, not the coarse label. **Both inputs confirmed
 correct; the ~12%-of-ceiling headroom finding stands unchanged.**
 
+**RECALCULATED post-async-fence-fix (2026-08-22, new session)** —
+`docs/roofline-recalculated-post-fix-2026-08-22.md`: the ~12% figure
+above was measured under the since-fixed silently-broken async fence
+(§2.8) — stale once decode throughput changed by +23-67%. Recalculated
+using the exact same bandwidth-floor methodology (6.51ms/token/node,
+unchanged — compute/bandwidth-side, not touched by the fence fix)
+against real post-fix decode numbers: **14.0-20.2% of theoretical peak
+depending on depth/context shape** (100K: 17.5%, 300K: 15.9%, 500K:
+14.0%, short-context: 19.0-20.2%) — up from 11.9% pre-fix, but **real,
+substantial headroom (~5-7x slower than roofline) still remains**.
+Confirms Fable's prediction ("still likely ~15-20% of peak") made
+before this calculation was run. The dispatch-overhead hypothesis
+(implied dispatches/token from the residual gap) remains broadly
+consistent post-fix (171-267 implied dispatches/token depending on
+depth, down from the pre-fix ~320 but not eliminated) — the underlying
+mechanism (real synchronization/dispatch overhead, not raw
+compute/bandwidth) still looks like the right frame, just with a
+smaller absolute gap now that the fence genuinely engages.
+
 ### 4.4 Older decode-stall investigation (NEGATIVE, three failed overlap attempts, 2026-06-26)
 
 `docs/dsv4-decode-stall-2026-06-26.md` — confirmed decode's 73%
