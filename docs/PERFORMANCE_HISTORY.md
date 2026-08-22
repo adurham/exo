@@ -1514,6 +1514,18 @@ different groupings worth keeping.)*
 
 ## 13. Open / never-finished threads
 
+**INTERIM SYNTHESIS (2026-08-22, end of session 3):** see
+`docs/decode-idle-time-investigation-interim-synthesis-2026-08-22.md`
+for the full honest status — 5 of 7 planned investigation steps
+completed with real findings this session (ruled out: `moe.all_sum`,
+memory/expert-weight paging, pure CPU-dispatch latency; confirmed real:
+GPU occupancy/clock/power reconciliation, real gap-length distribution,
+sharpened 82.5-84.9% unattributed figure). 2 steps remain genuinely
+open: true kernel-level attribution (needs a fresh Instruments capture
+with per-kernel labels — existing data lacks them) and CPU-side
+profiling (needs `py-spy` install approval, not given this session).
+Next-session priority order is spelled out in that doc.
+
 **Current highest-priority open question (2026-08-22, progressively
 sharpened across this session, still not fully answered):** decode runs
 at only ~12% of the theoretical bandwidth-bound roofline (§4.3) and
