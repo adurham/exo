@@ -1514,6 +1514,25 @@ different groupings worth keeping.)*
 
 ## 13. Open / never-finished threads
 
+**Current highest-priority open question (2026-08-22, sharpened by
+tonight's work, not yet answered):** decode runs at only ~12% of the
+theoretical bandwidth-bound roofline (§4.3) and ~29-30% real GPU
+occupancy on both ranks (§2.7 Instruments trace) — i.e. **~65-85% of
+decode's real per-token wall time is genuine GPU idle time or
+unattributed real compute, with no confirmed cause yet.** Tonight's
+work conclusively RULED OUT `moe.all_sum` as that cause (real transport
+cost is only 2.9-5.3% of wall time, not the 21.4% earlier tooling
+claimed — §2.7 arithmetic reconciliation) — this makes the remaining
+gap a sharper, better-defined question than before the session started,
+not a smaller one. The next real investigation should attribute that
+idle/unaccounted time to actual causes: most promising unstarted
+angles are a real Instruments trace of the `moe.switch_mlp` kernel
+internals specifically (flagged below, never done) and/or a kernel-level
+walk through the GPU command-buffer gaps already captured in tonight's
+raw Instruments trace data (only the aggregate occupancy stats were
+analyzed this session, not per-kernel attribution within the idle
+gaps).
+
 Things flagged in the source docs as incomplete, unresolved, or worth
 future investigation — check here before assuming a topic is fully
 closed:
@@ -1528,10 +1547,16 @@ closed:
   actually help (§3.2). This session's `INDEXER_PBLOCK` retest closed
   out ONE specific angle (small p_block causes decode regression at
   depth) but the original prefill cliff mechanism remains open.
-- **`EXO_DSV4_DSPARK_NATIVE`** — implemented, validated standalone,
-  never live-A/B-tested. Explicitly flagged by this session as real and
-  untested but OUT OF SCOPE for prefill-focused work (decode-only
-  mechanism).
+- ~~`EXO_DSV4_DSPARK_NATIVE`~~ **SUPERSEDED 2026-08-22**: this entry's
+  original framing ("out of scope for prefill-focused work, decode-only
+  mechanism") is stale. Confirmed this session
+  (`docs/roofline-sanity-check-inputs-confirmed-2026-08-22.md`):
+  DSpark's decode loop is PP-only and never invoked under the TP
+  topology production actually runs — `EXO_DSV4_DSPARK_NATIVE` (a
+  DSpark sub-flag selecting which draft head to use) is moot for the
+  same structural reason, not just out of scope. A live A/B of this
+  flag would be testing a no-op under the current config. Not worth
+  live-cluster time unless/until production switches to PP sharding.
 - **Decode stall's "third undiagnosed symptom"** (rank0 CPU never
   converging to idle after two other bugs were fixed, §8) — investigation
   chain was abandoned mid-cascade.
