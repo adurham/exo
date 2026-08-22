@@ -1684,6 +1684,40 @@ fresh post-fix Instruments capture with per-kernel labels (existing
 capture data lacks them) + concurrent GPU clock/power log, to directly
 attribute the real busy-vs-idle split now that the fence bug is fixed.
 
+**NEW (2026-08-22, session 4, T2): fresh post-fix Instruments capture
+confirms occupancy/gap/clock all dramatically improved, but per-kernel
+attribution still structurally unavailable from this template.**
+Attached `xctrace --template 'Metal System Trace'` to both live
+production runner PIDs during two real `decode_probe.py` requests,
+concurrent `powermetrics` on m4-1. Real interval-union occupancy
+(own-process rows only, request-window-isolated): **78.64% (rank0) /
+78.86% (rank1)** — up from pre-fix ~29-30%, roughly matching (not
+identical to, different capture window) the Phase C pysampler
+dual-capture's 85.42% figure. Gap-length distribution collapsed from
+pre-fix median 520-528µs/mean 1,700-1,961µs (dominated by 0.5-20ms
+buckets) to **post-fix median 89-95µs/mean 137-139µs** — now in the
+range consistent with ordinary per-kernel CPU-dispatch latency, not
+fence/collective-boundary-scale stalls. GPU clock: **median 1578MHz
+(exact peak spec), 88.3% of busy samples at peak**, vs pre-fix
+819-1122MHz never reaching peak; power draw ~19.5W median vs pre-fix
+4.6-7.1W — confirms the earlier "clock is a downstream symptom of
+bursty dispatch" prediction by showing it resolve once the bursty
+pattern was fixed. **Decision-gate result** (per the Fable plan's
+explicit criteria): occupancy 78.6-78.9% (idle ~21-21.4%) falls between
+the <15%-closes and >25%-promotes thresholds — gap-chasing is not
+fully closed, but its ceiling has shrunk to roughly +27% (1/0.786) at
+most, a much smaller prize than the pre-fix "70% idle" framing implied.
+Clock clearly clears the 80%-of-peak threshold, closing that decision
+branch (clock is not an independent lever). **Real limitation
+re-confirmed against fresh data**: `metal-gpu-intervals`'s
+`gpu-channel-name` field is only ever "Compute"/"Fragment"/"Vertex"
+(100.0% of our process's real GPU time was "Compute"); the
+`formatted-label` field shows only positional "Command Buffer
+N:Compute Command M" labels, never MLX kernel names — true per-kernel
+attribution (isolating `moe.switch_mlp`/`GatherQMM`) needs
+`mx.metal.start_capture()`/Xcode GPU Frame Capture, not this `xctrace`
+template. See `docs/gpu-occupancy-clock-gap-postfix-2026-08-22.md`.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
