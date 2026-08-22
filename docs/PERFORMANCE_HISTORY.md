@@ -117,6 +117,26 @@ decode-isolated measurement (SIGUSR1 mid-decode) showed **moe.all_sum =
 14.4% figure from an earlier same-day measurement, confirming decode-only
 windows show a bigger share than blended windows.
 
+**CORRECTION (2026-08-22, same continued session): both the 21.4% and
+14.4% figures above are very likely methodology artifacts, not real
+per-collective cost shares.** A later same-session arithmetic
+reconciliation (§2.7, `docs/allsum-sync-span-artifact-arithmetic-check-2026-08-22.md`)
+found that the underlying ~4094µs/call sync-span average is
+mathematically impossible as a real per-call cost — 43 layers ×
+4094µs = 176ms/token, but real measured decode wall time is only
+53.48ms/token (a 3.29x impossibility: the collective alone would have
+to consume 3.29x the ENTIRE token budget). Real jaccl-internal
+`steady_clock` timing (same section) instead measured a genuine
+median of 36µs/call, accounting for only ~2.9-5.3% of real wall time.
+The likely mechanism: `mx.synchronize()` at a sync-span boundary
+drains MLX's ENTIRE pending lazy graph (all upstream unevaluated
+compute since the last sync point), not just the spanned op — so a
+span ending right after `all_sum` misattributes real upstream
+GPU-compute time to the collective. Treat the 21.4%/14.4%/9.5%
+sync-span-derived percentages in this section as upper-bound
+measurement artifacts, not actionable per-collective cost shares; the
+real, trustworthy figure is the jaccl-internal one in §2.7.
+
 ### 2.2 The "178ms/call" artifact (2026-08-20) — measurement trap
 
 `docs/moe-all-sum-178ms-artifact-real-bottleneck-2026-08-20.md`: a
@@ -435,6 +455,37 @@ but never read).
   — no error signal, no recovery path on macOS, silently orphans all
   future writes. See
   `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md`.
+- **Arithmetic reconciliation: the sync-span 21.4%/14.4%/4094µs figures
+  were methodology artifacts, not real costs (WIN, decisive, offline,
+  zero cluster risk, same session, 2026-08-22)** — per an independent
+  Fable review's suggestion to check the sync-span figures against real
+  measured wall-clock arithmetic BEFORE attempting any further live
+  instrumentation (production uses non-blocking `mx.async_eval`, so a
+  naive timing wrapper around it would be uninformative, and the user
+  had gone to bed with no one available to approve/monitor a further
+  relaunch). Real check: 43 layers × the sync-span-measured ~4094µs/call
+  average = **176ms/token predicted**, vs. **53.48ms/token real
+  measured wall time** (18.7 tok/s baseline) — a 3.29x impossibility,
+  since a per-call cost cannot exceed the total per-token budget it's
+  supposedly a component of. Using the REAL jaccl-internal-measured cost
+  instead (previous entry, 36-66µs/call): 43 × 36-66µs = 1.55-2.85ms/token
+  = a plausible 2.9-5.3% of real wall time. **Conclusively corrects the
+  earlier "moe.all_sum = 21.4%/14.4% of decode wall time" claims (§2.1)
+  as sync-span methodology artifacts** — `mx.synchronize()` at a span
+  boundary drains MLX's ENTIRE pending lazy graph since the last sync
+  point (not just the spanned op), so a span ending right after
+  `all_sum` misattributes real upstream GPU-compute time from prior
+  layers to the collective specifically. Also explains sync-span
+  profiling's own previously-documented overhead (~15% prefill/~77%
+  decode, §12) as a direct consequence of this per-layer forced-drain
+  destroying pipelining, not just adding a flat measurement tax.
+  **Reusable lesson: before trusting a sync-span/forced-synchronization
+  percentage breakdown, sanity-check it against real end-to-end
+  wall-clock arithmetic (n_events × measured_avg_cost vs. total real
+  wall time) — an impossible ratio (predicted > actual) is a strong,
+  free, zero-risk signal that the measurement technique is
+  misattributing cost, not that the op is actually expensive.** See
+  `docs/allsum-sync-span-artifact-arithmetic-check-2026-08-22.md`.
 
 ---
 
