@@ -616,6 +616,24 @@ runtime GATE state (not just the top-level env var) with live
 diagnostic logging before trusting a flag's documented behavior,
 especially for any multi-owner/multi-condition gate.
 
+**Triple-confirmed via a fresh dual CPU+GPU capture (2026-08-22, Phase
+C of the post-fix investigation)** —
+`docs/phase-c-dual-capture-confirms-fix-2026-08-22.md`: since the
+original idle-gap data (§12) was captured under the broken fence, a
+fresh simultaneous CPU-side (in-process Python sampler) + GPU-side
+(Instruments Metal trace) capture was run on the fixed baseline. **Real
+post-fix GPU occupancy (request-window-isolated): 85.42%** — up from
+~28-30% pre-fix, a massive direct hardware-level confirmation. **Real
+CPU-side sampler**: the compute thread's dominant hot-line genuinely
+shifted from the blocking `mx.eval(y)` call (was 67% pre-fix) to the
+intended non-blocking `mx.async_eval(y)` call (45.75% post-fix; the
+blocking fallback is now only 13.19%, matching the design intent of
+firing only during prefill/transitions). **Three independent
+measurement methods — throughput benchmark, GPU hardware trace, and
+CPU-side stack sampling — all converge on the same conclusion**, using
+genuinely different instrumentation. This is about as decisively
+validated as a single fix can get.
+
 ---
 
 ## 3. Prefill throughput
