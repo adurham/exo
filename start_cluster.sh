@@ -1415,6 +1415,22 @@ for NODE in "${NODES[@]}"; do
     EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
     EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
     EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
+    # EXO_PYSAMPLER=1 (2026-08-22): activates an in-process Python-level
+    # stack sampler (~1kHz, sys._current_frames()-based) via a
+    # sitecustomize.py placed on PYTHONPATH, for the decode idle-gap
+    # investigation (see docs/decode-idle-time-investigation-interim-
+    # synthesis-2026-08-22.md). Zero-privilege alternative to py-spy,
+    # which requires root/sudo on macOS. NOT wired to a repo file --
+    # points at a diagnostic-only script placed manually in /tmp on each
+    # Studio (never committed; consistent with the exo deploy hard rule
+    # of never live-editing the deployed repo/mlx code, since this file
+    # lives entirely outside the repo). PYTHONPATH forwarding is
+    # otherwise unused by production, so this is safe to leave wired
+    # unconditionally -- with EXO_PYSAMPLER unset, sitecustomize.py's own
+    # top-level `if _ENABLED:` guard means the import is a no-op.
+    [ -n "${EXO_PYTHONPATH_DIAG:-}" ] && EXO_ENV="$EXO_ENV PYTHONPATH=$EXO_PYTHONPATH_DIAG"
+    [ -n "${EXO_PYSAMPLER:-}" ] && EXO_ENV="$EXO_ENV EXO_PYSAMPLER=$EXO_PYSAMPLER"
+    [ -n "${EXO_PYSAMPLER_INTERVAL_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_PYSAMPLER_INTERVAL_MS=$EXO_PYSAMPLER_INTERVAL_MS"
     # PP-only: the classic small-draft-model speculation path. Was
     # previously exported unconditionally regardless of sharding mode;
     # gated here (2026-08-16, TP-only pivot) since it has no effect
