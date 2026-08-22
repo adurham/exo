@@ -1661,6 +1661,29 @@ different groupings worth keeping.)*
 
 ## 13. Open / never-finished threads
 
+**NEW (2026-08-22, session 4): "82.5-84.9% unattributed" figure
+recomputed against the post-async-fence-fix baseline, per a Fable
+consult's flagged first step.** That figure was computed against the
+pre-fix ~18.7 tok/s decode baseline and went stale the moment the fence
+fix landed (decode -> 26.9-31.1 tok/s). Recomputed: **~73-81%
+unattributed depending on context depth** (short ctx 72.9-74.6%, 100K
+76.6%, 300K 78.7%, 500K 81.3%) — the headline number moved but the core
+conclusion (large majority of wall time still unexplained) survives.
+Per Fable's reframe: since GPU occupancy jumped 29-30% → 85.42% with
+the fence fix, the investigation has now flipped from "why is the GPU
+idle" to **"why is GPU-busy time still ~4-5x the roofline compute
+floor"** — a kernel-efficiency/achieved-bandwidth question, not a
+dispatch-gap question. Also flagged a real methodology gap not yet
+resolved: the 6.51ms roofline floor used is active-MoE-weight-bytes
+only and excludes KV-cache/attention read cost, which grows with
+context — meaning the 500K-ctx 81.3% figure is likely overstated (real
+compute floor is higher there than 6.51ms once KV-read cost is
+counted); short-context/100K figures are less affected. See
+`docs/decode-attribution-recompute-postfix-2026-08-22.md`. Next:
+fresh post-fix Instruments capture with per-kernel labels (existing
+capture data lacks them) + concurrent GPU clock/power log, to directly
+attribute the real busy-vs-idle split now that the fence bug is fixed.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
