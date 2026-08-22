@@ -676,6 +676,26 @@ cross-validated by a real Instruments trace (§2.7): measured dispatch
 latency 96.8µs matches this roofline's inferred ~150µs order of
 magnitude.
 
+**Sanity-checked and confirmed correct (2026-08-22, same continued
+session)** — `docs/roofline-sanity-check-inputs-confirmed-2026-08-22.md`:
+checked both roofline inputs against live production state. (1) Is
+decode's "1 real forward pass per token" assumption right given
+`EXO_DSV4_DSPARK=1`/`EXO_DSV4_MTP_EAGLE_K=8` are live? Traced the code:
+DSpark's decode loop (`pp_dspark_decode_loop`) is genuinely PP-only —
+confirmed via a live log check that its actual usage log line never
+fires under TP (only the harmless module-attach "ctx warmed" line
+does). **These flags are dormant under the TP topology tonight's
+production runs — real finding, not a bug, but worth knowing they
+provide zero effect here.** Decode is confirmed plain autoregressive,
+the roofline's assumption was already right. (2) Is the 0.588
+bytes/active-param ratio correct given the model card's coarse
+`"quantization": "fp8"` label? Checked against real on-disk size from
+`/state` (166,878,536,440 bytes / 284B params = 0.5876 bytes/param,
+between pure FP4 and FP8, confirming genuine mixed precision) — this
+IS what the original roofline calculation already used, sourced from
+real on-disk size, not the coarse label. **Both inputs confirmed
+correct; the ~12%-of-ceiling headroom finding stands unchanged.**
+
 ### 4.4 Older decode-stall investigation (NEGATIVE, three failed overlap attempts, 2026-06-26)
 
 `docs/dsv4-decode-stall-2026-06-26.md` — confirmed decode's 73%
