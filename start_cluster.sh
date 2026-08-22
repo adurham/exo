@@ -1925,6 +1925,15 @@ for NODE in "${NODES[@]}"; do
     # gating but uses the same trace file. Identifies transport
     # non-bit-exactness as a divergent hash at a specific call_id.
     [ -n "${JACCL_TRACE_HASH:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_HASH=$JACCL_TRACE_HASH"
+    # Per-call real steady_clock transport-duration diagnostic (2026-08-21);
+    # orthogonal to JACCL_TRACE_CALLS gating but uses the same trace file,
+    # same as JACCL_TRACE_HASH above. Appends transport_us=<float> to each
+    # collective's trace line, timed tightly around the actual ring-reduce
+    # transport call (mesh.cpp MeshGroup::all_sum). Built to decompose the
+    # moe.all_sum 34x software-overhead gap (see
+    # docs/offline-collective-microbenchmark-2026-08-21.md) into real
+    # jaccl-internal transport time vs overhead outside this call.
+    [ -n "${JACCL_TRACE_TIMING:-}" ]   && EXO_ENV="$EXO_ENV JACCL_TRACE_TIMING=$JACCL_TRACE_TIMING"
     # Per-stage RDMA progress logging (mesh_impl all_reduce +
     # drain_acks). Writes [jaccl-prog] lines to ~/exo.log stderr.
     # Localizes a wedge to a specific RDMA stage: ENTER /
