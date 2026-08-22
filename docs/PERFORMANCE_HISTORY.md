@@ -1,0 +1,1302 @@
+# exo Performance History — Consolidated Reference
+
+**Compiled 2026-08-21.** This document consolidates every performance,
+benchmark, timing, throughput, and optimization investigation found across
+~197 markdown files in this repository (docs/, .hermes/plans/, bench/,
+root-level handoffs), spanning 2026-04-24 through 2026-08-21 (~4 months of
+active work). Built by systematically scrubbing the full repo history, not
+just recent sessions.
+
+**Purpose: prevent re-litigating settled questions.** Every entry below
+states what was tried, the real numbers, why it worked or didn't, and a
+one-line reusable lesson. Read the relevant section before starting new
+optimization work in that area.
+
+**How to use this doc:** find your topic area below, read the WINs to know
+what's already banked, read the NEGATIVE/DEAD-END entries to know what NOT
+to re-attempt (or what would need genuinely new evidence to justify
+retrying), and check INCONCLUSIVE entries for open threads that were never
+fully closed out.
+
+---
+
+## Table of contents
+
+1. [Current known-good baseline](#1-current-known-good-baseline)
+2. [MoE / all_sum collective — the dominant cost center](#2-moe--all_sum-collective--the-dominant-cost-center)
+3. [Prefill throughput](#3-prefill-throughput)
+4. [Decode throughput & dispatch overhead](#4-decode-throughput--dispatch-overhead)
+5. [Speculative decoding (MTP / Eagle / token-tree / DSpark)](#5-speculative-decoding-mtp--eagle--token-tree--dspark)
+6. [Kernel fusion attempts (general pattern)](#6-kernel-fusion-attempts-general-pattern)
+7. [Quantization (KV cache, weights, collectives)](#7-quantization-kv-cache-weights-collectives)
+8. [jaccl / RDMA / Thunderbolt transport](#8-jaccl--rdma--thunderbolt-transport)
+9. [Concurrency (c=2+) and PP vs TP topology](#9-concurrency-c2-and-pp-vs-tp-topology)
+10. [Memory leaks](#10-memory-leaks)
+11. [Correctness bugs found during perf work](#11-correctness-bugs-found-during-perf-work)
+12. [Measurement methodology lessons (meta)](#12-measurement-methodology-lessons-meta)
+13. [Open / never-finished threads](#13-open--never-finished-threads)
+
+---
+
+## 1. Current known-good baseline
+
+**As of 2026-08-21** (tag `known-good-prefill-20260821-165048`, later
+superseded by same-day production config `EXO_DSV4_MOE_FUSED_GATE_UP=1` +
+`EXO_DSV4_FENCE_ASYNC=1`, both real, both non-negative, both active):
+
+| Metric | Value |
+|---|---|
+| Prefill @ 100K ctx | 366.6 tok/s (needle PASS) |
+| Prefill @ 300K ctx | 351.5 tok/s (needle PASS) |
+| Prefill @ 500K ctx | 331.6 tok/s (needle PASS) |
+| Decode @ 100K ctx | 17.48 tok/s |
+| Decode @ 300K ctx | 18.60 tok/s |
+| Decode @ 500K ctx | 17.26 tok/s |
+| Decode, short context (512-tok prompt) | ~18.6-18.9 tok/s |
+
+At parity with an earlier-campaign 339 tok/s @ 500K baseline (i.e. months
+of jaccl/transport hardening work did not regress raw throughput — it
+fixed correctness/stability, see §8).
+
+**Known operational constraint:** Thunderbolt RDMA degrades under repeated
+rapid restart/teardown cycles — GPU power asymmetry (~7W vs ~20W) and
+throughput crashing to ~130-165 tok/s after ~10 rapid relaunches. A full
+reboot of both nodes clears it completely. Check GPU power symmetry
+(~45-52W both nodes) as a cheap canary before trusting any throughput
+number gathered after several rapid cluster restarts.
+
+---
+
+## 2. MoE / all_sum collective — the dominant cost center
+
+This is the single most-investigated area in the repo — at least 20
+distinct docs, spanning 2026-05-14 through 2026-08-21. **Read this section
+in full before touching all_sum/collective code again.**
+
+### 2.1 Establishing it's the dominant cost (WIN, 2026-08-19)
+
+`docs/moe-all-sum-dominant-cost-2026-08-19.md` — NOP-ablation (file-toggle
+identity pass-through on `moe.all_sum`) confirmed at two depths:
+- 12,066-12,069 tok: baseline 162.5 tok/s vs NOP(all_sum off) 427.5 tok/s
+  = **2.63x speedup, all_sum share 62.0%**
+- 38,066-38,067 tok: baseline 167.3 tok/s vs NOP 430.3 tok/s = **2.57x,
+  share 61.1%**
+
+Consistent at two depths, ruling out cold-start confounds. **A prior
+skill-note claim of "~12% comms cost, ~0% at high context" was wrong by a
+large margin** — always re-measure inherited cost-attribution claims, don't
+trust them.
+
+Independently reconfirmed 2026-08-18 in `docs/dsv4-220k-prefill-span-profile-2026-08-18.md`:
+span breakdown at 220K context showed `moe.all_sum` = 9.5% of wall
+(narrower window, real 220,321-token prefill, attn 58.4% + ffn 41.6% with
+moe.switch_mlp 26.9%) — the percentage varies by measurement window/depth
+but the collective is consistently large.
+
+Reconfirmed again 2026-08-21 (this project's own session,
+`docs/moe-allsum-collective-cost-confirmed-2026-08-21.md`): sync-span
+decode-isolated measurement (SIGUSR1 mid-decode) showed **moe.all_sum =
+21.4% of decode wall time** — higher than the blended prefill+decode
+14.4% figure from an earlier same-day measurement, confirming decode-only
+windows show a bigger share than blended windows.
+
+### 2.2 The "178ms/call" artifact (2026-08-20) — measurement trap
+
+`docs/moe-all-sum-178ms-artifact-real-bottleneck-2026-08-20.md`: a
+previously-reported 178ms/call figure for all_sum was **itself a
+measurement artifact**, not the true collective cost — real collective
+cost is closer to ~12ms/call. **Always verify whether a large measured
+per-call cost reflects the operation itself or includes queuing/waiting
+artifacts before optimizing the wrong thing.**
+
+### 2.3 GPU-stream-boundary decomposition (WIN, 2026-08-20)
+
+`docs/phase0a-allsum-boundary-decomposition-2026-08-20.md` — isolated that
+the GPU→CPU stream-boundary coherency cost (required because MLX
+collectives are CPU-stream-only) is **payload-proportional, not a fixed
+drain bubble**, and is **NOT collective-specific** — a plain non-collective
+CPU-stream op reproduces the same 2.66x penalty. Boundary cost linear at
+~7 GB/s (1.05MB→0.242ms, 67.11MB→8.891ms). `MLX_EVENT_WAIT_POLL_US` sweep:
+flat, no effect. `MLX_METAL_FAST_SYNCH=1`: **1.5x SLOWER with 70x more
+variance** — dead end, don't retest. Production 16.8MB call: ~2.4ms
+boundary + ~0.9-1.7ms CPU work + ~2-9ms wire matches the prior 5-12ms/call
+band.
+
+**Reusable lesson: when attributing a stall to a specific op (e.g. a
+collective), test whether a non-collective op on the SAME stream
+reproduces the same cost before concluding the collective itself is
+expensive.**
+
+### 2.4 Skew vs. wire cost (WIN, 2026-08-19)
+
+`docs/moe-all-sum-skew-vs-comms-2026-08-19.md` — determined via arithmetic
++ source reading (no cluster relaunch) that the real bottleneck at the
+time was a **chunking config knob**, not rank skew or bandwidth:
+- 16.8MB all_sum payload: 178ms @ 12K tok depth, 170ms @ 38K tok depth
+  (flat with depth — rules out rank imbalance, since cost doesn't scale
+  with depth and machines are symmetric)
+- Effective bandwidth only ~92-96 MB/s vs Thunderbolt5/jaccl realistic
+  ~6-10 GB/s (bytes-on-wire explain only ~1.5% of cost)
+- `MLX_JACCL_RELIABLE_MAX_SZ=2` → chunk=15.9KB → ~1029 chunks/call → 258
+  stop-and-wait rounds; 690us/round cross-checks independently to ~94 MB/s
+- Projected fix: sz=4 → chunk=63.9KB → ~45ms/call; sz=7 → ~6ms/call
+
+**BUT sz≥4 has a documented hang risk on Apple's librdma** — flag any
+chunk-size widening as needing careful A/B, not blind widening.
+
+**Follow-up test (NEGATIVE, 2026-08-20):** `docs/jaccl-sz3-tested-no-improvement-2026-08-20.md`
+— bumped `MLX_JACCL_RELIABLE_MAX_SZ` from 2→3 (32KB, still inside the safe
+zone below sz≥4's hang risk). Result: **no measurable throughput change**
+(~166-169 tok/s vs baseline's ~162-172 tok/s, statistically identical).
+**Real clean null result — do not re-attempt sz=3 without new evidence.**
+The bottleneck likely has a fixed per-round latency floor or is dominated
+by a per-call barrier cost (e.g. `ack_sync_pre`), not chunk count.
+
+### 2.5 Quantized all_sum — the most-attempted, most-failed lever (NEGATIVE, closed 2026-08-19)
+
+A multi-doc chain (`moe-allsum-quant-phase0-repro`, `moe-allsum-sharedscale-root-cause-found`,
+`local-absmax-fence-artifact-confirmed`, `moe-allsum-sharedscale-CORRECTED-final`,
+`moe-allsum-quant-root-cause-and-closure`, `moe-allsum-quant-live-test-failed`,
+`moe-allsum-sharedscale-live-test-no-speedup`, `moe-allsum-quant-compute-overhead-analysis`,
+all 2026-08-19) tried replacing the bf16 `moe.all_sum` payload with a
+quantized (int8, shared-scale) version to cut wire bytes.
+
+**Timeline of the investigation (a good example of iterative
+self-correction):**
+1. Initial live test: quantized all_sum **hung the collective on the
+   first real prefill request** (GPU event timeout, peer rank stuck on an
+   abandoned c≥2 collective) — `docs/moe-allsum-quant-live-test-failed-2026-08-19.md`.
+2. Root-cause attempt #1 blamed `local_absmax` reduction costing
+   ~400-420ms/call (`moe-allsum-sharedscale-root-cause-found`) — **later
+   found to be a probe-fence artifact**: `mx.eval()` fences flush the
+   ENTIRE pending lazy graph, not just the requested output, so a probe's
+   first `mx.eval()` after an unevaluated backlog silently absorbs
+   upstream cost (`docs/local-absmax-fence-artifact-confirmed-2026-08-19.md` —
+   real reduction cost only ~0.4ms vs backlog-flush ~57-60ms, ~130x ratio).
+3. Corrected final measurement (`moe-allsum-sharedscale-CORRECTED-final-2026-08-19.md`):
+   an EARLIER version of this same investigation had wrongly claimed a
+   ~148x speedup by misreading the log tail as prefill when it was
+   actually decode. Real corrected numbers: **PREFILL: shared-scale
+   ~265ms/call vs baseline unquantized 178ms/call (~1.49x SLOWER)**;
+   DECODE: shared-scale ~1.1-1.6ms/call (fast, but decode's collective is
+   already tiny so this doesn't matter). Real prefill throughput
+   ~168-169 tok/s ≈ baseline ~162-172 tok/s — **no speedup**.
+4. Structural closure (`docs/moe-allsum-quant-root-cause-and-closure-2026-08-19.md`):
+   `moe.all_sum` is a true cross-rank **partial-sum reduction**, not
+   gather-semantics — the zero-padded int8 trick that works for GATHER
+   collectives (like the seq-split reconstruction, see §8) mathematically
+   **cannot** apply to a genuine elementwise sum reduction. Also: jaccl's
+   `all_gather` lacks the reliability layer `all_sum` has, explaining the
+   original crash when substituting two all_gathers.
+5. Compute-overhead check (`moe-allsum-quant-compute-overhead-analysis-2026-08-19.md`):
+   even setting aside the above, GPU-side quantize/dequant compute
+   overhead at production hidden_size was found negligible relative to
+   the (moot) wire savings.
+
+**Reusable lesson: before attempting a quantized/reduced-bytes redesign
+of a collective, verify whether it's a genuine GATHER (disjoint-slice
+combine, where zero-padding tricks work) or a genuine elementwise
+partial-sum REDUCTION (where they mathematically cannot) — this is a
+structural, not engineering, constraint. Also: correlate probe timestamps
+against an independent ground-truth log signal before trusting a
+prefill-vs-decode phase split in mixed data — a superficial "tail of log
+looks fast" read produced a false, more exciting conclusion here twice.**
+
+**Do not re-attempt quantized moe.all_sum without a fundamentally
+different mechanism** (this specific approach — shared-scale int8 payload
+reduction on the existing all_sum primitive — is conclusively closed).
+
+### 2.6 Comm/compute overlap — the real remaining lever (WIN, multi-phase, 2026-08-20/21)
+
+This is the one direction that DID pan out, across a careful multi-phase
+validation:
+
+**Phase 0b (WIN, 2026-08-20)** — `docs/phase0b-collective-overlap-gate-2026-08-20.md`:
+proved overlap is structurally achievable. `all_sum` runs on a CPU stream
+in MLX (no Metal `eval_gpu` exists for it); overlap is destroyed only by
+ordinary same-GPU-stream FIFO ordering, **not a device-wide barrier**.
+Probe1: COMPUTE_ONLY 77.75ms, COMM_ONLY 36.93ms, BOTH 77.34ms,
+overlap_ratio=0.995 (~33% of a 115ms serial budget recovered). Probe4
+(2nd GPU stream): near-perfect overlap (b/max=1.002-1.008) vs same-stream
+serialization (b/max=1.2-1.43). **Escape hatch: either pre-evaluate the
+collective's input before issuing overlapping compute, OR issue
+overlapping compute on a dedicated `mx.new_stream(mx.gpu)`. Doing neither
+gives ~0% overlap and LOOKS EXACTLY LIKE (but isn't) a hardware drain —
+likely why prior sessions wrongly concluded collectives "block
+everything."**
+
+**Phase 0c (correctness gate, MIXED/critical, 2026-08-20)** —
+`docs/phase0c-collective-order-determinism-2026-08-20.md`: before
+building any overlap, established the correctness constraint. 6 scenarios
+× 20 trials: `same_order`/`interleaved`/`async_eval_same`/`issue_skew` all
+PASS; `async_eval_skew` and `eval_arg_skew` **FAIL with 100% deterministic
+silent corruption** (no crash/hang, just cross-paired wrong-rank tags).
+**MLX collectives are matched positionally by EVAL order, not Python
+program order — any rank-dependent branching or divergent `async_eval`
+call order across ranks produces silent, deterministic wrong results
+with no crash/hang/NaN signal. Any overlap/pipelining design MUST
+guarantee a rank-invariant eval schedule.**
+
+**Lever 1 (small-M headroom check, NEGATIVE, 2026-08-20)** —
+`docs/lever1-moe-smallm-headroom-2026-08-20.md`: checked whether the
+gather_qmv_rhs/gather_qmm_rhs small-M kernels have headroom vs an ideal
+dense grouped-GEMM ceiling. Live kernels already **match or beat** the
+idealized ceiling at production per-expert token counts (0.79x at L=512,
+0.63x at L=1024 meaning live is 1.6x FASTER than the naive ceiling, 1.07x
+at L=2048). `MLX_GATHER_QMV_RHS=0` ablation changes production shape
+<4%. Widening `MAXBE=64` **regressed -33% at L=1024, -78% at L=2048**
+vs default MAXBE=6. **No kernel-level lever here — bottleneck is
+weight-streaming-bound arithmetic intensity from the routing
+distribution, not kernel inefficiency.**
+
+**Lever 2 (sequence-chunk pipelining, MIXED, 2026-08-20)** —
+`docs/lever2-seqchunk-overlap-2026-08-20.md`: layer-pipelining is
+**invalid** (RMSNorm inter-layer dependency breaks it structurally);
+sequence-CHUNK pipelining (overlap chunk A's all_sum with chunk B's
+independent same-layer compute) is the valid axis instead. Real but
+modest overlap of **~1.1-1.15x**, noisy on the (laptop) test environment.
+
+**Prefill-chunk-overlap live cluster test (INCONCLUSIVE, 2026-08-20)** —
+`docs/prefill-chunk-overlap-live-test-2026-08-20.md`: deployed the real
+TP-native compute/comm overlap mechanism (commit `b7aa41920`) live. No
+crash/hang/HTTP errors, but **a genuine correctness anomaly appeared on
+one of two trials** — flagged, not shipped as-is.
+`docs/prefill-chunk-overlap-race-fix-2026-08-20.md`: root-caused and fixed
+a cross-stream ordering race, but **the throughput lever itself was
+declared DEAD/CLOSED** — fixing the correctness bug did not resolve into
+a real performance win (`docs/prefill-optimization-campaign-handoff-2026-08-18.md`
+closes this line).
+
+**GPU utilization reconciliation (INFO_ONLY, 2026-08-19)** —
+`docs/gpu-util-vs-allsum-cost-reconciled-2026-08-19.md`: explains why
+96-97% GPU utilization telemetry and all_sum costing 61-64% of wall time
+LOOKED contradictory but aren't — GPU-busy metrics measure occupancy
+(including blocked-but-scheduled submission threads during a collective
+wait), not useful compute throughput. **Don't conflate occupancy with
+achieved compute.**
+
+**Phase 3 real-cluster validation (INCONCLUSIVE, blocked, 2026-08-20)** —
+`docs/phase3-cluster-validation-blocked-resolved-2026-08-20.md`: a
+standalone active RDMA overlap microbenchmark failed because the
+cluster's only two RDMA interfaces were already held by production
+runners. **Resolved by using PASSIVE instrumentation of live production
+instead of standalone active probing** — on hardware with limited
+physical RDMA interfaces already claimed by production, don't attempt
+standalone concurrent RDMA sessions. Theoretical ceiling for perfect
+overlap: ~10.5% end-to-end speedup best case (from a real 9.5%-of-wall
+measurement), realistically 5-7% after imperfect overlap/scheduling
+overhead — **flagged that this modest a ceiling may not justify a risky
+live deployment.**
+
+**Confirmed already implemented and active (2026-08-21, this project's
+own session)** — `docs/comm-compute-overlap-already-exists-2026-08-21.md`:
+discovered `EXO_DSV4_FENCE_ASYNC` (uses `mx.async_eval(y)` instead of
+blocking `mx.eval(y)` after the collective, two-owner-gated for cross-rank
+safety) was already implemented by a PRIOR session (2026-07-02) and
+already `=1` in production — this IS the comm/compute overlap design.
+Historic comment claims **+28% decode (28.9→37.0 t/s)** from 2026-07-02;
+this session's clean re-A/B on the current baseline measured only
+**+1.04%** (18.664 vs 18.471 tok/s, n=8 each side) — a real, consistently
+positive, but much smaller effect than claimed. **Discrepancy not
+resolved** — flagged for future investigation, most likely a different
+baseline/regime in the original 2026-07-02 measurement (possibly with
+MTP/speculative-decode active, since the code lives adjacent to
+`dsv4_mtp.py`).
+
+**Older, harder OPT-7 attempt (NEGATIVE, tested + reverted twice)** —
+gating the per-layer `mx.eval` on `_fence_every_n` (rather than doing
+`async_eval` at every layer) was tried and reverted: **made B=2 prefill
+23% SLOWER (111 vs 144 tok/s)**. Referenced repeatedly across multiple
+docs (`docs/gpu-util-vs-allsum-cost-reconciled-2026-08-19.md`,
+inline code comments in `deepseek_v4.py`) as a settled negative — "without
+the per-layer eval, MLX builds a larger lazy graph that's more expensive
+to evaluate at the fence point than incremental evals; the overlap
+benefit doesn't materialize, the graph accumulation cost dominates."
+**`EXO_DSV4_FENCE_EVERY_N_LAYERS` is dead/unused config as of 2026-08-21**
+(the OPT-7 mechanism that consumed it was reverted; the variable is set
+but never read).
+
+### 2.7 Other all_sum/collective investigations
+
+- `docs/moe-vs-dense-qmm-isolation-2026-08-19.md` — isolated qmm kernel
+  cost between MoE and dense configs (INFO_ONLY).
+- `docs/moe-quant-vs-bf16-dequant-attribution-2026-08-19.md` — attributed
+  overhead split between quantized compute path and bf16 dequant step
+  (MIXED).
+- `docs/moe-per-stage-gpu-breakdown-2026-08-18.md` — per-stage GPU time
+  breakdown for MoE forward (gather/qmm/allsum) (INFO_ONLY).
+- `docs/moe-gpu-time-overlap-bandwidth-bound-2026-08-19.md` — concluded
+  MoE GPU time is bandwidth-bound, not compute-bound (INFO_ONLY).
+- `docs/moe-all-sum-payload-size-causal-test-2026-08-19.md` — causal test
+  varying payload size (INCONCLUSIVE).
+- `docs/mxfp4-gather-qmm-rhs-lhs-kernel-2026-08-19.md` — MXFP4 quantized
+  gather+qmm RHS/LHS operand-layout kernel work (MIXED).
+- `.hermes/plans/2026-05-19_allsum_tail_findings.md` (NEGATIVE) — a
+  chained-collective peer-CQE-arrival-tail hypothesis was **falsified**:
+  forcing per-layer fences (`FENCE=1`) made the tail WORSE (verify mean
+  63.16ms vs production `FENCE=43`'s 57.10ms, +10.6%), the opposite of
+  the prediction. True cost is uniform per-layer all_sum drain (~1.4ms ×
+  43 layers); earlier apparent 35% spread was iter-0 cold-compile-cache
+  contamination. **Design hypothesis-falsifying experiments — a result
+  that's the OPPOSITE of the prediction is strong evidence the mechanism
+  is wrong, not just inconclusive.**
+- `.hermes/plans/2026-05-19_phase_f_findings.md` (NEGATIVE) — invalidated
+  an entire plan's premise that jaccl/RDMA ACK-barrier optimization would
+  meaningfully help decode: jaccl poll wall was only 1.9% of verify cost
+  (mean 8.15us, median 5.00us) vs ~98% attributable to the `mx.eval`
+  fence itself (median p50=37.4ms). **Don't assume the collective/RDMA
+  layer is the bottleneck without direct per-call instrumentation.**
+- Session-own 2026-08-21 work (this project): real Instruments Metal
+  System Trace measured **CPU-to-GPU dispatch latency = 96.8µs ± 4.6µs**
+  (n=19, steady-state matmul), cross-validating two independent prior
+  estimates (a MiniMax fusion docstring's "~100-200µs" and this session's
+  own roofline-inferred "~150µs"). Real jaccl `allreduce_bench` isolated
+  microbenchmark: raw hardware floor at the exact 8KB decode message size
+  = **~120µs**, vs in-model sync-span average of ~4094µs — a **34x gap**
+  confirming the cost is NOT the RDMA wire transport but overhead in the
+  model's call context (skew and/or CPU-dispatch/scheduling around the
+  collective). See `docs/offline-collective-microbenchmark-2026-08-21.md`
+  and `docs/instruments-metal-trace-real-dispatch-latency-2026-08-21.md`.
+
+---
+
+## 3. Prefill throughput
+
+### 3.1 Major wins
+
+**Prefill throughput breakthrough (WIN, 2026-06-24)** —
+`docs/prefill-throughput-breakthrough-2026-06-24.md`: five stacked fixes.
+- c=1 500K prefill: before 167 t/s avg (crossed below 200 at ~250K) →
+  after **251 t/s avg, never below 200 through 500K**
+- c=2 500K prefill: before sequential (not concurrent) → after **317
+  tok/s aggregate (B=2)**
+- Indexer weight fold (OPT-6): **64x compute reduction** (130 GFLOP→2
+  GFLOP/chunk at 380K), bit-equivalent (max diff 6e-5 fp32)
+- Command-buffer fix (`MLX_MAX_MB_PER_BUFFER` 50→200MB): eliminated
+  bimodal stalls, B=2 aggregate 144→317 t/s (+120%), per-chunk 1.78s avg
+  (bimodal 0.77/2.3s) → steady 0.81s, 100% fast chunks (was 32%)
+- **Reverted OPT-8** (broadcast sorted `gather_qmm_rhs` extended to
+  prefill): fast chunks hit 349 t/s individually but average unchanged at
+  142 t/s due to 3.2GB/chunk broadcast allocation causing bimodal stalls
+
+**Reusable lesson: a persistent bimodal fast/slow timing pattern with
+IDENTICAL memory between fast and slow runs rules out memory-pressure
+causes; a consistent Nx ratio matching per-layer op count points to GPU
+command-buffer scheduling. Apple Silicon's default `max_mb_per_buffer`
+(50MB on M4 Max 's' variants) can trigger non-deterministic mid-forward
+command-buffer flushes under large batched forwards — raise
+`MLX_MAX_MB_PER_BUFFER`/`MLX_MAX_OPS_PER_BUFFER` to fix.**
+
+**MoE kernel handoff (WIN, ~2026-07-01)** — `MOE_KERNEL_HANDOFF.md`:
+- Prefill 100K: **255→353 tok/s (+38%)**; 495K: ~200→306 tok/s; 727K: 215
+  tok/s; decode 29.0 tok/s mean
+- Eliminated the 340K prefill cliff (270→40 tok/s) by replacing the
+  indexer's O(P log P) **argsort with argpartition**
+- Breakdown: argpartition alone 255→289 tok/s, +lm_head last-row →295,
+  +chunk256 →353
+- Falsified alternatives (don't retry): chunk 512 lost to OPT-4 tiling
+  overhead; gamma=3 decode didn't pay off (25.2 vs 29.0 tok/s); qmm tile
+  retuning falsified (all alternatives worse); fused topk kernel proven
+  numerically incorrect via bitexact test
+
+**SEQ_SPLIT re-validated at long context (WIN, 2026-08-18)** —
+`docs/dsv4-220k-prefill-seqsplit-ab-2026-08-18.md`: SEQ_SPLIT=1 220,318
+tok/614.5s = **358.6 tok/s** vs SEQ_SPLIT=0 191,330 tok/688.775s = **277.8
+tok/s** — SEQ_SPLIT=1 is **~29% faster** at 190-220K context (confirms
+the default holds beyond the previously-only-tested 100K case).
+
+### 3.2 Prefill cliff investigation (root cause never fully found)
+
+`PREFILL_CLIFF_HANDOFF.md` (2026-06-21, NEGATIVE): documented the
+~340K-context sharp throughput cliff (270 t/s → 40-48 t/s). Root cause of
+the SHARP discontinuity was never identified. A memory-allocation fix
+(tiled-P indexer, `INDEXER_TILED_P_PLAN.md`) reduced peak memory per call
+**4.36GB→0.40GB (-91%)** but throughput was **~2% WORSE**, not better —
+**allocation pressure was not the actual bottleneck for the cliff.**
+`attn.indexer` avg cost grew +18% from 300K→360K context (4532us→5362us),
+max/avg ratio ~4x (22ms spikes) — consistent with, but not proven to
+fully explain, the cliff.
+
+**This session's own `EXO_DSV4_INDEXER_PBLOCK` re-test (NEGATIVE,
+2026-08-21)** confirmed: no prefill win at ANY tested depth (100K/300K/
+500K all at parity with baseline), and a REAL DECODE REGRESSION at small
+p_block (13.67→11.55→10.03 tok/s across depths) because the design's own
+"decode pays zero overhead" claim breaks once pooled length exceeds
+p_block at deep context. See §13 for what's still open here.
+
+**Later re-validated (2026-08-18, INFO_ONLY):**
+`docs/dsv4-220k-prefill-span-profile-2026-08-18.md` found the July
+gather-based bottleneck theory (indexer.score/topk/attn.gather) is now
+**0.0% of wall** — already optimized away by subsequent refactors. At
+220K: unprofiled clean run 220,321 tok/612s = **360 tok/s**; compute-bound
+verdict (attn+ffn sum to ~100% of wall, 97-98% live GPU utilization,
+superseding a stale July memory-bandwidth-bound finding). **Re-validate
+old bottleneck theories against current code before trusting them —
+significant refactors can invalidate a profile from even a month prior.**
+
+### 3.3 Step-size / chunk-size tuning
+
+`docs/dsv4-prefill-step-size-4096-retest-2026-08-18.md` (NEGATIVE): a
+retest of `EXO_PREFILL_STEP_SIZE=4096` (previously rejected). Quality now
+PASSES (previously-broken finding is stale), but throughput at ~191K
+tokens: **STEP_SIZE=4096 331.2 tok/s vs STEP_SIZE=2048 baseline 358.6
+tok/s — 4096 is ~8% SLOWER**, despite isolated MoE-GEMM microbench
+showing 4096 should be ~15% more GEMM-efficient (72.0% vs 62.6% of dense
+ceiling). **The sparse indexer's score-transient cost scales with BOTH
+chunk size L and pooled window P and dominates at high context — an
+isolated component-level microbenchmark win does NOT guarantee
+end-to-end throughput.** `EXO_PREFILL_STEP_SIZE=2048` remains correct
+default.
+
+`.hermes/plans/2026-06-12-prefill-optimization-fable5-analysis.md`
+(MIXED) — **measurement-harness bug produced a fake win.** Initial
+claimed progression 236→280→290→317.8 tok/s (+35%, "OPT-4 two-level
+chunking") was from a BUGGY harness (`fire_and_measure`) scraping the
+wrong log line via `grep|tail -1`. Corrected harness
+(`measure_clean.py`) revealed the REAL result at ~25K ctx: baseline
+(chunk 128) ~258 tok/s, seq-split ON ~285 tok/s (+10-11% real, shipped),
+**OPT-4 chunk 256 ~140 tok/s — a REGRESSION**, reverted (commit
+`ff1d3f42`). **Always cross-check log-parsed throughput against
+independently measured wall-clock throughput; flag >30% disagreement.**
+
+### 3.4 MoE tile geometry / GEMM efficiency (all closed NEGATIVE)
+
+`docs/moe-tile-geometry-retune-dead-end-2026-08-18.md`: tile-waste model
+at production ragged routing distribution — bm=16 (current) 20.4% mean
+waste, bm=32 34.8% waste, bm=64 52.1% waste (**monotonically worse**).
+Production's median expert receives only 8-14 rows, below current
+bm=16's tile height — larger tiles increase per-tile padding waste since
+most experts are small. Corrected MoE efficiency vs proper mxfp4 ceiling:
+**72.0-72.5% at L=2048** (28% gap, not an earlier miscalculated 37%).
+This closed the third and final investigated idea (after hybrid dispatch
+NO-GO and gather/scatter overhead ruled out) for the MoE efficiency gap.
+**Re-verify old "falsified" conclusions against the ACTUAL production
+distribution shape, not a stale uniform-distribution sweep.**
+
+`docs/lever1-moe-smallm-headroom-2026-08-20.md` (also see §2.6) — live
+kernels already match/beat the idealized dense-GEMM ceiling; widening
+MAXBE regressed severely.
+
+### 3.5 Prefill planning docs never fully executed
+
+`PREFILL_THROUGHPUT_PLAN.md` (2026-07-13, INFO_ONLY) — pure planning doc.
+Key finding used to justify the plan: per-chunk cost is near-FLAT
+(~2.3-2.8s) regardless of chunk tokens/depth — **fixed cost dominates**,
+not depth scaling. 147/200 logged prefills are <2K tokens (agentic-loop
+common case). **When throughput is dominated by a near-flat fixed
+per-chunk cost, the highest-leverage fix targets the common-case SMALL
+request bucket, not deep-context scaling.**
+
+`docs/pp-prefill-tp-decode-phase-swap-design-2026-08-16.md` (NEGATIVE,
+superseded design) — a PP-prefill→TP-decode phase-swap design was
+rejected. Full math: ~11.1% gain on a cold 500K request (TP-only 1584s
+vs PP+swap+TP 1409s), **0% gain on cached follow-up turns**; ~37.4s swap
+cost. PP 364 / TP 319 tok/s at 500K — **neither topology alone even hits
+the 400 tok/s depth requirement**, so the swap converts one miss into a
+smaller miss. Requires two weight layouts (~125.4GB of 128GB) that can't
+co-reside. Kept only the DSv4 CacheList/PoolingCache wire codec as
+salvage.
+
+`docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md` (NEGATIVE) —
+earlier version of the same investigation. Found and fixed a measurement
+bug (chars//4 instead of true ~5.68 chars/token, inflating all prefill
+tok/s by 1.42x). Corrected honest numbers: prefill 225/214/202 tok/s at
+100K/300K/500K; PP 364 vs TP 319-427 tok/s prefill. TP chosen for BOTH
+prefill and decode — PP structurally idles one node per single-session
+request. Hybrid swap and expert-locality placement both ruled
+architecturally dead (weight layouts can't co-reside on 128GB nodes).
+
+---
+
+## 4. Decode throughput & dispatch overhead
+
+### 4.1 MoE gate+up fusion — the clearest recent win (WIN, 2026-08-21, IN PRODUCTION)
+
+`docs/moe-gate-up-fusion-validated-2026-08-21.md` — `EXO_DSV4_MOE_FUSED_GATE_UP=1`
+fuses `SwitchGLU`'s gate_proj+up_proj into ONE `gather_qmm` dispatch
+instead of two. Decode: Fusion ON **18.879 tok/s** (n=8, σ=0.158) vs OFF
+**18.328 tok/s** (n=8, σ=0.173) = **+3.01%**, means differ by ~3.2x
+combined stdev — statistically clean. Prefill at parity (dispatch-count
+reduction matters proportionally more for decode's small per-forward-pass
+compute than prefill's large per-pass compute). **This is the current
+recommended production default for c=1.**
+
+### 4.2 The direct analogue that DIDN'T work (NEGATIVE, 2026-08-21)
+
+`docs/qa-kv-fusion-no-measurable-gain-2026-08-21.md` — tested the direct
+structural analogue on attention projections: fusing `wq_a`+`wkv`
+(`EXO_DSV4_QA_KV_FUSED`). Bit-exact, correct on real hardware, but
+**-0.48% incremental** vs gate+up alone (18.789 vs 18.879 tok/s, within
+noise). Combined gain over baseline (+2.52%) was actually LESS than
+gate+up alone (+3.01%). **A validated fusion pattern does not
+automatically generalize to smaller matmuls — wq_a/wkv are much smaller
+than gate_proj/up_proj, so the same fixed per-dispatch overhead is a
+smaller fraction of their cost. Never declare a fusion win by only
+checking correctness — always do the real A/B against the current best
+baseline.**
+
+### 4.3 Roofline / dispatch-bound analysis (WIN, 2026-08-21)
+
+`docs/decode-roofline-dispatch-bound-2026-08-21.md` — using confirmed
+public model specs (DeepSeek-V4-Flash: 284B total/13B active MoE, mixed
+FP4/FP8), decode is running at **~12% of the theoretical
+bandwidth-bound ceiling** (8.4x slower than roofline). This rules out
+"already near the hardware ceiling" and reprioritized the search toward
+dispatch-count-reducing fusions and comm/compute overlap. Later
+cross-validated by a real Instruments trace (§2.7): measured dispatch
+latency 96.8µs matches this roofline's inferred ~150µs order of
+magnitude.
+
+### 4.4 Older decode-stall investigation (NEGATIVE, three failed overlap attempts, 2026-06-26)
+
+`docs/dsv4-decode-stall-2026-06-26.md` — confirmed decode's 73%
+`moe.switch_mlp` cost is almost entirely GPU IDLE time during the
+cross-rank all_sum collective (envelope 2935ms vs ~7ms real GPU compute,
+>99% idle) — but **three separate attempts to capture that headroom all
+failed**:
+- MoE gate+up fusion (3→2 dispatches): **-3.8%** (37.2→35.8 tok/s) —
+  note this predates and CONTRADICTS the 2026-08-21 validated win (§4.1);
+  worth investigating whether something else changed between these two
+  measurements before assuming either is wrong
+- all_sum/shared_experts stream-overlap: **broke quality hard** (B=2 200K
+  needle failed, near-zero output ~0.42 tok/s aggregate)
+- OPT-7 fence-gating: **-23% prefill** (see §2.6)
+
+**A large measured GPU-idle window during a collective does NOT mean the
+idle time is capturable via naive dispatch-fusion or fence-reordering —
+MLX's lazy-graph + comm/GPU-stream + fence interaction has load-bearing
+fence POSITIONS for cross-rank bit-equivalence not visible from reading
+source alone. Three independent failed attempts at "overlap the stall"
+is strong evidence it needs deeper MLX-stream-scheduling understanding
+(see §2.6's later phase0b/0c work, which DID succeed with proper stream
+separation), not another surface-level retry.**
+
+### 4.5 Compile-boundary fusion attempts (NEGATIVE, hard "do not touch")
+
+From `.hermes/plans/2026-05-18_1830-dsv4-verify-tail-investigation.md`
+and `.hermes/plans/2026-05-19_to_35tps.md`:
+- Fused SDPA L≤8 fold (Lever 1): 30.06→28.9 tok/s — regressed because
+  MLX's compiled shapeless kernel had higher per-call Metal launch
+  overhead than `mx.fast.sdpa` at small batch×L
+- Fuse `_raw_post_attn`+`_raw_ffn_pre` (Lever 2): **30.06→7.2-10.5 tok/s
+  — CATASTROPHIC.** Capturing an `mx.fast.metal_kernel` inside another
+  `mx.compile` boundary triggers pathological behavior.
+
+**Do not nest `mx.fast.metal_kernel` calls inside another `mx.compile`
+boundary — causes catastrophic (3-4x) throughput regression. Always gate
+new fusion attempts with a single-layer microbench before cluster
+deployment.**
+
+### 4.6 The dispatch-overhead / pipelined-vs-isolated trap (recurring pattern, 3+ instances)
+
+This exact trap recurs across THREE separate fusion projects — worth
+flagging as a pattern, not just individual results:
+
+1. **MoE fused Metal kernel** (`.hermes/plans/2026-05-14_113951-dsv4-moe-fused-metal-kernel.md`,
+   NEGATIVE, killed at phase-1 spike): pipelined 43-layer chain measured
+   at 207us/layer vs 187us memory-bandwidth floor — only 20us/layer of
+   dispatch-overhead headroom = ~3% throughput, below the 1.5x decision
+   gate. The MoE-NOP probe showed 8K c=1 35.0→53.2 tok/s (+52%) and 100K
+   c=1 29.47→41.2 tok/s (+40%) headroom when MoE fully bypassed — but
+   that headroom is **memory-bandwidth-bound, not dispatch-bound**, so
+   kernel fusion couldn't recover it.
+2. **DSv4 indexer fused kernel** (`.hermes/plans/2026-05-14_185010-dsv4-indexer-fused-kernel.md`,
+   NEGATIVE, abandoned): pipelined 21-call microbench showed the fused
+   kernel (numerically correct, 159/160 topK overlap) at 215us/call vs
+   the EXISTING chain's 117us/call pipelined = **0.54x, SLOWER once
+   pipelined**. An INDEXER-NOP isolation probe had shown 28.4→32.3 tok/s
+   (+13.7%) motivating the plan, but the real fusion ceiling was only
+   ~0.9% once pipelining was accounted for.
+3. **DSv4 sparse-attn fused kernel** (`.hermes/plans/2026-05-14_140936-dsv4-sparse-attn-fused-kernel.md`,
+   NEGATIVE): abandoned after a phase-1 microbench spike failed the gate
+   before any real Metal kernel was written.
+
+**THE PATTERN: MLX's async graph executor already overlaps dispatch
+across the op chain. Per-call-in-isolation dispatch-overhead estimates
+(e.g. "~250 launches/token × 20-30us = 5-7ms recoverable") badly
+overestimate savings because they don't account for this pipelining —
+only a PIPELINED chain-level microbench reveals the true ceiling.
+Per-call analysis lies; pipelined chain tells the truth. Apple's own
+matmul/argsort kernels are already near-optimal — hand-rolled Metal
+rarely beats them for well-tuned ops, only for eliminating true
+dispatch-BOUNDARY overhead between many small ops (which is why the gate
++up and (attempted) wq_a+wkv fusions, which reduce dispatch COUNT rather
+than trying to out-kernel MLX's own primitives, are the pattern that
+actually works — see §4.1/4.2).**
+
+### 4.7 gather_qmm M=1 dispatch check (NEGATIVE = no bug found, 2026-08-21)
+
+`docs/gather-qmm-m1-dispatch-confirmed-correct-2026-08-21.md` — zero-risk
+read-only check confirmed MLX's `GatherQMM::eval_gpu` dispatch ladder
+already correctly routes decode's M=1 shape to a dedicated `gather_qmv`
+gemv kernel, not the general tiled `gather_qmm` gemm path. `vector_limit`
+(hardware-gen-aware, 10-32) confirms M=1 never reaches the general path.
+**No bug — closes this specific question with confidence.**
+
+---
+
+## 5. Speculative decoding (MTP / Eagle / token-tree / DSpark)
+
+Second-most-investigated area after all_sum. Long, iterative history —
+**the throughput ceiling here has proven very hard to move past ~30-35
+tok/s** despite dozens of attempts.
+
+### 5.1 Timeline of "champion" throughput claims (cautionary tale)
+
+Multiple sessions across May-June 2026 chased a "35 tok/s" target. Key
+lesson from this whole arc, stated explicitly in
+`.hermes/plans/2026-05-19_to_35tps.md`: **historical "champion" claims
+repeatedly failed to reproduce**:
+- `champion-2026-05-17-fenced` claimed **31.5 tok/s** — NOT reproducible
+  later (`FENCE=8` retest got 29.5 tok/s)
+- `champion-2026-05-18-acksync` claimed **32.3 tok/s** — redeploy
+  **catastrophically cratered to 4.3 tok/s**, cause never found
+- Actual reproducible baseline held at **30.06 tok/s (σ=0.06)**
+
+Separately, `.hermes/plans/2026-05-19_quality_findings.md` (NEGATIVE)
+found that some of these "champion" numbers were measured at
+**`EXO_DSV4_INDEX_TOPK=160`, which produces BROKEN quality** (only BOS
+token output at 100K context, complete needle-recall failure) vs the
+quality-correct `TOPK=512`'s 30.06 tok/s. **A throughput gain that trades
+away output quality is not a real win.**
+
+**Reusable lesson (critical): never trust a champion throughput number
+without ≥10 iterations at σ<0.3-0.5. Treat unreplicated single-sample
+champions as suspect until re-verified. Always pair speed benchmarks
+with a correctness/quality probe (needle-in-haystack) before accepting a
+throughput result as valid.**
+
+Eventually stabilized at a real, reproducible **gamma=2 MTP-on ~30.06-31.5
+tok/s** production baseline (`.hermes/plans/2026-05-17-session-retrospective.md`,
+WIN: gamma=2 MTP-on 31.5 tok/s shipped, +3.6% over gamma=1, ~30 hours wall
+across two sessions, ~15 bench runs). Later further refined via rollback
+cost fix and Eagle K=8 no-renorm (below).
+
+### 5.2 Real, shipped, quality-neutral wins
+
+**MTP verify-forward losslessness (WIN, 2026-07-10)** —
+`docs/dsv4-rowseq-followups-plan-2026-07-10.md`: `EXO_DSV4_VERIFY_ROWSEQ`
+makes L>1 MTP verify attention bitwise-identical to sequential decode,
+proven bitwise-zero on a dedicated harness, **at ZERO throughput cost**
+(c=1 27.4 tok/s matches the old lossy baseline). Fixed via
+`MLX_GEMV_BATCH_INVARIANT` + cache-level spec rollback. **It IS possible
+to fix MTP losslessness bugs at zero throughput cost when the root cause
+(gemv/gemm M-dispatch rounding drift) is fixed at the source.**
+
+**Rollback cost fix (WIN, 2026-07-12)** —
+`docs/rollback-cost-campaign-handoff-2026-07-12.md`: target was cutting
+rollback cost ~32ms→~5ms; **root cause was actually different from the
+assumed one** — pruned-champion rollback was already ~2ms, real cost was
+a ~72ms commit-forward FALLBACK path. Fixed at the cache level
+(`mlx-lm f00a9a9`). Result: 29.0-29.3 tok/s held, rollback cost slashed
+to **0.79ms mean** (`rb_commitfwd n=0`). **Premise revision via
+sub-phase profiling found the real cost center differed from the assumed
+one — always profile before assuming which code path dominates.**
+
+**Eagle K=8 no-renorm (WIN, small but rigorous, 2026-05-24)** —
+`.hermes/plans/2026-05-24_w3_K8_norenorm_results.md`: **+0.83%** decode
+(+0.24 tok/s), Welch t=6.19, p<0.001, Cohen's d=2.77. Baseline 28.7998
+mean → K=8+no-renorm 29.0375 mean. **Small but statistically significant
+gains (via proper Welch t-test/effect size) are valid to ship even at
+<1% improvement, provided quality is preserved and the effect is
+rigorously verified.**
+
+**Drain elimination (WIN, 2026-05-20/21)** — the key unlock for c=2
+concurrent MTP throughput. `.hermes/plans/2026-05-20_phase12_drain_elim_results.md`
++ `.hermes/plans/2026-05-21_phase13_c2_milestone.md`: yielding all
+N×(γ+1) responses in ONE `_next()` call removed ~50ms per-token-drain
+overhead at TP c>1, unlocking **22.9→34.5-34.6 aggregate tok/s** at c=2
+100K MTP-on (8/10 iters clean at σ=0.04, 2/10 outliers traced to a
+bench-side asyncio timing artifact, not a server regression). Required
+also bumping `EXO_BATCHED_PREFILL_RENDEZVOUS_MS` 200ms→2000ms to reliably
+catch the 2nd concurrent POST arrival — without this, intermittent
+fallback to serial submission caused σ≈10 tok/s variance
+(`.hermes/plans/2026-05-20_phase11_c2_progress.md`... wait see
+`phase12_drain_elim_results.md` for the pre-fix variance table: iter1
+wall=790s agg=11.7, iter3 wall=737s agg=34.6 — same code, wildly
+different outcome depending on whether the rendezvous window caught the
+race).
+
+### 5.3 Attempts that did NOT beat linear/baseline decode
+
+**Token-tree drafting (INCONCLUSIVE→NEGATIVE across a multi-week arc,
+May 2026):** planned in `.hermes/plans/2026-05-19_token_tree_drafting.md`
+as "the only remaining realistic structural path" after compile-fusion
+levers were exhausted. Implemented, but found broken at production
+config first (`.hermes/plans/2026-05-19_phase6_findings.md`, NEGATIVE —
+unit microbenches passed but production config output was garbage/looped,
+100K needle FAILED; root cause: microbenches didn't exercise the sparse/
+pooled-attention path, PoolingCache under tree input, or Indexer with
+tree-rotated Q). After 3 correctness bugs fixed
+(`.hermes/plans/2026-05-20_phase6b_findings.md`, MIXED): correctness
+restored (cluster bench 75K: tree 29.95 tok/s ≈ baseline 30.06 tok/s,
+100K needle passed), but **tree drafting showed NO throughput lift over
+linear baseline** — commit-forward overhead (~6% of wall, ~100ms/cycle)
+ate the gain. Perf-tuning follow-up
+(`.hermes/plans/2026-05-20_phase7_perf_findings.md`, NEGATIVE): 6 tuning
+variants (DFS reorder, greedy tree, K sweep) all landed in [29.7, 29.95]
+tok/s vs the 30.06 linear champion — **none beat linear.** Root cause:
+verify phase is bounded by per-token KV attention access at long context
+(constant regardless of tree/draft size), not by query-row count, so
+shrinking L_q barely helps.
+
+**`.hermes/plans/2026-05-20_phase8_beating_linear.md`** (INCONCLUSIVE) —
+best tree config (K=2 γ=2) still only 29.95 tok/s vs 30.06 linear:
++44% verify-wall growth (L_q=7) ate a +13% draft-acceptance win. **Verify
+cost decomposes as ~30ms floor (KV attention over long context) + ~5.3ms
+per L_q token — tree's wider verify erases its per-slot acceptance gain
+because the FLOOR, not marginal cost, dominates at long context.**
+
+**Per-row-SDPA verify-vec hypothesis (NEGATIVE, 2026-07-12)** —
+`docs/vec-rowsdpa-campaign-2026-07-12.md`: the "lossless ~34 tok/s via
+per-row sdpa variant" hypothesis was found DEAD. Don't re-attempt without
+new evidence.
+
+**Eagle K1 debug (NEGATIVE, 2026-05-22)** — a K=1 c=2 throughput
+regression was root-caused via 5-hypothesis elimination
+(`.hermes/plans/2026-05-22_eagle_k1_debug_report.md`) to un-synced
+`prev_logits` breaking cross-rank determinism: MLX produces tiny
+per-rank logit drift at cycle 5+ that flips argmax on near-tied logits;
+any new tensor computed from rank-local logits without inheriting the
+existing cross-rank broadcast reintroduces divergence. K=1 c=2 100K:
+21.48 tok/s vs FENCE=4 baseline's symmetric 23.29 tok/s. A DEEPER root
+cause was then found (`eagle_k1_fix_report.md`, NEGATIVE): the real
+mechanism was a `broadcast_from_canonical(soft_emb)` 16KB collective
+placed directly on the per-chain-step critical path with ZERO compute to
+hide behind — turned a ~150s c=2 100K iter into a **~6.5-min iter (~17x
+slowdown)**. **A collective placed immediately before a dependent compute
+op with no other work to overlap becomes fully exposed serialized
+latency — 16KB is "small" in absolute terms but catastrophic when
+directly on the critical path with nothing to hide the RTT behind.**
+
+**Gamma=3 bistability (never fully resolved, 2026-05-23)** —
+`.hermes/plans/2026-05-23_gamma3_bistability_fix_plan.md`: γ=3 c=2 100K
+showed a symmetric case at 40.57 tok/s but bistable behavior across
+iterations. `.hermes/plans/2026-05-23_session_eagle_to_gamma3_findings.md`
+(WIN, partial) landed a production champion: **γ=2 K=1 FENCE=4 @ 34.19
+tok/s, σ=0.05, 5/5 clean** — 0.81 tok/s short of the 35 tok/s target.
+
+**MTP head investigation (NEGATIVE, 2026-05-19)** —
+`.hermes/plans/2026-05-19_mtp_head_investigation.md`: DSv4-Flash ships
+only ONE MTP head (`num_nextn_predict_layers=1`) — **cannot add a second
+head without training** (weeks of cluster time). `gamma=3 alpha_3=0.37`
+acceptance measured. Cheaper alternative identified: Eagle-style
+token-tree drafting using the existing single head (this is what
+motivated the token-tree work above, which ultimately didn't beat
+linear).
+
+**DSpark FULLBLOCK context-depth collapse (NEGATIVE, severe, 2026-08-04)** —
+`docs/dspark-fullblock-context-scaling-cliff-2026-08-04.md`: DSpark
+ON+FULLBLOCK+ROWSEQ=shared showed **27.56 tok/s at depth~500 but 1.73
+tok/s at depth~14K — a 15.9x collapse** (later found narrower, ~2800-token
+band). DSpark OFF: normal 1.28x scaling (25.11→19.57 tok/s). A separate
+MoE fix (`EXO_DSV4_MOE_PARTS_ROWSEQ=shared`) gave a real win ONLY at
+near-zero context (300-500 tokens, +12%) but was never tested at real
+depth before this — DSpark+FULLBLOCK turned out catastrophically worse
+than no speculation at depth. **Cluster now runs DSpark OFF as a safety
+default.** **Always benchmark speculative-decode fixes across a RANGE of
+context depths, not just short prompts, before shipping.**
+
+**DSpark native head (INCONCLUSIVE, implemented but never A/B tested,
+2026-08-03)** — `docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md`:
+`EXO_DSV4_DSPARK_NATIVE` implemented and validated standalone, but never
+live-A/B-tested. **This session (2026-08-21) confirmed it's STILL unset
+in production** and flagged it as a real, untested candidate — but noted
+it's decode-only (affects MTP/DSpark draft acceptance rate) and NOT
+applicable to prefill-focused optimization work. Genuinely open.
+
+**Verify-cost restructuring plan (INCONCLUSIVE, 2026-05-18)** —
+`.hermes/plans/2026-05-18_1505-dsv4-verify-forward-toward-35tps.md`:
+target was 35 tok/s (+17% from a 30 tok/s quality-correct baseline; the
+32.35 tok/s `TOPK=160` number was quality-broken, see §5.1). Flagged
+**hard "do not touch" items**: ACK barrier optimization, removing the
+per-step `mx.eval` fence, and swapping to `mx.async_eval` were all
+PROVEN to cause severe regressions in this specific plan's context —
+note this predates and is superseded by 2026-07-02's successful,
+carefully-gated `EXO_DSV4_FENCE_ASYNC` (§2.6/§4) which DID make
+async_eval work safely, via proper two-owner gating that this earlier
+naive attempt lacked.
+
+**Critical-path NOP-probe methodology trap (NEGATIVE finding about the
+METHOD, 2026-05-19)** — `.hermes/plans/2026-05-19_critical_path_findings.md`:
+a `build_probe`-style per-op profiler attributed 46.51ms/forward (92.7%)
+to FFN/MoE, but a critical-path NOP test (zeroing MoE entirely) only
+saved ~7.5ms of verify wall — the other ~39ms ran CONCURRENTLY with other
+work on the async MLX pipeline. **Per-op profiler attribution can
+overstate a component's true critical-path cost when the framework
+overlaps ops asynchronously — a microbenchmark speedup does not imply an
+equivalent end-to-end wall-clock speedup.**
+
+### 5.4 MTP correctness fixes tied to performance work
+
+- `docs/mtp-tiebreak-losslessness-fix.md` (WIN, shipped default-on
+  2026-06-04) — fixed a losslessness bug in MTP tie-break logic.
+- `docs/deepseek-v4-c2-mtp-verify-fixes.md` (WIN, 2026-06-06/07) — made
+  MTP speculative decode correct at c≥2 (BS>1).
+- `docs/deepseek-v4-mtp-performance.md` (WIN, 2026-06-04) — MTP
+  self-speculation roughly doubles per-forward token yield since verify
+  dominates cycle cost (93.4% of an 81.7ms MTP cycle). 30.77 tok/s mean
+  (σ=0.067) c=1 100K gamma=2 with MTP-on + tiebreak fix vs MTP-off ~27
+  tok/s. mean_accept 1.04/2 drafts = 68% of gamma=2 ceiling. **gamma has
+  a sweet spot determined by acceptance-rate falloff, not a monotonic
+  increase** — gamma=1 is -6%, gamma=3 is -18% vs gamma=2's baseline.
+
+---
+
+## 6. Kernel fusion attempts (general pattern)
+
+See §4.6 for the detailed "pipelined vs isolated dispatch overhead" trap
+that recurred 3+ times. Summary table of ALL fusion attempts found in
+the repo history:
+
+| Fusion | Outcome | Result |
+|---|---|---|
+| MoE gate_proj+up_proj (`EXO_DSV4_MOE_FUSED_GATE_UP`) | **WIN** | +3.01% decode, in production (2026-08-21) |
+| Attention wq_a+wkv (`EXO_DSV4_QA_KV_FUSED`) | NEGATIVE (null) | Correct, bit-exact, but -0.48% incremental (2026-08-21) |
+| MoE fused Metal kernel (gate+up+SwiGLU+down, one kernel) | NEGATIVE | Killed at phase-1 spike, dispatch headroom only ~3% once pipelined (2026-05-14) |
+| DSv4 indexer fused kernel | NEGATIVE | Abandoned, fused kernel SLOWER once pipelined (2026-05-14) |
+| DSv4 sparse-attn fused kernel | NEGATIVE | Abandoned at phase-1 microbench gate (2026-05-14) |
+| Fused SDPA L≤8 fold | NEGATIVE | 30.06→28.9 tok/s regression (2026-05-18) |
+| Fuse post_attn+ffn_pre (compile-boundary) | NEGATIVE (severe) | 30.06→7.2-10.5 tok/s catastrophic (2026-05-18) |
+| Fused softmax (`EXO_DSV4_FUSED_SOFTMAX`) | **NEGATIVE (correctness break)** | Real needle failure at 100K, never A/B'd for 5 weeks before this was caught (2026-08-21) |
+| Fused sparse gather-SDPA kernel (decode/verify) | mentioned but outcome not captured in this scrub | See `mlx-lm` git log `0b07134` if revisiting |
+| MLX head_dim 192/256 support (upstream) | **WIN** | Enables fused SDPA for larger head dims, gated by key-seq-length threshold |
+
+**Cross-cutting lesson: fusions that reduce DISPATCH COUNT on
+already-small, frequently-called ops (gate+up, in production) tend to
+win. Fusions that try to out-kernel MLX's own already-tuned primitives
+(matmul, argsort, SDPA) tend to lose once measured in a pipelined
+context, because MLX's async graph executor already hides much of the
+per-call overhead a naive isolated microbench suggests is recoverable.**
+
+---
+
+## 7. Quantization (KV cache, weights, collectives)
+
+### 7.1 KV cache quantization
+
+`docs/kv-cache-architecture.md` (INFO_ONLY) — documented quality-vs-perf
+tradeoff: **bf16 KV is the default despite being SLOWER** (bf16: 11.4
+tok/s/stream vs 4-bit: 11.9 tok/s/stream, +4% faster at c=2 100K MTP=0
+sparse-attention regime) because 4-bit quantization noise compounds and
+degrades long-context quality. 4-bit's advantage is bandwidth-driven, not
+compute-driven, on Apple Silicon (SDPA is bandwidth-fed) — and that
+advantage **shrinks specifically for sparse-attention (top-K read)
+regimes** vs full attention, where it's ~2.5x. **Keep KV quantization
+decisions tied to measured quality regression risk, not just raw
+throughput.**
+
+### 7.2 TurboQuant (NEGATIVE, all configs regressed)
+
+`docs/turboquant-integration.md` — tested as an alternative to
+dequantize-then-SDPA. Baseline (4-bit dequant + fused SDPA): **40.9
+tok/s**. Every TurboQuant variant tested REGRESSED:
+- 4-bit+quantized_matmul: 37.0 tok/s (**-10%**)
+- 3-bit+quantized_matmul: 38.3 tok/s (**-6%**)
+- 3-bit+dequant+inverse-rotate+fused SDPA: 36.5 tok/s (**-11%**)
+
+**Despite theoretically avoiding full dequantization, added compute
+overhead (rotation, polar conversion) outweighed bandwidth savings on
+this hardware/kernel combo. Theoretical bandwidth wins don't guarantee
+measured wins when compute overhead is added — do not adopt without a
+fundamentally different implementation approach.** (Also separately
+evaluated as a no-win on Qwen3.5 for a different reason — see
+`docs/prefill-optimization.md`, §3.5-adjacent — only 8/30 layers are
+attention on that model, so KV-cache-focused optimizations have limited
+reach there.)
+
+### 7.3 Quantized MoE all_sum
+
+See §2.5 — comprehensively tested and closed NEGATIVE across 8 docs.
+
+### 7.4 Weight quantization comparisons (data points, not investigations)
+
+`bench/quant_compare_results/` contains benchmark result cards (decode
+tok/s, TTFT, total time) for coding-eval tasks across quant variants on
+Qwen3.5-397B-A17B. These are mostly INFO_ONLY reference data points, not
+investigations:
+- 4bit: 35.8 tok/s decode
+- 4bit-qkv: 35.6 tok/s decode
+- nvfp4: 35.6-37.0 tok/s decode (varies by sample)
+- 4bit (arch_design sample): 31.5-31.7 tok/s
+- 4bit (debug_fix sample): 34.9 tok/s
+
+(Note: these numbers vary noticeably across different eval samples of the
+same quant scheme — treat any single comparison as noisy; use only for
+rough cross-scheme ordering, not precise deltas.)
+
+### 7.5 bf16→fp16 compute dtype
+
+Referenced in `docs/fork-vs-upstream-inventory.md` as a **~7% faster
+quantized_matmul** win, applied across 7 kernel files in the
+`qwen3_5_moe` kernel set. **BUT** `docs/profiling/request_lifecycle_trace.md`
+notes fp16 compute dtype was **reverted for DSv4** — caused a **7x decode
+slowdown** because JACCL/RDMA lacks fp16 support. **This dtype switch is
+model/kernel-specific — a documented win for one model's MoE kernels is
+a severe regression for a different model on the RDMA transport path.
+Do not blanket-apply across models without re-testing the transport
+interaction.**
+
+---
+
+## 8. jaccl / RDMA / Thunderbolt transport
+
+(This session's own 2026-08-21 jaccl transport hardening work — 9 bugs
+fixed, dual-cable topology split, QP-less TCP CoordGroup — is
+extensively documented in `docs/dual-cable-topology-and-qp-budget-2026-08-21.md`
+and is the most recent, most complete writeup. Summarizing OLDER related
+work here for context.)
+
+**c=2 serving handoff (MIXED, 2026-07-06)** —
+`docs/dsv4-c2-serving-handoff-2026-07-06.md`: jaccl transport-level c=2
+wedge SOLVED with a reliable ARQ all_reduce over UC plus a framed
+coordinator barrier. A SEPARATE, unsolved residual instability was found
+in the exo/mlx-lm batched-generation admission path: admitting a request
+mid-batch diverges the two TP ranks, causing false-positive hangs. ~20
+tok/s decode at c=2; c=2 MTP-on 14.3 tok/s/stream (28.6 aggregate). Real
+measured: 1.45ms of a 6.6ms/token budget (~22%) attributed to jaccl
+overhead, matching 25% GPU idle. **c=2-from-start (streams starting
+together) is stable; admitting a new request into an already-running
+batch mid-decode is not.**
+
+**RDMA reliability bug cascade (2026-08-08/10)** — a good example of
+iterative masking:
+- `docs/handoff-2026-08-08-section22.md` / `section23.md` (NEGATIVE) —
+  Section 22's bounded-blocking-ack fix for a chunk-boundary race was
+  deployed, but its FIRST real validation attempt uncovered a NEW stall:
+  hard stall after chunk 0's 11-advance sequence, jaccl "recv() deadline
+  in drain", clean reconnect, then **ZERO activity for 8+ minutes** (test
+  killed before the 30-min self-abort ceiling). GPU idle during the stall
+  (23mW, ~6% active residency). Also found: `EXO_PP_METAFRAME=1` is an
+  UNDOCUMENTED prerequisite for `EXO_PP_BATCHED_DECODE=1` — missing this
+  caused two false-negative validation attempts that silently ran the
+  old fallback path.
+- `docs/handoff-2026-08-09-section39.md` (MIXED) — removing an internal
+  fatal retransmit cap (60s shared deadline → 300s dedicated) fixed
+  premature crashes on slow-but-healthy transfers, but ALSO removed the
+  only (accidental) mechanism that force-cleared a genuine, separate
+  scheduler-protocol-layer deadlock — a call_id then stayed stuck for
+  21+ minutes. **Fixing a redundant/miscalibrated timeout can unmask a
+  real, previously-hidden bug that the old timeout was accidentally
+  recovering from.**
+- `docs/handoff-2026-08-10-section43.md` / `section43-part2.md` (MIXED) —
+  RDMA p2p_retry_exchange bugs: Bug 1 (wrong timeout constant, 8s generic
+  vs 300s dedicated, crashed live requests at ~18s), Bug 2 (PP-spec-decode
+  cancel() lifecycle state unhandled, causing full runner process exit).
+  Verification after both fixes: no crash, cancel POST 200 in 5.29s, but
+  **rank0 CPU kept climbing, never converged to idle — a THIRD
+  undiagnosed symptom.** **When debugging a reliability/stall issue
+  iteratively, expect a "masking cascade" — fixing an earlier crash can
+  simply expose a later, previously-unreached bug. Don't declare victory
+  until the ORIGINAL reported symptom is soak-tested, not just absence of
+  newly-found bugs.**
+- `docs/handoff-2026-08-10-section42.md` (INCONCLUSIVE) — a prior finding
+  (TCP starving under RDMA contention) was DISPROVEN via a live interface
+  check, which triggered then REVERSED a decision to shelve an RDMA
+  migration for jaccl's control-plane traffic. **Disproving ONE stated
+  justification for a decision does not disprove the decision itself.**
+
+**Metal Event::wait stalls at 220K+ context** — multi-doc investigation
+(2026-08-18): `dsv4-220k-prefill-rdma-wait-breakdown`,
+`dsv4-220k-prefill-eventwait-rootcause-triage`,
+`dsv4-220k-prefill-eventwait-ringdiag-nonrepro`. The ring-diag
+reproduction attempt found: **zero Event::wait stalls across 2 runs**
+(~440,644 combined prompt tokens, ~1,452s combined prefill wall) vs 8
+stalls in a prior single 220K run — estimated per-call stall rate
+**~0.17%** (8 in ~4730 MoE all_sum calls), consistent with a low, noisy
+Bernoulli probability, not falsified by 0/9460 in these runs. **For
+low-probability intermittent stalls, compute expected trials-to-reproduce
+rather than burning cluster time on blind short repro attempts — either
+run much longer single sessions, or leave cheap always-on diagnostics
+enabled and wait for organic reproduction.**
+
+**subgroup all_gather (NEGATIVE, still faults post-fix, 2026-08-21, this
+session)** — `docs/allgather-lever-negative-result-2026-08-21.md`: tested
+whether the same night's TCP-coordinator fix retired the precondition for
+a known subgroup all_gather reliability bug. It did NOT — faulted
+~0.4s into prefill (jaccl `wc.status=1`), request lost, needle FAIL. The
+existing all_sum-based 2x-wire-bytes workaround remains necessary. **A
+partial fix to a related transport issue does not guarantee it covers
+all fault paths for a similar-looking lever — test small and cheap
+before committing.**
+
+**Chunk size / MTU tuning** — see §2.4 (`MLX_JACCL_RELIABLE_MAX_SZ`
+sz=2→3 tested NEGATIVE, sz≥4 has documented hang risk, don't attempt
+without new evidence).
+
+---
+
+## 9. Concurrency (c=2+) and PP vs TP topology
+
+### 9.1 PP vs TP structural tradeoff (settled, WIN as a design decision)
+
+`docs/fork-notes.md` (2026-07-31): PP gives **27-33 tok/s single-request**
+with DSpark vs TP's ~15-20 tok/s; TP wins CONCURRENCY because collective
+layers are stateless per-request while PP's pipeline layers hold mutable
+per-request state, making concurrent requests wire-indistinguishable at
+the `mx.distributed.send/recv` level. **This is structural, not a bug to
+fix** — confirmed on both fork and upstream exo. Cluster uses TP for both
+prefill and decode (per §3.5's hybrid-design rejection).
+
+### 9.2 c=2 concurrency bugs (mostly fixed, some residual)
+
+**B=2 quality bugs (WIN, resolved 2026-06-24)** —
+`docs/b2-quality-handoff-2026-06-24.md` + `docs/b2-mtp-resolution-2026-06-24.md`:
+root cause was NOT the originally-suspected cache-merge theory — it was a
+**seq-split all_gather batch-unsafe bug.** Two root-cause bugs fixed,
+verified across a full B=2 100K-500K needle sweep with MTP on, allowing
+removal of the previously-required c≥2 safety gate.
+
+**c=2 100K quality bug (NEGATIVE, invalidated a prior champion, 2026-05-23)** —
+`.hermes/plans/2026-05-23_c2_100k_quality_bug_discovery.md`: discovered a
+quality bug UNDERMINING the previously-shipped gamma=2 **34.16 tok/s
+(σ=0.07)** "production champion" claim from 2026-05-22. **A throughput
+win must be re-verified for quality/correctness at larger context/
+concurrency before declaring it a production champion** — same lesson as
+§5.1, recurring.
+
+**MTP cache lifecycle for c≥2 (MIXED, 2026-05-20)** —
+`.hermes/plans/2026-05-20_phase10_mtp_c2_fix.md`: fixed MTP cache
+lifecycle bug (commit `cc200799`), reverted KV-bits default 4→0 (bf16)
+per canonical prod constraint — but **c=2 100K bench still at 5.7
+aggregate tok/s after the fix**, pointing to a SEPARATE verify-cost
+bottleneck at B=2 long context, not resolved by this fix alone.
+
+**c=2 MTP structurally broken at first attempt (NEGATIVE, 2026-05-20)** —
+`.hermes/plans/2026-05-20_phase9_c2_findings.md`: c=2 MTP-OFF (bf16 KV)
+31.4 aggregate tok/s (target 35, below). **c=2 MTP-ON (γ=2): STRUCTURALLY
+BROKEN, 3.5-5.8 aggregate tok/s.** B=2 draft 147.34ms (30x B=1's 4.40ms),
+verify 176.85ms (4x B=1's 42.81ms). Root cause: MTP cache lifecycle
+assumed single-stream use, silently corrupted across concurrent streams
+(cache reset on new submit clobbers other in-flight streams' state).
+Also: 4-D masks (per-stream batch-rotating KV caches) force SDPA out of
+fused causal kernel paths, multiplying verify cost — a uniform-offset
+fast path (2D mask) is the mitigation. **Speculative-decoding/MTP caches
+designed for single-stream use will silently corrupt across concurrent
+streams — must be made per-stream-extendable before enabling
+concurrency>1.**
+
+**c=2 at 100K catastrophic slowdown / wedge (NEGATIVE, 2026-05-19)** —
+`.hermes/plans/2026-05-19_phase_j_findings.md`: iter 0 warmup 4.5 tok/s
+aggregate (2.3 per stream), wall 794s; **bench killed at iter 1, cluster
+WEDGED, required hard restart.** **Docstring/marketing claims of relative
+scaling (e.g. "2.7x scaling") can be relative to a weak baseline (naive
+c=2), not vs single-stream c=1 — verify absolute throughput at target
+context length, not just relative multipliers.**
+
+**Batched-decode N=2 admission race (WIN, fixed, 2026-08-05)** —
+`docs/batched-decode-n2-admission-handoff-2026-08-05.md`: 7 real bugs
+found and fixed in the N=2 concurrent admission path (bypassing a
+single-writer channel gate, conflating NACKs with timeouts in the retry
+guard, rank 1 never propagating eviction signal). Verified with 4 rounds/
+8 concurrent requests, zero crashes/500s/wire errors.
+`EXO_PP_BATCHED_DECODE=1` is a verified working opt-in path for N=2
+concurrency but **stays OFF by default.**
+
+### 9.3 Co-hosting multiple models
+
+`.hermes/plans/2026-06-10_dsv4_hyperconnection_fix_and_cohost_bench.md`
+(WIN) — c=1 co-host (DSv4+Qwen3.6): total aggregate decode mean **78.5
+tok/s** (Qwen ~51.2 tok/s/stream, DSv4 ~27.3 tok/s/stream). c=2: total
+aggregate mean 73.0 tok/s — Qwen per-model went UP to 56.4 tok/s but DSv4
+per-model roughly HALVED to 16.6 tok/s under contention. **Recommend the
+balanced concurrency point (c=1) rather than assuming more concurrent
+streams always helps — a lightweight model can starve a heavy one under
+GPU contention with no net throughput gain.** (This doc also root-caused
+a separate DSv4 garbage-output bug: silently-dropped Hyper-Connection
+weights from a checkpoint/code weight-key naming mismatch under
+`strict=False` loading — confidently-wrong output, not a numerical bug.)
+
+### 9.4 TP decode capability audit (INFO_ONLY reference)
+
+`bench/section101_tp_decode_capability_audit.md`: 43 real all_sum
+collectives per decode token (1/MoE layer; attention fully replicated/
+unsharded at decode, zero attention collectives). Cold shard+load ~18.7s
+per rank. PP+MTP is not structurally blocked (a separate PP-native
+speculative path already coexists). Sharding mode is baked into weight
+tensors at one-shot load time — switching TP↔PP needs a full process
+restart, no live re-dispatch seam, and no retained full-precision backup
+after in-place sharding.
+
+---
+
+## 10. Memory leaks
+
+Two separate, unrelated leak investigations, both eventually WIN:
+
+**Multi-turn memory leak #1 (WIN, resolved 2026-06-29)** —
+`docs/dsv4-memory-leak-handoff-2026-06-29.md` +
+`docs/dsv4-memory-leak-resolution-2026-06-29.md`: **+29.5 GB over a
+139-msg/68-call session** (77.13GB→106.61GB), ~0.2-0.4 GB/turn, **+21
+PoolingCache objects leaked per turn** (= layer count). Root cause: two
+never-pruned `CacheSnapshot` accumulators — a `leaf_snapshots` merge
+filter that never dropped entries because `restore_pos` climbs
+monotonically, and dead write-only node-level snapshots in
+`_build_edge_node`/`_split_edge` with zero live readers. Fixed by
+bounding retention (cap=4) and removing the dead write path. Post-fix:
+total GB pinned FLAT at 79.04GB for 11 consecutive turns. **Three earlier
+fix attempts based on plausible-sounding hypotheses (deepcopy, generator
+closing) all failed because they weren't the actual accumulation site —
+walk gc referrer chains for growing `len()` on nested containers per
+turn rather than guessing at fix sites. Bound any cache/snapshot list
+that grows per-turn with an explicit retention cap rather than relying on
+a filter condition that may never evaluate true in a monotonically-
+growing session.**
+
+**Multi-turn memory leak #2 (WIN, resolved 2026-06-27)** —
+`docs/dsv4-memory-leaks-2026-06-27.md`: four DISTINCT leak sites (in the
+prefix-cache/prefill path, separate from leak #1's MTP-cache path)
+identified, fixed, and verified — memory plateaus across sequential
+requests. **Memory leaks in prefix-cache paths compound across sequential
+requests; verify fixes by confirming memory plateaus over REPEATED
+requests, not a single run.**
+
+**Related: IOGPU residency-set abort** — `docs/iogpu-residency-set-abort.md`
+(NEGATIVE, environmental): a `MTLResidencySet::addAllocation` silent
+process abort deterministically reproduced on Apple M4 Max 128GB under
+LONG SUSTAINED workloads — this blocks long-running performance
+benchmarks and is a distinct systemic issue from throughput tuning, not
+something to fix via memory-leak-style debugging.
+
+---
+
+## 11. Correctness bugs found during perf work
+
+Performance investigations repeatedly surfaced correctness bugs as a
+side effect — worth tracking as its own category since several caused
+false throughput conclusions elsewhere in this doc:
+
+- **DSv4 confidently-wrong output** (2026-06-10) — silently-dropped
+  Hyper-Connection weights (checkpoint `hc_attn`/`hc_ffn` vs model code
+  `attn_hc`/`ffn_hc` naming mismatch, dropped under `strict=False`
+  loading). Produced confident-but-wrong output, not numerical
+  instability. §9.3.
+- **Eagle K=1 cross-rank divergence** (2026-05-22) — un-synced
+  `prev_logits` broadcast. §5.3.
+- **Fused softmax kernel correctness break** (2026-08-21, this session) —
+  `EXO_DSV4_FUSED_SOFTMAX` sat at default-off with a "needs A/B
+  validation" comment for ~5 weeks (added 2026-07-14) before being
+  actually tested — found to break needle-in-haystack correctness at
+  100K context on first real test. **Optimization flags left
+  default-off with an "unvalidated" comment can hide real correctness
+  bugs for a long time — test opt flags before they accumulate
+  untested.**
+- **Collective eval-order determinism** (2026-08-20) — silent,
+  deterministic cross-rank corruption if async_eval call order diverges
+  between ranks. §2.6.
+- **Token-tree drafting production-config bugs** (2026-05-19/20) — 3
+  bugs (row-causal pmask for tree siblings, compressor pool-cache
+  mutation during verify, KV/rollback discarding accepted-path context).
+  §5.3.
+- **Seq-split all_gather batch-unsafe bug** (2026-06-24) — masqueraded
+  as a cache-merge quality bug. §9.2.
+- **Thinking-parser delimiter fusion bug** — `docs/thinking-parser-fused-delimiter-fix.md`:
+  exact-string-equality bug in `parse_thinking_models` caused a
+  delimiter fused/split across streaming chunks to leak chain-of-thought
+  into visible content. Pure correctness fix, not perf-motivated, but
+  listed here since it's the kind of bug that could otherwise be
+  mistaken for a streaming-performance artifact.
+
+---
+
+## 12. Measurement methodology lessons (meta)
+
+These recur across many of the sections above — consolidated here as a
+standalone checklist to run through before trusting ANY new throughput
+number:
+
+1. **Verify tokenizer chars-per-token assumptions** in any script that
+   estimates token counts — a chars//4 assumption inflated prefill
+   numbers by 1.42x for an entire investigation (§3.5).
+2. **Cross-check log-parsed throughput against independent wall-clock
+   measurement.** A `grep|tail-1` harness bug fabricated an entire false
+   optimization narrative (§3.3).
+3. **Never trust a champion number without ≥10 iterations at low σ.**
+   Multiple "champions" in the 31-32 tok/s range failed to reproduce,
+   one catastrophically (§5.1).
+4. **Always pair a throughput claim with a quality/correctness probe**
+   (needle-in-haystack). Several fast-but-broken configs were nearly
+   shipped (§5.1, §5.3, §7.1).
+5. **`mx.eval()` fences flush the ENTIRE pending lazy graph**, not just
+   the requested output — a probe's first eval after an unevaluated
+   backlog silently absorbs upstream cost and inflates the timed phase
+   (§2.5, discovered as a repeat trap across 3 docs in the same
+   investigation).
+6. **Sync-span / forced-synchronization profiling has its own overhead**
+   (measured this session: ~15% prefill / ~77% decode) — never trust
+   ABSOLUTE tok/s from an instrumented run, only RELATIVE kernel
+   percentages.
+7. **Per-op isolated microbenchmarks can badly overstate recoverable
+   savings** when the framework (MLX) already pipelines/overlaps the op
+   chain — always validate with a PIPELINED chain-level microbench, not
+   per-call-in-isolation (§4.6, the single most-repeated trap in this
+   whole history, hit independently 3+ times across different fusion
+   projects).
+8. **GPU utilization/occupancy ≠ useful compute throughput** — a
+   submission thread blocked in an uninterruptible collective wait can
+   still read as "busy" (§2.6).
+9. **Correlate probe/bench timestamps against an independent
+   ground-truth signal** (e.g. a "Prefill complete" log line) before
+   trusting a phase split in mixed prefill+decode data (§2.5, happened
+   twice in the same investigation).
+10. **A blended prefill+decode measurement window can mask which phase a
+    cost belongs to** — always try to isolate the phase you actually
+    care about (this session's own decode-isolation via SIGUSR1 showed a
+    meaningfully different number than an earlier blended measurement,
+    §2.1).
+11. **Re-validate old bottleneck theories against CURRENT code** before
+    trusting them — significant refactors can invalidate a profile from
+    even a month prior (§3.2).
+12. **Component-level microbenchmark wins don't guarantee end-to-end
+    wins** if a different pipeline stage scales unfavorably with the
+    same knob (§3.3, hit at least twice with STEP_SIZE tuning).
+13. **Establish a theoretical ceiling (roofline) before an open-ended
+    optimization sweep**, so effort has a clear termination condition
+    (this session, §4.3).
+
+---
+
+## 13. Open / never-finished threads
+
+Things flagged in the source docs as incomplete, unresolved, or worth
+future investigation — check here before assuming a topic is fully
+closed:
+
+- **The 2026-07-02 `EXO_DSV4_FENCE_ASYNC` +28% claim vs this session's
+  re-measured +1.04%** — real discrepancy, not resolved (§2.6).
+- **The ~340K prefill cliff's true root cause** — the sharp discontinuity
+  was never fully explained; the tiled-P indexer memory fix didn't
+  actually help (§3.2). This session's `INDEXER_PBLOCK` retest closed
+  out ONE specific angle (small p_block causes decode regression at
+  depth) but the original prefill cliff mechanism remains open.
+- **`EXO_DSV4_DSPARK_NATIVE`** — implemented, validated standalone,
+  never live-A/B-tested. Explicitly flagged by this session as real and
+  untested but OUT OF SCOPE for prefill-focused work (decode-only
+  mechanism).
+- **Decode stall's "third undiagnosed symptom"** (rank0 CPU never
+  converging to idle after two other bugs were fixed, §8) — investigation
+  chain was abandoned mid-cascade.
+- **Section 110's decode-stall root cause** — 6 hypotheses refuted, root
+  cause of the 550-686ms/token PP decode stall still unknown as of that
+  doc; two unproven leading candidates flagged (`ForwardStepInfo.queue_sends`
+  context-var inconsistency, chunked-prefill KV-cache dependency-graph
+  fragmentation) (§4, referenced via `bench/section110_decode_stall_last_candidate.md`).
+- **DeltaNet kernel auto-selection** for Qwen3.5 pipeline-parallel prefill
+  — projected 5-15% of DeltaNet time, never started (§3.5,
+  `docs/prefill-optimization.md`).
+- **Dual-stream overlap** for Qwen3.5 prefill — projected 0.5-1ms/chunk,
+  flagged as high correctness risk, never started (§3.5).
+- **A real Instruments Metal trace of the `moe.switch_mlp` GatherQMM
+  kernel internals specifically** (as opposed to the generic matmul probe
+  this session ran) — the single largest individual span (~30-45% of
+  wall depending on phase) remains unexplored below the kernel-dispatch
+  level.
+- **The genuine unsync per-call `moe.all_sum` cost decomposed into
+  skew-wait vs. real dispatch/scheduling overhead** — this session's
+  offline microbenchmark established the raw wire floor (~120µs) and the
+  34x gap to in-model average cost, but did NOT decompose that gap into
+  its component causes. A live-cluster NOP-ablation attempt to get a
+  cleaner number was found UNSAFE (destabilized the cluster, required
+  full relaunch) — a future session needs a different, safer measurement
+  approach (dedicated `perf_counter` timing around just the collective
+  call site, not a full sync-span or ablation).
