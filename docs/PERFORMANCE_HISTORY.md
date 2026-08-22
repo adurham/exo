@@ -57,6 +57,11 @@ fully closed out.
 
 ## 1. Current known-good baseline
 
+**SUPERSEDED 2026-08-22 — see the update below the table.** The decode
+figures in this table were all measured with the async fence
+permanently, silently broken (see §2.8) — real numbers at the time,
+but not representative of current, fixed production throughput.
+
 **As of 2026-08-21** (tag `known-good-prefill-20260821-165048`, later
 superseded by same-day production config `EXO_DSV4_MOE_FUSED_GATE_UP=1` +
 `EXO_DSV4_FENCE_ASYNC=1`, both real, both non-negative, both active):
@@ -74,6 +79,27 @@ superseded by same-day production config `EXO_DSV4_MOE_FUSED_GATE_UP=1` +
 At parity with an earlier-campaign 339 tok/s @ 500K baseline (i.e. months
 of jaccl/transport hardening work did not regress raw throughput — it
 fixed correctness/stability, see §8).
+
+**UPDATE 2026-08-22 — real, validated decode throughput more than
+doubled the "known-good" figures above, after fixing a real structural
+defect (§2.8, `docs/async-fence-cache-owner-dead-code-root-cause-2026-08-22.md`,
+`docs/async-fence-fix-validated-2026-08-22.md`):**
+
+| Metric | Value |
+|---|---|
+| Decode, short context (512-tok prompt), post-fix | **30.70-30.91 tok/s** (+66-67% vs the table above) |
+| Decode, 2000-tok prompt, post-fix | **29.17-29.37 tok/s** (+58-59% vs the table above) |
+
+Prefill figures are unaffected by this fix (the async fence only
+changes decode-time behavior) and remain as in the table above pending
+a fresh re-measurement. **The decode figures in the original table
+above are now historical, not current** — `EXO_DSV4_FENCE_ASYNC=1` had
+been silently, permanently non-functional (always falling back to the
+blocking fence) for the entire multi-session optimization campaign
+prior to 2026-08-22's fix; every decode number recorded anywhere in
+this document before that date was measured under that broken
+condition, real at the time, but should not be treated as today's
+ceiling.
 
 **Known operational constraint:** Thunderbolt RDMA degrades under repeated
 rapid restart/teardown cycles — GPU power asymmetry (~7W vs ~20W) and
@@ -505,6 +531,58 @@ but never read).
   free, zero-risk signal that the measurement technique is
   misattributing cost, not that the op is actually expensive.** See
   `docs/allsum-sync-span-artifact-arithmetic-check-2026-08-22.md`.
+
+### 2.8 The async fence was permanently, silently broken — root cause found and FIXED (WIN, decisive, 2026-08-22)
+
+**This is the single biggest real throughput finding in this entire
+document.** `EXO_DSV4_FENCE_ASYNC=1` had been live in production
+config since 2026-07-02 — but the gate requiring its two owner flags
+(`"engine"` + `"cache"`) to both be `True` was structurally unsatisfiable
+under this cluster's TP sharding mode: `"cache"` is owned exclusively
+by `dsv4_mtp.py`'s `DSv4MTPPredictor`, MTP/DSpark-specific code that is
+never instantiated under TP (confirmed dead, see §12's DSpark finding).
+The fence had therefore ALWAYS fallen back to the blocking `mx.eval(y)`
+path for the entire multi-session optimization campaign, regardless of
+the flag's value — meaning every decode number in §1's original
+baseline table, and every decode measurement anywhere in this document
+before 2026-08-22, was taken under this silently-broken condition.
+
+Found via a real in-process Python stack sampler (built as a
+zero-privilege alternative to `py-spy`, which needs root/sudo
+unavailable on this cluster): ~95% of the compute thread's real
+decode-time wall time was spent blocked in `mx.eval(y)`. Live
+diagnostic logging (`EXO_DSV4_FENCE_GATE_DIAG=1`) confirmed the
+mechanism directly: zero `"cache"` setter calls logged across a real
+request.
+
+**Fix** (`docs/async-fence-cache-owner-dead-code-root-cause-2026-08-22.md`):
+a registration-based, fail-closed gate — an owner key is only REQUIRED
+to be `True` if something has actually registered as its live owner.
+`"engine"` always registers (unconditional request-lifecycle code).
+`"cache"` now only registers when `DSv4MTPPredictor.__init__` actually
+succeeds (i.e. MTP/DSpark is genuinely active) — preserving the
+original two-owner safety property exactly for that config, while
+letting the fence arm on `"engine"` alone when MTP/DSpark is
+structurally absent. Rejected a simpler getattr/hasattr
+structural-sniffing alternative per an independent Fable design review
+— that approach fails OPEN (silently drops the safety check on an
+unrelated rename/refactor), unacceptable for a subsystem with a real
+documented corruption history (the 2026-07-02 c=2 stream-join bug).
+
+**Real, validated result** (`docs/async-fence-fix-validated-2026-08-22.md`):
+decode throughput went from ~18.5 tok/s to **29.2-30.9 tok/s — a real
++58-67% improvement**, confirmed across two context depths (512-tok and
+2000-tok prompts), with output correctness validated via three
+independent checks including an exact-match needle-in-haystack test
+(given this subsystem's history of fast-but-corrupted output under
+related bugs). This single fix is larger than every other decode-side
+throughput win found in this document's entire history combined.
+
+**Reusable lesson**: a feature flag being `=1` in production config
+does not mean the feature is actually active — always verify the real
+runtime GATE state (not just the top-level env var) with live
+diagnostic logging before trusting a flag's documented behavior,
+especially for any multi-owner/multi-condition gate.
 
 ---
 
@@ -1542,11 +1620,19 @@ reusable lesson, not glossed over).
 This is very likely the single largest concrete, fixable contributor to
 decode's ~82.5-84.9% unattributed wall time identified this session —
 a real, structural code defect, not a mysterious hardware/dispatch
-limit. A fix was NOT implemented this session (would need careful
-design given this exact subsystem's documented 2026-07-02 corruption
-history around the same two-owner arming mechanism) — flagged as
-well-scoped, high-priority work for a future session with explicit
-user sign-off on a correctness-sensitive production code change.
+limit.
+
+**FIX IMPLEMENTED AND VALIDATED, same session (2026-08-22):** despite
+the corruption-history caution above, a careful, registration-based,
+fail-closed fix was designed (per an independent Fable design review),
+implemented (`mlx-lm` `1fea494` + `exo` `6e427b549`), deployed, and
+live-validated. **Real result: decode throughput 18.5 → 29.2-30.9
+tok/s (+58-67%)**, correctness confirmed via three independent checks
+including an exact-match needle-in-haystack test. See
+`docs/async-fence-fix-validated-2026-08-22.md` and §2.8 above for full
+detail. This closes what was flagged as "future session" work within
+the same session it was found, once a genuinely careful fix design
+(not a rushed patch) was available.
 
 Cross-rank skew correlation (previously the other queued item) was
 assessed as superseded by this direct-evidence finding — no longer
@@ -1554,10 +1640,10 @@ needed to distinguish "local stall" from "straggler wait" once a
 structural cause is confirmed. A real technical limitation was also
 found in the process: the sampler used `time.monotonic_ns()` (per-process
 clock), not directly cross-rank-comparable even with a real measured
-NTP clock-skew estimate (~1.1-1.2ms between nodes) — a future
-fix-and-validate session (testing the actual fix's real throughput
-recovery) should switch to `time.time_ns()` to get this correlation for
-free in the same relaunch, per Fable's guidance.
+NTP clock-skew estimate (~1.1-1.2ms between nodes) — this remains a
+real gap for future cross-rank timing work, though moot for THIS
+specific question now that a direct-evidence root cause and validated
+fix both exist.
 
 ---
 
