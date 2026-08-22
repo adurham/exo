@@ -1570,6 +1570,20 @@ unstarted angles remain: a real Instruments trace of the
 done, needs the richer capture config), and/or a clock-synced two-rank
 capture for the skew test.
 
+**RULED OUT this session** (`docs/memory-residency-check-ruled-out-2026-08-22.md`):
+memory residency / expert-weight paging from disk. Real pageins delta
+across a full real decode request (495 tokens, 1.97s TTFT + 26.73s
+decode) was only 1.0MB with zero swapins — not consistent with
+per-token expert-weight paging. Confirmed the model shard is fully
+resident (87.4GB via `vmmap --summary`'s `IOAccelerator (graphics)`
+line, matching the expected ~83.5GB TP=2 shard size) after an initial
+`ps aux` RSS reading (16.5GB) looked alarmingly low — resolved as a
+real measurement-tool gap: `ps`'s RSS column excludes GPU/Metal-owned
+unified memory on Apple Silicon, not a genuine residency problem.
+**Reusable lesson: use `vmmap --summary`, not `ps aux`, to check real
+memory footprint for MLX/Metal processes** — `ps`'s RSS undercounts
+GPU-resident unified memory by the full size of the GPU working set.
+
 Things flagged in the source docs as incomplete, unresolved, or worth
 future investigation — check here before assuming a topic is fully
 closed:
