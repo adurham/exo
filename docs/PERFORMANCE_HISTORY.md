@@ -389,15 +389,52 @@ but never read).
   roofline estimate (~12% of theoretical peak) using a completely
   different instrument (direct Metal telemetry vs. architectural FLOPs
   math). Idle gaps in the 1-10ms bucket cluster tightly on both ranks
-  (mean ~2909-3010µs), close to but not proven identical to the
-  `moe.all_sum` sync-span average (~4094µs) — a real, suggestive, but
-  NOT YET PROVEN correlation; queued for jaccl-internal timestamp
-  decomposition to confirm attribution rather than infer it from
-  magnitude match alone. Known limitation: the two captures used
-  independent, non-synchronized system clocks, so true cross-rank
-  wall-clock gap correlation was not attempted this session (only
-  aggregate per-rank statistics, which don't require synced clocks). See
+  (mean ~2909-3010µs), tentatively flagged at the time as suggestively
+  close to the `moe.all_sum` sync-span average (~4094µs) — **this
+  tentative correlation was tested directly in the very next step below
+  and found WRONG: the real jaccl transport call itself is far too fast
+  (median 36µs) to be the primary contributor to a ~3ms-scale GPU-idle
+  gap.** Known limitation: the two captures used independent,
+  non-synchronized system clocks, so true cross-rank wall-clock gap
+  correlation was not attempted this session (only aggregate per-rank
+  statistics, which don't require synced clocks). See
   `docs/live-decode-two-rank-instruments-trace-2026-08-21.md`.
+- **jaccl-internal timing decomposes the moe.all_sum 34x gap: transport
+  is fast, overhead is elsewhere (WIN, decisive, same session,
+  2026-08-21/22)** — directly answers the open thread above and open
+  thread #6 in §13. Added real `std::chrono::steady_clock` timing
+  INSIDE jaccl's C++ transport call itself (immune to MLX/Python-level
+  graph laziness, unlike a `perf_counter`-around-call-site approach an
+  earlier review correctly rejected as methodologically unsound — see
+  the rejected-approach note in §13). Took 5 relaunches to get right,
+  each one a real, separately-diagnosed bug, not repeated guessing:
+  (1) `MeshGroup` instrumented correctly but produced zero output; (2) a
+  wrong-class detour to `RingGroup` based on an unconfirmed premise
+  about which jaccl `Group` subclass the topology uses (later confirmed
+  `MeshGroup` was right all along — `MLX_JACCL_RING` unset in
+  production means `prefer_ring` is false); (3) real bug: `MeshGroup`'s
+  trace-file-open gates on `JACCL_TRACE_CALLS`, not the new
+  `JACCL_TRACE_TIMING`, so a relaunch that set only the latter silently
+  wrote nothing — confirmed both new symbols WERE present in the
+  rebuilt `.dylib` via `nm` before assuming a code bug; (4) real bug:
+  cleanup `rm -f` on the trace file path between a relaunch and the
+  benchmark run unlinked a file the long-lived runner process had
+  already opened at construction time (opens once per process
+  lifetime, not per-call) — classic Unix unlink-while-open, silently
+  orphaning ~1.68MB of real writes into an inode unrecoverable on macOS
+  (no `/proc`). **Real result once correctly measured: 45,666 real
+  decode-time 8192-byte `moe.all_sum` transport calls, median 36.1µs
+  (rank0) / 36.0µs (rank1), mean 66.3µs / 58.9µs — FASTER than the
+  earlier isolated microbenchmark's ~120µs wire floor, and only
+  0.04% of calls exceed the ~4094µs sync-span-measured average.** The
+  jaccl transport is conclusively NOT the software-overhead bottleneck
+  — the 34x gap lives almost entirely in whatever surrounds the call
+  (MLX's `mx.eval` fence, CPU/GPU dispatch coordination, or
+  Python-level scheduling), not the RDMA collective itself. Reusable
+  lesson: never `rm` a log file a long-lived process has already opened
+  — no error signal, no recovery path on macOS, silently orphans all
+  future writes. See
+  `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md`.
 
 ---
 
@@ -1420,15 +1457,17 @@ closed:
   this session ran) — the single largest individual span (~30-45% of
   wall depending on phase) remains unexplored below the kernel-dispatch
   level.
-- **The genuine unsync per-call `moe.all_sum` cost decomposed into
-  skew-wait vs. real dispatch/scheduling overhead** — this session's
-  offline microbenchmark established the raw wire floor (~120µs) and the
-  34x gap to in-model average cost, but did NOT decompose that gap into
-  its component causes. A live-cluster NOP-ablation attempt to get a
-  cleaner number was found UNSAFE (destabilized the cluster, required
-  full relaunch) — a future session needs a different, safer measurement
-  approach (dedicated `perf_counter` timing around just the collective
-  call site, not a full sync-span or ablation).
+- ~~The genuine unsync per-call `moe.all_sum` cost decomposed into
+  skew-wait vs. real dispatch/scheduling overhead~~ **RESOLVED
+  2026-08-21/22 (new session)**: real jaccl-internal `steady_clock`
+  timing (not the rejected `perf_counter`-around-call-site approach)
+  measured 45,666 real decode-time transport calls at median 36µs, mean
+  58-66µs — the transport itself is fast (faster than the earlier
+  isolated microbenchmark's ~120µs floor); the ~4094µs sync-span average
+  and its 34x gap live almost entirely OUTSIDE the transport call
+  (MLX's `mx.eval` fence, dispatch coordination, or Python-level
+  scheduling — not yet further decomposed, now the correct next target).
+  See §2.7 and `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md`.
 
 ---
 
