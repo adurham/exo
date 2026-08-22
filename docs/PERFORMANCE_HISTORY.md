@@ -57,14 +57,51 @@ fully closed out.
 
 ## 1. Current known-good baseline
 
-**SUPERSEDED 2026-08-22 — see the update below the table.** The decode
-figures in this table were all measured with the async fence
-permanently, silently broken (see §2.8) — real numbers at the time,
-but not representative of current, fixed production throughput.
+**LOCKED IN 2026-08-22** (tags `known-good-decode-fenceasync-20260822`
+on both `exo` and `mlx-lm` repos; `mlx` repo unchanged since
+`known-good-prefill-20260821-165048`, still current). Config:
+`EXO_DSV4_MOE_FUSED_GATE_UP=1` + `EXO_DSV4_FENCE_ASYNC=1`, the latter
+now GENUINELY functional after the §2.8 fix (was silently broken for
+the entire campaign before this date — see below). All figures
+re-measured fresh against this exact config, needle-verified where
+applicable.
 
-**As of 2026-08-21** (tag `known-good-prefill-20260821-165048`, later
-superseded by same-day production config `EXO_DSV4_MOE_FUSED_GATE_UP=1` +
-`EXO_DSV4_FENCE_ASYNC=1`, both real, both non-negative, both active):
+| Metric | Value |
+|---|---|
+| Prefill @ 100K ctx | 359.7 tok/s (needle PASS) |
+| Prefill @ 300K ctx | 348.2 tok/s (needle PASS) |
+| Prefill @ 500K ctx | 324.1 tok/s (needle PASS) |
+| Decode @ 100K ctx | 26.91 tok/s (needle PASS) |
+| Decode @ 300K ctx | 24.44 tok/s (needle PASS) |
+| Decode @ 500K ctx | 21.51 tok/s (needle PASS) |
+| Decode, short context (512-2000 tok prompt) | 29.2-31.1 tok/s |
+
+Prefill is at parity with the pre-fix baseline (was 366.6/351.5/331.6 —
+within normal run-to-run variance, confirming the async-fence fix
+correctly left prefill untouched, as designed). **Decode is up
++23-67% depending on context depth** vs. the pre-fix numbers below,
+because the async fence — live in production config since 2026-07-02
+but silently non-functional the whole time — now genuinely engages.
+
+**MTP/DSpark status, confirmed live 2026-08-22:** NOT wired up for this
+cluster's TP sharding mode. `EXO_DSV4_MTP=0` (classic single-head MTP
+disabled). `EXO_DSV4_DSPARK=1` is set but structurally inactive —
+DSpark's real decode loop (`pp_dspark_decode_loop`) is PP-only; live
+log check shows zero `"PP speculation using DSpark"` lines against 12
+`"DSpark ctx warmed"` lines (module loads/warms, decode loop never
+fires). This is a real, standing gap — DSpark/MTP speculative decode
+represents unrealized throughput upside on this cluster, not yet
+attempted for TP. See §12 and §13 for prior investigation.
+
+At parity with an earlier-campaign 339 tok/s @ 500K prefill baseline
+(i.e. months of jaccl/transport hardening work did not regress raw
+throughput — it fixed correctness/stability, see §8).
+
+<details>
+<summary>Historical baseline, 2026-08-21 — superseded, decode figures
+measured under the silently-broken async fence (click to expand)</summary>
+
+**As of 2026-08-21** (tag `known-good-prefill-20260821-165048`):
 
 | Metric | Value |
 |---|---|
@@ -76,30 +113,14 @@ superseded by same-day production config `EXO_DSV4_MOE_FUSED_GATE_UP=1` +
 | Decode @ 500K ctx | 17.26 tok/s |
 | Decode, short context (512-tok prompt) | ~18.6-18.9 tok/s |
 
-At parity with an earlier-campaign 339 tok/s @ 500K baseline (i.e. months
-of jaccl/transport hardening work did not regress raw throughput — it
-fixed correctness/stability, see §8).
+`EXO_DSV4_FENCE_ASYNC=1` had been silently, permanently non-functional
+(always falling back to the blocking `mx.eval(y)` fence) for the
+entire multi-session optimization campaign prior to the 2026-08-22 fix
+(§2.8, `docs/async-fence-cache-owner-dead-code-root-cause-2026-08-22.md`,
+`docs/async-fence-fix-validated-2026-08-22.md`) — real numbers at the
+time, not representative of current production throughput.
 
-**UPDATE 2026-08-22 — real, validated decode throughput more than
-doubled the "known-good" figures above, after fixing a real structural
-defect (§2.8, `docs/async-fence-cache-owner-dead-code-root-cause-2026-08-22.md`,
-`docs/async-fence-fix-validated-2026-08-22.md`):**
-
-| Metric | Value |
-|---|---|
-| Decode, short context (512-tok prompt), post-fix | **30.70-30.91 tok/s** (+66-67% vs the table above) |
-| Decode, 2000-tok prompt, post-fix | **29.17-29.37 tok/s** (+58-59% vs the table above) |
-
-Prefill figures are unaffected by this fix (the async fence only
-changes decode-time behavior) and remain as in the table above pending
-a fresh re-measurement. **The decode figures in the original table
-above are now historical, not current** — `EXO_DSV4_FENCE_ASYNC=1` had
-been silently, permanently non-functional (always falling back to the
-blocking fence) for the entire multi-session optimization campaign
-prior to 2026-08-22's fix; every decode number recorded anywhere in
-this document before that date was measured under that broken
-condition, real at the time, but should not be treated as today's
-ceiling.
+</details>
 
 **Known operational constraint:** Thunderbolt RDMA degrades under repeated
 rapid restart/teardown cycles — GPU power asymmetry (~7W vs ~20W) and
@@ -577,6 +598,17 @@ independent checks including an exact-match needle-in-haystack test
 (given this subsystem's history of fast-but-corrupted output under
 related bugs). This single fix is larger than every other decode-side
 throughput win found in this document's entire history combined.
+
+**Locked in as the new baseline (§1), including at real depth**: a
+full needle-verified 100K/300K/500K re-benchmark confirmed decode
++23-54% at depth too (17.48→26.91 @100K, 18.60→24.44 @300K,
+17.26→21.51 @500K) — the fix's benefit shrinks somewhat at deeper
+context (the fixed-cost prefill/transition window, still using the
+blocking fence by design, becomes a larger fraction of total time
+relative to the growing KV-cache decode cost) but remains large and
+real at every depth tested. Prefill confirmed unaffected (within normal
+run-to-run variance of the pre-fix numbers), exactly as the fix's
+design predicted.
 
 **Reusable lesson**: a feature flag being `=1` in production config
 does not mean the feature is actually active — always verify the real
