@@ -1745,6 +1745,21 @@ the measured 0.12 roofline efficiency — a real, smaller, still-open
 sub-mystery (~0.08 unaccounted) likely in per-kernel bandwidth
 efficiency, not yet investigated.
 
+**CONFIRMED via a direct real test (2026-08-22, Phase B of the
+post-async-fence-fix investigation)** —
+`docs/gpu-clock-symptom-confirmed-2026-08-22.md`: ran a sustained-load
+probe (2000 back-to-back 4096×4096 bf16 matmuls, `mx.eval`-forced, no
+artificial gaps) on the same physical node used for all other real
+measurements this campaign. Real `powermetrics` samples during the run:
+**GPU HW active frequency locked at 1578 MHz — 100% of that (the
+topmost) P-state bucket, every single sample**, with real 55-57W power
+draw (vs. 4.6-7.1W during real decode). **The same GPU hardware reaches
+its real peak clock under guaranteed sustained load — the 819-1122MHz
+range during decode is conclusively a downstream symptom of the bursty
+dispatch pattern, not an independent throttling/thermal/firmware
+limitation.** Closes this as a standalone lever; any future fix to the
+underlying idle-gap pattern should raise clock as a side effect.
+
 **Still genuinely open, not yet resolved**: (1) whether the dominant
 0.5-20ms gaps align with per-layer `moe.all_sum`/fence boundaries
 specifically — a per-token gap-rate check (~20-22 gaps/token from
