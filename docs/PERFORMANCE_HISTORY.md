@@ -334,11 +334,30 @@ already `=1` in production — this IS the comm/compute overlap design.
 Historic comment claims **+28% decode (28.9→37.0 t/s)** from 2026-07-02;
 this session's clean re-A/B on the current baseline measured only
 **+1.04%** (18.664 vs 18.471 tok/s, n=8 each side) — a real, consistently
-positive, but much smaller effect than claimed. **Discrepancy not
-resolved** — flagged for future investigation, most likely a different
-baseline/regime in the original 2026-07-02 measurement (possibly with
-MTP/speculative-decode active, since the code lives adjacent to
-`dsv4_mtp.py`).
+positive, but much smaller effect than claimed.
+
+**RESOLVED (2026-08-22, same continued session, read-only, zero cluster
+risk)** — `docs/fence-async-28pct-claim-traced-to-artifact-2026-08-22.md`:
+traced the +28% claim to its origin commit (`mlx-lm` `1e808319f`,
+2026-07-02), which cites **"MTP-PROF"** as its measurement tool.
+MTP-PROF's own code comment (`dsv4_mtp.py`) explicitly states: "brackets
+the draft/verify/accept phases with `mx.eval` + `perf_counter`...
+inserts evals at phase boundaries which serialises pipelining —
+**measurements are upper bounds on real production walls**." This is
+the SAME methodology-artifact class conclusively proven this session
+for the sync-span profiler (§2.7 arithmetic reconciliation) — forced
+per-boundary synchronization destroys real async pipelining and
+inflates measured cost. The historic +28% figure is now understood to
+be an inflated upper-bound artifact, not a real number this session's
+clean +1.04% A/B should have been expected to reproduce. **Internally
+consistent with the real transport-cost finding**: perfect all_sum
+overlap can recover at most ~2.9-5.3% of wall time (real measured
+transport cost, §2.7) — a real +1.04% capturing a meaningful fraction
+of that small ceiling is coherent; the old +28% claim against a
+collective that costs only ~3-5% of wall time was implausible on its
+face. No further live-cluster overlap investigation pursued this
+session given the now-small remaining ceiling (≤2% residual upside)
+does not justify relaunch risk with no one available to monitor it.
 
 **Older, harder OPT-7 attempt (NEGATIVE, tested + reverted twice)** —
 gating the per-layer `mx.eval` on `_fence_every_n` (rather than doing
@@ -1499,8 +1518,11 @@ Things flagged in the source docs as incomplete, unresolved, or worth
 future investigation — check here before assuming a topic is fully
 closed:
 
-- **The 2026-07-02 `EXO_DSV4_FENCE_ASYNC` +28% claim vs this session's
-  re-measured +1.04%** — real discrepancy, not resolved (§2.6).
+- ~~The 2026-07-02 `EXO_DSV4_FENCE_ASYNC` +28% claim vs this session's
+  re-measured +1.04%~~ **RESOLVED 2026-08-22**: traced to MTP-PROF, a
+  measurement tool whose own code comment documents it inflates costs
+  via forced per-boundary synchronization — same artifact class as the
+  sync-span profiler. See §2.6.
 - **The ~340K prefill cliff's true root cause** — the sharp discontinuity
   was never fully explained; the tiled-P indexer memory fix didn't
   actually help (§3.2). This session's `INDEXER_PBLOCK` retest closed
