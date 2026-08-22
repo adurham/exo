@@ -1625,6 +1625,17 @@ for NODE in "${NODES[@]}"; do
     # not affected.
     : "${EXO_DSV4_FENCE_ASYNC:=1}"
     [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
+    # TEMP DIAGNOSTIC (2026-08-22, EXO_DSV4_FENCE_GATE_DIAG=1): rate-limited
+    # real-value log of the async-fence gate's four conditions on every
+    # blocking-branch fallthrough, plus every _set_fence_async_ok() setter
+    # call. For the decode idle-gap investigation -- a real in-process
+    # Python sampler found ~95% of real decode-time compute-thread wall
+    # time blocked in the SYNCHRONOUS mx.eval(y) branch, not the intended
+    # async mx.async_eval(y) branch, despite EXO_DSV4_FENCE_ASYNC=1 being
+    # live -- this traces WHY the gate fails to arm. See
+    # docs/pysampler-blocking-eval-root-cause-2026-08-22.md. Remove once
+    # understood; not meant to be a permanent flag.
+    [ -n "${EXO_DSV4_FENCE_GATE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_GATE_DIAG=$EXO_DSV4_FENCE_GATE_DIAG"
     # c=2 decode levers.
     #
     # BS_MIN_ACCEPT DEFAULT 1 (2026-07-12, was 0). Per-stream acceptance
