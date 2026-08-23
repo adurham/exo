@@ -753,6 +753,38 @@ distribution shape, not a stale uniform-distribution sweep.**
 kernels already match/beat the idealized dense-GEMM ceiling; widening
 MAXBE regressed severely.
 
+**NEW (2026-08-23, P4): TP=2 width-sharding does NOT create skinny-GEMM
+inefficiency — the sign is inverted, and the lever is closed.**
+`docs/p4-tp-width-shard-gemm-efficiency-2026-08-23.md`. Hypothesis was
+that exo's MoE-only sharding (`gate/up` all-to-sharded → N 2048→1024;
+`down` sharded-to-all → K 2048→1024) leaves per-rank GEMMs too skinny for
+good tile efficiency. Measured with chained-eval methodology (one
+`mx.eval` per 12 calls, per the 2026-08-22 P0 retraction) and routing
+indices held EXACTLY constant across width arms:
+- MoE `SwitchGLU` arm, achieved TFLOPS across a **4x width sweep**
+  (inter=512/1024/2048): **6.851 / 7.049 / 6.739 — flat**, max/min ratio
+  1.046; wall time scales linearly (actual÷linear = 1.000/0.972/1.017).
+- Dense mxfp4 `qmm` at production shapes: sharded is **FASTER** per unit
+  work — gate/up N-halved **+3.6%** (9.939 vs 9.598 TFLOPS), down
+  K-halved **+2.6%** (9.510 vs 9.267). Kernels sit at **76.7–85.2% of
+  measured dense compute peak**.
+- A real skinny-K penalty does appear, but only **beyond** the cluster's
+  config (TP=4, down K=512: −3.5%) — not at TP=2.
+- Both per-rank and unsharded widths are exact multiples of the 32-wide
+  tile → zero partial-tile waste analytically; the bench confirms no
+  second-order latency-hiding penalty either.
+- Side confirmation: **mxfp4 dequant IS fused in-kernel**
+  (`QuantizedBlockLoader` inside `fp_gather_qmm_rhs`, no separate pass,
+  no materialized bf16 weights) — so the packed-bytes roofline
+  denominator used elsewhere is **correct as used**. Also confirmed
+  empirically that prefill dispatches **tier-2 `gather_qmm_rhs`** at the
+  production shape (B/E=48 vs the tier-1 gate of ≤6), tile geometry
+  bm=16/bn=32/bk=32 (the bm=64 `_nax` variant is gated off on M4 Max,
+  GPU gen 16 < 17).
+Lesson: **check the SIGN before assuming a structural penalty exists** —
+"TP makes our shapes skinny" sounded obviously true and measured
+backwards.
+
 ### 3.5 Prefill planning docs never fully executed
 
 `PREFILL_THROUGHPUT_PLAN.md` (2026-07-13, INFO_ONLY) — pure planning doc.
@@ -1526,6 +1558,34 @@ false throughput conclusions elsewhere in this doc:
 ---
 
 ## 12. Measurement methodology lessons (meta)
+
+> **⚠️ TOOLING HAZARD (2026-08-23, P2) — `xctrace` attach vs live
+> prefill.** Do NOT attach `xcrun xctrace record --template "Metal System
+> Trace"` to a live DSv4-Flash TP=2 runner during a long/deep prefill. It
+> preceded a cross-rank collective stall and cost BOTH runners in **3 of
+> 3 attempts** (including the "safe" simultaneous dual-rank design), at
+> depths of 61K–78K tokens. This is **separate from and additional to**
+> the SIGSTOP/watchdog false-positive fixed in `fc954293` — that fix is
+> sound and its defer branch never even fired here (the stalls began 2–3s
+> AFTER the tracer detached, and a 15.9s capture can never produce the
+> 45s of silence the watchdog needs). Untraced controls at the same and
+> greater depth are clean (135K+ this session with zero stalls; a full
+> 300014/300014 completion on 2026-08-22). Decode-window and idle-window
+> captures remain FINE (many prior successes, §2.7/T2) — the hazard is
+> scoped to deep prefill. Mechanism NOT root-caused; leading unproven
+> hypothesis is unified-memory pressure (large KV cache + non-trivial
+> system-wide trace buffers), which is checkable from existing
+> `memory_pressure`/`[MEM]` logs without another capture. Until then,
+> profile prefill via idle-window or synthetic-load captures, or
+> `mx.metal.start_capture()`. See
+> `docs/p2-xctrace-prefill-collective-wedge-2026-08-23.md`.
+>
+> Useful figure recovered from the captures that DID complete: **prefill
+> rank0 GPU occupancy is ~87–88%** (two independent short-window
+> measurements: 87.40% / 88.32%), with ranks near-symmetric (76.12% vs
+> 76.63% over a matched 120s window — but those longer windows are
+> contaminated by the wedge onset and are a floor, not steady state).
+> This refutes any lingering "prefill is mostly idle" framing.
 
 These recur across many of the sections above — consolidated here as a
 standalone checklist to run through before trusting ANY new throughput
@@ -2309,3 +2369,5 @@ section above; use the section refs to jump there.)*
 | `EXO_DSV4_INDEXER_PBLOCK` (small block size) | Real decode regression at depth | §3.2 |
 | Subgroup `attn.all_gather` (vs all_sum workaround) | Still faults post-transport-fix | §8 |
 | `all_sum` NOP ablation as a live measurement technique | Unsafe — destabilizes the cluster | §13 |
+| TP=2 width-sharding as a skinny-GEMM efficiency tax | No penalty — sharded is 2.6-3.6% FASTER per unit work; sign inverted | §3.4 |
+| `xctrace` Metal trace attach during live deep prefill | **HAZARD** — wedged the collective 3/3, killed both runners; use idle/synthetic captures | §12 |
