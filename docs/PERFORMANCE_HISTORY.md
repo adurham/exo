@@ -2033,6 +2033,16 @@ all remaining candidate spans:
   noise — compounds across 43 layers, payoff is only ~1.3pp of prefill
   wall time, not worth shipping without full quality validation (not
   performed this session). Documented as investigated-and-rejected.
+  **UPDATE (2026-08-22, session 5, P5): rejection RE-LITIGATED and
+  UPHELD with multi-seed evidence** — the 1.08% error is stable
+  (1.08–1.14% mean rel err, identical 0.125 max-abs, across 7 seeds),
+  so the original single-check rejection was not a fluke. Root cause
+  is quantizing `comb` itself to bf16: an fp32-accumulation variant
+  with bf16 comb is WORSE (1.30–1.37%), and the only variant clearing
+  the <0.2% gate (fp32 comb, broadcast-multiply+sum accumulation,
+  ~0.000% err) is 1.6x SLOWER than production (5018µs vs 3104µs).
+  No shippable variant exists in this design space; P5 CLOSED. See
+  `docs/hc-expand-rejection-relitigated-multiseed-2026-08-22.md`.
 - **moe.post_combine** (4.2%): `@mx.compile` gives ~0 speedup (1.01x,
   not broken). The apparent 6.1x span-vs-microbench gap was fully
   explained by reading the real code: the span genuinely wraps the
