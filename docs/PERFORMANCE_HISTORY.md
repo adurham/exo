@@ -1926,6 +1926,43 @@ record this session) remains the single highest-EV item on the active
 list — MTP/DSpark should not be prioritized ahead of it without first
 doing the cheap re-validation sweep flagged above.
 
+**NEW (2026-08-22, session 4, T10 first sub-investigation):
+HyperConnection training-gate — a promising decode-fence-shaped lead,
+FALSIFIED by direct production verification.** Investigating prefill's
+28.8% non-GEMM remainder (T7), read `HyperConnection.__call__`'s
+`use_ops = self.training or (not gpu) or (no metal) or env_var` gate
+(chooses between a slow pure-MLX 20-Sinkhorn-iteration path `_hc_ops`
+and a fast fused Metal kernel `_hc_kernel`). A standalone pipelined
+microbench at real production shape found a real **4.32x speedup**
+(_hc_ops 1517µs/call vs _hc_kernel 351µs/call) with near-identical
+output (max diff 4.9e-4) — looked exactly like the async-fence bug's
+shape. **Before treating this as a real bug, ran a Fable consult**
+which correctly flagged that static code reading can't rule out any of
+the 4 gate conditions differing in the live process, and load-time
+state doesn't guarantee nothing flips it later. **Direct production
+verification** (loading the REAL DSv4-Flash checkpoint via the exact
+`mlx_lm.utils.load_model` function exo's real TP path calls, at the
+real model path, `/Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731`):
+`training=False` throughout (confirmed `load_model` calls `model.eval()`
+before `load_weights()`, and this correctly propagates to submodules
+constructed before that call — verified experimentally); device/metal
+both clear; `EXO_HC_USE_OPS` confirmed unset via `ps eww` on the live
+runner PID. **All four gate conditions clear the fast path — `_hc_kernel`
+already fires in production. NOT a bug.** Root cause of my own false
+lead: my standalone microbench never called `.eval()` on the
+constructed module, and MLX's `nn.Module.training` defaults to `True`
+— a genuinely reusable methodology lesson, not previously documented
+in this repo: **any `self.training`-gated fast-path check must be
+verified against `load_model`'s real propagation, not a standalone
+reconstruction**, or it silently benchmarks the wrong branch. See
+`docs/hyperconnection-training-gate-false-lead-2026-08-22.md`.
+**T10 NOT closed** — this investigated only the single largest
+remainder-span candidate (attn_hc/ffn_hc, 4.6% combined) and found it
+already optimized; `layer.attn_residual`/`ffn_residual` (hc_expand,
+4.4%), `attn.indexer` (4.0%), and `moe.gate`/`post_combine` (5.1%)
+remain unread/unbenchmarked — a future continuation should apply the
+same rigor to those.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
