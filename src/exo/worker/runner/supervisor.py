@@ -80,6 +80,39 @@ def _env_seconds(name: str, default: float) -> float:
 
 HANG_TIMEOUT_SECONDS = _env_seconds("EXO_RUNNER_HANG_TIMEOUT_SECONDS", 45.0)
 
+
+def _process_is_stopped_or_traced(pid: int) -> bool:
+    """Return True if `pid` reports a macOS process state containing 'T'.
+
+    `ps -o state=` prints per-process state flags. On macOS/BSD 'T' means the
+    process is STOPPED (SIGSTOP) or being TRACED (ptrace/xctrace attach). A
+    profiling attach — `xcrun xctrace record --attach <pid> --time-limit ...`
+    for a Metal System Trace — puts the target in exactly this state, which
+    suppresses all runner event emission and would otherwise trip _check_hang
+    and get the runner SIGKILLed mid-capture (2026-08-22 incident, P2 capture
+    killer). Best-effort and time-boxed: on any subprocess error we return
+    False so the caller falls back to the existing kill path.
+
+    We shell out to `ps` rather than pull in a new dependency; psutil is
+    already available but this keeps the check parseable and easy to unit-test
+    via a mocked subprocess call.
+    """
+    try:
+        proc = subprocess.run(
+            ["/bin/ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    if proc.returncode != 0:
+        return False
+    state = proc.stdout.decode("utf-8", errors="replace").strip()
+    # BSD state field: first char is the primary state; on macOS a 'T' anywhere
+    # in the flag string means stopped/traced. Empty output = process gone.
+    return "T" in state
+
 # Companion watchdog for the PRE-serving phase. _check_hang only fires once a
 # task is in_progress, so a runner wedged during connect/load — e.g. the jaccl
 # re-place after a peer's mid-GPU-op SIGKILL leaves RDMA state that never
@@ -456,6 +489,20 @@ class RunnerSupervisor:
                 f"Runner {self.bound_instance.bound_runner_id} silent for "
                 f"{silent_for:.0f}s but a sibling runner is loading a model — "
                 "deferring hang watchdog until the load completes."
+            )
+            self._last_event_monotonic = time.monotonic()
+            return
+        if _process_is_stopped_or_traced(self.runner_process.pid):
+            # A profiling attach — `xcrun xctrace record --attach <pid>` for a
+            # Metal System Trace — SIGSTOPs / ptraces the target, suppressing
+            # all event emission. Killing here destroys the in-flight capture
+            # (2026-08-22, P2 killer). Defer: reset the clock so the runner
+            # gets a full HANG_TIMEOUT window after the trace ends; a genuinely
+            # dead-but-not-stopped runner still falls through to the kill path
+            # below on subsequent ticks.
+            logger.warning(
+                f"Runner {self.bound_instance.bound_runner_id} appears "
+                "stopped/traced (state T); deferring hang kill."
             )
             self._last_event_monotonic = time.monotonic()
             return

@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import time
 import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -41,6 +42,14 @@ from .system_info import (
 )
 
 IS_DARWIN = sys.platform == "darwin"
+
+# Suppress repeat identical full loguru tracebacks from the TB monitor's generic
+# exception handler within this window; a repeat of the SAME exception (matched
+# by type + repr) inside the window logs a short WARNING line instead of a full
+# traceback. Chosen to be several TB-monitor cycles (interval=5s) so a burst
+# during a transient system reconfigure collapses to one full traceback plus a
+# few short repeats, but a persistent misconfig still re-logs the traceback.
+_TB_TRACEBACK_COOLDOWN_SECONDS: float = 300.0
 
 
 async def _get_thunderbolt_devices() -> set[str] | None:
@@ -485,27 +494,76 @@ class InfoGatherer:
     async def _monitor_system_profiler_thunderbolt_data(
         self, system_profiler_interval: float
     ):
+        # De-escalate log spam on the generic exception handler: 4 identical
+        # full loguru tracebacks per node during the 2026-08-22 incident misled
+        # crash diagnosis into "unhandled AssertionError crashed the cluster"
+        # when the process was fine. Log the first traceback in full; suppress
+        # repeats of the same exception (by type + repr) for a cooldown window,
+        # logging a short WARNING line at repeat count boundaries instead.
+        last_tb_exception_key: str | None = None
+        last_tb_traceback_monotonic: float = 0.0
+        repeat_count: int = 0
         while True:
             try:
                 with fail_after(30):
                     iface_map = await _gather_iface_map()
                     if iface_map is None:
                         raise ValueError("Failed to gather interface map")
+                    if not iface_map:
+                        # Transient: post-SIGKILL / sleep-wake / cable event.
+                        # Skip this cycle rather than call `ident({})` on every
+                        # datum and stack up traceback spam via the assert path
+                        # (2026-08-22 incident: 4 tracebacks per node from
+                        # exactly this).
+                        logger.warning(
+                            "networksetup returned no Thunderbolt ports; "
+                            "skipping Thunderbolt info cycle"
+                        )
+                    else:
+                        data = await ThunderboltConnectivity.gather()
+                        assert data is not None
 
-                    data = await ThunderboltConnectivity.gather()
-                    assert data is not None
+                        idents = [
+                            it
+                            for i in data
+                            if (it := i.ident(iface_map)) is not None
+                        ]
+                        await self.info_sender.send(
+                            MacThunderboltIdentifiers(idents=idents)
+                        )
 
-                    idents = [
-                        it for i in data if (it := i.ident(iface_map)) is not None
-                    ]
-                    await self.info_sender.send(
-                        MacThunderboltIdentifiers(idents=idents)
-                    )
-
-                    conns = [it for i in data if (it := i.conn()) is not None]
-                    await self.info_sender.send(MacThunderboltConnections(conns=conns))
+                        conns = [it for i in data if (it := i.conn()) is not None]
+                        await self.info_sender.send(
+                            MacThunderboltConnections(conns=conns)
+                        )
             except Exception as e:
-                logger.opt(exception=e).warning("Error gathering Thunderbolt data")
+                key = f"{type(e).__name__}:{e!r}"
+                now = time.monotonic()
+                if (
+                    key == last_tb_exception_key
+                    and now - last_tb_traceback_monotonic
+                    < _TB_TRACEBACK_COOLDOWN_SECONDS
+                ):
+                    repeat_count += 1
+                    logger.warning(
+                        f"Error gathering Thunderbolt data (repeat #{repeat_count}, "
+                        f"same exception): {type(e).__name__}: {e}"
+                    )
+                else:
+                    if (
+                        key == last_tb_exception_key
+                        and repeat_count > 0
+                    ):
+                        logger.warning(
+                            f"Error gathering Thunderbolt data: {repeat_count} "
+                            "suppressed repeat traceback(s) since last full log"
+                        )
+                    logger.opt(exception=e).warning(
+                        "Error gathering Thunderbolt data"
+                    )
+                    last_tb_exception_key = key
+                    last_tb_traceback_monotonic = now
+                    repeat_count = 0
             await anyio.sleep(system_profiler_interval)
 
     async def _monitor_memory_usage(self, memory_poll_rate: float):

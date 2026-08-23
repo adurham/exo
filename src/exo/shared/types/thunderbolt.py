@@ -40,8 +40,16 @@ class ThunderboltConnectivityData(BaseModel, extra="ignore"):
         ):
             return
         tag = f"Thunderbolt {self.receptacle_1_tag.receptacle_id_key}"
-        assert tag in ifaces  # doesn't need to be an assertion but im confident
-        # if tag not in ifaces: return None
+        if tag not in ifaces:
+            # Transient: `networksetup -listallhardwareports` and
+            # `system_profiler SPThunderboltDataType` are two independent
+            # subprocess reads on the macOS SystemConfiguration daemon that can
+            # (very briefly) disagree during a Thunderbolt subsystem reconfigure
+            # — post-runner-SIGKILL, sleep/wake, cable event. Skip this ident;
+            # the caller filters `None`, and the next InfoGatherer tick retries.
+            # Persistent misses surface via the caller's cycle-skip warning
+            # (see info_gatherer._monitor_system_profiler_thunderbolt_data).
+            return None
         iface = f"rdma_{ifaces[tag]}"
         return ThunderboltIdentifier(
             rdma_interface=iface,
