@@ -1843,6 +1843,31 @@ of the 28.8% remainder (layer.attn_hc/ffn_hc, residuals, norms,
 attn.indexer, moe.gate/post_combine) with the same rigor as the decode
 async-fence investigation.
 
+**NEW (2026-08-22, session 4, T4): cross-rank all_sum skew — bulk
+distribution symmetric (closes the primary question), but a real
+4.2x rank0-leaning straggler asymmetry found in the rare tail.**
+Reused the existing jaccl-internal `steady_clock` trace files from the
+§2.7 investigation (no relaunch needed — the async-fence fix only
+changes Python-side handling of `y` after `all_sum` returns, not the
+C++ transport call being measured, so the transport-layer data isn't
+stale for this question). Matched all 45,666 real decode-time 8192-byte
+calls by `call_id` across both ranks (100% match rate). **Bulk result**:
+median 36.1µs (rank0) vs 36.0µs (rank1), essentially a coin-flip on
+which rank is momentarily slower per call (50.2%/49.4%) — clears the
+plan's "<symmetric ~36-60µs → closed>" decision criterion cleanly, no
+systematic one-rank-waits-for-the-other pattern in the bulk. **Real
+secondary finding**: filtering to severe outlier calls (>1000µs
+rank-to-rank difference, ~0.2% of all calls, 93 total) found **75
+rank0-straggling vs only 18 rank1-straggling — a 4.2x asymmetry**,
+consistent with rank0's slightly higher mean (66.3µs vs rank1's
+58.9µs). Small aggregate magnitude (doesn't change the primary
+conclusion), but a real, non-random, direction-consistent pattern —
+root cause (TCP-coordinator role, hardware/thermal asymmetry, or
+upstream scheduling artifact) not investigated further given the small
+impact. See `docs/cross-rank-allsum-skew-2026-08-22.md`. **T4 CLOSED**
+on the primary question; the tail asymmetry is flagged but not deemed
+worth independent follow-up at this time.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
