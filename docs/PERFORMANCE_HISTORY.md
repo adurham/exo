@@ -1985,24 +1985,56 @@ applicable and closed" — real prefill top-k always uses `argpartition`
 (a separate, already-tested lever) or fallback `argsort+slice`, never
 `topk_fused`. See `docs/indexer-topk-fused-decode-only-2026-08-22.md`.
 
-**T10 STATUS AT END OF SESSION 4 — explicit stopping point and decision
-criterion for the next continuation**: two real, independently-
-investigated NULL results this session (HyperConnection training-gate,
-indexer fused-topk) — a mild signal the 28.8% non-GEMM remainder may be
-predominantly legitimate small-op overhead rather than containing one
-single async-fence-class hidden bug. Still genuinely unexplored:
-`layer.attn_residual`/`ffn_residual` (`hc_expand`, 4.4% combined — no
-training-gate applies, needs its own fresh investigation) and
-`moe.gate`/`moe.post_combine` (5.1% combined, not read at all this
-session). **Explicit criterion for next session** (stated now per a
-Fable consult's advice, so it isn't re-litigated from scratch): one
-more genuine NULL result from either remaining span would justify
-demoting T10 from "actively hunt for a hidden bug" to "accepted
-overhead, documented and closed," at which point T7's 1.40x
-theoretical-headroom figure should be reframed as a genuine
-architectural/dispatch-count ceiling rather than a to-be-found bug.
-Conversely, a real fixable issue in either remaining span keeps T10 as
-the standing highest-priority item per T6's recommendation.
+**T10 CLOSED (2026-08-22, same session, continued and completed after
+a Fable-provided task list) — full decomposition, no async-fence-class
+bug found.** Continued immediately in the same session rather than
+deferring: ran a sum-check (Fable's flagged blind spot — real leaf
+spans sum to 101.5% of real wall time using raw ms totals, no hidden
+gap-between-spans bug; the earlier apparent 110% was a rounding
+artifact from re-summing pre-rounded percentages), then investigated
+all remaining candidate spans:
+- **hc_expand** (attn/ffn_residual, 4.4%): corrected the FLOP-vs-
+  bandwidth framing error Fable flagged (this op is memory-bound,
+  ~150MB traffic, not FLOP-bound) — real gap is 1.93x over a corrected
+  ceiling, not the initially-computed ~8.5x/100x. Found a real 1.41x
+  speedup (cast the tiny `comb` tensor to bf16 instead of upcasting the
+  large `residual` tensor) but **REJECTED on quality grounds**: real
+  precision-check found ~1.08% mean relative error (max abs diff 0.125
+  on realistic ±20-range activations), confirmed via a bf16-roundtrip
+  control that this is genuine numerical divergence, not ordinary bf16
+  noise — compounds across 43 layers, payoff is only ~1.3pp of prefill
+  wall time, not worth shipping without full quality validation (not
+  performed this session). Documented as investigated-and-rejected.
+- **moe.post_combine** (4.2%): `@mx.compile` gives ~0 speedup (1.01x,
+  not broken). The apparent 6.1x span-vs-microbench gap was fully
+  explained by reading the real code: the span genuinely wraps the
+  full `shared_experts` MLP forward too, not just the elementwise
+  combine (documented in the code's own comment) — my initial
+  microbench mis-scoped what it was comparing against. Real implied
+  shared_experts cost is **1.05x of theoretical peak — already
+  optimal.** Not a bug.
+- **moe.gate** (0.9%): clean code (argpartition, no host sync, already
+  compiled), 1.54x gap is normal overhead. Timeboxed per the plan
+  given the 0.9% cap on any possible win.
+- **7 tail spans** (~2.5% combined): batch-triaged against the
+  dispatch-latency floor; 4 exceeded 3x but each plausibly wraps 2+
+  real sub-ops (e.g. `attn.rope_in` does both q AND kv rope calls) —
+  not pursued to individual depth given the small aggregate magnitude.
+
+**Final conclusion**: no async-fence-class hidden bug exists in
+prefill's non-GEMM remainder. It decomposes into legitimate real
+compute already near its own ceilings, one real-but-unshippable gap
+(hc_expand), and the already-separately-closed `moe.all_sum` collective
+cost (§2). **T7's 1.40x theoretical-headroom figure is reframed**: this
+is a genuine architectural/dispatch-count ceiling for this model's
+current design, not a to-be-found bug — the honest remaining margin
+from everything investigated is closer to ~1.3 percentage points
+(hc_expand, unshipped) plus low-single-digit-percent residual
+efficiency in already-near-peak GEMMs. See
+`docs/t10-final-decomposition-closed-2026-08-22.md` for the full
+writeup. **No further prefill dispatch/gate-hunting recommended**
+without new evidence (different architecture, different context
+regime, or a new methodology beyond span-profiling).
 
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
