@@ -1868,6 +1868,35 @@ impact. See `docs/cross-rank-allsum-skew-2026-08-22.md`. **T4 CLOSED**
 on the primary question; the tail asymmetry is flagged but not deemed
 worth independent follow-up at this time.
 
+**NEW (2026-08-22, session 4, T5): long-context (300K) GPU occupancy
+capture — a real, informative NEGATIVE result for its hypothesis:
+occupancy INCREASES with depth (82.4-82.7%), not decreases.** Fired a
+real 300K-token prefill + decode against the live cluster, captured
+fresh `xctrace` traces on both ranks (same methodology as T2). Real
+decode: 22.03 tok/s, consistent with T1's known 300K baseline (24.44
+tok/s). **Occupancy at 300K ctx (82.4-82.7%, both ranks) is HIGHER than
+short-ctx (78.6-78.9%, T2)** — directly contradicting the naive
+hypothesis this check set out to test ("decode slows at depth because
+the GPU sits MORE idle waiting on growing attention/KV work"). Gap
+median collapsed from ~90-95µs (short ctx) to ~1µs (300K) while
+mean/p95 stayed comparable — consistent with far more back-to-back
+sub-microsecond dispatch gaps within larger per-token attention
+computation, not growing idle time. **Real interpretation**: the
+context-scaling throughput drop (29.2→21.51 tok/s, T1) is NOT an
+idle-time problem — it's straightforward increased real per-token
+compute cost from larger KV/pooled attention shapes at depth,
+independently corroborating T1's flagged caveat that the roofline
+compute floor (6.51ms/token) excludes KV-read cost, which grows with
+context. Same per-kernel-attribution limitation as T2/T3 re-confirmed
+(channel names still 100% generic "Compute"). Real methodology gap
+noted: decode window was only ~9s (a `bench=True`-routing quirk meant
+EOS wasn't banned as intended) — result is internally consistent
+across both ranks but would benefit from a longer confirmatory capture
+if this becomes higher priority. See
+`docs/long-context-gpu-occupancy-2026-08-22.md`. **T5 substantially
+answered** — context-scaling slowdown mechanism identified as real
+compute growth, not idle time; does not reprioritize T6/T10.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
