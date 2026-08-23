@@ -1752,6 +1752,20 @@ attribution (isolating `moe.switch_mlp`/`GatherQMM`) needs
 `mx.metal.start_capture()`/Xcode GPU Frame Capture, not this `xctrace`
 template. See `docs/gpu-occupancy-clock-gap-postfix-2026-08-22.md`.
 
+**RETRACTED 2026-08-22 (session 5, P0) — the 27.7% figure below is a
+measurement artifact, do not cite it. The T3 bench called `mx.eval(y)`
+inside its per-iteration loop ("serial-sync"), charging ~172µs/call of
+host/dispatch overhead to the kernel. Re-measured with a
+dependency-chained graph (one eval per 300 calls) and cache-defeating
+rotated routing indices: 116-117µs/call = ~404 GB/s = 74% of peak
+(87% with fully independent calls). The ablation matrix (dense-vs-gather,
+bf16-vs-mxfp4-vs-affine8, B=1..32 sweep) found NO meaningful cost from
+gather machinery, dequant, or B=1 sparse access — efficiency is flat in
+B. Real switch_mlp cost ≈ 5.0ms/token ≈ 15% of decode wall time, not
+39%. NO kernel optimization lever exists here. See
+`docs/switch-mlp-bandwidth-artifact-retraction-2026-08-22.md`. Original
+(wrong) finding kept below for the historical trail only.**
+
 **NEW (2026-08-22, session 4, T3): switch_mlp/FusedSwitchGLU kernel
 achieves only 27.7% of theoretical peak bandwidth — confirmed via a
 real pipelined microbench at exact production shape/config.** Built a
