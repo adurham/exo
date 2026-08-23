@@ -1807,6 +1807,42 @@ reading the code once. Confirmed: no fix needed, no further
 investigation warranted on this specific angle. See
 `docs/prefill-fence-gate-audit-2026-08-22.md`.
 
+**NEW (2026-08-22, session 4, T7): prefill FLOPs compute-bound roofline
+— aggregate ~70% of ceiling on the GEMM-bound majority, but honest
+end-to-end figure is ~49.8% with a real, un-decomposed 1.40x-headroom
+tail flagged as genuinely open.** First attempt used a decode-style
+top-down formula (2×active_params/peak-TFLOPS/TP) and got a nonsensical
+"36-40% of peak" — caught via cross-check against already-measured
+per-span data: reconciling it implied the unstudied remainder would
+need -35.8% efficiency, physically impossible. Root cause: that formula
+is a decode-style weight-touch-only heuristic that ignores attention's
+context-length-scaling FLOPs (real evidence: prefill tok/s genuinely
+decreases with depth, 359.7→324.1 @100K→500K, which a flat top-down
+formula can't explain) — **do not reuse the decode roofline formula for
+prefill; the regime is fundamentally different (compute-bound and
+context-scaling vs decode's bandwidth-bound and context-independent).**
+Corrected bottom-up approach aggregated 5 already-measured real spans
+(attn.sdpa 13.6%wall/61.7%ceiling, attn.sdpa.compressed 11.8%/79.1%,
+attn.o_proj 10.0%/83.2%, attn.proj_qkv 8.9%/84.7%, moe.switch_mlp
+26.9%/62.6%), covering 71.2% of real prefill wall time, into a
+wall-time-weighted figure never before explicitly synthesized: **9.00
+TFLOPS achieved vs 12.86 TFLOPS blended ceiling = 70.0%.** A Fable
+consult caught two real gaps before this was accepted as settled: (1)
+70% is span-conditional, not end-to-end — the honest end-to-end figure,
+counting the 28.8% non-GEMM remainder as ~0 useful FLOPs against wall
+time, is **~49.8%**, implying up to **1.40x** theoretical headroom if
+that remainder were fully addressed — comparable magnitude to decode's
+real fence-fix win, explicitly flagged as NOT yet decomposed/checked
+for a similar hidden bug (only the `moe.all_sum` 9.5% slice of it is
+separately closed elsewhere); (2) the achieved-TFLOPS ceiling
+denominators for `attn.sdpa`/`attn.sdpa.compressed` were never audited
+for causal-masking/MLA-absorption FLOP-count inflation — flagged,
+not yet checked. See `docs/prefill-flops-roofline-aggregate-2026-08-22.md`.
+**Genuinely open next step**: decompose the ~19.3% non-all_sum portion
+of the 28.8% remainder (layer.attn_hc/ffn_hc, residuals, norms,
+attn.indexer, moe.gate/post_combine) with the same rigor as the decode
+async-fence investigation.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
