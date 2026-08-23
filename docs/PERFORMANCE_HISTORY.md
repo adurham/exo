@@ -1963,6 +1963,47 @@ already optimized; `layer.attn_residual`/`ffn_residual` (hc_expand,
 remain unread/unbenchmarked — a future continuation should apply the
 same rigor to those.
 
+**NEW (2026-08-22, session 4, T10 second sub-investigation):
+attn.indexer's fused top-k lever closed cheaply via code reading alone,
+no live test needed — second real NULL result.** Following the
+HyperConnection false lead, checked `attn.indexer`'s existing
+`EXO_DSV4_TOPK_FUSED` opt-in flag (live-toggleable via
+`/tmp/dsv4_nop_targets`, docstring claims "~5x speedup at the pipelined
+chain level") since a prior A/B of it (`docs/fork-notes.md`, older
+MTP-era session) tested only decode and might not have been re-checked
+for the current TP prefill regime. **Real finding, settled by reading
+the gate condition alone**: `_fused_topk`'s dispatch requires
+`scores.shape[1] == 1` — a structural decode-only shape condition
+(`scores.shape[1]` equals `L`, and real prefill chunks run at
+`L=2048`). **The fused top-k path cannot engage during prefill by
+construction, regardless of the flag's value** — no live cluster test
+was needed to settle this. Confirmed clean baseline via `ps eww` on the
+live runner (neither the env var nor the NOP-target file were active
+before this check). This upgrades the prior decode-only A/B from
+"possibly stale for current architecture" to "confirmed still fully
+applicable and closed" — real prefill top-k always uses `argpartition`
+(a separate, already-tested lever) or fallback `argsort+slice`, never
+`topk_fused`. See `docs/indexer-topk-fused-decode-only-2026-08-22.md`.
+
+**T10 STATUS AT END OF SESSION 4 — explicit stopping point and decision
+criterion for the next continuation**: two real, independently-
+investigated NULL results this session (HyperConnection training-gate,
+indexer fused-topk) — a mild signal the 28.8% non-GEMM remainder may be
+predominantly legitimate small-op overhead rather than containing one
+single async-fence-class hidden bug. Still genuinely unexplored:
+`layer.attn_residual`/`ffn_residual` (`hc_expand`, 4.4% combined — no
+training-gate applies, needs its own fresh investigation) and
+`moe.gate`/`moe.post_combine` (5.1% combined, not read at all this
+session). **Explicit criterion for next session** (stated now per a
+Fable consult's advice, so it isn't re-litigated from scratch): one
+more genuine NULL result from either remaining span would justify
+demoting T10 from "actively hunt for a hidden bug" to "accepted
+overhead, documented and closed," at which point T7's 1.40x
+theoretical-headroom figure should be reframed as a genuine
+architectural/dispatch-count ceiling rather than a to-be-found bug.
+Conversely, a real fixable issue in either remaining span keeps T10 as
+the standing highest-priority item per T6's recommendation.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
