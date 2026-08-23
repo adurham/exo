@@ -1897,6 +1897,35 @@ if this becomes higher priority. See
 answered** — context-scaling slowdown mechanism identified as real
 compute growth, not idle time; does not reprioritize T6/T10.
 
+**NEW (2026-08-22, session 4, T6): MTP/DSpark TP-port decision gate —
+NOT recommended, for two independent reasons, one of which is a
+significant previously-unflagged staleness finding.** Per the plan's
+gate ("<1.5x realistic ceiling → MTP becomes highest-EV"): (1) a narrow
+kernel-fix-only ceiling estimate using T3's real switch_mlp finding
+(38.9% of wall time, 27.7%→optimistic-65% of peak BW) gives **1.29x**
+— below the 1.5x threshold, but incomplete (single-kernel-only, no
+decode-side equivalent of T10's remainder investigation exists yet).
+(2) **More significant**: the entire "MTP/DSpark is worth porting"
+premise rests on `docs/fork-notes.md`'s 2026-07-23 PP+DSpark sweep
+(27-33 tok/s single-request) compared against a TP baseline of
+"~15-20 tok/s" — **that TP baseline is now known stale**, predating
+both the MoE gate+up fusion AND the async-fence fix (+58-67%, this
+session's headline finding). Redone honestly: PP+DSpark's unchanged
+27-33 tok/s vs current TP's real 29.2-31.1 tok/s (T1) is only **-8% to
++13%**, not the +35-120% the stale comparison implied. **Nobody has
+re-measured PP+DSpark since the fence fix** — it's equally plausible
+PP+DSpark has its own undiscovered async-fence-class bug as it is that
+TP has caught up. Recommended cheap next step (not executed this
+session): re-run the 2026-07-23 PP+DSpark sweep as-is against current
+cluster state before any porting decision — resolves the premise
+itself before committing to multi-day TP-native speculative-decode
+engineering. See `docs/mtp-dspark-tp-port-decision-gate-2026-08-22.md`.
+**Standing recommendation**: T10 (prefill's 28.8% non-GEMM remainder,
+real quantified 1.40x headroom via a methodology with a proven track
+record this session) remains the single highest-EV item on the active
+list — MTP/DSpark should not be prioritized ahead of it without first
+doing the cheap re-validation sweep flagged above.
+
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
 blocked pending `py-spy` install approval. Approval was given; `py-spy`
