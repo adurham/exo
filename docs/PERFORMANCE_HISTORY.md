@@ -1878,6 +1878,20 @@ consistent with rank0's slightly higher mean (66.3µs vs rank1's
 conclusion), but a real, non-random, direction-consistent pattern —
 root cause (TCP-coordinator role, hardware/thermal asymmetry, or
 upstream scheduling artifact) not investigated further given the small
+impact.
+**UPDATE (2026-08-22, session 5, P6): aggregate impact QUANTIFIED from
+the same traces** (`docs/allsum-straggler-aggregate-impact-2026-08-22.md`,
+calc in `/tmp/p6_skew_calc.py`): summing per-call `max−min` over the 93
+severe events gives 0.595s of fast-rank idle wait = 14.3% of total
+effective all_sum time = **~1.7% of total decode wall time (upper
+bound; ~1.3% attributable to the rank0-leaning portion)** — this
+EXCEEDS the 0.5% "ignore forever" threshold at the upper bound, but is
+an upper bound (assumes lateness is fully removable overhead, not
+arrival jitter — for scale, summing max−min over ALL pairs gives 7.4%,
+mostly un-removable jitter). Verdict: not conclusively ignorable;
+bounded future investigation (correlate severe-event timestamps vs
+rank0 master/control-plane activity) justified only if decode wins are
+needed again. No action taken within the P6 timebox by design.
 impact. See `docs/cross-rank-allsum-skew-2026-08-22.md`. **T4 CLOSED**
 on the primary question; the tail asymmetry is flagged but not deemed
 worth independent follow-up at this time.
