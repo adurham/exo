@@ -2340,6 +2340,423 @@ closed:
   scheduling — not yet further decomposed, now the correct next target).
   See §2.7 and `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md`.
 
+**NEW (2026-08-23, P3 worker A): attention-path read bandwidth is NOT the
+500K decode decay — code-derived byte inventory, and the TP all_sum
+payload is provably depth-independent.** Pure code/config derivation (no
+cluster load; read-only `cat` of the checkpoint config on m4-1). Derived
+the exact per-decode-step attention memory-read inventory as a function
+of context depth L: **`bytes_per_rank(L) = 5.298 GB + 1930 B · L`** →
+5.491 GB @100K, 5.978 GB @352.6K, 6.263 GB @500K. Per-component scaling
+laws: core attention on the 21 `SparseCompressedAttention` layers is
+**CONSTANT in L** — it gathers exactly `index_topk=512` pooled rows
+(`deepseek_v4.py:2527-2549`, OPT-10 comment: "does NOT scale with P");
+the 2 `LocalAttention` layers are constant (128-entry rotating window);
+the 20 `CompressedAttention` layers are linear but at slope L/128. **The
+only material depth term is the Indexer's full-pool score GEMM** —
+21 layers × L/4 entries × 128 dims × bf16 = **1344 of the 1930 B/token
+(70%)** (`deepseek_v4.py:3800,3833`), plus 42 B/token for the exact-topk
+kernel's 4 strided passes over the scores array (`deepseek_v4.py:3455,
+3480,3510,3545`). KV dtype at runtime is confirmed **bf16, unquantized**
+(`start_cluster.sh:151` `EXO_KV_CACHE_BITS:=0`; the 0-sentinel is honored
+at `mlx/cache.py:2393`). **PREDICTION, not measurement**: at the
+repo-measured 297 GB/s streaming BW
+(`docs/dsv4-attention-kernel-efficiency-2026-08-18.md:28`) the byte
+deltas imply only **+1.64 ms/token going 100K→352.6K** and +0.96 ms
+going 352.6K→500K — ~3% of the ~54.6 ms/token baseline. **all_sum
+verdict: shape is independent of L.** The ONLY collective active in TP
+single-token decode is `moe.all_sum` (`deepseek_v4.py:3007`) at a fixed
+`(1, 1, 4096)`; both attention-tail all_sums are dead because production
+sets `EXO_DSV4_ATTN_ALLSUM:=0` (`start_cluster.sh:1755`), and both
+seq-split all_gathers need `L >= 16` (`deepseek_v4.py:225`) so never fire
+at decode. `auto_parallel.py:1141-1152` confirms experts are sharded by
+intermediate WIDTH, so the reduced tensor is fixed "regardless of which
+experts fired". If measured all_sum time grows with depth it must be
+**arrival skew, not payload**. **Incidental correction worth flagging**:
+exo never calls mlx-lm's `Model.shard()` — its TP path is MoE-only
+(`auto_parallel.py:1032-1034`), so attention is fully REPLICATED and
+TP=2 does not halve any attention byte figure;
+`docs/dsv4-attention-kernel-efficiency-2026-08-18.md:38,52-55` assumes
+the head-halving and is wrong on that specific point (depth verdicts
+unaffected). **Scope discipline: this rules out ONE mechanism
+(attention-path read bandwidth), not the attention path** — the indexer
+scan may still be latency/occupancy-bound at large P, which bytes cannot
+capture. See `docs/p3-worker-a-kv-read-inventory-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 worker B1): fresh live depth anchors with a REAL
+EOS ban — the depth penalty is a UNIFORM per-token shift, and
+`decode_probe.py`'s EOS ban is a no-op (root cause of T5's 9s window).**
+Three live probes, one HTTP POST each, cluster untouched (`RunnerReady`
+before/after). Real depths from `usage.prompt_tokens`, decode window =
+last−first streamed event so prefill is excluded by construction:
+**520 tok → 29.63 tok/s (33.75 ms/tok), 67.5s window; 100,026 tok →
+27.94 tok/s (35.79 ms/tok), 71.6s; 352,599 tok → 23.48 tok/s (42.59
+ms/tok), 85.1s.** All three delivered exactly 2000/2000 completion
+tokens with `finish_reason=length` and `cached_tokens=0`. **Probe bug
+found**: `bench/decode_probe.py` posts `{"bench": true}` to
+`/v1/chat/completions`, but `ChatCompletionRequest` has **no `bench`
+field** — pydantic silently drops it, so EOS is never banned; the ban
+(`batch_generate.py:2658`) only fires via the separate
+`/bench/chat/completions` route. Verified side-by-side live: `/v1`+bench
+gave `finish=stop` at 56/60 tokens, `/bench` gave `finish=length` at
+60/60. **This is the mechanism behind T5's flagged "`bench=True`-routing
+quirk" 9s window** — T5 recorded the symptom, not the cause. **Main
+finding — the depth penalty is uniform, not bursty**: the entire gap
+distribution translates rightward (p10 18.0→26.4ms, p50 31.9→39.2ms,
+mean 36.6→42.9ms short→deep) while the tail does NOT fatten (outliers
+>3× median: 1.25% short vs 0.55%/0.76% deep) and dispersion FALLS
+(stdev 55.6→16.3→19.6ms); the only multi-second stalls are at SHORT
+context. This corroborates T5's "real compute growth, not idle time"
+conclusion **by a different instrument on a 9x longer window**,
+discharging its caveat. Decay: **+8.84 ms/token total (−20.8%) 520→352.6K**,
++2.05 ms/100K over the first 100K and +2.69 ms/100K over the next 253K
+(mildly super-linear, not saturating). **vs T1**: short and 100K
+reproduce within noise (+3.8% @100K); the deep point is **+9.2% above
+T1's 21.51** — NOT claimed as an improvement, most likely T1's deep
+number was measured on the same short-window/unbanned-EOS path;
+confounds (window length, prompt content, n=1) not separated. **Note for
+worker A**: its prediction arithmetic used a "~54.6 ms/token baseline"
+at depth; the real measured value here is **42.59 ms/token @352.6K**, so
+its ~3% bandwidth share should be recomputed against 42.59. Limitations:
+n=1 per depth, 300K not re-run. New additive probe
+`bench/p3_depth_anchor_probe.py` (read-only vs cluster); `decode_probe.py`
+deliberately NOT patched mid-investigation — **recommend repointing it at
+`/bench/chat/completions` and re-examining past results that used it**.
+See `docs/p3-worker-b1-live-depth-anchors-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 reviewer R1): independent re-verification of workers
+A and B1 — both hold; one incidental number in A refuted.** Re-derived
+every central claim from the primary sources (code, an independent local
+copy of the -0731 `config.json`, and the workers' own raw pasted output);
+read-only, no cluster contact. **Worker A: 6/6 central claims CONFIRMED.**
+MoE-only TP / replicated attention holds — `grep '\.shard(' src/exo/`
+returns one unrelated hit, and mlx-lm's `n_heads //= N`
+(`deepseek_v4.py:7170`) is reachable only from `sharded_load`
+(`mlx_lm/utils.py:759`), which exo never calls; **`docs/dsv4-attention-kernel-efficiency-2026-08-18.md:38,52-55`
+is confirmed WRONG on the head-halving.** bf16-unquantized KV, top-k=512
+bounded gather, the 21-sparse-layer L/4×128 indexer scan (census recomputed
+from config: 21×r4 / 20×r128 / 2×r0), and L-independent all_sum payloads all
+verified at their cited (or ±3-line) locations. **The byte arithmetic is
+exactly self-consistent**: components sum to 5,297,553,408 + 1930.25·L, giving
+5.978 GB @352,599 and +1.6417 ms @297 GB/s — no table-vs-formula drift.
+**REFUTED**: A's §4 aside that 6.9 KB/token is "~74× smaller than a naive
+dense-MLA estimate (44 KB/token)" — the real ratio is **6.39×**. Cosmetic
+only; it touches no formula and was never carried into this file. **Worker
+B1: probe bug CONFIRMED from code alone** — `ChatCompletionRequest`
+(`api/types/api.py:243`) has no `bench` field and no `ConfigDict`, so
+pydantic's default `extra='ignore'` drops it; only `/bench/chat/completions`
+(`main.py:1192-1197`) force-sets it for `batch_generate.py:2658`. **Anchors
+arithmetically sound**: all three tok/s, ms/token and deltas reproduce from
+the raw windows to ±0.03, decode-only accounting verified by the identity
+`wall − TTFT == decode window` at every depth, and all three points show
+2000/2000 with `finish_reason=length` and `cached_tokens=0`. Uniform-shift
+distribution claims are internally consistent. **Both worker entries above
+are correctly placed and free of drift vs their source docs.** One carry-
+forward for the synthesis: use B1's measured **42.59 ms/token** denominator,
+so A's attention-read share is **~3.9%**, not the ~3% its entry states.
+See `docs/p3-reviewer-r1-verification-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 worker C): attention-path kernel wall time MEASURED at
+depth — kernels are ~2x bigger than the byte model but explain only ~43% of
+the live +6.80 ms; scaling above 100K is LINEAR, not superlinear.** Built one
+real instance of each production attention class (`v4_attention_factory`, real
+mxfp8/affine quantization per `make_quantization_config`, bf16 KV, all
+`start_cluster.sh` env defaults) with a synthetic pre-filled KV/pool cache and
+timed 256 consecutive real B=1 L_q=1 decode steps, then scaled by the true layer
+census (2x r0 / 21x r4 / 20x r128). Run on **`adams-mac-studio-m4-2.local`
+(rank1, production silicon)** from `/tmp`; nothing under `~/repos/exo` on either
+studio touched; both runners `RunnerReady` before AND after; bench peak GPU
+allocation **0.96 GB**. **43-layer attention-path ms/token: 12.88 @520, 16.57
+@100,026, 19.13 @352,599, 21.52 @500,000.** Δ(100K→352.6K) = **+2.56 ms**
+(+2.96 and +3.34 in two earlier runs under a different fencing mode) vs Worker
+A's byte-model +1.19–1.64 and vs the live **+6.80**. So attention explains
+**38–49%** of the live depth cost; **~3.5–4.2 ms/token lives outside the
+attention block.** Absolute scale validated independently: the 520-token point
+(12.88 ms) matches A's constant term 5.298 GB / 405 GB/s measured streaming =
+13.1 ms to within 2%, and attention is 45–46% of B1's live per-token budget at
+both depths — no 2–4x microbench/production mismatch of the kind
+`dsv4-attention-kernel-efficiency-2026-08-18.md` warns about. **Scaling verdict:
+LINEAR** — 3-point fit above 50K is `15.22 + 1.21 ms/100K` with residuals
+within ±2% (two other runs ±2.4%), and the marginal rate goes +3.71 → +1.01 →
++1.62 ms/100K, i.e. a large fixed 520→100K step then a flat regime. **B1's
+mildly superlinear end-to-end decay (+2.05 then +2.69 ms/100K) is NOT reproduced
+by the attention kernels.** Component attribution: `_indexer_score` is the only
+monotonic depth term (+0.405 ms x21 over the range) and it is **already at the
+bandwidth roof — 477 GB/s @352.6K, 558 @500K, vs 405 GB/s measured streaming —
+so it has zero headroom**; `_exact_topk` (+0.088) and compressed-SDPA (+0.261)
+are latency-bound (8–12% of peak) but too small to matter; sparse gather and
+sparse core SDPA are **flat in L**, empirically confirming A's O(1) claim.
+Achieved GB/s *rises* with depth for every kernel — the kernels get **more**
+efficient at depth, the opposite of the "kernels degrade at L" hypothesis.
+Fork's own `EXO_DSV4_SECTION_TIME` sub-span fences agree: of the sparse layer's
+depth growth, **94% is the `indexer` sub-span**; `proj_qkv`/`qk_prep`/`out_proj`/
+`compressor` are flat. **Methodological finding worth carrying forward: fencing
+discipline changes the answer by up to 2x.** A per-step `mx.eval+synchronize`
+adds a measured **0.197 ms round-trip floor** (= 8.5 ms/token over 43 layers);
+and naively chaining K steps under ONE fence keeps K pool-storage views alive,
+defeating `PoolingCache`'s donation (`cache.py:1547-1556`) and inflating the
+352.6K number as K grows (0.461→0.494→0.555 for K=4/8/32) while barely moving
+100K. Use per-step `mx.async_eval`, which is what production does. Residual
++4.24 ms/token is NOT attributed here — candidates are MoE all_sum arrival skew,
+inter-layer pipelining loss this bench structurally cannot see (biases the
+attention estimate DOWNWARD), 85 GB-resident allocator pressure, and
+intermittent pool-write donation failure (an isolated probe shows that failure
+mode costs up to +6.35 ms/token over the same range — most testable follow-up).
+New additive benches `bench/p3_attn_depth_walltime_microbench.py` and
+`bench/p3_attn_subspan_attribution.py`; no existing script modified; nothing
+committed. See `docs/p3-worker-c-attn-kernel-walltime-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 worker C2): live two-rank GPU busy/idle capture at ~100K
+— occupancy 82.98%/83.06%, idle ~6.1 ms/token, ranks symmetric to 0.03
+ms/token; the 352.6K counterpart was NEVER CAPTURED because the capture itself
+probably killed a runner. Decision rule UNRESOLVED.** Reused T2/T5's read-only
+`xctrace --template 'Metal System Trace' --attach` methodology on both live
+runner PIDs (m4-1 46718, m4-2 45206), driven by B1's `build_prompt` + the
+EOS-banning `/bench/chat/completions` route, with the capture fired 6.02s AFTER
+the first decode token (prefill never traced, per §12's HAZARD) and both ranks
+attached within 0.40s. **Measured**: occupancy **82.98% (rank0) / 83.06%
+(rank1)** over a 50.55s decode-interior window, 214,182/213,816 own-process
+interval-union rows; in-window decode **38.02 ms/token** traced (median gap
+35.79 ms) vs B1's 35.79 ms/token untraced. **DERIVED** (arithmetic, kept
+separate): on B1's untraced anchor, busy **29.70/29.73** and idle
+**6.09/6.06 ms/token**, i.e. ≤0.142 ms per all_sum if ALL idle were the
+collective (it is not — ordinary dispatch latency lives there too). **The two
+ranks agree to 0.08pp of occupancy — no measurable arrival skew at 100K.**
+**T5's 9s-window gap is closed at 100K, not at 300K**: a 5.6x longer window
+confirms T5's qualitative claim (deep ~83% >> short-ctx 78.6-78.9%) and its
+gap shape (median 0.92µs vs ~90µs short-ctx), but my 100K figure sits slightly
+ABOVE T5's 300K 82.43-82.70%, suggesting a step-then-plateau, not monotone
+climb. **Decision rule NOT evaluable on one depth.** Cross-run/cross-window
+SUGGESTIVE only: derived idle is 7.21/7.13 (short, T2) → 6.09/6.06 (100K, this)
+→ 7.48/7.37 (300K, T5) ms/token — a 6.1-7.5 band with NO monotone growth while
+busy climbs 26.5→29.7→35.1; that is the direction of the "collective-wait ruled
+out" branch, but three windows (30s/50s/9s), T5's non-EOS-banned 9s point, and
+n=1 everywhere forbid calling it. **moe.all_sum verdict downgraded**: payload
+L-independence stands (worker A, code-verified); wait-growth is NOT bounded —
+only bounded ≤6.09 ms/token total idle AT 100K, symmetric. **INCIDENT + safety
+update**: the traced 50s were metronomic (no stall >200ms), then 6.5s AFTER the
+tracer detached a cascade of 12 stalls (200ms-2.6s) hit and rank1 died with
+`[METAL] Command buffer execution failed: Caused GPU Timeout Error` in
+`mx.async_eval(y)`; instance now `instances: []`, one `RunnerFailed` — NOT
+relaunched (hard rule). Signature matches §12's post-detach pattern (stalls
+began 2-3s after detach there). Suspected mechanism is **stop/finalize** load,
+not recording: each trace was **10 GB while recording**, finalizing to 1.7 GB
+over ~25 min, on an 85 GB-resident node. **This narrows §12's "decode-window
+captures remain fine" claim — it does not extend to 50s captures at depth; the
+risk scaler looks like trace size/duration, not prefill-vs-decode** (T5's 300K
+capture was deep but only 9s and survived). Retry protocol: 12-15s windows,
+decode-interior, deep point FIRST, expect ~25min finalization and post-detach
+pressure. powermetrics SKIPPED (no passwordless sudo on either studio). n=1;
+no `usage` block returned (depth inferred: same builder/target predicted
+100,021 here, landed 100,026 on B1's identical target); channel names 99.98%
+generic "Compute" so no per-kernel attribution, same limit as T2/T3/T5. Studio
+`/tmp` traces+XML deleted (~24 GB reclaimed); nothing committed. See
+`docs/p3-worker-c2-depth-busy-idle-capture-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 worker D): rank1 Metal GPU timeout during C2 capture —
+crash forensics say MEMORY PRESSURE, not thermal, not a pre-existing fault;
+kernel logged 2 GPURestarts. NEW OPEN ITEM — instance still DOWN, needs
+restoring.** **Host↔rank correction first: the dead runner was PID 46718 on
+`adams-mac-studio-m4-1.local`, which was rank1 this run — C2's doc has the
+labels swapped** (proved by each node's own `mlx_distributed_init: Starting
+initialization for rank N`, the jaccl coordinator bind/dial roles, and the PID
+carrying the Metal error). C2's `100k_rank0`/`100k_rank1` occupancy blocks are
+therefore swapped too; since they agree to 0.08pp, **no C2 conclusion changes**.
+**Crash**: 13:51:43.416 CDT, `mx.async_eval(y)` in the DSv4 MoE ffn
+(`deepseek_v4.py:3061`) on a plain `L_q=1` decode step (`inputs[:, None]`) at
+~100K context, 2h41m into the runner's life. **Full traceback recovered** and
+the failure is kernel-real, not bookkeeping: `kernel[0] (IOGPUFamily) … Deny
+submissions/ignore app[] with **2 GPURestarts in 398 submissions**` at
+13:51:48. Note `MTL_DISABLE_TIMEOUT=1`/`MTL_COMMAND_BUFFER_TIMEOUT=0`/
+`EXO_DISABLE_METAL_TIMEOUT=1` were all set and **a timeout fired anyway** — those
+knobs don't cover the IOGPUFamily watchdog. **Telemetry**: thermal **NEGATIVE**
+(zero events either node). Memory **POSITIVE and tightly aligned** — jetsam
+cascade at T−31s (≥25 daemons, `JETSAM_REASON_MEMORY_LONGIDLE_EXIT`, compressor
+≈23.6 GB), then **26 swapfiles created in 18s ending in the same second as the
+GPU timeout**. Baseline kills the "it always swaps" objection: m4-1's swapfile
+bursts today occur **only** at 03:16-03:24, 10:55-11:10 and 13:51 — every one an
+xctrace window; **the box does not swap in ordinary operation**. History clean:
+**0 GPU-timeout/GPURestart events in 7 days on m4-1 and ever on m4-2**, 0 across
+all 5 rotated `exo.*.log.zst`. Peer rank0 saw **no jaccl/RDMA fault** — healthy
+37.5-38.5ms steps until one 85.10ms step at 13:51:13.975 (waiting on its dying
+peer), then blocked in `wait_for_one` until the 45s hang-watchdog SIGKILLed it;
+its thread dump gives **footprint 90.3 GB, peak 115.3 GB of 137 GB**.
+**RANKED**: (1) xctrace stop/finalize **memory** pressure on a ~90GB-resident
+node — `runningboardd` logged xctrace is **"not RunningBoard jetsam managed"/
+"not memory-managed"**, so its 10 GB buffer takes RAM with no OS backstop;
+(2) latent MoE-kernel fragility under allocator stress — **not separable** from
+(1) with 99.98% generic "Compute" channels; (3) coincidence/pre-existing —
+**refuted**; (4) finalize **disk** I/O — demoted, the apfs activity in-window is
+swapfile truncation, i.e. an *effect* of memory pressure (refines C2's I/O
+suspicion to a memory axis); (5) thermal — **ruled out**. **PRODUCTION vs
+TRACING: primarily a TRACING-PROCEDURE risk** — trigger chain requires the
+tracer's buffer, the box only swaps when tracing, and 7 days of untraced deep
+decode (incl. worker C's 352.6K/500K benches) produced zero such events. **But
+the caveat is real and P3-relevant**: 90.3 GB resident / 115.3 GB peak of 137 GB
+at 100K means headroom is thin, and nothing here proves an untraced 500K decode
+can't reach the same jetsam/swap regime on its own — measure it directly, don't
+infer it from this crash. **Next time**: background `powermetrics` logger (the
+one lever that would separate cause 1 from 2), 1Hz `vm_stat`/`memory_pressure`/
+`swapusage` sampling through finalize, per-N-step `mx.get_active_memory()`, and
+a live `GPURestart` tripwire; budget traces against **free RAM**, not just wall
+time. **CLUSTER STATE (read-only, not restored)**: `instances: {}`; `6ac91846`
+(m4-1/rank1) `RunnerFailed`; `f85456ee` (m4-2/rank0) shows `RunnerRunning` but
+**the process is gone** (SIGKILL -9 13:52:20) — stale state. Both `python -m exo`
+supervisors alive with full env; **memory fully released on both nodes (~133.5 GB
+of 137.4 GB free, 97%, swap drained)**; no zombie runner, no stuck tracer, GPU
+recovered. Needs a fresh DSv4-Flash instance placement — cluster processes do
+**not** need restarting. Nothing modified/killed/committed on either studio; all
+`/tmp` scratch removed. See
+`docs/p3-worker-d-metal-timeout-crash-forensics-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 worker C3): PoolingCache donation-failure hypothesis
+TESTED and REFUTED — production does NOT defeat donation. But the real
+production cache class is `BatchPoolingCache`, which reallocates the ENTIRE
+pool via `mx.concatenate` on EVERY flush: +1.91 ms/token of depth cost, ADDITIVE
+with worker C's kernel delta, no double-count.** Worker C flagged donation
+failure as the most testable candidate for the ~3.5-4.2 ms/tok residual (live
++6.80 minus kernel +2.56-+3.34). **Tested, not cited.** Method: drove the REAL
+production decode loop (exo `ExoBatchGenerator.step()` →
+`self._mlx_gen.next()`, `batch_generate.py:4228` → mlx-lm `BatchGenerator._next()`
+→ `GenerationBatch._step()`, `generate.py:1564`) over all 43 REAL DSv4
+attention blocks + real `model.make_cache()` pre-filled to depth, real sampler +
+real bench-mode `ban_token_ids`, production env verified off the LIVE rank-1
+process command line. MoE replaced by a depth-INDEPENDENT stub (out of scope,
+cancels exactly in every delta) — **residual living in MoE-at-depth or
+collective interplay is NOT covered**. Harness on `adams-mac-studio-m4-2`,
+12.9 GB peak, 3 reps/point (spread ≤0.016 ms/tok). **KEY STRUCTURAL FINDING**:
+`insert()` does not keep the caller's caches — `_merge_caches`
+(`generate.py:1261`) converts `PoolingCache` → **`BatchPoolingCache`**
+(`cache.py:1822`), verified at runtime (`LIVE CACHE CLASS: BatchPoolingCache`).
+Worker C's microbench measured `PoolingCache`, which grows storage in
+**256-entry chunks** (`cache.py:1522-1528`, so growth costs 1 flush in 256);
+production's `BatchPoolingCache` grows via `mx.concatenate` to **exactly
+max_pool, i.e. +1 entry, EVERY flush** (`cache.py:1899-1903`) — an
+unconditional O(P·D) copy donation can never address. **MEASURED** (mod-4
+flush-phase split, amortized ms/token, 100,026 → 352,599): (a) production as-is
++0.557 → **+2.504**; (c) donation maximally enabled (sync per step) +0.553 →
++2.493; (b) donation deliberately defeated (`EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES=1<<40`)
++1.850 → +3.437; (d) **concat suppressed** (pool pre-padded) +0.019 → **+0.055**.
+**(a)≈(c) within 0.011 ms/tok at both depths → donation is RULED OUT as the
+residual's source, plainly.** (a)→(d) removes **98%** of the pool cost and the
+mod-4 periodicity vanishes (p90 51.72→42.11 ms at 352.6K); per-step transient
+`get_active_memory` drops **107.1 MB → 10.1 MB (10.6x)**, matching the 90.3 MB
+compressor + 22.6 MB indexer pool exactly. Control (e) (concat suppressed AND
+donation defeated) leaves +1.00 → +1.07 — **FLAT in depth**, i.e. the residual
+donation-sensitive cost is fixed overhead, not O(P·D). **ADDITIVITY**: concat
+cost (a)−(d) = +0.538 @100K → +2.449 @352.6K, **depth delta +1.91 ms/tok**.
+Disjoint from C's +2.56 (C's 256-step window amortized its growth 1/64 vs
+production's 64/64; had C paid it, C's r=4 layer would have been ~+0.48 ms/step
+higher, which C did not observe). **C (+2.56) + C3 (+1.91) = +4.47, vs B1 live
++6.80 — NO overshoot, no double-count.** Explained fraction rises 38-49% →
+**66%**; unexplained residual narrows **~3.5-4.2 → ~1.5-2.3 ms/tok** (still
+open: MoE all_sum skew, inter-layer pipelining, 85 GB allocator regime,
+MoE-at-depth). **NEXT ATTACK VECTOR (needs relaunch authorization)**: one-line
+change at `cache.py:1899-1903` making `BatchPoolingCache` growth step-chunked,
+gated by new `EXO_DSV4_POOL_GROW_STEP` (=1 is today's behavior bit-for-bit; =256
+matches `PoolingCache.step`). Safe by the existing `_visible_width` mask clamp
+(`cache.py:2174-2176`). **Expected live signature** via B1's probe: 352.6K
+42.59 → **~40.14 ms/tok** (23.48 → ~24.91 tok/s, +6.1%), 100K 35.79 → ~35.25;
+depth delta +6.80 → **~+4.89**. The **asymmetry (deep helped ~4.5x more than
+shallow) is the diagnostic**; p90 at 352.6K should collapse ~9-10 ms toward p50.
+**Falsification stated up front**: no change at 352.6K ⇒ mechanism is off the
+live critical path and +1.91 is a stub-MoE-schedule artifact. Instance was DOWN
+throughout — **no relaunch, no runner touched, no live A/B possible; all numbers
+are harness-on-production-silicon, not live**. Nothing under `~/repos/exo` on
+either studio touched; nothing committed. See
+`docs/p3-worker-c3-donation-failure-insitu-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 reviewer R2): independent verification of workers C, C3
+and D — C3's mechanism and arithmetic HOLD, but its A/B correctness rationale
+is WRONG and one sanity number is 4x off; C's 520→100K delta OVERSHOOTS the
+live delta and its doc never says so.** Read-only re-derivation from code and
+the workers' own raw output (R1's A/B1 pass not repeated). **CONFIRMED**:
+C3-1 `_merge_caches` (generate.py:1261) → `PoolingCache.merge` → **`BatchPoolingCache`**
+(cache.py:1823); C3-2 the growth asymmetry is real — `max_pool = max(_pool_lengths)
++ max_new` so the concat pads **exactly +1 entry every flush** (cache.py:1899-1903)
+vs `grow_by = max(self.step=256, …)` 1-in-256 (cache.py:1517-1528), and
+`BatchPoolingCache` *cannot* carry slack because its length IS its capacity
+(`size()` = `pooled.shape[1]`, :2532) while `PoolingCache` hides slack behind a
+storage/offset view (:1360-1364); C3-3 all four no-holder cites (generate.py:1639,
+:1651, batch_generate.py:971-981); C3-5 all arithmetic exact (0.557−0.019=0.538,
+2.504−0.055=2.449, Δ**+1.911**, C 2.56+1.911=**4.471**=65.8% of live 6.80,
+residual 2.33; (a)≈(c) to 0.004/0.011; mod-4 spikes verified at indices ≡3 mod 4
+in C3's raw series; pool 90.27+22.57=112.8 MB vs 107.1 observed). **REFUTED (C3-4,
+matters — PM is forwarding this A/B)**: growing the pool past `max_pool` is NOT
+made safe by the `_visible_width` clamp — in both branches `visible = self.pooled`
+**in full**, so `_visible_width == P` and `min(P, _visible_width)` (:2175-2176) is
+a **no-op** on a trailing pad. The real invariant is the **length mask**
+`pool_idx < pool_lengths` (:2177-2181). And `PoolingCache` relies on no such
+invariant — it has **zero** `_visible_width` references (all 11 are inside
+`BatchPoolingCache`). Patch still looks safe (pads score `finfo.min`, k=512 ≪ P),
+but **the stated rationale must be replaced**, and the A/B has an unflagged
+confound: padding flips `make_mask` from `None` to a `valid` array, switching the
+indexer to the full `mx.where` path (deepseek_v4.py:3840/3858/3883) — arm B changes
+two things, not one. **REFUTED (C3-6, cosmetic)**: "C's r=4 would have been ~+0.48
+ms/step higher, ~+10 ms/token over **43** layers" — +10.014 is the whole-step
+excess for all **21** sparse layers, and C's 0.5403 is a 256-step average with only
+64 flushes, so the like-for-like adder is **+0.12 ms/step → +2.50 ms/token over 21
+layers** (= C3's own concat cost, self-consistent). Still 13% of C's 19.13, far
+outside its ±2% residuals, so **disjointness holds on corrected arithmetic**.
+**C-1 CONFIRMED** (12.88/16.57/19.13/21.52, Δ+2.562, +2.962/+3.344 alt-fencing,
+fit 15.2182+1.2139/100K resid +0.82/−1.92/+1.08%; totals recompute from per-class
+medians to 19.129). **C-2 CONFIRMED AND UNADDRESSED — carry as a caveat**: C's
+kernel delta over 520→100K is **+3.69 ms** but B1's *live end-to-end* delta on the
+same span is **+2.04 ms**; a component cannot outgrow the whole budget. C's doc
+compares the two spans only in *shape* (line 443-451, "the reverse curvature") and
+never notices the overshoot; §6's sanity check only inspects the 100K/352.6K
+points. This bounds how literally C's absolute deltas read — quote "explained ~66%"
+with a one-sided error bar, not as a measurement. **D-1/D-2/D-3 CONFIRMED**: the
+rank correction is backed by each node's own `mlx_distributed_init` line plus three
+independent corroborations, the timeline is internally consistent (43.416 Metal →
+48.043 GPURestarts → 52:04.34 reap → 52:06.17 peer SIGKILL, and the 45s watchdog
+maths out from the 13:51:13.975 last-healthy step), and §4/§5/§8 explicitly separate
+"best supported" from "not separable"/"proven" while arguing against its own
+convenient conclusion. **But C and C3 both carry the SAME host↔rank swap D fixed
+in C2** — both call m4-2 "rank1"; D proves m4-2 was **rank 0** this launch.
+Label-only (attention is replicated; C3 is single-rank B=1), but don't propagate it
+a third time. **HISTORY FILE INTACT**: all seven P3 entries present, contiguous,
+chronological, none duplicated/truncated, zero conflict markers — A 2343-2383,
+B1 2385-2424, R1 2426-2456, C 2458-2506, C2 2508-2553, D 2555-2609, C3 2611-2666.
+No drift vs source docs on any headline number. **Two inherited errors live in this
+file and need fixing**: line ~2648 repeats the "+0.48 ms/step" slip, and line ~2656
+repeats "Safe by the existing `_visible_width` mask clamp" — the second is a
+correctness rationale attached to a patch someone will write. Not fixed here
+(read-only). See `docs/p3-reviewer-r2-verification-2026-08-23.md`.
+
+**NEW (2026-08-23, P3 SYNTHESIS): 500K-context decode decay decomposed —
+~66% explained (attention/indexer kernels +2.56 ms/tok + BatchPoolingCache
+per-flush concat +1.91 ms/tok of the live +6.80 ms/tok 100K→352.6K),
+residual ~1.5-2.3 ms/tok open; all_sum payload proven L-independent;
+core sparse attention proven O(1); scaling LINEAR, not superlinear.**
+Full synthesis: `docs/p3-synthesis-500k-decode-decay-decomposition-2026-08-23.md`.
+Key corrections to the historical picture: (1) the "31% drop" was partly
+probe artifact — decode_probe.py's EOS ban silently never worked via /v1
+(no `bench` field in ChatCompletionRequest), so historical deep anchors
+had short decode windows; clean 2000-token-window anchors give 29.63 →
+27.94 → 23.48 tok/s (520/100,026/352,599 real tokens) = **-20.8%**
+short→352.6K. (2) The depth cost is NOT idle time (C2: occupancy ~83%
+both ranks at 100K, idle ~6.1 ms/tok, ranks symmetric to 0.08pp — no
+arrival skew; corroborates T5 on a 5.6× longer window) and NOT KV-read
+bytes alone (worker A: 1930 B/ctx-token/step linear slope predicts only
++1.19-1.64 ms; core attention reads top-k=512, O(1) in L). It is: real
+indexer L/4-pool scan kernel time (linear, already at/above streaming-BW
+ceiling — no kernel headroom) + an O(P·D) `mx.concatenate` pool realloc
+on EVERY 4th-token flush in `BatchPoolingCache` (production converts
+PoolingCache→BatchPoolingCache at generate.py:1261; chunked-growth
+asymmetry vs cache.py:1517-1528 confirmed by R2). Donation-failure
+hypothesis REFUTED in-situ (production loop ≈ donation-optimal within
+0.011 ms/tok). NEXT: (a) live A/B env-gated chunked pool growth
+(EXO_DSV4_POOL_GROW_STEP=256; expected ~+6% tok/s at 352.6K; carry R2's
+two corrections: correctness rests on the length mask cache.py:2177-2181
+NOT `_visible_width`, and padding flips the indexer make_mask path —
+needs a control); (b) deep busy/idle capture under the new ≤15s-window
+protocol to close all_sum-wait-at-depth; (c) probe-bug fix via git.
+OPEN ITEM: rank1 Metal GPU timeout during C2's capture (worker D
+forensics: tracer-finalize memory pressure best-supported, thermal ruled
+out, primarily tracing-procedure risk BUT node runs 90.3 GB resident /
+115.3 GB peak of 137 GB at 100K — headroom itself is a depth-scaling
+risk). Cluster left DOWN pending operator relaunch authorization.
+
 ---
 
 ## Quick-reference: closed levers, one line each
@@ -2371,3 +2788,4 @@ section above; use the section refs to jump there.)*
 | `all_sum` NOP ablation as a live measurement technique | Unsafe — destabilizes the cluster | §13 |
 | TP=2 width-sharding as a skinny-GEMM efficiency tax | No penalty — sharded is 2.6-3.6% FASTER per unit work; sign inverted | §3.4 |
 | `xctrace` Metal trace attach during live deep prefill | **HAZARD** — wedged the collective 3/3, killed both runners; use idle/synthetic captures | §12 |
+| `xctrace` LONG (50s) decode-window attach at 100K depth | **HAZARD (new 2026-08-23, C2)** — runner died of Metal GPU Timeout 6.5s after detach; 10 GB trace, ~25min finalize. Keep decode captures to 12-15s | §12 |
