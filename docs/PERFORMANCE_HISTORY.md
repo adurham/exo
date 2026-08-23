@@ -1661,6 +1661,40 @@ different groupings worth keeping.)*
 
 ## 13. Open / never-finished threads
 
+**NEW (2026-08-22, session 4): triaged 4 external tip items against
+real repo history — 1 genuinely new+high-value (prefill FLOPs
+roofline, promoted to T7, see below), 1 cheaply confirmed closed (T8,
+prefill fence-gate audit, see above), 2 already substantially/fully
+investigated and STALE as stated:**
+- *"switch_mlp batch-size sweep B=1→8, untested at prefill's larger
+  M"* — **already done, just not by that name.** §3's MoE-GEMM
+  efficiency work (`docs/moe-vs-dense-qmm-isolation-2026-08-19.md`,
+  `docs/lever1-moe-smallm-headroom-2026-08-20.md`) measured this exact
+  kernel across the real prefill M-range: 62.6-72.0% of dense-mxfp4
+  ceiling at L=2048-8192, and confirmed the existing small-M kernels
+  already MATCH OR BEAT an idealized dense grouped-GEMM ceiling at
+  production per-expert counts (0.63-1.07x). A follow-on kernel
+  extension (`gather_qmv_rhs_lhs` for M>1) was actually IMPLEMENTED,
+  deployed, and found NO-GO (`docs/lever1-moe-smallm-headroom-2026-08-20.md`)
+  — real headroom exists only at decode's B=1 (T3's 27.7%), not at
+  prefill's larger M. Do not re-run this sweep; it would reproduce
+  already-committed numbers.
+- *"sequence-chunk pipelining overlap never validated on real
+  cluster"* — **false as stated; it WAS live-cluster tested and
+  permanently closed.** `docs/prefill-chunk-overlap-live-test-2026-08-20.md`
+  deployed the real mechanism on hardware, found a correctness race,
+  which `docs/prefill-chunk-overlap-race-fix-2026-08-20.md` root-caused
+  and fixed — but the throughput lever itself measured FLAT and was
+  declared **"DEAD. This avenue is CLOSED... Do not re-litigate this
+  lever for throughput."** (explicit standing decision, `EXO_PREFILL_CHUNK_OVERLAP`
+  permanently OFF). Do not re-test.
+
+Lesson for future external tips: always cross-check against
+`PERFORMANCE_HISTORY.md` + a targeted `git log --grep` before acting —
+this session's 197-file doc scrub means most "obvious next steps" have
+already been tried, and re-running a closed lever wastes real cluster
+time for a result already on record.
+
 **NEW (2026-08-22, session 4): "82.5-84.9% unattributed" figure
 recomputed against the post-async-fence-fix baseline, per a Fable
 consult's flagged first step.** That figure was computed against the
@@ -1752,6 +1786,26 @@ access-pattern hypothesis directly). A real Metal GPU Frame Capture was
 saved (`/tmp/switch_mlp_capture_session4.gputrace`, m4-1) but not yet
 opened/analyzed in Xcode this session. See
 `docs/switch-mlp-kernel-bandwidth-efficiency-2026-08-22.md`.
+
+**NEW (2026-08-22, session 4, T8): audited prefill's blocking-fence
+gate for the same silent-multi-owner-gate failure class that broke
+decode's async fence — CONFIRMED genuinely by-design, closed cheaply.**
+Prompted by an external tip (correctly informed by the real cache-owner
+bug precedent) suggesting prefill's "blocking fence by design" claim
+might be another stale, un-re-audited gate. Real gate code
+(`deepseek_v4.py` line ~3050): `y.shape[1] <= 8` — an explicit, always-
+visible numeric shape check, not a hidden multi-owner boolean.
+Prefill's `y.shape[1]` equals the active chunk length
+(`EXO_PREFILL_STEP_SIZE`, 2048 standing default, tested up to 4096/8192
+— §3), always ≥64x over the threshold. This trivially and structurally
+excludes every prefill call by construction, independent of the
+`engine`/`cache` owner state that caused the DECODE bug. **Different
+failure class from the cache-owner bug**: that one was invisible
+(unregistered owner silently defaulting False forever, needed a stack
+sampler to find); this one is a single visible comparison, settled by
+reading the code once. Confirmed: no fix needed, no further
+investigation warranted on this specific angle. See
+`docs/prefill-fence-gate-audit-2026-08-22.md`.
 
 **RESOLVED (2026-08-22, end of session 3, root cause found):** the
 previous interim synthesis (below, superseded) flagged CPU profiling as
