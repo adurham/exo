@@ -2068,6 +2068,12 @@ for NODE in "${NODES[@]}"; do
     # Pool-write donation threshold (session-4 pool fixes) — validated prod value.
     : "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:=8388608}"
     [ -n "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES=$EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES"
+    # EXO_DSV4_POOL_GROW_STEP: BatchPoolingCache growth chunking (P3 follow-up A/B,
+    # 2026-08-23). Unset/1 = legacy concat-to-exact-max_pool every flush (arm A,
+    # bit-identical to prior behavior); 256 = grow in 256-entry chunks like
+    # PoolingCache.step (arm B). Deliberately NO default here so an unset var
+    # leaves arm A byte-identical -- opt-in forwarding only.
+    [ -n "${EXO_DSV4_POOL_GROW_STEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_STEP=$EXO_DSV4_POOL_GROW_STEP"
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
     [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
