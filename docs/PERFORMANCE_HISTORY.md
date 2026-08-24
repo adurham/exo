@@ -673,6 +673,58 @@ validated as a single fix can get.
 
 ### 3.1 Major wins
 
+**hc_expand fused Metal kernel (WIN, 2026-08-24)** —
+`docs/hc-expand-kernel-ab-2026-08-24.md`. Env-gated fused Metal kernel
+for `HyperConnection.expand` (used inside every layer's `attn_residual`
+and `ffn_residual`); previously the op path was measured at 4.4% of
+prefill wall time at 220K real tokens
+(`docs/t10-final-decomposition-closed-2026-08-22.md` Check 1). Laptop
+microbench: 8.66x faster than the op path at true prefill shape
+`[1,2048,4,4096]` (3645µs → 421µs). Live 2×2 A/B on the cluster at
+~70.5K real tokens (`bench/phase3_precheck_depth_throughput.py`,
+`target_tokens=100000`), production env (`EXO_SPECULATIVE=0
+EXO_DSV4_MTP=0 EXO_DSV4_DSPARK=1`):
+- Arm A (kernel OFF, env absent): mean **359.89 tok/s** prefill (355.03,
+  364.75; arm A r2 landed at the P5 known-good baseline of 366.5)
+- Arm B (kernel ON): mean **373.80 tok/s** prefill (373.18, 374.43;
+  0.33% spread)
+- **Δ = +13.91 tok/s (+3.87%) mean-to-mean**; pairwise +5.11% / +2.65%;
+  even the conservative "worst B vs best A" bound is +2.31% —
+  above the pre-registered +1.5% ship threshold in every framing
+- Quality: needle FALCON-MERCURY-7749 recovered exact on all 4 probes,
+  no U+FFFD, no BOS spam, `finish_reason=stop`
+- Kernel path is fp32-accumulate + single-cast-to-output-dtype at the
+  end (mean rel err 2.77e-7 vs the reference op path, laptop-measured
+  — fp32-exact class, NOT the bf16-comb variant rejected earlier for
+  1.08% mean rel err in `docs/hc-expand-rejection-relitigated-multiseed
+  -2026-08-22.md`; that one is dead, this is a different mechanism)
+- The measured +3.87% matches the `span_share × kernel_reduction`
+  prediction (4.4% × 7/8 = 3.85%) almost exactly — first e2e prefill win
+  since the 2026-06-24 breakthrough that isn't a NULL/dead-end
+- **Default flipped 2026-08-24** in `start_cluster.sh`
+  (`: "${EXO_DSV4_HC_EXPAND_KERNEL:=1}"`); cluster now serves production
+  with kernel ON. Reversion recipe: `EXO_DSV4_HC_EXPAND_KERNEL=0
+  ./start_cluster.sh` gives the pre-kernel op path bit-identical (arm A
+  of the A/B). SHAs: exo `deb1c8a6d` (env-forwarding +
+  default-flip landed same-day, previous SHA `e3df799c0` had only the
+  forwarding), mlx-lm `7a1a4e8` (unchanged this session; the kernel
+  itself was shipped by a prior worker via exo `ecce148ff`
+  submodule-bump)
+- Not tested at deeper context (300K, 500K) or under PP mode — expected
+  to transfer since the op is per-layer-per-token and the code path is
+  shared, but not verified
+
+**Reusable lesson: a small-share prefill op (single-digit % of wall
+time) with a large per-op inefficiency (~8x) can still be worth
+shipping as a fused kernel; the span-share × per-op-reduction math
+predicts the e2e win within noise, so triage kernels by that product
+BEFORE writing the fused version. Also: bit-identity when disabled is
+what makes an env-gated fused kernel safe to ship default-on — the
+gate itself must remain and default-off must be provably equivalent
+to the pre-kernel code path (verified here max_abs=0.0 laptop-side,
+and the live A/B arm A independently confirmed by matching the P5
+same-code baseline).**
+
 **Prefill throughput breakthrough (WIN, 2026-06-24)** —
 `docs/prefill-throughput-breakthrough-2026-06-24.md`: five stacked fixes.
 - c=1 500K prefill: before 167 t/s avg (crossed below 200 at ~250K) →
