@@ -1712,8 +1712,57 @@ for NODE in "${NODES[@]}"; do
     # comment exists so a future investigation doesn't re-waste time
     # assuming DSpark is providing a decode-time speedup under TP that it
     # is not.
+    #
+    # SHIPPED DEFAULT RECONCILED 2026-08-24 (P4v2 milestone M0). The block
+    # above was written when DSpark was believed to be load-bearing-but-
+    # free under TP. Two of its claims are now known wrong:
+    #
+    #   * "costs nothing extra to warm under TP" — it costs ~10 GB of
+    #     RESIDENT unified memory per node for the whole process lifetime
+    #     (the local head's model.safetensors is 10,876,789,654 B). The
+    #     comment accounted for compute, not residency, on nodes documented
+    #     at ~125 GB of 128 GB co-resident weights.
+    #   * the DSpark decode path is not merely "PP-only": under TP there IS
+    #     a first-class DSpark draft branch in _speculative_next
+    #     (dsv4_mtp.py), it is simply unreachable in the shipped config
+    #     because reaching it needs EXO_DSV4_MTP=1 as well (that flag is
+    #     what makes inner.mtp exist, which is what is_dsv4_with_mtp tests,
+    #     which is what constructs the generator).
+    #
+    # So DSPARK=1 with MTP=0 under Tensor sharding buys a ~10 GB head that
+    # can never draft. Rather than flip this default (DSpark IS this
+    # cluster's intended sole speculation mechanism and the flag should
+    # stay expressing that intent), utils_mlx now GATES THE LOAD on a
+    # consumer actually being reachable: TP needs SPECULATIVE=1 AND MTP=1,
+    # PP needs SPECULATIVE=1 + EXO_PP_DRAFT_MODEL + Pipeline sharding.
+    # EXO_DSV4_DSPARK_FORCE_LOAD=1 overrides. Configurations that really
+    # speculate are byte-identical to before; the dead ones reclaim ~10 GB.
     : "${EXO_DSV4_DSPARK:=1}"
     [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
+    # Force the head to attach even when no consumer is reachable (the M0
+    # gate above). Opt-in; used to measure the head's own memory/load cost.
+    [ -n "${EXO_DSV4_DSPARK_FORCE_LOAD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_FORCE_LOAD=$EXO_DSV4_DSPARK_FORCE_LOAD"
+    # ── DSPARK SHADOW MEASUREMENT (P4v2 milestone M1, 2026-08-24) ───────
+    # EXO_DSV4_SPEC_SHADOW=1 runs the DSpark draft + the batched verify
+    # every cycle, logs what WOULD have been accepted plus the measured
+    # draft and verify walls, then forces n_accepted=0 so the EMITTED
+    # stream still comes from the sequential path. Requires all three
+    # speculation flags to be on (EXO_SPECULATIVE=1 EXO_DSV4_MTP=1
+    # EXO_DSV4_DSPARK=1) or there is no DSpark cycle to shadow.
+    #
+    # This is a MEASUREMENT BUILD, never a serving config: it pays the
+    # draft + the (k+1)-row verify + the rollback to commit ONE token, so
+    # it is strictly slower than plain decode. Default off; with the flag
+    # unset the code is dead and behaviour is unchanged.
+    #
+    # Structured output in the runner log:
+    #   [DSPARK-SHADOW]        aggregate every _INTERVAL cycles
+    #   [DSPARK-SHADOW-GUARD]  one-shot non-degeneracy + ctx-tap verdict
+    #   [DSPARK-GUARD]         one-shot load-time provenance/param-tree
+    [ -n "${EXO_DSV4_SPEC_SHADOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW=$EXO_DSV4_SPEC_SHADOW"
+    [ -n "${EXO_DSV4_SPEC_SHADOW_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_INTERVAL=$EXO_DSV4_SPEC_SHADOW_INTERVAL"
+    [ -n "${EXO_DSV4_SPEC_SHADOW_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_LOG=$EXO_DSV4_SPEC_SHADOW_LOG"
+    [ -n "${EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES=$EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES"
     [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
     # EXO_DSV4_DSPARK_NATIVE=1 (2026-08-04): use the checkpoint's OWN
     # bundled mtp.0/1/2.* DSpark head (trained alongside these exact target

@@ -352,6 +352,182 @@ _POOL_RESTORE_AFTER_TRIM = (
 # without any unsound trim+refeed instrumentation. B=1 path only.
 _CYCLE_STATS = os.environ.get("EXO_DSV4_MTP_CYCLE_STATS", "0") == "1"
 
+# ── DSPARK SHADOW MEASUREMENT (P4v2 milestone M1, 2026-08-24) ─────────────
+#
+# WHAT THIS IS FOR. The P4v2 plan
+# (docs/p4-scoping-mtp-for-tp-2026-08-24.md §D.1) needs three numbers that
+# this repo has never measured on the live TP=2 cluster:
+#
+#   * ``a``  — mean accepted draft tokens per cycle for the DSpark head
+#   * ``D``  — the real batched-verify wall cost (the cost model's weakest
+#              input; §C.2's 8 ms is an unanchored placeholder)
+#   * the effective-``k`` distribution after confidence pruning
+#
+# and it needs them WITHOUT a single speculative token reaching a user,
+# because DSpark's correctness on this checkpoint is not re-validated.
+#
+# WHAT SHADOW MODE DOES. With ``EXO_DSV4_SPEC_SHADOW=1`` (and the three
+# speculation flags that make the DSpark TP path reachable at all —
+# ``EXO_SPECULATIVE=1 EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1``), the cycle runs
+# the DSpark draft and the batched verify forward EXACTLY as it does with
+# speculation live, records what WOULD have been accepted, and then forces
+# ``n_accepted = 0``. Everything downstream — bonus selection, cache
+# rollback, DSpark ctx feed, pre_norm update, the yielded token list —
+# then takes the ordinary full-rejection path, which commits exactly ONE
+# token per cycle: ``argmax(verify_logits[:, 0, :])``, the anchor row.
+#
+# WHY THAT IS THE SEQUENTIAL-DECODE TOKEN. Row 0 of the verify forward is
+# the target model's own prediction for ``y`` given the committed prefix,
+# computed under EXO_DSV4_VERIFY_ROWSEQ + EXO_DSV4_ROWSEQ_FULLBLOCK, whose
+# whole purpose is to make the L>1 batched verify bitwise-equivalent to L
+# sequential single-token decodes (2026-08-02 fix, start_cluster.sh:355+).
+# So shadow-on output must be byte-identical to a non-speculative run at
+# temp=0 — and that identity is the self-checking gate on this whole
+# measurement. If it breaks, the numbers below are meaningless AND the
+# rowseq equivalence claim is false; both are reportable findings.
+#
+# COST. Shadow mode is strictly SLOWER than plain decode: it pays the
+# draft, the (k+1)-row verify, and the rollback for one committed token.
+# It is a measurement build, never a serving config. Default OFF; with the
+# flag unset every branch below is dead and behaviour is bit-identical to
+# the pre-M1 code.
+#
+# temp NOTE. Byte-identity is claimed at temp=0 ONLY. At temp>0 the
+# forced-rejection path draws the emitted token from the residual
+# correction sampler, which is not the plain sampler's draw; acceptance
+# statistics are still collected but output equivalence is NOT claimed.
+_SPEC_SHADOW = os.environ.get("EXO_DSV4_SPEC_SHADOW", "0") == "1"
+# Cycles between aggregate ``[DSPARK-SHADOW]`` summary lines in the runner
+# log. These are the primary deliverable (parseable straight out of
+# exo.log); the per-cycle JSONL below is optional detail.
+_SPEC_SHADOW_INTERVAL = max(
+    1, int(os.environ.get("EXO_DSV4_SPEC_SHADOW_INTERVAL", "50") or "50")
+)
+# Optional per-cycle JSONL dump path (rank 0 only).
+_SPEC_SHADOW_LOG = os.environ.get("EXO_DSV4_SPEC_SHADOW_LOG", "")
+# Non-degenerate-draft guard window (§D.3 part 4).
+_SPEC_SHADOW_GUARD_CYCLES = max(
+    1, int(os.environ.get("EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES", "100") or "100")
+)
+# DSpark's noise filler token. A head that has silently lost its context
+# conditioning degenerates into emitting this in real draft slots.
+_DSPARK_NOISE_TOKEN_ID = 128799
+
+
+class _ShadowStats:
+    """Accumulator for one runner process's shadow-measurement cycles.
+
+    Deliberately plain Python ints/lists: every value fed in here has
+    already been materialised by the real forward (the skill's hard rule —
+    shadow mode adds no ``model()`` call and no extra collective).
+    """
+
+    def __init__(self) -> None:
+        self.cycles: int = 0
+        self.total_would_accept: int = 0
+        self.total_drafted: int = 0
+        # would-accept histogram, indexed by count (0..block_size).
+        self.accept_hist: dict[int, int] = {}
+        # effective-k (post-tau gamma) histogram.
+        self.k_hist: dict[int, int] = {}
+        # By-position: reached[i] = cycles that verified position i at all;
+        # hit[i] = cycles whose draft at position i matched the target.
+        self.pos_reached: dict[int, int] = {}
+        self.pos_hit: dict[int, int] = {}
+        self.draft_ms: list[float] = []
+        self.verify_ms: list[float] = []
+        self.cycle_ms: list[float] = []
+        self.ctx_len: int = 0
+        # Guard state (§D.3 part 4 + the get_dspark_ctx tap check).
+        self.guard_draft_tokens: set[int] = set()
+        self.guard_noise_hits: int = 0
+        self.guard_ctx_none: int = 0
+        self.guard_reported: bool = False
+
+    def record(
+        self,
+        *,
+        gamma: int,
+        block_size: int,
+        would_accept: int,
+        match_flags: list[bool] | None,
+        draft_tokens: list[int],
+        draft_ms: float,
+        verify_ms: float,
+        cycle_ms: float,
+        ctx_len: int,
+    ) -> None:
+        self.cycles += 1
+        self.total_would_accept += would_accept
+        self.total_drafted += gamma
+        self.accept_hist[would_accept] = self.accept_hist.get(would_accept, 0) + 1
+        self.k_hist[gamma] = self.k_hist.get(gamma, 0) + 1
+        self.draft_ms.append(draft_ms)
+        self.verify_ms.append(verify_ms)
+        self.cycle_ms.append(cycle_ms)
+        self.ctx_len = ctx_len
+        if match_flags is not None:
+            # Prefix semantics: position i is only "reached" when every
+            # earlier draft matched, because a linear-chain verify stops at
+            # the first rejection. This is the conditional acceptance the
+            # cost model's geometric p refers to.
+            for i, ok in enumerate(match_flags):
+                self.pos_reached[i] = self.pos_reached.get(i, 0) + 1
+                if ok:
+                    self.pos_hit[i] = self.pos_hit.get(i, 0) + 1
+                else:
+                    break
+        if self.cycles <= _SPEC_SHADOW_GUARD_CYCLES:
+            self.guard_draft_tokens.update(draft_tokens)
+            if _DSPARK_NOISE_TOKEN_ID in draft_tokens:
+                self.guard_noise_hits += 1
+
+    @staticmethod
+    def _stat(xs: list[float]) -> tuple[float, float, float]:
+        if not xs:
+            return (0.0, 0.0, 0.0)
+        s = sorted(xs)
+        return (
+            sum(xs) / len(xs),
+            s[len(s) // 2],
+            s[int(0.95 * (len(s) - 1))],
+        )
+
+    def summary(self) -> str:
+        a = self.total_would_accept / self.cycles if self.cycles else 0.0
+        k_mean = self.total_drafted / self.cycles if self.cycles else 0.0
+        d_mean, d_med, d_p95 = self._stat(self.draft_ms)
+        v_mean, v_med, v_p95 = self._stat(self.verify_ms)
+        c_mean, _, _ = self._stat(self.cycle_ms)
+        hist = ",".join(f"{k}:{v}" for k, v in sorted(self.accept_hist.items()))
+        khist = ",".join(f"{k}:{v}" for k, v in sorted(self.k_hist.items()))
+        bypos = ",".join(
+            f"{i}:{self.pos_hit.get(i, 0)}/{self.pos_reached[i]}"
+            f"={self.pos_hit.get(i, 0) / self.pos_reached[i]:.3f}"
+            for i in sorted(self.pos_reached)
+            if self.pos_reached[i]
+        )
+        return (
+            f"[DSPARK-SHADOW] cycles={self.cycles} ctx={self.ctx_len} "
+            f"a_mean={a:.4f} k_mean={k_mean:.3f} "
+            f"accept_hist={hist} k_hist={khist} bypos={bypos} "
+            f"draft_ms_mean={d_mean:.3f} draft_ms_med={d_med:.3f} "
+            f"draft_ms_p95={d_p95:.3f} "
+            f"verify_ms_mean={v_mean:.3f} verify_ms_med={v_med:.3f} "
+            f"verify_ms_p95={v_p95:.3f} cycle_ms_mean={c_mean:.3f}"
+        )
+
+    def guard_summary(self) -> str:
+        return (
+            f"[DSPARK-SHADOW-GUARD] window={min(self.cycles, _SPEC_SHADOW_GUARD_CYCLES)} "
+            f"distinct_draft_tokens={len(self.guard_draft_tokens)} "
+            f"noise_token_cycles={self.guard_noise_hits} "
+            f"ctx_none_cycles={self.guard_ctx_none} "
+            f"nondegenerate={'PASS' if len(self.guard_draft_tokens) > 1 and self.guard_noise_hits == 0 else 'FAIL'} "
+            f"ctx_conditioning={'PASS' if self.guard_ctx_none == 0 else 'FAIL'}"
+        )
+
+
 # BATCH-POOL SNAPSHOT FIX (2026-07-10, default OFF until gates pass). The
 # batched generator converts every PoolingCache to BatchPoolingCache at
 # insert (mlx-lm generate._make_cache / _merge_caches) — and
@@ -3462,6 +3638,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if prof is not None:
             t_cycle_start = time.perf_counter()
 
+        # SHADOW MEASUREMENT (P4v2 M1): independent of _phase_timer so the
+        # measurement build does not have to enable the profiler's global
+        # per-cycle dump. Like the profiler, the brackets below insert
+        # mx.eval at phase boundaries, so draft_ms / verify_ms are UPPER
+        # BOUNDS on the pipelined production wall — which is the
+        # conservative direction for a break-even decision (a larger
+        # measured D raises the required acceptance a*).
+        _shadow = _SPEC_SHADOW
+        _sh_t0 = time.perf_counter() if _shadow else 0.0
+        _sh_draft_ms = 0.0
+        _sh_verify_ms = 0.0
+        _sh_block_size = 0
+        _sh_verify_t0 = 0.0
+
         # 1. Draft γ tokens via MTP — chained, fully lazy.
         # Pass coord_group so each chained-predict step's tok_arr
         # broadcast goes through the isolated coord subgroup (separate
@@ -3545,6 +3735,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 else mx.softmax(_corrected[:, k, :], axis=-1)
                 for k in range(gamma)
             ]
+            # SHADOW: close the draft bracket here — an mx.eval forces the
+            # block forward + Markov loop to actually complete, so the
+            # elapsed time is the DSpark draft cost D_draft the P4v2 cost
+            # model calls flat-per-cycle. Also record the pre-tau block
+            # width so the k-pruning distribution is attributable.
+            if _shadow:
+                mx.eval(*draft_ids)
+                _sh_draft_ms = (time.perf_counter() - _sh_t0) * 1000.0
+                _sh_block_size = int(_dspark.block_size)
         else:
             draft_ids, draft_probs = draft_tokens(
                 self.mtp, pre_norm, next_token_arr, gamma, temp,
@@ -3624,12 +3823,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 "rb_snap", (time.perf_counter() - _t_rb_snap0) * 1000.0
             )
 
+        # SHADOW: open the verify bracket immediately before the forward so
+        # the snapshot/arm bookkeeping above is NOT charged to D. This is
+        # the number the P4v2 cost model calls the batched-verify cost —
+        # what the model predicts as (k+1)·A + N.
+        if _shadow:
+            _sh_verify_t0 = time.perf_counter()
+
         verify_pre_norm, verify_logits = dsv4_speculative_forward(
             self.model,
             verify_input,
             gen_batch.prompt_cache,
             self._captured,
         )
+
+        if _shadow:
+            mx.eval(verify_pre_norm, verify_logits)
+            _sh_verify_ms = (time.perf_counter() - _sh_verify_t0) * 1000.0
 
         if _SPEC_STATE_RESTORE and _SPEC_CACHE_ROLLBACK:
             # Disarm BEFORE any other forward (the commit-forward fallback
@@ -3886,6 +4096,94 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     n_accepted += 1
                 else:
                     break
+
+        # ── DSPARK SHADOW SUPPRESSION + MEASUREMENT (P4v2 M1) ────────────
+        # ``n_accepted`` above is what speculation WOULD have committed
+        # this cycle. Record it, then force full rejection so the emitted
+        # stream stays on the sequential path (see _SPEC_SHADOW's header
+        # comment for why row 0 of the verify IS the sequential token).
+        #
+        # ORDER MATTERS: this must run BEFORE the tie-reverify gate and
+        # before the bonus_val selection below, so every downstream branch
+        # sees the suppressed value and no cache write ever reflects an
+        # accepted draft.
+        #
+        # TP SAFETY: the suppression is unconditional and identical on
+        # every rank (it reads no rank-local tensor), so all ranks take the
+        # same branches and the collectives stay balanced. The n_accepted
+        # broadcast below still runs; it now broadcasts 0 from every rank.
+        if _shadow and _dspark is not None:
+            _sh_would_accept = n_accepted
+            _sh_match_flags: list[bool] | None = None
+            if temp == 0 and matches is not None:
+                _sh_match_flags = [bool(matches[i].item()) for i in range(gamma)]
+            _sh_stats = getattr(self, "_shadow_stats", None)
+            if _sh_stats is None:
+                _sh_stats = _ShadowStats()
+                self._shadow_stats = _sh_stats
+            # Context depth: the KV offset the verify just ran against.
+            _sh_ctx = 0
+            try:
+                _sh_c0 = gen_batch.prompt_cache[0]
+                _sh_sub = (
+                    _sh_c0.caches[0] if hasattr(_sh_c0, "caches") else _sh_c0
+                )
+                _sh_ctx = int(getattr(_sh_sub, "offset", 0))
+            except Exception:
+                _sh_ctx = 0
+            _sh_stats.record(
+                gamma=gamma,
+                block_size=_sh_block_size,
+                would_accept=_sh_would_accept,
+                match_flags=_sh_match_flags,
+                draft_tokens=_draft_ids_flat,
+                draft_ms=_sh_draft_ms,
+                verify_ms=_sh_verify_ms,
+                cycle_ms=(time.perf_counter() - _sh_t0) * 1000.0,
+                ctx_len=_sh_ctx,
+            )
+            # GUARD part 3 (§D.3, "the highest-value assert of the three"):
+            # a tap-id mismatch makes get_dspark_ctx() return None, which
+            # silently disables context conditioning — drafts still flow,
+            # acceptance is just quietly worse, and every number this
+            # milestone produces would be understating the head. Check the
+            # SAME call the ctx feed below makes.
+            if _sh_stats.cycles <= _SPEC_SHADOW_GUARD_CYCLES:
+                from mlx_lm.models.deepseek_v4 import (
+                    get_dspark_ctx as _sh_get_ctx,
+                )
+
+                if _sh_get_ctx(_dspark.target_layer_ids) is None:
+                    _sh_stats.guard_ctx_none += 1
+            _sh_rank0 = sync_group is None or sync_group.rank() == 0
+            if (
+                not _sh_stats.guard_reported
+                and _sh_stats.cycles >= _SPEC_SHADOW_GUARD_CYCLES
+            ):
+                _sh_stats.guard_reported = True
+                if _sh_rank0:
+                    logger.warning(_sh_stats.guard_summary())
+            if _sh_rank0 and _sh_stats.cycles % _SPEC_SHADOW_INTERVAL == 0:
+                logger.warning(_sh_stats.summary())
+            if _SPEC_SHADOW_LOG and _sh_rank0:
+                try:
+                    with open(_SPEC_SHADOW_LOG, "a") as _sh_f:
+                        _sh_f.write(json.dumps({
+                            "cycle": int(_sh_stats.cycles),
+                            "uid": int(uid),
+                            "ctx": _sh_ctx,
+                            "block_size": _sh_block_size,
+                            "gamma": int(gamma),
+                            "would_accept": int(_sh_would_accept),
+                            "match_flags": _sh_match_flags,
+                            "draft": _draft_ids_flat,
+                            "draft_ms": _sh_draft_ms,
+                            "verify_ms": _sh_verify_ms,
+                        }) + "\n")
+                except Exception as _sh_err:  # never break generation
+                    logger.warning(f"dspark-shadow log failed: {_sh_err}")
+            # THE SUPPRESSION.
+            n_accepted = 0
 
         # ── TIE RE-VERIFY GATE (EXO_DSV4_MTP_TIE_REVERIFY=1, temp=0) ────
         # The batched L>1 verify forward carries small numeric drift vs a

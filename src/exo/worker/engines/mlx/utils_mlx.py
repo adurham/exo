@@ -380,7 +380,63 @@ def shard_and_load(
     # checkpoint's hidden-state distribution rather than a different
     # (e.g. preview) checkpoint's. Falls back to the local-head overlay if
     # unset, preserving prior behavior.
-    if os.environ.get("EXO_DSV4_DSPARK", "0") == "1":
+    # DSPARK HEAD-LOAD GATE (P4v2 milestone M0, 2026-08-24). Attaching the
+    # head costs ~10 GB of resident unified memory per node (measured: the
+    # local head's model.safetensors is 10,876,789,654 B on disk) and holds
+    # it for the process lifetime. On 128 GB nodes documented at ~125 GB
+    # co-resident weights, that is the single largest recoverable resource
+    # in the config — IF nothing can use it.
+    #
+    # Two, and only two, runtime consumers of ``model.model.dspark`` exist:
+    #
+    #   (a) TP: ``DSv4MTPBatchGenerator._speculative_next``'s DSpark draft
+    #       branch. Reaching it needs the generator to be CONSTRUCTED, which
+    #       needs ``EXO_SPECULATIVE=1`` (batch_generate.__post_init__:813)
+    #       AND ``is_dsv4_with_mtp``, i.e. ``hasattr(inner,"mtp")``, which
+    #       only exists when ``EXO_DSV4_MTP=1`` (deepseek_v4.py:6500-6507).
+    #       Both flags, not either.
+    #   (b) PP: ``pp_dspark_decode_loop``, selected inside the
+    #       ``_pp_spec_active`` block, which needs ``EXO_SPECULATIVE=1`` +
+    #       a non-empty ``EXO_PP_DRAFT_MODEL`` + genuine Pipeline sharding
+    #       (``get_pipeline_info`` non-None). It does NOT need
+    #       ``EXO_DSV4_MTP``.
+    #
+    # Live production before this change was ``EXO_SPECULATIVE=1
+    # EXO_DSV4_MTP=0`` under Tensor sharding — path (a) blocked by MTP=0,
+    # path (b) blocked by Tensor sharding. The head loaded, warmed, held
+    # ~10 GB, and could never draft. This gate encodes exactly the
+    # disjunction above, so every configuration that CAN draft still loads
+    # the head bit-identically; only the provably-dead configurations skip
+    # it. ``EXO_DSV4_DSPARK_FORCE_LOAD=1`` overrides (e.g. to measure the
+    # head's own load/memory cost deliberately).
+    #
+    # RANK CONSISTENCY: every input is an env var that start_cluster.sh
+    # propagates identically to all nodes, plus the shard-metadata type,
+    # which is the same class on both ranks in either sharding mode. So all
+    # ranks take the same branch. The all_sum guard below still covers a
+    # per-rank overlay ATTEMPT failure.
+    _dspark_env_on = os.environ.get("EXO_DSV4_DSPARK", "0") == "1"
+    _spec_on = os.environ.get("EXO_SPECULATIVE", "0") == "1"
+    _dspark_force = os.environ.get("EXO_DSV4_DSPARK_FORCE_LOAD", "0") == "1"
+    _tp_consumer = _spec_on and os.environ.get("EXO_DSV4_MTP", "0") == "1"
+    _pp_consumer = (
+        _spec_on
+        and bool(os.environ.get("EXO_PP_DRAFT_MODEL", ""))
+        and isinstance(shard_metadata, PipelineShardMetadata)
+    )
+    _dspark_usable = _tp_consumer or _pp_consumer or _dspark_force
+    if _dspark_env_on and not _dspark_usable:
+        logger.warning(
+            "DSpark head load SKIPPED (~10 GB/node reclaimed): "
+            "EXO_DSV4_DSPARK=1 but no runtime consumer is reachable — "
+            f"EXO_SPECULATIVE={os.environ.get('EXO_SPECULATIVE', '0')} "
+            f"EXO_DSV4_MTP={os.environ.get('EXO_DSV4_MTP', '0')} "
+            f"sharding={type(shard_metadata).__name__}. The TP draft branch "
+            "needs SPECULATIVE=1 AND MTP=1; the PP decode loop needs "
+            "SPECULATIVE=1 + EXO_PP_DRAFT_MODEL + Pipeline sharding. Set "
+            "EXO_DSV4_DSPARK_FORCE_LOAD=1 to attach anyway."
+        )
+    if _dspark_env_on and _dspark_usable:
         _dspark_ok = 1
         _use_native = os.environ.get("EXO_DSV4_DSPARK_NATIVE", "0") == "1"
         try:
@@ -814,6 +870,10 @@ def _overlay_dsv4_dspark(model: Any) -> None:
         f"({len(weights)} tensors, {len(mod.stages)} stages, "
         f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
     )
+    _log_dspark_load_guard(
+        mod, inner, provenance="local", source=str(head_dir),
+        serving_model_path=None,
+    )
 
 
 def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
@@ -960,6 +1020,95 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
         f"bundled head, {len(weights)} tensors, {len(mod.stages)} stages, "
         f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
     )
+    _log_dspark_load_guard(
+        mod, inner, provenance="native", source=str(model_path),
+        serving_model_path=str(model_path),
+    )
+
+
+
+def _log_dspark_load_guard(
+    mod: Any,
+    inner: Any,
+    *,
+    provenance: str,
+    source: str,
+    serving_model_path: str | None,
+) -> None:
+    """Emit the P4v2 §D.3 silent-partial-load guard line, unconditionally.
+
+    ``strict=True`` on both DSpark overlays already catches key/shape
+    mismatch. The failure it CANNOT catch is a shape-compatible,
+    distribution-mismatched head — one converted from a different
+    checkpoint's mtp shards, which loads cleanly, drafts confidently, and
+    simply has depressed acceptance. That is exactly the state production
+    is in today (local head converted from the PREVIEW checkpoint, serving
+    ``-0731``), and it would silently corrupt every acceptance number the
+    P4v2 measurement produces.
+
+    So log, on every load, the three facts a reader needs to decide whether
+    an acceptance number is trustworthy:
+
+      1. **Provenance** — which overlay ran and from where. For the native
+         path, whether the head source IS the serving checkpoint path.
+      2. **Param-tree count** — ``len(tree_flatten(mod.parameters()))``
+         against a freshly-constructed ``DeepseekV4DSparkModule(args)``,
+         reported as ``0 missing / 0 extra`` set-equality. The count is
+         ASSERTED, never hardcoded: the "81 params" figure in circulation
+         did not reproduce (the ``-0731`` index carries 4,705 on-disk
+         ``mtp.*`` keys), so any remembered constant is untrustworthy.
+      3. **Config** — ``block_size`` / ``markov_rank`` / ``target_layer_ids``
+         / stage count, which must match what ``set_dspark_taps`` armed and
+         what ``_speculative_next`` reads.
+
+    Never raises: a guard that can crash a model load is worse than the
+    hazard it reports.
+    """
+    try:
+        from mlx.utils import tree_flatten
+        from mlx_lm.models.deepseek_v4 import DeepseekV4DSparkModule
+
+        loaded = {k for k, _ in tree_flatten(mod.parameters())}
+        expected = {
+            k
+            for k, _ in tree_flatten(
+                DeepseekV4DSparkModule(inner.args).parameters()
+            )
+        }
+        missing = expected - loaded
+        extra = loaded - expected
+        tree_ok = not missing and not extra
+
+        mismatch = ""
+        if provenance == "local":
+            # The local head is a conversion of a DIFFERENT checkpoint's
+            # mtp shards. Flag it loudly — this is the live hazard, not a
+            # hypothetical one.
+            mismatch = (
+                " CHECKPOINT_PROVENANCE=UNVERIFIED"
+                " (locally-converted head; not proven to be trained against"
+                " the serving checkpoint — acceptance numbers from this head"
+                " are a LOWER BOUND on the native head's)"
+            )
+        elif serving_model_path is not None and source == serving_model_path:
+            mismatch = " CHECKPOINT_PROVENANCE=MATCHED"
+
+        logger.warning(
+            f"[DSPARK-GUARD] provenance={provenance} source={source} "
+            f"param_tree={len(loaded)}/{len(expected)} "
+            f"missing={len(missing)} extra={len(extra)} "
+            f"param_tree_assert={'PASS' if tree_ok else 'FAIL'} "
+            f"block_size={mod.block_size} markov_rank={mod.markov_rank} "
+            f"n_stages={len(mod.stages)} taps={mod.target_layer_ids} "
+            f"noise_token_id={mod.noise_token_id}{mismatch}"
+        )
+        if not tree_ok:
+            logger.warning(
+                f"[DSPARK-GUARD] param-tree mismatch — missing={sorted(missing)[:8]} "
+                f"extra={sorted(extra)[:8]}"
+            )
+    except Exception as guard_err:  # never break a model load
+        logger.warning(f"[DSPARK-GUARD] guard failed: {guard_err}")
 
 
 def _prepare_mtp_weights(model_id: str, model_path: Path) -> None:
