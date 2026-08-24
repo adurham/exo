@@ -1,5 +1,47 @@
 # DSv4-Flash High-Context Prefill Cliff — Handoff (2026-06-21)
 
+> **2026-08-24 RESOLUTION BANNER**: this cliff is **RESOLVED IN
+> PRODUCTION** since the 2026-06-24 breakthrough batch (exo
+> `463ac5d` + `d26dc013` + `862c85a`; see
+> `docs/prefill-throughput-breakthrough-2026-06-24.md`). Verified
+> live on 2026-08-24: cliff-band probe at 381,619 tokens shows
+> 328.6 tok/s aggregate with needle PASS — well above the ~40-48
+> t/s cliff floor described below and above the ~168 t/s pre-cliff
+> gentle decline. The current-stack env (`MLX_MAX_MB_PER_BUFFER=200`,
+> `EXO_PREFILL_STEP_SIZE=2048`, `EXO_DSV4_PREFILL_ARGPARTITION=1`,
+> OPT-6 indexer weight fold) is what closed the symptom. Mechanism
+> analysis (2026-08-24): the era cliff belongs to the `active_memory
+> > threshold` family, with allocator gc-release
+> (`allocator.cpp:149-151`) and fork memory-branch throttle
+> (`transforms.cpp:285-299`) both riding the same crossing under
+> era MB=50 per-primitive commits. Amplitude and bimodality at
+> Studio scale remain INFERRED / UNREPRODUCED at local repro scale.
+> See `docs/prefill-cliff-mechanism-2026-08-24.md` for the full
+> three-round evidence chain, arithmetic model, local reproductions,
+> and the attribution correction (argpartition on Metal is a
+> byte-identical no-op vs argsort per `sort.cpp:342` and was NOT the
+> proximate fix — `MOE_KERNEL_HANDOFF.md`'s claim to the contrary
+> is wrong; correction banner is on that doc).
+>
+> **Scoping note on the TILED-P A/B result below**: the tiled-P
+> `~2% WORSE / allocation was NOT the throughput bottleneck`
+> conclusion (in "WHAT WAS TRIED AND FAILED" below) was measured
+> under the launch config on line 108 of this doc
+> (`EXO_PROFILER=spans EXO_PROFILER_SYNC_SPANS=1 ...`).
+> `mx.synchronize()` per span serializes the pipeline and
+> structurally disables both throttle branches and gc-release
+> stacking. The A/B remains **INTERNALLY VALID** as evidence for
+> the narrow claim "tiled-P does not help in a sync-serialized
+> regime". What is **INVALID** is only the broader INFERENCE that
+> "allocation pressure is ruled out for the unprofiled cliff
+> regime" — because sync-spans structurally suppress the mechanisms
+> under investigation, so extrapolating the conclusion beyond the
+> sync-serialized regime is not licensed by the data. The
+> measurement is fine; its inference-scope was overreached.
+>
+> Original 2026-06-21 handoff preserved as-is below for historical
+> record.
+
 ## THE PROBLEM
 A single growing conversation (or a cold prefill) on DSv4-Flash sees prefill
 throughput collapse as context grows:

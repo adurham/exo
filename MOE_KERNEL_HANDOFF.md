@@ -1,5 +1,30 @@
 # MoE Prefill Kernel Optimization — Handoff (2026-07-01/02)
 
+> **2026-08-24 CORRECTION (attribution)**: the cliff-elimination
+> attribution to `EXO_DSV4_PREFILL_ARGPARTITION=1` (below) is
+> **factually wrong on this Metal backend**.
+> `ArgPartition::eval_gpu` in the fork's mlx submodule delegates to
+> the identical merge sort kernel that `ArgSort::eval_gpu` uses
+> (`mlx/backend/metal/sort.cpp:342-353`, comment: "We direct arg
+> partition to sort for now"; same `bn`/`tn` selection, same
+> temporaries, same output shape). Local microbench parity confirms
+> byte-identical timing. Moreover, the "340K prefill cliff" was
+> **already gone in the 2026-06-24 breakthrough batch** (see
+> `docs/prefill-throughput-breakthrough-2026-06-24.md`: c=1 500K
+> = 251 t/s recorded there), a week BEFORE the `argpartition` flag
+> path shipped (~2026-07-01). The proximate positive fix is most
+> likely `MLX_MAX_MB_PER_BUFFER=50→200` (exo `463ac5d`) together
+> with OPT-6 (indexer weight fold, mlx-lm `453daa5` / exo
+> `d26dc013`) which cut per-call transient GFLOPs 100→2; those two
+> plus OPT-9 shipped in the same 2026-06-24 batch and their
+> individual contributions to the cliff closure cannot be cleanly
+> separated. Full mechanism analysis (allocator gc-release +
+> memory-branch throttle threshold family, cache-collapse local
+> repro, attribution correction with evidence): see
+> `docs/prefill-cliff-mechanism-2026-08-24.md`.
+> The rest of this handoff (including the paragraph below) is
+> preserved as-is for historical accuracy.
+
 ## WHERE THIS SESSION LANDED (all deployed + quality-gated)
 
 Prefill at 100K-target (76,213 real tokens): 255 -> 353 t/s (+38%)

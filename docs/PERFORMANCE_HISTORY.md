@@ -714,7 +714,7 @@ tok/614.5s = **358.6 tok/s** vs SEQ_SPLIT=0 191,330 tok/688.775s = **277.8
 tok/s** — SEQ_SPLIT=1 is **~29% faster** at 190-220K context (confirms
 the default holds beyond the previously-only-tested 100K case).
 
-### 3.2 Prefill cliff investigation (root cause never fully found)
+### 3.2 Prefill cliff investigation (mechanism CLOSED 2026-08-24; symptom fixed in production since 2026-06-24)
 
 `PREFILL_CLIFF_HANDOFF.md` (2026-06-21, NEGATIVE): documented the
 ~340K-context sharp throughput cliff (270 t/s → 40-48 t/s). Root cause of
@@ -743,7 +743,71 @@ superseding a stale July memory-bandwidth-bound finding). **Re-validate
 old bottleneck theories against current code before trusting them —
 significant refactors can invalidate a profile from even a month prior.**
 
+**MECHANISM CLOSURE (2026-08-24)** — `docs/prefill-cliff-mechanism-2026-08-24.md`
+consolidates a 3-round investigation into a threshold-family mechanism
+identification:
+
+- **Mechanism family DEMONSTRATED**: the era cliff belongs to the
+  `active_memory > threshold` family, with TWO independent triggers
+  riding the SAME crossing under era `MLX_MAX_MB_PER_BUFFER=50`
+  per-primitive commits — (a) MLX allocator gc-release
+  (`mlx/backend/metal/allocator.cpp:149-151`, fires when
+  `mem_required = active + cache + size ≥ gc_limit_ ≈ 106.7 GB` on
+  Studios), and (b) fork's eval-driver memory-branch throttle
+  (`mlx/transforms.cpp:285-299`, fires on `active > memory_limit &&
+  n_active_tasks > 0`, draining outstanding cbufs synchronously).
+  Local repro (§14 of the mechanism doc): cache_gb collapses
+  lockstep with ballast (direct evidence gc-release firing);
+  memory-branch throttle produces +48% per-chunk overhead in
+  isolation.
+- **Amplitude and bimodality at Studio scale INFERRED/UNREPRODUCED**:
+  the era ~6-8× stall + bimodal 8-32s per-chunk signature do NOT
+  reproduce at local 36 GB M4 Max scale (+13-48% smooth overhead
+  only). The Studio-resident-set (~30×) + queueing divergence
+  (`1/(1-ρ)` wait-time explosion) hypothesis is offered as inference,
+  not evidence.
+- **PROVEN attribution correction**: `EXO_DSV4_PREFILL_ARGPARTITION=1`
+  **cannot have fixed the cliff on Metal** — `sort.cpp:342-353`
+  (`ArgPartition::eval_gpu` delegates to identical
+  `gpu_merge_sort(...,argsort=true)`) + microbench parity +
+  timeline (cliff was already gone in the 2026-06-24 500K = 251 t/s
+  measurement, a week BEFORE argpartition shipped ~2026-07-01).
+  `MOE_KERNEL_HANDOFF.md`'s attribution to argpartition is
+  factually wrong; correction banner added to that doc.
+- **Positive attribution strongly-supported but co-shipped-candidate-
+  ambiguous**: `MLX_MAX_MB_PER_BUFFER=50→200` (exo `463ac5d`) is the
+  *most likely* proximate positive fix; the same 2026-06-24
+  breakthrough batch also shipped OPT-6 (indexer weight fold, 64×
+  compute reduction, mlx-lm `453daa5` / exo `d26dc013`) and OPT-9
+  (broadcast elimination, -3.2 GB/chunk); attribution weight cannot
+  be cleanly split among the three from available evidence
+  (mechanism doc §15.1 provenance audit).
+- **Sync-span observer-effect rescoping**: the era tiled-P A/B
+  (`PREFILL_CLIFF_HANDOFF.md:108` documented launch:
+  `EXO_PROFILER=spans EXO_PROFILER_SYNC_SPANS=1 ...`) remains
+  **INTERNALLY VALID** as evidence for the narrow claim "tiled-P
+  does not help in a sync-serialized regime". What is INVALID is
+  only the broader INFERENCE "allocation pressure ruled out for the
+  unprofiled cliff regime" — because sync-spans structurally disable
+  both throttle branches and gc-release stacking; extrapolating from
+  that cliff-suppressed regime to the cliff-manifesting regime is
+  not licensed by the data. The A/B measurement is fine; its
+  conclusion's scope was overreached.
+- **Live confirmation (2026-08-24)**: cliff-band probe at 381,619
+  tokens (exo `34478792b` / `0854b39` era stack, MB=200 live) —
+  328.6 tok/s aggregate, needle PASS. **Symptom fully gone in
+  production.**
+- Bench artifacts: `bench/prefill_cliff_mechanism_local.py`,
+  `bench/prefill_cliff_throttle_repro_local.py`,
+  `bench/prefill_cliff_gclimit_repro_local.py` (+v2),
+  `bench/cliffband_380k_probe.py` — all with `_results.jsonl`
+  companions. Full analysis: `docs/prefill-cliff-mechanism-2026-08-24.md`.
+- **Correction banners added**: `MOE_KERNEL_HANDOFF.md` (argpartition
+  attribution wrong) and `PREFILL_CLIFF_HANDOFF.md` (symptom-resolved
+  banner + sync-span rescoping note).
+
 ### 3.3 Step-size / chunk-size tuning
+
 
 `docs/dsv4-prefill-step-size-4096-retest-2026-08-18.md` (NEGATIVE): a
 retest of `EXO_PREFILL_STEP_SIZE=4096` (previously rejected). Quality now
@@ -3186,6 +3250,7 @@ section above; use the section refs to jump there.)*
 | `EXO_DSV4_FUSED_SOFTMAX` | Real correctness break (needle failure at 100K) | §6 |
 | Nesting `mx.fast.metal_kernel` inside `mx.compile` | Catastrophic 3-4x regression | §4.5 |
 | `EXO_DSV4_INDEXER_PBLOCK` (small block size) | Real decode regression at depth | §3.2 |
+| Prefill cliff (~340K, 270→40 t/s, bimodal 8-32s stalls) | **RESOLVED IN PRODUCTION** since 2026-06-24 (breakthrough batch); mechanism identified 2026-08-24 as `active_memory > threshold` family — allocator gc-release + fork memory-branch throttle riding same crossing under era MB=50 per-primitive commits. Argpartition attribution PROVEN WRONG (`sort.cpp:342` identity + microbench parity + timeline). Positive attribution to MB=50→200 strongly-supported but shares credit with co-shipped OPT-6 / OPT-9. Amplitude / bimodality at Studio scale remain INFERRED / UNREPRODUCED. Live-confirmed 381K @ 328.6 tok/s 2026-08-24. | §3.2, `docs/prefill-cliff-mechanism-2026-08-24.md` |
 | Subgroup `attn.all_gather` (vs all_sum workaround) | Still faults post-transport-fix | §8 |
 | `all_sum` NOP ablation as a live measurement technique | Unsafe — destabilizes the cluster | §13 |
 | TP=2 width-sharding as a skinny-GEMM efficiency tax | No penalty — sharded is 2.6-3.6% FASTER per unit work; sign inverted | §3.4 |
