@@ -733,3 +733,305 @@ produced literally different text at temperature 0. "Not degraded at depth" and
   evidence favours it and the output-quality control passed. Note this was a
   *runtime* state, not a committed default, as of this run. **Superseded by
   Part III.**
+
+---
+
+# PART III — THE DEFAULT FLIP (2026-08-23, later the same day)
+
+Part II measured the raw lever and recommended it. An independent reviewer then
+verified those numbers from the raw JSONs, verified additivity against the P3
+budget (no overdraw), and **refuted** the `make_mask` confound as an alternative
+mechanism (its sign adds work) — but **rejected flipping the default as-is**,
+citing §10.5: two temp-0 smoke generations on an identical prompt produced
+different text. This part is the gated flip that followed, the code-evidence
+resolution of the one hole left in the reviewer's own neutrality argument, and
+the live gates and re-verification that discharge it.
+
+## 15. The r=128 question — resolved from code, and the reviewer was wrong
+
+The reviewer proposed gating growth on width alone (`_POOL_GROW_MIN = 512`),
+arguing it is *"numerically neutral because past `max_pool > 512` every consumer
+is on the sparse/top-k path."* **That is false for 20 of the 43 layers.**
+
+Code evidence, at mlx-lm `643d42d`:
+
+| # | site | what the code does |
+|---|---|---|
+| 1 | `deepseek_v4.py:4846-4851` `v4_attention_factory` | `ratio == 0` → `LocalAttention` (no pool). `ratio == 128` → `CompressedAttention`. else (`ratio == 4`) → `SparseCompressedAttention`. |
+| 2 | `deepseek_v4.py:4244-4250` `CompressedAttention.__call__` | `kv = mx.concatenate([kv, pooled[:, None]], axis=2)`; `mask = _extend_mask(mask, pooled_mask, kv.shape[2])`; SDPA. **No `Indexer`, no `index_topk`, no top-k — anywhere in the class, at any context.** |
+| 3 | `deepseek_v4.py:4612-4624` `SparseCompressedAttention` dispatch | `pooled.shape[1] == 0` → local only; `<= index_topk` → **compressed branch**, concatenates the full pool, also no top-k; `> index_topk` → **sparse branch**, the only path with a top-k. |
+| 4 | `deepseek_v4.py:3888` `Indexer.__call__` | `k = min(self.index_topk, pooled.shape[1])`, top-k over scores where invalid columns were set to `mx.finfo(scores.dtype).min`. |
+| 5 | `cache.py:2183-2185` `make_mask` | `valid = pool_idx < pool_lengths` — pads are always masked invalid. |
+| 6 | `cache.py:1927-1928` `BatchPoolingCache.__init__` | stores `self.ratio` — the cache knows its own consumer class. |
+
+An r=128 pool holds ≈ ctx/128 columns, so it crosses 512 at **ctx ≈ 65,536**.
+Under a width-only gate, at 352.6K it would grow 2755 → 2816 and
+`CompressedAttention` would attend 61 masked pads on each of 20 layers.
+
+### 15.1 Which pools pad, and who attends the pads — per regime
+
+Enumerated from the shipped predicate (`/tmp/poolgrow_logic_test.py`, run before
+implementing):
+
+| ctx | pool | P | pads under the **shipped** gate | pads under a **width-only** gate | consumer | attends pads? |
+|---|---|---|---|---|---|---|
+| 2K | r=4 | 512 | 255 (→768) | 255 | sparse branch (top-k 512) | **no** — pads score `finfo.min`, k ≤ valid count |
+| 2K | r=128 | 16 | **0** | 0 | `CompressedAttention` (no top-k) | no |
+| 10K | r=4 | 2,500 | 59 (→2560) | 59 | sparse branch | **no** |
+| 10K | r=128 | 78 | **0** | 0 | `CompressedAttention` | no |
+| 70K | r=4 | 17,500 | 163 (→17664) | 163 | sparse branch | **no** |
+| **70K** | **r=128** | **546** | **0** | **34 (→576)** | **`CompressedAttention` (no top-k)** | **width-only: YES → drift** |
+| 352.6K | r=4 | 88,149 | 170 (→88320) | 170 | sparse branch | **no** |
+| **352.6K** | **r=128** | **2,754** | **0** | **61 (→2816)** | **`CompressedAttention`** | **width-only: YES → drift** |
+
+No compressed↔sparse branch flip occurs at any point: where padding happens, both
+the padded and unpadded widths are already `> index_topk`.
+
+### 15.2 Shipping decision: neither (i) nor (ii) — a third form
+
+- **(i) reviewer diff as-is + documented drift at ctx > 65K** — rejected. The
+  drift is avoidable for ~0.1% of the win; accepting an avoidable
+  non-determinism on 20 layers to save that is a bad trade, and it would have
+  made the 70K gate a permanent known-divergence.
+- **(ii) consumer-side pad-slice** — rejected. `self.pooled` is read directly by
+  many other sites (`state`, `save_meta`, `spec_rollback`, `_tree_pmask`, the
+  Compressor's pool-freeze path, and the non-deferred `update_and_fetch` used
+  during prefill), so a partial slice creates width inconsistencies across them.
+  More importantly, `cache.py`'s own comments (see `_POOL_DEFER_COPY_MAX_BYTES`)
+  document that holding an extra reference to the pool buffer **blocks MLX
+  slice-update donation and reintroduces the exact O(P·D) per-step copy** this
+  change exists to remove — variant (ii) risks eating its own win.
+- **(iii) SHIPPED: reviewer diff + a ratio gate.** One extra condition,
+  `self.ratio <= _POOL_GROW_MAX_RATIO` (default 4). No new tensor, no new
+  reference, no effect on donation, zero per-step cost (it is an int compare on
+  a static attribute).
+
+Neutrality then holds at **every** context, not just below 65K:
+
+1. **r=128 → never padded** → bit-identical everywhere.
+2. **r=4 below 512 valid columns → never padded** → bit-identical. This is also
+   what fixes the reviewer's short-context blocker (§10.5).
+3. **r=4 at ≥ 512 valid columns → padded, and provably neutral.** Both arms are
+   `> index_topk` so both take the sparse branch (no branch flip). The Indexer's
+   per-column score is a reduction over `D`, not over `P`, so each real column's
+   score is unchanged by how many columns exist. Pads are set to `finfo.min`.
+   `k = min(index_topk, P) = 512` and the gate requires `min(_pool_lengths) ≥
+   512`, so the top-k never has to reach past the valid columns into a
+   masked/pad column. Identical top-k indices → the gather (and the pmask
+   gather, which is indexed *by* `topk`, `deepseek_v4.py:4658-4661`) yields
+   identical values → SDPA runs over exactly 512 identical columns.
+
+The gate keys on `min(self._pool_lengths)`, **not** `max_pool`. That is
+deliberate: in a ragged batch a short stream could otherwise be forced to select
+`finfo.min` columns, and the relative order MLX's `argsort` assigns within an
+enlarged tie-set of equal `finfo.min` values is not a documented guarantee.
+Keying on the shortest stream removes the dependency on tie-break stability
+entirely.
+
+**Cost of excluding r=128.** Realloc byte-volume scales as 1/ratio² (both pool
+size *and* flush frequency scale as 1/ratio): `(1/128²) / (1/4² + 1/128²) ≈
+0.1%`. On a pure realloc-*event* model (if the small r=128 copies are
+latency-bound rather than bandwidth-bound) it is `1/33 ≈ 3%`. Honest range:
+**0.1–3% of the win**, and the deep re-verification in §18 bounds it empirically.
+
+### 15.3 Shipped diff
+
+`mlx-lm@0854b396`, `mlx_lm/models/cache.py`. Module scope (~:1265, beside
+`_POOL_DEFER_COPY_MAX_BYTES`):
+
+```python
+_POOL_GROW_STEP = int(_pool_os.environ.get("EXO_DSV4_POOL_GROW_STEP", "256"))
+_POOL_GROW_MIN = int(_pool_os.environ.get("EXO_DSV4_POOL_GROW_MIN", "512"))
+_POOL_GROW_MAX_RATIO = int(_pool_os.environ.get("EXO_DSV4_POOL_GROW_MAX_RATIO", "4"))
+```
+
+Growth site, `BatchPoolingCache.update_and_fetch_deferred`:
+
+```python
+if self.pooled.shape[1] < max_pool:
+    _target = max_pool
+    if (
+        _POOL_GROW_STEP > 1
+        and self.ratio <= _POOL_GROW_MAX_RATIO
+        and min(self._pool_lengths) >= _POOL_GROW_MIN
+    ):
+        _target = (
+            ((max_pool + _POOL_GROW_STEP - 1) // _POOL_GROW_STEP) * _POOL_GROW_STEP
+        )
+    pad = mx.zeros((B, _target - self.pooled.shape[1], D), dtype=px.dtype)
+    self.pooled = mx.concatenate([self.pooled, pad], axis=1)
+```
+
+**Escape hatch preserved:** `EXO_DSV4_POOL_GROW_STEP=1` restores the
+bit-identical legacy exact-fit growth (arm A). `start_cluster.sh` now forwards
+`EXO_DSV4_POOL_GROW_MIN` and `EXO_DSV4_POOL_GROW_MAX_RATIO` alongside the
+existing `GROW_STEP` passthrough — the `EXO_ENV` allowlist is the only way a var
+reaches a runner (§2).
+
+### 15.4 Pre-deploy local verification (Tier 0, no cluster)
+
+- Predicate enumerated over ctx {2K, 10K, 70K, 352.6K} × ratio {4, 128}: the
+  table in §15.1. No branch flip at any point; escape hatch exact-fit everywhere.
+- A **real** `BatchPoolingCache` driven 600 flushes: r=4 first pads at exactly
+  `_pool_lengths == 512` (storage 512 → 768) and pads on 88 of 600 steps;
+  **r=128 never pads** (storage tracks `_pool_lengths` exactly). With
+  `EXO_DSV4_POOL_GROW_STEP=1`, neither ratio ever pads.
+- Ragged-batch check: `_pool_lengths = [600, 400]`, `max_pool = 601` → target
+  601 (**no pad**, short stream blocks it); `[600, 600]` → target 768.
+
+## 16. Deployment
+
+Three relaunches, all via `start_cluster.sh` (git-only deploy, hard-reset to
+`origin/main` on both nodes). All three: `READY (2/2)`, `EXIT=0`, **no crashes,
+no runner deaths, no split-brain**.
+
+| # | arm | env delta | result |
+|---|---|---|---|
+| 1 | **default** | *(none — GROW_STEP unset)* | READY (2/2), EXIT=0 |
+| 2 | escape hatch | `EXO_DSV4_POOL_GROW_STEP=1` | READY (2/2), EXIT=0 |
+| 3 | **default** (final state) | *(none)* | READY (2/2), EXIT=0 |
+
+Verified on **both** nodes after each relaunch:
+
+- Deployed SHAs: exo `10357e570`, mlx-lm `0854b396`.
+- `md5 mlx-lm/mlx_lm/models/cache.py` == `md5
+  .venv/.../site-packages/mlx_lm/models/cache.py` = `5bc32bc07aeafb5a9d23eec2bb5c3bf8`
+  — the runner imports the file we think it does (this is the check the Part II
+  `uv.lock` caveat demanded).
+- The venv copy contains all three new constants at :1312-1314.
+- `ps eww <runner_pid>` on the default arm: **zero** `POOL_GROW*` variables
+  present on either node — the flip is coming from the committed default, not
+  from a leftover export. Production env (`EXO_DSV4_MOE_FUSED_GATE_UP=1`,
+  `EXO_DSV4_FENCE_ASYNC=1`, `MLX_GEMV_BATCH_INVARIANT=1`,
+  `MLX_STEEL_BATCH_INVARIANT=1`, …) intact.
+- Escape arm: `EXO_DSV4_POOL_GROW_STEP=1` present on both nodes, same SHAs.
+
+## 17. Byte-identity gates: **3 / 3 PASS**
+
+Method: `/tmp/gate/gate_probe.py`. Fixed deterministic prompt (**no nonce** — both
+arms must send identical bytes; verified by `prompt_md5`), `temperature=0`,
+`top_p=1.0`, `use_prefix_cache=False`, `max_tokens=250`, via
+`/bench/chat/completions`. Reasoning and content streams are concatenated and
+compared **as raw bytes**, not just by md5.
+
+| gate | target | REAL `prompt_tokens` | prompt md5 match | output bytes | verdict |
+|---|---|---|---|---|---|
+| **(a) short** | ~2K | **1,825** | ✓ `abb77c1a…` | 1,007 == 1,007 | **BYTE-IDENTICAL** |
+| **(b) mid** | ~10K | **10,025** | ✓ `5455095b…` | 1,150 == 1,150 | **BYTE-IDENTICAL** |
+| **(c) r=128 boundary** | ~70K | **70,016** | ✓ `c88f5826…` | 1,081 == 1,081 | **BYTE-IDENTICAL** |
+
+Output md5 (default arm vs escape arm), identical in all three:
+
+| gate | default | escape |
+|---|---|---|
+| (a) 1,825 | `96d1f88955a717aa268a25e1ab84c5e5` | `96d1f88955a717aa268a25e1ab84c5e5` |
+| (b) 10,025 | `cf4d851dc527419acc2630a556f6ede5` | `cf4d851dc527419acc2630a556f6ede5` |
+| (c) 70,016 | `0ad988f046af891f4445afe5cb91ca42` | `0ad988f046af891f4445afe5cb91ca42` |
+
+**Gate (c) is the one that matters for §15.** 70,016 tokens is past the ctx
+≈ 65.5K point where an r=128 pool crosses 512. Under the reviewer's width-only
+gate this point was *predicted to diverge* (34 pads on 20 no-top-k layers).
+Under the shipped ratio gate it is byte-identical. **That is the live
+confirmation that the ratio gate closes the hole, and it is a positive control,
+not merely an absence of evidence** — the same probe at the same depth would
+have diverged had the gate been width-only.
+
+Raw outputs saved: `/tmp/gate/{default,escape}_{a_2k,b_10k,c_70k}.json`.
+
+Contrast with §10.5, where the *raw* lever produced different text at ctx ≈ 20 on
+an identical prompt. The gated form does not.
+
+## 18. Deep re-verification on the final default build
+
+Run on the **final** deployed state — relaunch #3, default arm, **no
+`POOL_GROW*` env var on either node** — so this measures the committed default,
+not a runtime override. `bench/p3_depth_anchor_probe.py`, EOS genuinely banned
+(`finish_reason=length`, 2000 completion tokens, `cached_tokens=0`).
+
+| depth (REAL `prompt_tokens`) | tok/s (usage) | tok/s (events) | ms/tok | p50 gap | p90 gap | p99 | decode window | TTFT |
+|---|---|---|---|---|---|---|---|---|
+| **352,643** | **25.32** | 25.31 | **39.49** | 38.82 ms | 53.54 ms | 104.80 ms | 78.94 s | 1062.94 s |
+| **100,067** | **28.94** | 28.73 | **34.55** | 33.82 ms | 52.95 ms | 101.98 ms | 69.06 s | 277.22 s |
+
+### 18.1 Against the Part II arms
+
+| depth | arm A (`=1`) | arm B (raw `=256`) | **default (gated)** | default vs arm A |
+|---|---|---|---|---|
+| ~352.6K | 23.50 tok/s | 25.80 | **25.32** | **+7.7%** |
+| ~100K | 28.09 tok/s | 29.06 | **28.94** | **+3.0%** |
+
+The gated default lands **within noise of arm B and far above arm A** at both
+depths — 98.1% of arm B's deep number and 99.6% of its shallow number, against a
+~±0.5% instrument noise floor established in §11.2. The deep point sits inside
+the +7–10% estimator range §11.1 requires be quoted, and the two estimators now
+agree to 0.04% (25.32 vs 25.31), unlike the Part II deep run.
+
+**This also empirically bounds the cost of the ratio gate** (§15.2's 0.1–3%
+prediction): the gated default gives up ~1.9% of arm B's deep gain, i.e. the
+r=128 exclusion costs roughly 0.5 percentage points of the ~9.8 point win —
+comfortably inside the predicted band, and the price of bit-identity on 20
+layers.
+
+Secondary signature holds on the final build: at 352.6K the p90−p50 spread is
+**14.72 ms** (vs arm A's 31.00 and arm B's 26.68), and the slow-gap rate is
+0.75% (arm A 0.70%, arm B 0.36%).
+
+### 18.2 Generated text — the honest proof
+
+Every number above comes from a run that produced real, on-task text. No output
+is quoted here without the run that produced it.
+
+**352,643 tokens, head:**
+
+> *"The user wants a brief summary of the corpus. The corpus is a long list of
+> sections (0 to 7923) that follow a repetitive pattern. Each section describes
+> a practice (e.g., "distributed inference schedu…"*
+
+**352,643 tokens, tail:**
+
+> *"…ceholder data. A brief summary: the corpus is a formulaic enumeration of
+> technical scenarios, each tied to arbitrary con…"*
+
+**100,067 tokens, head:**
+
+> *"The user wants a brief summary of the corpus. The corpus is a long list of
+> sections (0 through 2263) that describe various technical topics in a
+> repetitive template. Each section follows the pattern: …"*
+
+Both correctly recover the corpus's actual structure **and its true section
+count** (7,923 at 352.6K; 2,263 at 100K — two different, correct numbers for two
+differently-sized corpora). That is a content-dependent read of the full prompt,
+so it functions as a needle-style check: a model whose deep attention had been
+corrupted by mis-masked pads could not report the right section count. Zero
+U+FFFD, no repetition loops, no `<|begin_of_sentence|>` leakage.
+
+Raw JSON: `/tmp/p3_depth_default_352k.json`, `/tmp/p3_depth_default_100k.json`.
+
+## 19. Final state and what remains open
+
+**Shipped.** exo `10357e570` (+ a follow-up docs commit), mlx-lm `0854b396`,
+both on `main` and pushed. Tags `known-good-poolgrow-default-20260823` on both.
+Cluster **RUNNING the new default** with no `POOL_GROW*` env var.
+
+**Discharged from Part II's limitations:** the default-flip item; the
+short-context numerics gap (§10.5 → gates (a),(b) pass); the r=128-at-depth
+question (§15, gate (c) passes); n=1 at both depths is now n=2 (arm A, arm B, and
+now the gated default all agree on the shape).
+
+**Still open, honestly:**
+
+- **Attribution, not causation.** R2's slice-the-pad-off variant was *rejected as
+  a shipping form* (§15.2) but was never *run as an experiment*, so the clean
+  separation of "concat elimination" from "make_mask duty cycle" is still
+  unmeasured. The causal claim about the lever is sound (the duty-cycle change
+  adds work); the mechanism decomposition is not isolated.
+- **`GROW_STEP=256` only.** Still no sweep over step sizes.
+- **`_POOL_GROW_MAX_RATIO` is env-tunable.** Setting it to 128 re-opens the exact
+  hole §15 closes. It is left tunable for forensic A/B, and is documented at the
+  constant, but it is a foot-gun: there is no legitimate production reason to
+  raise it.
+- **Gates used 250-token windows at 3 depths.** They are strong positive
+  controls (especially (c)) but they are not a proof of bit-identity over all
+  inputs — batch>1 and speculative reject-cycles (MTP/DSpark OFF on this
+  cluster) were not exercised.
+- **No 300K point**, so the 100K→352.6K curve shape is still interpolated.

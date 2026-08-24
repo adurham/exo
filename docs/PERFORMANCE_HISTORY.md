@@ -2839,6 +2839,66 @@ default-flip entry below.** Cluster left RUNNING in arm B
 session, both clean (`EXIT=0`, READY 2/2 in 8.6 and 6.7 min), no crashes, no
 runner deaths.
 
+**NEW (2026-08-23, DEFAULT FLIPPED — GATED FORM, BYTE-IDENTITY VERIFIED):
+chunked `BatchPoolingCache` growth is now ON BY DEFAULT.** mlx-lm `0854b396`
+(`EXO_DSV4_POOL_GROW_STEP` default 1 -> 256), exo `10357e570`. Tags
+`known-good-poolgrow-default-20260823` on both repos. Full report:
+`docs/p3-followup-poolgrow-ab-2026-08-23.md` **Part III**.
+
+The reviewer approved a flip gated only on width (`_POOL_GROW_MIN=512`), on the
+claim that past 512 "every consumer is on the sparse/top-k path." **That claim is
+FALSE for 20 of 43 layers and the flip shipped with a third gate to fix it.**
+`CompressedAttention` (deepseek_v4.py:4249, the ratio-128 layers) has NO top-k at
+ANY context — it concatenates the whole pool into SDPA. An r=128 pool crosses 512
+at ctx ~65.5K, so a width-only gate would still pad it at depth (2755 -> 2816 at
+352.6K) and drift 20 layers. Shipped fix: `EXO_DSV4_POOL_GROW_MAX_RATIO=4` —
+never pad a ratio-128 pool. Costs ~0.1-3% of the win (realloc byte-volume scales
+as 1/ratio^2); measured cost was ~0.5 points of the ~9.8-point deep gain.
+
+Neutrality now holds at EVERY context, not just below 65K: r=128 never pads;
+r=4 below 512 valid columns never pads; r=4 above it pads but both arms are
+`> index_topk` (same sparse branch, no flip), pads score `finfo.min`, and
+`k = min(512, P)` never reaches past the valid columns, so the top-k selects
+identical indices -> identical gather -> identical SDPA. The gate keys on
+`min(_pool_lengths)`, not `max_pool`, so a ragged batch's short stream also
+blocks padding (removes any dependence on MLX argsort tie-break stability).
+
+BYTE-IDENTITY GATES: **3/3 PASS.** temp-0, fixed nonce-free prompt (prompt md5
+verified equal), `use_prefix_cache=False`, 250-token windows, default build vs
+`EXO_DSV4_POOL_GROW_STEP=1` escape-hatch relaunch, compared as RAW BYTES:
+ctx 1,825 identical (1007 B); ctx 10,025 identical (1150 B); **ctx 70,016
+identical (1081 B)**. The 70K point is the positive control — it is past the
+r=128/512 crossover and was PREDICTED to diverge under the reviewer's
+width-only gate; under the shipped ratio gate it does not. Contrast §10.5, where
+the raw ungated lever produced DIFFERENT text at ctx~20 on an identical prompt.
+
+DEEP RE-VERIFICATION on the final default build (no POOL_GROW var on either
+node), `bench/p3_depth_anchor_probe.py`, EOS banned, 2000 completion tokens:
+
+| depth (REAL) | tok/s | ms/tok | p50 | p90 | vs arm A |
+|---|---|---|---|---|---|
+| 352,643 | **25.32** (events 25.31) | 39.49 | 38.82 ms | 53.54 ms | **+7.7%** |
+| 100,067 | **28.94** (events 28.73) | 34.55 | 33.82 ms | 52.95 ms | **+3.0%** |
+
+Within noise of raw arm B (25.80 / 29.06) and far above arm A (23.50 / 28.09).
+Both estimators now agree to 0.04% at depth. Text is real and on-task: both runs
+recover the corpus structure AND its correct section count (7,923 at 352.6K,
+2,263 at 100K — two different correct numbers), a content-dependent read that a
+mis-masked pool could not produce. Zero U+FFFD, no repetition loops.
+
+Three relaunches (default -> escape -> default), all `READY (2/2)` / `EXIT=0`,
+no crashes, no runner deaths. Verified on BOTH nodes each time: SHAs, venv
+`cache.py` md5 == submodule md5 (`5bc32bc0...`), the three new constants present
+at :1312-1314, and `ps eww` showing ZERO `POOL_GROW*` vars on the default arm
+(so the flip comes from the committed default, not a stale export).
+
+STILL OPEN: attribution (R2's slice-the-pad variant was rejected as a shipping
+form and never run as an experiment, so concat-elimination vs make_mask
+duty-cycle is not isolated); no step-size sweep; `EXO_DSV4_POOL_GROW_MAX_RATIO`
+remains env-tunable and setting it to 128 re-opens the closed hole; gates were
+250-token windows at 3 depths with batch=1 and MTP/DSpark OFF, so they are
+strong positive controls rather than a proof over all inputs.
+
 ---
 
 ## Quick-reference: closed levers, one line each
