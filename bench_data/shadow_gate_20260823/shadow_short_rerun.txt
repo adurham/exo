@@ -1,0 +1,13 @@
+1.  **Analyze the Request**:
+    *   Reference identifier: `p4v2-shadow-gate-fixed`.
+    *   Corpus: A list of 45 sections (Section 0 to Section 45).
+    *   Task: Briefly summarize the corpus.
+
+2.  **Analyze the Corpus**:
+    *   The corpus consists of 45 sentences (Sections 0-45).
+    *   Each sentence follows a strict template: "In practice [topic] ...; the resulting behaviour depends on configuration {X} and on the observed interaction between stage {Y} and stage {Z} of the surrounding system."
+    *   There are 9 distinct topics (repeating in a cycle of 9):
+        0. distributed inference schedulers allocate pipeline stages across nodes
+        1. thunderbolt fabrics expose queue pairs with distinct completion semantics
+        2. mixture of experts routing selects a sparse subset of feedforward blocks
+        3. key value c

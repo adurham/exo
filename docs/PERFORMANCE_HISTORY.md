@@ -3115,6 +3115,52 @@ between them).
 
 ---
 
+## 2026-08-24 — P4v2 M1 shadow gate: measured, verdict HOLD; incident recovery; cluster reverted to production
+
+Full writeup: `docs/p4v2-m1-shadow-gate-results-and-recovery-2026-08-24.md`.
+Build `34478792b` (M0 head-load gate + M1 env-gated DSpark shadow measurement).
+
+The 2026-08-23 measurement session was killed mid-flight by API-provider
+overload, leaving the cluster serving on the experimental shadow config with
+what looked like a 3.4x decode regression (8.51 tok/s @100K) and an empty
+diagnostic log. Recovery session findings: **neither was a malfunction.**
+8.51 tok/s is shadow mode's designed cost (full draft+verify every cycle,
+forced n_accepted=0, 1 token/cycle: 117.5 ms wall/cycle ≈ 110.3 ms measured
+draft+verify + ~8 ms bookkeeping); the "empty" log was an artifact of (a) the
+worker's relaunch #2 dropping `EXO_DSV4_SPEC_SHADOW_LOG` from the env and
+(b) checking the wrong host — the real 782-cycle jsonl from relaunch #1 was
+intact on m4-1 and is preserved at
+`bench_data/shadow_gate_20260823/dspark_shadow_relaunch1.jsonl`.
+
+**M1 gate numbers (the point of the exercise), 100K ctx, τ=0.5, block=5:**
+a = 2.256 accepted/cycle (γ_mean 3.31, accept rate 0.681), draft 11.3 ms,
+verify 99.0 ms (γ-linear: 53.5@γ=1 → 134.4@γ=5, ≈20.2 ms/row — +22% over
+the cost model's A@100K=16.57). Projected speculative decode =
+1000·(1+a)/110.3 = **29.5 tok/s vs 29 sequential = +1.8%**, break-even
+a\*=2.199, margin 0.057 ⇒ **§D.4 HOLD band. DSpark speculation at 100K is
+knife-edge at best under real verify cost; M2+ not funded.** At 2K it's
++17.7% (a=2.995) — but the north-star is 100K. Byte-identity gate FAILS
+under shipped MoE config (`ROWSEQ_FULLBLOCK_MOE=0`/`PARTS_ROWSEQ=shared`
+0.023%/row residual, documented) — deterministic across reruns but diverges
+from production trajectory; any future byte-exact shadow run needs
+`EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=1`. Acceptance stats remain valid
+(self-consistent vs walked trajectory). LIMITS: n=1/depth, 200/385-token
+windows, no 10K or 352.6K shadow point, τ=0.9 never measured.
+
+**Cluster reverted to production defaults** (relaunch #3,
+`EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 ./start_cluster.sh`, READY 2/2, EXIT=0).
+This relaunch also live-validated **M0**: both nodes log `DSpark head load
+SKIPPED (~10 GB/node reclaimed)` with the exact gate reasoning, 0 attach
+lines. Post-revert verification: identity probe @2K = 30.05 tok/s,
+byte-identical to the pre-shadow production output; decode probe @100K
+below.
+
+**Post-revert 100K decode probe: 28.73 tok/s usage (28.44 events), gap
+median 34.2 ms / p95 60.4 ms, 600/600 tokens, coherent text — baseline
+restored** (vs 8.51 / p95 189 ms under shadow config).
+
+---
+
 ## Quick-reference: closed levers, one line each
 
 *(Added from the independent second pass's appendix table — a fast

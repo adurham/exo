@@ -1,0 +1,17 @@
+The user wants a brief summary of the corpus. The corpus is a long list of sections (0 to 2262) that follow a repetitive pattern. Each section describes a practice (e.g., "distributed inference schedulers allocate pipeline stages across nodes") and states that the resulting behaviour depends on a configuration number and on the observed interaction between two stages of the surrounding system.
+
+The content is highly repetitive and formulaic. The "practices" mentioned are a set of about 10 different topics:
+- distributed inference schedulers
+- thunderbolt fabrics
+- mixture of experts routing
+- key value caches
+- quantised weight formats
+- speculative decoding
+- unified memory architectures
+- attention indexers
+
+Each section repeats one of these topics with different configuration numbers and stage numbers.
+
+The task is to "Briefly summarise the corpus above." So I should provide a concise summary of what the corpus contains, not a detailed analysis of each section.
+
+I'll summarize that it's a large corpus of repetitive statements about various computing practices, each stating that behavior depends on a configuration and interaction between stages. The content is formulaic and doesn't contain substantive information beyond the pattern.</think>The corpus consists of 2,263 repetitive, formulaic sections (0–2262). Each section follows the same template: it names a computing practice (e.g., distributed inference schedulers, thunderbolt fabrics, mixture-of-experts routing, key-value caches, quantised weight formats, speculative decoding, unified memory architectures, attention indexers) and states that the resulting behaviour depends on a configuration number and on the observed interaction between two stages of the surrounding system. The configuration numbers and stage pairs cycle through a fixed set of values, but no additional information, analysis, or narrative is provided. The corpus is essentially a large, structured list of near-identical statements with no substantive content beyond the repeated pattern.

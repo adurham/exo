@@ -1,0 +1,33 @@
+{
+  "prompt_tokens": 2034,
+  "completion_tokens": 200,
+  "usage": {
+    "prompt_tokens": 2034,
+    "completion_tokens": 200,
+    "total_tokens": 2234,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "finish_reason": "length",
+  "ttft_s": 7.378190457995515,
+  "decode_window_s": 23.773929249990033,
+  "total_s": 31.153107041987823,
+  "streamed_events": 191,
+  "decode_tok_s_events": 7.991947734095308,
+  "decode_tok_s_usage": 8.37051367939456,
+  "ms_per_token_events": 125.12594342100017,
+  "gap_mean_ms": 125.12594342100017,
+  "gap_median_ms": 120.1389794878196,
+  "gap_p95_ms": 209.42287502111867,
+  "predicted_prompt_tokens": 2034,
+  "target_tokens": 2000,
+  "mode": "identity"
+}
