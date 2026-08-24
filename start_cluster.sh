@@ -2135,10 +2135,15 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_POOL_GROW_MAX_RATIO:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MAX_RATIO=$EXO_DSV4_POOL_GROW_MAX_RATIO"
     # EXO_DSV4_HC_EXPAND_KERNEL: fused Metal kernel for HyperConnection expand
     # (layer.attn_residual / ffn_residual). Env-gated in mlx-lm/mlx_lm/models/
-    # hyper_connection.py; default OFF is bit-identical to today's op path.
-    # Opt-in forwarding only -- unset var leaves the production launch command
-    # line unchanged (matches the pool-grow forwarding above), so an unset here
-    # is provably arm A in an A/B. See docs/hc-expand-kernel-ab-2026-08-24.md.
+    # hyper_connection.py; the kernel path itself is bit-identical to the op
+    # path when the kernel is disabled (verified max_abs=0.0 vs the pre-kernel
+    # code path when EXO_DSV4_HC_EXPAND_KERNEL is unset). DEFAULT FLIPPED TO
+    # 1 on 2026-08-24 after the live A/B measured +3.87% prefill @70.6K real
+    # tokens (arm A mean 359.89 tok/s, arm B mean 373.80 tok/s, 2 runs each,
+    # needle FALCON-MERCURY-7749 recovered exact on all 4 probes) -- see
+    # docs/hc-expand-kernel-ab-2026-08-24.md. Set EXO_DSV4_HC_EXPAND_KERNEL=0
+    # to revert to the pre-kernel op path (bit-identical, no perf gain).
+    : "${EXO_DSV4_HC_EXPAND_KERNEL:=1}"
     [ -n "${EXO_DSV4_HC_EXPAND_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_EXPAND_KERNEL=$EXO_DSV4_HC_EXPAND_KERNEL"
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
