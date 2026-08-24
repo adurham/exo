@@ -531,6 +531,108 @@ commit and the initial A/B doc commit so the git history preserves the
 distinction between what the A/B session measured and what the closing
 task verified in production.
 
+### 14.2.1 Final production verification (2026-08-24 PM closing task, appended)
+
+Fresh evidence gathered after the closing task's relaunch. Timeline:
+
+- **15:31:09** — background `tmux new-session -d -s hc_prodrelaunch` launched
+  `EXO_DSV4_MTP=0 EXO_SPECULATIVE=0 ./start_cluster.sh` on the laptop.
+  The script default (this session's `deb1c8a6d` commit)
+  `: "${EXO_DSV4_HC_EXPAND_KERNEL:=1}"` promoted the var to 1; no
+  explicit override on the command line.
+- **~15:43:35** — API on `adams-mac-studio-m4-1.local:52415` began
+  responding (before this, the polls got "API not responding" because
+  the launcher was still in the Rust `pyo3` rebuild + zenoh discovery
+  phase; a bare `Waiting for cluster to stabilize...` was still in
+  progress). This is normal for a full launcher run.
+- **~15:44:16** — launcher log reported
+  `Nodes synchronized on commit 302759bec.`,
+  `Memory reclaim on macstudio-m4-1 complete (wired+compressor 3 GB <= 25 GB).`,
+  `Memory reclaim on macstudio-m4-2 complete (wired+compressor 3 GB <= 25 GB).`,
+  `Waiting for cluster to stabilize...... HEALTHY! (Nodes: 2, Identities: 2)`,
+  `Auto-placing DeepSeek V4 Flash (deepseek-ai/DeepSeek-V4-Flash-0731)`,
+  and finally `Waiting for 2 DeepSeek V4 runner(s) to become Ready.................... READY (2/2)`.
+  Total launch time ~13 minutes (T+00:00 → T+13:07), consistent with the
+  A/B session's launches #2-4 (~11-14 min each).
+- **15:44:16** — tmux session `hc_prodrelaunch` exited cleanly (return
+  code 0, no crash-retry loop, no orphan foreground process).
+
+`/state` verification:
+
+```
+$ curl http://adams-mac-studio-m4-1.local:52415/state | jq '.runners'
+6446d367-edb...: state={'RunnerReady': {'prefillServerPort': None}}
+573c199f-fc7...: state={'RunnerReady': {'prefillServerPort': None}}
+```
+
+Both runners `RunnerReady`. The instance
+`ce71f238-a68d-4e11-aae9-a678d78cc872` for
+`deepseek-ai/DeepSeek-V4-Flash-0731` has both TensorShardMetadata halves
+placed (`worldSize=2`, `deviceRank=0/1`, `startLayer=0 endLayer=43`
+across 43 total layers, `quantization=fp8`).
+
+`ps eww <runner_pid>` on both nodes (the check §2 said would catch a
+silent null):
+
+```
+$ ssh adams-mac-studio-m4-1.local 'ps eww $(pgrep -f ".venv/bin/python -m exo -v")'
+node m4-1 PID=33871
+EXO_DSV4_HC_EXPAND_KERNEL=1
+EXO_SPECULATIVE=0
+EXO_DSV4_MTP=0
+EXO_DSV4_DSPARK=1
+
+$ ssh adams-mac-studio-m4-2.local 'ps eww $(pgrep -f ".venv/bin/python -m exo -v")'
+node m4-2 PID=33826
+EXO_DSV4_HC_EXPAND_KERNEL=1
+EXO_SPECULATIVE=0
+EXO_DSV4_MTP=0
+EXO_DSV4_DSPARK=1
+```
+
+Kernel gate = 1 present on both runners; production overrides
+`EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_DSPARK=1` match the A/B's
+arm-B configuration. This is genuinely arm-B in production, no silent
+null.
+
+Smoke test (short chat completion for serving-sanity, NOT a benchmark):
+
+```
+$ curl -X POST http://adams-mac-studio-m4-1.local:52415/v1/chat/completions \
+    -H "Content-Type: application/json" -d '{
+      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "messages": [{"role":"user","content":
+        "Reply with exactly: PROD-OK-HCEXPAND then one sentence about why the sky is blue."}],
+      "max_tokens": 64, "temperature": 0.0, "stream": false }'
+```
+
+Response:
+
+- `finish_reason: length` (hit max_tokens=64 mid-sentence — expected)
+- `usage: {prompt_tokens: 26, completion_tokens: 64, total_tokens: 90,
+  reasoning_tokens: 49}`
+- `reasoning_content` (49 tokens): coherent thinking that parsed the
+  instruction correctly (`"1.  The user asks to reply with exactly:
+  \"PROD-OK-HCEXPAND then one sentence about why the sky is blue.\"
+  2.  I need to output the exact string \"PROD-OK-HCEXPAND`)
+- `content`: `PROD-OK-HCEXPAND The sky appears blue because` (starts
+  with the exact required sentinel, then begins the explanation before
+  the 64-token cap cut it off — consistent with a healthy DSv4-Flash
+  emitting reasoning-then-content in that order)
+- No U+FFFD, no BOS spam, no degeneration, no tool-call XML leak
+
+The cluster is now serving production in the shipped kernel-ON
+configuration. The only tmux sessions remaining on the laptop are
+pre-existing peer sessions (`exo-default2`, `exo-relaunch1`, `p100k`,
+`p3e`) from earlier subagents / A/B sessions — the closing task's own
+`hc_prodrelaunch` session exited cleanly.
+
+Nodes are at exo `302759bec` (this session's docs commit) — one docs-
+only commit will follow this appendage to record §14.2.1 above; the
+nodes' commit will lag laptop head by that single docs-only commit,
+which matches this campaign's convention (nodes get resynced only at
+the next real launcher run).
+
 ### 14.3 Rollback recipe (if this ever needs to be reverted)
 
 ```sh
