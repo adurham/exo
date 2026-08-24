@@ -1435,6 +1435,77 @@ without new evidence).
 
 ## 9. Concurrency (c=2+) and PP vs TP topology
 
+### 9.0 NEW(2026-08-24): the "~22% TP-vs-PP prefill gap" is an ARTIFACT — live head-to-head INVERTS it (WIN, decisive)
+
+`docs/p5-tp-prefill-gap-2026-08-24.md` — the long-standing, never-root-caused
+"TP ~350 vs PP ~450 prefill" lead was chased to ground with provenance
+archaeology + the first-ever apples-to-apples live PP-vs-TP measurement on the
+production checkpoint. **Verdict (b): the gap does not reproduce; it runs the
+OPPOSITE direction.**
+
+Live, identical probe (`bench/phase3_precheck_depth_throughput.py`, tokenizer
+ground truth, needle-verified), same fp8 `DeepSeek-V4-Flash-0731`, same 100K
+depth, fresh cluster for each arm:
+
+| Mode | Prefill @100K | TTFT | Needle |
+|---|---|---|---|
+| **TP** (production) | **366.5 tok/s** | 192.49 s | PASS |
+| **PP** | **277.0 tok/s** | 255.06 s | PASS |
+
+**TP is +32.3% over PP.** (TP also re-confirms the §1 baseline: 366.5 vs
+359.7, +1.9%, and matches the 2026-08-21 known-good 366.6 to 0.03%.)
+
+**Four compounding provenance defects manufactured the phantom 22%:**
+1. **Different checkpoint + quantization** — every PP ~450 figure was measured
+   on `mlx-community/DeepSeek-V4-Flash` (**affine int8 PREVIEW**); production is
+   `deepseek-ai/DeepSeek-V4-Flash-0731` (**fp8 e4m3**). `start_cluster.sh`'s own
+   comment warns preview vs production differ structurally.
+2. **The 1.42x `chars//4` counting artifact** — fact 1450 explicitly names fact
+   1018 (the entire PP 364–512 curve) as contaminated; §3.5's own header already
+   forbade quoting those numbers without checking the numerator.
+3. **Depth swap** — the ~450s are 500K/94K/10K points quoted as if at 100K.
+   (One source, `docs/profiling/request_lifecycle_trace.md`'s 467/439, is a
+   *different model entirely* — Qwen3.5-397B.)
+4. **THE DECISIVE ONE — chunk-loop rate vs TTFT rate.** PP's opening chunk-loop
+   rate measured live today is **523 tok/s**, reproducing the historical
+   490/512 claims *exactly*. But **55.8 s of PP-only first-token pipeline drain
+   sits OUTSIDE the chunk loop** (runner logs "Prefill complete: 199.29s" while
+   client TTFT was 255.06 s). TP's chunk-loop and TTFT rates diverge by **2.9%**;
+   PP's by **34%**. Comparing PP's loop rate to TP's TTFT rate invents the gap.
+
+**Exact additive decomposition of PP's chunk loop (closes to 188.1s measured):**
+`PP1 baseline at PP's own opening rate 135.0s + PP2 stall outliers 19.5s +
+PP3 depth-decay 33.6s`. TP's total for the same 70,656 tokens is **187.1s**.
+PP1 alone *beats* TP by 52s — PP simply cannot hold it: PP decays **+63.4%**
+across 70K with **5 stall outliers** (worst 9.6s), vs TP's **+5.1% and ZERO
+outliers**.
+
+**The structural asymmetry is real but self-cancelling.** TP moves 43x the
+collective bytes per chunk (43 × 16.78 MB all_sum vs PP's 1 boundary transfer),
+worth **4–9%** — bounded two independent ways: §2.3 arithmetic (215–516 ms of a
+measured 5502 ms chunk) and fact 939's 93–95% GPU-busy (275–385 ms idle
+headroom). PP repays all of it in bubble + decay, so **at the chunk-loop level
+the modes are 377 (TP) vs 372 (PP) — statistically identical.**
+
+**Consequences:**
+- **The 2026-08-18 "prefill ceiling ~350–360, compute-bound" finding is UPHELD
+  and STRENGTHENED.** A PP 450 was the only evidence straining it; PP is 277.
+- **No TP-side prefill lever is proposed, and none should be.** Any comm-side
+  lever addresses a ≤9% pool against ≤7% GPU idle; the collective/compute
+  overlap cousin additionally inherits §2.6's correctness-race death and §0c's
+  silent eval-order corruption hazard. fp8-native collective payload is capped
+  under ~2% (§2.3: wire is only 2–9 ms of the 5–12 ms/call; the rest is
+  payload-proportional but *non-collective-specific* stream-boundary cost).
+  **Remaining prefill headroom is in COMPUTE, not communication.**
+- **Side-finding: PP mode is NOT bit-rotted** — it launched clean on current
+  code (`PipelineShardMetadata` 0–22 / 22–43, both runners READY, needle PASS).
+
+**Reusable methodology lesson (→ §12):** *an instantaneous per-chunk progress
+rate is only a valid throughput proxy when out-of-loop time is small. TP hides
+2.8% outside its chunk loop, PP hides 25.5%. Never compare a chunk-loop rate
+from one topology against a TTFT rate from another — always compare the same
+denominator, and state which one it is.*
+
 ### 9.1 PP vs TP structural tradeoff (settled, WIN as a design decision)
 
 `docs/fork-notes.md` (2026-07-31): PP gives **27-33 tok/s single-request**
