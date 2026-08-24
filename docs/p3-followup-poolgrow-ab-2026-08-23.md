@@ -1,13 +1,22 @@
 # P3 follow-up — BatchPoolingCache chunked-growth A/B (`EXO_DSV4_POOL_GROW_STEP`) — 2026-08-23
 
-**Status: LEVER IMPLEMENTED AND DEPLOYED TO GIT. LIVE A/B NOT RUN — BLOCKED ON CLUSTER CONTENTION.**
+**Status: LIVE A/B COMPLETE. VERDICT — CONFIRMED.**
 
-This document records the code change, two verification results that needed no
-cluster, and the exact reason the four probe runs were **not** executed. **No
-throughput numbers are reported here, because none were measured.** The
-pre-registered signature table from
-`p3-worker-c3-donation-failure-insitu-2026-08-23.md` §8.2 is reproduced below as
-the *hypothesis to be tested*, not as a result.
+`EXO_DSV4_POOL_GROW_STEP=256` is a **real, reproducible decode win**:
+**+9.79% at 352.6K ctx** (23.50 → 25.80 tok/s, −3.79 ms/tok) and **+3.46% at
+100K ctx** (28.09 → 29.06 tok/s, −1.19 ms/tok). The pre-registered
+falsification condition was **not** met. The pre-registered deep≫shallow
+asymmetry fingerprint is present, and the pre-registered *depth-delta* numbers
+were hit almost exactly (arm A +6.95 vs predicted +6.80 ms/tok; arm B +4.35 vs
+predicted +4.89). Output quality is unchanged (R2 control passed).
+
+Results are in §10-§14. §3 preserves the pre-registered hypothesis verbatim, so
+the run is judged against what was written before the data existed. The
+original §5 (why the A/B was blocked on the first attempt) is kept for the
+record.
+
+**The code default was deliberately NOT changed.** The lever remains opt-in and
+unset everywhere; flipping the default is a separate reviewed step (§14).
 
 ---
 
@@ -18,13 +27,14 @@ the *hypothesis to be tested*, not as a result.
 | 1. Code change (env-gated chunked grow) | **DONE** — `mlx-lm` `643d42d` |
 | 2. Git (mlx-lm commit+push, exo submodule bump, uv.lock, push) | **DONE** — `exo` `8a04cf492` |
 | 2b. *(unplanned, required)* env forwarding in `start_cluster.sh` | **DONE** — see §2 |
-| 3. Deploy arm A (relaunch) | **NOT DONE** — cluster contention, §5 |
-| 4. Arm A probes (100,026 / 352,599) | **NOT DONE** |
-| 5. Deploy arm B + verify env reached runners | **NOT DONE** |
-| 6. Analysis vs pre-registered signature | **NOT POSSIBLE** — no data |
+| 3. Deploy arm A (relaunch) | **DONE** — §10 |
+| 4. Arm A probes (100,026 / 352,599) | **DONE** — §11 |
+| 5. Deploy arm B + verify env reached runners | **DONE** — §10, env verified via `ps eww` on BOTH nodes |
+| 6. Analysis vs pre-registered signature | **DONE** — §12, verdict CONFIRMED |
 | 6b. R2 make_mask control, static half | **DONE** — §4, and it is a real finding |
+| 6c. R2 make_mask control, live half (output quality) | **DONE** — §13, passed |
 | 7. This doc | **DONE** |
-| 7b. `PERFORMANCE_HISTORY.md` entry | **DELIBERATELY NOT WRITTEN** — §7 |
+| 7b. `PERFORMANCE_HISTORY.md` entry | **DONE** — real numbers, see §7 |
 
 ---
 
@@ -168,7 +178,10 @@ the cluster.
 
 ---
 
-## 5. Why the live A/B was not run
+## 5. Why the live A/B was not run *on the first attempt* (historical)
+
+*Kept verbatim for the record. The A/B was subsequently run to completion in a
+later session with exclusive cluster time — see §10 onward.*
 
 The task brief stated the cluster was DOWN and that relaunch was pre-approved.
 **The cluster was in fact UP and in use by another agent.**
@@ -209,9 +222,11 @@ This is safe: the lever is env-gated and defaults to bit-identical behaviour.
 
 ---
 
-## 6. Exact runbook to finish this (nothing else is blocking)
+## 6. Exact runbook (as written before the run; followed as specified)
 
-Requires ~1.5-2 h of **exclusive** cluster time.
+Requires ~1.5-2 h of **exclusive** cluster time. This runbook was executed
+as-written, with one deviation noted in §10: the probe must be invoked with the
+repo venv interpreter (`./.venv/bin/python`), not bare `python3`.
 
 ```sh
 # ARM A — production config, GROW_STEP unset (default 1)
@@ -246,18 +261,21 @@ p50/p90 inter-token gap, and a generated-text snippet for **every** number quote
 
 ---
 
-## 7. Why there is no `PERFORMANCE_HISTORY.md` entry
+## 7. `PERFORMANCE_HISTORY.md` entry
 
-The task asked for a dated `NEW(...)` entry "describing the A/B result (measured,
-either direction)". **No measurement exists**, so no entry was written.
-`PERFORMANCE_HISTORY.md` is a record of measured outcomes; adding an entry for an
-experiment that never ran would pollute the one document whose stated purpose is
-to prevent re-litigating settled questions. The entry should be appended by
-whoever completes §6, with real numbers.
+Originally withheld because no measurement existed — `PERFORMANCE_HISTORY.md` is
+a record of *measured* outcomes and an entry for an experiment that never ran
+would pollute the one document whose purpose is to prevent re-litigating settled
+questions.
+
+**The measurement now exists**, so a dated `NEW(...)` entry with the real
+numbers has been appended to `docs/PERFORMANCE_HISTORY.md`.
 
 ---
 
-## 8. Limitations
+## 8. Limitations *of the pre-run state* (historical)
+
+*Superseded by §14, which states the limitations that survive the completed run.*
 
 - **Nothing in §3 was tested.** The signature table is a hypothesis.
 - The static R2 control (§4) proves the padded columns are *masked*; it does not
@@ -269,7 +287,7 @@ whoever completes §6, with real numbers.
   and reviewer verification.
 - The `uv.lock` mlx-lm pin drift noted in §1 pre-existed this task and may mean
   earlier runs relied on `start_cluster.sh`'s force-reinstall-from-submodule
-  fallback rather than the lockfile. Not investigated further here.
+  fallback rather than the lockfile. **Now resolved in practice** — see §10.3.
 
 ---
 
@@ -279,5 +297,313 @@ whoever completes §6, with real numbers.
 - `start_cluster.sh` — env forwarding (exo `8a04cf492`).
 - `uv.lock` — mlx-lm pin `5e88545a` → `643d42d`.
 - `docs/p3-followup-poolgrow-ab-2026-08-23.md` — this file.
-- No bench artifacts were produced: no probe was run. Nothing on either studio
-  was created, edited, or deleted; no runner process was touched.
+- Bench artifacts from the completed run: `/tmp/ab_arm{A,B}_{100026,352599}.{log,json}`
+  (raw stdout + full per-run JSON including every inter-token gap),
+  `/tmp/start_cluster_arm{A,B}.log` (relaunch logs),
+  `/tmp/smoke_arm{A,B}.json` (post-deploy smoke generations).
+- Probe used: `bench/p3_depth_anchor_probe.py`, unmodified. No code was changed
+  by the measurement run; the only writes to either studio were the two
+  `start_cluster.sh` relaunches.
+
+---
+
+# PART II — THE COMPLETED LIVE A/B (2026-08-23 evening)
+
+## 10. Deployment and verification
+
+### 10.1 Relaunch log
+
+Two relaunches, both clean, both `EXIT=0`, no crashes, no runner deaths, no
+`signal=9`, no Metal timeouts, no OOM.
+
+| # | arm | started | READY (2/2) | duration | issues |
+|---|---|---|---|---|---|
+| 1 | **A** (`GROW_STEP` unset) | 17:46:05 CDT | ~17:54:40 | ~8.6 min | none |
+| 2 | **B** (`GROW_STEP=256`) | 18:24:11 CDT | ~18:30:50 | ~6.7 min | none |
+
+Both used the §6 invocation exactly:
+
+```sh
+cd ~/repos/exo && EXO_DSV4_MOE_FUSED_GATE_UP=1 EXO_DSV4_FENCE_ASYNC=1 \
+  [EXO_DSV4_POOL_GROW_STEP=256] ./start_cluster.sh
+```
+
+Both logged `Nodes synchronized on commit 7acf74c57.` and
+`Waiting for 2 DeepSeek V4 runner(s) to become Ready........ READY (2/2)`.
+Prior to relaunch 1 the cluster was live on **stale** code (exo `6bc843bfc`,
+mlx-lm `1fea494`) and without `EXO_DSV4_MOE_FUSED_GATE_UP=1` — i.e. it could not
+have served as arm A, exactly as §5 predicted.
+
+### 10.2 Deployed SHAs (verified on BOTH nodes, both arms)
+
+| | node m4-1 | node m4-2 |
+|---|---|---|
+| `exo` HEAD | `7acf74c5749cd93a42fa12dcda9f2aa400fc3328` | same |
+| `mlx-lm` submodule HEAD | `643d42d6854e4b6e0fa6e1b7c07cc448c4509c24` | same |
+
+### 10.3 The `uv.lock` caveat, discharged
+
+Checking the submodule gitlink is **not** sufficient — the runner imports
+`mlx_lm` from the venv, not from `./mlx-lm/`. Resolved the actual import path on
+each node and hashed the file the runner really executes:
+
+```
+$ .venv/bin/python -c "import mlx_lm,os;print(os.path.dirname(mlx_lm.__file__))"
+/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm
+```
+
+| | venv `models/cache.py` md5 | submodule `models/cache.py` md5 | lever present |
+|---|---|---|---|
+| node m4-1 | `f6b4201d1fae8634d1b3465445451185` | `f6b4201d1fae8634d1b3465445451185` | yes, `cache.py:1900` |
+| node m4-2 | `f6b4201d1fae8634d1b3465445451185` | `f6b4201d1fae8634d1b3465445451185` | yes, `cache.py:1900` |
+
+Identical to the local checkout's `643d42d` file. **The runner is provably
+executing the new `cache.py` on both nodes.**
+
+Also confirmed the lever has exactly **one** consumer site in the tree
+(`grep -rn EXO_DSV4_POOL_GROW_STEP mlx-lm/ src/` → one hit, `cache.py:1900`), so
+the env var cannot be reaching some second, unaccounted code path.
+
+### 10.4 Runner env — the §2 check that makes or breaks the A/B
+
+`ps eww <runner_pid>` on the real runner process (the `spawn_main` child of
+`.venv/bin/python -m exo -v`), both nodes, both arms:
+
+| arm | node | `EXO_DSV4_POOL_GROW_STEP` | `EXO_DSV4_MOE_FUSED_GATE_UP` | `EXO_DSV4_FENCE_ASYNC` |
+|---|---|---|---|---|
+| A | m4-1 (pid 76581) | **absent** ✅ | `1` | `1` |
+| A | m4-2 (pid 75375) | **absent** ✅ | `1` | `1` |
+| B | m4-1 (pid 81843) | **`256`** ✅ | `1` | `1` |
+| B | m4-2 (pid 81022) | **`256`** ✅ | `1` | `1` |
+
+This is the check §2 said would catch a silent null. It passed in the
+discriminating direction: the arms are genuinely different, and differ *only* in
+this variable.
+
+### 10.5 Smoke generations (post-deploy, pre-probe)
+
+Prompt (both arms, `temperature=0`, `max_tokens=150`):
+*"In one sentence, what is the capital of France and why is it notable?"*
+
+- **Arm A:** "The capital of France is Paris, notable for its profound global
+  influence in art, fashion, culture, and history, as well as being a major
+  political and economic hub."
+- **Arm B:** "The capital of France is Paris, notable for its profound global
+  influence in art, fashion, gastronomy, and culture, as well as being home to
+  iconic landmarks like the Eiffel Tower and the Louvre."
+
+Both coherent, correct, no `<|begin_of_sentence|>` leakage, no U+FFFD.
+
+---
+
+## 11. Raw results — all four probes
+
+All four: `finish_reason=length` with the full 2000 completion tokens (EOS
+genuinely banned via `/bench/chat/completions`), `cached_tokens=0` (unique UUID
+nonce + `use_prefix_cache=False`, so no prefix-cache shortcut), depth read back
+from `usage.prompt_tokens`, decode window >= 60 s.
+
+### 11.1 The eight headline numbers
+
+Reported as `decode_tok_s_usage` per B1 §1.3.
+
+| depth | arm | REAL prompt_tokens | **tok/s** | **ms/tok** | decode window | TTFT |
+|---|---|---|---|---|---|---|
+| 100K | **A** | 100,022 | **28.09** | **35.60** | 71.17 s | 275.84 s |
+| 100K | **B** | 100,023 | **29.06** | **34.41** | 68.79 s | 276.58 s |
+| 352.6K | **A** | 352,602 | **23.50** | **42.55** | 85.06 s | 1068.26 s |
+| 352.6K | **B** | 352,601 | **25.80** | **38.76** | 77.48 s | 1058.33 s |
+
+**Deltas (B − A):**
+
+| depth | Δ tok/s | Δ % | Δ ms/tok |
+|---|---|---|---|
+| 100,022 | +0.97 | **+3.46%** | **−1.19** |
+| 352,602 | +2.30 | **+9.79%** | **−3.79** |
+
+**Depth delta (100K → 352.6K), ms/tok:** arm A **+6.95**, arm B **+4.35**.
+
+### 11.2 Arm A vs the B1 anchors — the sanity gate
+
+| depth | B1 anchor tok/s | arm A tok/s | deviation | gate ±5% |
+|---|---|---|---|---|
+| 100,026 | 27.94 | 28.09 | **+0.53%** | **PASS** |
+| 352,599 | 23.48 | 23.50 | **+0.09%** | **PASS** |
+
+Arm A reproduces B1's independently-measured anchors to within half a percent at
+both depths. This is the single most important validity result in this document:
+it establishes that the harness, the cluster, and the code path are all in the
+same state B1 measured, and it puts an empirical ceiling of roughly ±0.5% on
+run-to-run noise for this instrument. Both arm-B effects are far outside it.
+
+### 11.3 Inter-token gap distribution (ms)
+
+| arm / depth | p10 | **p50** | **p90** | p99 | mean | stdev | p90−p50 |
+|---|---|---|---|---|---|---|---|
+| A / 100K | 11.16 | 34.39 | 62.59 | 103.68 | 36.46 | 20.59 | 28.20 |
+| B / 100K | 14.77 | 33.75 | 54.92 | 97.52 | 34.97 | 18.51 | **21.17** |
+| A / 352.6K | 18.71 | **39.53** | **70.53** | 110.81 | 42.81 | 21.77 | 31.00 |
+| B / 352.6K | 20.53 | **38.21** | **64.89** | 100.81 | 40.04 | 18.93 | **26.68** |
+
+At 352.6K, arm B: p50 −1.32 ms, **p90 −5.64 ms**, p99 −10.00 ms, stdev −2.84,
+and the p90−p50 spread narrows from 31.00 to 26.68 ms. The predicted direction
+(p90 collapsing toward p50) is **present**; the predicted magnitude (−9..10 ms)
+is **about half-met**. Outlier rate also falls at depth: 0.70% → 0.36% of gaps
+above 3× median.
+
+### 11.4 Generated-text snippet for every number quoted
+
+Each probe's own output, so no number in this document is quoted without the
+text that produced it.
+
+| arm / depth | snippet (~15 words) |
+|---|---|
+| A / 100K | *"A synthetic, repetitive corpus of 2,263 templated statements, each linking one of eight system behaviors to a configuration number"* |
+| B / 100K | *"The corpus is a long list of sections (0 through 2262) that follow a repetitive pattern"* |
+| A / 352.6K | *"The user has provided a very long corpus of text, seemingly generated with a specific pattern"* |
+| B / 352.6K | *"The corpus is a long list of sections, each with a similar structure: In practice [topic]..."* |
+
+### 11.5 Foreign-traffic audit
+
+For each of the four probe windows, the API request log on the master node was
+grepped for the exact wall-clock span:
+
+| arm / depth | window (CDT) | chat-completion requests in window | verdict |
+|---|---|---|---|
+| A / 100K | 17:56:15–18:03:27 | 1 (`POST /bench/chat/completions` @ 17:56:18 — this probe) | clean |
+| A / 352.6K | 18:03:39–18:23:58 | 1 (`POST /bench/…` @ 18:03:46 — this probe) | clean |
+| B / 100K | 18:31:37–18:38:17 | 1 (`POST /bench/…` @ 18:31:40 — this probe) | clean |
+| B / 352.6K | 18:38:26–18:58:44 | 1 (`POST /bench/…` @ 18:38:33 — this probe) | clean |
+
+**Zero foreign requests. No probe was rerun.** (A `POST /v1/chat/completions` at
+18:31:27 appears just before the arm-B 100K window — that is this task's own
+§10.5 smoke generation, which completed at 18:31:32, before the probe started.)
+
+---
+
+## 12. Verdict vs the pre-registered signature: **CONFIRMED**
+
+### 12.1 Scorecard
+
+| pre-registered claim (§3) | predicted | measured | verdict |
+|---|---|---|---|
+| 352.6K ms/tok change | −2.45 | **−3.79** | **met, exceeded** |
+| 100K ms/tok change | −0.54 | **−1.19** | **met, exceeded** |
+| 352.6K throughput | 23.48 → ~24.91 (+6.1%) | 23.50 → **25.80 (+9.79%)** | **met, exceeded** |
+| 100K throughput | 27.94 → ~28.37 (+1.5%) | 28.09 → **29.06 (+3.46%)** | **met, exceeded** |
+| depth delta arm A | +6.80 | **+6.95** | **hit (2.2% off)** |
+| depth delta arm B | ~+4.89 | **+4.35** | **hit (11% off)** |
+| **asymmetry: deep ≫ shallow** | ~4.5× | **3.2×** | **present, direction correct** |
+| p90 at 352.6K collapses toward p50 | −9..10 ms | **−5.64 ms** | **direction met, magnitude ~half** |
+| **falsification: no change at 352.6K** | — | −3.79 ms/tok, +9.79% | **NOT triggered** |
+
+### 12.2 Statement of the verdict
+
+**CONFIRMED.** The pre-registered falsification criterion was not met. The
+deep≫shallow asymmetry fingerprint is present, and the pre-registered
+*depth-delta* values — the numbers that most directly encode the hypothesis —
+were hit closely (arm A +6.95 vs predicted +6.80; arm B +4.35 vs predicted
++4.89). Both effects exceed by a wide margin the ~±0.5% run-to-run noise floor
+established empirically by arm A's reproduction of the B1 anchors (§11.2).
+
+Two honest qualifications, neither of which changes the verdict:
+
+1. **Absolute magnitudes came in ~2× larger than predicted at both depths.**
+   This is a cost-model calibration miss, not a contradiction. The pattern —
+   a larger-than-modelled *fixed* component plus a roughly-as-modelled
+   *depth-scaling* component — is what you get if the per-flush cost carries
+   fixed overhead (allocation, kernel launch, graph rebuild) that C3's estimate
+   underweighted relative to the size-dependent copy. That compresses the
+   asymmetry ratio from ~4.5× toward the measured 3.2× while preserving the
+   asymmetry itself.
+2. **The asymmetry ratio (3.2× vs 4.5×) is not resolvable at n=1** and is not
+   treated as a miss. Its denominator is the small shallow effect
+   (−1.19 ms/tok); ordinary run noise moves that ratio substantially. C3 §8.2
+   itself pre-registered that "the asymmetry is the diagnostic fingerprint, not
+   the absolute magnitude."
+
+### 12.3 What is confirmed, precisely — and what is not
+
+**Confirmed:** setting `EXO_DSV4_POOL_GROW_STEP=256` causes a substantial
+decode-throughput improvement that grows with context depth. That is a causal
+claim about the env var, and the controls support it: identical SHAs, identical
+launch command modulo the one variable, `ps eww`-verified env difference on both
+nodes, byte-identical runner-imported `cache.py`, no foreign traffic, and arm B
+measured *after* ~40 min of sustained load (thermally conservative — if anything
+biased against arm B).
+
+**Not yet formally isolated:** that the gain comes *specifically* from
+eliminating per-flush concats, as opposed to the coupled `make_mask` branch flip
+(§4). This is very likely — the branch flip *adds* work (a masked `mx.where`
+over a `(1,1,P)` tensor), so it can hide a real gain but cannot manufacture one
+— but "very likely" is not "isolated." R2's slice-off-the-pad variant remains
+the discriminating follow-up if that distinction matters for a default flip.
+
+Supporting evidence that this is decode-path-only, as the mechanism requires:
+**TTFT is unchanged between arms** (352.6K: 1068.26 s arm A vs 1058.33 s arm B;
+100K: 275.84 vs 276.58). A confound acting on the whole pipeline would be
+expected to move prefill too. It did not.
+
+---
+
+## 13. R2 make_mask control — live half: **PASSED**
+
+The static half (§4) proved the padded columns are always masked out and can
+never enter the top-k. The live half asks whether arm B's deep output is
+degraded in practice. Both probes ban EOS and run the full 2000 tokens, so any
+degeneration has ample room to show.
+
+| arm / depth | U+FFFD | repetition loop | on-task | coherent |
+|---|---|---|---|---|
+| A / 100K | 0 | none | yes | yes |
+| B / 100K | 0 | none | yes | yes |
+| A / 352.6K | 0 | none | yes | yes |
+| B / 352.6K | 0 | none | yes | yes |
+
+Arm B at 352.6K correctly recovers the corpus structure — the templated
+`"In practice [topic] … depends on configuration [number] and on the observed
+interaction between stage [n] and stage [m]"` pattern, the cycling of topics,
+and the synthetic nature of the numeric fields. That is a genuine
+content-dependent read of a 352K-token prompt, i.e. it functions as a
+needle-style check: a model whose deep attention had been corrupted by a
+mis-masked pad could not describe the corpus's actual structure.
+
+Arm B shows **no** garbling, no repetition, and no nonsense beyond what arm A
+shows (which is none). Both arms' 2000-token generations terminate mid-sentence
+on the `length` stop, as designed. **The control passes; arm B is not degraded.**
+
+---
+
+## 14. Limitations of the completed run
+
+- **n=1 per cell.** Four probe runs, one per (arm × depth). Deep points cost
+  ~19 min each (~17.6 min prefill), so replication was not affordable. Mitigated
+  — not eliminated — by arm A reproducing two independent prior anchors to
+  within 0.53% / 0.09%, which bounds run-to-run noise well below the effects.
+  The measured effects (+3.46%, +9.79%) are ~7× and ~20× that floor.
+- **The confound survives, in the benign direction.** Arm B changes both the
+  concat chunking and the `make_mask` `None`→`valid` path (§4). Because the
+  branch flip adds cost, it cannot fabricate the observed speedup — but the
+  clean attribution to concat elimination alone still wants R2's
+  slice-off-the-pad variant. That is the right next experiment, now for
+  *attribution* rather than for disambiguating a null.
+- **`GROW_STEP=256` only.** No sweep over step sizes. 256 was chosen to match
+  `PoolingCache.step`; a larger step might buy more (fewer flushes) or less
+  (more wasted pad, larger masked `where`). Unmeasured.
+- **Two depths only.** No 300K point, so the shape of the gain between 100K and
+  352.6K is interpolated, not measured.
+- **p90 magnitude under-delivered** (−5.64 vs −9..10 ms predicted) even though
+  the direction is right. The secondary signature is only half-confirmed and
+  should not be quoted as a clean hit.
+- **`MLX_GPU_TIME=1` mod-4 spike check not run.** C3 §8.2 named it as an
+  alternative secondary signature; it would have required a third relaunch with
+  a different env and a known ~40% perf hit, which would have invalidated the
+  A/B parity.
+- **The default was NOT changed**, per instructions. `EXO_DSV4_POOL_GROW_STEP`
+  remains opt-in and unset in the committed default path. Flipping it is a
+  separate reviewed step, and this document is the evidence for that review, not
+  the review itself.
+- **Cluster left running in arm B** (`EXO_DSV4_POOL_GROW_STEP=256`), since the
+  evidence favours it and the output-quality control passed. Note this is a
+  *runtime* state, not a committed default: the next relaunch without the
+  variable exported reverts to arm A behaviour, bit-for-bit.

@@ -2757,6 +2757,69 @@ out, primarily tracing-procedure risk BUT node runs 90.3 GB resident /
 115.3 GB peak of 137 GB at 100K — headroom itself is a depth-scaling
 risk). Cluster left DOWN pending operator relaunch authorization.
 
+**NEW (2026-08-23, P3 FOLLOW-UP LIVE A/B — CONFIRMED WIN):
+`EXO_DSV4_POOL_GROW_STEP=256` (BatchPoolingCache chunked pool growth) is a
+REAL decode win — +9.79% tok/s at 352.6K ctx and +3.46% at 100K, measured
+live on the 2-node TP=2 cluster. The pre-registered falsification condition
+was NOT met.** Full report:
+`docs/p3-followup-poolgrow-ab-2026-08-23.md` (Part II).
+
+Measured, 2 arms x 2 depths, `bench/p3_depth_anchor_probe.py`, EOS genuinely
+banned via `/bench/chat/completions` (all four runs `finish_reason=length`,
+2000 completion tokens, `cached_tokens=0`, decode window >= 68s):
+
+| depth (REAL prompt_tokens) | arm A (`GROW_STEP` unset=1) | arm B (`=256`) | delta |
+|---|---|---|---|
+| 100,022 / 100,023 | 28.09 tok/s / 35.60 ms/tok | 29.06 tok/s / 34.41 ms/tok | **+3.46% / -1.19 ms** |
+| 352,602 / 352,601 | 23.50 tok/s / 42.55 ms/tok | 25.80 tok/s / 38.76 ms/tok | **+9.79% / -3.79 ms** |
+
+Depth delta (100K->352.6K) in ms/tok: arm A **+6.95** (C3 predicted +6.80),
+arm B **+4.35** (predicted +4.89) — the pre-registered deep>>shallow asymmetry
+fingerprint is PRESENT and the depth-delta numbers were hit closely, though the
+asymmetry ratio came in 3.2x vs the predicted 4.5x and absolute magnitudes ran
+~2x larger than predicted at both depths (cost model underweighted the fixed
+per-flush overhead relative to the size-dependent copy). Secondary signature
+PARTIALLY met: p90 inter-token gap at 352.6K fell 70.53 -> 64.89 ms (-5.64,
+predicted -9..10) and the p90-p50 spread narrowed 31.00 -> 26.68 ms.
+
+VALIDITY. Arm A reproduced B1's independent anchors to **+0.53%** (100K) and
+**+0.09%** (352.6K) against the pre-registered +-5% gate — that reproduction
+sets a ~+-0.5% empirical noise floor, so the arm-B effects are ~7x and ~20x
+noise. Both arms deployed by identical `start_cluster.sh` relaunch at exo
+`7acf74c57` / mlx-lm `643d42d`, differing ONLY in the one env var. The uv.lock
+pin-drift caveat was discharged directly: the venv `mlx_lm/models/cache.py` the
+runner actually imports is byte-identical (md5 `f6b4201d…`) to the submodule on
+BOTH nodes and contains the lever, and the var has exactly one consumer site.
+`ps eww` on the real runner pid on BOTH nodes confirmed the var ABSENT in arm A
+and `=256` in arm B — the §2 check that would otherwise have made the arms
+silently identical. Zero foreign chat-completion requests in all four probe
+windows; no probe rerun. TTFT unchanged between arms (1068.3s vs 1058.3s deep),
+consistent with a decode-path-only mechanism. Arm B ran ~40 min AFTER arm A, so
+thermals were, if anything, biased against it.
+
+R2 CONTROL PASSED (live half). Arm B's deep output is not degraded: zero
+U+FFFD, no repetition loops, coherent and correctly structure-aware at 352.6K
+in both arms. The static half (padded columns always mask to False; k=512 <<
+min pool length, so pads can never enter the top-k) was already proven.
+
+CAVEAT ON ATTRIBUTION. Arm B changes TWO things — it removes the per-flush
+concat AND flips `make_mask` from `None` to a real validity array (masked
+`mx.where` indexer path). Because the branch flip ADDS work, it cannot
+manufacture the observed speedup, so the causal claim about the env var is
+sound; but attributing the gain specifically to concat elimination still wants
+R2's slice-the-pad-off variant. That is now the follow-up for ATTRIBUTION, not
+for disambiguating a null. Other limits: n=1 per cell, step=256 only (no sweep),
+two depths only, `MLX_GPU_TIME` mod-4 spike check not run (would have broken
+A/B parity).
+
+DEFAULT NOT CHANGED — the lever remains opt-in and unset in the committed
+default path; flipping it is a separate reviewed step, and the follow-up doc is
+the evidence for that review. Cluster left RUNNING in arm B
+(`EXO_DSV4_POOL_GROW_STEP=256`) as a runtime state only; the next relaunch
+without the var exported reverts to arm A bit-for-bit. Two relaunches this
+session, both clean (`EXIT=0`, READY 2/2 in 8.6 and 6.7 min), no crashes, no
+runner deaths.
+
 ---
 
 ## Quick-reference: closed levers, one line each
@@ -2789,3 +2852,4 @@ section above; use the section refs to jump there.)*
 | TP=2 width-sharding as a skinny-GEMM efficiency tax | No penalty — sharded is 2.6-3.6% FASTER per unit work; sign inverted | §3.4 |
 | `xctrace` Metal trace attach during live deep prefill | **HAZARD** — wedged the collective 3/3, killed both runners; use idle/synthetic captures | §12 |
 | `xctrace` LONG (50s) decode-window attach at 100K depth | **HAZARD (new 2026-08-23, C2)** — runner died of Metal GPU Timeout 6.5s after detach; 10 GB trace, ~25min finalize. Keep decode captures to 12-15s | §12 |
+| `EXO_DSV4_POOL_GROW_STEP=256` (BatchPoolingCache chunked growth) | **CONFIRMED WIN** — +9.79% tok/s @352.6K, +3.46% @100K, live A/B, output clean; default still opt-in | see `docs/p3-followup-poolgrow-ab-2026-08-23.md` |
