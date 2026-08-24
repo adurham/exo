@@ -2901,6 +2901,89 @@ strong positive controls rather than a proof over all inputs.
 
 ---
 
+**NEW (2026-08-24, P3 FOLLOW-UP — the all_sum-wait-at-depth measurement is
+CLOSED: collective wait does NOT grow with depth; the residual is on-GPU busy
+work).** Full report:
+`docs/p3-followup-allsum-wait-at-depth-2026-08-24.md`.
+
+The measurement C2 lost to the crash now exists: **same-build, two-depth,
+dual-rank** xctrace decode-window captures. GPU occupancy **RISES** with depth,
+so derived per-rank idle **falls**:
+
+| depth (REAL) | rank0 (m4-2) busy % | rank1 (m4-1) busy % | window |
+|---|---|---|---|
+| 100,067 | **83.86** | **83.70** | 10.6 s |
+| ~352.6K | **86.22** | **85.91** | 12.5 s |
+
+Derived on Part III's clean same-build anchors (34.55 / 39.49 ms/tok):
+
+| depth | rank | busy ms/tok | idle ms/tok | ≤ per all_sum call |
+|---|---|---|---|---|
+| 100K | rank0 / rank1 | 28.97 / 28.92 | **5.577 / 5.631** | 0.130 / 0.131 ms |
+| 352.6K | rank0 / rank1 | 34.05 / 33.92 | **5.442 / 5.566** | 0.127 / 0.129 ms |
+
+**Δidle = −0.07 to −0.14 ms/tok** (wrong sign, ~20x too small vs the
++1.0..+1.8 residual) while **Δbusy = +5.0 to +5.4 ms/tok** = 101–103% of the
+total wall delta. Arrival skew DOES grow with depth (0.054 → 0.124 ms/tok) but
+that **+0.070 ms/tok is only 4–7% of the residual**. VERDICT: **residual NOT
+collective.** With worker A's code-proof that the payload is L-independent, the
+`moe.all_sum` question is closed on BOTH axes — payload flat (code), wait
+flat-to-shrinking (live, 2 depths, 2 ranks, same build).
+
+ADDITIVITY DOES NOT CLOSE, and the residual GREW. Same-build total is
+**+4.94 ms/tok** (39.49 − 34.55), not the +4.35 previously carried. Kernel band
++2.56..+3.34 and collective −0.07..−0.14 leave **+1.67 to +2.52 ms/tok
+unexplained**, all of it on-GPU busy. Leading candidate is the bias worker C
+flagged against himself (one-layer-per-class harness scaled by census captures
+no inter-layer pipelining loss). Interval data agrees: at depth there are
+**FEWER, BIGGER** GPU work items (112 vs 124 intervals/token, median interval
++9%, p90 +22%).
+
+Also reproduces C2's 100K occupancy to within 0.8 pp on a 5x shorter window
+(83.86/83.70 vs C2's 83.06/82.98), and **overturns C2's tentative "step up then
+plateau" reading** — occupancy keeps climbing 100K → 352.6K. T5's 300K/9s figure
+now looks low, as C2 warned it might.
+
+HONEST HOLE: the method assumes collective wait appears as GPU *idle*. If MLX
+encodes an event-wait INSIDE a command buffer it would be counted as *busy* and
+hidden. Interval-shape analysis narrows but does not eliminate this (the whole
+distribution shifts right, incl. the median, and intervals/token FALLS — the
+signature of bigger kernels, not padded waits). The clean closer is a direct
+CPU-side collective timer; `EXO_DSV4_ALLSUM_PROBE` exists (`deepseek_v4.py:3026`)
+but forces a blocking `mx.eval` in place of the production `mx.async_eval`
+fence, so it perturbs what it measures and needs its own A/B. Not run.
+
+⚠ **THE ≤15s CAPTURE PROTOCOL IS NOT SAFE AT 352.6K — second crash of this
+shape.** The 12 s dual-rank deep capture killed **BOTH** runners 16 s after
+detach (`[METAL] GPU Timeout Error`, rank1 first, rank0 collateral). The 1 Hz
+memory sampler run through the whole window makes worker D's mechanism a
+measured curve and **localizes it to FINALIZE, not recording**: memory is flat
+during the 12 s recording, then compressor goes 0→35 GB (m4-1) / 11→82.5 GB
+(m4-2) and swap 140 MB→**15 GB**, with both deaths inside that window. Tracer
+peak RSS is **~13 GB even for a 10 s trace**, against only **23.5/25.9 GB free**
+at 352.6K (vs 33.1/33.5 GB at 100K). The real constraint is
+`trace_peak_GB + resident_GB < RAM − margin`, NOT wall-clock. The single
+permitted retry (10 s, at 100K) **survived cleanly** — probe ran to completion,
+`finish_reason=length`, 2000 tokens, zero GPU timeouts. Cluster relaunched via
+`start_cluster.sh` (production env, no `POOL_GROW*`): `READY (2/2)`, `EXIT=0`.
+Traces DO survive the crash, which is why the deep point exists.
+
+Rank labels: worker D's correction re-verified live on both the pre-crash and
+post-relaunch cluster — **m4-1 = rank1 (API node), m4-2 = rank0 (coordinator)**.
+C2's capture script had these backwards.
+
+LIMITS: n=1 per depth; deep depth INFERRED (crashed run returned no `usage`
+block; 100K is fully measured at 100,067); windows 10 s vs 12 s across depths;
+~5% tracing overhead whose cross-depth *differential* (~0.4 ms/tok) exceeds the
+Δidle reported, so the robust claim is **"idle growth is ≪ +1.0 ms/tok"** rather
+than "idle shrinks"; 99.98% generic "Compute" channel = still no per-kernel
+attribution; idle is whole-process GPU idle (includes ordinary dispatch
+latency), so the per-call figures are CEILINGS by division, not measurements of
+the collective; different runner PIDs across the two depths (relaunch sat
+between them).
+
+---
+
 ## Quick-reference: closed levers, one line each
 
 *(Added from the independent second pass's appendix table — a fast
@@ -2930,5 +3013,6 @@ section above; use the section refs to jump there.)*
 | `all_sum` NOP ablation as a live measurement technique | Unsafe — destabilizes the cluster | §13 |
 | TP=2 width-sharding as a skinny-GEMM efficiency tax | No penalty — sharded is 2.6-3.6% FASTER per unit work; sign inverted | §3.4 |
 | `xctrace` Metal trace attach during live deep prefill | **HAZARD** — wedged the collective 3/3, killed both runners; use idle/synthetic captures | §12 |
-| `xctrace` LONG (50s) decode-window attach at 100K depth | **HAZARD (new 2026-08-23, C2)** — runner died of Metal GPU Timeout 6.5s after detach; 10 GB trace, ~25min finalize. Keep decode captures to 12-15s | §12 |
+| `xctrace` LONG (50s) decode-window attach at 100K depth | **HAZARD (2026-08-23, C2)** — runner died of Metal GPU Timeout 6.5s after detach; 10 GB trace, ~25min finalize | §12 |
+| `xctrace` SHORT (≤15s) decode-window attach at 352.6K depth | **HAZARD (new 2026-08-24)** — the 12–15s cap is NOT sufficient at depth: a **12s** dual-rank capture killed BOTH runners 16s after detach (same GPU-Timeout signature). Live 1 Hz telemetry shows memory is flat DURING recording and collapses at **finalize** (compressor 0→35 GB / 11→82 GB, swap 140 MB→15 GB). Tracer peak RSS is **~13 GB even for a 10s trace**, vs only ~23–26 GB free at 352.6K. Real constraint is `trace_peak_GB + resident_GB < RAM − margin`, NOT wall-clock. Assume any Metal trace attach at ≥350K kills the instance; budget the run as sacrificial (traces DO survive the crash). A 10s attach at 100K (~33 GB free) survives cleanly | see `docs/p3-followup-allsum-wait-at-depth-2026-08-24.md` §6 |
 | `EXO_DSV4_POOL_GROW_STEP=256` (BatchPoolingCache chunked growth) | **CONFIRMED WIN** — +9.79% tok/s @352.6K, +3.46% @100K, live A/B, output clean; default still opt-in | see `docs/p3-followup-poolgrow-ab-2026-08-23.md` |
