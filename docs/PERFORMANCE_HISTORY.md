@@ -93,6 +93,39 @@ fires). This is a real, standing gap — DSpark/MTP speculative decode
 represents unrealized throughput upside on this cluster, not yet
 attempted for TP. See §12 and §13 for prior investigation.
 
+> **CORRECTION 2026-08-24 (P4v2, machine-verified against exo `6dcd61e4a`
+> / mlx-lm `0854b39`; supersedes the paragraph above on three points).**
+> See `docs/p4-scoping-mtp-for-tp-2026-08-24.md` for the full trail.
+>
+> 1. **"NOT wired up for TP" is wrong.** A TP-mode draft+verify cycle
+>    exists and is live-reachable: `DSv4MTPBatchGenerator._speculative_next`
+>    (`speculative/dsv4_mtp.py:3415`), constructed at
+>    `generator/batch_generate.py:847`, dispatched via `self._mlx_gen.next()`
+>    at `:4228`. It contains a **first-class DSpark branch**
+>    (`dsv4_mtp.py:3481-3486`) that drafts with the DSpark 3-stage head and
+>    feeds it ctx at `:3984-3991`. Nothing needs to be built for TP.
+>    What is actually off is the env: `EXO_SPECULATIVE=0` **and**
+>    `EXO_DSV4_MTP=0` (both verified live via `ps eww` on both nodes,
+>    2026-08-24).
+> 2. **The zero-`"PP speculation using DSpark"` evidence proves nothing
+>    about TP.** That line is emitted only on the PP path
+>    (`batch_generate.py:3466`, reached from `pp_speculation.py`'s
+>    `pp_dspark_decode_loop`). Its absence under TP is *expected by
+>    construction*, not evidence of missing TP capability. The TP DSpark
+>    branch has **no log line at all** — that is an observability gap, not
+>    a wiring gap.
+> 3. **`EXO_DSV4_DSPARK=1` is not free under TP, and it is not "warmed but
+>    ready" either.** Today it (a) attaches a ~10 GB draft head into unified
+>    memory on every node (`utils_mlx.py:383-390`, live log: `DSpark draft
+>    head attached ... 115 tensors, 3 stages, block_size=5, taps=[40,41,42]`),
+>    (b) arms per-layer hc-mean capture taps at layers 40/41/42 that run on
+>    **every** target forward including all prefill
+>    (`mlx-lm/mlx_lm/models/deepseek_v4.py:6705-6724`), and (c) does a
+>    per-request `append_ctx` warm (`batch_generate.py:2748-2760`). All of
+>    that output is discarded because the consumer
+>    (`_speculative_next`) is never constructed while `EXO_SPECULATIVE=0`.
+>    See the P4v2 memo §2 for the pure-waste cost breakdown.
+
 At parity with an earlier-campaign 339 tok/s @ 500K prefill baseline
 (i.e. months of jaccl/transport hardening work did not regress raw
 throughput — it fixed correctness/stability, see §8).
@@ -1143,6 +1176,33 @@ depth before this — DSpark+FULLBLOCK turned out catastrophically worse
 than no speculation at depth. **Cluster now runs DSpark OFF as a safety
 default.** **Always benchmark speculative-decode fixes across a RANGE of
 context depths, not just short prompts, before shipping.**
+
+> **CORRECTION 2026-08-24 (P4v2): this verdict attaches to a decode-loop
+> MODE, not to the DSpark head, and the "cluster runs DSpark OFF" line is
+> stale.** Two separate things share the name "DSpark":
+> - **DSpark the head** — `DeepseekV4DSparkModule`
+>   (`mlx-lm/mlx_lm/models/deepseek_v4.py:6340`), a 3-stage
+>   semi-autoregressive draft head, `block_size=5`, taps `[40,41,42]`.
+>   Nothing in the 15.9x measurement indicts the head: the cited
+>   `r1_verify_fwd=1455.8ms` outlier occurred at **94% draft acceptance**,
+>   i.e. the head was drafting *well* while the verify path was collapsing.
+> - **FULLBLOCK the verify mode** — `EXO_DSV4_ROWSEQ_FULLBLOCK=1`
+>   (`deepseek_v4.py:1591`), which runs the ENTIRE non-MoE block **once per
+>   drafted row** instead of batched. Its cost scales with `k` × (per-row
+>   attention incl. the Indexer top-k over compressed KV, which itself grows
+>   with context) — that product is the collapse mechanism.
+>
+> Consequence: the collapse is a `k`-multiplier problem, and DSpark's
+> `block_size=5` simply put it at the worst end of that multiplier. It is
+> **not** a reason to reject the DSpark head at small `k`.
+>
+> Also stale: **the cluster does NOT run DSpark off.** Live `ps eww` on
+> both nodes 2026-08-24: `EXO_DSV4_DSPARK=1`, `EXO_DSV4_ROWSEQ_FULLBLOCK=1`,
+> `EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=0`, `EXO_DSV4_MOE_PARTS_ROWSEQ=shared`.
+> What is actually off is `EXO_SPECULATIVE=0` + `EXO_DSV4_MTP=0`, which
+> prevents the *generator* from ever being constructed — so FULLBLOCK never
+> executes even though its flag reads `1`. The safety property holds, but
+> by a different mechanism than this entry claims.
 
 **DSpark native head (INCONCLUSIVE, implemented but never A/B tested,
 2026-08-03)** — `docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md`:
@@ -3004,7 +3064,7 @@ section above; use the section refs to jump there.)*
 | `MLX_JACCL_RELIABLE_MAX_SZ=3` | Statistically identical to sz=2, clean null | §2.4 |
 | Expert co-location to reduce TP all_sum traffic | Traffic volume independent of expert placement | §2.1 |
 | `EXO_PREFILL_CHUNK_OVERLAP` | Correctness race fixed, but lever itself dead/closed | §2.6 |
-| DSpark FULLBLOCK at real context depth | 15.9x throughput collapse; cluster runs DSpark OFF | §5.3 |
+| DSpark FULLBLOCK at real context depth | 15.9x throughput collapse. **Corrected 2026-08-24 (P4v2): indicts the FULLBLOCK verify MODE at k=4 (block_size=5), not the DSpark head — the outlier occurred at 94% acceptance. Cluster does NOT run "DSpark OFF": `EXO_DSV4_DSPARK=1` is live; `EXO_SPECULATIVE=0` is what disables the loop.** | §5.3 |
 | `MLX_METAL_FAST_SYNCH=1` | 1.5x slower, 70x more variance | §2.3 |
 | `EXO_DSV4_FUSED_SOFTMAX` | Real correctness break (needle failure at 100K) | §6 |
 | Nesting `mx.fast.metal_kernel` inside `mx.compile` | Catastrophic 3-4x regression | §4.5 |
