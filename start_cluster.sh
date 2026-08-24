@@ -2133,6 +2133,13 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_POOL_GROW_STEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_STEP=$EXO_DSV4_POOL_GROW_STEP"
     [ -n "${EXO_DSV4_POOL_GROW_MIN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MIN=$EXO_DSV4_POOL_GROW_MIN"
     [ -n "${EXO_DSV4_POOL_GROW_MAX_RATIO:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MAX_RATIO=$EXO_DSV4_POOL_GROW_MAX_RATIO"
+    # EXO_DSV4_HC_EXPAND_KERNEL: fused Metal kernel for HyperConnection expand
+    # (layer.attn_residual / ffn_residual). Env-gated in mlx-lm/mlx_lm/models/
+    # hyper_connection.py; default OFF is bit-identical to today's op path.
+    # Opt-in forwarding only -- unset var leaves the production launch command
+    # line unchanged (matches the pool-grow forwarding above), so an unset here
+    # is provably arm A in an A/B. See docs/hc-expand-kernel-ab-2026-08-24.md.
+    [ -n "${EXO_DSV4_HC_EXPAND_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_EXPAND_KERNEL=$EXO_DSV4_HC_EXPAND_KERNEL"
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
     [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
