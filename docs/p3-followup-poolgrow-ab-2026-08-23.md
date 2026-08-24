@@ -137,18 +137,37 @@ and asked for a control. Both corrections are honoured in the commit message and
 here:
 
 **(a) The safety invariant is `_pool_lengths`, not `_visible_width`.** Confirmed by
-reading the code: at cache.py:1920 `_visible_width` is set from `visible`, which
+reading the code: at cache.py:1924 `_visible_width` is set from `visible`, which
 in both branches *is* `self.pooled` in full — pad included. So
-`min(P, self._visible_width)` at :2175-2176 returns `P` unchanged and cannot mask a
-trailing pad. What masks it is the length mask at :2177-2181,
+`min(P, self._visible_width)` at :2179-2180 returns `P` unchanged and cannot mask a
+trailing pad. What masks it is the length mask at :2183-2185,
 `pool_idx < pool_lengths`.
 
+*(Line numbers in this subsection are at mlx-lm `643d42d`, and were corrected on
+2026-08-23 — the originally-published refs were off by +4.)*
+
 **(b) Padding flips the `make_mask` branch — arm B changes TWO things.** Also
-confirmed. `make_mask` returns `None` when `all(pl == P)` (cache.py:2185-2186).
-Arm A satisfies that; arm B does not.
+confirmed. `make_mask` returns `None` when `all(pl == P)` (cache.py:2189-2190).
+
+*Correction (2026-08-23, reviewer-mandated).* The original text here said "Arm A
+satisfies that; arm B does not," which is **wrong as an absolute**. Arm A does
+NOT universally take the `None` path: `all(pl == P)` fails in arm A too, on every
+step where a deferred bump has been staged but not committed, i.e. whenever the
+pool has just grown past a stream's committed length. The real difference is a
+**duty cycle**, not a presence/absence:
+
+| pool | steps returning a `valid` mask, arm A | arm B |
+|---|---|---|
+| r=4 | ~25% | ~99% |
+| r=128 | ~0.8% | ~75% |
+
+So arm B does not *introduce* the masked path — it makes an already-exercised
+path the common case. That is still a real coupled change (see the confound
+discussion below) but it is a change of frequency, not of kind, and any claim
+that arm A "never" builds a mask is false.
 
 R2's recommended precondition — *"assert `k < min(_pool_lengths)` holds at both
-depths"* — is **verified**, by an arithmetic replica of cache.py:2170-2187:
+depths"* — is **verified**, by an arithmetic replica of cache.py:2174-2191:
 
 | depth | arm | max_pool | P (pool width) | pad cols | make_mask returns | all pads masked | k=512 < pool_len |
 |---|---|---|---|---|---|---|---|
@@ -158,10 +177,34 @@ depths"* — is **verified**, by an arithmetic replica of cache.py:2170-2187:
 | 352,599 | B | 88,150 | 88,320 | 170 | `valid` array | **yes** | yes |
 
 So: every padded column masks to `False`, and `k = min(512, P)` is far below
-`min(_pool_lengths)` at both depths, so pads can never enter the top-k —
-**selection is unaffected and the patch is correctness-safe on this axis.** But
-the branch flip is real, so arm B removes a concat *and* switches the indexer
-from a no-mask path to a masked `mx.where` path (`deepseek_v4.py:3840/3883`).
+`min(_pool_lengths)` at both depths, so **on the sparse branch** pads can never
+enter the top-k — selection is unaffected and the patch is correctness-safe on
+that axis.
+
+**SCOPE CORRECTION (2026-08-23, reviewer-mandated) — "pads can never enter the
+top-k" is a statement about the SPARSE branch ONLY, and this document originally
+over-generalised it.** There is no top-k on two of the three consumer paths:
+
+- **`CompressedAttention` (`deepseek_v4.py:4249`) — the 20 ratio-128 layers —
+  has NO top-k at ANY context.** It concatenates the whole pool into `kv` and
+  calls SDPA directly. Every pad in an r=128 pool is *attended* (masked, so
+  value-neutral, but present in the softmax denominator's K length).
+- **`SparseCompressedAttention`'s COMPRESSED branch (`deepseek_v4.py:4614`,
+  taken when `pooled.shape[1] <= index_topk`, i.e. below ctx ≈ 2048 for r=4)**
+  likewise concatenates the full pool with no top-k. Same exposure.
+- Only the **sparse branch** (`pooled.shape[1] > index_topk`) runs the Indexer's
+  `k = min(index_topk, P)` gather, and only there does the table above's
+  argument apply.
+
+The table's rows are r=4 pools at 100K/352.6K, which are on the sparse branch, so
+the table itself is correct — the *claim drawn from it* was too broad. This is
+exactly the hole that made the raw lever non-neutral at short context and (for
+r=128) at ctx > ~65K, and it is what the shipped default-flip gates close: see
+Part III §15.
+
+But the branch flip is real, so arm B removes a concat *and* switches the indexer
+from a no-mask path to a masked `mx.where` path (`deepseek_v4.py:3840/3883`) on
+far more steps.
 At decode `L_q=1` that where() is over a `(1,1,P)` tensor, so it is O(P) — small,
 but non-zero and not today's path.
 
@@ -394,6 +437,36 @@ Prompt (both arms, `temperature=0`, `max_tokens=150`):
 
 Both coherent, correct, no `<|begin_of_sentence|>` leakage, no U+FFFD.
 
+**⚠ THE TWO GENERATIONS DIFFER — and that is a finding, not a footnote
+(added 2026-08-23, reviewer-mandated).** Same prompt, same `temperature=0`, same
+SHAs, same seed params. Arm A said "gastronomy…culture / Eiffel Tower and the
+Louvre" where arm B said "art, fashion, culture, and history / political and
+economic hub". At temperature 0 an identical model on an identical prompt must
+produce identical bytes; these did not.
+
+**Cause, from the code:** at ctx ≈ 20 the r=4 pool holds ~5 columns. The raw
+lever (no gate) rounds that up to 256, so `pooled.shape[1]` goes 5 → 256 while
+`_pool_lengths` stays 5. Both consumers at that width have NO top-k — the r=128
+layers use `CompressedAttention` (`deepseek_v4.py:4249`) and the r=4 layers take
+`SparseCompressedAttention`'s compressed branch (`:4614`, since 256 ≤
+`index_topk`=512) — so both concatenate the whole padded pool into SDPA. K goes
+from 133 to 384, i.e. **251 masked columns added to the softmax**. Masked columns
+contribute nothing to the numerator but do change the reduction shape and order,
+which is a ulp-level difference, which at temperature 0 is enough to flip an
+argmax and diverge the whole continuation.
+
+**Two consequences, both binding:**
+
+1. **Short-context numerics were NOT preserved by the raw lever.** The lever is
+   not "bit-identical below the depths measured"; it is not bit-identical
+   anywhere the pool gets padded.
+2. **Short context was never A/B'd.** Every quantitative result in this document
+   is from 100K and 352.6K. The 2K–10K regime — where this divergence lives —
+   has no throughput measurement in either arm.
+
+This is precisely why the default flip (Part III) ships in a **gated** form with
+byte-identity gates, rather than as the raw lever measured here.
+
 ---
 
 ## 11. Raw results — all four probes
@@ -420,6 +493,24 @@ Reported as `decode_tok_s_usage` per B1 §1.3.
 |---|---|---|---|
 | 100,022 | +0.97 | **+3.46%** | **−1.19** |
 | 352,602 | +2.30 | **+9.79%** | **−3.79** |
+
+**⚠ Estimator sensitivity (added 2026-08-23, reviewer-mandated).** The headline
+percentages above are the **usage-based** estimator (`decode_tok_s_usage`:
+`usage.completion_tokens / decode_window`). The probe also records an
+**events-based** estimator (streamed-event count / window), and the two disagree
+materially at depth:
+
+| depth | usage-based Δ | events-based Δ |
+|---|---|---|
+| 100K | +3.46% | (same order) |
+| 352.6K | **+9.79%** | **+6.91%** |
+
+Both are real measurements of real behaviour; they differ because the two
+denominators count slightly different things (a streamed event is not always
+exactly one token for a thinking model). **The honest headline for the deep point
+is "+7 to +10%", not a single +9.79%.** Every downstream quote of this result —
+including `PERFORMANCE_HISTORY.md` — should carry the range or name the
+estimator.
 
 **Depth delta (100K → 352.6K), ms/tok:** arm A **+6.95**, arm B **+4.35**.
 
@@ -450,6 +541,14 @@ and the p90−p50 spread narrows from 31.00 to 26.68 ms. The predicted direction
 (p90 collapsing toward p50) is **present**; the predicted magnitude (−9..10 ms)
 is **about half-met**. Outlier rate also falls at depth: 0.70% → 0.36% of gaps
 above 3× median.
+
+*Percentile convention (footnote added 2026-08-23, reviewer-mandated): the
+percentiles in this table are computed with **linear interpolation** between
+order statistics (numpy/statistics default). The runner-side logs report
+**index-based** (nearest-rank) percentiles. On these sample sizes the two differ
+by well under a millisecond, but the numbers are not interchangeable — do not
+cross-compare a value from this table against one grepped from a log without
+recomputing under one convention.*
 
 ### 11.4 Generated-text snippet for every number quoted
 
@@ -497,6 +596,12 @@ grepped for the exact wall-clock span:
 | p90 at 352.6K collapses toward p50 | −9..10 ms | **−5.64 ms** | **direction met, magnitude ~half** |
 | **falsification: no change at 352.6K** | — | −3.79 ms/tok, +9.79% | **NOT triggered** |
 
+*Estimator note (added 2026-08-23, reviewer-mandated): the throughput rows use
+the **usage-based** estimator. Under the **events-based** estimator the 352.6K
+gain is **+6.91%** rather than +9.79% — still comfortably past the +6.1%
+prediction, so no verdict in this table changes, but the margin on that row is
+"met" rather than "met, exceeded". See §11.1.*
+
 ### 12.2 Statement of the verdict
 
 **CONFIRMED.** The pre-registered falsification criterion was not met. The
@@ -533,11 +638,18 @@ measured *after* ~40 min of sustained load (thermally conservative — if anythi
 biased against arm B).
 
 **Not yet formally isolated:** that the gain comes *specifically* from
-eliminating per-flush concats, as opposed to the coupled `make_mask` branch flip
-(§4). This is very likely — the branch flip *adds* work (a masked `mx.where`
-over a `(1,1,P)` tensor), so it can hide a real gain but cannot manufacture one
+eliminating per-flush concats, as opposed to the coupled `make_mask` duty-cycle
+change (§4b — arm B does not introduce the masked path, it raises its duty cycle
+from ~25% to ~99% of r=4 steps and ~0.8% to ~75% of r=128 steps).
+This is very likely — the extra masked steps *add* work (a masked `mx.where`
+over a `(1,1,P)` tensor), so they can hide a real gain but cannot manufacture one
 — but "very likely" is not "isolated." R2's slice-off-the-pad variant remains
 the discriminating follow-up if that distinction matters for a default flip.
+
+**Also not established by this run:** anything about short or mid context. See
+§10.5 — the two temp-0 smoke generations at ctx ≈ 20 *differed*, so the raw
+lever is not numerics-preserving there, and no throughput was measured below
+100K in either arm.
 
 Supporting evidence that this is decode-path-only, as the mechanism requires:
 **TTFT is unchanged between arms** (352.6K: 1068.26 s arm A vs 1058.33 s arm B;
@@ -548,8 +660,9 @@ expected to move prefill too. It did not.
 
 ## 13. R2 make_mask control — live half: **PASSED**
 
-The static half (§4) proved the padded columns are always masked out and can
-never enter the top-k. The live half asks whether arm B's deep output is
+The static half (§4) proved the padded columns are always masked out and — **on
+the sparse branch only** (see §4's scope correction) — can never enter the top-k.
+The live half asks whether arm B's deep output is
 degraded in practice. Both probes ban EOS and run the full 2000 tokens, so any
 degeneration has ample room to show.
 
@@ -572,6 +685,12 @@ Arm B shows **no** garbling, no repetition, and no nonsense beyond what arm A
 shows (which is none). Both arms' 2000-token generations terminate mid-sentence
 on the `length` stop, as designed. **The control passes; arm B is not degraded.**
 
+**Scope of this pass (added 2026-08-23, reviewer-mandated).** This is a
+*quality* control at 100K/352.6K, and it passes. It is **not** a numerics-identity
+control and does not claim to be one: §10.5 records that at ctx ≈ 20 the two arms
+produced literally different text at temperature 0. "Not degraded at depth" and
+"bit-identical" are different bars, and the raw lever clears only the first.
+
 ---
 
 ## 14. Limitations of the completed run
@@ -582,16 +701,23 @@ on the `length` stop, as designed. **The control passes; arm B is not degraded.*
   within 0.53% / 0.09%, which bounds run-to-run noise well below the effects.
   The measured effects (+3.46%, +9.79%) are ~7× and ~20× that floor.
 - **The confound survives, in the benign direction.** Arm B changes both the
-  concat chunking and the `make_mask` `None`→`valid` path (§4). Because the
-  branch flip adds cost, it cannot fabricate the observed speedup — but the
+  concat chunking and the `make_mask` masked-path **duty cycle** (§4b: ~25%→~99%
+  of r=4 steps, ~0.8%→~75% of r=128 steps — not a `None`→`valid` flip from
+  nothing, as originally written). Because the extra masked steps add cost, they
+  cannot fabricate the observed speedup — but the
   clean attribution to concat elimination alone still wants R2's
   slice-off-the-pad variant. That is the right next experiment, now for
   *attribution* rather than for disambiguating a null.
 - **`GROW_STEP=256` only.** No sweep over step sizes. 256 was chosen to match
   `PoolingCache.step`; a larger step might buy more (fewer flushes) or less
   (more wasted pad, larger masked `where`). Unmeasured.
-- **Two depths only.** No 300K point, so the shape of the gain between 100K and
-  352.6K is interpolated, not measured.
+- **Two depths only, both deep.** No 300K point, so the shape of the gain between
+  100K and 352.6K is interpolated, not measured — and **nothing below 100K was
+  measured at all** in either arm.
+- **Estimator-dependent headline.** +9.79% is usage-based; events-based is
+  +6.91% at the same depth (§11.1). Quote the range.
+- **The raw lever is not numerics-neutral at short context.** §10.5: two temp-0
+  smoke generations on an identical prompt produced different text.
 - **p90 magnitude under-delivered** (−5.64 vs −9..10 ms predicted) even though
   the direction is right. The secondary signature is only half-confirmed and
   should not be quoted as a clean hit.
@@ -599,11 +725,11 @@ on the `length` stop, as designed. **The control passes; arm B is not degraded.*
   alternative secondary signature; it would have required a third relaunch with
   a different env and a known ~40% perf hit, which would have invalidated the
   A/B parity.
-- **The default was NOT changed**, per instructions. `EXO_DSV4_POOL_GROW_STEP`
-  remains opt-in and unset in the committed default path. Flipping it is a
-  separate reviewed step, and this document is the evidence for that review, not
-  the review itself.
+- **The default was NOT changed** *by this run*, per its instructions.
+  `EXO_DSV4_POOL_GROW_STEP` remained opt-in and unset in the committed default
+  path as of `643d42d`. **SUPERSEDED 2026-08-23:** the default WAS subsequently
+  flipped, in a gated form and after byte-identity gates — see **Part III**.
 - **Cluster left running in arm B** (`EXO_DSV4_POOL_GROW_STEP=256`), since the
-  evidence favours it and the output-quality control passed. Note this is a
-  *runtime* state, not a committed default: the next relaunch without the
-  variable exported reverts to arm A behaviour, bit-for-bit.
+  evidence favours it and the output-quality control passed. Note this was a
+  *runtime* state, not a committed default, as of this run. **Superseded by
+  Part III.**

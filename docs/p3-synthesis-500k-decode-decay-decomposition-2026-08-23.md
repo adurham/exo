@@ -213,7 +213,8 @@ The remainder of the historical -31% is attributable to the probe bug
    ~42.59 → ~40.1 ms/tok, +6.1% tok/s, asymmetric-by-depth signature;
    falsification stated). Two R2 corrections MUST be carried: (a) the
    correctness invariant is the **length mask** `pool_idx <
-   pool_lengths` (`cache.py:2177-2181`), *not* `_visible_width` (no-op
+   pool_lengths` (`cache.py:2177-2181` — *pre-`643d42d` numbering; now
+   `:2183-2185`*), *not* `_visible_width` (no-op
    on trailing pad — C3's §8.1 rationale is wrong, and
    PERFORMANCE_HISTORY's C3 entry inherits it); (b) padding flips
    `make_mask` None→valid, switching the indexer mask path

@@ -2800,11 +2800,22 @@ thermals were, if anything, biased against it.
 R2 CONTROL PASSED (live half). Arm B's deep output is not degraded: zero
 U+FFFD, no repetition loops, coherent and correctly structure-aware at 352.6K
 in both arms. The static half (padded columns always mask to False; k=512 <<
-min pool length, so pads can never enter the top-k) was already proven.
+min pool length, so pads can never enter the top-k) was already proven — **but
+that top-k claim is scoped to the SPARSE branch ONLY (correction 2026-08-23).**
+`CompressedAttention` (deepseek_v4.py:4249 — the 20 ratio-128 layers) has NO
+top-k at ANY context and attends the full padded pool; so does
+`SparseCompressedAttention`'s compressed branch (:4614) below ctx ~2048. Only
+`pooled.shape[1] > index_topk` reaches the top-k gather the claim describes.
+
+ESTIMATOR CAVEAT (added 2026-08-23). +9.79% at 352.6K is the **usage-based**
+estimator; the **events-based** estimator on the same run gives **+6.91%**. Both
+are real. Quote the deep win as **+7 to +10%**, not a bare +9.79%.
 
 CAVEAT ON ATTRIBUTION. Arm B changes TWO things — it removes the per-flush
-concat AND flips `make_mask` from `None` to a real validity array (masked
-`mx.where` indexer path). Because the branch flip ADDS work, it cannot
+concat AND raises the `make_mask` masked-path DUTY CYCLE (correction: not a
+`None`→valid flip from nothing — arm A already builds a real validity array on
+~25% of r=4 steps and ~0.8% of r=128 steps; arm B takes those to ~99% and ~75%).
+Because the extra masked steps ADD work, they cannot
 manufacture the observed speedup, so the causal claim about the env var is
 sound; but attributing the gain specifically to concat elimination still wants
 R2's slice-the-pad-off variant. That is now the follow-up for ATTRIBUTION, not
@@ -2812,11 +2823,19 @@ for disambiguating a null. Other limits: n=1 per cell, step=256 only (no sweep),
 two depths only, `MLX_GPU_TIME` mod-4 spike check not run (would have broken
 A/B parity).
 
-DEFAULT NOT CHANGED — the lever remains opt-in and unset in the committed
-default path; flipping it is a separate reviewed step, and the follow-up doc is
-the evidence for that review. Cluster left RUNNING in arm B
-(`EXO_DSV4_POOL_GROW_STEP=256`) as a runtime state only; the next relaunch
-without the var exported reverts to arm A bit-for-bit. Two relaunches this
+⚠ SCOPE WARNING ON THE MEASUREMENT (reviewer, 2026-08-23). This win was
+measured at **100K and 352.6K only**. Short and mid context were **never A/B'd**
+by the raw lever, and the raw lever is **not numerics-preserving** there: the two
+post-deploy temp-0 smoke generations, same prompt, same seed params, produced
+**DIFFERENT text** (at ctx=20 the pool pads 5→256, K goes 133→384 with 251 masked
+columns, and both consumers at that width have no top-k). Consequently the
+default flip proceeded **ONLY in a gated form and ONLY after byte-identity
+gates** — never as the raw lever measured here. See the next entry.
+
+DEFAULT NOT CHANGED *by this run* — the lever remained opt-in and unset in the
+committed default path at `643d42d`. **SUPERSEDED the same day — see the
+default-flip entry below.** Cluster left RUNNING in arm B
+(`EXO_DSV4_POOL_GROW_STEP=256`) as a runtime state only. Two relaunches this
 session, both clean (`EXIT=0`, READY 2/2 in 8.6 and 6.7 min), no crashes, no
 runner deaths.
 

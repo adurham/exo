@@ -2068,12 +2068,22 @@ for NODE in "${NODES[@]}"; do
     # Pool-write donation threshold (session-4 pool fixes) — validated prod value.
     : "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:=8388608}"
     [ -n "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES=$EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES"
-    # EXO_DSV4_POOL_GROW_STEP: BatchPoolingCache growth chunking (P3 follow-up A/B,
-    # 2026-08-23). Unset/1 = legacy concat-to-exact-max_pool every flush (arm A,
-    # bit-identical to prior behavior); 256 = grow in 256-entry chunks like
-    # PoolingCache.step (arm B). Deliberately NO default here so an unset var
-    # leaves arm A byte-identical -- opt-in forwarding only.
+    # EXO_DSV4_POOL_GROW_STEP: BatchPoolingCache growth chunking. DEFAULT FLIPPED
+    # to 256 in mlx-lm on 2026-08-23 after the live A/B confirmed +3.46% tok/s
+    # @100K and +9.79% @352.6K -- see docs/p3-followup-poolgrow-ab-2026-08-23.md
+    # Part III. Set EXO_DSV4_POOL_GROW_STEP=1 for the bit-identical legacy
+    # exact-fit growth (the A/B's arm A) -- that is the escape hatch and the
+    # reference arm for the byte-identity gates.
+    # EXO_DSV4_POOL_GROW_MIN (default 512 in mlx-lm) and
+    # EXO_DSV4_POOL_GROW_MAX_RATIO (default 4) are the neutrality gates: never
+    # pad below index_topk valid columns, and never pad a ratio-128 pool
+    # (CompressedAttention has no top-k, so it would attend the pads).
+    # Deliberately NO ``: "${VAR:=default}"`` lines here -- the mlx-lm module
+    # constants carry the defaults, so an unset var leaves the production
+    # launch command line unchanged and opt-in forwarding stays exact.
     [ -n "${EXO_DSV4_POOL_GROW_STEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_STEP=$EXO_DSV4_POOL_GROW_STEP"
+    [ -n "${EXO_DSV4_POOL_GROW_MIN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MIN=$EXO_DSV4_POOL_GROW_MIN"
+    [ -n "${EXO_DSV4_POOL_GROW_MAX_RATIO:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MAX_RATIO=$EXO_DSV4_POOL_GROW_MAX_RATIO"
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
     [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
