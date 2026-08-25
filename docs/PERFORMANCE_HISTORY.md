@@ -3329,6 +3329,41 @@ does not fire on ordinary launches.
 
 ---
 
+## 2026-08-25 — hc_collapse fused precursor kernel: live 2x2 A/B PASSES all framings (+1.89% mean prefill @ ~70.5K)
+
+Full writeup: `docs/hc-collapse-kernel-ab-2026-08-25.md`. Kernel: fused Metal
+precursor (`astype fp32` + `rms_norm` + `matmul fn.T`) for HyperConnection
+collapse (`layer.attn_hc` / `layer.ffn_hc`), mlx-lm branch
+`kernel/hc-collapse-roofline` @ `8d5de181d`, gate
+`EXO_DSV4_HC_COLLAPSE_KERNEL=1`, default OFF (unset = bit-identical classic
+path). Env forwarding: exo `782c8cf97` (opt-in, no default flip).
+
+**Numbers** (`bench/phase3_precheck_depth_throughput.py --targets 100000
+--max-tokens 128`, 2 runs/arm, ~70.5K real tokens, both arms exo `cd254d15a`,
+`EXO_DSV4_HC_EXPAND_KERNEL=1` held ON, TP worldSize=2 fp8): arm A mean
+**376.1681** tok/s (spread 0.03%), arm B mean **383.2700** (spread 0.37%).
+Gate `mean(A) x 1.015 = 381.8106` ⇒ **PASS**. Deltas: +2.0947% B1−A1,
++1.6814% B2−A2, **+1.8880% mean-mean (+7.10 tok/s)**, conservative min-B vs
+max-A +1.6814%. **All pre-registered framings pass.** Quality clean: needle
+`FALCON-MERCURY-7749` byte-identical on 4/4 runs, zero U+FFFD, zero BOS spam,
+zero `RunnerFailed`. Deploy discrimination verified per-PID on all 8 runner
+PIDs (arm A env absent, arm B `=1`) plus venv greps (0 vs 3 hits/node).
+
+**Caveats**: n=2/arm and the tightest passing framing clears the gate by only
++0.18 pp — smaller than arm B's own 0.37% spread; depth spread 235 tok (0.33%)
+unnormalized; B1 reasoning-token outlier 60 vs 32/34/34 (same trajectory-
+variance class as hc_expand's documented delta, final answers identical);
+measured +1.89% is only **~70% of the predicted +2.73%** (span share 4.6% x
+(1 − 1/2.47) from `docs/hc-collapse-roofline-2026-08-24.md`); decode (A 26.4677
+→ B 28.8293) is noise-dominated at 41-69 completion tokens and NOT load-bearing.
+
+**PM verdict SHIP.** At time of writing the ship steps are **pending supervisor
+GO**: no default flip, no mlx-lm submodule pointer bump committed, cluster left
+in arm-A default. The production flip + final verification will be appended as
+§14 of the A/B doc.
+
+---
+
 ## Quick-reference: closed levers, one line each
 
 *(Added from the independent second pass's appendix table — a fast
