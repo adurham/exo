@@ -1162,7 +1162,36 @@ for NODE in "${NODES[@]}"; do
     # confirmed correct on both nodes at the time, so this call was a
     # no-op in effect anyway -- the fix is purely about failing fast
     # rather than hanging, not about actually needing sudo to succeed.
-    ssh "$NODE" "sudo -n xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true"
+    #
+    # 2026-08-25: only point xcode-select at Xcode.app if the node actually
+    # HAS it. Xcode.app was removed from both studios, leaving only
+    # CommandLineTools; unconditionally -s'ing a nonexistent path would
+    # break the node's default toolchain outright the moment a sudo
+    # credential happened to be cached.
+    ssh "$NODE" "if [ -d /Applications/Xcode.app/Contents/Developer ]; then sudo -n xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true; fi"
+
+    # Per-node developer-toolchain prelude, resolved ON THE NODE.
+    #
+    # 2026-08-25: the build steps below used to hardcode
+    #   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    # which is fatal on a node where Xcode.app is absent: every cc/clang
+    # invocation dies with "xcrun: error: missing DEVELOPER_DIR path:
+    # /Applications/Xcode.app/Contents/Developer". Observed live on
+    # macstudio-m4-1 inside uv sync's isolated maturin build of exo_rs
+    # (maturin pep517 build-wheel -> cargo -> cc -> xcrun), which aborted
+    # the whole deploy before a single line of exo ran.
+    #
+    # Resolution MUST happen remotely (this string is single-quoted so the
+    # laptop does not expand any of it) -- the laptop still has Xcode, so
+    # deciding here would reintroduce exactly the bug being fixed.
+    #
+    # CommandLineTools is a valid DEVELOPER_DIR for cc/clang/ld, so Rust
+    # links fine under the fallback. It has NO metal compiler, so the
+    # `dirname $(xcrun -f metal)` PATH segment is added only when metal is
+    # actually resolvable; a missing metal simply omits that segment
+    # instead of poisoning PATH with dirname's "." fallback.
+    REMOTE_DEV_ENV='if [ -d /Applications/Xcode.app/Contents/Developer ]; then export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer; else export DEVELOPER_DIR=/Library/Developer/CommandLineTools; fi; _metal_bin=$(xcrun -f metal 2>/dev/null); if [ -n "$_metal_bin" ]; then export PATH="/opt/homebrew/bin:$(dirname "$_metal_bin"):$PATH"; else export PATH="/opt/homebrew/bin:$PATH"; fi'
+
     
     # Update and Build Logic
     #
@@ -1266,7 +1295,7 @@ for NODE in "${NODES[@]}"; do
     # intentional -- the unconditional force-reinstall from ./mlx-lm below
     # always overwrites it (see that step's comment for why).
     echo "Syncing dependencies on $NODE..."
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages --inexact --no-install-package mlx'" || { echo "Failed to sync on $NODE"; exit 1; }
+    ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages --inexact --no-install-package mlx'" || { echo "Failed to sync on $NODE"; exit 1; }
 
     # FETCHCONTENT_BASE_DIR pins CMake's FetchContent cache to a PERSISTENT
     # directory instead of uv's per-build temp dir. Without it every MLX
@@ -1309,7 +1338,7 @@ for NODE in "${NODES[@]}"; do
     #     this step exists to prevent -- the check would corrupt the state it
     #     is checking. Observed live: a bare `uv run python3 -c ...` probe on
     #     macstudio-m4-1 printed "Uninstalled 1 package / Installed 1 package".
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c '
+    ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c '
       cd ~/repos/exo
       MLX_SHA=\$(git -C mlx rev-parse HEAD)
       STAMP=.venv/.mlx-installed-sha
@@ -1335,6 +1364,20 @@ sys.exit(0 if got == pathlib.Path(sys.argv[1]).resolve() else 1)
         NEED_BUILD=0
       fi
       if [ \"\$NEED_BUILD\" = 1 ]; then
+        if ! xcrun -f metal >/dev/null 2>&1; then
+          echo \"\"
+          echo \"  ==================================================================\"
+          echo \"  ERROR: mlx rebuild required but no Metal toolchain on $NODE\"
+          echo \"  ------------------------------------------------------------------\"
+          echo \"  DEVELOPER_DIR=\$DEVELOPER_DIR has no metal compiler.\"
+          echo \"  CommandLineTools does NOT ship one -- only a full Xcode.app does.\"
+          echo \"  Reinstall Xcode on $NODE (and re-run xcode-select -s), then retry.\"
+          echo \"  Failing now instead of dying mid-build with a confusing\"
+          echo \"  cmake/clang metal-command-not-found error.\"
+          echo \"  ==================================================================\"
+          echo \"\"
+          exit 1
+        fi
         export CMAKE_ARGS=\"-DFETCHCONTENT_BASE_DIR=\$HOME/repos/exo/mlx/build/_deps\"
         CMAKE_ARGS=\"\$CMAKE_ARGS\" uv pip install --no-deps --force-reinstall ./mlx \\
           && echo \"\$MLX_SHA\" > \"\$STAMP\"
@@ -1362,7 +1405,7 @@ sys.exit(0 if got == pathlib.Path(sys.argv[1]).resolve() else 1)
     # which line ~721's `git reset --hard` would clobber every run anyway).
     # Same idiom as the Rust-bindings rebuild below.
     echo "Pinning mlx-lm to vendored submodule on $NODE..."
-    ssh "$NODE" "export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer && export PATH=/opt/homebrew/bin:\$(dirname \$(xcrun -f metal)):\$PATH && zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx-lm'" || { echo "Failed to pin vendored mlx-lm on $NODE"; exit 1; }
+    ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx-lm'" || { echo "Failed to pin vendored mlx-lm on $NODE"; exit 1; }
 
     # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
     echo "Rebuilding Rust pyo3 bindings on $NODE..."
