@@ -3298,6 +3298,37 @@ restored** (vs 8.51 / p95 189 ms under shadow config).
 
 ---
 
+## 2026-08-25 — Launcher incident: Xcode removed from studios; CLT-fallback fix (no perf impact)
+
+Full writeup: `docs/xcode-removal-launcher-clt-fallback-2026-08-25.md`.
+Fix commit `70e0423bc` (`start_cluster.sh` only).
+
+The arm-A launch for the `hc_collapse` fused-pre A/B aborted with
+`Failed to sync on macstudio-m4-1`. Root cause: `/Applications/Xcode.app` had
+been removed from **both** studios (only CommandLineTools remain), while
+`start_cluster.sh` hardcoded
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` at three remote-build
+sites. Latent until commit `782c8cf97` touched `start_cluster.sh` and
+invalidated uv's wheel cache — the first launch that actually had to *build* hit
+it, dying inside `uv sync`'s maturin build of `exo_rs`
+(`maturin` → `cargo` → `cc` → `xcrun: error: missing DEVELOPER_DIR path`).
+
+Fix: `DEVELOPER_DIR` is now resolved **on each node** (Xcode if present, else
+`/Library/Developer/CommandLineTools`), `xcode-select -s` is guarded on Xcode
+existing, the `dirname $(xcrun -f metal)` PATH segment is added only when metal
+resolves, and the mlx stamp-check's `NEED_BUILD=1` branch fails fast with an
+explicit reinstall-Xcode banner (CLT has `cc` but no Metal compiler).
+
+**No performance impact** — launcher-only, no model/kernel/config change. Perf
+baselines from 2026-08-24 and earlier remain valid and directly comparable.
+Residual risk: any future mlx C++ rebuild (an `mlx` submodule pin advance,
+`MLX_FORCE_REINSTALL`, or a stale venv stamp) now requires reinstalling Xcode on
+the studios first; the launcher will abort loudly rather than produce a broken
+build. The current pin `e40a416b2` is stamped-good on both nodes, so the guard
+does not fire on ordinary launches.
+
+---
+
 ## Quick-reference: closed levers, one line each
 
 *(Added from the independent second pass's appendix table — a fast
