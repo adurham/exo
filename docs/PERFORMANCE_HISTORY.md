@@ -3370,6 +3370,24 @@ RunnerReady TP worldSize=2. Serving smoke clean (finish_reason `stop`, 206
 completion tokens, zero U+FFFD, no BOS spam). Full record: §14 of the A/B doc.
 Rollback: `EXO_DSV4_HC_COLLAPSE_KERNEL=0 ... ./start_cluster.sh`.
 
+**Depth verification (same day, 2026-08-25 afternoon):** HOLDS at depth —
+**+1.97% @300K-target** (211.7K real tokens, 364.97 vs 357.93 tok/s,
+OFF×1.015 = 363.30) and **+1.89% @500K-target** (352.3K real, 345.53 vs
+339.12 tok/s, gate 344.20). n=1 per arm per depth, verdicts per the
+pre-registered gate (written before any probe, `/tmp/hccol_depth_preregistration.txt`);
+no repeats ran because both deltas cleared +1.5% (the repeat branch was
+reserved for the inconclusive case). Needle `FALCON-MERCURY-7749` exact
+on 5/5 probes, zero U+FFFD, zero BOS spam. **No attenuation with depth**
+(+1.89% @70.5K → +1.97% @300K → +1.89% @500K) — the pre-registered
+mechanistic prediction (~+0.6%/+0.4%, hc_expand-style decay) was WRONG
+in the pleasant direction. All four arms inside pre-registered sanity
+bands; env gate verified 8/8 runner PIDs per arm with zero code delta
+between arms (pure env flip, submodule NOT rolled back); SHAs unchanged
+(exo `f7ef1180e`, mlx-lm `8d5de181d`). Production restored kernel-ON
+via bare relaunch (script default `:=1` promoted it), READY 2/2 in
+~330s, verified on 8/8 PIDs, smoke needle-exact. Full record:
+`docs/hc-collapse-depth-verification-2026-08-25.md`.
+
 ---
 
 ## Quick-reference: closed levers, one line each
