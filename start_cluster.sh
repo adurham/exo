@@ -2192,9 +2192,13 @@ for NODE in "${NODES[@]}"; do
     # HyperConnection collapse (layer.attn_hc / layer.ffn_hc), env-gated in
     # mlx-lm/mlx_lm/models/hyper_connection.py. Default OFF is bit-identical to
     # the classic astype+rms_norm+matmul precursor path (the gate is read once
-    # at import, so unset => the kernel is never even compiled). Opt-in
-    # forwarding ONLY, for the live A/B -- no ``:=`` default until a ship
-    # verdict; see docs/hc-collapse-kernel-ab-2026-08-25.md.
+    # at import, so unset => the kernel is never even compiled). DEFAULT
+    # FLIPPED TO ON on 2026-08-25 after the live 2x2 A/B passed all
+    # pre-registered framings (+1.89% mean prefill @ ~70.5K real tokens).
+    # Set EXO_DSV4_HC_COLLAPSE_KERNEL=0 to revert to the classic
+    # astype+rms_norm+matmul precursor path; see
+    # docs/hc-collapse-kernel-ab-2026-08-25.md.
+    : "${EXO_DSV4_HC_COLLAPSE_KERNEL:=1}"
     [ -n "${EXO_DSV4_HC_COLLAPSE_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_COLLAPSE_KERNEL=$EXO_DSV4_HC_COLLAPSE_KERNEL"
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
