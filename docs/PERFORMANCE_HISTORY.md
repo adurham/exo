@@ -713,6 +713,27 @@ EXO_DSV4_MTP=0 EXO_DSV4_DSPARK=1`):
 - Not tested at deeper context (300K, 500K) or under PP mode — expected
   to transfer since the op is per-layer-per-token and the code path is
   shared, but not verified
+- **Depth verification (2026-08-24, INCONCLUSIVE)** —
+  `docs/hc-expand-depth-verification-2026-08-24.md`. Live A/B on the
+  same production config, at 300K target (2 pairs) and 500K target
+  (1 pair): Δ = **+1.28% @300K** (356.72 ON vs 352.21 OFF mean),
+  **+0.85% @500K** (336.74 ON vs 333.91 OFF, n=1 per arm). BOTH
+  DEPTHS INSIDE ±1.5% — pre-registered NEUTRAL/INCONCLUSIVE per the
+  task brief. No regression flagged (neither trips −1.5%). Needle
+  recovered exact on all 6 probes. Direction matches the mechanistic
+  prediction (smaller relative share of the op as SDPA/indexer grow
+  with depth) but magnitude is below the predicted +2.5%–4% range at
+  300K — either the 70.5K span share overestimated the op's
+  contribution at depth, or the noise floor at these depths (~±0.7%
+  within-arm at 300K, unbounded at 500K with n=1) hides a real ~+2%
+  effect. **The 70.5K ship decision is not undermined**; the kernel
+  is neutral/safe at depth in this sample. Default stays ON;
+  production restored to kernel-ON and depth-scale-verified with a
+  final 211K-token production probe (ON@300K r2, real 211,022
+  tokens, coherent needle-recovery decode). One anomaly recorded:
+  first ON@500K probe hung client-side after successful server-side
+  prefill; re-run cleanly. n=1 at 500K is this test's biggest
+  limitation.
 
 **Reusable lesson: a small-share prefill op (single-digit % of wall
 time) with a large per-op inefficiency (~8x) can still be worth
