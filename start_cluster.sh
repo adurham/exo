@@ -2145,6 +2145,14 @@ for NODE in "${NODES[@]}"; do
     # to revert to the pre-kernel op path (bit-identical, no perf gain).
     : "${EXO_DSV4_HC_EXPAND_KERNEL:=1}"
     [ -n "${EXO_DSV4_HC_EXPAND_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_EXPAND_KERNEL=$EXO_DSV4_HC_EXPAND_KERNEL"
+    # EXO_DSV4_HC_COLLAPSE_KERNEL: fused Metal precursor kernel for the
+    # HyperConnection collapse (layer.attn_hc / layer.ffn_hc), env-gated in
+    # mlx-lm/mlx_lm/models/hyper_connection.py. Default OFF is bit-identical to
+    # the classic astype+rms_norm+matmul precursor path (the gate is read once
+    # at import, so unset => the kernel is never even compiled). Opt-in
+    # forwarding ONLY, for the live A/B -- no ``:=`` default until a ship
+    # verdict; see docs/hc-collapse-kernel-ab-2026-08-25.md.
+    [ -n "${EXO_DSV4_HC_COLLAPSE_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_COLLAPSE_KERNEL=$EXO_DSV4_HC_COLLAPSE_KERNEL"
     # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
     : "${EXO_STALL_SAMPLER_SECONDS:=10}"
     [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
