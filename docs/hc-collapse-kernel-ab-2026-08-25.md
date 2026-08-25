@@ -1,9 +1,9 @@
-# hc_collapse fused precursor kernel — live A/B on 2026-08-25 — SHIP (pending GO)
+# hc_collapse fused precursor kernel — live A/B on 2026-08-25 — SHIP
 
-**Status: LIVE A/B COMPLETE — ALL PRE-REGISTERED FRAMINGS PASS
-(+1.89% mean prefill). VERDICT — SHIP, pending supervisor GO. The
-production flip has NOT been executed by this measurement session; it
-will be appended as §14 when a follow-up ship task performs it.**
+**Status: LIVE A/B COMPLETE. VERDICT — SHIP (default flipped, cluster now
+production on kernel-on).** All pre-registered framings passed (+1.89%
+mean prefill); supervisor GO was given at ~11:05 and the production flip
+was executed and verified 11:12–11:20 the same day — recorded in §14.
 
 `EXO_DSV4_HC_COLLAPSE_KERNEL=1` gates a fused Metal *precursor* kernel
 (`astype fp32` + `rms_norm` + `matmul fn.T`, one dispatch instead of
@@ -417,8 +417,8 @@ clean.
 **This session did NOT flip anything to production.** The default remains
 OFF, `start_cluster.sh` carries only the opt-in forwarding of
 `782c8cf97`, and the mlx-lm submodule pointer bump remains uncommitted on
-the laptop. Executing the flip is gated on supervisor **GO** and will be
-recorded in §14.
+the laptop. Supervisor **GO** was subsequently given and the flip was
+executed and verified the same morning — recorded in §14.
 
 ---
 
@@ -443,21 +443,135 @@ incident).
 
 ---
 
-## 13. Rollback recipe (applies once §14 ships)
+## 13. Rollback recipe (as-shipped version is §14.5)
 
-Until the flip happens there is nothing to roll back — default is OFF and
-unset is bit-identical to the classic path. After a flip, launching with
-`EXO_DSV4_HC_COLLAPSE_KERNEL=0` restores the classic op path, and the
-submodule pointer can be returned to `7a1a4e86`.
+The flip **has** shipped, so the live recipe is §14.5: launching with
+`EXO_DSV4_HC_COLLAPSE_KERNEL=0` restores the classic op path
+(bit-identical to arm A), and the submodule pointer can be returned to
+`7a1a4e86`.
 
 ---
 
 ## 14. Production flip + final verification (appended post-GO)
 
-*(Placeholder — intentionally empty. To be filled in by the follow-up
-ship task once supervisor GO is given: the default flip / submodule
-pointer bump, the production relaunch, per-PID env verification, and a
-serving smoke test.)*
+Supervisor **GO** was received at **~11:05** on 2026-08-25. The ship was
+executed **11:12–11:20** the same morning by a follow-up ship task. This
+section is the record of what was changed, how production was relaunched,
+and how kernel-ON was verified on the live cluster.
+
+### 14.1 The flip commit + mlx-lm fast-forward
+
+**mlx-lm (fork).** Branch `main` was fast-forwarded from `7a1a4e8` to
+`8d5de181d09cc9ce9e5955f5be5fe4708f86258e` — the exact commit the A/B's
+arm B ran — and pushed. `git ls-remote` then confirmed remote
+`main = 8d5de18…`, so the kernel is no longer only reachable from the
+`kernel/hc-collapse-roofline` branch.
+
+**exo ship commit `99f5f96b8bc3bd58bd72f6f4c793e899464ad639`.** Two
+changes, both minimal:
+
+| # | file | change |
+|---|---|---|
+| 1 | `mlx-lm` (submodule pin) | `7a1a4e868` → `8d5de181d` |
+| 2 | `start_cluster.sh` | default flip: `: "${EXO_DSV4_HC_COLLAPSE_KERNEL:=1}"`, comment updated (revert = set `0`) |
+
+The `:=` form means the gate is **promoted to ON by default** but any
+explicit value in the environment still wins — which is what makes the
+rollback in §14.5 a zero-edit operation.
+
+### 14.2 Production relaunch timeline
+
+Relaunched under tmux session `hccol_prodship` with the **bare** command —
+deliberately **no** explicit `EXO_DSV4_HC_COLLAPSE_KERNEL` in the
+environment, so that the kernel being live afterwards is itself the proof
+that the `start_cluster.sh` default flip took effect:
+
+```
+EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 ./start_cluster.sh
+```
+
+| step | time | result |
+|---|---|---|
+| T0 — launch | **11:12:38** | started |
+| push-check | — | **pass** on `99f5f96b8` |
+| rsync + dependency sync | — | **clean** (both nodes) |
+| node commit sync | — | `Nodes synchronized on commit 99f5f96b8.` |
+| health | — | **HEALTHY** (Nodes 2, Identities 2) |
+| **READY (2/2)** | **11:19:55** | **~7.3 min** end-to-end |
+
+### 14.3 Post-relaunch verification
+
+**Deployed SHAs (both nodes):**
+
+|  | node m4-1 | node m4-2 |
+|---|---|---|
+| `exo` HEAD | `99f5f96b8` | `99f5f96b8` |
+| `mlx-lm` checkout | `8d5de181d` | `8d5de181d` |
+
+**Venv verification** — the same grep that discriminated the arms in §3.3,
+now run against production:
+
+| check | node m4-1 | node m4-2 |
+|---|---|---|
+| `grep -c HC_COLLAPSE` in venv-installed `mlx_lm` | **3** | **3** |
+
+Three hits — i.e. the *arm-B* installed code, not a stale `site-packages`
+copy.
+
+**Runner env, per-PID** — `ps eww` on **all 8** production runner PIDs:
+
+| node | runner PIDs | `EXO_DSV4_HC_COLLAPSE_KERNEL` |
+|---|---|---|
+| m4-1 | `25937`, `25938`, `25939`, `25949` | **`1`** ✅ (4/4) |
+| m4-2 | `27261`, `27262`, `27263`, `27272` | **`1`** ✅ (4/4) |
+
+Every one of the 8 PIDs also carries `EXO_DSV4_HC_EXPAND_KERNEL=1` (the
+sibling kernel, shipped 2026-08-24), `EXO_SPECULATIVE=0`,
+`EXO_DSV4_MTP=0`, `EXO_DSV4_DSPARK=1`. None of these were passed
+explicitly for the collapse gate — the script default supplied it.
+
+**Cluster `/state`:**
+
+| field | value |
+|---|---|
+| runner status | **2× `RunnerReady`** |
+| instance | `DSv4-Flash-0731`, TP `worldSize = 2` |
+
+### 14.4 Serving smoke probe
+
+Two probes at temperature 0 against the production endpoint.
+
+| probe | `max_tokens` | `finish_reason` | usage / notes |
+|---|---|---|---|
+| 1 | **160** | `length` | truncated — 117 **reasoning** tokens ate the budget; content = `PROD-OK-HCCOLLAPSE` plus the start of the explanation |
+| 2 (re-probe) | **400** | **`stop`** | **206 completion tokens**, complete answer |
+
+Probe 1 is *not* a defect: at temp 0 the model spent most of a 160-token
+budget on reasoning tokens, so the visible answer was cut mid-sentence.
+Re-probing with a 400-token budget produced a clean terminated response.
+
+Probe 2 content, **verbatim**:
+
+> PROD-OK-HCCOLLAPSE
+>
+> A fused GPU kernel combines multiple computational operations (such as element-wise transformations, reductions, or matrix multiplications) into a single kernel launch, avoiding the overhead of separate launches and intermediate global memory reads/writes. By keeping intermediate data in fast on-chip registers or shared memory, it dramatically reduces memory bandwidth usage and latency, often yielding significant speedups for deep learning and scientific workloads.
+
+**Zero U+FFFD (`�`), no BOS spam.** The sentinel string came back
+byte-exact and the free-form continuation is coherent — the same quality
+bar applied in §9.
+
+### 14.5 Rollback recipe (production, as shipped)
+
+One command, no edits, no revert — the `:=` default yields to an explicit
+value:
+
+```
+EXO_DSV4_HC_COLLAPSE_KERNEL=0 EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 ./start_cluster.sh
+```
+
+That relaunches on the classic op path, **bit-identical to arm A** of this
+A/B. To make the rollback permanent, revert the single `:=` line in
+`start_cluster.sh` and/or return the `mlx-lm` submodule pin to `7a1a4e868`.
 
 ---
 

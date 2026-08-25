@@ -3357,10 +3357,18 @@ measured +1.89% is only **~70% of the predicted +2.73%** (span share 4.6% x
 (1 − 1/2.47) from `docs/hc-collapse-roofline-2026-08-24.md`); decode (A 26.4677
 → B 28.8293) is noise-dominated at 41-69 completion tokens and NOT load-bearing.
 
-**PM verdict SHIP.** At time of writing the ship steps are **pending supervisor
-GO**: no default flip, no mlx-lm submodule pointer bump committed, cluster left
-in arm-A default. The production flip + final verification will be appended as
-§14 of the A/B doc.
+**PM verdict SHIP — and SHIPPED.** Supervisor GO ~11:05; production flip executed
+and verified **2026-08-25 ~11:20**. exo ship commit **`99f5f96b8`** = mlx-lm
+submodule pin bump `7a1a4e868` → `8d5de181d` + `start_cluster.sh` default flip
+`: "${EXO_DSV4_HC_COLLAPSE_KERNEL:=1}"` (revert = set `0`); mlx-lm fork `main`
+fast-forwarded `7a1a4e8` → **`8d5de18`** and pushed. Production relaunched with a
+bare `./start_cluster.sh` (no explicit gate — the script default promoted it),
+READY 2/2 at 11:19:55 (~7.3 min); verified **kernel-ON on all 8 runner PIDs**
+(m4-1 25937/25938/25939/25949, m4-2 27261/27262/27263/27272), both nodes on exo
+`99f5f96b8` + mlx-lm `8d5de181d`, venv `HC_COLLAPSE` grep = 3/node, /state 2x
+RunnerReady TP worldSize=2. Serving smoke clean (finish_reason `stop`, 206
+completion tokens, zero U+FFFD, no BOS spam). Full record: §14 of the A/B doc.
+Rollback: `EXO_DSV4_HC_COLLAPSE_KERNEL=0 ... ./start_cluster.sh`.
 
 ---
 
