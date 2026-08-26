@@ -4395,7 +4395,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _draft_list = [int(v) for v in draft_concat[0].tolist()]
                     _tgt_list = [int(v) for v in target_tokens[0].tolist()]
                     _all_next_list = [int(v) for v in all_next.tolist()]
-                    _bonus_special = bonus_val in _special
+                    _bonus_special = int(bonus_val) in _special
                     _draft_special = any(d in _special for d in _draft_list)
                     _tgt_special = any(t in _special for t in _tgt_list)
                     if _bonus_special or _draft_special or _tgt_special:
