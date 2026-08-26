@@ -1091,3 +1091,79 @@ primary bar fails.
 6. Grep `[MTP] cycles=... mean_accept=.../3` for acceptance stats.
 7. DECIDE vs bars: PROMOTE (cluster STAYS Stage 3) or REVERT (spec-off).
 8. `docs/PERFORMANCE_HISTORY.md` entry + report. Commit + push.
+
+---
+
+## Stage 3 — RESULT (2026-08-26, GLM-5.2 PM): PRIMARY FAIL → REVERT
+
+**Status: REVERT.** The Stage 3 validation ran against the pre-registered bars
+and tripped the PRIMARY hard gate at BOTH probe depths. Cluster does NOT stay
+on Stage 3.
+
+### PRIMARY (losslessness, hard gate) — FAIL
+
+Depth probes (`p3_depth_anchor_probe`, `/bench/chat/completions`, temp=0):
+
+| depth | baseline | stage3 | verdict |
+|---|---|---|---|
+| 100K | completion=2000, finish=length | **completion=369, finish=stop** | **FAIL** (early-stop anomaly) |
+| 352.6K | completion=2000, finish=length | **completion=462, finish=stop** | **FAIL** (early-stop anomaly) |
+
+Per the pre-registered bar: "If completion < 2000 or finish=stop at
+100K/352.6K probes → hard fail, revert immediately." Both depths tripped it.
+Additionally, the spec-ON committed stream diverges from the spec-OFF baseline
+**from token 1** (common-prefix length 0) — a deeper losslessness/correctness
+divergence, not merely a different stop point.
+
+**7/7 spec_degen short-prompt parity: PASS** (sys_capital_france→"Paris"/stop
+matched baseline exactly; sys_count_to_five→"One, two, three, four,
+five."/stop matched). **math_digit_sum: PASS** (3/3, answer=115, finish=stop).
+Both held — but they do not cover the deep-probe regime where the anomaly
+recurred.
+
+### SECONDARY (throughput, target not hard gate) — FAIL at 352K (below baseline)
+
+| depth | baseline tok/s | stage3 tok/s | delta | bar | met? |
+|---|---|---|---|---|---|
+| 100K | 28.46 | 29.54 | +3.8% | ≥+10% | NO (target miss) |
+| 352.6K | 25.07 | 24.30 | −3.1% | ≥+5% | **NO — below baseline (hard rollback)** |
+
+The 352K throughput DECREASE vs baseline is an independent hard rollback
+criterion ("throughput DECREASE vs baseline → REVERT"). The 100K +3.8% is
+above baseline but below the +10% target, and is measured over a truncated
+12.46s decode window (369 tokens, not 2000) — not a clean comparison.
+
+### Acceptance + memory (both PASS, do not override PRIMARY)
+
+- Acceptance: mean_accept=2.134/3 = **71.1%** (exceeds 50% bar; hist
+  0:277, 1:407, 2:318, 3:1264, cycles=2266). Irrelevant to the finish gate.
+- Memory: m4-2=95 GB, m4-1=93 GB footprint, 0 swap (under 126 GB bar). PASS.
+
+### Determinism check — nondeterministic at temp=0 (root-cause clue)
+
+A repeat 100K probe (same config/prompt/temp=0) produced completion=504 vs
+the first run's 369 — a 37% difference with the same text opening. Greedy
+decode should be deterministic; the spec verify path is not. This also
+explains the Stage 2b (1148) vs Stage 3 (369) discrepancy: it is NOT the ban
+code's presence (the ban gate is a verified no-op when `EXO_DSV4_SPEC_EOS_BAN`
+is unset), it is nondeterminism in the spec verify path at 100K+ depth.
+
+### Protocol-calibration note (does NOT excuse the fail)
+
+The `/bench` endpoint bans EOS in the committed stream, so the spec-OFF
+baseline's "2000/length" is an artifact — the baseline literally cannot
+emit EOS. Stage 3's spec path (ban OFF) CAN emit EOS, so its stop may be the
+model's true natural greedy end. The discriminator (does spec stream 1..N
+match an UNBANNED greedy stream?) cannot be answered from the `/bench`
+endpoint. Next-protocol gap: a `/v1/chat/completions` (no bench flag) probe
+at 100K to capture the model's true natural-stop point. Per the
+pre-registered bars, this calibration issue does not excuse the fail — the
+bars were written against the `/bench` baseline and Stage 3 diverged.
+
+### Decision
+
+**REVERT to spec-off.** The user must run the `dspark_revert` relaunch
+(SIGTERM-only; the PM session does not relaunch). Full numbers, samples, and
+analysis in `docs/PERFORMANCE_HISTORY.md` Stage 3 entry. Artifacts in
+`/tmp/ab/s3_*`. Cluster is still running Stage 3 config pending the user's
+revert relaunch.

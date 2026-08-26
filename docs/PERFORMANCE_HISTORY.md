@@ -4119,3 +4119,200 @@ at `2026-08-26 09:32:13.941` and `09:32:18.485`).
 **Cluster final state: production spec-off (`dspark_revert2` tmux session,
 both studios, API live, env audited).** Campaign closes here per the failed
 quality gate.
+
+
+## 2026-08-26 — DSpark/MTP Stage 3 (width-3 + EOS_BAN default-off fix): PRIMARY FAIL → REVERT
+
+**Auditor:** GLM-5.2 (Ollama Cloud), acting as PM.
+**Repo HEAD:** `1c26dad08` (pre-reg commit) — cluster running Stage 3 config,
+NO relaunch. Fix under test: `d8c671501` (default `EXO_DSV4_SPEC_EOS_BAN` 1→0,
+opt-in now). Stage 3 = Stage 2b flags + the ban default-OFF fix.
+
+**Stage 3 config (verified live via env audit on both nodes):**
+`EXO_SPECULATIVE=1 EXO_SPECULATIVE_GAMMA=3 EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1
+EXO_DSV4_DSPARK_NATIVE=1 EXO_DSV4_DSPARK_FORCE_LOAD=1 EXO_DSV4_MTP_DEDICATED=0
+EXO_DSV4_MTP_LOG_INTERVAL=1 EXO_DSV4_HC_COLLAPSE_KERNEL=1`. `EXO_DSV4_SPEC_EOS_BAN`
+**ABSENT** from the runner env on both nodes (ban OFF — the fix). DSpark head
+attached NATIVE checkpoint-bundled (115 tensors, 3 stages, block_size=5,
+taps=[40,41,42]) on both nodes. HEAD `1c26dad08` on both nodes.
+
+### Verdict: REVERT — PRIMARY FAIL at BOTH probe depths
+
+Per the pre-registered Stage 3 bars (docs/dspark-mtp-ab-preregister-2026-08-25.md):
+PRIMARY (hard gate) = "Where baseline runs to 2000/length, spec must run to
+2000/length" and "If completion < 2000 or finish=stop at 100K/352.6K probes →
+hard fail, revert immediately." Stage 3 tripped this at BOTH depths.
+
+### Depth-probe results (p3_depth_anchor_probe, /bench/chat/completions, temp=0)
+
+| metric | baseline 100K | stage3 100K | baseline 352K | stage3 352K |
+|---|---|---|---|---|
+| prompt_tokens | 100,025 | 100,022 | 352,601 | 352,646 |
+| **completion_tokens** | **2000** | **369** | **2000** | **462** |
+| **finish_reason** | **length** | **stop** | **length** | **stop** |
+| TTFT (s) | 269.0 | 265.7 | 1011.4 | 1026.8 |
+| tok/s (usage) | 28.46 | 29.54 | 25.07 | 24.30 |
+| tok/s (events) | 28.17 | 29.22 | 24.91 | 24.14 |
+| streamed events | 1980 | 365 | 1987 | 459 |
+| decode window (s) | 70.24 | 12.46 | 79.73 | 18.97 |
+
+**Deltas vs baseline:**
+- 100K: completion 369 vs 2000 (−1631) → **PRIMARY FAIL** (early-stop anomaly).
+  tok/s +3.8% (but measured over a truncated 12.46s decode window — not a
+  clean 2000-token comparison).
+- 352K: completion 462 vs 2000 (−1538) → **PRIMARY FAIL**. tok/s 24.30 vs 25.07
+  (−3.1%) → **hard rollback criterion tripped** (throughput DECREASE vs baseline).
+
+Both probes hit the early-stop anomaly (finish=stop, completion < 2000). The
+log line itself flagged it: `finish_reason: stop  (must be 'length' -- EOS banned)`.
+The text tails are NOT clean natural ends — 100K tail ends mid-thought
+("...no narrative or analytical content." — a period, but the summary is
+truncated relative to what the model continues to produce across runs); 352K
+tail ends mid-word in the first run ("...underlying content i") and mid-sentence
+in the repeat.
+
+### Committed-stream divergence (losslessness failure — deeper than finish alone)
+
+The spec-ON output diverges from the spec-OFF baseline **from token 1** —
+common-prefix length 0 chars (baseline "1.  The user has provided..." vs
+stage3 "The user wants a brief summary..."). This is not "same text, different
+stop point"; the committed stream is a different generation. Per the
+`exo-speculative-decode-correctness` skill, spec-ON producing different output
+than spec-OFF on the identical prompt at temp=0 is a correctness divergence,
+not merely a finish-behavior difference.
+
+### Determinism check — NONDETERMINISTIC at temp=0 (root-cause clue)
+
+A repeat of the 100K probe (same config, same prompt, same temp=0) produced
+**completion=504** vs the first run's **369** — a 37% difference in stop
+point, with the same text opening ("The user wants a brief summary...") but
+different length. Greedy/temp=0 decode should be deterministic; the spec path
+is not. This run-to-run variance also explains the Stage 2b (1148) vs Stage 3
+(369) discrepancy: it is NOT the ban code's presence changing no-ban behavior
+(the ban gate `env == "1"` is a true no-op when unset — verified at
+`dsv4_mtp.py:2532,3940,5235`), it is nondeterminism in the spec verify path
+itself (likely floating-point / RDMA-ordering / async-timing sensitivity in
+the draft+verify cycle at 100K+ depth).
+
+### Quality gate — 7/7 spec_degen PASS (natural-end parity on SHORT prompts)
+
+`bench/spec_degen_capture.py` 7-prompt trigger set (max-tokens 256, temp=0)
+on Stage 3 config. Compared vs baseline (`/tmp/ab/baseline_degen.json`):
+
+| label | baseline finish | stage3 finish | base content | stage3 content | parity |
+|---|---|---|---|---|---|
+| sys_primary_colors | length | length | — | — | PASS |
+| **sys_capital_france** | **stop** | **stop** | **Paris** | **Paris** | **PASS** |
+| **sys_count_to_five** | **stop** | **stop** | **One, two, three, four, five.** | **One, two, three, four, five.** | **PASS** |
+| sys_long_essay | length | length | — | — | PASS |
+| sys_long_steps | length | length | — | — | PASS |
+| sys_long_list | length | length | — | — | PASS |
+| control_user_only | length | length | — | — | PASS |
+
+**7/7 PARITY (finish + content + no leak): PASS. 0 U+FFFD across all 7.**
+The natural-end equality holds on short prompts: `sys_capital_france`→"Paris"
+finish=stop (vs Stage 2c's ban-ON "Paris.Paris.Paris..." period-3 loop — the
+ban-OFF fix restored natural-end here). This is the losslessness signal the
+fix was designed to deliver — but it does NOT hold at the deep probes.
+
+### math_digit_sum control — PASS (3/3)
+
+`bench/hard_eval.py --tasks math_digit_sum --max-tokens 8000 --temperature 0`:
+3/3 trials pass=1.00, finish=stop, leak=False, snippet="115", 0 leaks, 0
+truncations. No loop.
+
+### Acceptance (from [MTP] LOG_INTERVAL logs) — 71% (exceeds 50% bar)
+
+`grep "[MTP]" exo.log` final aggregate: cycles=2266, mean_accept=2.134/3 =
+**71.1%**, hist 0:277, 1:407, 2:318, 3:1264. Good draft acceptance — but
+irrelevant to the finish/stop PRIMARY gate.
+
+### Memory — PASS (95/93 GB, 0 swap)
+
+`footprint` on the real `python -m exo` worker PID (the spawn_main child, not
+the screen wrapper — see `exo-cluster-debugging` skill pitfall):
+- m4-2 (master): 95 GB footprint, sysctl `vm.swapusage` = 0.00M used, 0
+  swapins/swapouts.
+- m4-1 (worker): 93 GB footprint, `vm.swapusage` = 0.88M/1024M used (56
+  historical swapouts, 0 swapins — negligible background, not runner paging).
+Both under the 126 GB bar. Memory gate PASS (but irrelevant to the finish
+gate).
+
+### Generated-text samples
+
+**Short prompt (natural stop, PARITY with baseline) — sys_capital_france:**
+> finish=stop, content="Paris"
+
+**Short prompt (natural stop, PARITY) — sys_count_to_five:**
+> finish=stop, content="One, two, three, four, five."
+
+**100K probe (early-stop anomaly) — text head:**
+> "The user wants a brief summary of the corpus. The corpus is a long list of
+> sections (0 to 2262) that follow a repetitive pattern. Each section describes
+> a practice (e.g., \"distributed inference schedulers allocate pipeline stages
+> across nodes\"..."
+>
+> **completion=369, finish=stop** (baseline 2000/length)
+
+**352K probe (early-stop anomaly) — text tail:**
+> "...The configuration and stage numbers vary across entries, but the
+> underlying content is essentially identical, with no narrative, argument,
+> or additional information."
+>
+> **completion=462, finish=stop** (baseline 2000/length)
+
+### Audit excerpt (ban gate, verified OFF)
+
+```
+dsv4_mtp.py:2532  if (self._spec_eos_ids and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"):
+dsv4_mtp.py:3940      if (self._spec_eos_ids and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"):
+dsv4_mtp.py:5235      if (self._spec_eos_ids and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"):
+```
+Env audit on both nodes: `EXO_DSV4_SPEC_EOS_BAN` ABSENT (ban OFF, correct for
+Stage 3). The gate is a true no-op when unset — verified the ban code's
+presence does not change no-ban behavior; the 369-vs-1148 (Stage 2b)
+discrepancy is nondeterminism, not a code-path regression.
+
+### Protocol-calibration note (separate from the verdict)
+
+The `/bench/chat/completions` endpoint bans EOS in the committed stream
+(`ban_token_ids(eos_ids)` at `batch_generate.py:2658`). The spec-OFF baseline
+ran to 2000/length at both depths **because it was forced to** — it literally
+cannot emit EOS. Stage 3's spec verify path (ban OFF) CAN emit EOS, so it
+stops where the model's true greedy argmax is EOS. The 369/stop and 462/stop
+may be the model's TRUE natural greedy end — which the baseline was
+artificially prevented from reaching. The discriminator would be: does the
+spec stream 1..N match an UNBANNED greedy stream? We cannot get an unbanned
+greedy stream from the `/bench` endpoint (it always bans). This is the
+next-protocol gap: a probe that runs spec-OFF WITHOUT the `/bench` EOS ban
+(e.g. `/v1/chat/completions`, no bench flag) at 100K to capture the model's
+true natural-stop point, then compare. Per the pre-registered bars, this
+calibration issue does NOT excuse the fail — the bars were written against
+the `/bench` baseline behavior and Stage 3 diverged. Noting it as the path
+to a fairer Stage 4 bar.
+
+### Decision: REVERT to spec-off
+
+Per the pre-registered rollback criterion ("ANY divergence from baseline on
+finish/stop behavior OR throughput DECREASE vs baseline → REVERT"), Stage 3
+FAILS: early-stop anomaly at both depths (369/stop, 462/stop vs 2000/length)
+PLUS throughput −3.1% at 352K. The 7/7 short-prompt parity and 71% acceptance
+do not override the deep-probe finish-gate failure. **Cluster does NOT stay
+on Stage 3.** The natural-end theory held on short prompts but broke at deep
+context — the spec path's EOS emission at the post-acceptance bonus position
+is depth-correlated and nondeterministic.
+
+### Raw artifacts
+
+`/tmp/ab/s3_degen.json`, `/tmp/ab/s3_degen.log`,
+`/tmp/ab/s3_math_digit_sum.json`, `/tmp/ab/s3_math.log`,
+`/tmp/ab/s3_100k.json`, `/tmp/ab/s3_100k.log`,
+`/tmp/ab/s3_352k.json`, `/tmp/ab/s3_352k.log`,
+`/tmp/ab/s3_100k_repeat.json` (determinism check),
+node exo logs (`~/exo.log` on both studios — `[MTP]` acceptance lines
+through `2026-08-26 13:05+`).
+
+**Cluster final state: Stage 3 config still RUNNING (screen `exorun` on both
+studios, API live) — pending REVERT to spec-off per this verdict.** The PM
+session does not relaunch (SIGTERM-only rule + approval gate); the user must
+run the `dspark_revert` relaunch.
