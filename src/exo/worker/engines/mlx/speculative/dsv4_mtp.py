@@ -4419,18 +4419,31 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # bonus_val was a list after the coord-group broadcast,
                     # leaving the 2c degeneration attribution blind).
                     _bv: object = bonus_val
-                    if isinstance(_bv, list):
-                        _bv = _bv[0] if _bv else -1
+                    # Recursively unwrap nested lists / mlx-array scalars
+                    # until we reach a Python number. The coord-group
+                    # broadcast can wrap bonus_val in layers (list of list,
+                    # list of mx.array scalar), and a partial unwrap left
+                    # int() choking on a residual list (2026-08-26: the
+                    # AUDIT_ALL=1 run still hit "int() argument ... not 'list'"
+                    # because _bv[0] was itself a list). Unwrap completely.
+                    for _ in range(8):  # depth cap, never more than this
+                        if isinstance(_bv, list):
+                            _bv = _bv[0] if _bv else -1
+                            continue
+                        if hasattr(_bv, "item") and callable(getattr(_bv, "item", None)):
+                            _bv = cast("Any", _bv).item()
+                            continue
+                        break
                     _bonus_int: int
-                    if hasattr(_bv, "item") and callable(getattr(_bv, "item", None)):
-                        _bonus_int = int(cast("Any", _bv).item())
+                    if isinstance(_bv, (int, float)):
+                        _bonus_int = int(_bv)
                     else:
                         _bonus_int = int(cast("Any", _bv))
                     _bonus_special = _bonus_int in _special
                     _draft_special = any(d in _special for d in _draft_list)
                     _tgt_special = any(t in _special for t in _tgt_list)
                     if _audit_all or _bonus_special or _draft_special or _tgt_special:
-                        _bpos = gamma if n_accepted == gamma else n_accepted
+                        _bpos = int(gamma) if n_accepted == gamma else int(n_accepted)
                         _vl = verify_logits[0, _bpos]
                         _top2 = mx.topk(_vl, 2)
                         _top2v = [float(x) for x in _top2.tolist()]
