@@ -3886,3 +3886,236 @@ Raw artifacts: `/tmp/ab/s2_degen.json`, `/tmp/ab/s2_degen_2k.json`,
 `/tmp/ab/s2_math_digit_sum.json`, `/tmp/ab/s2_quality_samples.txt`,
 `/tmp/ab/s2_100k.json`, `/tmp/ab/s2_352k.json`, `/tmp/dspark_s2.log`.
 Cluster reverted to `dspark_revert` (spec-off, production-safe).
+
+---
+
+## 2026-08-26 — DSpark/MTP Stage 2c (width-3 + EOS ban): QUALITY FAIL 2/7 → REVERT
+
+**Stage 2c config:** Stage 2b flags (DSpark native + MTP, `EXO_SPECULATIVE=1
+EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1 EXO_DSV4_DSPARK_NATIVE=1
+EXO_DSV4_MTP_DEDICATED=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1 EXO_SPECULATIVE_GAMMA=3`)
+**plus** the EOS-ban fix (`commit ebe272fd7`, `EXO_DSV4_SPEC_EOS_BAN=1` default
+ON). The EOS ban mirrors the non-spec baseline's `ban_token_ids(eos_ids)`
+logits-processor by applying it to the spec verify logits BEFORE any argmax —
+so neither accepted drafts NOR the bonus token can be EOS. Applied at three
+verify sites in `dsv4_mtp.py` (lines 2532, 3927, 5184), gated by
+`EXO_DSV4_SPEC_EOS_BAN` (default `"1"`). HEAD `8668e2616` (pre-reg commit +
+EOS-ban fix). Launched `dsp_s2c` on both studios (screen `exorun`), API 200,
+runners READY 2/2, model `deepseek-ai/DeepSeek-V4-Flash-0731` loaded, 89
+GB/node, 0 swap.
+
+### QUALITY GATE — FAIL 2/7 (vs 7/7 clean in Stage 2b)
+
+`bench/spec_degen_capture.py` 7-prompt trigger set (max-tokens 256, temp=0)
+against the spec-ON cluster. **2 of 7 prompts degenerated** — both hit the
+built-in degeneration kill-switch (HTTP 500 "repetition-loop degeneration
+detected"):
+
+| label | Stage 2b (no ban) | Stage 2c (EOS ban) | delta |
+|---|---|---|---|
+| `sys_primary_colors` | clean ("Red, Yellow, Blue") | clean (finish=length) | — |
+| **`sys_capital_france`** | **clean ("Paris", stop)** | **HTTP 500 repetition-loop** | **FAIL** |
+| **`sys_count_to_five`** | **clean ("One, two, three, four, five.", stop)** | **HTTP 500 repetition-loop** | **FAIL** |
+| `sys_long_essay` | clean (length) | clean (length) | — |
+| `sys_long_steps` | clean (length) | clean (length) | — |
+| `sys_long_list` | clean (length) | clean (length) | — |
+| `control_user_only` | clean (length) | clean (length) | — |
+
+**Stage 2b baseline (commit `d0f1db1e1`, DSpark native at γ=3, NO EOS ban):
+7/7 clean** — `sys_capital_france`→"Paris", `sys_count_to_five`→"One, two,
+three, four, five.", all 7 prompts coherent, `math_digit_sum` PASS (115). The
+ONLY delta between 2b (clean) and 2c (2/7 fail) is the EOS-ban fix
+(`ebe272fd7`). Ban is the sole regressor.
+
+### Degeneration evidence — real repetition samples (from both nodes' exo logs)
+
+The degeneration detector (`batch_generate.py:4381`) caught both failures
+with exact per-cycle state. Identical timestamps + cycle_token_ids on BOTH
+nodes (rank-consistent — the failure is cluster-wide, not node-specific):
+
+**`sys_capital_france` (uid=3)** — degenerated at completion_token=61,
+cycle period=3, repeated ≥6×:
+```
+DEGENERATION DETECTED uid=3 at completion_token=61: token cycle period=3
+  repeated>=6x. action=error
+  cycle_token_ids=[16, 128822, 51119]
+  cycle_text='.<|end|>Paris'
+  in_thinking=False | temp=0.0 | gen_engine=DSv4MTPBatchGenerator
+```
+Fired at MTP cycle ~125 (mean_accept=1.848/3, hist 0:20,1:30,2:24,3:51).
+
+**`sys_count_to_five` (uid=4)** — degenerated at completion_token=96,
+cycle period=11, repeated ≥6×:
+```
+DEGENERATION DETECTED uid=4 at completion_token=96: token cycle period=11
+  repeated>=6x. action=error
+  cycle_token_ids=[16, 128822, 6111, 14, 1234, 14, 2038, 14, 2689, 14, 3818]
+  cycle_text='.<|end|>One, two, three, four, five'
+  in_thinking=False | temp=0.0 | gen_engine=DSv4MTPBatchGenerator
+```
+Fired at MTP cycle ~154 (mean_accept=1.935/3, hist 0:22,1:33,2:32,3:67).
+
+**Key observation:** token `128822` = `<|end|>` (think_end; confirmed from
+the verify-audit code's own special-token set at `dsv4_mtp.py:4394`:
+`_special = {128822, 128821}  # <|end|>, <|done|>`). The think_end special
+token appears in BOTH degenerate cycles' committed streams — the model
+generates `.<|end|>` then restarts the answer, looping. The EOS ban was
+intended to prevent EOS from entering the committed stream; instead it
+appears to have pushed the argmax to the next-best special token
+(`<|end|>`/think_end, 128822), which enters the committed stream and the
+model re-answers indefinitely.
+
+### Verify-audit evidence gap — `EXO_DSV4_MTP_VERIFY_AUDIT` was NOT set
+
+The built-in verify-audit (`dsv4_mtp.py:4388+`, env
+`EXO_DSV4_MTP_VERIFY_AUDIT=<path>`) fires rank-0 JSONL whenever a special
+token (think_end/eos, the `{128822, 128821}` set) appears in the draft,
+accepted-target, or bonus at temp=0 — exactly the smoking-gun detector for
+this failure class. It would have captured the per-cycle draft/target/bonus
+token ids, the verify-logit top-2 margin at the bonus position, and the
+pool-cache flush state at the degeneration onset.
+
+**This env was NOT set during the s2c run.** Confirmed via
+`ps eww <pid> | grep EXO_DSV4_MTP_VERIFY_AUDIT` on both nodes (absent from
+the running process env), and it was not in the Stage 2c flag list. The
+audit's per-cycle JSONL was therefore never written — the evidence gap is
+documented here, not papered over.
+
+**What the audit WOULD have captured** (per the code at `dsv4_mtp.py:4394+`):
+for each cycle where `128822`/`128821` appeared in the draft, target_argmax,
+or bonus, a JSONL record with `cycle`, `uid`, `gamma`, `n_accepted`,
+`draft` (token id list), `target_argmax`, `all_next`, `bonus`, `bonus_pos`,
+`bonus_argmax`, `bonus_top2_logits`, `bonus_margin`, `bonus_special`,
+`draft_special`, and `pools` (per-pool offset/remainder/snapshot state).
+This would have pinned whether `<|end|>` was being DRAFTED (DSpark head
+emitting it), ACCEPTED (verify argmax choosing it), or chosen as the BONUS
+(raw argmax on the banned-EOS logits), and whether it won by a healthy
+margin (corrupted context) or a hair (numerical/ban side-effect).
+
+**What we DO have** (independent corroboration): the degeneration detector's
+own `cycle_token_ids` field confirms `128822` (`<|end|>`) is in the committed
+output stream at both failing prompts. Combined with the fact that Stage 2b
+(no ban) produced clean output on the same prompts, the ban is implicated as
+the cause — but the per-cycle draft-vs-accept-vs-bonus attribution that the
+audit would have provided is absent.
+
+### The EOS-ban-fix-causes-degeneration finding
+
+The EOS-ban fix (commit `ebe272fd7`) was intended to kill the Stage 2b
+early-stop anomaly (completion 1148/2000, finish=stop) by preventing EOS
+from entering the committed stream via the spec verify path. The
+hypothesis: the non-spec baseline is immune because `_step` applies
+`ban_token_ids(eos_ids)` as a logits-processor before sampling, but the
+spec verify path (`dsv4_speculative_forward`) calls the model RAW with no
+logits-processors — so the raw-argmax bonus and per-row accepted-draft
+argmax could both be EOS.
+
+**The fix worked for its stated goal** (no early-stop observed in 2c), but
+**introduced a new regression**: banning EOS from the spec verify logits
+changes the argmax distribution. The baseline applies the ban to the
+*sampling* path (the model samples after the ban); the spec path applies
+the ban to *raw argmax* — these are not equivalent. Banning EOS from raw
+argmax can push the argmax to the next-best token, which for these two
+prompts is `<|end|>` (think_end, 128822), another special token that
+triggers the model to re-emit its answer in a loop. The ban is applied at
+three verify sites (`dsv4_mtp.py:2532`, `:3927`, `:5184`) — all gated by
+`EXO_DSV4_SPEC_EOS_BAN` (default `"1"`).
+
+**Mechanism (suspect, not fully confirmed without the audit data):** the
+spec path's raw argmax + ban changes the argmax distribution in a way the
+non-spec path's sample-after-ban does not. The non-spec path samples from
+the banned distribution (EOS mass redistributed proportionally across all
+non-EOS tokens via softmax); the spec path takes argmax on the banned
+logits (EOS mass simply removed, argmax jumps to whatever was second —
+often another special token like `<|end|>`). This is a structurally
+different operation, and for these 2/7 prompts it lands on a token that
+triggers a repetition loop.
+
+### REVERT executed
+
+The pre-registered bars mandated revert on quality FAIL. Executed
+2026-08-26 09:38 CDT:
+
+1. **SIGTERM** (graceful, never `kill -9`) the `dsp_s2c` exo processes on
+   both studios. `pkill -TERM -f 'python.*exo'` on each node — both exited
+   cleanly within 1s (jaccl RDMA teardown ran via static destructors, TB
+   link stayed healthy: 0% packet loss, sub-ms latency, 2 active ports
+   each). Quit the `exorun` screen sessions. Verified NO exo processes
+   remained on either node (pgrep clean, lsof 52415 clear) before relaunch.
+2. **Relaunch** spec-off production config via tmux pattern
+   `tmux new-session -d -s dspark_revert2 'cd ~/repos/exo && EXO_SPECULATIVE=0
+   EXO_DSV4_MTP=0 EXO_DSV4_DSPARK=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1
+   ./start_cluster.sh 2>&1 | tee /tmp/dspark_revert2.log'`.
+3. **READY (2/2)** reached at poll 34 (~340s). HEALTHY (Nodes: 2,
+   Identities: 2), commit `8668e2616` synchronized on both nodes.
+4. **ENV AUDIT** (both nodes, `ps eww`, rank-consistent):
+   `EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_DSPARK=0
+   EXO_DSV4_HC_COLLAPSE_KERNEL=1` — spec fully OFF, prefill opt retained.
+   `EXO_DSV4_MTP_VERIFY_AUDIT` and `EXO_DSV4_SPEC_EOS_BAN` absent (correct
+   for spec-off).
+5. **API live** on both nodes (port 52415), 125 models including
+   `deepseek-ai/DeepSeek-V4-Flash-0731`.
+
+### Spec-off quality confirmation (proves ban+spec interaction, not the prompts)
+
+Re-ran `bench/spec_degen_capture.py` (7 prompts, max-tokens 256, temp=0)
+against the spec-off cluster: **7/7 clean.** The 2 previously-failing
+prompts are now clean:
+
+- `sys_capital_france` → "Paris" (finish=stop, no leak) — was HTTP 500
+  repetition-loop under s2c
+- `sys_count_to_five` → "One, two, three, four, five." (finish=stop, no
+  leak) — was HTTP 500 repetition-loop under s2c
+- All other 5 prompts: coherent, no leak, no error
+
+This confirms the degeneration requires the spec path + the EOS-ban
+interaction — the prompts themselves are benign under greedy/sequential
+decode. The ban is the sole regressor vs the 7/7-clean Stage 2b baseline.
+
+### Next steps — candidate alternatives for the next campaign
+
+The ban mechanism itself is suspect: the baseline applies the ban because
+the non-spec path *samples* (EOS mass redistributed via softmax); the spec
+path's *raw argmax* + ban changes the argmax distribution differently, and
+for 2/7 prompts it lands on a loop-triggering special token. Candidate
+alternatives to explore (not yet tested):
+
+1. **Skip-EOS-at-commit-boundary (intercept, don't ban):** instead of
+   banning EOS from the verify logits (which distorts the argmax), let the
+   draft/verify accept EOS normally but intercept it at the committed-stream
+   boundary — when EOS would be committed, *skip* the EOS token and continue
+   decoding (as if the model "changed its mind"). This preserves the
+   argmax distribution while still preventing premature finish. Closest to
+   how a sampler with `ban_token_ids` behaves, but applied post-acceptance
+   rather than pre-argmax.
+2. **Bonus-only ban (don't ban the draft-acceptance rows):** apply the EOS
+   ban ONLY to the bonus-token argmax (the raw `all_next`), NOT to the
+   per-row accepted-draft argmax (`target_tokens`). The early-stop anomaly
+   was specifically the bonus token being EOS; banning it there may suffice
+   without distorting the draft-acceptance distribution that the 2 failing
+   prompts depend on. The three ban sites (`dsv4_mtp.py:2532`, `:3927`,
+   `:5184`) could be selectively gated.
+3. **Load-aware scheduler (compare against the paper):** the DSpark paper's
+   mechanism may handle EOS differently — a load-aware scheduler that
+   decides when to stop drafting vs. when to commit EOS may avoid both the
+   early-stop anomaly AND the repetition degeneration. Worth a literature
+   check before re-attempting a ban-based fix.
+
+**Before any re-attempt:** set `EXO_DSV4_MTP_VERIFY_AUDIT=<path>` in the
+launch env so the per-cycle draft/accept/bonus state is captured to JSONL.
+The audit was built exactly for this failure class and its absence this run
+left the mechanism attribution incomplete. Also consider extending the
+audit's `_special` set beyond `{128822, 128821}` if other special tokens
+(like `<|done|>` variants) become loop triggers.
+
+### Raw artifacts
+
+`/tmp/dspark_s2c.log`, `/tmp/dspark_s2c_specdegen.log`,
+`/tmp/dspark_s2c_specdegen.json`, `/tmp/dspark_revert2.log`,
+`/tmp/dspark_revert2_specdegen.json`, `/tmp/dspark_revert2_specdegen.log`,
+node exo logs (`~/.exo/exo_log/exo.log` on both studios — degeneration lines
+at `2026-08-26 09:32:13.941` and `09:32:18.485`).
+
+**Cluster final state: production spec-off (`dspark_revert2` tmux session,
+both studios, API live, env audited).** Campaign closes here per the failed
+quality gate.
