@@ -883,3 +883,145 @@ recurs), OR memory blow → REVERT to spec-off (`dspark_revert` command:
     them); FAIL → revert to spec-off (`dspark_revert`).
 11. `docs/PERFORMANCE_HISTORY.md` entry with real numbers + 2-3
     generated-text samples. Commit + push everything.
+
+---
+
+# Stage 2c — "EOS-ban fix + width-3" A/B (pre-registered 2026-08-26)
+
+## Background / why a Stage 2c
+
+Stage 2b (width-3, commit `433dce6c1`) measured **+13.3% tok/s @100K
+(32.25 vs 28.46 baseline)** — the first real DSpark win — but the
+**early-stop anomaly RECURRED**: completion 1148/2000, `finish=stop`.
+Quality was 7/7 PASS, math_digit_sum PASS (115), acceptance 1.585/3 =
+52.8% (from `EXO_DSV4_MTP_LOG_INTERVAL=1` `[MTP]` log lines). The
+throughput number is real but INVALIDATED by the early stop — the
+probe didn't run to 2000 tokens, so the tok/s is measured over a
+shorter decode window (inflated).
+
+**Root cause (confirmed by independent audit with file:line):**
+`dsv4_speculative_forward` (`dsv4_mtp.py:1420`) calls the model RAW —
+no logits_processors applied. At temp=0 the bonus token is
+`mx.argmax(verify_logits[0])` at the post-acceptance position, staged
+as `_next_tokens` and yielded UNCONDITIONALLY. If the target's raw
+argmax there is EOS, EOS enters the committed stream and the
+`StopSequenceMatcher` fires `finish=stop`. The non-spec baseline is
+immune because `generate.py`'s `_step` applies the `ban_token_ids`
+logits_processor (`ban_token_ids` at `generate.py:1718`, wired in
+`batch_generate.py:2658-2660`, `eos_ids_from_tokenizer` at
+`generate.py:1915`) before sampling. This is independent of width —
+Stage 2b's recurrence at 1148 tokens proves it.
+
+## Code fix shipped (commit `ebe272fd7`, main)
+
+`src/exo/worker/engines/mlx/speculative/dsv4_mtp.py`:
+1. New import: `from exo.worker.engines.mlx.generator.generate import
+   ban_token_ids` (the same function the baseline uses).
+2. `DSv4MTPBatchGenerator.__init__` gains an `eos_ids: list[int] |
+   None = None` kwarg, stored as `self._spec_eos_ids`. Passed from
+   `batch_generate.py:853` as `eos_ids=list(stop_tokens)` (where
+   `stop_tokens = set(eos_ids_from_tokenizer(self.tokenizer))` is
+   already computed at `batch_generate.py:814`).
+3. In all three verify paths (`_speculative_next` linear at ~3904,
+   `_speculative_next_batch` at ~2527, `_speculative_next_tree` at
+   ~5167), apply `ban_token_ids(self._spec_eos_ids)` to
+   `verify_logits` BEFORE any argmax, logsumexp, or tie-break derives
+   from them. The ban sets `logits[..., eos_id] = -1e9` across ALL
+   verify positions, so neither the per-row accepted-draft argmax
+   (`target_tokens`) NOR the bonus argmax (`all_next`) can select EOS.
+4. Env-gated: `EXO_DSV4_SPEC_EOS_BAN` default `"1"` (ON for spec
+   path); `"0"` opts out for debug. Zero non-spec behavior change:
+   the ban only runs inside the speculative verify cycle
+   (`EXO_SPECULATIVE=1`).
+
+Gates: basedpyright 726→725 (zero NEW), ruff zero NEW (import
+ordering auto-fixed by `ruff --fix`), `test_pp_speculation_spec_tag`
+45/45 pass, `test_reasoning_budget_limiter` 27/27 pass.
+
+## Hypothesis
+
+The EOS ban fixes the early-stop anomaly (completion will reach
+2000, `finish=length` like baseline). With early-stop gone, width-3
+acceptance (~52.8% per Stage 2b) + full 2000-token decode window →
+net decode win over the 28.46/25.07 spec-off baseline. The Stage 2b
+32.25 tok/s was inflated by the short window; the real number will be
+lower but must still clear the +15%/+10% bars to PROMOTE.
+
+## Flags (Stage 2c)
+
+```
+EXO_SPECULATIVE=1
+EXO_DSV4_MTP=1
+EXO_DSV4_DSPARK=1
+EXO_DSV4_DSPARK_NATIVE=1
+EXO_DSV4_DSPARK_FORCE_LOAD=1
+EXO_DSV4_MTP_DEDICATED=0
+EXO_SPECULATIVE_GAMMA=3          # width-3 (Stage 2b fix, honored)
+EXO_SPECULATIVE_TEMP=0.0
+EXO_SPECULATIVE_ALPHA=1.0
+EXO_DSV4_HC_COLLAPSE_KERNEL=1
+EXO_DSV4_MTP_LOG_INTERVAL=1      # per-cycle acceptance stats
+# EXO_DSV4_SPEC_EOS_BAN defaults to 1 (ON) — no need to set explicitly
+```
+
+Identical to Stage 2b flags; the EOS-ban fix is in the code
+(commit `ebe272fd7`), not a flag. `start_cluster.sh` already forwards
+all the above (verified in the Stage 2b doc).
+
+## Acceptance bars (must hit ALL to PROMOTE)
+
+| metric | bar | baseline (spec-off) | Stage 2b (width-3, EOS bug) |
+|---|---|---|---|
+| tok/s @100K | ≥ +15% vs 28.46 → ≥ 32.73 | 28.46 | 32.25 (INFLATED — early stop) |
+| tok/s @352.6K | ≥ +10% vs 25.07 → ≥ 27.58 | 25.07 | not measured (early stop) |
+| mean_accept/γ (from LOG_INTERVAL logs) | ≥ 0.5 (i.e. ≥1.5/3) | n/a | 1.585/3 = 52.8% ✅ |
+| spec_degen 7/7 trigger set | 0/7 diff (no BOS-spam/loop/collapse) | clean | clean ✅ |
+| math_digit_sum control | answer correct (115), finish=stop, no loop | clean | clean ✅ |
+| early-stop anomaly | **NONE — completion 2000, finish=length REQUIRED** | 2000/length | **1148/stop (ANOMALY)** |
+| memory per node | < 126 GB, 0 swap | 91/90 GB | ~89 GB ✅ |
+
+**The early-stop anomaly MUST be GONE.** If completion < 2000 or
+`finish=stop` at 100K/352.6K probes → hard fail, revert immediately
+(spec-off relaunch), capture the verify-audit log
+(`EXO_DSV4_MTP_VERIFY_AUDIT` if set) and report.
+
+**Rollback:** any throughput DECREASE vs baseline at either depth,
+OR any quality fail (BOS-spam/loop/collapse, math loop, early-stop
+anomaly recurs), OR memory blow → REVERT to spec-off (`dspark_revert`:
+`EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1`).
+
+## Procedure
+
+1. SIGTERM old tmux session (`tmux kill-session -t dspark_s2b`) —
+   SIGTERM only, NEVER `kill -9` (SIGKILLed runner wedges the TB/RDMA
+   link — documented). Verify no exo runners remain on BOTH studios
+   via `ssh <node> pgrep -fl 'python -m exo'` before relaunching.
+2. `tmux new-session -d -s dspark_s2c 'cd ~/repos/exo && <flags above>
+   ./start_cluster.sh 2>&1 | tee /tmp/dspark_s2c.log'`, wait READY
+   (2/2).
+3. Env-audit both nodes: `ps eww $(pgrep -f spawn_main | head -1) |
+   tr ' ' '\n' | grep EXO_SPECULATIVE_GAMMA` — CONFIRM `=3` reached
+   runners. Also confirm `EXO_DSV4_MTP_LOG_INTERVAL=1`.
+4. Head-load greps: `DSpark draft head attached` (tensors, stages,
+   block_size, taps) on the rank that owns it.
+5. Memory audit: `footprint -p $(pgrep -f spawn_main | head -1)` both
+   nodes; expect ~89 GB, 0 swap.
+6. QUALITY FIRST:
+   - `bench/spec_degen_capture.py` 7 trigger prompts vs baseline →
+     `spec_degen_diff.py`, expect 0/7 diff.
+   - `bench/hard_eval.py --tasks math_digit_sum --max-tokens 8000
+     --temperature 0` → expect answer=115, finish=stop, no loop.
+   - ANY BOS-spam/loop/collapse = hard fail, revert immediately.
+7. `bench/p3_depth_anchor_probe.py --host <api-node> --port 52415
+   --model deepseek-ai/DeepSeek-V4-Flash-0731 --target-tokens 100000
+   --max-tokens 2000` → record tok/s (events AND usage), TTFT,
+   completion_tokens + finish_reason (MUST be 2000/length — if it
+   stops early, capture verify-audit log + report), memory. ONE AT
+   A TIME.
+8. Repeat at `--target-tokens 352600`. One at a time.
+9. Grep runner logs for `[MTP] cycles=... mean_accept=.../3 hist=...`
+   (the LOG_INTERVAL output) — extract acceptance stats.
+10. DECIDE vs bars: PASS → keep Stage 2c flags running (cluster STAYS
+    on them); FAIL → revert to spec-off (`dspark_revert`).
+11. `docs/PERFORMANCE_HISTORY.md` entry with real numbers + 2-3
+    generated-text samples. Commit + push everything.
