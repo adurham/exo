@@ -850,6 +850,7 @@ class ExoBatchGenerator:
                         gamma=gamma,
                         temp=temp,
                         alpha=alpha,
+                        eos_ids=list(stop_tokens),
                         stop_tokens=stop_tokens_seq,
                         prefill_step_size=prefill_step_size,
                     )

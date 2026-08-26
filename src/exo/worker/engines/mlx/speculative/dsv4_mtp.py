@@ -36,7 +36,6 @@ from collections import deque
 from typing import Any, BinaryIO, Optional, Sequence, cast
 
 import mlx.core as mx
-
 from mlx_lm.models.cache import (
     BatchPoolingCache,
     BatchRotatingKVCache,
@@ -45,11 +44,12 @@ from mlx_lm.models.cache import (
     PoolingCache,
 )
 
-from .mtp_batch_generator import MTPBatchGenerator
-from . import mtp_module as _mtp_module  # for _TREE_ALPHA_PROBE_STEPS drain
-from .mtp_module import broadcast_from_canonical, draft_tokens, draft_tokens_topk
-from exo.worker.engines.mlx.utils_mlx import get_coord_group, mx_any
+from exo.worker.engines.mlx.generator.generate import ban_token_ids
+from exo.worker.engines.mlx.utils_mlx import get_coord_group
 
+from . import mtp_module as _mtp_module  # for _TREE_ALPHA_PROBE_STEPS drain
+from .mtp_batch_generator import MTPBatchGenerator
+from .mtp_module import broadcast_from_canonical, draft_tokens, draft_tokens_topk
 
 # Token-tree alpha probe writer state. Rank-0 only writes the JSONL so we
 # don't fight two ranks for one file. File path is parametric to PID so
@@ -1452,8 +1452,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
     target model would produce after ``n_min + 1`` non-spec steps.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        eos_ids: list[int] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
+        # EOS token ids to ban from the speculative verify logits. Mirrors
+        # the non-spec baseline which applies ``ban_token_ids(eos_ids)`` as
+        # a logits_processor before sampling (batch_generate.py:2658-2660,
+        # wired from ``eos_ids_from_tokenizer`` at generate.py:1915). The
+        # spec verify path (``dsv4_speculative_forward`` at dsv4_mtp.py:1420)
+        # calls the model RAW — no logits_processors — so the raw-argmax
+        # bonus token (and the per-row accepted-draft argmax) could be EOS,
+        # entering the committed stream and firing ``finish=stop`` early
+        # (the early-stop anomaly, Stage 2b recurrence at 1148/2000). Stash
+        # the ids here; ``_speculative_next`` applies the ban to the verify
+        # logits before any argmax/tie-break derives from them. Default ON
+        # for the spec path (see ``EXO_DSV4_SPEC_EOS_BAN`` gate at the
+        # application site); empty list = no ban = current behavior.
+        self._spec_eos_ids: list[int] = list(eos_ids) if eos_ids else []
         # Acceptance-rate counters. Always updated — read by the
         # opt-in EXO_DSV4_MTP_LOG_INTERVAL warning, by the
         # EXO_DSV4_MTP_PROFILE phase timer, and by GenerationStats's
@@ -2501,6 +2520,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             gen_batch.prompt_cache,
             self._captured,
         )
+        # ── EOS BAN on verify logits (same root-cause fix as the linear
+        # path; see the comment block in ``_speculative_next`` below). The
+        # batched path's per-row accepted-draft argmax and the per-uid bonus
+        # argmax both derive from raw ``verify_logits`` and can select EOS,
+        # firing ``finish=stop`` early. Apply BEFORE any argmax/logsumexp. ─
+        if (
+            self._spec_eos_ids
+            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "1") != "0"
+        ):
+            _eos_ban = ban_token_ids(self._spec_eos_ids)
+            verify_logits = _eos_ban(mx.array([]), verify_logits)
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
         if _SPEC_CACHE_ROLLBACK_C2:
             # Disarm before any other forward (the commit-forward fallback
@@ -3869,6 +3899,34 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             mx.eval(verify_pre_norm, verify_logits)
             _sh_verify_ms = (time.perf_counter() - _sh_verify_t0) * 1000.0
 
+        # ── EOS BAN on verify logits (root-cause fix for early-stop anomaly) ─
+        # The spec verify path calls the model RAW via
+        # ``dsv4_speculative_forward`` (dsv4_mtp.py:1420) with NO
+        # logits_processors, so the raw-argmax bonus token (selected at
+        # ``all_next = mx.argmax(verify_logits[0], ...)`` below) and the
+        # per-row accepted-draft argmax (``target_tokens = mx.argmax(
+        # verify_logits[:, :gamma, :], ...)``) can both be EOS. EOS then
+        # enters the committed token stream and the StopSequenceMatcher
+        # fires ``finish=stop`` early — the Stage 2b early-stop anomaly
+        # (completion 1148/2000, finish=stop). The non-spec baseline is
+        # immune because ``_step`` applies ``ban_token_ids(eos_ids)`` as a
+        # logits_processor before sampling (batch_generate.py:2658-2660,
+        # wired from ``eos_ids_from_tokenizer`` at generate.py:1915). Here
+        # we mirror that exactly: ban EOS logits to -1e9 across ALL verify
+        # positions BEFORE any argmax, logsumexp, or tie-break derives from
+        # them — so neither the accepted drafts NOR the bonus token can be
+        # EOS. The ban is applied in place on ``verify_logits`` (a fresh
+        # array from the model forward, safe to mutate). Default ON for the
+        # spec path; ``EXO_DSV4_SPEC_EOS_BAN=0`` opts out (debug only).
+        # Zero non-spec behavior change: this code only runs inside the
+        # speculative verify cycle, which only exists when EXO_SPECULATIVE=1.
+        if (
+            self._spec_eos_ids
+            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "1") != "0"
+        ):
+            _eos_ban = ban_token_ids(self._spec_eos_ids)
+            verify_logits = _eos_ban(mx.array([]), verify_logits)
+
         if _SPEC_STATE_RESTORE and _SPEC_CACHE_ROLLBACK:
             # Disarm BEFORE any other forward (the commit-forward fallback
             # must not append to the stash); the stashed rows themselves
@@ -5112,6 +5170,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             )
         finally:
             _dsv4_model_mod._set_tree_verify_ctx(None, None)
+
+        # ── EOS BAN on verify logits (same root-cause fix as the linear path;
+        # see the comment block in ``_speculative_next`` above). The tree
+        # path's per-node argmax (``all_next = mx.argmax(verify_logits[0],
+        # ...)`` below) and bonus selection (``bonus_val =
+        # all_next_list[best_end_node]``) can both be EOS without this ban,
+        # firing ``finish=stop`` early. Apply BEFORE any argmax/logsumexp. ─
+        if (
+            self._spec_eos_ids
+            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "1") != "0"
+        ):
+            _eos_ban = ban_token_ids(self._spec_eos_ids)
+            verify_logits = _eos_ban(mx.array([]), verify_logits)
 
         if prof is not None:
             mx.eval(verify_pre_norm, verify_logits)
