@@ -4391,11 +4391,26 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             _is_rank0 = sync_group is None or sync_group.rank() == 0
             if _is_rank0:
                 try:
-                    _special = {128822, 128821}  # </think>, <think>
+                    _special = {128822, 128821}  #  , 
                     _draft_list = [int(v) for v in draft_concat[0].tolist()]
                     _tgt_list = [int(v) for v in target_tokens[0].tolist()]
                     _all_next_list = [int(v) for v in all_next.tolist()]
-                    _bonus_special = int(bonus_val) in _special
+                    # Robustly extract bonus token id — bonus_val may be a
+                    # Python int, an mx.array scalar, or (post-broadcast) a
+                    # list element. Handle all cases so the audit never
+                    # silently fails on a type error (2026-08-26: the prior
+                    # int(bonus_val) cast failed with "not 'list'" because
+                    # bonus_val was a list after the coord-group broadcast,
+                    # leaving the 2c degeneration attribution blind).
+                    _bv: object = bonus_val
+                    if isinstance(_bv, list):
+                        _bv = _bv[0] if _bv else -1
+                    _bonus_int: int
+                    if hasattr(_bv, "item") and callable(getattr(_bv, "item", None)):
+                        _bonus_int = int(cast("Any", _bv).item())
+                    else:
+                        _bonus_int = int(cast("Any", _bv))
+                    _bonus_special = _bonus_int in _special
                     _draft_special = any(d in _special for d in _draft_list)
                     _tgt_special = any(t in _special for t in _tgt_list)
                     if _bonus_special or _draft_special or _tgt_special:
@@ -4408,6 +4423,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                             abs(_top2v[-1] - _top2v[-2])
                             if len(_top2v) >= 2 else None
                         )
+                        # Top-3 at the bonus position — reveals whether the
+                        # model's true argmax was EOS (token 1) that the ban
+                        # suppressed, with 128822 as the forced next-best.
+                        _top3 = mx.topk(_vl, 3)
+                        _top3_ids: list[int] = cast("list[int]", _top3.tolist())
+                        _top3_logits: list[float] = [float(_vl[i].item()) for i in _top3_ids]
                         _pools = []
                         for _pc, _snap in zip(_pool_caches, _pool_snaps):
                             _pools.append({
@@ -4425,13 +4446,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                             "draft": _draft_list,
                             "target_argmax": _tgt_list,
                             "all_next": _all_next_list,
-                            "bonus": int(bonus_val),
+                            "bonus": _bonus_int,
                             "bonus_pos": int(_bpos),
                             "bonus_argmax": _argmax_bonus,
                             "bonus_top2_logits": _top2v,
                             "bonus_margin": _margin,
+                            "bonus_top3_ids": _top3_ids,
+                            "bonus_top3_logits": _top3_logits,
                             "bonus_special": bool(_bonus_special),
                             "draft_special": bool(_draft_special),
+                            "tgt_special": bool(_tgt_special),
                             "pools": _pools,
                         }
                         with open(_audit_path, "a") as _f:
