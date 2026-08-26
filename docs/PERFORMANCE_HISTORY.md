@@ -3423,3 +3423,159 @@ section above; use the section refs to jump there.)*
 | `xctrace` LONG (50s) decode-window attach at 100K depth | **HAZARD (2026-08-23, C2)** — runner died of Metal GPU Timeout 6.5s after detach; 10 GB trace, ~25min finalize | §12 |
 | `xctrace` SHORT (≤15s) decode-window attach at 352.6K depth | **HAZARD (new 2026-08-24)** — the 12–15s cap is NOT sufficient at depth: a **12s** dual-rank capture killed BOTH runners 16s after detach (same GPU-Timeout signature). Live 1 Hz telemetry shows memory is flat DURING recording and collapses at **finalize** (compressor 0→35 GB / 11→82 GB, swap 140 MB→15 GB). Tracer peak RSS is **~13 GB even for a 10s trace**, vs only ~23–26 GB free at 352.6K. Real constraint is `trace_peak_GB + resident_GB < RAM − margin`, NOT wall-clock. Assume any Metal trace attach at ≥350K kills the instance; budget the run as sacrificial (traces DO survive the crash). A 10s attach at 100K (~33 GB free) survives cleanly | see `docs/p3-followup-allsum-wait-at-depth-2026-08-24.md` §6 |
 | `EXO_DSV4_POOL_GROW_STEP=256` (BatchPoolingCache chunked growth) | **CONFIRMED WIN** — +9.79% tok/s @352.6K, +3.46% @100K, live A/B, output clean; default still opt-in | see `docs/p3-followup-poolgrow-ab-2026-08-23.md` |
+
+
+---
+
+## 2026-08-25 — DSpark Native + MTP Enablement: Phase 0 Static Audit (pre-registration, no cluster)
+
+**PM:** GLM-5.2 (Ollama Cloud). **Repo HEAD:** `61efad499` (main, clean).
+**Plans:** `/tmp/glm_plan.md` (authoritative), cross-ref `/tmp/dspark_plan.md`,
+`/tmp/kimi_reasoning.md`. Cluster currently DOWN (unrelated debugger investigating
+"no nodes available" placement for DeepSeek-V4-Flash-0731). No relaunch, no flag
+flip, no baseline capture performed — only static code audit + pre-registration.
+Full doc: `docs/dspark-mtp-ab-preregister-2026-08-25.md`.
+
+### ⚠️ CRITICAL FINDING — DSpark head is REPLICATED, not SHARDED (~10 GB/node)
+
+`DeepseekV4ShardingStrategy.shard_model` (`auto_parallel.py:1049-1180`) does NOT
+shard `model.model.dspark`. It iterates only `model.model.layers` (loop
+1062-1133, sets `layer.ffn.sharding_group` at :1087) and `model.model.mtp`
+(`mtp_blocks` at :1059, loop 1153-1178, sets `mtp.ffn.sharding_group` at :1156).
+**Definitive grep: zero `dspark` references in the sharding code** (only
+mentions are PP tap-capture comments at :622-633). No `super().shard_model()`
+call (base `TensorParallelShardingStrategy.shard_model` is `@abstractmethod`,
+:869-873). No generic `modules()`/`children()` walk. The dspark stages DO
+contain `DeepseekV4MoE` ffns (`deepseek_v4.py:6320` `DeepseekV4DSparkStage.ffn
+= DeepseekV4MoE(...))`) that WOULD shard if reached, but the loop never sets
+their `sharding_group` → cross-rank `sum_gradients` never fires → **head runs
+replicated full-size on every rank (~10 GB/node, ~20 GB total), not sharded
+(~5 GB/node).**
+
+The overlay comment at `utils_mlx.py:370-372` ("Attached BEFORE tensor sharding
+so its DeepseekV4MoE ffns shard exactly like the native mtp head's") is **FALSE**
+— the sharding strategy was never updated to recurse into `dspark`. Confirmed
+via second-opinion consult (no missed generic path). **Memory implication: the
+enablement plan's ~5 GB/node sharded assumption is wrong; per-node cost is
+~10 GB/node, 2× the assumption. A sharding code fix is required before a
+sharded trial can run; until then any trial runs the head replicated.**
+
+### Phase 0 audit results (all file:line verified)
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| Native head reads `mtp.0/1/2.*` from checkpoint | ✅ | `utils_mlx.py:879` (`_overlay_dsv4_dspark_native`), gated `:441` |
+| Head attaches BEFORE sharding | ✅ | `utils_mlx.py:866,:1016` (`inner.dspark=mod`); dispatch at `:500` |
+| DSpark head sharded across TP | ❌ **REPLICATED ~10GB/node** | `auto_parallel.py:1049-1180` no dspark; `deepseek_v4.py:6320` MoE; consult-confirmed |
+| MTP head double-load | two distinct modules (sum costs) | `deepseek_v4.py:6500-6507` (`self.mtp`) vs `utils_mlx.py:866` (`dspark`); different roles |
+| `EXO_DSV4_MTP_DEDICATED` default | ✅ unset (native MTP default) | `utils_mlx.py:358-362` |
+| TP consumer double-gate (SPEC + MTP) | ✅ both required | `utils_mlx.py:421`; `dsv4_mtp.py:370-371` |
+| No PP fallthrough in TP mode | ✅ | `utils_mlx.py:422-426` requires `PipelineShardMetadata` |
+| Head-load gate single var | ✅ (FORCE_LOAD is measurement override, not 2nd key) | `utils_mlx.py:418-420` |
+| `spec_degen_capture.py` intact + system+user triggers | ✅ | `bench/spec_degen_capture.py:37-89`; `--help` runs |
+| Config dspark params | ✅ block_size=5, target=[40,41,42], markov=256, nextn=1 | `~/.cache/huggingface/.../config.json` |
+| Native head weights on disk (node 0) | ❌ **ABSENT — blocker** | HF cache 6.1 MB, no safetensors |
+
+### Proposed flag set (two-stage staging, Kimi-K3 idea — indicated given REPLICATED finding)
+
+**Stage 1 (head-load validation, SPECULATIVE=0, zero decode risk):**
+`EXO_DSV4_DSPARK=1 EXO_DSV4_DSPARK_NATIVE=1 EXO_DSV4_MTP=1 EXO_SPECULATIVE=0
+EXO_DSV4_HC_COLLAPSE_KERNEL=1`. Unset: `EXO_DSV4_DSPARK_DIR`,
+`EXO_DSV4_MTP_DEDICATED`, `EXO_PP_DRAFT_MODEL`, `EXO_DSV4_POOL_GROW_STEP` (isolate
+per delta (a)). Gate: head loads without OOM, `mx.metal.get_active_memory()` +~10GB
+(replicated, per node), config matches, decode works, `spec_degen_capture.py`
+no diff. **If OOM → STOP; head doesn't fit replicated.**
+
+**Stage 2 (full speculative, only if Stage 1 passes):** add `EXO_SPECULATIVE=1`,
+`EXO_SPECULATIVE_GAMMA=2` (conservative — Eagle K=8 degenerated),
+`EXO_SPECULATIVE_TEMP=0.0`, `EXO_SPECULATIVE_ALPHA=1.0`.
+
+Acceptance (strict): ≥15% decode t/s @100K, ≥10% @352.6K, draft acceptance ≥60%,
+TTFT ≤+10%, zero quality regression on trigger set, RSS <126GB/node, 0 swap, 50
+clean steps. **No approval requested — all flag flips pre-registered only.**
+
+### Blocked on live cluster
+
+Phase 0.1 memory audit (peak RSS per node), Phase 0.7 weight verification on
+node 1 (`mtp.0/1/2.*` safetensors absent on node 0), Phase 1 baseline capture
+(Treatment A, no relaunch), Phase 2.2 single-node dry run, Stage 1/2 relaunch.
+Cluster is DOWN; even if up, user must explicitly approve each relaunch
+(session runs through the cluster).
+
+
+---
+
+## 2026-08-25 — DSpark Native + MTP Enablement: Phase 0 Static Audit (pre-registration, no cluster)
+
+**PM:** GLM-5.2 (Ollama Cloud). **Repo HEAD:** `61efad499` (main, clean).
+**Plans:** `/tmp/glm_plan.md` (authoritative), cross-ref `/tmp/dspark_plan.md`,
+`/tmp/kimi_reasoning.md`. Cluster currently DOWN (unrelated debugger investigating
+"no nodes available" placement for DeepSeek-V4-Flash-0731). No relaunch, no flag
+flip, no baseline capture performed — only static code audit + pre-registration.
+Full doc: `docs/dspark-mtp-ab-preregister-2026-08-25.md`.
+
+### ⚠️ CRITICAL FINDING — DSpark head is REPLICATED, not SHARDED (~10 GB/node)
+
+`DeepseekV4ShardingStrategy.shard_model` (`auto_parallel.py:1049-1180`) does NOT
+shard `model.model.dspark`. It iterates only `model.model.layers` (loop
+1062-1133, sets `layer.ffn.sharding_group` at :1087) and `model.model.mtp`
+(`mtp_blocks` at :1059, loop 1153-1178, sets `mtp.ffn.sharding_group` at :1156).
+**Definitive grep: zero `dspark` references in the sharding code** (only
+mentions are PP tap-capture comments at :622-633). No `super().shard_model()`
+call (base `TensorParallelShardingStrategy.shard_model` is `@abstractmethod`,
+:869-873). No generic `modules()`/`children()` walk. The dspark stages DO
+contain `DeepseekV4MoE` ffns (`deepseek_v4.py:6320` `DeepseekV4DSparkStage.ffn
+= DeepseekV4MoE(...))`) that WOULD shard if reached, but the loop never sets
+their `sharding_group` → cross-rank `sum_gradients` never fires → **head runs
+replicated full-size on every rank (~10 GB/node, ~20 GB total), not sharded
+(~5 GB/node).**
+
+The overlay comment at `utils_mlx.py:370-372` ("Attached BEFORE tensor sharding
+so its DeepseekV4MoE ffns shard exactly like the native mtp head's") is **FALSE**
+— the sharding strategy was never updated to recurse into `dspark`. Confirmed
+via second-opinion consult (no missed generic path). **Memory implication: the
+enablement plan's ~5 GB/node sharded assumption is wrong; per-node cost is
+~10 GB/node, 2× the assumption. A sharding code fix is required before a
+sharded trial can run; until then any trial runs the head replicated.**
+
+### Phase 0 audit results (all file:line verified)
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| Native head reads `mtp.0/1/2.*` from checkpoint | ✅ | `utils_mlx.py:879` (`_overlay_dsv4_dspark_native`), gated `:441` |
+| Head attaches BEFORE sharding | ✅ | `utils_mlx.py:866,:1016` (`inner.dspark=mod`); dispatch at `:500` |
+| DSpark head sharded across TP | ❌ **REPLICATED ~10GB/node** | `auto_parallel.py:1049-1180` no dspark; `deepseek_v4.py:6320` MoE; consult-confirmed |
+| MTP head double-load | two distinct modules (sum costs) | `deepseek_v4.py:6500-6507` (`self.mtp`) vs `utils_mlx.py:866` (`dspark`); different roles |
+| `EXO_DSV4_MTP_DEDICATED` default | ✅ unset (native MTP default) | `utils_mlx.py:358-362` |
+| TP consumer double-gate (SPEC + MTP) | ✅ both required | `utils_mlx.py:421`; `dsv4_mtp.py:370-371` |
+| No PP fallthrough in TP mode | ✅ | `utils_mlx.py:422-426` requires `PipelineShardMetadata` |
+| Head-load gate single var | ✅ (FORCE_LOAD is measurement override, not 2nd key) | `utils_mlx.py:418-420` |
+| `spec_degen_capture.py` intact + system+user triggers | ✅ | `bench/spec_degen_capture.py:37-89`; `--help` runs |
+| Config dspark params | ✅ block_size=5, target=[40,41,42], markov=256, nextn=1 | `~/.cache/huggingface/.../config.json` |
+| Native head weights on disk (node 0) | ❌ **ABSENT — blocker** | HF cache 6.1 MB, no safetensors |
+
+### Proposed flag set (two-stage staging, Kimi-K3 idea — indicated given REPLICATED finding)
+
+**Stage 1 (head-load validation, SPECULATIVE=0, zero decode risk):**
+`EXO_DSV4_DSPARK=1 EXO_DSV4_DSPARK_NATIVE=1 EXO_DSV4_MTP=1 EXO_SPECULATIVE=0
+EXO_DSV4_HC_COLLAPSE_KERNEL=1`. Unset: `EXO_DSV4_DSPARK_DIR`,
+`EXO_DSV4_MTP_DEDICATED`, `EXO_PP_DRAFT_MODEL`, `EXO_DSV4_POOL_GROW_STEP` (isolate
+per delta (a)). Gate: head loads without OOM, `mx.metal.get_active_memory()` +~10GB
+(replicated, per node), config matches, decode works, `spec_degen_capture.py`
+no diff. **If OOM → STOP; head doesn't fit replicated.**
+
+**Stage 2 (full speculative, only if Stage 1 passes):** add `EXO_SPECULATIVE=1`,
+`EXO_SPECULATIVE_GAMMA=2` (conservative — Eagle K=8 degenerated),
+`EXO_SPECULATIVE_TEMP=0.0`, `EXO_SPECULATIVE_ALPHA=1.0`.
+
+Acceptance (strict): ≥15% decode t/s @100K, ≥10% @352.6K, draft acceptance ≥60%,
+TTFT ≤+10%, zero quality regression on trigger set, RSS <126GB/node, 0 swap, 50
+clean steps. **No approval requested — all flag flips pre-registered only.**
+
+### Blocked on live cluster
+
+Phase 0.1 memory audit (peak RSS per node), Phase 0.7 weight verification on
+node 1 (`mtp.0/1/2.*` safetensors absent on node 0), Phase 1 baseline capture
+(Treatment A, no relaunch), Phase 2.2 single-node dry run, Stage 1/2 relaunch.
+Cluster is DOWN; even if up, user must explicitly approve each relaunch
+(session runs through the cluster).
