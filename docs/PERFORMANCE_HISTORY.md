@@ -3670,3 +3670,58 @@ command + checklist written. **Waiting on:** user to explicitly approve and
 run the Stage-1 `tmux new-session` command themselves (their established
 pattern — relaunch kills this session). A separate post-launch dispatch will
 run the verification checklist once they confirm.
+
+---
+
+**NEW (2026-08-26, DSPARK/MTP TWO-STAGE ENABLEMENT — BASELINE (Treatment A,
+spec-off) MEASURED):** the spec-off baseline against which Stage-1 (head-load)
+and Stage-2 (full speculative) DSpark/MTP arms will be compared. Cluster relaunched
+fresh (`dspark_base` tmux) at exo HEAD `d0ef1f7f0` / mlx-lm `643d42d`,
+`EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1` (HC_COLLAPSE
+now default-ON since `61efad499`). DSpark head-load gate SKIPPED the head on
+both nodes (confirmed in `~/.exo/exo_log/exo.log`: "DSpark head load SKIPPED
+(~10 GB/node reclaimed): EXO_DSV4_DSPARK=1 but no runtime consumer is reachable
+— EXO_SPECULATIVE=0 EXO_DSV4_MTP=0"). Env audited via `ps eww` on both runner
+pids: `SPECULATIVE=0 MTP=0 HC_COLLAPSE_KERNEL=1 DSPARK=1 MTP_DEDICATED=1`
+(DSPARK=1 + MTP_DEDICATED=1 are start_cluster.sh defaults, inert with
+SPECULATIVE=0 + MTP=0). Sharding=Tensor, 2/2 runners READY.
+
+Measured, `bench/p3_depth_anchor_probe.py`, one probe at a time, EOS banned via
+`/bench/chat/completions` (`finish_reason=length`, 2000 completion tokens,
+decode window >= 70s), `.venv/bin/python`:
+
+| depth (REAL prompt_tokens) | tok/s (usage) | tok/s (events) | ms/tok | TTFT | decode window | gaps p50/p90 |
+|---|---|---|---|---|---|---|
+| 100,025 | **28.46** | 28.17 | 35.14 | 269.0s | 70.2s | 0.03 / 0.06 ms |
+| 352,601 | **25.07** | 24.91 | 39.88 | 1011.4s | 79.7s | 0.04 / 0.07 ms |
+
+Peak memory (footprint on the real `spawn_main` weight-holding child, sampled
+during deep-probe decode): node1 91 GB (peak 104), node2 90 GB (peak 103).
+`vm_stat` Swapouts=0 on both nodes (zero swap pressure). Headroom ~24-38 GB/node.
+
+ANCHOR SANITY GATE (vs pre-registered 27.94 @100K, 23.48 @352.6K, ±5%):
+- **100K: PASS** — 28.46 vs 27.94 = +1.9% (within ±5%).
+- **352.6K: +6.8%** (25.07 vs 23.48) — outside the strict ±5% gate, but FASTER
+  (healthier), not slower. Explained: the 23.48 anchor was measured 2026-08-23
+  (poolgrow arm A, exo `7acf74c57`) BEFORE `EXO_DSV4_HC_COLLAPSE_KERNEL=1`
+  shipped as default (`61efad499`/`f7ef1180e`, +1.89% @500K per the hc_collapse
+  entry). The current baseline includes hc_collapse ON; the historical anchor
+  did not. The +6.8% shift at 352.6K (vs +1.9% at 100K) is consistent with the
+  hc_collapse depth-scaling gain. This does NOT invalidate the A/B: both
+  Stage-1 and Stage-2 arms run at the SAME HEAD with the SAME hc_collapse=1,
+  so the comparison isolates the DSpark/MTP effect. The pre-reg anchors are
+  historical reference points, not the control — this measured baseline IS
+  the control. Baseline @100K is the cleaner anchor reproduction (+1.9%).
+
+QUALITY BASELINE (`bench/spec_degen_capture.py`, 7 trigger prompts, temp=0
+greedy, max-tokens 200): **7/7 clean.** Zero BOS-spam, zero U+FFFD, zero
+special-token leaks, all `finish_reason` normal (3 stop, 4 length-truncated).
+Short prompts: "Paris", "One, two, three, four, five.", "red, yellow, blue".
+Long prompts start coherent (Roman Empire essay, TCP handshake, 20 languages).
+Saved to `/tmp/ab/baseline_degen.json`. This is the ground-truth the Stage-2
+spec-degen diff will be compared against.
+
+Raw artifacts: `/tmp/ab/baseline_100k.json`, `/tmp/ab/baseline_352k.json`,
+`/tmp/ab/baseline_degen.json`, `/tmp/ab/baseline_degen_samples.txt`,
+`/tmp/dspark_base.log`. Cluster left RUNNING in `dspark_base` (spec-off,
+head not resident) pending Stage-1 relaunch.
