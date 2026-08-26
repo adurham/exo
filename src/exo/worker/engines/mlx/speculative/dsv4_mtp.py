@@ -3668,9 +3668,31 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # re-bound to block_size for the WHOLE cycle so verify length, pool
         # snapshot arithmetic, and rollback all size themselves off the
         # DSpark block. Verify/accept/rollback machinery below is unchanged.
+        #
+        # Env-gated width cap (2026-08-26): the DSpark head is a 3-stage block
+        # (n_stages = n_mtp_layers = 3, deepseek_v4.py) trained for width-3
+        # draft/verify. block_size is 5 (anchor + 4). Previously this branch
+        # unconditionally re-bound gamma to block_size, SILENTLY IGNORING
+        # EXO_SPECULATIVE_GAMMA on the DSpark path — so a launch that set
+        # EXO_SPECULATIVE_GAMMA=2 actually ran width-5 drafts with confidence
+        # pruning. Now an explicitly-set EXO_SPECULATIVE_GAMMA (>0) CAPS gamma
+        # to min(env, block_size), and width=gamma is passed to draft() so the
+        # draft compute AND the verify length both truncate to the same width
+        # (matching draft()'s width contract at deepseek_v4.py — "truncates
+        # the draft to fewer than block_size positions ... callers MUST trim
+        # their caches by the SAME width afterwards"). Default (env unset)
+        # stays block_size — zero behavior change for existing configs.
         _dspark = getattr(getattr(self.model, "model", None), "dspark", None)
         if _dspark is not None:
             gamma = _dspark.block_size
+            _env_gamma = os.environ.get("EXO_SPECULATIVE_GAMMA", "")
+            if _env_gamma:
+                try:
+                    _env_gamma_int = int(_env_gamma)
+                except ValueError:
+                    _env_gamma_int = 0
+                if _env_gamma_int > 0:
+                    gamma = min(_env_gamma_int, _dspark.block_size)
             if getattr(self, "_dspark_caches", None) is None:
                 self._dspark_caches = _dspark.make_cache()
             _dsc = self._dspark_caches
@@ -3696,11 +3718,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _dsc,
                 temperature=temp,
                 sample_fn=_dspark_sample,
+                width=gamma,
             )
             # Block KV must not persist as draft context; committed rows'
             # ctx is appended after acceptance (post-verify capture).
+            # Trim by gamma (NOT block_size): draft() with width=gamma wrote
+            # exactly `gamma` physical KV positions per stage, so trimming by
+            # block_size would over-trim into the next cycle's frames. This
+            # matches the draft() docstring contract: "Callers MUST trim
+            # their caches by the SAME width afterwards (not block_size)."
             for _c in _dsc:
-                _c.trim(_dspark.block_size)
+                _c.trim(gamma)
 
             # Confidence-scheduled verification (paper §3.2): prune the
             # block to the leading prefix whose per-position survival
