@@ -3725,3 +3725,61 @@ Raw artifacts: `/tmp/ab/baseline_100k.json`, `/tmp/ab/baseline_352k.json`,
 `/tmp/ab/baseline_degen.json`, `/tmp/ab/baseline_degen_samples.txt`,
 `/tmp/dspark_base.log`. Cluster left RUNNING in `dspark_base` (spec-off,
 head not resident) pending Stage-1 relaunch.
+
+---
+
+**NEW (2026-08-26, DSPARK/MTP STAGE 1 — HEAD-LOAD VALIDATION PASSED):**
+native DSpark head loaded + resident on both nodes, SPECULATIVE=0 (zero decode
+risk), memory fits with ~39 GB headroom. First-ever on-cluster load of the
+NATIVE checkpoint-bundled DSpark head (per enablement doc, "NATIVE has NEVER
+been run on-cluster"). Relaunched `dspark_s1` tmux at exo HEAD `9ed2ee218` /
+mlx-lm `643d42d`, flags: `EXO_DSV4_DSPARK=1 EXO_DSV4_DSPARK_NATIVE=1
+EXO_DSV4_DSPARK_FORCE_LOAD=1 EXO_DSV4_MTP=1 EXO_DSV4_MTP_DEDICATED=0
+EXO_SPECULATIVE=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1`.
+
+ENV AUDIT (`ps eww` on runner pids, both nodes identical):
+`DSPARK=1 DSPARK_NATIVE=1 DSPARK_FORCE_LOAD=1 MTP=1 MTP_DEDICATED=0
+SPECULATIVE=0 HC_COLLAPSE_KERNEL=1`. All 7 flags reached both runners.
+
+HEAD-LOAD GREP (both nodes, `~/.exo/exo_log/exo.log`):
+```
+DSpark draft head attached from .../deepseek-ai--DeepSeek-V4-Flash-0731
+  (NATIVE checkpoint-bundled head, 115 tensors, 3 stages, block_size=5,
+   taps=[40, 41, 42]).
+[DSPARK-GUARD] provenance=native ... missing=0 extra=34 ... block_size=5
+  markov_rank=256 n_stages=3 taps=[40,41,42] noise_token_id=128799
+  CHECKPOINT_PROVENANCE=MATCHED
+```
+No `SKIPPED`, no `overlay failed`, no fallback warnings. The
+`param_tree_assert=FAIL` + `extra=34` is a WARNING about MXFP4 `.scales`
+quantization tensors the assertion doesn't enumerate — `missing=0` (no missing
+weights), `CHECKPOINT_PROVENANCE=MATCHED`; the head loaded correctly.
+
+MEMORY AUDIT (footprint on `spawn_main` child, post-load idle):
+
+| node | baseline (spec-off) | Stage 1 (head loaded) | delta | peak | swap |
+|---|---|---|---|---|---|
+| m4-1 | 80-83 GB | **89 GB** | **+6-9 GB** | 94 GB | 0 |
+| m4-2 | 80-83 GB | **89 GB** | **+6-9 GB** | 94 GB | 0 |
+
+Delta is the replicated native head (~10 GB estimate per Phase 0.2, measured
+~6-9 GB — under estimate). Headroom **~39 GB/node** (128-89), well above the
+1 GB min and 126 GB safety ceiling. `vm_stat Swapouts=0` both nodes. **Head
+fits; no OOM; no headroom fail.**
+
+DECODE SMOKE (temp=0): "The capital of France is Paris, notable for being a
+global hub of art, fashion, and culture, renowned for iconic landmarks like the
+Eiffel Tower and the Louvre." — coherent, `finish=stop`, zero U+FFFD, no
+`<|begin_of_sentence|>` leak.
+
+QUALITY GATE FIRST — `spec_degen_capture.py` 7 trigger prompts diff vs baseline:
+**0/7 diffs.** All 7 prompts byte-identical between baseline (spec-off, no head)
+and Stage 1 (spec-off, head loaded). Confirms the pre-reg prediction: with
+`EXO_SPECULATIVE=0` the draft cycle is NOT constructed (`batch_generate.py:813`
+gates `use_speculative` on `EXO_SPECULATIVE=1`), so loading the head via
+`FORCE_LOAD=1` has zero decode effect. Head is resident but inert. Quality
+unaffected.
+
+STAGE-1 GATE: **PASS** (all 6 checks). Proceed to Stage 2 (full speculative).
+Raw artifacts: `/tmp/ab/s1_degen.json`, `/tmp/dspark_s1.log`. Cluster left
+RUNNING in `dspark_s1` (head resident, spec off) pending Stage-2 relaunch.
