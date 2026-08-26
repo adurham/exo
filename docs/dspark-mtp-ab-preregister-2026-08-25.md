@@ -1025,3 +1025,69 @@ anomaly recurs), OR memory blow → REVERT to spec-off (`dspark_revert`:
     on them); FAIL → revert to spec-off (`dspark_revert`).
 11. `docs/PERFORMANCE_HISTORY.md` entry with real numbers + 2-3
     generated-text samples. Commit + push everything.
+
+---
+
+## Stage 3 — Pre-Registration (2b config + EOS_BAN default-off fix) — 2026-08-26
+
+**Auditor:** GLM-5.2 (Ollama Cloud), acting as PM.
+**Repo HEAD:** `5076824d5` (fix(dspark): make verify-audit bonus_val extraction
+fully recursive) + `d8c671501` (fix(dspark): default EXO_DSV4_SPEC_EOS_BAN to 0).
+**Rationale:** Stage 2c (ban ON) confirmed the natural-end theory — the ban
+breaks losslessness by forcing the committed-stream argmax from EOS (token 1,
+in stop trie) to 128822 (`<|end|>` think_end, NOT in stop trie) at natural-end
+positions → spec commits 128822 → no stop match → continues → model repeats
+→ `.<|end|>Paris` period-3 loop (2/7 spec_degen prompts degenerated). Stage 2b
+(ban OFF, width-3) was 7/7 clean, byte-identical to baseline on short prompts,
++13.3% throughput @100K. The fix flips the ban DEFAULT to OFF (env still
+overridable to ON for experiments). This Stage 3 validates the fix as the
+promotion candidate.
+
+**Config (Stage 3 = Stage 2b + fix):** width-3 (`EXO_SPECULATIVE_GAMMA=3`),
+NO EOS ban (`EXO_DSV4_SPEC_EOS_BAN` unset → code default "0" OFF),
+`EXO_DSV4_MTP_LOG_INTERVAL=1` (acceptance stats), audit-off (no
+AUDIT_ALL/AUDIT path for the perf run). All other flags identical to Stage 2b
+(see launch env in Stage 2b section above).
+
+**PRIMARY bar (losslessness — MUST PASS):** committed stream identical to
+baseline on all 7 spec_degen prompts INCLUDING finish/stop behavior:
+- Where baseline runs to 2000/length, spec must run to 2000/length.
+- Where baseline stops naturally (finish=stop), spec must stop at the same
+  point (natural-end equality: token 1 enters committed stream → stop trie
+  matches → finish=stop, identical to baseline).
+- No BOS-spam, no loop, no collapse, no early-stop anomaly.
+- `bench/spec_degen_diff.py` against baseline ground-truth: 0/7 diff.
+- `math_digit_sum` (temp=0, 8000 tokens): answer=115, finish=stop, no loop.
+
+**SECONDARY bars (throughput — target, not hard gate):**
+- tok/s @100K > baseline 28.46 (target >=+10% → >=31.3).
+- tok/s @352.6K > baseline 25.07 (target >=+5% → >=26.3).
+- acceptance >=50% (from `[MTP]` LOG_INTERVAL lines).
+- memory <126 GB per node, 0 swap.
+
+**Rollback:** ANY divergence from baseline on the 7 prompts (including
+finish/stop behavior), OR any quality fail (loop/collapse/early-stop),
+OR throughput DECREASE vs baseline → REVERT to spec-off
+(`EXO_SPECULATIVE=0`). The cluster does NOT stay on Stage 3 config if the
+primary bar fails.
+
+**Procedure:**
+1. Cluster is SIGTERM'd and clean (verified 2026-08-26 12:30 CDT).
+2. Relaunch 2b+fix config (BAN unset=default off, GAMMA=3, LOG_INTERVAL=1)
+   on both nodes via screen, wait for DSpark head attach + model load.
+3. Env-audit both nodes: CONFIRM `EXO_DSV4_SPEC_EOS_BAN` is UNSET (not in
+   env) or `=0` — the ban must be OFF. Confirm `EXO_SPECULATIVE_GAMMA=3`,
+   `EXO_DSV4_MTP_LOG_INTERVAL=1`.
+4. QUALITY FIRST (one at a time, temp=0):
+   - `bench/spec_degen_capture.py` 7 prompts → diff vs baseline → 0/7.
+   - `bench/hard_eval.py --tasks math_digit_sum --max-tokens 8000
+     --temperature 0` → answer=115, finish=stop, no loop.
+5. p3 probes ONE AT A TIME:
+   - `bench/p3_depth_anchor_probe.py --target-tokens 100000 --max-tokens 2000`
+     → tok/s (events+usage), TTFT, completion/finish (expect 2000/length),
+     memory.
+   - `bench/p3_depth_anchor_probe.py --target-tokens 352600 --max-tokens 2000`
+     → same.
+6. Grep `[MTP] cycles=... mean_accept=.../3` for acceptance stats.
+7. DECIDE vs bars: PROMOTE (cluster STAYS Stage 3) or REVERT (spec-off).
+8. `docs/PERFORMANCE_HISTORY.md` entry + report. Commit + push.
