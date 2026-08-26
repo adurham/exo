@@ -1954,9 +1954,10 @@ for NODE in "${NODES[@]}"; do
     # MTP verify-audit ALL-cycles mode (diagnostic: dump every cycle, not just
     # special-token ones). Pairs with EXO_DSV4_MTP_VERIFY_AUDIT.
     [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT_ALL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT_ALL=$EXO_DSV4_MTP_VERIFY_AUDIT_ALL"
-    # Spec-path EOS ban gate (default "1" ON in code; "0" opts out for the
-    # no-ban diagnostic config). Mirrors the code default so an unset env
-    # leaves production behavior unchanged.
+    # Spec-path EOS ban gate (default "0" OFF in code; "1" opts IN for the
+    # ban experiment only — the ban breaks losslessness at natural-end
+    # positions, confirmed 2026-08-26). Mirrors the code default so an unset
+    # env leaves production behavior unchanged.
     [ -n "${EXO_DSV4_SPEC_EOS_BAN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_EOS_BAN=$EXO_DSV4_SPEC_EOS_BAN"
     # MTP reference-forward refcheck JSONL path (diagnostic: verify vs clean greedy).
     [ -n "${EXO_DSV4_MTP_REFCHECK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK=$EXO_DSV4_MTP_REFCHECK"

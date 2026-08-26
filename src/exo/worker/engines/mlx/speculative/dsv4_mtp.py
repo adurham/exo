@@ -1469,9 +1469,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # entering the committed stream and firing ``finish=stop`` early
         # (the early-stop anomaly, Stage 2b recurrence at 1148/2000). Stash
         # the ids here; ``_speculative_next`` applies the ban to the verify
-        # logits before any argmax/tie-break derives from them. Default ON
+        # logits before any argmax/tie-break derives from them. Default OFF
         # for the spec path (see ``EXO_DSV4_SPEC_EOS_BAN`` gate at the
-        # application site); empty list = no ban = current behavior.
+        # application site — the ban breaks losslessness at natural-end
+        # positions, confirmed 2026-08-26); empty list = no ban = current
+        # behavior.
         self._spec_eos_ids: list[int] = list(eos_ids) if eos_ids else []
         # Acceptance-rate counters. Always updated — read by the
         # opt-in EXO_DSV4_MTP_LOG_INTERVAL warning, by the
@@ -2527,7 +2529,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # firing ``finish=stop`` early. Apply BEFORE any argmax/logsumexp. ─
         if (
             self._spec_eos_ids
-            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "1") != "0"
+            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"
         ):
             _eos_ban = ban_token_ids(self._spec_eos_ids)
             verify_logits = _eos_ban(mx.array([]), verify_logits)
@@ -3916,13 +3918,26 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # positions BEFORE any argmax, logsumexp, or tie-break derives from
         # them — so neither the accepted drafts NOR the bonus token can be
         # EOS. The ban is applied in place on ``verify_logits`` (a fresh
-        # array from the model forward, safe to mutate). Default ON for the
-        # spec path; ``EXO_DSV4_SPEC_EOS_BAN=0`` opts out (debug only).
+        # array from the model forward, safe to mutate). Default OFF for the
+        # spec path; ``EXO_DSV4_SPEC_EOS_BAN=1`` opts IN (debug/experiment
+        # only — see the natural-end theory note below).
         # Zero non-spec behavior change: this code only runs inside the
         # speculative verify cycle, which only exists when EXO_SPECULATIVE=1.
+        #
+        # NATURAL-END THEORY (confirmed 2026-08-26, commit history
+        # 8668e2616/91a124f4): the ban breaks losslessness by construction at
+        # EOS-want positions — it forces the committed-stream argmax to the
+        # NEXT-BEST special token (128822 = ``<|end|>`` think_end, NOT in the
+        # stop trie) where baseline's stop matcher expects EOS (token 1, IN
+        # the stop trie). With the ban OFF (this default), token 1 enters the
+        # committed stream → the stop trie matches → finish=stop at the
+        # natural end, identical to baseline. The no-ban width-3 config
+        # (Stage 2b) was 7/7 clean and byte-identical to baseline on the short
+        # prompts; the ban ON config (Stage 2c) degenerated 2/7. Keep the
+        # ban OFF by default; the env override remains for experiments.
         if (
             self._spec_eos_ids
-            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "1") != "0"
+            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"
         ):
             _eos_ban = ban_token_ids(self._spec_eos_ids)
             verify_logits = _eos_ban(mx.array([]), verify_logits)
@@ -5204,7 +5219,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # firing ``finish=stop`` early. Apply BEFORE any argmax/logsumexp. ─
         if (
             self._spec_eos_ids
-            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "1") != "0"
+            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"
         ):
             _eos_ban = ban_token_ids(self._spec_eos_ids)
             verify_logits = _eos_ban(mx.array([]), verify_logits)
