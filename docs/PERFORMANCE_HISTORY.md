@@ -3783,3 +3783,106 @@ unaffected.
 STAGE-1 GATE: **PASS** (all 6 checks). Proceed to Stage 2 (full speculative).
 Raw artifacts: `/tmp/ab/s1_degen.json`, `/tmp/dspark_s1.log`. Cluster left
 RUNNING in `dspark_s1` (head resident, spec off) pending Stage-2 relaunch.
+
+---
+
+**NEW (2026-08-26, DSPARK/MTP STAGE 2 — FULL SPECULATIVE: QUALITY PASS,
+THROUGHPUT FAIL → REVERT):** Stage-2 relaunched `dspark_s2` at exo HEAD
+`5078e9018` / mlx-lm `643d42d`, flags = Stage 1 + `EXO_SPECULATIVE=1
+EXO_SPECULATIVE_GAMMA=2 EXO_SPECULATIVE_TEMP=0.0 EXO_SPECULATIVE_ALPHA=1.0`
+(FORCE_LOAD dropped — `SPECULATIVE=1` makes `_tp_consumer=True` so the
+head-load gate passes naturally). Spec mechanism confirmed engaged on both
+nodes: log shows `DSv4 MTP speculative decoding enabled (γ=2, T=0.0)`.
+Memory 89 GB/node (same as Stage 1 — spec-on adds no resident weight, only the
+draft cycle), 0 swap.
+
+QUALITY GATE FIRST — **PASS** (the one gate that would force immediate revert
+did NOT trigger):
+- `spec_degen_capture.py` 7 trigger prompts (max-tokens 2000, temp=0): **all
+  coherent.** Zero BOS-spam, zero U+FFFD, zero special-token leaks. Short
+  prompts: "Paris", "One, two, three, four, five.", "Red, Yellow, and Blue".
+  Long prompts produce coherent structured content (Roman Empire essay, TCP
+  handshake with `##` headers, 20-language list outline). Note: at max-tokens=200
+  the long prompts had empty `content` (all 200 tokens consumed by reasoning);
+  at 2000 tokens they emit correct content. This is the DSv4 reasoning/content
+  split, not degeneration.
+- **`math_digit_sum` self-verification control (the batched-verify landmine
+  test): PASS.** `hard_eval.py --tasks math_digit_sum --max-tokens 8000
+  --temperature 0`: **answer = 115 (CORRECT), finish=stop, 0 leaks, 0
+  truncations, reasoning_len=3383c, latency=40.4s.** On the PP cluster, the
+  spec-correctness skill documented ALL THREE spec mechanisms (classic, MTP,
+  DSpark) looping on this exact prompt (18-24x repetition, finish=length,
+  never converged). On this TP cluster with DSpark native + MTP γ=2, the model
+  **converges and answers correctly**. The PP batched-verify landmine does NOT
+  reproduce on TP with this config — a genuine, positive quality finding.
+
+THROUGHPUT GATE — **FAIL at both depths** (per `p3_depth_anchor_probe.py`):
+
+| depth (prompt_tokens) | baseline (spec-off) | Stage 2 (spec-ON) | delta | gate | verdict |
+|---|---|---|---|---|---|
+| 100,025 | 28.46 tok/s (2000 tok, length) | **27.57** tok/s (760 tok, stop) | **−3.1%** | ≥+15% | **FAIL** |
+| 352,601 | 25.07 tok/s (2000 tok, length) | **22.13** tok/s (340 tok, stop) | **−11.7%** | ≥+10% | **FAIL** |
+
+- **TTFT**: 100K 269.0→266.6s (−0.9%, within +10% gate PASS); 352.6K
+  1011.4→1026.8s (+1.5%, within +10% gate PASS). Prefill unaffected by spec.
+- **Acceptance**: `usage.completion_tokens_details.accepted_prediction_tokens=0`
+  and `rejected_prediction_tokens=0` on both probes. Either drafts have ~0%
+  acceptance (fails the ≥60% gate) or the TP code path does not populate these
+  OpenAI-usage counters (the pre-reg doc anticipated "if not logged, note
+  that"). Either way, no measurable acceptance → no speedup mechanism.
+- **Gap distribution**: bimodal — many 0.1ms "burst" gaps (accepted draft
+  batches) interspersed with 100–400ms slow gaps (verify+reject overhead);
+  37–39% of gaps are >3× median. This is the signature of speculative decode
+  with poor draft acceptance: the verify overhead dominates the occasional
+  accepted-batch savings.
+- **Early-stop anomaly**: both Stage-2 probes show `finish_reason=stop` (760
+  and 340 tokens) despite EOS being banned via `/bench/chat/completions`.
+  Baseline ran the full 2000 tokens (`finish=length`). The tok/s is a rate
+  (completion_tokens / decode_window), so the shorter window doesn't inflate
+  it — but the premature stop is a behavioral change worth investigating (a
+  possible spec-decode token-drop at an MTP cycle boundary, per the
+  degeneration-sampler skill's known residual). It does not rescue the
+  throughput result: the sign is negative at both depths and the regression
+  worsens with depth (−3.1% → −11.7%), which is not plausibly a
+  short-window artifact.
+
+**DECISION: REVERT** (confirmed via second-opinion consult). The pre-reg doc's
+"Throughput DECREASE vs baseline → immediate revert" criterion triggered at
+both depths. Quality and memory gates passing do not override a throughput
+regression — a config that is slower at both depths, uses more memory (+6-9
+GB/node for the inert head), and has unmeasurable draft acceptance should not
+be kept. The cluster was reverted to spec-off baseline flags
+(`EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1`,
+`dspark_revert` tmux session) — the production-safe config.
+
+**Positive findings to bank** (do NOT re-litigate without new evidence):
+1. The NATIVE DSpark head loads cleanly on both nodes (first-ever on-cluster
+   native load) — `CHECKPOINT_PROVENANCE=MATCHED`, 115 tensors, 3 stages,
+   block_size=5, taps=[40,41,42]. The `.scales` `param_tree_assert=FAIL` is a
+   benign quantization-metadata warning, not a load failure.
+2. The replicated head fits: +6-9 GB/node (under the ~10 GB estimate), 89 GB
+   total, ~39 GB headroom, 0 swap. Memory is NOT the blocker for DSpark.
+3. The PP batched-verify landmine (self-doubt loop on math_digit_sum) does
+   NOT reproduce on TP with DSpark+MTP γ=2 — the model converges correctly.
+   This is the single most important quality finding: the correctness fear
+   that kept spec decode off production (per the spec-correctness skill) does
+   not apply to this TP config.
+
+**Why it's slow (leading hypothesis, not confirmed)**: draft acceptance is
+near-zero. The DSpark native head's drafts (trained on this checkpoint's
+hidden-state distribution) are being rejected by the TP verify forward. The
+bimodal gap pattern (0.1ms bursts = accepted batches, 100-400ms = verify
+overhead) and `accepted_prediction_tokens=0` both point here. The γ=2 setting
+means at most 2 draft tokens/step — even if all accepted, the ceiling is
+~2× sequential; with near-zero acceptance, the verify+reject overhead
+(~per-step extra forward) makes it slower. A future trial would need (a)
+proper accepted/rejected counters on the TP path to measure acceptance, (b)
+a higher γ if acceptance is actually decent, and/or (c) investigation of
+whether the native head's draft distribution actually matches the TP
+verify path's expectations. These are separate follow-ups, not blockers for
+this revert decision.
+
+Raw artifacts: `/tmp/ab/s2_degen.json`, `/tmp/ab/s2_degen_2k.json`,
+`/tmp/ab/s2_math_digit_sum.json`, `/tmp/ab/s2_quality_samples.txt`,
+`/tmp/ab/s2_100k.json`, `/tmp/ab/s2_352k.json`, `/tmp/dspark_s2.log`.
+Cluster reverted to `dspark_revert` (spec-off, production-safe).
