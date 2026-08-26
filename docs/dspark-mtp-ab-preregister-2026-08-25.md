@@ -760,3 +760,126 @@ dispatch will run the verification checklist above once the user confirms the
 cluster is up. The REPLICATED-head finding may prompt the user to instead
 prioritize a sharding code fix before any flag flip — that decision is the
 user's, not this audit's.
+
+---
+
+# Stage 2b — "DSpark native at 3 tokens" A/B (pre-registered 2026-08-26)
+
+## Background / why a Stage 2b
+
+Stage 2 (spec-ON, `EXO_SPECULATIVE_GAMMA=2`) FAILED throughput at both depths
+(−3.1% @100K, −11.7% @352.6K vs the 28.46/25.07 spec-off baseline) and was
+REVERTED. **Post-mortem finding (verified by supervisor, 2026-08-26):** the
+DSpark draft branch at `dsv4_mtp.py:3673` did `gamma = _dspark.block_size`
+UNCONDITIONALLY — it SILENTLY IGNORED `EXO_SPECULATIVE_GAMMA` on the DSpark
+path. So Stage 2 did NOT test γ=2; it tested `block_size=5` (anchor + 4 draft
+positions) with confidence pruning (`EXO_DSV4_DSPARK_CONF_TAU=0.5`). The
+DSpark native head is a 3-stage block (`n_stages = n_mtp_layers = 3`,
+`deepseek_v4.py`) trained for **width-3** draft/verify — not 5, not 2.
+
+**User hypothesis:** "DSpark should be native at 3 tokens I think" — the head
+should run natively at width 3 (draft + verify = 3 positions), matching its
+3-stage training. This is a root-cause fix + re-test, not a parameter sweep.
+
+## Code fix shipped (commit `433dce6c1`, main)
+
+`src/exo/worker/engines/mlx/speculative/dsv4_mtp.py` DSpark branch:
+1. After `gamma = _dspark.block_size`, an explicitly-set
+   `EXO_SPECULATIVE_GAMMA` (>0) now CAPS gamma to `min(env, block_size)`.
+   Default (env unset) stays `block_size` — zero behavior change for
+   existing configs.
+2. `width=gamma` passed to `_dspark.draft(...)` so draft compute AND verify
+   length both truncate to the same width (matching `draft()`'s width
+   contract at `deepseek_v4.py:6393-6424`: "truncates the draft to fewer than
+   block_size positions ... callers MUST trim their caches by the SAME width
+   afterwards").
+3. DSpark cache trim changed from `_dspark.block_size` to `gamma` (the
+   physical KV written by `draft(width=gamma)` is exactly `gamma` positions
+   per stage; trimming by `block_size` would over-trim into the next cycle).
+
+`start_cluster.sh` already forwards `EXO_SPECULATIVE_GAMMA` (line 1632,
+unconditional) and `EXO_DSV4_MTP_LOG_INTERVAL` (line 1939, opt-in) to
+runners — no forwarding change needed. Gates: basedpyright 726→726 (zero
+NEW), ruff 20→20 (zero NEW), `test_pp_speculation_spec_tag.py` 45/45 pass.
+
+## Hypothesis
+
+Width-3 draft/verify aligns with the DSpark head's 3-stage training depth.
+Stage 2 ran width-5 (block_size, the env was silently ignored) → the verify
+forward processed 2 extra positions the head was never trained to draft,
+plausibly tanking acceptance and adding per-row verify cost. At width 3,
+acceptance should rise (drafts within the trained distribution) and the
+per-cycle verify cost falls (3 rows not 5), so the net decode rate should
+beat BOTH the spec-off baseline (28.46/25.07) AND the Stage-2 width-5
+result (27.57/22.13).
+
+## Flags (Stage 2b)
+
+```
+EXO_SPECULATIVE=1
+EXO_DSV4_MTP=1
+EXO_DSV4_DSPARK=1
+EXO_DSV4_DSPARK_NATIVE=1
+EXO_DSV4_DSPARK_FORCE_LOAD=1
+EXO_DSV4_MTP_DEDICATED=0
+EXO_SPECULATIVE_GAMMA=3          # <-- THE FIX: now honored, caps width to 3
+EXO_SPECULATIVE_TEMP=0.0
+EXO_SPECULATIVE_ALPHA=1.0
+EXO_DSV4_HC_COLLAPSE_KERNEL=1
+EXO_DSV4_MTP_LOG_INTERVAL=1      # <-- per-cycle acceptance stats (was 0 in Stage 2)
+# EXO_DSV4_DSPARK_CONF_TAU stays default 0.5 (confidence pruning still active)
+```
+
+`EXO_DSV4_MTP_LOG_INTERVAL=1` is added because Stage 2 had
+`accepted_prediction_tokens=0` on the OpenAI usage path (the TP code path
+does not populate those API counters). The internal per-cycle logger at
+`dsv4_mtp.py:1969-1998` (`_record_acceptance`, gated by `_LOG_INTERVAL` =
+`EXO_DSV4_MTP_LOG_INTERVAL`) emits `[MTP] cycles=N mean_accept=X/γ hist=...`
+every cycle — this is the acceptance evidence channel this run.
+
+## Acceptance bars (must hit ALL to PROMOTE)
+
+| metric | bar | baseline (spec-off) | Stage 2 (width-5) |
+|---|---|---|---|
+| tok/s @100K | ≥ +15% vs 28.46 → ≥ 32.73 | 28.46 | 27.57 (−3.1%) |
+| tok/s @352.6K | ≥ +10% vs 25.07 → ≥ 27.58 | 25.07 | 22.13 (−11.7%) |
+| mean_accept/γ (from LOG_INTERVAL logs) | ≥ 0.5 (i.e. ≥1.5/3 accepted/cycle) | n/a | unmeasured |
+| spec_degen 7/7 trigger set | 0/7 diff vs baseline (no BOS-spam/loop/collapse) | clean | clean |
+| math_digit_sum control | answer correct (115), finish=stop, no loop | clean | clean |
+| early-stop anomaly | NONE — completion reaches max_tokens (2000), finish=length like baseline | 2000/length | **760/stop, 340/stop (ANOMALY)** |
+
+**Rollback:** any throughput DECREASE vs baseline at either depth, OR any
+quality fail (BOS-spam/loop/collapse, math loop, early-stop anomaly
+recurs), OR memory blow → REVERT to spec-off (`dspark_revert` command:
+`EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1`).
+
+## Procedure
+
+1. SIGTERM old tmux sessions (dspark_revert) — SIGTERM only, NEVER kill -9.
+2. `tmux new-session -d -s dspark_s2b 'cd ~/repos/exo && <flags above>
+   ./start_cluster.sh 2>&1 | tee /tmp/dspark_s2b.log'`, wait READY (2/2).
+3. Env-audit both nodes: `ps eww $(pgrep -f spawn_main | head -1) | tr ' '
+   '\n' | grep EXO_SPECULATIVE_GAMMA` — CONFIRM `=3` reached runners this
+   time (Stage 2 could not confirm because the env was ignored in code;
+   now it must be honored AND present in the process env).
+4. Head-load greps: `DSpark draft head attached` (tensors, stages,
+   block_size, taps) on the rank that owns it.
+5. Memory audit: `footprint -p $(pgrep -f spawn_main | head -1)` both
+   nodes; expect ~89GB (Stage 1/2 level), 0 swap.
+6. QUALITY FIRST:
+   - `bench/spec_degen_capture.py` 7 trigger prompts vs baseline →
+     `spec_degen_diff.py`, expect 0/7 diff.
+   - `bench/hard_eval.py --tasks math_digit_sum --max-tokens 8000
+     --temperature 0` → expect answer=115, finish=stop, no loop.
+   - ANY BOS-spam/loop/collapse = hard fail, revert immediately.
+7. `bench/p3_depth_anchor_probe.py --host <api-node> --port 52415 --model
+   deepseek-ai/DeepSeek-V4-Flash-0731 --target-tokens 100000 --max-tokens
+   2000` → record tok/s (events AND usage), TTFT, completion_tokens +
+   finish_reason (anomaly check), memory. ONE AT A TIME.
+8. Repeat at `--target-tokens 352600`. One at a time.
+9. Grep runner logs for `[MTP] cycles=... mean_accept=.../3 hist=...` (the
+   LOG_INTERVAL output) — extract acceptance stats.
+10. DECIDE vs bars: PASS → keep Stage 2b flags running (cluster STAYS on
+    them); FAIL → revert to spec-off (`dspark_revert`).
+11. `docs/PERFORMANCE_HISTORY.md` entry with real numbers + 2-3
+    generated-text samples. Commit + push everything.
