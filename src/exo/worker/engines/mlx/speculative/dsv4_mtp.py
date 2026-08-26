@@ -4387,6 +4387,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # hair => numerical. Correlating the cycle with pool flush state pins
         # the mechanism. Rank-0 only, JSONL to EXO_DSV4_MTP_VERIFY_AUDIT path.
         _audit_path = os.environ.get("EXO_DSV4_MTP_VERIFY_AUDIT")
+        _audit_all = os.environ.get("EXO_DSV4_MTP_VERIFY_AUDIT_ALL", "0") == "1"
         if _audit_path and temp == 0 and all_next is not None:
             _is_rank0 = sync_group is None or sync_group.rank() == 0
             if _is_rank0:
@@ -4413,7 +4414,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _bonus_special = _bonus_int in _special
                     _draft_special = any(d in _special for d in _draft_list)
                     _tgt_special = any(t in _special for t in _tgt_list)
-                    if _bonus_special or _draft_special or _tgt_special:
+                    if _audit_all or _bonus_special or _draft_special or _tgt_special:
                         _bpos = gamma if n_accepted == gamma else n_accepted
                         _vl = verify_logits[0, _bpos]
                         _top2 = mx.topk(_vl, 2)
