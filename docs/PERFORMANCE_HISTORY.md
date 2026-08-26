@@ -3579,3 +3579,94 @@ node 1 (`mtp.0/1/2.*` safetensors absent on node 0), Phase 1 baseline capture
 (Treatment A, no relaunch), Phase 2.2 single-node dry run, Stage 1/2 relaunch.
 Cluster is DOWN; even if up, user must explicitly approve each relaunch
 (session runs through the cluster).
+
+---
+
+## 2026-08-25 21:39 CDT — Post-reboot TB link verification + Stage-1 launch command prep (GLM-5.2 PM, commit pending)
+
+**Context:** the TB/RDMA wedge diagnosed earlier (AppleThunderboltRDMA teardown
+20:23:22 after a runner SIGKILLed; TB link dropped; all ports "No device
+connected") was fixed by the user rebooting both Studios. This entry records
+the read-only post-reboot verification + the exact Stage-1 launch command now
+written into `docs/dspark-mtp-ab-preregister-2026-08-25.md`.
+
+### Post-reboot TB/RDMA link — HEALTHY on both nodes (read-only SSH)
+
+- **Node1** (`adams-mac-studio-m4-1.local`, uptime 4 min): `ifconfig` shows
+  `inet 192.168.200.1` on the TB bridge, `status: active`; `system_profiler
+  SPThunderboltDataType` shows 2 ports `Status: Device connected`;
+  `pgrep python -m exo` = none; `ping -c5 192.168.200.2` = **0.0% packet loss,
+  avg 0.849 ms**.
+- **Node2** (`adams-mac-studio-m4-2.local`, uptime 4 min): `ifconfig` shows
+  `inet 192.168.200.2` on the TB bridge, `status: active`; `system_profiler`
+  shows 2 ports `Status: Device connected`; `pgrep python -m exo` = none;
+  `ping -c5 192.168.200.1` = **0.0% packet loss, avg 0.608 ms**.
+- **Verdict:** link fully healthy both directions, sub-ms latency, no stale
+  exo procs. Wedge fix confirmed. exo NOT yet started (user's launch gate).
+
+### Checkpoint + DSpark weights — PRESENT on both nodes (blocker resolved)
+
+- The earlier "ABSENT — blocker" finding was checking the WRONG machine's HF
+  cache. The cluster loads from `~/.exo/models/`, not `~/.cache/huggingface/`.
+- Node1 `~/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731/` = 155 GB, 48
+  shards; node2 = 165 GB, 48 shards. Identical `model.safetensors.index.json`
+  SHA-1 `810e55576e2d29570d6b9a0ffaa8202f7cec1ea2` on both. 155G/165G delta =
+  APFS sparse accounting, not content.
+- **4705 `mtp.*` keys (mtp.0/1/2) packed inside shards 46-48** — the Phase 0
+  `ls | grep mtp` returned 0 because it looked for standalone files; the
+  weights live inside the unified shards. Native head weights ARE present.
+
+### Stage-1 launch command — TWO corrections vs the original pre-reg
+
+1. **`EXO_DSV4_DSPARK_FORCE_LOAD=1` added.** With `EXO_SPECULATIVE=0` alone,
+   the head-load gate (`utils_mlx.py:427` `_dspark_usable = _tp_consumer or
+   _pp_consumer or _dspark_force`) is False → head SKIPPED, not loaded. The
+   original "head loads but no speculative drafting" was wrong for this code
+   path. FORCE_LOAD=1 bypasses the consumer-reachability gate so the head
+   actually loads; the draft cycle itself is gated separately at
+   `batch_generate.py:813,822` (`use_speculative = SPECULATIVE==1`, cycle
+   constructed only `if use_speculative:`), so SPECULATIVE=0 still guarantees
+   zero decode risk. Confirmed via consult.
+2. **`EXO_DSV4_MTP_DEDICATED=0` explicitly set.** `start_cluster.sh:468` has
+   `: "${EXO_DSV4_MTP_DEDICATED:=1}"` inside the `DSV4_ENABLED=1` block, so
+   the launch path defaults it to 1 (not unset, as the Phase 0 audit claimed
+   by reading only the Python env default at `utils_mlx.py:361`). Without
+   explicit `=0`, the external `mlx-community/DeepSeek-V4-Flash-MTP-bf16` head
+   overlays `mtp[0]` before DSpark native runs — conflicting with
+   `EXO_DSV4_DSPARK_NATIVE=1`'s intent.
+
+### Exact approved Stage-1 launch command (user runs in tmux — approval gate)
+
+```bash
+tmux new-session -d -s dspark_s1 \
+  'cd ~/repos/exo && \
+   EXO_DSV4_DSPARK=1 EXO_DSV4_DSPARK_NATIVE=1 EXO_DSV4_DSPARK_FORCE_LOAD=1 \
+   EXO_DSV4_MTP=1 EXO_DSV4_MTP_DEDICATED=0 EXO_SPECULATIVE=0 \
+   EXO_DSV4_HC_COLLAPSE_KERNEL=1 \
+   ./start_cluster.sh 2>&1 | tee /tmp/dspark_s1.log'
+```
+
+Each inline var maps to a verified `start_cluster.sh` EXO_ENV allowlist line
+(DSPARK→1784, NATIVE→1819, FORCE_LOAD→1787, MTP→1728, MTP_DEDICATED→1921,
+SPECULATIVE→1631, HC_COLLAPSE→2202). `DSPARK_DIR`/`PP_DRAFT_MODEL`/
+`POOL_GROW_STEP` deliberately not exported → not forwarded → code sees its
+`os.environ.get(..., "0")` default.
+
+### Post-launch verification checklist (written into the pre-reg doc)
+
+7 steps for the post-launch dispatch: (1) wait for `READY (2/2)` in
+`/tmp/dspark_s1.log`; (2) env-var propagation audit via `ps eww` on both
+nodes; (3) head-load log greps (`DSpark draft head attached (NATIVE...)`,
+must NOT see `SKIPPED`/`overlay failed`); (4) memory audit (`footprint <pid>`
+not `ps RSS` — Apple Silicon unified memory; <126 GB/node, 0 swap); (5)
+decode smoke (coherent "hello world"); (6) **spec_degen baseline+diff
+QUALITY GATE FIRST** — zero BOS-spam, zero period-≥3 loops on all 6
+system+user triggers; (7) 50 clean decode steps, no desync/OOM.
+
+### Status
+
+**No relaunch run.** Cluster is back up, link healthy, weights present, exact
+command + checklist written. **Waiting on:** user to explicitly approve and
+run the Stage-1 `tmux new-session` command themselves (their established
+pattern — relaunch kills this session). A separate post-launch dispatch will
+run the verification checklist once they confirm.

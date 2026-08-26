@@ -1,13 +1,15 @@
 # DSpark Native + MTP Enablement — Pre-Registered A/B & Static Audit (2026-08-25)
 
-**Status:** PHASE 0 STATIC AUDIT COMPLETE. Phase 1 pre-registration written.
-**Blocked on:** live cluster (currently DOWN — unrelated debugger investigating
-"no nodes available" placement failure for DeepSeek-V4-Flash-0731). No relaunch,
-no flag flip, no baseline capture until cluster is back AND user explicitly
-approves. This doc is pre-registered BEFORE any data collection per house rule.
+**Status:** PHASE 0 STATIC AUDIT COMPLETE. Post-reboot TB link + checkpoint
+verification COMPLETE (2026-08-25 21:39 CDT). Stage-1 launch command written
+below — PENDING USER APPROVAL GATE. No relaunch, no flag flip, no baseline
+capture until the user explicitly approves and launches. This doc is
+pre-registered BEFORE any data collection per house rule.
 
 **Audit by:** GLM-5.2 (Ollama Cloud), acting as PM.
-**Repo HEAD at audit:** `61efad499802bc766eeb1015558ad92537f8ae91` (main, clean).
+**Repo HEAD at audit:** `61efad499802bc766eeb1015558ad92537f8ae91` (Phase 0
+commit `07906d8b0`, main, clean). Post-reboot verification appended 2026-08-25
+21:40+ CDT on the same HEAD.
 **Plans cross-referenced:** `/tmp/glm_plan.md` (GLM-5.2, authoritative),
 `/tmp/dspark_plan.md` (DSv4-Pro), `/tmp/kimi_reasoning.md` (Kimi-K3).
 
@@ -128,12 +130,30 @@ Until then, any trial runs the head replicated at ~10 GB/node.
   3-stage head. **This needs empirical measurement at load time** (blocked on
   cluster).
 
-### 0.4 `EXO_DSV4_MTP_DEDICATED` default — UNSET (correct)
+### 0.4 `EXO_DSV4_MTP_DEDICATED` default — CORRECTED: defaults to 1 on the launch path (NOT unset)
 
 - `utils_mlx.py:358-362`: the dedicated-MTP overlay is gated on
-  `EXO_DSV4_MTP=1 AND EXO_DSV4_MTP_DEDICATED=1`. Default is `"0"` (falsy) →
-  the native MTP head stays the default. **Confirmed: unset by default.**
-  We want native MTP head, so we leave `EXO_DSV4_MTP_DEDICATED` unset.
+  `EXO_DSV4_MTP=1 AND EXO_DSV4_MTP_DEDICATED==1`. The Python reads env
+  default `"0"` (`utils_mlx.py:361`).
+- **BUT `start_cluster.sh:468` has `: "${EXO_DSV4_MTP_DEDICATED:=1}"`
+  inside the `if [ "${DSV4_ENABLED}" = "1" ]` block (line 354).** With
+  `DSV4_ENABLED=1` (the production default), if you launch with
+  `EXO_DSV4_MTP=1` but leave `EXO_DSV4_MTP_DEDICATED` unset, the shell
+  script defaults it to `1` and forwards it to the runner via the EXO_ENV
+  allowlist line at `start_cluster.sh:1921`
+  (`[ -n "${EXO_DSV4_MTP_DEDICATED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DEDICATED=$EXO_DSV4_MTP_DEDICATED"`).
+  The live process therefore sees `MTP_DEDICATED=1` and runs
+  `_overlay_dsv4_dedicated_mtp(model, model_path)` — overlaying the
+  external `mlx-community/DeepSeek-V4-Flash-MTP-bf16` head onto
+  `model.model.mtp[0]` BEFORE the DSpark native overlay runs
+  (`utils_mlx.py:364`), which conflicts with `EXO_DSV4_DSPARK_NATIVE=1`'s
+  intent of using the checkpoint's OWN `mtp.0/1/2.*` weights.
+- **CORRECTION to the Phase 0 audit:** the earlier finding (0.4) "unset
+  by default → native MTP head stays the default" was reading the Python
+  env default, not the launch-path default. **Stage 1 MUST explicitly set
+  `EXO_DSV4_MTP_DEDICATED=0`** to keep the native checkpoint-bundled MTP
+  head that `EXO_DSV4_DSPARK_NATIVE=1` expects. This is a launch-critical
+  correction.
 
 ### 0.5 TP consumer double-gate — CONFIRMED (both flags required)
 
@@ -166,26 +186,47 @@ Until then, any trial runs the head replicated at ~10 GB/node.
   about a "second gate" is resolved: there is no `EXO_DSV4_DSPARK_LOAD`
   second key.
 
-### 0.7 Checkpoint `mtp.0/1/2.*` + config in HF cache — **BLOCKER: weights absent**
+### 0.7 Checkpoint `mtp.0/1/2.*` + config — RESOLVED: weights PRESENT on both nodes (2026-08-25 post-reboot verification)
 
-- `~/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V4-Flash-0731/`
-  contains ONLY `config.json` (1888 B), `tokenizer_config.json` (801 B),
-  `tokenizer.json` (6.1 MB). Total cache size: **6.1 MB**.
-- **NO `.safetensors` weight files** — not `mtp.0.*`, not `mtp.1.*`, not
-  `mtp.2.*`, not even `model.safetensors`. The 155 GB model weights are NOT
-  downloaded locally on this node. (This is consistent with the cluster
-  state: model unloaded, placement failing.)
-- `config.json` DOES declare the DSpark params correctly:
+- **Earlier "BLOCKER: weights absent" finding was based on inspecting the
+  WRONG machine's HuggingFace cache** (`~/.cache/huggingface/hub/...` on a
+  non-cluster host). The exo cluster loads from `~/.exo/models/`, not the
+  HF hub cache. Post-reboot verification on BOTH cluster nodes confirms
+  the native head weights ARE present.
+- **Node1** (`adams-mac-studio-m4-1.local`):
+  `~/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731/` = **155 GB**,
+  48 safetensors shards (`model-00001-of-00048` … `model-00048-of-00048`),
+  `model.safetensors.index.json` (hash `810e55576e2d29570d6b9a0ffaa8202f7cec1ea2`).
+- **Node2** (`adams-mac-studio-m4-2.local`):
+  `~/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731/` = **165 GB**,
+  48 safetensors shards (identical filenames), `model.safetensors.index.json`
+  (identical hash `810e55576e2d29570d6b9a0ffaa8202f7cec1ea2`).
+- **The 155G vs 165G size difference is APFS sparse/clone accounting, NOT
+  a content difference**: both nodes have identical file counts (57 entries),
+  identical 48 shard names, and a byte-identical index.json (same SHA-1).
+  Node2's larger `du` reflects fewer sparse-block references in its APFS
+  container, not extra weight tensors.
+- **`mtp.0/1/2.*` weights are packed INSIDE the 48 `model-*` shards, not
+  as separate files** — confirmed via `model.safetensors.index.json`'s
+  `weight_map` on node2: **4705 `mtp.*` keys**, spanning `mtp.0` through
+  `mtp.2`, resident in shards `model-00046-of-00048` through
+  `model-00048-of-00048` (e.g. `mtp.0.attn.wq_a.weight ->
+  model-00046-of-00048.safetensors`). The Phase 0 audit's `ls | grep mtp`
+  returned 0 because it looked for standalone `mtp.*` files; the weights
+  live inside the unified shards.
+- `config.json` declares the DSpark params correctly:
   - `dspark_block_size = 5` ✅
   - `dspark_target_layer_ids = [40, 41, 42]` ✅
   - `dspark_markov_rank = 256` ✅
   - `num_nextn_predict_layers = 1` ✅
-- **BLOCKER:** before `EXO_DSV4_DSPARK_NATIVE=1` can be flipped, the native
-  head tensors (`mtp.0/1/2.*` safetensors) must be present on BOTH nodes.
-  Current state: absent on this node; status on node 1 unknown (cluster
-  down). This must be verified once the cluster is back. The plan's Phase
-  1.5 checklist item "Native head safetensors exist in local model cache"
-  is **NOT met**.
+- **The local overlay head is also present on both nodes:**
+  `~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP/` (the separately-
+  converted head used when `EXO_DSV4_DSPARK_NATIVE` is unset and
+  `EXO_DSV4_DSPARK_DIR` points at it). Stage 1 uses NATIVE, not this.
+- **BLOCKER RESOLVED.** `EXO_DSV4_DSPARK_NATIVE=1` can be flipped; the
+  native head tensors are present on both nodes. The plan's Phase 1.5
+  checklist item "Native head safetensors exist in local model cache" IS
+  met.
 
 ### 0.8 Degeneration test harness — INTACT
 
@@ -289,42 +330,129 @@ Given the REPLICATED-head finding (~10 GB/node, not ~5 GB/node), the memory
 budget is tighter than the plan assumed. **Two-stage staging is
 recommended** (Kimi-K3 idea, reconciled plan delta (c)):
 
-### Stage 1 — Head-load validation (SPECULATIVE=0, zero decode risk)
+### Stage 1 — Head-load validation (SPECULATIVE=0 + FORCE_LOAD, zero decode risk)
+
+**CORRECTION to the original Stage-1 plan (verified 2026-08-25 post-reboot
+via consult + code re-read):** with `EXO_SPECULATIVE=0` alone, the DSpark
+head-load gate at `utils_mlx.py:427`
+(`_dspark_usable = _tp_consumer or _pp_consumer or _dspark_force`) is **False**
+— `_tp_consumer` needs `SPECULATIVE=1`, `_pp_consumer` needs Pipeline
+sharding + `EXO_PP_DRAFT_MODEL`. The head would be **SKIPPED** with the
+"~10 GB/node reclaimed" warning, not loaded. The original Stage-1 text "head
+loads but no speculative drafting" was **wrong for this code path** — it
+described the skip path, not the load path.
+
+To genuinely validate the native head LOAD + memory cost without engaging
+speculative decode, Stage 1 must add `EXO_DSV4_DSPARK_FORCE_LOAD=1`
+(`utils_mlx.py:420`), which makes `_dspark_force=True` → `_dspark_usable=True`
+→ head attaches via `_overlay_dsv4_dspark_native` (line 444). The draft
+cycle itself is gated separately at `batch_generate.py:813`
+(`use_speculative = os.environ.get("EXO_SPECULATIVE", "0") == "1"`) and is
+only constructed inside `if use_speculative:` (line 822), so `SPECULATIVE=0`
+guarantees no drafting even with the head loaded. This is the load-only
+override the consult confirmed.
 
 ```
 EXO_DSV4_DSPARK=1
 EXO_DSV4_DSPARK_NATIVE=1
+EXO_DSV4_DSPARK_FORCE_LOAD=1   # NEW: bypass consumer-reachability gate so head LOADS under SPECULATIVE=0
 EXO_DSV4_MTP=1
-EXO_SPECULATIVE=0        # head loads but no speculative drafting
-# Unset:
+EXO_DSV4_MTP_DEDICATED=0       # NEW: explicitly 0 — start_cluster.sh:468 defaults this to 1 when DSV4_ENABLED=1
+EXO_SPECULATIVE=0              # head loads but draft cycle NOT constructed (batch_generate.py:813,822)
+EXO_DSV4_HC_COLLAPSE_KERNEL=1  # keep existing prefill opt
+# Explicitly unset/empty (do NOT export):
 #   EXO_DSV4_DSPARK_DIR       (native, not local overlay)
-#   EXO_DSV4_MTP_DEDICATED    (native MTP head)
-#   EXO_PP_DRAFT_MODEL        (TP, not PP)
-#   EXO_DSV4_POOL_GROW_STEP   (isolate from it — delta (a))
-# Keep:
-EXO_DSV4_HC_COLLAPSE_KERNEL=1
+#   EXO_PP_DRAFT_MODEL        (TP, not PP; also avoids tokenizer-mismatch gibberish)
+#   EXO_DSV4_POOL_GROW_STEP   (isolate from it — reconciled plan delta (a))
 ```
-**Gate:** head loads without OOM, `mx.metal.get_active_memory()` increases by
-~10 GB (replicated, per node), config values match
-(`dspark_block_size=5`, `target_layer_ids=[40,41,42]`, `markov_rank=256`),
-decode still works (non-speculative), `spec_degen_capture.py` shows no diff
-vs baseline. **If OOM here → STOP, the head does not fit replicated.**
+
+#### EXACT approved Stage-1 launch command (user runs this in tmux)
+
+Mirrors the established background-launch pattern from
+`docs/hc-expand-kernel-ab-2026-08-24.md:538` (`tmux new-session -d -s <name>
+'... ./start_cluster.sh 2>&1 | tee /tmp/<name>.log'`), with the Stage-1 env
+vars set inline before `./start_cluster.sh` (the script's `${VAR:-default}`
+and `[ -n "${VAR:-}" ]` allowlist lines pick them up):
+
+```bash
+tmux new-session -d -s dspark_s1 \
+  'cd ~/repos/exo && \
+   EXO_DSV4_DSPARK=1 \
+   EXO_DSV4_DSPARK_NATIVE=1 \
+   EXO_DSV4_DSPARK_FORCE_LOAD=1 \
+   EXO_DSV4_MTP=1 \
+   EXO_DSV4_MTP_DEDICATED=0 \
+   EXO_SPECULATIVE=0 \
+   EXO_DSV4_HC_COLLAPSE_KERNEL=1 \
+   ./start_cluster.sh 2>&1 | tee /tmp/dspark_s1.log'
+```
+
+**Env-forwarding verification (why each inline var reaches the runner):**
+- `EXO_DSV4_DSPARK` → `start_cluster.sh:1784` allowlist → `EXO_ENV`.
+- `EXO_DSV4_DSPARK_NATIVE` → `start_cluster.sh:1819` allowlist → `EXO_ENV`.
+- `EXO_DSV4_DSPARK_FORCE_LOAD` → `start_cluster.sh:1787` allowlist → `EXO_ENV`.
+- `EXO_DSV4_MTP` → `start_cluster.sh:1728` allowlist → `EXO_ENV`.
+- `EXO_DSV4_MTP_DEDICATED` → `start_cluster.sh:1921` allowlist → `EXO_ENV`.
+- `EXO_SPECULATIVE` → `start_cluster.sh:1631` (unconditional) → `EXO_ENV`.
+- `EXO_DSV4_HC_COLLAPSE_KERNEL` → `start_cluster.sh:2202` allowlist → `EXO_ENV`.
+- `EXO_DSV4_DSPARK_DIR`, `EXO_PP_DRAFT_MODEL`, `EXO_DSV4_POOL_GROW_STEP` →
+  not exported, so their `[ -n "${VAR:-}" ]` allowlist lines are skipped
+  (the runner sees them unset = the code's `os.environ.get(..., "0")` default).
+
+**Stage-1 gate (what "passes" means):**
+1. Head loads without OOM on either node.
+2. `mx.metal.get_active_memory()` increases by ~10 GB/node (replicated head,
+   per the Phase 0.2 finding) — measured post-load.
+3. Config values match: `dspark_block_size=5`, `target_layer_ids=[40,41,42]`,
+   `markov_rank=256`.
+4. Decode still works (non-speculative) — a short smoke completion returns
+   coherent text.
+5. `spec_degen_capture.py` shows no diff vs baseline (quality gate FIRST).
+6. Peak RSS < 126 GB/node, 0 swap.
+
+**If OOM here → STOP, the head does not fit replicated.** Path forward is
+either (i) a code fix to shard `model.model.dspark` in
+`DeepseekV4ShardingStrategy.shard_model` (halves per-node cost), or (ii)
+memory recovery to free ≥12 GB/node. A code fix is the cleaner long-term
+answer but requires its own audit + A/B. **Flag-flip approval for Stage 2
+should NOT be requested until Stage 1 passes.**
 
 ### Stage 2 — Full speculative (only if Stage 1 passes)
 
 ```
 EXO_SPECULATIVE=1
 EXO_DSV4_MTP=1
+EXO_DSV4_MTP_DEDICATED=0       # explicit 0 (same correction as Stage 1)
 EXO_DSV4_DSPARK=1
 EXO_DSV4_DSPARK_NATIVE=1
 EXO_DSV4_HC_COLLAPSE_KERNEL=1
 EXO_SPECULATIVE_GAMMA=2     # conservative — Eagle K=8 champion degenerated
 EXO_SPECULATIVE_TEMP=0.0    # eliminate draft randomness
 EXO_SPECULATIVE_ALPHA=1.0
-# Unset (same as Stage 1):
-#   EXO_DSV4_DSPARK_DIR, EXO_DSV4_MTP_DEDICATED, EXO_PP_DRAFT_MODEL,
-#   EXO_DSV4_POOL_GROW_STEP
+# Explicitly unset/empty (do NOT export):
+#   EXO_DSV4_DSPARK_DIR       (native, not local overlay)
+#   EXO_DSV4_DSPARK_FORCE_LOAD  (NOT needed — SPECULATIVE=1 makes _tp_consumer=True)
+#   EXO_PP_DRAFT_MODEL        (TP, not PP)
+#   EXO_DSV4_POOL_GROW_STEP   (isolate from it — delta (a))
 ```
+
+#### EXACT approved Stage-2 launch command (user runs this in tmux, only after Stage 1 passes)
+
+```bash
+tmux new-session -d -s dspark_s2 \
+  'cd ~/repos/exo && \
+   EXO_SPECULATIVE=1 \
+   EXO_DSV4_MTP=1 \
+   EXO_DSV4_MTP_DEDICATED=0 \
+   EXO_DSV4_DSPARK=1 \
+   EXO_DSV4_DSPARK_NATIVE=1 \
+   EXO_DSV4_HC_COLLAPSE_KERNEL=1 \
+   EXO_SPECULATIVE_GAMMA=2 \
+   EXO_SPECULATIVE_TEMP=0.0 \
+   EXO_SPECULATIVE_ALPHA=1.0 \
+   ./start_cluster.sh 2>&1 | tee /tmp/dspark_s2.log'
+```
+
 **Rationale for gamma=2:** the Eagle K=8 champion degenerated on system+user
 prompts. Start conservative. gamma=2 = at most 2 draft tokens/step, minimal
 runaway-loop risk, easy to validate quality. Can increase to 3-4 later if
@@ -398,26 +526,205 @@ unload command exists; a relaunch with `EXO_DSV4_DSPARK=0` is the revert.
 | Gate | Status | Approver | When | Understanding of session-loss risk |
 |---|---|---|---|---|
 | Phase 0 static audit | COMPLETE (this doc) | GLM-5.2 (PM) | 2026-08-25 | N/A — no relaunch |
-| Stage 1 head-load relaunch | PENDING | user | — | relaunch kills session |
-| Stage 2 full-spec relaunch | PENDING | user | — | relaunch kills session |
+| Post-reboot TB link + checkpoint verification | COMPLETE (this doc, §"Post-reboot verification") | GLM-5.2 (PM) | 2026-08-25 21:39 CDT | N/A — read-only SSH, no relaunch |
+| Stage 1 head-load relaunch | PENDING — exact command written (§Stage 1) | user | — | relaunch kills session |
+| Stage 2 full-spec relaunch | PENDING — exact command written (§Stage 2) | user | — | relaunch kills session |
 
 **No relaunch is requested by this audit.** All flag flips are pre-registered
-only. The cluster is currently DOWN (unrelated debugger investigating); even
-if it were up, the user must explicitly approve each relaunch.
+only. The cluster is back up post-reboot (TB link healthy, exo NOT yet
+started); the user must explicitly approve and launch each stage themselves
+in tmux (their established pattern — a separate dispatch will handle
+post-launch verification once they confirm).
+
+---
+
+## Post-reboot verification (2026-08-25 21:39 CDT, read-only)
+
+Context: the TB/RDMA wedge was diagnosed earlier (AppleThunderboltRDMA
+teardown at 20:23:22 after a runner was SIGKILLed; TB link dropped; all ports
+"No device connected"). The user rebooted both Studios. This section records
+the read-only verification that the link is fully healthy on BOTH nodes before
+any launch is approved.
+
+### TB/RDMA link — HEALTHY on both nodes
+
+**Node1** (`adams-mac-studio-m4-1.local`), uptime `4 mins` at check:
+- `ifconfig`: `inet 192.168.200.1 netmask 0xffffff00 broadcast 192.168.200.255`
+  on the TB bridge interface, `status: active`, `media: autoselect <full-duplex>`.
+- `system_profiler SPThunderboltDataType -detailLevel basic`: two ports
+  reporting `Status: Device connected` / `Link Status: 0x2` (peer = Mac16,9,
+  Device ID 0xA, Vendor ID 0x0A27 = Apple). No "No device connected" entries.
+- `pgrep -fl "python -m exo"`: `NO_EXO_PROC` (exo not started, as expected).
+- `ping -c 5 192.168.200.2` (node1 → node2 across TB): `5 packets transmitted,
+  5 packets received, 0.0% packet loss`, `round-trip min/avg/max/stddev =
+  0.667/0.849/0.996/0.113 ms`.
+
+**Node2** (`adams-mac-studio-m4-2.local`), uptime `4 mins` at check:
+- `ifconfig`: `inet 192.168.200.2 netmask 0xffffff00 broadcast 192.168.200.255`
+  on the TB bridge interface, `status: active`, `media: autoselect <full-duplex>`.
+- `system_profiler SPThunderboltDataType -detailLevel basic`: two ports
+  reporting `Status: Device connected` / `Link Status: 0x2` (peer = Mac16,9,
+  same Device/Vendor ID). No "No device connected" entries.
+- `pgrep -fl "python -m exo"`: `NO_EXO_PROC` (exo not started, as expected).
+- `ping -c 5 192.168.200.1` (node2 → node1 across TB): `5 packets transmitted,
+  5 packets received, 0.0% packet loss`, `round-trip min/avg/max/stddev =
+  0.477/0.608/0.667/0.071 ms`.
+
+**Verdict: TB/RDMA link fully healthy on both nodes, both directions, 0% loss,
+sub-ms latency, both ports "Device connected", no stale exo processes.** The
+post-reboot wedge fix is confirmed. RDMA port states will be re-verified by
+`start_cluster.sh` itself during the launch (it prints `rdma_enN(...)=PORT_ACTIVE`).
+
+### Checkpoint + DSpark weights — PRESENT on both nodes
+
+See Phase 0.7 above for the full evidence. Summary:
+- Node1 `~/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731/` = 155 GB, 48
+  shards, index hash `810e55576e2d29570d6b9a0ffaa8202f7cec1ea2`.
+- Node2 `~/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731/` = 165 GB, 48
+  shards, identical index hash. Size delta = APFS sparse accounting, not content.
+- 4705 `mtp.*` keys (mtp.0/1/2) packed inside shards 46-48 on both nodes.
+- Local overlay head `local--DeepSeek-V4-Flash-DSpark-MTP/` present on both
+  (not used by Stage 1's NATIVE path).
+
+---
+
+## Post-launch verification checklist (exact commands, run AFTER the user confirms the Stage-1 launch)
+
+These are read-only verification commands for the post-launch dispatch to run
+once the user has launched Stage 1 in tmux and confirmed the cluster is up.
+They are NOT run by this PM session. **Quality gate (spec_degen) runs FIRST,
+before any throughput measurement.**
+
+### 1. Cluster up + runners ready (wait for the launcher log)
+
+```bash
+# On the laptop (where tmux is), tail the launch log until READY:
+tail -f /tmp/dspark_s1.log
+# Wait for: "READY (2/2)", "HEALTHY! (Nodes: 2, Identities: 2)",
+#           "rdma_en3(...)=PORT_ACTIVE" / "rdma_en4(...)=PORT_ACTIVE" on both nodes.
+# Abort if: "CRITICAL ERROR: Cluster out of sync", "RunnerFailed",
+#           "placement not ready", or no READY within ~6 min.
+```
+
+### 2. Env-var propagation audit (both nodes — catch the allowlist trap)
+
+```bash
+for n in adams-mac-studio-m4-1.local adams-mac-studio-m4-2.local; do
+  echo "=== $n ==="
+  ssh adam.durham@$n "ps aux | grep 'python -m exo -v' | grep -v grep | head -1 | awk '{print \$2}' | xargs -I{} ps eww {} | grep -oE 'EXO_DSV4_DSPARK=[^ ]*|EXO_DSV4_DSPARK_NATIVE=[^ ]*|EXO_DSV4_DSPARK_FORCE_LOAD=[^ ]*|EXO_DSV4_MTP=[^ ]*|EXO_DSV4_MTP_DEDICATED=[^ ]*|EXO_SPECULATIVE=[^ ]*|EXO_DSV4_HC_COLLAPSE_KERNEL=[^ ]*|EXO_DSV4_DSPARK_DIR=[^ ]*|EXO_PP_DRAFT_MODEL=[^ ]*|EXO_DSV4_POOL_GROW_STEP=[^ ]*' | sort"
+done
+```
+**Expected on BOTH nodes** (identical — rank consistency):
+```
+EXO_DSV4_DSPARK=1
+EXO_DSV4_DSPARK_NATIVE=1
+EXO_DSV4_DSPARK_FORCE_LOAD=1
+EXO_DSV4_MTP=1
+EXO_DSV4_MTP_DEDICATED=0
+EXO_SPECULATIVE=0
+EXO_DSV4_HC_COLLAPSE_KERNEL=1
+```
+(`EXO_DSV4_DSPARK_DIR`, `EXO_PP_DRAFT_MODEL`, `EXO_DSV4_POOL_GROW_STEP` must
+NOT appear — confirming they were not forwarded.)
+
+### 3. Head-load log greps (dspark loaded, native head, no fallback)
+
+```bash
+for n in adams-mac-studio-m4-1.local adams-mac-studio-m4-2.local; do
+  echo "=== $n ==="
+  ssh adam.durham@$n "grep -E 'DSpark draft head attached|DSpark head load SKIPPED|DSv4 DSpark overlay failed|DSv4 dedicated MTP overlay failed|NATIVE checkpoint-bundled' ~/.exo/exo_log/exo.log ~/.exo/exo.log.prev 2>/dev/null | tail -5"
+done
+```
+**Expected on BOTH nodes:** `DSpark draft head attached ... (NATIVE
+checkpoint-bundled head, N tensors, 3 stages, ...)`. **Must NOT see:**
+`DSpark head load SKIPPED` (means FORCE_LOAD didn't propagate), `DSv4 DSpark
+overlay failed` (head load error → fallback), or `DSv4 dedicated MTP overlay
+failed` (only fires if MTP_DEDICATED=1 leaked through).
+
+### 4. Memory audit (RSS + footprint + metal active memory, per node)
+
+```bash
+for n in adams-mac-studio-m4-1.local adams-mac-studio-m4-2.local; do
+  echo "=== $n ==="
+  ssh adam.durham@$n "
+    PID=\$(ps aux | grep 'python -m exo -v' | grep -v grep | head -1 | awk '{print \$2}');
+    echo '--- RSS (ps) ---'; ps -o rss,vsz,pid,command -p \$PID 2>/dev/null;
+    echo '--- footprint (real unified memory, NOT RSS) ---'; footprint \$PID 2>/dev/null | head -5;
+    echo '--- system memory_pressure ---'; memory_pressure 2>/dev/null | head -3;
+    echo '--- vm_stat (swap) ---'; vm_stat | grep -iE 'swap|free|wired';
+    echo '--- top 3 RSS python procs ---'; ps aux | grep python | grep -v grep | sort -k5 -rn | head -3 | awk '{print \$5/1024/1024 \" GB RSS - \" \$11,\$12,\$13}'
+  "
+done
+```
+**Gate:** peak footprint < 126 GB/node, 0 swap (swap used = 0), `memory_pressure`
+not in critical/warn. If the runner pid can't be found, the cluster didn't come
+up — check `/tmp/dspark_s1.log` for RunnerFailed. For the truest per-process
+number on Apple Silicon, prefer `footprint <pid>` over `ps RSS` (RSS excludes
+Metal/GPU unified memory — see `exo-cluster-debugging` skill pitfall).
+
+### 5. Decode smoke (non-speculative — SPECULATIVE=0 so this is plain decode)
+
+```bash
+curl -s http://adams-mac-studio-m4-1.local:52415/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-ai/DeepSeek-V4-Flash-0731","messages":[{"role":"user","content":"Say exactly: hello world"}],"max_tokens":20,"temperature":0}' \
+  | python3 -c 'import sys,json; r=json.load(sys.stdin); print("CONTENT:", repr(r["choices"][0]["message"]["content"])); print("FINISH:", r["choices"][0]["finish_reason"]); print("PROMPT_TOK:", r["usage"]["prompt_tokens"], "COMPLETION_TOK:", r["usage"]["completion_tokens"])'
+```
+**Expected:** coherent text containing "hello world" (case-insensitive),
+`finish_reason=stop`, non-zero completion tokens. **Abort if:** empty content,
+BOS-spam (`<｜` repetition), `finish_reason=length` with garbage, or HTTP 5xx.
+
+### 6. spec_degen baseline + diff (QUALITY GATE — runs FIRST, before any t/s)
+
+```bash
+# Capture the Stage-1 (head-loaded, spec-off) baseline on the trigger set:
+cd ~/repos/exo
+uv run python bench/spec_degen_capture.py \
+  --model deepseek-ai/DeepSeek-V4-Flash-0731 \
+  --out /tmp/dspark_s1_specdegen.json \
+  --max-tokens 256 2>&1 | tee /tmp/dspark_s1_specdegen.log
+
+# If a spec-off-without-head baseline was captured pre-launch, diff against it:
+uv run python bench/spec_degen_diff.py \
+  --trace /tmp/dspark_s1_specdegen.json \
+  --ground-truth /tmp/spec_off_no_head_baseline.json \
+  --max-period 6 --min-repeats 3 2>&1 | tee /tmp/dspark_s1_specdegen_diff.log
+```
+**Gate:** zero BOS-spam, zero period-≥3 loops on ANY of the 6 system+user
+trigger prompts, `control_user_only` clean. If ANY trigger degenerates → STOP,
+do not proceed to throughput or Stage 2. (See `exo-dsv4-degeneration-sampler`
+skill for the full trigger-set semantics.)
+
+### 7. 50 clean decode steps (stability gate)
+
+```bash
+# Run a single longer generation and confirm it completes without desync/OOM:
+curl -s http://adams-mac-studio-m4-1.local:52415/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-ai/DeepSeek-V4-Flash-0731","messages":[{"role":"user","content":"Count from 1 to 50, one number per line."}],"max_tokens":300,"temperature":0}' \
+  | python3 -c 'import sys,json; r=json.load(sys.stdin); c=r["choices"][0]["message"]["content"]; print("LINES:", c.count(chr(10))+1); print("FINISH:", r["choices"][0]["finish_reason"]); print(c[:200])'
+# Then check both node logs for desync/OOM in the window:
+for n in adams-mac-studio-m4-1.local adams-mac-studio-m4-2.local; do
+  ssh adam.durham@$n "grep -iE 'desync|oom|killed|shard mismatch|tensor shape' ~/.exo/exo_log/exo.log | tail -3"
+done
+```
+**Gate:** ≥50 clean decode steps, no desync/OOM/shard-mismatch log entries.
 
 ---
 
 ## What is blocked on the live cluster
 
-- **Phase 0.1 memory audit** — measure peak RSS per node at steady-state
-  decode with loaded context. Cannot run (cluster down, model unloaded).
-- **Phase 0.7 checkpoint weight verification on node 1** — confirm
-  `mtp.0/1/2.*` safetensors present on BOTH nodes (node 0 confirmed ABSENT).
-- **Phase 1 baseline capture (Treatment A)** — 5 prompts × 256 tokens at 100K
-  and 352.6K ctx, spec-off. No relaunch needed but needs cluster up.
-- **Phase 2.2 single-node dry run** — load just the dspark head, print
-  `mx.metal.get_active_memory()` delta. Needs cluster.
-- **Stage 1 / Stage 2 relaunch + validation** — needs cluster + user approval.
+- **Phase 0.1 memory audit** — measure peak footprint per node at steady-state
+  with the head loaded. NOW RUNNABLE (cluster back up) but requires the
+  Stage-1 launch first (the head must be loaded to measure it).
+- **Phase 1 baseline capture (Treatment A, spec-off without head)** — 5
+  prompts × 256 tokens at 100K and 352.6K ctx, spec-off, NO head. Runnable
+  with a separate spec-off launch (not this doc's Stage 1). Optional: the
+  Stage-1 launch itself (head loaded, spec-off) can serve as the "head
+  loaded, spec-off" reference for the spec_degen diff.
+- **Stage 1 head-load relaunch + validation** — needs user launch approval
+  (command written above). Post-launch verification = the checklist above.
+- **Stage 2 full-spec relaunch + validation** — needs Stage 1 to pass first.
 
 ## What is verified (no cluster needed) — summary
 
@@ -427,22 +734,29 @@ if it were up, the user must explicitly approve each relaunch.
 | Head attaches BEFORE sharding | ✅ | `utils_mlx.py:866,1016`, dispatch at `:500` |
 | DSpark head sharded across TP | ❌ **REPLICATED (~10GB/node)** | `auto_parallel.py:1049-1180` no dspark ref; `deepseek_v4.py:6320` has the MoE; consult-confirmed |
 | MTP head double-load | partial — two distinct modules, sum costs | `deepseek_v4.py:6500-6507` (mtp) vs `utils_mlx.py:866` (dspark) |
-| `EXO_DSV4_MTP_DEDICATED` default unset | ✅ | `utils_mlx.py:358-362` |
+| `EXO_DSV4_MTP_DEDICATED` launch-path default | ⚠️ **defaults to 1 in start_cluster.sh:468** (NOT unset) — Stage 1 must explicitly set =0 | `start_cluster.sh:468,1921`, `utils_mlx.py:361` |
 | TP consumer double-gate (SPEC + MTP) | ✅ | `utils_mlx.py:421`, `dsv4_mtp.py:370-371` |
 | No PP fallthrough in TP mode | ✅ | `utils_mlx.py:422-426` requires PipelineShardMetadata |
-| Head-load gate single var | ✅ | `utils_mlx.py:418` (FORCE_LOAD is measurement override, not 2nd key) |
+| Head-load gate single var + FORCE_LOAD override | ✅ | `utils_mlx.py:418,420,427` (FORCE_LOAD bypasses consumer gate; draft cycle gated separately at `batch_generate.py:813,822`) |
 | `spec_degen_capture.py` intact + triggers | ✅ | `bench/spec_degen_capture.py:37-89`, `--help` runs |
 | Config dspark params correct | ✅ | `config.json`: block_size=5, target=[40,41,42], markov=256 |
-| Native head weights on disk | ❌ **ABSENT (blocker)** | HF cache 6.1MB, no safetensors |
+| Native head weights on disk | ✅ **PRESENT (blocker resolved)** | both nodes 48 shards, 4705 mtp.* keys in index, hash `810e5557...` identical |
+| Post-reboot TB link (node1) | ✅ HEALTHY | `192.168.200.1` active, 2 ports "Device connected", ping node2 0% loss 0.85ms avg, no exo proc |
+| Post-reboot TB link (node2) | ✅ HEALTHY | `192.168.200.2` active, 2 ports "Device connected", ping node1 0% loss 0.61ms avg, no exo proc |
+| Checkpoint consistency across nodes | ✅ identical | same 57 files, 48 shard names, index.json SHA-1 `810e5557...` on both; 155G/165G = APFS sparse accounting |
+| Stage-1 launch command env-forwarding | ✅ verified | each inline var maps to a `start_cluster.sh` EXO_ENV allowlist line (cited per-var above) |
 
 ---
 
 ## Next approval-gate status
 
-**No approval requested.** This audit completes all static-work items. The
-next step that needs the user is: (1) cluster back up (debugger's job), (2)
-verify `mtp.0/1/2.*` weights present on both nodes, (3) Phase 0.1 memory
-audit, (4) if memory passes, explicit approval for Stage 1 head-load
-relaunch. The REPLICATED-head finding may prompt the user to instead
+**No relaunch is requested by this audit.** All static-work + read-only
+verification items are complete. The cluster is back up, TB link healthy,
+weights present on both nodes, and the exact Stage-1 launch command is written
+above. **What I'm waiting on:** the user to explicitly approve and run the
+Stage-1 `tmux new-session -d -s dspark_s1 ...` command themselves (their
+established pattern — a relaunch kills this session). A separate post-launch
+dispatch will run the verification checklist above once the user confirms the
+cluster is up. The REPLICATED-head finding may prompt the user to instead
 prioritize a sharding code fix before any flag flip — that decision is the
 user's, not this audit's.
