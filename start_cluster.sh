@@ -311,6 +311,12 @@ fi
 # Default OFF so production keeps the validated rowseq path; the gates +
 # sanity A/B must PASS before this becomes a candidate default.
 : "${EXO_DSV4_VERIFY_BATCH:=0}"
+# EXO_DSV4_VERIFY_BATCH_MIN_CTX (default 8192, 2026-08-27 depth gate): the
+# verify-batch path only activates when ctx length >= this threshold. Below
+# it rowseq runs unchanged (byte-identity at short ctx). At/above it the
+# batched path activates — the base decode is nondeterministic at depth so
+# the batched path's small drift is acceptable (G0'' bar, not bitwise).
+: "${EXO_DSV4_VERIFY_BATCH_MIN_CTX:=8192}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
@@ -2011,6 +2017,8 @@ for NODE in "${NODES[@]}"; do
     # exported explicitly when set — a silently-dropped flag has burned us
     # before (the env allowlist gate drops anything not listed here).
     [ -n "${EXO_DSV4_VERIFY_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH=$EXO_DSV4_VERIFY_BATCH"
+    # Depth gate: the ctx threshold below which verify-batch stays OFF.
+    [ -n "${EXO_DSV4_VERIFY_BATCH_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH_MIN_CTX=$EXO_DSV4_VERIFY_BATCH_MIN_CTX"
     # min_p tail-clip for the temp>0 MTP correction/bonus sampling (default 0.05
     # in code = the DSv4 card value; set 0 to disable for A/B). Stops MTP
     # committing extreme-tail tokens that seed structured-output degeneration.
