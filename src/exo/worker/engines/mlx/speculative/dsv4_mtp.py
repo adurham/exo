@@ -402,6 +402,58 @@ _ACCEPT_LOGPROBS = os.environ.get("EXO_DSV4_MTP_ACCEPT_LOGPROBS", "0") == "1"
 # read once at import; toggling requires a runner restart.
 _BOOKKEEP_FAST = os.environ.get("EXO_DSV4_BOOKKEEP_FAST", "0") == "1"
 
+# EXO_DSV4_DRAFT_EPILOGUE (default OFF, 2026-08-27): draft-epilogue fusion
+# for the DSpark TP path — move the next cycle's draft forward off the
+# critical path by computing it in the CURRENT cycle's epilogue (after
+# the DSpark ctx feed + bonus token are known) rather than at the start
+# of the NEXT cycle. Mirrors the PP path's existing implementation
+# (``pp_speculation.py`` ~line 2952: after ``append_ctx``, call
+# ``_dspark.draft(bonus_token, ...)`` and stash the result for the next
+# cycle to consume).
+#
+# WHAT SHIPS. In ``_speculative_next`` (single-uid DSpark branch only;
+# the MTP-chain and the BS>1 batched path are untouched):
+#   * At cycle START: if a pre-computed draft for this uid is cached and
+#     valid (same gamma, not invalidated), consume it and skip the
+#     ``_dspark.draft()`` call — the ~10.8 ms draft forward drops off
+#     the per-cycle critical path (it overlapped with the prior cycle's
+#     accept/rollback/bookkeeping tail instead of serializing before
+#     the next verify).
+#   * In the EPILOGUE (after ``append_ctx`` at the ctx-feed step AND
+#     after ``bonus_val`` is finalized): run ``_dspark.draft(bonus_val,
+#     ...)`` for the NEXT cycle, materialize via ``mx.eval``, trim the
+#     draft caches by the drafted width, and stash
+#     ``(draft_ids, draft_probs, corrected, gamma)`` keyed by uid.
+#   * First cycle (no cached draft) and any invalidation (gamma change,
+#     tie-reverify firing while both env flags are on) fall back to the
+#     inline ``draft()`` call at cycle start — zero behavior change.
+#
+# CORRECTNESS. The DSpark draft (``DeepseekV4DSparkModule.draft``) depends
+# on: (1) the anchor token ``y`` = the previous cycle's ``bonus_val``
+# (known after the accept step, finalized before the epilogue), (2) the
+# DSpark ctx-KV caches (``_dspark_caches``) populated by ``append_ctx``
+# (runs immediately before the epilogue draft), (3) the block forward +
+# sequential Markov loop — fully self-contained within one ``draft()``
+# call; NO state persists across cycles except ``_dspark_caches``. The
+# draft does NOT read ``_mtp_pre_norm`` (that's the MTP-chain path only)
+# or the target's prompt-cache. So the epilogue draft is independent of
+# the rollback (step 5, trims target KV only), the _mtp_pre_norm update
+# (step 7), and the bonus staging (step 8) — all run after the epilogue
+# without affecting the pre-computed draft.
+#
+# TIE-REVERIFY HAZARD. ``EXO_DSV4_MTP_TIE_REVERIFY`` (default OFF,
+# RETIRED FROM PROD 2026-07-10) can mutate ``bonus_val`` AFTER the
+# epilogue via a clean re-forward. A pre-computed draft anchored on the
+# pre-reverify ``bonus_val`` would then be wrong. Guard: when both
+# flags are ON, the epilogue draft is computed with the pre-reverify
+# bonus, and if tie-reverify fires (``_tie_reverify == 1``) the cached
+# draft is invalidated so the next cycle recomputes from scratch. In
+# production (tie-reverify OFF) this branch is dead.
+#
+# All no-ops when ``EXO_DSV4_DRAFT_EPILOGUE != "1"``. Read once at
+# import; toggling requires a runner restart.
+_DRAFT_EPILOGUE = os.environ.get("EXO_DSV4_DRAFT_EPILOGUE", "0") == "1"
+
 # REGIME-B DOUBLE-ROLLBACK FIX (2026-07-10, default OFF until the
 # byte-equality gate + battery pass). In the pool-flush rollback path
 # (regime b), the code restore_meta()s every SNAPSHOTTED pool to its
@@ -1563,6 +1615,20 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         self._spec_total_accepted: int = 0
         self._spec_accept_hist: list[int] = [0] * (self.gamma + 1)
         self._cached_sharding_group: Optional[mx.distributed.Group] = None
+        # EXO_DSV4_DRAFT_EPILOGUE: per-uid cache of the NEXT cycle's
+        # pre-computed DSpark draft. Populated by the epilogue (after
+        # append_ctx + bonus_val) and consumed at the next cycle's
+        # start. Value is a tuple ``(draft_ids, draft_probs, corrected,
+        # conf, gamma, anchor_tok)`` where draft_ids is a list[mx.array]
+        # of length gamma, draft_probs is the matching list, corrected is
+        # the (B, gamma, V) logits tensor, conf is the (B, gamma)
+        # confidence tensor, and anchor_tok is the bonus token the draft
+        # was conditioned on (for invalidation when tie-reverify changes
+        # it). Empty dict / missing key = no cached draft → inline
+        # draft() at cycle start (zero behavior change).
+        self._dspark_next_draft: dict[
+            int, tuple[list[mx.array], list[Any], Any, Any, int, int]
+        ] = {}
         self._jaccl_spec_handle: Optional[BinaryIO] = None
         self._mtp_drift_handle: Optional[BinaryIO] = None
         self._mtp_trace_handle: Optional[BinaryIO] = None
@@ -1777,6 +1843,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if hasattr(self.mtp, "drop_uid"):
             self.mtp.drop_uid(uid)
         self._recent_tokens.pop(uid, None)
+        # EXO_DSV4_DRAFT_EPILOGUE: drop any pre-computed next draft for
+        # the finished uid so it doesn't leak into a recycled uid's
+        # first cycle (the cached draft was anchored on this stream's
+        # last bonus token, which is stale for a new stream).
+        self._dspark_next_draft.pop(uid, None)
         super()._filter_finished_uid(uid)
 
     def _mtp_trace_log(self, event: str, data: dict[str, Any]) -> None:
@@ -3850,6 +3921,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # their caches by the SAME width afterwards"). Default (env unset)
         # stays block_size — zero behavior change for existing configs.
         _dspark = getattr(getattr(self.model, "model", None), "dspark", None)
+
+        # Cross-rank draft sync sample fn: the sharded MoE all_sum makes
+        # the block forward rank-identical, but temp>0 sampling uses
+        # per-rank RNG and even temp=0 keeps the chained path's broadcast
+        # discipline. Defined here (before the ``if _dspark is not None``
+        # block) so BOTH the inline draft AND the EXO_DSV4_DRAFT_EPILOGUE
+        # epilogue draft (which runs in a separate ``if _dspark is not
+        # None`` block after the verify/accept) can pass it to
+        # ``_dspark.draft(..., sample_fn=...)``. Closure-captures temp /
+        # sync_drafts / coord_group, all bound above.
+        def _dspark_sample(step_logits: mx.array, _k: int) -> mx.array:
+            if temp > 0:
+                t = mx.random.categorical(step_logits / max(temp, 1e-6))
+            else:
+                t = mx.argmax(step_logits, axis=-1)
+            if sync_drafts:
+                t = broadcast_from_canonical(
+                    t.astype(mx.int32), coord_group
+                )
+            return t
+
         if _dspark is not None:
             gamma = _dspark.block_size
             _env_gamma = os.environ.get("EXO_SPECULATIVE_GAMMA", "")
@@ -3864,38 +3956,53 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 self._dspark_caches = _dspark.make_cache()
             _dsc = self._dspark_caches
 
-            # Cross-rank draft sync: the sharded MoE all_sum makes the block
-            # forward rank-identical, but temp>0 sampling uses per-rank RNG
-            # and even temp=0 keeps the chained path's broadcast discipline.
-            def _dspark_sample(step_logits: mx.array, _k: int) -> mx.array:
-                if temp > 0:
-                    t = mx.random.categorical(step_logits / max(temp, 1e-6))
-                else:
-                    t = mx.argmax(step_logits, axis=-1)
-                if sync_drafts:
-                    t = broadcast_from_canonical(
-                        t.astype(mx.int32), coord_group
-                    )
-                return t
-
-            _toks, _corrected, _dspark_conf = _dspark.draft(
-                y.reshape(1),
-                self.model.model.embed_tokens,
-                self.model.lm_head,
-                _dsc,
-                temperature=temp,
-                sample_fn=_dspark_sample,
-                width=gamma,
-            )
-            # Block KV must not persist as draft context; committed rows'
-            # ctx is appended after acceptance (post-verify capture).
-            # Trim by gamma (NOT block_size): draft() with width=gamma wrote
-            # exactly `gamma` physical KV positions per stage, so trimming by
-            # block_size would over-trim into the next cycle's frames. This
-            # matches the draft() docstring contract: "Callers MUST trim
-            # their caches by the SAME width afterwards (not block_size)."
-            for _c in _dsc:
-                _c.trim(gamma)
+            # EXO_DSV4_DRAFT_EPILOGUE consume path: if the PREVIOUS cycle's
+            # epilogue pre-computed this cycle's draft (keyed by uid, with
+            # a matching gamma), consume it and skip the ~10.8 ms
+            # ``_dspark.draft()`` forward on the critical path. The cached
+            # draft was conditioned on the previous cycle's bonus_val
+            # (this cycle's anchor ``y``) and on the ctx-KV that
+            # ``append_ctx`` had just pushed — exactly what the inline
+            # ``draft()`` call below would use. ``y_val`` is this cycle's
+            # anchor; the cache's ``anchor_tok`` must equal it (the
+            # epilogue stashed ``bonus_val`` which becomes this cycle's
+            # ``y`` via ``gen_batch._next_tokens`` at step 9). If they
+            # ever disagree (e.g. tie-reverify changed the committed
+            # bonus after the epilogue cached the draft), drop the cache
+            # and recompute inline — correctness over speed.
+            _cached = self._dspark_next_draft.pop(uid, None) if _DRAFT_EPILOGUE else None
+            _consumed_epilogue = False
+            if (
+                _cached is not None
+                and _cached[4] == gamma
+                and _cached[5] == y_val
+            ):
+                # Unpack the cached draft tensors; the confidence prune
+                # below + the draft_ids/draft_probs construction after it
+                # consume these exactly as the inline path would.
+                _toks = mx.stack(_cached[0], axis=1)
+                _corrected = _cached[2]
+                _dspark_conf = _cached[3]
+                _consumed_epilogue = True
+            else:
+                _toks, _corrected, _dspark_conf = _dspark.draft(
+                    y.reshape(1),
+                    self.model.model.embed_tokens,
+                    self.model.lm_head,
+                    _dsc,
+                    temperature=temp,
+                    sample_fn=_dspark_sample,
+                    width=gamma,
+                )
+                # Block KV must not persist as draft context; committed rows'
+                # ctx is appended after acceptance (post-verify capture).
+                # Trim by gamma (NOT block_size): draft() with width=gamma wrote
+                # exactly `gamma` physical KV positions per stage, so trimming by
+                # block_size would over-trim into the next cycle's frames. This
+                # matches the draft() docstring contract: "Callers MUST trim
+                # their caches by the SAME width afterwards (not block_size)."
+                for _c in _dsc:
+                    _c.trim(gamma)
 
             # Confidence-scheduled verification (paper §3.2): prune the
             # block to the leading prefix whose per-position survival
@@ -4524,6 +4631,54 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _ctx_cat[:, : n_accepted + 1], self._dspark_caches
                 )
 
+            # EXO_DSV4_DRAFT_EPILOGUE: pre-compute the NEXT cycle's draft
+            # here in the current cycle's epilogue, so the next cycle's
+            # ``_speculative_next`` consumes it without paying the ~10.8 ms
+            # ``_dspark.draft()`` forward on its critical path. Mirrors the
+            # PP path (pp_speculation.py ~line 2952). The draft is
+            # conditioned on: (1) ``bonus_val`` (next cycle's anchor ``y``,
+            # finalized above), (2) ``_dspark_caches`` (ctx-KV just
+            # populated by ``append_ctx``). It is independent of the
+            # rollback / tie-reverify / _mtp_pre_norm update / bonus
+            # staging below — all operate on the TARGET's caches or
+            # bookkeeping, not the DSpark draft caches. The block KV
+            # written by ``draft()`` is trimmed back out immediately
+            # (same contract as the inline path). The result is stashed
+            # keyed by uid for the next cycle to consume; the anchor_tok
+            # field lets the consumer invalidate if tie-reverify (OFF in
+            # prod) changes the committed bonus after this point.
+            if _DRAFT_EPILOGUE:
+                _ep_toks, _ep_corrected, _ep_conf = _dspark.draft(
+                    mx.array([bonus_val]),
+                    self.model.model.embed_tokens,
+                    self.model.lm_head,
+                    self._dspark_caches,
+                    temperature=temp,
+                    sample_fn=_dspark_sample,
+                    width=gamma,
+                )
+                mx.eval(_ep_toks)
+                # Trim the block KV this draft() wrote, exactly like the
+                # inline path — block KV must not persist as draft
+                # context; only the ctx-KV from append_ctx persists.
+                for _c in self._dspark_caches:
+                    _c.trim(gamma)
+                _ep_draft_ids = [_ep_toks[:, k] for k in range(gamma)]
+                _ep_draft_probs = [
+                    mx.softmax(_ep_corrected[:, k, :] / max(temp, 1e-6), axis=-1)
+                    if temp > 0
+                    else mx.softmax(_ep_corrected[:, k, :], axis=-1)
+                    for k in range(gamma)
+                ]
+                self._dspark_next_draft[uid] = (
+                    _ep_draft_ids,
+                    _ep_draft_probs,
+                    _ep_corrected,
+                    _ep_conf,
+                    gamma,
+                    int(bonus_val),
+                )
+
         # ── VERIFY AUDIT (env-gated, temp=0 only) ────────────────────────
         # Diagnostic for the MTP losslessness break: the linear verify forward
         # is supposed to be bit-equivalent to a clean greedy forward, so every
@@ -5028,6 +5183,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 except Exception as _trv_err:
                     logger.warning(f"tie-reverify log failed: {_trv_err}")
             bonus_val = _trv_pick
+            # EXO_DSV4_DRAFT_EPILOGUE tie-reverify invalidation: the
+            # epilogue (above) pre-computed the next cycle's draft anchored
+            # on the PRE-reverify bonus_val. tie-reverify just changed
+            # bonus_val, so that cached draft is now conditioned on the
+            # wrong anchor token. Drop it so the next cycle recomputes
+            # from scratch (correctness over speed). In production
+            # tie-reverify is OFF (EXO_DSV4_MTP_TIE_REVERIFY defaults 0,
+            # retired 2026-07-10), so this branch is dead by default.
+            if _DRAFT_EPILOGUE:
+                self._dspark_next_draft.pop(uid, None)
 
         # ── REFERENCE-FORWARD REFCHECK (env-gated, temp=0) ───────────────
         # ⚠ JUDGE BIAS (2026-07-10): the trim(1)+refeed below is only sound

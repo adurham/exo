@@ -1234,6 +1234,35 @@ wall=790s agg=11.7, iter3 wall=737s agg=34.6 — same code, wildly
 different outcome depending on whether the rendezvous window caught the
 race).
 
+**DSpark draft-epilogue fusion (WIN — code shipped, cluster A/B deferred,
+2026-08-27)** — `docs/dspark-draft-epilogue-fusion-2026-08-27.md`,
+env-gated `EXO_DSV4_DRAFT_EPILOGUE=1` (default OFF). Moves the DSpark
+draft forward (~10.8 ms `_dspark.draft()` block-forward + Markov loop)
+off the per-cycle critical path by computing the NEXT cycle's draft in
+the CURRENT cycle's epilogue (after `append_ctx` + bonus token), so the
+next cycle consumes it without serializing before the verify. Mirrors
+the PP path's existing implementation (`pp_speculation.py` ~line 2952).
+Scoping verdict: the DSpark draft depends only on the anchor token
+(prev cycle's `bonus_val`) + the ctx-KV caches (populated by
+`append_ctx`) — NOT on `_mtp_pre_norm` or the target's prompt-cache —
+so the **entire** next draft is computable in the epilogue (full fusion,
+no partial-fusion needed). The Markov loop is sequential WITHIN one
+`draft()` call but no state persists across cycles except `_dspark_caches`.
+Tie-reverify hazard (can mutate `bonus_val` after the epilogue) guarded
+by invalidation; dead code in prod (tie-reverify OFF/retired). Expected:
+cycle 73.7→~62.9 ms, C_s 2.14→~2.51, 36.6→~42.5 tok/s (+16% theoretical;
+real win depends on the epilogue-tail overlap fraction on Metal).
+**Cluster A/B deferred** — the 352.6K decode protocol was running during
+implementation (NO CLUSTER TOUCH). Gates: ruff 20→20 (zero new),
+basedpyright 734 (zero new error types — only pre-existing
+`reportAny`/`reportUnknownMemberType` from the untyped `_dspark.draft()`
+pattern), import clean, scoped pytest pass (the one
+`test_pp_speculation_cache_snapshot` failure is pre-existing — stale
+test vs 5-tuple `PoolingCache.state`, confirmed against clean HEAD).
+**Lesson: the PP path was the reference implementation — when a fork
+has two decode paths (PP + TP), the optimization that landed on one is
+the proven design for the other; port the pattern, don't redesign.**
+
 ### 5.3 Attempts that did NOT beat linear/baseline decode
 
 **Token-tree drafting (INCONCLUSIVE→NEGATIVE across a multi-week arc,
