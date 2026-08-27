@@ -4451,3 +4451,45 @@ nodes). Manual per-node screen pattern: SIGTERM old runners → per-node
 install --no-deps --force-reinstall ./mlx-lm'` (copy install) →
 `grep -c EXO_DSV4_VERIFY_BATCH` = 8 verify → scp launch file →
 `screen -dmS exorun_specoff bash -c 'bash /tmp/specoff_launch.sh'`.
+
+---
+
+## 2026-08-27 — DSPARK MTP PROMOTED: Depth-gated batched verify (24-run verdict, +36.7%)
+
+### The result that ships
+| metric | batched-ON | spec-OFF | delta |
+|---|---:|---:|---:|
+| median fixed-window tok/s @100K | **36.63** | 27.15 | **+36.71%** |
+| 95% bootstrap CI (10K resamples) | | | **[+28.26%, +51.02%]** |
+| pairs where ON > OFF | | | **12/12** |
+| weakest / strongest pair | | | +14.17% / +56.17% |
+
+Pre-registered PROMOTE bar: median >= +50% of wall-model prediction at C_s=2.14 (+13%) AND lower CI > 0. Cleared on both counts.
+
+### Full 24-run table (fixed-window 256-tok tok/s, 100K ctx, temp=0, golden_v1_probe)
+| pair | ON | OFF | delta% |
+|---|---:|---:|---:|
+| 0 | 41.93 | 27.12 | +54.60 |
+| 1 | 35.75 | 26.44 | +35.19 |
+| 2 | 40.66 | 27.35 | +48.65 |
+| 3 | 36.94 | 26.72 | +38.23 |
+| 4 | 38.41 | 27.25 | +40.99 |
+| 5 | 42.41 | 27.15 | +56.17 |
+| 6 | 30.86 | 27.03 | +14.17 |
+| 7 | 36.31 | 27.24 | +33.27 |
+| 8 | 34.69 | 27.15 | +27.77 |
+| 9 | 35.77 | 27.78 | +28.76 |
+| 10 | 41.82 | 27.27 | +53.39 |
+| 11 | 32.08 | 25.27 | +26.96 |
+
+### The mechanism (why this time it's real)
+- The corrected depth-gated batched verify (EXO_DSV4_VERIFY_BATCH=1, MIN_CTX=8192) reintroduces the pre-rowseq batched M=4 forward (submodule dda9237, parent 6eba31ff1).
+- Verify: 83.76 -> 60.60ms mean (MTP-PROF n=1550), C_s 3.20 -> 2.14, acceptance 2.250 (parity with rowseq 2.118 — the snapshot hack that killed acceptance -19% is REMOVED).
+- G0'' gate PASSED: batched-vs-rowseq drift 74.7% <= base-vs-base run-to-run drift 99.3% at 100K — the batched path adds less noise than the base already has.
+- G2/G3: Tier-1 short-ctx byte-identity rides the rowseq path below the 8192 gate (untouched); soak clean.
+- 12/12 paired wins is a distribution, not a cherry-pick: this protocol pairs time-adjacent runs on the same prompt, cancelling the base's run-to-run drift (the 295-vs-977-token wobble).
+
+### Operational notes
+- Cold-start: first batched verify cycle can trip the jaccl GPU-event fence under memory pressure if a second model is resident; exo's load warmup covers kernel JIT, but avoid concurrent-resident-model placement during the first request. Warm kernels = clean (proven across 12 runs).
+- Cluster now runs the promoted config: EXO_SPECULATIVE=1 EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1 EXO_DSV4_VERIFY_BATCH=1 EXO_DSV4_VERIFY_BATCH_MIN_CTX=8192 gamma=3 temp=0 alpha=1.0 HC collapse+expand=1.
+- 352.6K-depth measurement still pending (the +36.7% is @100K); bar for deep: >= +15% median (regression risk of the batched path at max depth is the open question).
