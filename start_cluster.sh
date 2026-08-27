@@ -157,11 +157,14 @@ fi
 # has a different access pattern than MiniMax's full SDPA. Leave unset
 # globally; benchmark and override per-model when needed.
 : "${MLX_SDPA_BLOCKS:=}"
-: "${EXO_SPECULATIVE_GAMMA:=2}"
+: "${EXO_SPECULATIVE_GAMMA:=3}"
 # Per-model gamma override for the Qwen3.5-style MTP path (Qwen3.6). Its
 # dedicated head is trained with block_size=3, so it sustains a deeper draft
 # chain than DSv4's depth-1 head — default γ=3, independent of the DSv4
 # EXO_SPECULATIVE_GAMMA above.
+# NOTE (2026-08-27): DSv4 default raised 2→3 to match the promoted DSpark MTP
+# production baseline (24-run verdict @100K was measured at γ=3; see
+# docs/dspark-mtp-production-baseline-2026-08-27.md).
 : "${EXO_QWEN_SPECULATIVE_GAMMA:=3}"
 # Eagle K (MTP top-K soft-emb mixture, K=1 fast-path / K>1 mixture path).
 # Promoted to K=8 default 2026-05-24 after the no-renorm fix at
@@ -302,15 +305,18 @@ fi
 : "${EXO_DSV4_MTP_TIE_REVERIFY:=0}"
 : "${EXO_DSV4_VERIFY_ROWSEQ:=1}"
 : "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:=0}"
-# EXO_DSV4_VERIFY_BATCH (default OFF, 2026-08-26 verify-batching campaign):
-# indexer-stream-sharing. When 1, each sparse layer's Indexer snapshots the
-# compressed-KV stream once (row 0) and reuses it for rows 1..L-1 of a small-L
-# verify forward, targeting the Indexer top-k cost that dominates per-row
-# verify wall (the C_s=3.20 cliff source). Bitwise-equivalent to the rowseq
-# path via a stale-safe pool-length fallback (see deepseek_v4.py header).
-# Default OFF so production keeps the validated rowseq path; the gates +
-# sanity A/B must PASS before this becomes a candidate default.
-: "${EXO_DSV4_VERIFY_BATCH:=0}"
+# EXO_DSV4_VERIFY_BATCH (default ON, 2026-08-27 PROMOTED to production):
+# depth-gated batched verify. When 1 (and ctx >= EXO_DSV4_VERIFY_BATCH_MIN_CTX),
+# the verify forward runs the corrected batched M=4 path (the pre-rowseq
+# batched forward, reintroduced 2026-08-27) — all 4 verify rows through one
+# batched call per layer. Below the depth gate, rowseq runs unchanged
+# (byte-identity at short ctx). Rationale: the base decode is nondeterministic
+# at depth (MLX Metal dispatch drift, ~0.6-logit run-to-run), so the batched
+# path's small drift is within the base's own envelope (G0'' bar: 74.7% drift
+# <= base-vs-base 99.3%). 24-run paired verdict @100K: +36.7% median tok/s
+# (CI +28.3..+51.0), 12/12 paired wins, acceptance 2.250 parity, verify
+# 83.8->60.6ms, C_s 3.20->2.14. See docs/dspark-mtp-production-baseline-2026-08-27.md.
+: "${EXO_DSV4_VERIFY_BATCH:=1}"
 # EXO_DSV4_VERIFY_BATCH_MIN_CTX (default 8192, 2026-08-27 depth gate): the
 # verify-batch path only activates when ctx length >= this threshold. Below
 # it rowseq runs unchanged (byte-identity at short ctx). At/above it the
@@ -471,7 +477,7 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # DSpark once DSpark's bug (see EXO_SPECULATIVE comment above) is
     # fixed, so this existing separately in the first place is itself
     # legacy redundancy worth revisiting.
-    : "${EXO_DSV4_MTP:=0}"
+    : "${EXO_DSV4_MTP:=1}"
     # Use the dedicated mlx-community/DeepSeek-V4-Flash-MTP-bf16 head instead of
     # the checkpoint-bundled MTP weights. Only matters if EXO_DSV4_MTP=1
     # (see above -- default OFF alongside it 2026-07-26). Measured
@@ -480,7 +486,11 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
     # IS in use. Overlaid onto mtp[0] before sharding in
     # utils_mlx._overlay_dsv4_dedicated_mtp. Set =0 to fall back to the
     # native checkpoint-bundled MTP head instead.
-    : "${EXO_DSV4_MTP_DEDICATED:=1}"
+    # NOTE (2026-08-27): DEDICATED flipped 1→0 to match the promoted DSpark MTP
+    # production baseline — the 24-run +36.7% verdict used the NATIVE
+    # checkpoint-bundled head (EXO_DSV4_DSPARK_NATIVE=1); see
+    # docs/dspark-mtp-production-baseline-2026-08-27.md.
+    : "${EXO_DSV4_MTP_DEDICATED:=0}"
 else
     : "${EXO_SPECULATIVE:=1}"
 fi

@@ -167,3 +167,19 @@ verify path passes (the crash shows L_full=3, not the L<=MAX_L the
 None-pmask branch was gated on). This is a code fix in the submodule
 mlx-lm fork, scoped to the `EXO_DSV4_VERIFY_BATCH` path, with no change
 to the rowseq baseline.
+---
+
+## RESOLVED 2026-08-27 — SUPERSEDED BY THE CORRECTED DESIGN
+
+The indexer-stream-sharing design documented above was ABANDONED after
+measurement: it saved 8% verify time but killed acceptance -19% (stale row-0
+pool snapshots break the top-k sets for rows 1..L-1) → net -8.7% tok/s.
+
+The pmask bug fix and the depth-gate plumbing were KEPT, but the snapshot
+logic was REMOVED. The corrected design reintroduces the pre-rowseq batched
+M=4 forward (submodule dda9237, parent 6eba31ff1) as the depth-gated path
+(EXO_DSV4_VERIFY_BATCH=1, MIN_CTX=8192, rowseq below).
+
+Result: PROMOTED to production — 24-run paired verdict @100K +36.71% median
+(CI +28.26..+51.02), 12/12 wins, acceptance parity 2.250, verify
+83.8→60.6ms. See docs/dspark-mtp-production-baseline-2026-08-27.md.

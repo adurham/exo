@@ -1237,3 +1237,17 @@ Full 24-run table + statistics: `docs/dspark-verdict-measurement-2026-08-26.md`
 and `docs/PERFORMANCE_HISTORY.md` (2026-08-26 corrected-verdict entry).
 Artifacts: `/tmp/ab/protocol/summary_{on,off}.jsonl`,
 `run_{on,off}_{00..11}.json`, `stats_result.json`, `tier2_result.json`.
+---
+
+## FINAL STATUS 2026-08-27 — PROMOTED TO PRODUCTION
+
+The Stage-3/verdict bars in this document are SUPERSEDED by the corrected
+depth-gated batched verify (EXO_DSV4_VERIFY_BATCH=1, MIN_CTX=8192): 24-run
+paired protocol @100K, median +36.71% (CI +28.26..+51.02), 12/12 paired
+wins, acceptance parity, verify 83.8→60.6ms, C_s 3.20→2.14.
+
+The pre-registered protocol methodology (fixed-window 256-tok tok/s,
+paired time-adjacent runs, bootstrap CI, no-goalpost-moving) is what made
+this verdict trustworthy after the earlier +13.3% cherry-pick mirage.
+
+Production config + full record: docs/dspark-mtp-production-baseline-2026-08-27.md.

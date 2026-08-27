@@ -208,3 +208,17 @@ cd ~/repos/exo
 
 No cluster needed — runs locally with random weights at real shapes.
 Output: the 0-ulp table + the DECIDED design.
+---
+
+## RESOLUTION 2026-08-27 — what the phase-0 0-ulp table actually meant
+
+The 0-ulp table correctly killed the FULL batched design at short context
+(byte-identity requirement). But G0'' (measured 2026-08-27) showed the base
+decode itself is nondeterministic at depth (99.3% run-to-run divergence at
+100K) — so the depth-gated bar is NOT bitwise, it's "batched drift <= base
+drift", which PASSED (74.7% <= 99.3%).
+
+The "MoE expert 0-ulp PASS" row was the seed of the final design: the
+batched M=4 forward (pre-rowseq code) was reintroduced as the depth-gated
+verify path and PROMOTED (+36.7% median @100K, 12/12 paired wins).
+See docs/dspark-mtp-production-baseline-2026-08-27.md.
