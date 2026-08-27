@@ -109,7 +109,11 @@ BS>1 batched path are untouched):
    draft and the epilogue draft can pass it to `draft()`.
 4. **Epilogue draft** (line ~4639, right after `append_ctx`): compute
    `_dspark.draft(bonus_val, ...)` for the next cycle, `mx.eval` the
-   tokens, trim the block KV, stash the result keyed by uid.
+   tokens, trim the block KV, stash the result keyed by uid. Uses
+   `_gamma_pre_prune` (the FULL pre-prune width, saved before the
+   confidence-prune rebinds `gamma`) so the next cycle can apply its OWN
+   confidence prune to the cached draft — stashing at the pruned width
+   would make the next cycle's prune a no-op and silently cap acceptance.
 5. **Tie-reverify invalidation** (line ~5180): if tie-reverify fires,
    `pop` the cached draft (correctness over speed).
 6. **Cleanup** (line ~1846): `_filter_finished_uid` drops the cached draft
