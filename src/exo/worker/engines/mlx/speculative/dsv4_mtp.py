@@ -3871,6 +3871,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         gamma = self.gamma
         temp = self._request_temp.get(uid, self.temp)
         alpha = self.alpha
+        # EXO_DSV4_DRAFT_EPILOGUE: the pre-prune gamma (full block width
+        # before confidence pruning). Initialized to self.gamma here and
+        # rebound inside the DSpark branch after the env-cap; the epilogue
+        # (a separate ``if _dspark is not None`` block) reads it. Pre-bound
+        # here so the type checker sees it as always-defined on every
+        # path (both DSpark blocks run together when _dspark is not None;
+        # the epilogue is skipped otherwise, but pyright can't prove the
+        # pairing, so bind at the top).
+        _gamma_pre_prune = gamma
 
         prof = _phase_timer
         if prof is not None:
@@ -4015,6 +4024,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # rank-identical inputs (all_sum'd block hiddens + broadcast
             # tokens), so the kept-length agrees across ranks without an
             # extra broadcast.
+            #
+            # Save the PRE-prune gamma before the rebind below: the
+            # EXO_DSV4_DRAFT_EPILOGUE epilogue must draft the NEXT cycle's
+            # draft at the FULL pre-prune width (block_size or
+            # EXO_SPECULATIVE_GAMMA-capped), not the pruned width — the
+            # next cycle applies its OWN confidence prune to the cached
+            # draft. Stashing at the pruned width would make the next
+            # cycle's prune a no-op (too few positions) and silently
+            # cap acceptance.
+            _gamma_pre_prune = gamma
             _conf_tau = float(
                 os.environ.get("EXO_DSV4_DSPARK_CONF_TAU", "0.5")
             )
@@ -4648,6 +4667,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # field lets the consumer invalidate if tie-reverify (OFF in
             # prod) changes the committed bonus after this point.
             if _DRAFT_EPILOGUE:
+                # Use _gamma_pre_prune (the FULL width before this cycle's
+                # confidence prune) so the NEXT cycle can apply its OWN
+                # confidence prune to the cached draft. The next cycle's
+                # consume path validates _cached[4] == gamma against its
+                # own pre-prune gamma (block_size / env-capped), which
+                # equals _gamma_pre_prune here.
                 _ep_toks, _ep_corrected, _ep_conf = _dspark.draft(
                     mx.array([bonus_val]),
                     self.model.model.embed_tokens,
@@ -4655,27 +4680,27 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     self._dspark_caches,
                     temperature=temp,
                     sample_fn=_dspark_sample,
-                    width=gamma,
+                    width=_gamma_pre_prune,
                 )
                 mx.eval(_ep_toks)
                 # Trim the block KV this draft() wrote, exactly like the
                 # inline path — block KV must not persist as draft
                 # context; only the ctx-KV from append_ctx persists.
                 for _c in self._dspark_caches:
-                    _c.trim(gamma)
-                _ep_draft_ids = [_ep_toks[:, k] for k in range(gamma)]
+                    _c.trim(_gamma_pre_prune)
+                _ep_draft_ids = [_ep_toks[:, k] for k in range(_gamma_pre_prune)]
                 _ep_draft_probs = [
                     mx.softmax(_ep_corrected[:, k, :] / max(temp, 1e-6), axis=-1)
                     if temp > 0
                     else mx.softmax(_ep_corrected[:, k, :], axis=-1)
-                    for k in range(gamma)
+                    for k in range(_gamma_pre_prune)
                 ]
                 self._dspark_next_draft[uid] = (
                     _ep_draft_ids,
                     _ep_draft_probs,
                     _ep_corrected,
                     _ep_conf,
-                    gamma,
+                    _gamma_pre_prune,
                     int(bonus_val),
                 )
 
