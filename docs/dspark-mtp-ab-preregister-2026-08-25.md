@@ -1167,3 +1167,73 @@ bars were written against the `/bench` baseline and Stage 3 diverged.
 analysis in `docs/PERFORMANCE_HISTORY.md` Stage 3 entry. Artifacts in
 `/tmp/ab/s3_*`. Cluster is still running Stage 3 config pending the user's
 revert relaunch.
+
+---
+
+## CORRECTED VERDICT PROTOCOL (2026-08-26) — executed, REVERT confirmed
+
+> This section supersedes the Stage-2/3 bars above for the final verdict.
+> The Stage-2/3 bars were confounded by (a) the `/bench` endpoint's EOS ban
+> making length-incomparable, (b) the gamma env being silently ignored on the
+> DSpark path (fixed `433dce6c1`), and (c) prefill+startup amortizing into
+> decode tok/s. The corrected protocol fixes all three.
+
+### Corrected protocol design
+
+- **Probe**: `bench/golden_v1_probe.py` (`/v1/chat/completions`, no `/bench`
+  EOS ban) at 100K context (`--target-tokens 100000 --max-tokens 2000`,
+  temp=0 greedy). One probe at a time, ~60s cooldown.
+- **Metric**: 256-token fixed-window decode tok/s =
+  `(N−1)/(t[N−1]−t[0])` over the first 256 decoded tokens — amortizes away
+  prefill+startup, measures pure decode. Fresh process per run.
+- **Design**: 12 spec-ON + 12 spec-OFF, paired by index (time-adjacent).
+  Paired deltas = on_i − off_i. Median % delta + 95% bootstrap CI (10K
+  resamples, seed 42).
+- **Pre-registered bars**: **PROMOTE** iff median % delta ≥ +10% AND lower
+  CI ≥ +5% AND Tier-1 byte-identical AND Gate A clean. **REVERT** iff
+  median < +5% OR CI includes 0. Marginal → recommend 352.6K block (not
+  run unless asked).
+- **Steps**: (1) C_s per-cycle profile (`docs/dspark-cs-profile-2026-08-26.md`)
+  — predicts break-even; (2) Gate A audit (acceptance = strict argmax, clean);
+  (3) Tier-1 byte-identity (`docs/dspark-tier1-byte-identity-2026-08-26.md`)
+  — 2/3 (MoE-rowseq 0.023%/row residual flips a near-tie, deterministic);
+  (4) this measurement.
+
+### Result: REVERT (matches the C_s prediction)
+
+| metric | value | bar | pass? |
+|---|---|---|---|
+| median % delta (on−off) | **+1.87%** | ≥ +10% | FAIL |
+| 95% bootstrap CI | **[−0.82%, +9.45%]** | lower ≥ +5% | FAIL |
+| CI includes 0? | **YES** | no | FAIL (REVERT trigger) |
+| Tier-1 byte-identical | 2/3 | all 7 | FAIL |
+| Gate A (strict argmax) | clean | clean | PASS |
+
+Per-arm fixed-window tok/s: ON median 28.30 (IQR 27.44–29.90), OFF median
+27.49 (IQR 27.19–27.61). ON spread ~3.7× wider (spec-cycle bimodality). Run
+#02-ON (64 tokens, `finish_reason: null`) is the EOS-bypass anomaly
+(spec verify applies no logits processors → raw-argmax bonus can be EOS).
+Excluding it, median % delta is +2.14%, still ≪ +10%.
+
+**Tier 2 (natural-EOS):** ON 10 stop / 1 length / 1 null-anomaly, median
+length 374; OFF 12/12 stop, median 535. ON shorter by 161 tokens (EOS
+tendency). rep16-gram fraction ON lower (length-confounded). 1 loop flag
+each (task-structural, not degeneration).
+
+### Decision
+
+**REVERT to spec-off.** All three independent inputs agree: throughput
+(+1.87% ≪ +10%, CI straddles 0), Tier-1 (2/3, not bit-identical), and C_s
+arithmetic (break-even is the ceiling at C_s=3.20 / a≈2.26; +10% is
+impossible without verify-path batching). The arithmetic prediction from
+step 1 held exactly: a clean fixed-window measurement lands near break-even,
+not +10%.
+
+**Cluster final state: production spec-off** (screen `exorun_specoff` both
+nodes, `EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1`,
+DSpark head loaded but not drafting). Env verified via `ps eww`.
+
+Full 24-run table + statistics: `docs/dspark-verdict-measurement-2026-08-26.md`
+and `docs/PERFORMANCE_HISTORY.md` (2026-08-26 corrected-verdict entry).
+Artifacts: `/tmp/ab/protocol/summary_{on,off}.jsonl`,
+`run_{on,off}_{00..11}.json`, `stats_result.json`, `tier2_result.json`.

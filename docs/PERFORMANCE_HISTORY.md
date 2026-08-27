@@ -4316,3 +4316,60 @@ through `2026-08-26 13:05+`).
 studios, API live) — pending REVERT to spec-off per this verdict.** The PM
 session does not relaunch (SIGTERM-only rule + approval gate); the user must
 run the `dspark_revert` relaunch.
+
+## 2026-08-26 — DSpark/MTP corrected verdict protocol (24-run measurement): REVERT
+
+**Step 4 (measurement) of the corrected spec-decode verdict protocol.**
+Follows step 1 (C_s profile, `docs/dspark-cs-profile-2026-08-26.md`) and
+step 3 (Tier-1 byte-identity, `docs/dspark-tier1-byte-identity-2026-08-26.md`).
+Full writeup: `docs/dspark-verdict-measurement-2026-08-26.md`.
+
+Ran 12 spec-ON + 12 spec-OFF runs of `bench/golden_v1_probe.py` at 100K
+context (`--target-tokens 100000 --max-tokens 2000`, temp=0 greedy), one
+probe at a time, ~60s cooldown. Metric: **256-token fixed-window decode
+tok/s** — amortizes away prefill+startup so it measures pure decode.
+
+**Result (REVERT):**
+
+| metric | value | bar | pass? |
+|---|---|---|---|
+| median % delta (on−off) | +1.87% | ≥ +10% | FAIL |
+| 95% bootstrap CI (10K resamples) | [−0.82%, +9.45%] | lower ≥ +5% | FAIL |
+| CI includes 0? | YES | no | FAIL (REVERT trigger) |
+| Tier-1 byte-identical | 2/3 | all 7 | FAIL |
+| Gate A (acceptance = strict argmax) | clean | clean | PASS |
+
+Per-arm fixed-window tok/s: **ON median 28.30 (IQR 27.44–29.90, range
+21.6–32.3), OFF median 27.49 (IQR 27.19–27.61, range 27.0–28.2).** The ON
+arm has ~3.7× wider spread — the spec-decode cycle's bimodality (long
+verified chains vs early-reject cycles). Run #02-ON (64 tokens,
+`finish_reason: null`) is the EOS-bypass anomaly (the spec verify path
+applies no logits processors, so the raw-argmax bonus token can be EOS —
+same family as the Stage-2c early-stop). Excluding it, median % delta is
++2.14%, still ≪ +10%.
+
+**Tier 2 (natural-EOS):** ON 10 stop / 1 length / 1 null-anomaly, median
+length 374; OFF 12/12 stop, median 535. ON shorter by 161 tokens median
+(consistent with the EOS-emission tendency). rep16-gram fraction ON lower
+(0.019 vs 0.069) but length-confounded (shorter → fewer 16-gram windows).
+1 loop flag each (task-structural, maxrep=3 on a repetitive-corpus summary
+task — not degeneration). scipy unavailable → descriptives only.
+
+**Decision: REVERT.** All three independent inputs agree: (1) throughput
++1.87% ≪ +10%, CI straddles 0; (2) Tier-1 2/3 (MoE-rowseq 0.023%/row residual
+flips a near-tie, so spec-ON is NOT bit-identical); (3) C_s arithmetic says
+break-even is the ceiling at C_s=3.20 / a≈2.26 — +10% is impossible without
+verify-path batching (the real fix direction, per the C_s doc). The
+arithmetic prediction from step 1 held: a clean fixed-window measurement
+lands near break-even, not +10%.
+
+**Cluster final state: production spec-off** (screen `exorun_specoff` both
+nodes, `EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_HC_COLLAPSE_KERNEL=1`,
+DSpark head loaded but not drafting — the `dspark_prod`/`dspark_revert`
+pattern). Env verified via `ps eww` on both nodes. The measurement phase
+left the cluster in the production state; no further relaunch needed.
+
+Pre-reg doc updated: `docs/dspark-mtp-ab-preregister-2026-08-25.md`
+(corrected-protocol section). The corrected fixed-window protocol's bars
+(median ≥ +10%, lower CI ≥ +5%) supersede the Stage-2/3 bars for the
+final verdict.
