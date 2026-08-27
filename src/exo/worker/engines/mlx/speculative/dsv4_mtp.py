@@ -284,6 +284,20 @@ _BS_MIN_ACCEPT = os.environ.get("EXO_DSV4_BS_MIN_ACCEPT", "1") != "0"
 _warned_min_accept_off = False
 
 
+def _int_at(row: "list[int]", idx: int) -> int:
+    """Narrow an element of an ``mx.array.tolist()`` result to ``int``.
+
+    ``tolist()`` is typed ``list_or_scalar`` in the untyped mlx-lm stubs;
+    ``cast(list[int], tolist())`` narrows the outer list but basedpyright-
+    strict still flags the inner element as ``int | Unknown | list_or_scalar``
+    at every index site. This shim is the single typed accessor that hides
+    that leak (per the exo-source-development skill's accessor-shim
+    guidance): the ``int()`` re-narrows the element, and the explicit
+    ``list[int]`` parameter type routes all callers through one site.
+    """
+    return int(row[idx])
+
+
 def _warn_min_accept_off(n_streams: int) -> None:
     """One-shot loud warning: BS>1 spec with per-stream acceptance is a
     KNOWN-CORRUPT mode (batch-uniform pool rollback loses committed tokens
@@ -321,6 +335,72 @@ def _warn_min_accept_off(n_streams: int) -> None:
 # tie-break fix (EXO_DSV4_MTP_TIEBREAK_FIX, already OFF in prod): that
 # masked ties by picking lowest-id-within-eps; this removes the mismatch.
 _ACCEPT_LOGPROBS = os.environ.get("EXO_DSV4_MTP_ACCEPT_LOGPROBS", "0") == "1"
+
+# EXO_DSV4_BOOKKEEP_FAST (default OFF, 2026-08-27): fuse the three
+# post-verify bookkeeping syncs in _speculative_next_batch into fewer
+# fences to trim the ~8ms bookkeeping phase toward ~3ms. Three independent
+# sub-optimizations, all gated by this one flag (default OFF so production
+# is untouched until A/B):
+#
+#   (a) LAZY PRE_NORM EVAL: the per-uid ``mx.eval(self._mtp_pre_norm[uid])``
+#       (N synchronous fences, one per stream) is replaced with a single
+#       batched ``mx.async_eval`` of all N slices (see sub-feature (b)
+#       below for the fused implementation). The slice is a view into
+#       ``verify_pre_norm`` (a forward output, not a cache) and is
+#       consumed by the NEXT cycle's draft forward
+#       (``_draft_tokens_batched`` concatenates it into
+#       ``stacked_pre_norm``), which materializes it. The cross-rank
+#       broadcast (a collective, already a sync) keeps the committed
+#       state rank-consistent. Safe because rollback trims caches, not
+#       ``verify_pre_norm``.
+#
+#   NOTE on LAZY ROLLBACK (deferred, NOT shipped this round): the task
+#   brief listed "lazy rollback (defer KV trim until the next cycle
+#   actually needs the space)" as a candidate. Code-reading shows it is
+#   BLOCKED by a correctness dependency: the NEXT cycle's DRAFT forward
+#   (``_draft_tokens_batched``) reads the KV cache BEFORE the next verify
+#   forward. If the current cycle's rejected rows (``gamma - n_accepted``)
+#   are not trimmed before the draft runs, the draft's attention attends
+#   to rejected (uncommitted) tokens, corrupting the draft distribution
+#   and breaking acceptance. The trim cannot be deferred past the draft;
+#   it can only be deferred past the CURRENT bookkeeping into the next
+#   cycle's pre-draft, which is the same point it already runs. So lazy
+#   rollback has no safe implementation in the current DSpark cycle
+#   structure without restructuring the draft to not-read-rejected-rows
+#   (a larger change, left for a future round). Documented here so the
+#   brief's "lazy rollback" item is not re-attempted naively.
+#
+#   (b) FUSED FENCE (batched pre_norm eval): the per-uid
+#       ``mx.eval(self._mtp_pre_norm[uid])`` runs N synchronous fences (one
+#       per stream). Under FAST these are fused into a SINGLE
+#       ``mx.async_eval`` of all N slices (one fence instead of N). The
+#       slices are views into ``verify_pre_norm`` (a forward output, not a
+#       cache) and are consumed by the NEXT cycle's draft forward, which
+#       materializes them; the async_eval keeps them in the deferred graph
+#       without blocking. The correctness-critical ``_set_fence_async(False)``
+#       drain (which protects rollback buffer mutations from the deferred
+#       pool/indexer side-chain writes) is UNCHANGED — it cannot be folded
+#       into the pre_norm eval because the pre_norm chain does not cover
+#       the pool side-chains. So the fusion is N-syncs -> 1-async, not a
+#       drain elimination.
+#
+#   (c) LM-HEAD ARGMAX FUSION: ``all_next = mx.argmax(verify_logits,
+#       axis=-1)`` computes the argmax over ALL gamma+1 rows (expensive:
+#       (N, gamma+1, vocab=129K) argmax). But ``bonus_vals[n] =
+#       all_next_arr[n][acc]`` — and for ``acc < gamma`` this EQUALS
+#       ``target_tokens[n][acc]`` (already computed at :2551). The only
+#       NEW argmax needed is row ``gamma`` (the full-acceptance bonus
+#       row). FAST computes just ``mx.argmax(verify_logits[:, gamma, :])``
+#       (N, vocab) and derives ``bonus_vals`` from ``target_tokens`` for
+#       partial acceptance, from the new row-gamma argmax for full
+#       acceptance. Bitwise-identical outputs (argmax is deterministic
+#       per row; the row-slice argmax equals the corresponding slice of
+#       the full argmax). Only the all_greedy path is fused; the temp>0
+#       path samples the bonus and is left unchanged.
+#
+# All three are no-ops when ``EXO_DSV4_BOOKKEEP_FAST != "1"``. The flag is
+# read once at import; toggling requires a runner restart.
+_BOOKKEEP_FAST = os.environ.get("EXO_DSV4_BOOKKEEP_FAST", "0") == "1"
 
 # REGIME-B DOUBLE-ROLLBACK FIX (2026-07-10, default OFF until the
 # byte-equality gate + battery pass). In the pool-flush rollback path
@@ -2560,9 +2640,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # Same decision rule as the MTP-off generator: argmax over
                 # bf16-normalized logprobs (see _ACCEPT_LOGPROBS above).
                 target_tokens = mx.argmax(logprobs_all[:, :gamma, :], axis=-1)
-                all_next = mx.argmax(logprobs_all, axis=-1)  # (N, γ+1)
+                if _BOOKKEEP_FAST:
+                    # LM-HEAD ARGMAX FUSION (EXO_DSV4_BOOKKEEP_FAST): only
+                    # row gamma (the full-acceptance bonus row) is a NEW
+                    # argmax — rows 0..gamma-1 are already in target_tokens.
+                    # Bitwise-identical: argmax(logprobs_all[:, gamma, :])
+                    # == argmax(logprobs_all, axis=-1)[:, gamma] (per-row
+                    # argmax is a slice of the full argmax). See the
+                    # _BOOKKEEP_FAST gate comment for the full derivation.
+                    all_next = mx.argmax(logprobs_all[:, gamma, :], axis=-1)  # (N,)
+                else:
+                    all_next = mx.argmax(logprobs_all, axis=-1)  # (N, γ+1)
             else:
-                all_next = mx.argmax(verify_logits, axis=-1)  # (N, γ+1)
+                if _BOOKKEEP_FAST:
+                    # LM-HEAD ARGMAX FUSION: as above, only row gamma is new.
+                    all_next = mx.argmax(verify_logits[:, gamma, :], axis=-1)  # (N,)
+                else:
+                    all_next = mx.argmax(verify_logits, axis=-1)  # (N, γ+1)
             matches = mx.equal(target_tokens, draft_concat)  # (N, γ)
             mx.async_eval(matches, all_next, logprobs_all, verify_pre_norm)
             # Per-uid n_accepted = first-mismatch index.
@@ -2580,13 +2674,34 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # used for response.logprobs (informational; master picks
             # rank 0 only).
             draft_int = draft_concat.tolist()
-            all_next_arr = all_next.tolist()
+            if _BOOKKEEP_FAST:
+                # FUSED bonus derivation: all_next is (N,) = row-gamma
+                # argmax (the ONLY new row). For acc < gamma the bonus is
+                # target_tokens[n][acc] (already computed, bitwise-equal to
+                # the full-argmax row acc); for acc == gamma (full
+                # acceptance) the bonus is all_next[n] (row gamma). This
+                # avoids the (N, gamma+1, vocab) full argmax entirely,
+                # replacing it with the (N, gamma, vocab) target_tokens
+                # argmax + a single (N, vocab) row-gamma argmax.
+                _all_next_row = cast(list[int], all_next.tolist())  # (N,)
+                _all_next_full: list[list[int]] = []
+            else:
+                _all_next_row = []
+                _all_next_full = cast(
+                    list[list[int]], all_next.tolist()
+                )  # (N, γ+1)
             next_tokens_int = next_tokens_arr.reshape(N).tolist()
             bonus_vals: list[int] = []
             bonus_lps: list[Any] = []
             for n in range(N):
                 acc = n_accepted_per[n]
-                bonus_vals.append(int(all_next_arr[n][acc]))
+                if _BOOKKEEP_FAST:
+                    if acc < gamma:
+                        bonus_vals.append(_int_at(target_arr[n], acc))
+                    else:
+                        bonus_vals.append(_int_at(_all_next_row, n))
+                else:
+                    bonus_vals.append(_int_at(_all_next_full[n], acc))
                 bonus_lps.append(logprobs_all[n, acc])
 
             # Cross-rank n_accepted_per + bonus_vals broadcast —
@@ -3142,10 +3257,30 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         # 5. Update per-uid pre_norm to each stream's first-rejection
         #    position in verify_pre_norm.
-        for n, uid in enumerate(uids):
-            acc = n_accepted_per[n]
-            self._mtp_pre_norm[uid] = verify_pre_norm[n : n + 1, acc : acc + 1, :]
-            mx.eval(self._mtp_pre_norm[uid])
+        if _BOOKKEEP_FAST:
+            # LAZY + FUSED pre_norm eval (EXO_DSV4_BOOKKEEP_FAST): stage
+            # all N slices with a SINGLE mx.async_eval instead of N
+            # synchronous mx.eval fences. The slices are views into
+            # verify_pre_norm (forward output, not a cache); the next
+            # cycle's draft forward (``_draft_tokens_batched``) concatenates
+            # them into stacked_pre_norm and materializes them, and the
+            # cross-rank broadcast (a collective) keeps committed state
+            # rank-consistent. The correctness-critical _set_fence_async
+            # drain above is unchanged — it covers the pool/indexer
+            # side-chains this async_eval does NOT cover.
+            _pn_slices: list[mx.array] = []
+            for n, uid in enumerate(uids):
+                acc = n_accepted_per[n]
+                _pn = verify_pre_norm[n : n + 1, acc : acc + 1, :]
+                self._mtp_pre_norm[uid] = _pn
+                _pn_slices.append(_pn)
+            if _pn_slices:
+                mx.async_eval(*_pn_slices)
+        else:
+            for n, uid in enumerate(uids):
+                acc = n_accepted_per[n]
+                self._mtp_pre_norm[uid] = verify_pre_norm[n : n + 1, acc : acc + 1, :]
+                mx.eval(self._mtp_pre_norm[uid])
 
         # 6. Stage bonus tokens for next call.
         gen_batch._next_tokens = mx.array(bonus_vals)
