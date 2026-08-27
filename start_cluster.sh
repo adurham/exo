@@ -302,6 +302,15 @@ fi
 : "${EXO_DSV4_MTP_TIE_REVERIFY:=0}"
 : "${EXO_DSV4_VERIFY_ROWSEQ:=1}"
 : "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:=0}"
+# EXO_DSV4_VERIFY_BATCH (default OFF, 2026-08-26 verify-batching campaign):
+# indexer-stream-sharing. When 1, each sparse layer's Indexer snapshots the
+# compressed-KV stream once (row 0) and reuses it for rows 1..L-1 of a small-L
+# verify forward, targeting the Indexer top-k cost that dominates per-row
+# verify wall (the C_s=3.20 cliff source). Bitwise-equivalent to the rowseq
+# path via a stale-safe pool-length fallback (see deepseek_v4.py header).
+# Default OFF so production keeps the validated rowseq path; the gates +
+# sanity A/B must PASS before this becomes a candidate default.
+: "${EXO_DSV4_VERIFY_BATCH:=0}"
 # EXO_SPECULATIVE default is set after DSV4_ENABLED is known — see below.
 # Runner QoS pin — disabled by default. Benchmarking showed that pinning
 # all runners to user_initiated causes Metal command-queue contention at
@@ -1998,6 +2007,10 @@ for NODE in "${NODES[@]}"; do
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ=$EXO_DSV4_VERIFY_ROWSEQ"
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=$EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX"
     [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MAX_L:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MAX_L=$EXO_DSV4_VERIFY_ROWSEQ_MAX_L"
+    # Verify-path batching (indexer-stream-sharing, default OFF). Must be
+    # exported explicitly when set — a silently-dropped flag has burned us
+    # before (the env allowlist gate drops anything not listed here).
+    [ -n "${EXO_DSV4_VERIFY_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH=$EXO_DSV4_VERIFY_BATCH"
     # min_p tail-clip for the temp>0 MTP correction/bonus sampling (default 0.05
     # in code = the DSv4 card value; set 0 to disable for A/B). Stops MTP
     # committing extreme-tail tokens that seed structured-output degeneration.
