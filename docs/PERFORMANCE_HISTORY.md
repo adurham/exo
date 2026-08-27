@@ -4373,3 +4373,81 @@ Pre-reg doc updated: `docs/dspark-mtp-ab-preregister-2026-08-25.md`
 (corrected-protocol section). The corrected fixed-window protocol's bars
 (median ≥ +10%, lower CI ≥ +5%) supersede the Stage-2/3 bars for the
 final verdict.
+
+---
+
+## 2026-08-27 — Verify-path batching (EXO_DSV4_VERIFY_BATCH) G0 FAIL → REVERT
+
+**Campaign:** verify-path batching — the proposed fix to bring C_s from
+3.20 (rowseq break-even) down to ~1.3, targeting +55-80% throughput.
+Implementation: **indexer-stream-sharing** (Phase 0 design,
+`docs/verify-batch-phase0-2026-08-26.md`) — snapshot the compressed-KV
+stream once per cycle, reuse for rows 1..L-1. Gated behind
+`EXO_DSV4_VERIFY_BATCH=1` (default OFF, submodule `93afab7`).
+
+**Implementation SHAs:** super `a1ba8c27e18bed8d26a430325357851b5cf29492`,
+submodule `93afab74a27f40ec747663833407b215de653366` (both pushed, clean).
+
+**G0 (cycle-level bitwise, VERIFY_BATCH=1 vs 0, expect 0-ulp): FAIL.**
+VERIFY_BATCH=1 crashes deterministically on the first verify cycle:
+`ValueError: [broadcast_shapes] Shapes (1,1,3) and (1,1,2) cannot be
+broadcast.` in `Indexer.__call__` (`deepseek_v4.py:4008`), call chain
+`_speculative_next` (`dsv4_mtp.py:3893`) → `dsv4_speculative_forward`
+(`:1420`) → `_forward_steps` (`:6856` activates
+`_set_verify_batch_ctx`) → `Indexer` (`:4008` `mx.where(pmask, scores)`).
+4 crashes per node (8 total) on the first warmup (`"Say hi"`). The
+runner supervisor restarts the worker each time; the parent survives.
+
+**Root cause:** the Phase 0 design doc and the in-code comment
+(`deepseek_v4.py:3870-3880`) assume "the verify-time pmask is None
+(PoolingCache.make_mask returns None for L<=_POOL_VERIFY_MAX_L)". This
+is **violated**: `_dispatch_pmask` returns a non-None, 3D pmask sized
+`(1,1,L_full=3)`. The `_tail_ok` fast-path (`:3960`) requires
+`pmask.ndim == 2`, so it falls to the `else` branch (`:4007`) which
+broadcasts pmask `(1,1,3)` against per-row scores `(1,1,2)` → last-axis
+3 vs 2 mismatch → crash. The stream-sharing reuses row 0's `pooled`
+snapshot correctly, but the companion pmask handling was written for the
+None-pmask case only.
+
+**VERIFY_BATCH=0 (rowseq baseline) CLEAN:** identical env minus the 3
+verify-batch flags — 0 errors, 0 crashes, 256-token probe coherent
+(`completion_tokens=256, finish_reason=length`). Confirms the bug is
+isolated to the `EXO_DSV4_VERIFY_BATCH=1` path.
+
+**REAL C_s:** NOT OBTAINABLE — the verify-batch path crashes before
+`[MTP-PROF]` phase-timer lines emit (crash is inside the verify forward,
+before the dump). The rowseq-baseline G0-OFF run was launched without
+`MTP_PROFILE`, so no `[MTP-PROF]` lines there either. Documented
+rowseq C_s=3.20 (`docs/dspark-cs-profile-2026-08-26.md`) stands: at
+C_s=3.20 the +10% bar is unreachable (break-even a*=2.199 vs a≈2.256).
+
+**G2 / G3 / sanity A/B / 24-run: CANCELLED (moot).** The verify-batch
+path crashes before any downstream gate can execute — there is no
+functioning VERIFY_BATCH=1 to A/B test.
+
+**Verdict: REVERT.** `EXO_DSV4_VERIFY_BATCH` stays default OFF. The fix
+direction is in the Indexer pmask handling (`deepseek_v4.py:3894-4010`):
+slice pmask to the per-row band when `_VERIFY_BATCH_CTX["active"]` and
+`pmask is not None`, OR extend the `_tail_ok` fast-path to the 3D-pmask
+case the stream-sharing produces. Scoped to the mlx-lm submodule fork;
+rowseq baseline untouched.
+
+**Cluster final state: production spec-off** (screen `exorun_specoff`
+both nodes, `EXO_SPECULATIVE=0 EXO_DSV4_MTP=0 EXO_DSV4_DSPARK=1
+EXO_DSV4_DSPARK_NATIVE=1 EXO_DSV4_DSPARK_FORCE_LOAD=1`, DSpark head
+resident not drafting). Env verified via `ps eww` both nodes.
+`EXO_DSV4_VERIFY_BATCH` absent (default OFF). Warmup `"Say hello"` →
+`"Hello!"` clean.
+
+**Docs:** `docs/verify-batch-g0-fail-2026-08-27.md` (full root-cause +
+call chain + next-step direction). Phase 0 design doc
+(`docs/verify-batch-phase0-2026-08-26.md`) unchanged — its design
+decision (indexer-stream-sharing) stands; the implementation has a pmask
+bug that blocks G0.
+
+**Sync/launch method:** `start_cluster.sh` blocked (expired sudo both
+nodes). Manual per-node screen pattern: SIGTERM old runners → per-node
+`git fetch + reset --hard` (super + submodule) → `zsh -l -c 'uv pip
+install --no-deps --force-reinstall ./mlx-lm'` (copy install) →
+`grep -c EXO_DSV4_VERIFY_BATCH` = 8 verify → scp launch file →
+`screen -dmS exorun_specoff bash -c 'bash /tmp/specoff_launch.sh'`.
