@@ -4522,3 +4522,35 @@ Pre-registered PROMOTE bar: median >= +50% of wall-model prediction at C_s=2.14 
 - Cold-start: first batched verify cycle can trip the jaccl GPU-event fence under memory pressure if a second model is resident; exo's load warmup covers kernel JIT, but avoid concurrent-resident-model placement during the first request. Warm kernels = clean (proven across 12 runs).
 - Cluster now runs the promoted config: EXO_SPECULATIVE=1 EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1 EXO_DSV4_VERIFY_BATCH=1 EXO_DSV4_VERIFY_BATCH_MIN_CTX=8192 gamma=3 temp=0 alpha=1.0 HC collapse+expand=1.
 - 352.6K-depth measurement still pending (the +36.7% is @100K); bar for deep: >= +15% median (regression risk of the batched path at max depth is the open question).
+
+## 2026-08-27/28 — 352.6K deep-context gate: memory regression found, root-caused, fix shipped
+
+The pending 352.6K measurement ran (16 ON runs, golden_v1_probe, fresh
+process each, ~60s cooldown): **4/16 collapsed to ~1 tok/s** (median cycle
+gap 1.8-2.3s, every cycle stalled onset-to-end, 1.37-1.76 GB swap both
+nodes); healthy runs 16.9-31.1 tok/s at ~97 GB wired / ~600 MB free.
+Regression frame: spec-OFF @500K ran 17.26 tok/s ZERO swap on 2026-08-21.
+
+**Root cause (code-verified): the DSpark draft head (~10.13 GB quantized)
+loads REPLICATED on both nodes** — `DeepseekV4ShardingStrategy` shards
+`model.model.layers` + `mtp_blocks` but never `model.model.dspark`
+(`utils_mlx.py:866` attach; no shard-path reference). Spec-ON steady
+residency ≈ 99.4 GB/node vs spec-OFF ≈ 89.3. With a ~19-22 GB/node
+per-cycle touched working set (MoE routing dominant) and mmap-backed
+weights, crossing the ceiling → clean-page eviction → every cycle
+re-faults → bistable thrash equilibrium (matches the stochastic 4/16 rate
+and the three observed modes). Batched-verify transients (+4.7 MB/layer),
+allocator fragmentation, pool growth: all analyzed and REFUTED as drivers
+(docs/dspark-352k-*.md).
+
+**Fix `2d85ccdcb`: `EXO_DSV4_DSPARK_TP_SHARD=1`** (default OFF) — shards
+the 3 DSpark stages' MoE FFN through the same quantized shard helpers as
+the mtp blocks; ~3-3.5 GB/node recovery, ~1-3% draft-latency cost;
+detach-on-failure guard. Honest framing: collapse-eliminator candidate,
+not a full margin-restorer (attention/markov parts stay replicated).
+
+Protocol completion (stripped-OFF ×9 for the paired verdict, forced-OFF ×3
+residency probe, verbon3 ×8 fix-validation with CLEAR_CACHE_INTERVAL=64 +
+per-cycle memory profile) ran overnight; results land in
+docs/dspark-352k-memory-regression-2026-08-27.md and the production
+baseline doc's 352.6K section.
