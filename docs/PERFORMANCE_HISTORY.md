@@ -4660,3 +4660,39 @@ node logs ~/exo_verbon3.log{,.rot-*} both nodes).
 memory-regression collapse mode is eliminated at depth with the promoted
 spec-ON throughput win intact (+17.6% median vs spec-OFF at the same
 depth). Promote TP_SHARD=1 into the production spec-ON launch env.
+
+## 2026-08-28 — 352.6K correctness + harness verification of the SHIPPED stacked config: PASS (with one harness artifact found)
+
+Final verification pass on the exact production config (batched verify +
+TP_SHARD + CLEAR_CACHE=64; BOOKKEEP_FAST/DRAFT_EPILOGUE compiled-in but
+env-OFF, absence verified via ps eww; exo 75d2402dd, mlx-lm d098642):
+
+- **Tier-1 (live, stacked)**: capital_france + count_to_five byte-identical
+  to the Aug-26 spec-OFF captures; primary_colors byte-identical to the
+  known accepted spec-ON residual trajectory; 7/7 deterministic across 2
+  live captures AND across a deep-session boundary (post-soak rerun 7/7).
+- **G0''-style @352.6K, ONE frozen prompt (usage=352600, cached=0, TTFT
+  ~1000s all runs)**: spec-off S1=S2=S3 BYTE-IDENTICAL; batched B0=B1
+  BYTE-IDENTICAL across two separate cluster launches; rowseq R
+  deterministic. Arms differ from each other deterministically (B-vs-R
+  first div char 24; R-vs-S char 54) — the known bounded MoE residual
+  class, not noise. Formal envelope bar recorded FAIL-degenerate (base
+  drift = 0 makes it unfalsifiable); real bars (determinism + bounded
+  divergence + quality) PASS.
+- **HARNESS ARTIFACT (real finding): the "base nondeterministic at depth"
+  premise (99.3% base-vs-base @100K, 295-vs-977) came from fresh-nonce
+  prompts** — build_prompt() embeds a uuid4 per call; those runs never had
+  byte-identical prompts. Fixed-prompt retest @100K (EOS-banned past the
+  natural end, 979 toks): byte-identical pair. Do not cite "base is
+  nondeterministic at depth" or the G0'' 74.7%<=99.3% numbers without this
+  caveat. Throughput verdicts unaffected.
+- **Depth soak (production config)**: 4000/4000 tokens @352.6K, 30.46
+  tok/s, median gap 0.08ms, max 376ms, zero faults, swap peak 50/72MB,
+  mean_accept 2.438/3; 34/34 procedurally-verifiable factual claims in the
+  output correct (0 wrong).
+- **Shipped-verdict artifact audit**: von3 +17.57% / CI [+8.76,+27.79] /
+  0 collapses, pre-fix -17.87% gate FAIL, telemetry 97MB swap / 92.0-93.5GB
+  wired — all reproduce from raw JSONLs/CSVs to the decimal; 0 mismatches.
+- Cluster end state: verbon3 production, cold JIT auto-place + Paris smoke
+  PASS. Docs: dspark-352k-correctness-harness-verification-2026-08-28.md
+  (+ preregister + runs-table JSON). Artifacts: /tmp/ab/g0_352/.
