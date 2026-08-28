@@ -4554,3 +4554,49 @@ residency probe, verbon3 ×8 fix-validation with CLEAR_CACHE_INTERVAL=64 +
 per-cycle memory profile) ran overnight; results land in
 docs/dspark-352k-memory-regression-2026-08-27.md and the production
 baseline doc's 352.6K section.
+
+## 2026-08-28 — verbon3 launch abort root-caused: JIT placement wait aborted on transient non-memory blocker (fix `75d2402dd`)
+
+The overnight driver's phase C (verbon3 = promoted spec-ON config +
+`EXO_DSV4_DSPARK_TP_SHARD=1` + `EXO_MLX_CLEAR_CACHE_INTERVAL=64`) aborted
+at 04:01 and auto-reverted to stripped-OFF: the smoke probe got a 503 and
+the dspark shard-gate grep came back empty. **Neither had anything to do
+with the TP shard** — the model never placed at all.
+
+Timeline (node log, `exo_verbon3.log.rot-*` on m4-1): smoke request hit
+the API 6s after API-up (19s after the previous phase's SIGTERM).
+04:01:01.654 the JIT placement wait entered its 120s window on a
+memory-blocked tick ("No cycles found with sufficient memory" — post-kill
+reclaim lag, exactly what the window is for). A poll tick 2-4s later
+raised a NON-memory `JitPlacementUnavailableError`, and the wait loop
+treated any non-memory blocker as permanent → instant 503 → driver abort
+→ auto-revert. At 04:01:05.66, ~1-2s after the 503, an `/instance/previews`
+sweep dry-ran ALL FOUR RDMA placement combos successfully — the cluster
+was healthy; the blocker class had merely oscillated while gossip
+converged (memory reports, topology edges, rdma_ctl, node_network all
+stream in asynchronously after a launch).
+
+**Fix `75d2402dd`**: while the opt-in `EXO_JIT_PLACEMENT_WAIT_SECONDS`
+window is open, poll through ALL `JitPlacementUnavailableError` reasons;
+503 only at deadline (detail carries first+last blocker so oscillation is
+visible). Default 0 = upstream instant-503, unchanged. Replaced the unit
+test that encoded the buggy behavior with an oscillation regression test
+(memory→non-memory→viable), a non-memory-first-tick test, and a
+default-off parity test. 121/121 api+jit suites pass; basedpyright/ruff
+zero-delta.
+
+**Live validation of the fix (07:50 relaunch, same launch file)**: the
+identical race occurred and was survived — log shows tick 1 memory-blocked
+→ tick 3 blocker CHANGED to "MLX ring backend requires connectivity
+between neighbouring nodes" (the old code's insta-503) → placement
+succeeded 6s in: "JIT auto-placing ... (sharding=Tensor, meta=MlxJaccl,
+min_nodes=2)". Smoke probe returned "Paris"; both ranks logged
+"DSv4 DSpark draft head TP-sharded across 2 ranks (3 stages)" with no
+detach. The verbon3 8-run 352.6K phase is now genuinely running; verdict
+lands in dspark-352k-memory-regression-2026-08-27.md.
+
+Also fixed in the driver (phaseC_von3.py): the env gate now reads the
+runner env via `ps eww <pid>` (env-prefix vars never appear in
+`ps -axo command` argv — the 07:46 first relaunch attempt false-aborted on
+that before any request was sent), and the append-mode node log is rotated
+per attempt so gate greps can't see a previous launch's lines.
