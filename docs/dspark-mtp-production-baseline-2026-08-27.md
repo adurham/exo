@@ -74,9 +74,19 @@ EXO_DSV4_MTP_PROFILE=50           # per-phase timing (production-optional)
   model still resident blocking 0731). Keep the cluster single-model
   during the first request after a launch. Warm kernels: zero issues
   across 12 consecutive runs.
-- **352.6K depth: NOT YET MEASURED.** The +36.7% is @100K. The deep-context
-  bar (>= +15% median vs spec-off @352.6K) is the open question; run the
-  paired protocol at 352.6K before trusting max-depth production.
+- **352.6K depth: MEASURED 2026-08-27/28 — REGRESSION FOUND, not yet
+  promoted at depth.** 16 ON runs at 352.6K: 4 collapsed to ~1 tok/s
+  (memory-thrash equilibrium; 1.4-1.8 GB swap both nodes), healthy runs
+  16.9-31.1 tok/s. Root cause: the ~10.13 GB DSpark draft head loads
+  REPLICATED on both nodes (never TP-sharded), moving spec-ON steady
+  residency to ~99.4 GB/node vs spec-OFF's ~89.3 — thin enough at 352.6K
+  that runs stochastically tip into mmap clean-page eviction and re-fault
+  every cycle. Fix `2d85ccdcb` (`EXO_DSV4_DSPARK_TP_SHARD=1`, default
+  OFF) shards the head's MoE FFN (~3-3.5 GB/node back). Full
+  investigation, refuted hypotheses, protocol completion and the paired
+  deep verdict: `docs/dspark-352k-memory-regression-2026-08-27.md`.
+  Until the fix validates with zero collapses at depth, the batched-verify
+  promotion holds for <= 100K-class contexts only.
 
 ## Prior baselines superseded
 
