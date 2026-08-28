@@ -161,3 +161,67 @@ ds = [100*(s.median(random.choices(a,k=len(a)))-s.median(random.choices(b,k=len(
 ds.sort(); print(f"bootstrap CI [{ds[250]:+.1f} .. {ds[9750]:+.1f}] vs +15% bar")
 EOF
 ```
+
+## RESULTS (2026-08-28, protocol complete)
+
+### Gate verdict (pre-registered: 16 pre-fix ON vs stripped-OFF ×9)
+
+- ON (pre-fix, collapses included): n=16, 4 collapsed (<5 tok/s), median
+  **19.87** — sorted: 1.1, 1.3, 1.4, 1.4, 16.9, 18.6, 19.2, 19.6, 20.2,
+  20.2, 25.8, 26.4, 27.3, 28.3, 28.7, 31.1.
+- stripped-OFF: n=9, median **24.19** (22.47-24.39, zero collapses,
+  `finish=stop` all runs).
+- **Gate: −17.87% median [bootstrap 95% CI −57.5 .. +9.8] → FAIL.** The
+  unfixed config is confirmed WORSE than spec-off at 352.6K; the collapse
+  tail dominates. This is the honest pre-fix verdict the protocol was
+  designed to produce.
+
+### Residency probe (forced-OFF ×3, arm B)
+
+23.92 / 23.45 / 23.68 tok/s, zero collapses, swap stayed ≤ ~100 MB.
+Head-resident-but-inert did not collapse in 3 runs — consistent with the
+margin story (spec execution's touched working set on top of residency is
+what tips runs over), though 3 runs only bound the collapse rate loosely
+(0.75³ ≈ 42% zero-collapse-by-luck).
+
+### verbon3 candidate verdict (arm C — separate candidate, NOT the gate)
+
+8 genuine runs (2 slots voided by an unrelated-to-memory jaccl WC_ERR
+segfault at 08:52 — first in campaign, auto-recovered, watch item):
+26.29, 34.77, 28.83, 28.05, 30.52, 30.89, 27.97, 19.50 tok/s; all
+`finish=stop`.
+
+- **Collapses: 0/8** (success criterion #1 MET).
+- Median **28.44** vs stripped-OFF 24.19 = **+17.57%** (bar +15% →
+  criterion #2 MET on the point estimate; unpaired bootstrap 95% CI
+  [+8.7 .. +27.8] — the CI floor is below the bar, so the throughput
+  margin is thin; the collapse-elimination is the conclusive part).
+- Telemetry: swap peak 97 MB (pre-fix: 1.37-1.76 GB), pageouts-delta
+  ~44-49 over the ~4.7h phase; wired peak 92.0 / 93.5 GB (pre-fix
+  telemetry window: 96.8 / 95.3) — ~3-4.8 GB/node recovered, matching the
+  shard's predicted ~3-3.5 GB/node.
+- Caveat: verbon3 bundles TP_SHARD with `EXO_MLX_CLEAR_CACHE_INTERVAL=64`
+  (+ mem-profile overhead); knobs not isolated. The wired-peak drop
+  matches the shard's prediction, so the shard is the operative fix.
+
+### Promotion decision
+
+`EXO_DSV4_DSPARK_TP_SHARD=1` **promoted for spec-ON at depth** (add to the
+production spec-ON launch env alongside the batched verify). The 100K
+promotion (+36.7%) is unaffected. Spec-ON at 352.6K now runs
+collapse-free at +17.6% median; no depth gate needed.
+
+### Launch-failure post-mortem folded in
+
+The first verbon3 validation attempt (04:01) aborted before any run: the
+smoke request raced post-launch cluster-state convergence, and the JIT
+placement wait loop hard-503'd on a transient non-memory blocker
+(blocker-class oscillation). Root-caused and fixed in exo `75d2402dd`
+(wait polls through ALL JitPlacementUnavailableError reasons; first+last
+blocker in the 503 detail; regression tests replace the test that encoded
+the old behavior). The fix was then live-validated at 07:50: the same
+oscillation occurred (memory → "MLX ring backend requires connectivity"
+→ viable) and the wait survived it — placement succeeded 6s in, and the
+phase ran. A second launch-automation bug found the same morning: the env
+gate read `ps -axo command` (env prefixes never appear in argv) — fixed to
+`ps eww <pid>` in phaseC_von3.py.

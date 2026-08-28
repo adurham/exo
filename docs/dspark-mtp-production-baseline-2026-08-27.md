@@ -74,19 +74,25 @@ EXO_DSV4_MTP_PROFILE=50           # per-phase timing (production-optional)
   model still resident blocking 0731). Keep the cluster single-model
   during the first request after a launch. Warm kernels: zero issues
   across 12 consecutive runs.
-- **352.6K depth: MEASURED 2026-08-27/28 — REGRESSION FOUND, not yet
-  promoted at depth.** 16 ON runs at 352.6K: 4 collapsed to ~1 tok/s
-  (memory-thrash equilibrium; 1.4-1.8 GB swap both nodes), healthy runs
-  16.9-31.1 tok/s. Root cause: the ~10.13 GB DSpark draft head loads
-  REPLICATED on both nodes (never TP-sharded), moving spec-ON steady
-  residency to ~99.4 GB/node vs spec-OFF's ~89.3 — thin enough at 352.6K
-  that runs stochastically tip into mmap clean-page eviction and re-fault
-  every cycle. Fix `2d85ccdcb` (`EXO_DSV4_DSPARK_TP_SHARD=1`, default
-  OFF) shards the head's MoE FFN (~3-3.5 GB/node back). Full
-  investigation, refuted hypotheses, protocol completion and the paired
-  deep verdict: `docs/dspark-352k-memory-regression-2026-08-27.md`.
-  Until the fix validates with zero collapses at depth, the batched-verify
-  promotion holds for <= 100K-class contexts only.
+- **352.6K depth: VALIDATED 2026-08-28 with `EXO_DSV4_DSPARK_TP_SHARD=1`.**
+  The 2026-08-27 measurement found a memory regression: 4/16 ON runs
+  collapsed to ~1 tok/s (mmap clean-page eviction thrash; the ~10.13 GB
+  DSpark head loaded REPLICATED per node, pushing spec-ON residency to
+  ~99.4 GB/node). Fix `2d85ccdcb` (TP-shards the head's MoE FFN,
+  ~3-3.5 GB/node back) validated over 8 genuine 352.6K runs (verbon3
+  config, + `EXO_MLX_CLEAR_CACHE_INTERVAL=64`): **zero collapses**, ON
+  median 28.44 vs stripped-OFF 24.19 = **+17.6%** (bar +15%; unpaired
+  bootstrap 95% CI [+8.7%, +27.8%] — thin margin, collapse-elimination
+  conclusive). Swap peak 97 MB (was 1.4-1.8 GB); wired peak ~92-93.5 GB
+  (was ~95.3-96.8). One jaccl WC_ERR segfault voided 2 run slots
+  (auto-recovered; first ever in campaign; watch item, class documented in
+  dsv4-c2-serving-handoff-2026-07-06.md). Full record:
+  `docs/dspark-352k-memory-regression-2026-08-27.md` +
+  PERFORMANCE_HISTORY.md 2026-08-28 entries. **Production spec-ON env
+  should now include `EXO_DSV4_DSPARK_TP_SHARD=1`** (and
+  `EXO_JIT_PLACEMENT_WAIT_SECONDS=120`, which needs exo >= `75d2402dd` —
+  the placement wait previously aborted on transient non-memory blockers
+  during post-launch convergence).
 
 ## Prior baselines superseded
 
