@@ -4600,3 +4600,63 @@ runner env via `ps eww <pid>` (env-prefix vars never appear in
 `ps -axo command` argv — the 07:46 first relaunch attempt false-aborted on
 that before any request was sent), and the append-mode node log is rotated
 per attempt so gate greps can't see a previous launch's lines.
+
+## 2026-08-28 — 352.6K verbon3 validation COMPLETE: zero collapses, +17.6% median — DSpark TP shard validated at depth
+
+**8 genuine von3 runs at 352.6K (spec-ON promoted config + `EXO_DSV4_DSPARK_TP_SHARD=1`
++ `EXO_MLX_CLEAR_CACHE_INTERVAL=64`), fresh process each, ~60s cooldown,
+telemetry on both nodes:**
+
+| run | fw tok/s | n_tokens | finish |
+|---|---:|---:|---|
+| 00 | 26.29 | 384 | stop |
+| 01 | 34.77 | 1196 | stop |
+| 02 | 28.83 | 338 | stop |
+| 05 | 28.05 | 356 | stop |
+| 06 | 30.52 | 585 | stop |
+| 07 | 30.89 | 450 | stop |
+| 08 | 27.97 | 361 | stop |
+| 09 | 19.50 | 380 | stop |
+
+- **Collapses (<5 tok/s): 0/8** (the regression phase had 4/16 at ~1 tok/s).
+  Worst run 19.50 tok/s — slow tail, NOT the thrash equilibrium.
+- **ON median 28.44 vs stripped-OFF median 24.19 (n=9, same night, same
+  protocol) = +17.57%**, above the +15% deep bar. Unpaired bootstrap 95% CI
+  on the median delta: [+8.74%, +27.77%] — the point estimate clears the
+  bar; the CI lower bound does not, so the margin is thin. Honest read:
+  collapse-elimination is conclusive; the throughput win at depth is real
+  but modest.
+- **Memory ground truth (2s OS telemetry)**: swap peaked 97 MB (vs
+  1.37-1.76 GB in the regression runs), pageouts-delta ~44-49 across the
+  whole ~4.7h phase. Peak wired m4-1 92.0 GB / m4-2 93.5 GB vs 96.8/95.3
+  in the (equal-length window) regression-phase telemetry — ~3-4.8 GB/node
+  recovered, matching the ~3-3.5 GB/node the FFN shard predicts.
+- Validation is of the COMBINED verbon3 config (TP_SHARD + CLEAR_CACHE=64
+  + mem-profile overhead); the two knobs were not isolated. Given zero
+  collapses and the wired-peak drop matching the shard's predicted
+  recovery, the shard is the operative fix; CLEAR_CACHE=64 is retained as
+  belt-and-braces.
+
+**Incident during the phase (2 run slots voided, runs #3/#4):** at
+08:52:18, ~1h2m into the launch, both ranks hit `[jaccl-v2] WC_ERR
+rank=0/1 call=85230 status=4 wt=5 buff=6` mid-prefill → segfault in the
+prefill forward (deepseek_v4 attention path, NOT the dspark draft path) →
+both runners died. First WC_ERR ever in this campaign (verbon2's 126 MB /
+16-run log: zero). exo's supervisor + JIT auto-re-place recovered the
+cluster WITHOUT operator action — notably through the `75d2402dd` wait
+path (the re-place rode a fresh jaccl PD-allocation backoff). Runs #5-9
+completed cleanly after. n=1: cannot attribute to TP_SHARD vs the known
+flaky-UC RDMA class (dsv4-c2-serving-handoff-2026-07-06.md documents the
+class); no repeat in ~3.7h of post-recovery running. Watch item, not a
+blocker.
+
+**Cluster end state**: left on verbon3 config (exo `75d2402dd` + mlx-lm
+`d098642`), model idle-reaped (JIT-placed ⇒ reaper-eligible; next request
+auto-places in ~2min). Artifacts: /tmp/ab/protocol352/ (summary_von3.jsonl,
+run_von3_*.json, telemetry_*_von3.csv, phaseC_von3.log,
+node logs ~/exo_verbon3.log{,.rot-*} both nodes).
+
+**Verdict: `EXO_DSV4_DSPARK_TP_SHARD=1` is VALIDATED at 352.6K** — the
+memory-regression collapse mode is eliminated at depth with the promoted
+spec-ON throughput win intact (+17.6% median vs spec-OFF at the same
+depth). Promote TP_SHARD=1 into the production spec-ON launch env.
