@@ -126,6 +126,16 @@ attempted for TP. See §12 and §13 for prior investigation.
 >    (`_speculative_next`) is never constructed while `EXO_SPECULATIVE=0`.
 >    See the P4v2 memo §2 for the pure-waste cost breakdown.
 
+> **SUPERSEDED 2026-08-27/28 — SPECULATION IS NOW ON IN PRODUCTION.** The
+> paragraph above and its Aug-24 correction both describe pre-promotion
+> state. Depth-gated batched verify was PROMOTED 2026-08-27 (+36.71%
+> median @100K, 12/12 pairs; `EXO_SPECULATIVE=1 EXO_DSV4_MTP=1
+> EXO_DSV4_DSPARK=1 EXO_DSV4_VERIFY_BATCH=1 MIN_CTX=8192 γ=3`), and the
+> 352.6K memory regression was fixed and validated 2026-08-28
+> (`EXO_DSV4_DSPARK_TP_SHARD=1` + `EXO_MLX_CLEAR_CACHE_INTERVAL=64`,
+> +17.57% @352.6K, 0/8 collapses). Authoritative consolidated record:
+> `docs/dspark-mtp-master-history-2026-08-28.md`.
+
 At parity with an earlier-campaign 339 tok/s @ 500K prefill baseline
 (i.e. months of jaccl/transport hardening work did not regress raw
 throughput — it fixed correctness/stability, see §8).
@@ -1158,6 +1168,13 @@ Second-most-investigated area after all_sum. Long, iterative history —
 **the throughput ceiling here has proven very hard to move past ~30-35
 tok/s** despite dozens of attempts.
 
+> **UPDATE 2026-08-27: the ~30-35 tok/s ceiling framing is superseded.**
+> Depth-gated batched verify (`EXO_DSV4_VERIFY_BATCH=1 MIN_CTX=8192`)
+> measured **36.63 tok/s median @100K** (+36.71% vs spec-off, 12/12
+> paired wins) and is the production default. The ceiling statement was
+> true of the rowseq-verify era (C_s=3.20); batched verify (C_s=2.14)
+> broke it. See `docs/dspark-mtp-master-history-2026-08-28.md`.
+
 ### 5.1 Timeline of "champion" throughput claims (cautionary tale)
 
 Multiple sessions across May-June 2026 chased a "35 tok/s" target. Key
@@ -1369,6 +1386,14 @@ context depths, not just short prompts, before shipping.**
 > prevents the *generator* from ever being constructed — so FULLBLOCK never
 > executes even though its flag reads `1`. The safety property holds, but
 > by a different mechanism than this entry claims.
+
+> **UPDATE 2026-08-27/28: doubly superseded — speculation is now ON in
+> production.** Depth-gated batched verify was promoted (+36.71% @100K)
+> and the DSpark head runs live drafting at γ=3 with `TP_SHARD=1` at
+> 352.6K (+17.57%, zero collapses). The FULLBLOCK k-multiplier collapse
+> above remains a valid negative result for that verify MODE; the
+> production path avoids it (batched ≥8K, rowseq <8K). See
+> `docs/dspark-mtp-master-history-2026-08-28.md`.
 
 **DSpark native head (INCONCLUSIVE, implemented but never A/B tested,
 2026-08-03)** — `docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md`:
