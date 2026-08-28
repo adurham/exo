@@ -7,9 +7,11 @@ Covers the behavior of ``_validate_model_has_instance`` and the single-flight
   - JIT enabled, model already resident → returns immediately.
   - JIT enabled, model not downloaded → 404 (no auto-place).
   - Single-flight: concurrent first-requests trigger exactly ONE placement.
-  - EXO_JIT_PLACEMENT_WAIT_SECONDS: memory-blocked placements poll through
-    the post-kill reclaim window; non-memory blockers and the default 0
-    hard-fail immediately.
+  - EXO_JIT_PLACEMENT_WAIT_SECONDS: placements poll through ALL transient
+    JitPlacementUnavailableError blockers (memory, topology, RDMA — the
+    blocker class oscillates during post-launch state convergence; see the
+    2026-08-28 incident note on ``_choose_jit_placement_with_wait``); the
+    default 0 hard-fails immediately.
 """
 
 import anyio
@@ -242,11 +244,59 @@ async def test_placement_wait_polls_through_memory_blocker(
     assert calls[0] == 3
 
 
-async def test_placement_wait_ignores_non_memory_blockers(
+async def test_placement_wait_polls_through_non_memory_blockers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Regression test for the 2026-08-28 verbon3 launch failure.
+
+    During post-launch convergence the blocker class OSCILLATES: a
+    memory-blocked tick, then a topology/RDMA tick (memory_blocked=False),
+    then viable. The old code aborted the wait on the first non-memory tick,
+    503ing a healthy cluster (and the launch automation auto-reverted the
+    whole phase). The wait window must poll through ALL
+    JitPlacementUnavailableError reasons.
+    """
     monkeypatch.setenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", "5")
     monkeypatch.setattr(api_main, "_JIT_PLACEMENT_POLL_SECONDS", 0.01)
+    config: _PlacementConfig = (Sharding.Tensor, InstanceMeta.MlxJaccl, 2)
+    api, calls = _wait_api(
+        [
+            JitPlacementUnavailableError("no memory", memory_blocked=True),
+            JitPlacementUnavailableError("no RDMA cycles", memory_blocked=False),
+            config,
+        ]
+    )
+    result = await api._choose_jit_placement_with_wait(_card())
+    assert result == config
+    assert calls[0] == 3
+
+
+async def test_placement_wait_non_memory_first_tick_still_polls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-memory blocker on the FIRST tick must also enter the window.
+
+    Whether tick 1 lands on the memory blocker or the topology gap is a race
+    decided by gossip arrival order — both orderings must survive."""
+    monkeypatch.setenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", "5")
+    monkeypatch.setattr(api_main, "_JIT_PLACEMENT_POLL_SECONDS", 0.01)
+    config: _PlacementConfig = (Sharding.Tensor, InstanceMeta.MlxJaccl, 2)
+    api, calls = _wait_api(
+        [
+            JitPlacementUnavailableError("no RDMA cycles", memory_blocked=False),
+            config,
+        ]
+    )
+    result = await api._choose_jit_placement_with_wait(_card())
+    assert result == config
+    assert calls[0] == 2
+
+
+async def test_placement_wait_default_off_non_memory_hard_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default (wait=0) still hard-fails non-memory blockers instantly."""
+    monkeypatch.delenv("EXO_JIT_PLACEMENT_WAIT_SECONDS", raising=False)
     api, calls = _wait_api(
         [JitPlacementUnavailableError("no RDMA cycles", memory_blocked=False)]
     )

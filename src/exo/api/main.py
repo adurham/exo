@@ -1359,42 +1359,69 @@ class API:
     async def _choose_jit_placement_with_wait(
         self, model_card: ModelCard
     ) -> tuple[Sharding, InstanceMeta, int]:
-        """Choose a JIT placement, polling through transient memory blockers.
+        """Choose a JIT placement, polling through transient placement blockers.
 
-        After an exo kill, macOS takes ~a minute to reclaim the previous
-        runners' wired Metal pages, so a quick relaunch + JIT request sees
-        transiently-low ``ram_available`` and used to 503 instantly ("no
-        admissible placement"). When the ONLY blocker is memory
-        (``memory_blocked`` on ``JitPlacementUnavailableError``) and
-        EXO_JIT_PLACEMENT_WAIT_SECONDS > 0, re-evaluate placement against the
-        refreshing ``state.node_memory`` every ``_JIT_PLACEMENT_POLL_SECONDS``
-        until the window closes. Any non-memory blocker — and the wait-window
-        default of 0 — preserves the immediate hard 503.
+        After an exo (re)launch, EVERYTHING the placement dry-run consumes —
+        node memory reports, topology cycles, RDMA/rdma_ctl status,
+        node_network info — streams in asynchronously via gossip, and macOS
+        additionally takes ~a minute to reclaim a killed run's wired Metal
+        pages. A JIT request landing in that convergence window used to 503
+        instantly. When EXO_JIT_PLACEMENT_WAIT_SECONDS > 0, re-evaluate
+        placement against the refreshing state every
+        ``_JIT_PLACEMENT_POLL_SECONDS`` until the window closes; the
+        wait-window default of 0 preserves the immediate hard 503.
+
+        The poll deliberately continues through ALL
+        ``JitPlacementUnavailableError`` reasons, not just memory-blocked
+        ones (2026-08-28 incident): the blocker CLASS oscillates during
+        convergence — one tick reports "no cycles with sufficient memory"
+        (memory_blocked=True), the next reports a topology/RDMA gap
+        (memory_blocked=False), and a second later placement is fully viable.
+        Aborting on the first non-memory tick turned that oscillation into a
+        503 + launch-automation revert even though the cluster was healthy.
+        A genuinely-impossible placement on a wait-enabled cluster now burns
+        the window before its 503 — an accepted, bounded cost (model-too-big
+        already burned the window via InsufficientMemoryError anyway; only
+        exotic misconfigurations lose their fast-fail). Any exception OTHER
+        than JitPlacementUnavailableError still surfaces immediately. On
+        expiry the 503 carries the first AND last blocker seen so the
+        oscillation is visible to operators.
         """
         wait_seconds = jit_placement_wait_seconds()
         deadline = anyio.current_time() + wait_seconds
-        waiting_logged = False
+        first_blocker: str | None = None
         while True:
             try:
                 return self._choose_jit_placement(model_card)
             except JitPlacementUnavailableError as exc:
                 remaining = deadline - anyio.current_time()
-                if not exc.memory_blocked or remaining <= 0:
+                if remaining <= 0:
+                    first = first_blocker if first_blocker is not None else exc.detail
                     detail = f"Cannot JIT-load model {model_card.model_id}: {exc.detail}"
-                    if exc.memory_blocked and wait_seconds > 0:
+                    if wait_seconds > 0:
                         detail += (
                             f" (still blocked after waiting {wait_seconds:.0f}s "
-                            "for memory reclaim; if this follows an exo kill, "
-                            "node memory may be stuck — see reclaim runbook)"
+                            "for cluster state to converge; first blocker seen: "
+                            f"{first!r}. If this follows an exo kill, node "
+                            "memory may be stuck — see the memory reclaim "
+                            "runbook)"
                         )
                     raise HTTPException(status_code=503, detail=detail) from exc
-                if not waiting_logged:
-                    waiting_logged = True
+                if first_blocker is None:
+                    first_blocker = exc.detail
                     logger.info(
-                        f"JIT placement for {model_card.model_id} blocked only "
-                        f"by node memory ({exc.detail}); polling for up to "
+                        f"JIT placement for {model_card.model_id} not yet "
+                        f"admissible ({exc.detail}); polling for up to "
                         f"{wait_seconds:.0f}s (EXO_JIT_PLACEMENT_WAIT_SECONDS) "
-                        "while the OS reclaims."
+                        "while cluster state converges."
+                    )
+                elif exc.detail != first_blocker:
+                    # Blocker class changed mid-wait (the oscillation this
+                    # loop exists to survive) — log at debug for forensics.
+                    logger.debug(
+                        f"JIT placement blocker for {model_card.model_id} "
+                        f"changed during wait: now {exc.detail!r} "
+                        f"(first was {first_blocker!r})"
                     )
                 await anyio.sleep(min(_JIT_PLACEMENT_POLL_SECONDS, remaining))
 
