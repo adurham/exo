@@ -1,3 +1,4 @@
+import importlib
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
@@ -1176,6 +1177,143 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
             mx.eval(mtp)
             mx.clear_cache()
             yield ModelLoadingResponse(layers_loaded=len(layers) + j, total=total)
+
+        # DSpark draft head (env-gated, EXO_DSV4_DSPARK_TP_SHARD=1, default
+        # OFF). Attached earlier in the load flow by
+        # ``_overlay_dsv4_dspark[_native]`` in ``utils_mlx.py``: the overlay
+        # runs at ``utils_mlx.py:439-472`` (inside ``shard_and_load``), and
+        # ``tensor_auto_parallel`` — which invokes this strategy — is called
+        # at ``utils_mlx.py:500``, i.e. AFTER the overlay. So when this
+        # strategy runs, ``model.model.dspark`` (if the user opted in and
+        # the overlay succeeded on every rank) is already attached and its
+        # QuantizedLinear weights are materialized.
+        #
+        # Each DSpark stage's ``.ffn`` is a ``DeepseekV4MoE`` — the exact
+        # same class the ``layers`` and ``mtp_blocks`` loops above shard —
+        # with ``shared_experts`` (dense DeepseekV4MLP) and ``switch_mlp``
+        # (SwitchGLU) sub-modules and a ``sharding_group`` attribute
+        # consumed by ``DeepseekV4MoE.__call__`` (see
+        # ``mlx-lm/mlx_lm/models/deepseek_v4.py`` ``DeepseekV4MoE.__call__``:
+        # ``sum_gradients`` on input, ``all_sum`` on output). The mlx
+        # ``QuantizedAllToShardedLinear`` / ``QuantizedShardedToAllLinear``
+        # helpers preserve ``mode`` (``mxfp4``/``mxfp8``) via
+        # ``from_quantized_linear``, and the shard axes align with the
+        # DSpark head's actual quant group boundaries
+        # (``moe_intermediate_size=2048`` / 2 ranks = 1024; group_size 32
+        # divides evenly under both mxfp4 and mxfp8 packing).
+        #
+        # Runtime execution on both ranks: TP-mode
+        # ``DSv4MTPBatchGenerator._speculative_next`` reads
+        # ``model.model.dspark`` and calls ``.draft()`` unconditionally on
+        # every rank, so the added ``sum_gradients``/``all_sum`` collectives
+        # pair correctly.
+        #
+        # Failure policy: wrap the whole loop in try/except and, on failure,
+        # DETACH the dspark module across ranks (mirroring the load-time
+        # rank-consistency guard in ``utils_mlx.py:452-472``). Leaving a
+        # partially-sharded head attached would desync collectives on the
+        # first draft cycle — worse than falling back to the MTP-1 draft
+        # path. This never crashes model load.
+        _dspark_tp_shard = (
+            os.environ.get("EXO_DSV4_DSPARK_TP_SHARD", "0") == "1"
+        )
+        _dspark: object = (
+            getattr(model.model, "dspark", None) if _dspark_tp_shard else None
+        )
+        if _dspark is not None:
+            _fuse_gate_up = (
+                os.environ.get("EXO_DSV4_MOE_FUSED_GATE_UP", "0") == "1"
+            )
+
+            def _shard_stage(stage: object, idx: int) -> None:
+                # Local helper: attribute chains reach into mlx_lm modules
+                # that basedpyright can't see through. Cast each hop to
+                # the concrete `nn.Module`/`nn.Linear` shape via untyped
+                # ``getattr`` -> ``cast``, mirroring the strict-typing
+                # style used elsewhere in this file (see ``_shard`` /
+                # ``_all_to_sharded`` at the top). Same *runtime* attribute
+                # pattern the mtp loop above uses, but expressed so
+                # basedpyright doesn't report reportAny on every hop.
+                mx.eval(cast(nn.Module, stage).parameters())
+                ffn: nn.Module = cast(nn.Module, getattr(stage, "ffn"))  # noqa: B009
+                _shared: nn.Module = cast(
+                    nn.Module, getattr(ffn, "shared_experts")  # noqa: B009
+                )
+                _switch: nn.Module = cast(
+                    nn.Module, getattr(ffn, "switch_mlp")  # noqa: B009
+                )
+                # Assign the sharding_group used by DeepseekV4MoE.__call__
+                # for its sum_gradients/all_sum collectives.
+                setattr(ffn, "sharding_group", self.group)  # noqa: B010
+                self.all_to_sharded_linear_in_place(
+                    cast(nn.Linear, getattr(_shared, "gate_proj"))  # noqa: B009
+                )
+                self.sharded_to_all_linear_in_place(
+                    cast(nn.Linear, getattr(_shared, "down_proj"))  # noqa: B009
+                )
+                self.all_to_sharded_linear_in_place(
+                    cast(nn.Linear, getattr(_shared, "up_proj"))  # noqa: B009
+                )
+                self.all_to_sharded_linear_in_place(
+                    cast(nn.Linear, getattr(_switch, "gate_proj"))  # noqa: B009
+                )
+                self.sharded_to_all_linear_in_place(
+                    cast(nn.Linear, getattr(_switch, "down_proj"))  # noqa: B009
+                )
+                self.all_to_sharded_linear_in_place(
+                    cast(nn.Linear, getattr(_switch, "up_proj"))  # noqa: B009
+                )
+                if _fuse_gate_up:
+                    try:
+                        _install_fused_gate_up(_switch)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            f"DSv4 MoE gate+up fusion failed on DSpark "
+                            f"stage {idx}: {e}; keeping vanilla "
+                            f"3-dispatch switch_mlp."
+                        )
+                mx.eval(cast(nn.Module, stage))
+                mx.clear_cache()
+
+            try:
+                _stages_seq: list[object] = list(
+                    cast("list[object]", getattr(_dspark, "stages", []) or [])
+                )
+                _n_stages = len(_stages_seq)
+                for _si, _stage_o in enumerate(_stages_seq):
+                    _shard_stage(_stage_o, _si)
+                logger.info(
+                    f"DSv4 DSpark draft head TP-sharded across "
+                    f"{self.group.size()} ranks "
+                    f"(EXO_DSV4_DSPARK_TP_SHARD=1, {_n_stages} stages)."
+                )
+            except Exception as e:  # noqa: BLE001
+                # Sharding failed mid-loop — the head may now be partially
+                # sharded, which would desync collectives at draft time.
+                # Detach it here so the runtime falls back to the MTP-1
+                # draft path (or to no speculation, depending on flags).
+                # Mirrors the utils_mlx.py load-time rank-consistency guard.
+                logger.warning(
+                    f"DSv4 DSpark TP sharding failed ({e}); detaching "
+                    f"DSpark head — falling back to MTP-1 draft path."
+                )
+                try:
+                    _set_taps: Callable[[list[int]], None] = cast(
+                        "Callable[[list[int]], None]",
+                        importlib.import_module(
+                            "mlx_lm.models.deepseek_v4"
+                        ).set_dspark_taps,
+                    )
+                    _inner_mod: nn.Module = cast(nn.Module, model.model)
+                    if hasattr(_inner_mod, "dspark"):
+                        delattr(_inner_mod, "dspark")
+                    _set_taps([])
+                except Exception as _e:  # noqa: BLE001
+                    logger.warning(
+                        f"DSpark detach cleanup itself failed ({_e}); "
+                        f"draft state may be inconsistent — expect "
+                        f"first-cycle desync."
+                    )
 
         return model
 
