@@ -4913,3 +4913,162 @@ env-OFF, absence verified via ps eww; exo 75d2402dd, mlx-lm d098642):
   history §5 rows CLOSED for the 14K A/B and TP_SHARD/CLEAR_CACHE
   ablation items; remaining open items are unchanged (replicated-head
   residue, SPEC_STATE_RESTORE gating, jaccl WC_ERR watch).
+
+## 2026-08-29 — Phase 0: real per-kernel Metal capture of moe.switch_mlp — capture restored durably, kernel confirmed at ceiling
+
+**PM:** GLM-5.3. Repo HEAD `6a5f7fb23`. Delegated to two leaf workers;
+PM re-verified every claim (own grep of trace bundles, own byte
+arithmetic, git status on both nodes, runner PIDs). Full detail:
+`docs/p01-switch-mlp-gputrace-recapture-2026-08-29.md`.
+
+- **The lost capture is replaced — and this time it is durable AND
+  analyzed.** Real `mx.metal.start_capture()` traces captured at exact
+  production decode shape (B=1, top_k=6-of-256, per-rank inter=1024,
+  mxfp4 g=32 b=4, rotated 64-entry routing pool): `~/repos/exo/tmp/
+  p01-20260829/m4_1/moe_capture.gputrace` (m4-1, 11 GB) and the laptop
+  copy `~/repos/exo/tmp/p01-20260829/laptop_smoke/moe_capture.gputrace`
+  (11 GB). Both outside /tmp — they survive relaunch/reboot cycles.
+  Runner PID 25491 unchanged before/after; no relaunch, no env flips.
+- **Capture-enabling finding (reusable, closes the "unparseable format"
+  dead-end partially):** `mx.metal.start_capture()` fails with
+  "Capture layer is not inserted" unless `METAL_CAPTURE_ENABLED=1` is
+  set in the environment — on laptop AND on studios (works even with
+  Xcode removed from the studios). Kernel NAMES are scriptably
+  extractable from the bundle's `device-resources-*` member (grep:
+  `mxfp4_gather_qmv_fast_bfloat16_t_gs_32_b_4`,
+  `mxfp4_quantize_float_gs_32_b_4`) but per-kernel TIMINGS are not
+  stored in a scriptable format (Xcode GUI on the laptop remains the
+  only route for visual per-kernel timeline inspection).
+- **Per-stage GPU attribution (DRAM-real, rotated indices, m4-1,
+  MLX_GPU_TIME=1 bracketing):** fused_gate_up (gather_qmm) 59.08 µs =
+  531 GB/s = **97.5% of 546 GB/s spec** (31.46 MB stage bytes);
+  activation 2.93 µs; down_proj (gather_qmm) 32.67 µs = 482 GB/s =
+  **88.5% of spec** (15.73 MB). Stage sum 94.67 µs vs the retraction
+  doc's chained wall regime ~117 µs — GPU-busy sum sits below wall as
+  expected (gaps excluded), both stages land between measured real
+  streaming (424 GB/s) and spec. NOTE the byte accounting in the
+  first draft of the doc (worker) split 47.186 MB ~50/50, producing a
+  physically impossible "126%-of-peak" down_proj figure — corrected by
+  PM to the true 2:1 gate_up:down split (gate+up are TWO fused
+  matrices, down is one).
+- **A first attempt produced a tainted 131%-of-peak claim — superseded
+  and documented as such.** Worker 1's per-stage run used a FIXED
+  routing index (`idx = pool[0]`) inside its 50-iter timing windows →
+  warm-cache times (gate_up 38.7µs/down 24.2µs, "719 GB/s, 131% of
+  peak") — the exact fictitious-cache artifact class the 2026-08-22
+  retraction warns about. The repo's standing rotated-indices rule
+  caught it; the re-measurement above is DRAM-real. Worker 1 also
+  patched `BatchedSwitchGLU.fuse_weights` (bias=None handling) on the
+  laptop AND scp'd it to m4-1; worker 2 investigated, found production
+  does not call `fuse_weights()` on the runner's load path, and
+  REVERTED both trees (verified: mlx-lm submodule clean on laptop and
+  m4-1). No unreviewed edit remains on any production node.
+- **HEADROOM VERDICT: no meaningful kernel-level headroom at this op.**
+  Independent-calls wall-clock on m4-1: 100.65 µs ≈ 491 GB/s ≈ 90% of
+  spec — consistent with the corrected microbench's 74-87% band
+  (chained regime slightly lower because dependency-chain tails are
+  real). The ~30-45%-of-wall span attribution is kernel time, not
+  hidden overhead; closing the §13 line-2648 thread ("a real Instruments
+  Metal trace of the GatherQMM kernel internals") with an honest
+  negative: the kernel is at its realistic ceiling (between real
+  streaming BW and spec), no lever exists. Do not re-litigate
+  switch_mlp kernel optimization.
+
+## 2026-08-29 — Phase 1(b): inter-layer pipelining-loss at depth — leading candidate tested, NOT the residual
+
+**PM:** GLM-5.3. Full detail: `docs/p01b-multilayer-pipelining-loss-2026-08-29.md`,
+raw `tmp/p01b-20260829/p01b_results.json`. Cluster node m4-2 (rank0),
+runner PID 28581 unchanged before/after. No relaunch.
+
+- **The hypothesis, precisely:** the 2026-08-24 additivity doc's stated
+  leading candidate for the +1.67..+2.52 ms/tok unattributed on-GPU
+  busy growth was inter-layer pipelining loss that worker C's
+  single-layer × census microbench structurally cannot see.
+- **Method:** 4-layer chain of REAL production attention layers
+  ([sparse r4, compressed r128] × 2) with real cross-layer data
+  dependencies and real shared cache state (PoolingCache/RotatingKVCache
+  pre-filled at depth), 256 B=1 L_q=1 decode steps, per-step
+  mx.async_eval, depths ~500/100K/352.6K, 3 repeats each (spread
+  ≤0.014 ms). Single-layer-per-class arm re-measured on the same
+  silicon/build for apples-to-apples.
+- **Result:** multi-layer chained per-token cost at depth grows only
+  **+0.076 ms/token** (100K→352.6K, 1.845→1.921 ms) — an order of
+  magnitude below the +1.67..+2.52 residual band. The chain is
+  consistently FASTER than the summed single-layer baseline (~0.7
+  ms/token faster at every depth — cross-layer command-buffer
+  pipelining makes the chain more, not less, efficient). No growing
+  inter-layer bubble exists in this harness's frame.
+- **CAVEAT (PM verification, do not bury):** the same harness's
+  single-layer arm shows ~ZERO depth growth (2.6335→2.6173 ms
+  100K→352.6K) where worker C's 2026-08-23 measurement of the same
+  classes demanded ~+2.56 ms/tok at 43-layer census scale (~+0.24 ms
+  per 4-layer chain). Both arms of this bench under-engage
+  depth-dependent attention work (~3× too cheap at 100K). Root cause
+  not run down; plausible causes: the harness's synthetic pre-fill
+  may not reproduce the indexer's depth-dependent scan (e.g. pool
+  fill via raw state writes may skip the real accumulate_windows
+  path), or class mix/shape differences. CONSEQUENCE: the honest
+  verdict is **"no support for the leading candidate in this
+  harness's frame"**, not a clean refutation — the harness fails the
+  calibration cross-check against the historical baseline, so the
+  ~0 term is weak evidence, not proof. The residual remains OPEN.
+- **Donation/allocator pre-check (read-only telemetry):** peak bench
+  memory grew linearly with depth (1.65→1.84→2.0 GB) and stayed tiny
+  vs the runner's ~85-90 GB; no donation-failure markers; node
+  resident memory far below the 125 GB hard-abort threshold.
+  Allocator-pressure deep-dive remains a separate later phase (c),
+  untouched here by design.
+- **State of the residual after (b):** still +1.67..+2.52 ms/tok
+  unattributed. Candidates narrowed: inter-layer pipelining loss is
+  now UNLIKELY (weak evidence); MoE-at-depth interplay and
+  allocator/donation-at-85GB-regime remain live. Next test should
+  first re-calibrate against worker C's per-class numbers (or use a
+  harness validated to reproduce them) before drawing conclusions.
+
+## 2026-08-29 — Phase 1(a): all_sum arrival-skew at depth — measured INSIDE the collective, ruled out
+
+**PM:** GLM-5.3 campaign, executed by fable-5 orchestrator directly
+(serialized probes, no nested delegation). Full detail:
+`docs/p01a-allsum-arrival-skew-at-depth-2026-08-29.md`; raw traces +
+analyzer in `tmp/p01a-20260829/`.
+
+- **Method:** `JACCL_TRACE_CALLS=1 JACCL_TRACE_TIMING=1` relaunch (env
+  diff vs production = exactly those two vars), two serialized
+  p3_depth_anchor_probe runs at REAL usage.prompt_tokens **100,022** and
+  **352,645**, per-rank steady_clock timing inside C++
+  `reliable_all_reduce_v2` (includes peer-wait), cross-rank matched by
+  call_id (100% match), decode segmented after last 16MB prefill chunk.
+  This is the "direct CPU-side timer on the collective" the 2026-08-24
+  doc §5.3 named as the decisive experiment for its one honest hole.
+- **RESULT: arrival skew grows only +0.079 ms/tok** (0.494→0.573) across
+  100K→352.6K in the per-token verify-class collectives (32/24/16KB,
+  ~16-17 calls/tok) — 3-5% of the +1.67..+2.52 residual band, and an
+  independent-method confirmation of 2026-08-24's occupancy-derived
+  +0.070. Per-CALL skew depth-flat (30.7→33.5µs mean); rescaled to
+  spec-off's 43-calls/tok cadence the growth is +0.12 ms/tok ≈ 5-7% of
+  band — holds in both regimes. **Total in-collective time is also
+  depth-flat** (< +0.09 ms/tok/rank growth) — even charging everything
+  inside all_sum to the residual cannot close it. Median per-call
+  transport depth-FLAT (36.9-40.1µs both depths) — extends "transport is
+  fast" to 352.6K.
+- **No straggler rank on this build:** r0-slower 44-50% everywhere;
+  severe (>1ms) verify-class skew 0.03-0.34% with no direction. The
+  2026-08-22 4.2x rank0 tail asymmetry does not reproduce.
+- **Per-REQUEST skew classes flagged as a trap:** 8192B sequential-path
+  (215/request, 177→358ms total) and multi-MB transition calls
+  (74.8→297.2ms) amortize to ~0 over long generations — dividing them by
+  a short probe's token count manufactures a phantom +1.5 ms/tok. Do not
+  re-derive.
+- **Probe anomaly, separate thread:** /bench route returned
+  finish_reason=stop at 409/320 tok despite the EOS ban (expected
+  length@2000). Does not affect per-call skew arithmetic. Worth its own
+  look.
+- **Residual after 1(a)+1(b): still +1.67..+2.52 ms/tok unattributed
+  on-GPU busy.** Collective now closed from BOTH sides (idle: 08-24;
+  in-call: this). Live candidates: MoE-at-depth interplay,
+  allocator/~90GB-resident regime.
+- **Production restored + verified (relaunch #2):** SIGTERM + clean
+  screen teardown, byte-identical verbon3_launch.sh relaunched both
+  nodes, ps eww shows zero JACCL_TRACE_* + all production flags, no new
+  trace files under new PIDs, smoke probe @2K clean (35.15 tok/s,
+  coherent, finish_reason=length).
