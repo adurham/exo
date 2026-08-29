@@ -97,6 +97,31 @@ and BOTH arms rerun — trigger and remedy fixed now.
 
 ## P2 — c=2 validation under the promoted config
 
+**AMENDMENT P2-1 (2026-08-28 19:20, after L0 stage-2 short-c2 legs landed, BEFORE
+L2 runs):** all 3 short-c2 spec-ON repeats hit the degeneration kill-switch —
+deterministic `token cycle period=3 '.</think>Paris'` at completion_token=61 on the
+cap stream (uid varies), second stream aborted collaterally mid-phrase (its text
+also shows unstopped repetition: "One...five." ~2.5×). c=1 on the SAME launch was
+clean (Aug-28 Tier-1). ADDED to L2 (spec-OFF stripped config): 3 repeats of the
+identical concurrent short pair via /v1 — decides spec-specific vs
+batched-generator-c=2-generic before any conclusions are drawn. Both outcomes
+pre-committed: spec-OFF clean ⇒ finding attributes to the spec c=2 path (rowseq
+B×L=8); spec-OFF degenerates too ⇒ attributes to the shared c=2 EOS/stop handling,
+and the P2 verdict says so.
+
+**AMENDMENT P2-2 (2026-08-28 19:35, during L0 stage-2, before Bug-3/throughput legs):**
+observed mechanics of the short-c2 degeneration, recorded for the verdict: each of
+the 3 repeats hit the kill-switch (`action=error`) on the cap stream at token 61,
+and the ABORT PATH then crashed the whole runner —
+`ValueError: [reshape] Cannot reshape array of size 2 into shape (1,1,1,1)` in
+mlx-lm `cache.py:2050 fetch_overlap_carry` — killing BOTH streams (availability
+bug, distinct from the degeneration itself) and forcing instance deletion + JIT
+reload. Consequence: c2deep repeat 0's B stream landed in the reload window →
+503; that slot is VOIDED (not evidence about the batched path), repeat 0 A ran
+effectively as c=1-deep. Repeats 1+ (both streams admitted concurrently) are the
+binding contamination/determinism evidence. The reshape crash is a NEW finding
+to file under P2 results: the BS=2 degen-abort cleanup path is broken.
+
 Gap (h): every campaign run was c=1; batched verify at B=2 (deep) and rowseq at
 B×L=8 (short) are production-unvalidated. June Bug-3 residual (80% adversarial
 final-digit flip, PP-era) never re-tested under TP batched verify.
