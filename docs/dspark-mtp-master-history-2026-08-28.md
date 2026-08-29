@@ -292,13 +292,13 @@ fixed prompts (dspark-352k-correctness-harness-verification-2026-08-28.md).
 | Item | Status | Next action |
 |------|--------|-------------|
 | Draft-epilogue A/B @100K + 352.6K | **CLOSED 2026-08-28: gate FAIL, stays OFF** | Byte-lossless (Tier-1 7/7, cross-arm identical both depths) but −0.35% @100K / −0.26% @352.6K; epilogue draft is synchronous, cost moved to accept phase (dspark-p1-draft-epilogue-ab-results-2026-08-28.md) |
-| 14K same-regime A/B + `EXACT_TOPK_PARAM_CAP` validation | No same-regime 14K point; flag shipped default 64 | Sweep 8K/14K/32K/64K/100K one run each under batched config |
-| `TP_SHARD` vs `CLEAR_CACHE=64` ablation | Bundled in verbon3; individual contributions unquantified | 1 short session: each alone, then both; quantify clear-interval throughput cost |
+| 14K same-regime A/B + `EXACT_TOPK_PARAM_CAP` validation | **P4a DONE**: batched 14K = 56.1 ms/cycle (1455 ms claim dead); P4b rowseq crossover pending | Run L5 rowseq 14K/32K (staged); then MIN_CTX verdict |
+| `TP_SHARD` vs `CLEAR_CACHE=64` ablation | Staged, not run (launch scripts + driver ready) | Run L3/L4 per §6 P3 resume notes |
 | Remaining ~6.5–7 GB replicated head (attention/main_proj/markov) | Not sharded; headroom gap vs spec-OFF persists | Further sharding or harder quant; low priority, real risk |
 | Fix #3 `SPEC_STATE_RESTORE` gating | Unimplemented; ~11 MB alloc+free per verify cycle continues | Gate to non-rotating-ring high-acceptance cycles; ~5.5 MB/cycle saving |
 | jaccl `WC_ERR` segfault | n=1 auto-recovered; first ever in campaign; 2 verbon3 slots voided | Watch; escalate if recurs |
 | 352.6K CI floor +8.7% < +15% bar | Collapse-elimination conclusive; throughput margin thin | State "margin thin" — do not claim full +15% bar |
-| c=2 under promoted config | Never validated; see gap (h) | Correctness-first (Tier-1-style paired capture at c=2); then throughput |
+| c=2 under promoted config | **Correctness legs DONE 2026-08-28**: spec legs clean (Bug-3 0/6, deep B=2 deterministic); TWO shared-generator bugs found (short-c2 degen + BS=2 abort reshape crash), both repro spec-OFF | Fix the two shared bugs (see dspark-p2-c2-validation-results-2026-08-28.md); then c=2 spec-OFF throughput control |
 | G0'' methodology revision | Fresh-nonce artifact exposes denominator flaw | Adopt fixed-prompt + per-arm-determinism framing as standard correctness gate |
 | mxfp4/mxfp8 numerics under axis-1 sharding long-run | Deployed but not long-soak validated under TP shard | Monitor production logs; escalate on any U+FFFD or repetition |
 
@@ -320,33 +320,66 @@ assumed overlap the single-Metal-stream reality doesn't provide.
 
 ### P2 — c=2 validation under promoted config
 
-**Rationale:** Production-readiness gap — every campaign run used c=1. At γ=3, c=2 gives B×L=8,
-exactly at the rowseq gate boundary (<8K path), and the ≥8K batched path at B=2 is completely
-unvalidated. Promotion cannot be claimed production-ready for concurrent serving without this.
-
-**Pre-registered gate:** correctness first — Tier-1-style paired capture at c=2, explicitly
-re-testing the June Bug-3 adversarial final-digit needle (code ending in digit immediately before
-EOS). Then fixed-window throughput vs c=2 spec-off. No throughput promotion without both legs
-clean.
+**CLOSED (correctness legs) 2026-08-28 — two NEW shared-generator bugs found,
+NEITHER in the spec path** (`dspark-p2-c2-validation-results-2026-08-28.md`):
+(1) c=2 system+user short-prompt degeneration — `.</think>Paris` period-3 loop,
+kill-switch at token 61, 3/3 spec-ON AND 2/2 spec-OFF (mechanism-independent,
+c=1 clean); (2) BS=2 degen-abort reshape crash — mlx-lm `cache.py:2050
+fetch_overlap_carry` `[reshape] size 2 into (1,1,1,1)` kills BOTH streams +
+instance (availability bug, also spec-OFF). Spec-specific legs ALL CLEAN: deep
+batched B=2 deterministic + zero contamination; **Bug-3 adversarial final-digit
+0/6 flips under TP batched verify** (PP-era ~80% class not reproduced); c=2
+spec-ON @100K = 10.0/9.7 tok/s per stream (19.7 aggregate; B=2 cycles are
+per-row — BS>1 batched verify remains the Phase-5 TODO). Outstanding: c=2
+spec-OFF throughput control (L2 leg cut at session wrap-up). c=2 NOT
+production-ready until the two shared bugs are fixed; c=1 promoted config
+unaffected.
 
 ### P3 — verbon3 ablation
 
-**Rationale:** `EXO_DSV4_DSPARK_TP_SHARD=1` and `EXO_MLX_CLEAR_CACHE_INTERVAL=64` were bundled
-in the verbon3 validation arm; the clear-interval parameter's throughput cost (estimated 5–15%
-at interval=64) is unquantified, and the individual memory contributions are unmeasured.
-
-**Pre-registered gate:** 1 short session; three arms: TP_SHARD alone, CLEAR_CACHE=64 alone,
-both; primary output: throughput penalty of CLEAR_CACHE=64, confirmed shard savings in GB.
+**NOT STARTED (deferred to a fresh session).** Everything is staged:
+- Launch scripts ON BOTH studios: `/tmp/von3_cc0_launch.sh` (arm-SHARD:
+  `TP_SHARD=1 CLEAR_CACHE_INTERVAL=0`, logs `~/exo_von3cc0.log`) and
+  `/tmp/von3_shard0_launch.sh` (arm-CACHE: `TP_SHARD=0 CLEAR_CACHE_INTERVAL=64`,
+  logs `~/exo_von3shard0.log`).
+- Driver ready: `/tmp/ab/p1p4/driver_L2_L6.py` (L3/L4 sections — relaunch,
+  ps-eww env assert, Paris smoke gate, telemetry sampler, 3× 352.6K runs each
+  from `/tmp/ab/g0_352/prompt_352k_long.txt`, max_tokens 2500).
+- arm-BOTH comparator = P1-OFF trio (`/tmp/ab/p1p4/run_off352k_*.json`,
+  30.35/30.35/30.42 shared-window; byte-hash `f08efa3f`); add ONE anchor run on
+  restored production per pre-registration (±5% validity check).
+- Run via: `cd ~/repos/exo && uv run python3` a trimmed driver_L2_L6 (comment out
+  the L2 section), or execute L3/L4 blocks manually with
+  `/tmp/ab/p1p4/relaunch.py <launch_file> <expected FLAG=V...>`.
 
 ### P4 — 14K same-regime verify-cost curve
 
-**Rationale:** The "14K cliff" claim (1455.8 ms@14K) was a regime-mismatch artifact: that
-measurement was FULLBLOCK rowseq; current production is batched. No same-regime 14K point exists.
-The placement of `EXO_DSV4_VERIFY_BATCH_MIN_CTX=8192` is unvalidated.
+**P4a (batched arm) DONE 2026-08-28** on the production launch (L0), fixed
+prompts, MTP-PROF windowed per-run means (m4-1, `/tmp/ab/p1p4/p4_phase_extract.json`):
 
-**Pre-registered gate:** sweep 8K/14K/32K/64K/100K, one run each, all under current production
-batched config; plot verify_ms vs context; confirms or revises MIN_CTX=8192 placement; closes
-the cliff question for good.
+| ctx | regime (by MIN_CTX=8192) | verify ms | total ms | draft ms |
+|-----|--------------------------|----------:|---------:|---------:|
+| 4K | rowseq | 79.5 | 92.2 | 8.2 |
+| 7.5K | rowseq | 78.3 | 91.3 | 8.4 |
+| 9K | batched | **56.1** | 68.6 | 8.2 |
+| 14K | batched | **56.1** | 68.7 | 8.2 |
+| 32K | batched | 54.5 | 68.0 | 8.5 |
+| 64K | batched | 59.2 | 72.0 | 8.2 |
+| 100K | batched | 64.2 | 76.0 | 8.2 |
+| 352.6K | batched | 84.8 | 96.5 | 8.2 |
+
+Interim reads (final verdict needs P4b): the historical "1455.8 ms @14K" is
+dead — same-regime-adjacent batched 14K measures **56.1 ms/cycle** (26× lower;
+the old number was FULLBLOCK-regime rowseq); the batched verify curve is nearly
+flat 9K–32K and grows gently to 352.6K; the rowseq points below the gate cost
+~+40% vs adjacent batched points, consistent with the C_s 3.20→2.14 promotion
+analysis. **P4b NOT RUN** (needs L5: `/tmp/von3_rowseq_launch.sh`,
+`EXO_DSV4_VERIFY_BATCH=0`, staged both studios, logs `~/exo_von3rowseq.log`) —
+rowseq 14K/32K points above the gate to complete the crossover comparison; the
+pre-registered MIN_CTX verdict rule (placement supported iff batched < rowseq at
+14K; floor stays ≥8K for correctness regardless) awaits those two runs, each
+~2 min of decode after a ~40 s prefill, driver section L5 in
+`/tmp/ab/p1p4/driver_L2_L6.py`.
 
 ### P5 — Doc hygiene
 

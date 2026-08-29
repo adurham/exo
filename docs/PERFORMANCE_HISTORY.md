@@ -4744,3 +4744,31 @@ env-OFF, absence verified via ps eww; exo 75d2402dd, mlx-lm d098642):
 - Verdict: `EXO_DSV4_DRAFT_EPILOGUE` remains default-OFF. Draft is 10.8% of the
   cycle; verify (64 ms @100K / 85 ms @352.6K) remains the only wall worth
   attacking. Full doc: `docs/dspark-p1-draft-epilogue-ab-results-2026-08-28.md`.
+
+## 2026-08-28/29 — P2 c=2 validation + P4a verify-cost curve (campaign wrap; P3/P4b staged for next session)
+
+- **P2 c=2 (dspark-p2-c2-validation-results-2026-08-28.md):** spec-specific legs
+  ALL CLEAN — deep batched B=2 (100K+100K) per-stream deterministic across
+  repeats with zero cross-stream contamination; June Bug-3 adversarial
+  final-digit needle **0/6 flips** under TP batched verify (PP-era ~80% class not
+  reproduced). TWO NEW SHARED-GENERATOR BUGS (both reproduce spec-OFF, c=1
+  clean): (a) c=2 system+user short prompts degenerate deterministically
+  (`.</think>Paris` period-3, kill-switch token 61) — BS=2 stop/EOS handling;
+  (b) the BS=2 degen-abort path crashes the runner (mlx-lm cache.py:2050
+  fetch_overlap_carry `[reshape] size 2 -> (1,1,1,1)`), killing the healthy
+  batchmate + instance. c=2 spec-ON @100K measured 10.0/9.7 tok/s per stream
+  (19.7 aggregate; B=2 spec cycles are per-row — BS>1 batched verify is still
+  the Phase-5 TODO). c=2 NOT production-ready until (a)+(b) fixed; c=1 promoted
+  config unaffected.
+- **P4a (batched-regime verify-cost curve, production config, fixed prompts):**
+  verify ms/cycle = 79.5 @4K, 78.3 @7.5K (rowseq, <MIN_CTX) | 56.1 @9K, 56.1
+  @14K, 54.5 @32K, 59.2 @64K, 64.2 @100K, 84.8 @352.6K (batched). The
+  historical "1455.8 ms @14K cliff" is refuted at the measurement level: batched
+  14K is 26× cheaper; the old number was FULLBLOCK-regime. P4b (rowseq-forced
+  14K/32K above the gate, launch staged) + the MIN_CTX placement verdict deferred
+  to next session — see master-history §6 P4 resume notes.
+- **P3 (TP_SHARD vs CLEAR_CACHE ablation):** not started; launch scripts + driver
+  + comparator trio staged — master-history §6 P3 resume notes.
+- Campaign hygiene: all runs pre-registered (`dspark-p1p4-campaign-preregister-
+  2026-08-28.md` + amendments committed before the affected runs); cluster
+  restored to production verbon3 (env ps-eww-verified, Paris smoke PASS).
