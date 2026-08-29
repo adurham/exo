@@ -291,7 +291,7 @@ fixed prompts (dspark-352k-correctness-harness-verification-2026-08-28.md).
 
 | Item | Status | Next action |
 |------|--------|-------------|
-| Draft-epilogue A/B @100K + 352.6K | Code shipped default-OFF; cluster now free | Run fixed-prompt A/B; pre-register gate per P1 below |
+| Draft-epilogue A/B @100K + 352.6K | **CLOSED 2026-08-28: gate FAIL, stays OFF** | Byte-lossless (Tier-1 7/7, cross-arm identical both depths) but −0.35% @100K / −0.26% @352.6K; epilogue draft is synchronous, cost moved to accept phase (dspark-p1-draft-epilogue-ab-results-2026-08-28.md) |
 | 14K same-regime A/B + `EXACT_TOPK_PARAM_CAP` validation | No same-regime 14K point; flag shipped default 64 | Sweep 8K/14K/32K/64K/100K one run each under batched config |
 | `TP_SHARD` vs `CLEAR_CACHE=64` ablation | Bundled in verbon3; individual contributions unquantified | 1 short session: each alone, then both; quantify clear-interval throughput cost |
 | Remaining ~6.5–7 GB replicated head (attention/main_proj/markov) | Not sharded; headroom gap vs spec-OFF persists | Further sharding or harder quant; low priority, real risk |
@@ -308,14 +308,15 @@ fixed prompts (dspark-352k-correctness-harness-verification-2026-08-28.md).
 
 ### P1 — Draft-epilogue fusion A/B @100K + 352.6K
 
-**Rationale:** Highest expected value: code is already shipped at default-OFF, theoretical gain
-is +16% (cycle 73.7 → 62.9 ms, draft 10.8 ms hidden behind accept+rollback+bookkeeping tail
-~10.3 ms). Cluster is free. Both contexts required — overlap fraction with the tail is untested
-at 352.6K depth.
-
-**Pre-registered gate:** fixed-prompt protocol (no uuid4 nonce); Tier-1 7/7 pass; median
-≥ +8% @100K with CI floor > 0; no new collapses at 352.6K; byte-determinism per config
-preserved across ON/OFF arms.
+**CLOSED 2026-08-28 — GATE FAIL (throughput), flag stays default-OFF.**
+Pre-registered campaign `dspark-p1p4-campaign-preregister-2026-08-28.md`; results
+`dspark-p1-draft-epilogue-ab-results-2026-08-28.md`. Correctness perfect (Tier-1
+7/7 byte-identical; ON/OFF cross-arm byte-identical at BOTH depths; all arms
+internally deterministic; 0 collapses @352.6K). Throughput: −0.35% @100K,
+−0.26% @352.6K. Mechanism confirmed engaged (consume-cycle draft 8.2→0.55 ms)
+but the epilogue draft runs synchronously in the accept window (+7.9 ms) — no
+overlap exists to hide it; cycle −1.8%, end-to-end ≈ 0. The theoretical +16%
+assumed overlap the single-Metal-stream reality doesn't provide.
 
 ### P2 — c=2 validation under promoted config
 

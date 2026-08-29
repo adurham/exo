@@ -4721,3 +4721,26 @@ env-OFF, absence verified via ps eww; exo 75d2402dd, mlx-lm d098642):
 - Cluster end state: verbon3 production, cold JIT auto-place + Paris smoke
   PASS. Docs: dspark-352k-correctness-harness-verification-2026-08-28.md
   (+ preregister + runs-table JSON). Artifacts: /tmp/ab/g0_352/.
+
+## 2026-08-28/29 — P1 draft-epilogue fusion A/B: byte-lossless but NO throughput win; stays default-OFF
+
+- Pre-registered (`docs/dspark-p1p4-campaign-preregister-2026-08-28.md`, committed
+  before any run) fixed-prompt A/B of `EXO_DSV4_DRAFT_EPILOGUE=1` vs `0` on the
+  production verbon3 stack (exo `75d2402dd` + mlx-lm `d098642`): 6 runs/arm @100K
+  + 3/arm @352.6K + Tier-1.
+- **Correctness: ALL PASS.** Tier-1 7/7 byte-identical to Aug-28 captures; ON and
+  OFF streams byte-identical to EACH OTHER at both depths (the consume path
+  reproduces the inline draft exactly, as designed); every arm internally
+  deterministic; 0 collapses; swap ≤65 MB; zero fault lines.
+- **Throughput: FAIL.** Shared-window medians — @100K ON 37.62 vs OFF 37.76
+  (−0.35%, boot CI [−0.56,+0.51]); @352.6K ON 30.27 vs OFF 30.35 (−0.26%).
+  Pre-registered bar was ≥+8% AND min(ON)>max(OFF): neither met.
+- **Mechanism (MTP-PROF windowed, m4-1):** consume-cycle draft 8.20→0.55 ms — the
+  fusion ENGAGES — but the epilogue `_dspark.draft()`+eval is synchronous inside
+  the cycle epilogue and its cost reappears in the accept window (1.55→9.47 ms).
+  Net cycle 76.0→74.6 ms (−1.8%), which does not survive to end-to-end tok/s.
+  The design's assumed overlap with the accept/rollback/bookkeeping tail does not
+  exist on a single Metal stream with a synchronous eval.
+- Verdict: `EXO_DSV4_DRAFT_EPILOGUE` remains default-OFF. Draft is 10.8% of the
+  cycle; verify (64 ms @100K / 85 ms @352.6K) remains the only wall worth
+  attacking. Full doc: `docs/dspark-p1-draft-epilogue-ab-results-2026-08-28.md`.
