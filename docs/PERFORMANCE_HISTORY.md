@@ -4772,3 +4772,144 @@ env-OFF, absence verified via ps eww; exo 75d2402dd, mlx-lm d098642):
 - Campaign hygiene: all runs pre-registered (`dspark-p1p4-campaign-preregister-
   2026-08-28.md` + amendments committed before the affected runs); cluster
   restored to production verbon3 (env ps-eww-verified, Paris smoke PASS).
+
+## 2026-08-29 — P3 arm-SHARD landed (first leg of the verbon3 ablation)
+
+- **L3 arm-SHARD (TP_SHARD=1, CLEAR_CACHE_INTERVAL=0), n=3 @352.6K, fixed
+  prompt `prompt_352k_long.txt`, max_tokens 2500:** shared-window (W=2170)
+  tok/s = 30.465 / 30.483 / 30.512 (median 30.483, σ=0.024 = 0.08% CV) vs
+  arm-BOTH (P1-OFF L0 trio) 30.352 / 30.353 / 30.424 (median 30.353). The
+  CLEAR_CACHE=64 interval at depth costs **−0.43%** — i.e. removing it buys
+  +0.43%, far inside the estimated 5–15% band, and arms overlap in range.
+  All 3 runs byte-identical to each other AND to the arm-BOTH comparator
+  (hash `f08efa3f`) — the two fixes remain byte-lossless across the config
+  axis, and determinism survives the relaunch.
+- **Memory (decode-windowed telemetry):** arm-SHARD wired peaks climb
+  across consecutive depth runs within one launch — 92.3 → 94.1 → 96.6 GB
+  (m4-1), 92.3 → 92.3 → 97.0 GB (m4-2) — vs arm-BOTH 92.3 → 92.3 → 93.4 GB:
+  the MLX buffer-cache ratchet with CLEAR_CACHE=0 is real (~+3 GB by run 3
+  at depth, growing per run) but produced **zero collapses and flat swap
+  (50–65 MB)** over this short horizon. No throughput penalty from the
+  ratchet at n=3 depth-run scale.
+- Hygiene: env verified via `ps eww` on both nodes pre-run; log offsets
+  recorded per run in `log_offsets.jsonl` (L3.* labels); telemetry sampler
+  `p3shard` tag; artifacts `run_p3shard_{0,1,2}.json`.
+
+## 2026-08-29 — P3 arm-CACHE landed; P3 ablation complete (verdict)
+
+- **L4 arm-CACHE (TP_SHARD=0, CLEAR_CACHE_INTERVAL=64), n=3 @352.6K, same
+  fixed prompt/max_tokens:** shared-window (W=2097, min chunk-count across
+  all arms) tok/s = 29.000 / 29.008 / 29.035 (median 29.008, σ=0.018 =
+  0.06% CV). With arm-CACHE in the set the shared window tightens
+  2170→2097, so the pre-registered analysis (`analyze_p3_final.py` →
+  `p3_verdict.json`) recomputes every arm on W=2097: arm-BOTH
+  30.446/30.482/30.519 (median 30.482), arm-SHARD 30.582/30.590/30.618
+  (median 30.590). The L3 interim entry above quoted whole-generation tok/s
+  rather than windowed — same ranking, uniformly ~0.1–0.4% lower.
+- **P3 verdict (pre-registered outputs; quantification session, no hard
+  pass/fail bar):**
+  - **CLEAR_CACHE=64 cost at depth** = arm-BOTH vs arm-SHARD = 30.482 vs
+    30.590 → **−0.35%** (windowed; −0.43% whole-generation). The 5–15%
+    estimate is refuted — the interval is ~free at depth.
+  - **TP_SHARD contribution** = arm-CACHE vs arm-BOTH = 29.008 vs 30.482
+    → **−4.84%**: sharding the DSpark head is worth ~+4.8% at 352.6K and is
+    the dominant term of the bundled pair by >10×.
+  - Confidence: per-arm σ ≈ 0.02 tok/s (0.06% CV, 3 runs each); shard-off
+    delta 1.47 tok/s with non-overlapping 3-run ranges (>40σ separation);
+    cache-interval delta ~0.35% — direction consistent across both
+    windowing conventions but near cross-session drift scale, so read as
+    "≤0.5%, marginal".
+- **Collapse tallies (pre-registered):** 0/3 arm-CACHE (the accepted-risk
+  arm did NOT collapse — n=3 distinguishes ~0 from ~1 rates only), 0/3
+  arm-SHARD, 0/3 arm-BOTH. Decode health gap_median 0.07 ms on every run.
+- **Memory (decode-windowed telemetry — shard contribution):** arm-CACHE
+  wired peaks 101.1 → 97.6 → 97.3 GB (m4-1), 101.5 → 97.3 → 97.3 GB (m4-2)
+  vs arm-BOTH 92.3–93.4 GB (m4-1) / 92.3–96.2 GB (m4-2): the replicated
+  head costs **~+4–5 GB/node settled** (first-run load spike ~101 GB then
+  settles; prereg estimate was ~+3–3.5 GB — close, slightly low); swap flat
+  at 50–65 MB on both arms — no memory-pressure signal anywhere.
+- **Byte-identity across the TP_SHARD axis does NOT hold (new finding):**
+  all 3 arm-CACHE runs are byte-identical to each other (hash `d56b8dd1`)
+  and fully deterministic, but diverge from arm-BOTH/arm-SHARD
+  (`f08efa3f`) — first divergence at output char ~1967 is a single
+  mid-reasoning coin flip ("…topics repeat in order? Let's identify 10
+  topics…" vs "…There are 8? Let's identify distinct topic patterns…"),
+  then bounded divergence with identical finish_reason=length,
+  completion_tokens=2500. This is the expected numerics class (head
+  replication changes reduction order in draft/verify matmuls — same
+  family as the documented batched-vs-sequential divergence), NOT a
+  correctness regression; the production path (TP_SHARD=1) remains
+  byte-lossless across the CLEAR_CACHE axis (L3 finding stands).
+- **Production-env recommendation fed by P3:** keep both fixes (arm-BOTH
+  config = production): the shard buys ~4.8% at depth with no settled-memory
+  penalty, CLEAR_CACHE=64 costs ≤0.5% and holds wired memory ~4–5 GB lower
+  than it would otherwise ratchet. Each term of the bundle is now
+  individually quantified.
+- Hygiene: env ps-eww-verified both nodes pre-run; log offsets L4.* in
+  `log_offsets.jsonl`; telemetry sampler `p3cache`; artifacts
+  `run_p3cache_{0,1,2}.json`; machine verdict in `p3_verdict.json` (to be
+  re-run after L6 to fill the cross-session anchor leg).
+
+## 2026-08-29 — P4b rowseq crossover landed; MIN_CTX placement verdict
+
+- **L5 rowseq-forced (`VERIFY_BATCH=0, VERIFY_ROWSEQ=1`), 14K + 32K, same
+  frozen prompts as P4a, max_tokens 600, warm-flush runs first
+  (250-token same-ctx generation before each measured run so MTP-PROF
+  accumulator remainders are same-ctx cycles):** both runs clean
+  (finish_reason=length, 600 completion tokens, no errors). Windowed
+  MTP-PROF per-run means (m4-1, `~/exo_von3rowseq.log`,
+  `p4_phase_extract.json`, extraction method identical to P4a):
+  - 14K rowseq: verify **78.73 ms**, draft 8.24, total 89.21 (n=200 cycles)
+  - 32K rowseq: verify **75.20 ms**, draft 8.17, total 85.64 (n=250 cycles)
+  - vs P4a batched: 14K verify **56.06 ms** / total 68.70; 32K verify
+    **54.48 ms** / total 68.02 (re-extracted and reproduced exactly).
+  - Within-window per-dump ranges (verify): batched 14K mean-range
+    72.8–73.3 cumulative / per-cycle min–max 38.5–136.3; rowseq 14K
+    75.4–77.6 / 45.4–122.6 — cycle-level scatter overlaps but windowed
+    means separate cleanly (+40% gap).
+- **MIN_CTX placement verdict (pre-registered rule: placement SUPPORTED iff
+  batched verify_ms < rowseq verify_ms at 14K, checked at 32K too):
+  SUPPORTED — keep 8192.** Batched is cheaper at both crossover depths:
+  14K 56.1 < 78.7 (+40.4% rowseq penalty), 32K 54.5 < 75.2 (+38.0%).
+  The floor cannot move below ~8K regardless (pre-registered correctness
+  asymmetry: rowseq below 8K is the short-ctx byte-identity guarantee).
+  End-to-end corroboration: decode tok/s batched 41.3 vs rowseq 31.3 @14K
+  (+32%), 39.3 vs 28.7 @32K (+37%); TTFT identical (37.3 s / 83–84 s) —
+  the difference is pure decode-path cost.
+- **Curve shape:** rowseq verify is ~flat in ctx (79.5 @4K, 78.3 @7.5K,
+  78.7 @14K, 75.2 @32K) while batched sits at 54–56 ms from 9K–32K — the
+  two regimes are parallel plates with a one-time step at the 8K gate; no
+  crossover above 8K, so there is no depth at which raising MIN_CTX above
+  8192 would pay. The historical "1455.8 ms @14K cliff" is retired with a
+  same-stack rowseq measurement: 78.7 ms — the old number was
+  FULLBLOCK-regime, off by ~18.5×.
+- Hygiene: env ps-eww-verified both nodes (VERIFY_BATCH=0,
+  VERIFY_ROWSEQ=1); log offsets L5.* labels; artifacts
+  `run_p4b_flush_{14000,32000}.json` + `run_p4b_rowseq_{14000,32000}.json`;
+  merged P4a+P4b extraction in `p4_phase_extract.json`.
+
+## 2026-08-29 — L6 production restore + cross-session anchor; campaign P1–P4 complete
+
+- **L6 production restore:** `/tmp/verbon3_launch.sh` on both studios, env
+  ps-eww-verified (EXO_DSV4_VERIFY_BATCH=1, EXO_DSV4_DSPARK_TP_SHARD=1,
+  EXO_MLX_CLEAR_CACHE_INTERVAL=64, EXO_SPECULATIVE=1 on both nodes),
+  Paris smoke PASS (stop, 200, correct answer). Cluster left on stock
+  production verbon3 — NOT a test config.
+- **Cross-session validity anchor (pre-registered ±5% gate): PASS.** One
+  fresh 352.6K run on the restored production launch: shared-window
+  (W=2097) tok/s **30.462**, whole-generation 30.367, finish_reason=length,
+  2500 tokens, gap_median 0.07 ms — vs arm-BOTH median 30.482 →
+  **−0.07%**, comfortably inside ±5%. The P1-OFF L0 trio reuse for the
+  P3 ablation stands; no session-confound caveat needed.
+- **Byte-identity bonus:** anchor output hash `f08efa3f` — byte-identical
+  to the arm-BOTH L0 trio AND arm-SHARD, across a session boundary, two
+  relaunches, and the whole P3/P4b campaign. Determinism of the
+  production TP_SHARD=1 path is now cross-session verified.
+- **Final machine verdict** (`p3_verdict.json`, re-run with anchor leg):
+  window W=2097; arm-BOTH median 30.482, arm-SHARD 30.590 (σ=0.019,
+  0.06% CV), arm-CACHE 29.008 (σ=0.018, 0.06% CV), anchor 30.462;
+  CLEAR_CACHE cost −0.35%, shard-off −4.84%, anchor −0.07% (valid).
+- Campaign end-state: P1/P2/P3/P4a/P4b all landed and documented; master
+  history §5 rows CLOSED for the 14K A/B and TP_SHARD/CLEAR_CACHE
+  ablation items; remaining open items are unchanged (replicated-head
+  residue, SPEC_STATE_RESTORE gating, jaccl WC_ERR watch).

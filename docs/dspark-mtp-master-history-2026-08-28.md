@@ -292,8 +292,8 @@ fixed prompts (dspark-352k-correctness-harness-verification-2026-08-28.md).
 | Item | Status | Next action |
 |------|--------|-------------|
 | Draft-epilogue A/B @100K + 352.6K | **CLOSED 2026-08-28: gate FAIL, stays OFF** | Byte-lossless (Tier-1 7/7, cross-arm identical both depths) but −0.35% @100K / −0.26% @352.6K; epilogue draft is synchronous, cost moved to accept phase (dspark-p1-draft-epilogue-ab-results-2026-08-28.md) |
-| 14K same-regime A/B + `EXACT_TOPK_PARAM_CAP` validation | **P4a DONE**: batched 14K = 56.1 ms/cycle (1455 ms claim dead); P4b rowseq crossover pending | Run L5 rowseq 14K/32K (staged); then MIN_CTX verdict |
-| `TP_SHARD` vs `CLEAR_CACHE=64` ablation | Staged, not run (launch scripts + driver ready) | Run L3/L4 per §6 P3 resume notes |
+| 14K same-regime A/B + `EXACT_TOPK_PARAM_CAP` validation | **CLOSED 2026-08-29: MIN_CTX=8192 SUPPORTED** | P4a batched 14K/32K = 56.1/54.5 ms vs P4b rowseq 78.7/75.2 ms (+40%/+38%); no crossover above 8K; 1455 ms claim retired (rowseq 14K = 78.7 ms same-stack) |
+| `TP_SHARD` vs `CLEAR_CACHE=64` ablation | **CLOSED 2026-08-29: both fixes kept** | Shard = +4.84% @352.6K (dominant term, >10×); CLEAR_CACHE=64 = −0.35% (~free); 0 collapses any arm; arm-CACHE hash `d56b8dd1` deterministic within-arm but byte-divergent from TP_SHARD=1 arms (expected numerics, documented) |
 | Remaining ~6.5–7 GB replicated head (attention/main_proj/markov) | Not sharded; headroom gap vs spec-OFF persists | Further sharding or harder quant; low priority, real risk |
 | Fix #3 `SPEC_STATE_RESTORE` gating | Unimplemented; ~11 MB alloc+free per verify cycle continues | Gate to non-rotating-ring high-acceptance cycles; ~5.5 MB/cycle saving |
 | jaccl `WC_ERR` segfault | n=1 auto-recovered; first ever in campaign; 2 verbon3 slots voided | Watch; escalate if recurs |
@@ -337,20 +337,30 @@ unaffected.
 
 ### P3 — verbon3 ablation
 
-**NOT STARTED (deferred to a fresh session).** Everything is staged:
-- Launch scripts ON BOTH studios: `/tmp/von3_cc0_launch.sh` (arm-SHARD:
-  `TP_SHARD=1 CLEAR_CACHE_INTERVAL=0`, logs `~/exo_von3cc0.log`) and
-  `/tmp/von3_shard0_launch.sh` (arm-CACHE: `TP_SHARD=0 CLEAR_CACHE_INTERVAL=64`,
-  logs `~/exo_von3shard0.log`).
-- Driver ready: `/tmp/ab/p1p4/driver_L2_L6.py` (L3/L4 sections — relaunch,
-  ps-eww env assert, Paris smoke gate, telemetry sampler, 3× 352.6K runs each
-  from `/tmp/ab/g0_352/prompt_352k_long.txt`, max_tokens 2500).
-- arm-BOTH comparator = P1-OFF trio (`/tmp/ab/p1p4/run_off352k_*.json`,
-  30.35/30.35/30.42 shared-window; byte-hash `f08efa3f`); add ONE anchor run on
-  restored production per pre-registration (±5% validity check).
-- Run via: `cd ~/repos/exo && uv run python3` a trimmed driver_L2_L6 (comment out
-  the L2 section), or execute L3/L4 blocks manually with
-  `/tmp/ab/p1p4/relaunch.py <launch_file> <expected FLAG=V...>`.
+**DONE 2026-08-29 (L3+L4+L6 anchor).** Full numbers in
+PERFORMANCE_HISTORY 2026-08-29 entries + machine verdict
+`/tmp/ab/p1p4/p3_verdict.json` (shared-window W=2097 recomputed across all
+arms; `analyze_p3_final.py`):
+- arm-BOTH (P1-OFF L0 trio): 30.446/30.482/30.519 (median 30.482)
+- arm-SHARD (L3): 30.582/30.590/30.618 (median 30.590, σ=0.019 = 0.06% CV)
+- arm-CACHE (L4): 29.000/29.008/29.035 (median 29.008, σ=0.018 = 0.06% CV)
+- **CLEAR_CACHE=64 cost at depth: −0.35%** (windowed; 5–15% estimate
+  refuted — the interval is ~free). **TP_SHARD contribution: +4.84%**
+  (shard-off = arm-CACHE 29.008 vs arm-BOTH 30.482) — the dominant term
+  of the bundled pair by >10×. Both fixes stay in production.
+- Collapses 0/3 on every arm (arm-CACHE accepted-risk arm did not
+  collapse; n=3 distinguishes ~0 from ~1 rates only).
+- Memory: replicated head costs ~+4–5 GB/node settled wired (arm-CACHE
+  97.3–101.5 GB peaks vs arm-BOTH 92.3–96.2); swap flat 50–65 MB.
+- Byte-identity: arm-CACHE deterministic within-arm (hash `d56b8dd1`)
+  but byte-divergent from the TP_SHARD=1 arms (`f08efa3f`) — first
+  divergence one mid-reasoning coin flip at output char ~1967; expected
+  numerics (head replication changes reduction order), NOT a correctness
+  regression. Production (TP_SHARD=1) remains byte-lossless across the
+  CLEAR_CACHE axis.
+- Cross-session anchor (L6, production restore): see PERFORMANCE_HISTORY
+  2026-08-29 L6 entry — fresh 352.6K within ±5% of arm-BOTH median
+  validates arm-BOTH reuse.
 
 ### P4 — 14K same-regime verify-cost curve
 
@@ -368,18 +378,22 @@ prompts, MTP-PROF windowed per-run means (m4-1, `/tmp/ab/p1p4/p4_phase_extract.j
 | 100K | batched | 64.2 | 76.0 | 8.2 |
 | 352.6K | batched | 84.8 | 96.5 | 8.2 |
 
-Interim reads (final verdict needs P4b): the historical "1455.8 ms @14K" is
-dead — same-regime-adjacent batched 14K measures **56.1 ms/cycle** (26× lower;
-the old number was FULLBLOCK-regime rowseq); the batched verify curve is nearly
-flat 9K–32K and grows gently to 352.6K; the rowseq points below the gate cost
-~+40% vs adjacent batched points, consistent with the C_s 3.20→2.14 promotion
-analysis. **P4b NOT RUN** (needs L5: `/tmp/von3_rowseq_launch.sh`,
-`EXO_DSV4_VERIFY_BATCH=0`, staged both studios, logs `~/exo_von3rowseq.log`) —
-rowseq 14K/32K points above the gate to complete the crossover comparison; the
-pre-registered MIN_CTX verdict rule (placement supported iff batched < rowseq at
-14K; floor stays ≥8K for correctness regardless) awaits those two runs, each
-~2 min of decode after a ~40 s prefill, driver section L5 in
-`/tmp/ab/p1p4/driver_L2_L6.py`.
+**P4b (rowseq arm) DONE 2026-08-29** (L5, `VERIFY_BATCH=0
+VERIFY_ROWSEQ=1`, same frozen prompts, warm-flush first per window-bias
+note): rowseq verify 14K = **78.73 ms** (total 89.21, n=200), 32K =
+**75.20 ms** (total 85.64, n=250).
+
+**MIN_CTX placement verdict (pre-registered rule): SUPPORTED — keep 8192.**
+Batched verify is cheaper at both crossover depths (14K: 56.1 < 78.7 =
++40.4% rowseq penalty; 32K: 54.5 < 75.2 = +38.0%); the two regimes are
+parallel plates (rowseq ~78–80 ms flat 4K→32K, batched ~54–56 ms flat
+9K→32K) with a one-time step at the 8K gate and NO crossover above 8K, so
+no depth exists at which raising MIN_CTX above 8192 would pay. Floor
+stays ≥8K regardless (correctness asymmetry, pre-registered). The
+historical "1455.8 ms @14K" is retired with a same-stack rowseq
+measurement: 78.7 ms (~18.5× lower; old number was FULLBLOCK-regime).
+End-to-end corroboration: decode tok/s batched 41.3 vs rowseq 31.3 @14K,
+39.3 vs 28.7 @32K; TTFT identical (prefill unaffected).
 
 ### P5 — Doc hygiene
 
