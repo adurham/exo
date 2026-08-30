@@ -1,0 +1,17 @@
+{
+ "arm_A": {
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "knob": true,
+  "compl": 200,
+  "source": "same_prompt_A_0731_dryrun.json (12:37, instance 99e6a0a5, mxfp8 head)"
+ },
+ "arm_B": {
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "knob": false,
+  "compl": 200,
+  "source": "same_prompt_B_0731.json (live production BF16 head, 14:5x)"
+ },
+ "first_reasoning_divergence_char": 199,
+ "identical_prefix_len": 199,
+ "note": "temp=0 max_tokens=200 fixed prompt; both arms reasoning-only (content empty at 200 tokens). Divergence is EXPECTED and quantifies the visible quality cost of the quantized head."
+}

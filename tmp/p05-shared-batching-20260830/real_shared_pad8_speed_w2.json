@@ -1,0 +1,22 @@
+{
+ "host": "Adams-Mac-Studio-M4-1",
+ "gpu": "applegpu_g16s",
+ "tensor": "layers.3.ffn.shared_experts.w2.weight (per-rank out-slice 1024)",
+ "speeds_us": {
+  "per_row_m1_x4": 202.83297635614872,
+  "batched_m4_wide": 183.20896197110415,
+  "pad8_qmm": 179.00002421811223
+ },
+ "numerics": {
+  "pad8_vs_per_row": {
+   "max_abs": 0.0,
+   "nonzero": 0,
+   "total": 4096
+  },
+  "m4_wide_vs_per_row": {
+   "max_abs": 0.0,
+   "nonzero": 0,
+   "total": 4096
+  }
+ }
+}

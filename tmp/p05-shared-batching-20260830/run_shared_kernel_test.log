@@ -1,0 +1,16 @@
+GPU arch: applegpu_g16s (use_qmv_wide active for mxfp8 M>=2: yes (arch>=15 or fp-mode))
+
+qmv_wide(M=4) vs qmv(M=1) same-row max diff: 0.000e+00
+padded M=8 (qmm path) vs qmv_wide M=4: 0.000e+00 | vs qmv M=1 ref: 0.000e+00
+padded M=16 (qmm path) vs qmv_wide M=4: 6.250e-02 | vs qmv M=1 ref: 6.250e-02
+padded M=32 (qmm path) vs qmv_wide M=4: 6.250e-02 | vs qmv M=1 ref: 6.250e-02
+padded M=64 (qmm path) vs qmv_wide M=4: 6.250e-02 | vs qmv M=1 ref: 6.250e-02
+
+speeds (gate_proj, H=4096->I=1024, laptop GPU):
+  M=1 qmv:              256.1 us/call
+  M=4 qmv_wide:         338.3 us/call
+  M=16 qmm padded:     266.2 us/call
+  M=32 qmm padded:     270.1 us/call
+
+wrote /Users/adam.durham/repos/exo/tmp/p05-shared-batching-20260830/shared_batching_kernel_test.json
+EXIT=0

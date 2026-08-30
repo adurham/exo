@@ -1,0 +1,15 @@
+{
+  "tag": "base_5k_2",
+  "target_tokens": 5000,
+  "prompt_tokens": 5732,
+  "completion_tokens": 72,
+  "prefill_s": 22.58,
+  "prefill_tps": 253.85,
+  "decode_s": 1.05,
+  "decode_tps": 68.57,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_base_5k_2.json

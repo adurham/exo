@@ -1,0 +1,15 @@
+{
+  "tag": "quant_16k_diag",
+  "target_tokens": 16000,
+  "prompt_tokens": 18156,
+  "completion_tokens": 89,
+  "prefill_s": 53.21,
+  "prefill_tps": 341.21,
+  "decode_s": 0.82,
+  "decode_tps": 108.22,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_quant_16k_diag.json

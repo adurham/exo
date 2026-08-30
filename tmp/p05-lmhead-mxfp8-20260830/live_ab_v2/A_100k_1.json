@@ -1,0 +1,15 @@
+{
+  "tag": "A_100k_1",
+  "target_tokens": 100000,
+  "prompt_tokens": null,
+  "completion_tokens": null,
+  "prefill_s": NaN,
+  "prefill_tps": null,
+  "decode_s": NaN,
+  "decode_tps": null,
+  "needle_hit": false,
+  "bos_spam": false,
+  "output_head": "",
+  "output_tail": ""
+}
+saved -> /tmp/ab_probe_A_100k_1.json

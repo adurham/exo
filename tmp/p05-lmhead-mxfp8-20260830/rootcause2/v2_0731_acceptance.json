@@ -1,0 +1,29 @@
+{
+  "window": "12:32:40 (PlaceInstance 99e6a0a5) -> 12:45:50 (cluster shutdown)",
+  "instance_id": "99e6a0a5-11cf-4cb2-9986-ba660dc85437",
+  "model_id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "sharding": "tensor",
+  "knob_fired": true,
+  "knob_evidence": "[2026-08-30 12:32:44.120 | WARNING | exo.worker.runner.supervisor:<lambda>:182 ] Runner stderr: [LMHEAD_MXFP8] quantized lm_head to mxfp8 (group=32, bits=8)",
+  "load_evidence": "[2026-08-30 12:32:46.183 | INFO | exo.worker.engines.mlx.utils_mlx:shard_and_load:499 ] loading model from /Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4-Flash-0731 with tensor parallelism",
+  "acceptance": {
+    "final_cycle": 237,
+    "final_mean_accept": 1.890,
+    "final_hist": {"0": 43, "1": 37, "2": 60, "3": 97},
+    "note": "mean_accept ~1.89/3 sustained across the healthy window; hist dominated by 2-3 token accepts (157/237 cycles >= 2 accepts). No zero-acceptance collapse."
+  },
+  "mtp_prof": [
+    {"cycles": 50, "draft_ms_mean": 10.74, "verify_ms_mean": 68.07, "total_ms_mean": 81.39, "ts": "12:34:36"},
+    {"cycles": 100, "draft_ms_mean": 9.28, "verify_ms_mean": 65.99, "total_ms_mean": 77.80, "ts": "12:37:52"},
+    {"cycles": 150, "draft_ms_mean": 8.81, "verify_ms_mean": 65.92, "total_ms_mean": 77.18, "ts": "12:41:00"},
+    {"cycles": 200, "draft_ms_mean": 9.05, "verify_ms_mean": 66.05, "total_ms_mean": 77.51, "ts": "12:41:40"}
+  ],
+  "decode_tps": {"A_5k_1": 200.16, "A_5k_2": 204.62, "A_5k_3": 201.47, "A_warmup_1": 214.16, "A_warmup_2": 223.25},
+  "prompt_tokens_served": {"A_5k_1": 5619, "A_5k_2": 5562, "A_5k_3": 5619, "A_warmup_1": 360, "A_warmup_2": 392},
+  "max_prompt_tokens_served": 5619,
+  "unmeasured_regimes": [
+    ">=8192 prompt tokens (VERIFY_BATCH / EXO_DSV4_VERIFY_BATCH_MIN_CTX=8192 batched-verify regime) was NEVER exercised against the knob-quantized 0731 head",
+    "100K prompt tokens against the knob-quantized 0731 head (A_100k_1 was killed mid-prefill at 88064/111074 by cluster shutdown; A_100k_2/3 connection-refused)"
+  ],
+  "verdict": "The knob-quantized 0731 head was healthy at all measured contexts (trivial 360-392, 5.6K). No zero-acceptance collapse, no draft/verify slowness (draft ~9ms, verify ~66ms, total ~78ms). The >=8K and 100K regimes remain UNMEASURED on the quantized head."
+}

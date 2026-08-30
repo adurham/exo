@@ -1,0 +1,15 @@
+{
+  "tag": "B_100k_1",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 100000,
+  "prompt_tokens": 111073,
+  "completion_tokens": 81,
+  "prefill_s": 295.89,
+  "prefill_tps": 375.38,
+  "decode_s": 0.3,
+  "decode_tps": 271.42,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}

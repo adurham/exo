@@ -1,0 +1,25 @@
+head.weight BF16 loaded: (129280, 4096), absmax=4.156 std=0.1774
+quantized head: weight mlx.core.uint32 (129280, 1024) (529.5 MB packed) + scales 16.5 MB -> 0.546 GB vs 1.059 GB BF16
+
+M=1 rows/call: bf16 batch-vs-row max=2.50e-01 | quant batch-vs-row max=0.00e+00
+  quant-vs-bf16 per-row: max=6.7500 mean=0.53235
+  top-1 flips: 0/8 (0.00%) | top-5 set overlap: 87.5%
+  greedy margin p50=3.125 p10=0.775 | rows where qerr>margin: 5/8
+
+M=3 rows/call: bf16 batch-vs-row max=2.50e-01 | quant batch-vs-row max=2.50e-01
+  quant-vs-bf16 per-row: max=6.7500 mean=0.53398
+  top-1 flips: 3/24 (12.50%) | top-5 set overlap: 89.2%
+  greedy margin p50=3.500 p10=0.325 | rows where qerr>margin: 15/24
+
+M=4 rows/call: bf16 batch-vs-row max=2.50e-01 | quant batch-vs-row max=1.25e-01
+  quant-vs-bf16 per-row: max=6.3750 mean=0.53371
+  top-1 flips: 6/32 (18.75%) | top-5 set overlap: 90.0%
+  greedy margin p50=3.750 p10=0.525 | rows where qerr>margin: 18/32
+
+M=8 rows/call: bf16 batch-vs-row max=2.50e-01 | quant batch-vs-row max=2.50e-01
+  quant-vs-bf16 per-row: max=7.5000 mean=0.53367
+  top-1 flips: 8/64 (12.50%) | top-5 set overlap: 90.6%
+  greedy margin p50=3.625 p10=0.250 | rows where qerr>margin: 39/64
+
+wrote /Users/adam.durham/repos/exo/tmp/p05-lmhead-mxfp8-20260830/lmhead_numerics.json
+EXIT=0

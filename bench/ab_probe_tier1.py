@@ -60,6 +60,7 @@ def main() -> int:
     ap.add_argument("target_tokens", type=int, nargs="?", default=100_000)
     ap.add_argument("--max-tokens", type=int, default=1500)
     ap.add_argument("--tag", default="untagged")
+    ap.add_argument("--out", type=str, help="output file path")
     ap.add_argument(
         "--model",
         default=MODEL,
@@ -81,6 +82,7 @@ def main() -> int:
     t_first = None
     text_parts: list[str] = []
     usage = None
+    model_id = None
     with httpx.Client(timeout=httpx.Timeout(7200.0, connect=30.0)) as client:
         with client.stream("POST", f"{API}/v1/chat/completions", json=body) as r:
             r.raise_for_status()
@@ -91,6 +93,8 @@ def main() -> int:
                 if payload.strip() == "[DONE]":
                     break
                 chunk = json.loads(payload)
+                if chunk.get("model"):
+                    model_id = chunk["model"]
                 if chunk.get("usage"):
                     usage = chunk["usage"]
                 for ch in chunk.get("choices", []):
@@ -115,6 +119,7 @@ def main() -> int:
 
     result = {
         "tag": args.tag,
+        "model": model_id,
         "target_tokens": args.target_tokens,
         "prompt_tokens": prompt_toks,
         "completion_tokens": completion_toks,
@@ -128,7 +133,7 @@ def main() -> int:
         "output_tail": text[-200:],
     }
     print(json.dumps(result, indent=2))
-    out = f"/tmp/ab_probe_{args.tag}.json"
+    out = args.out or f"/tmp/ab_probe_{args.tag}.json"
     with open(out, "w") as f:
         json.dump(result, f, indent=2)
     print(f"saved -> {out}", file=sys.stderr)

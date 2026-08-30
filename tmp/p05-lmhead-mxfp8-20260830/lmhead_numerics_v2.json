@@ -1,0 +1,51 @@
+{
+ "n_tokens": 128,
+ "quant_err": {
+  "max": 7.5,
+  "mean": 0.5336575508117676,
+  "rms": 0.6794992089271545
+ },
+ "flips_total": 17,
+ "flip_rate": 0.1328125,
+ "margin_strata": [
+  {
+   "margin_range": "[0.00, 1.44)",
+   "n": 32,
+   "flips": 13,
+   "flip_rate": 0.40625
+  },
+  {
+   "margin_range": "[1.44, 3.62)",
+   "n": 32,
+   "flips": 4,
+   "flip_rate": 0.125
+  },
+  {
+   "margin_range": "[3.62, 7.50)",
+   "n": 31,
+   "flips": 0,
+   "flip_rate": 0.0
+  },
+  {
+   "margin_range": "[7.50, inf)",
+   "n": 33,
+   "flips": 0,
+   "flip_rate": 0.0
+  }
+ ],
+ "top5_overlap": 0.9,
+ "m_dep_M3": {
+  "bf16": 0.0,
+  "mxfp8": 0.0
+ },
+ "m_dep_M4": {
+  "bf16": 0.0,
+  "mxfp8": 0.0
+ },
+ "timing_us": {
+  "bf16_m1": 2955.5000364780426,
+  "bf16_m4": 3027.9579805210233,
+  "mxfp8_m1": 1527.8750215657055,
+  "mxfp8_m4": 3666.8330430984497
+ }
+}

@@ -1,0 +1,15 @@
+{
+  "tag": "quant_100k_retry2",
+  "target_tokens": 100000,
+  "prompt_tokens": 108833,
+  "completion_tokens": 71,
+  "prefill_s": 286.82,
+  "prefill_tps": 379.45,
+  "decode_s": 0.9,
+  "decode_tps": 78.54,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_quant_100k_retry2.json

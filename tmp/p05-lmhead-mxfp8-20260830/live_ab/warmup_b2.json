@@ -1,0 +1,15 @@
+{
+  "tag": "warmup_b2",
+  "target_tokens": 300,
+  "prompt_tokens": 376,
+  "completion_tokens": 60,
+  "prefill_s": 9.42,
+  "prefill_tps": 39.92,
+  "decode_s": 0.21,
+  "decode_tps": 290.62,
+  "needle_hit": false,
+  "bos_spam": false,
+  "output_head": "FAL",
+  "output_tail": "FAL"
+}
+saved -> /tmp/ab_probe_warmup_b2.json

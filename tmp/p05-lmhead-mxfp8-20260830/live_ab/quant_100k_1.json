@@ -1,0 +1,15 @@
+{
+  "tag": "quant_100k_1",
+  "target_tokens": 100000,
+  "prompt_tokens": 109954,
+  "completion_tokens": 84,
+  "prefill_s": 428.31,
+  "prefill_tps": 256.72,
+  "decode_s": 16.93,
+  "decode_tps": 4.96,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_quant_100k_1.json

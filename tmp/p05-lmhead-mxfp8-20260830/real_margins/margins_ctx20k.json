@@ -1,0 +1,7000 @@
+{
+  "prompt_tokens": 25116,
+  "completion_tokens": 1000,
+  "finish_reason": "length",
+  "positions": [
+    {
+      "n": 0,
+      "token": "1",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 1,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -16.375,
+      "margin": 16.375
+    },
+    {
+      "n": 2,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -10.875,
+      "margin": 10.875
+    },
+    {
+      "n": 3,
+      "token": "  The",
+      "top1_lp": 0.0,
+      "top2_lp": -2.625,
+      "margin": 2.625
+    },
+    {
+      "n": 4,
+      "token": " user",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 5,
+      "token": "'s",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 6,
+      "token": " prompt",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 7,
+      "token": " is",
+      "top1_lp": -0.25,
+      "top2_lp": -2.75,
+      "margin": 2.5
+    },
+    {
+      "n": 8,
+      "token": " a",
+      "top1_lp": -0.25,
+      "top2_lp": -2.5,
+      "margin": 2.25
+    },
+    {
+      "n": 9,
+      "token": " massive",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 10,
+      "token": " repetition",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 11,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -7.625,
+      "margin": 7.625
+    },
+    {
+      "n": 12,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 13,
+      "token": " definition",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 14,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 15,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -12.875,
+      "margin": 12.875
+    },
+    {
+      "n": 16,
+      "token": " observer",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 17,
+      "token": " pattern",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 18,
+      "token": " (",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 19,
+      "token": "cop",
+      "top1_lp": -1.5,
+      "top2_lp": -1.75,
+      "margin": 0.25
+    },
+    {
+      "n": 20,
+      "token": "ied",
+      "top1_lp": 0.0,
+      "top2_lp": -12.375,
+      "margin": 12.375
+    },
+    {
+      "n": 21,
+      "token": " hundreds",
+      "top1_lp": -1.0,
+      "top2_lp": -1.5,
+      "margin": 0.5
+    },
+    {
+      "n": 22,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -12.625,
+      "margin": 12.625
+    },
+    {
+      "n": 23,
+      "token": " times",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 24,
+      "token": ").",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 25,
+      "token": " This",
+      "top1_lp": -1.0,
+      "top2_lp": -1.25,
+      "margin": 0.25
+    },
+    {
+      "n": 26,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 27,
+      "token": " a",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 28,
+      "token": " classic",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 29,
+      "token": " prompt",
+      "top1_lp": -0.625,
+      "top2_lp": -1.625,
+      "margin": 1.0
+    },
+    {
+      "n": 30,
+      "token": " injection",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 31,
+      "token": " or",
+      "top1_lp": -1.0,
+      "top2_lp": -1.25,
+      "margin": 0.25
+    },
+    {
+      "n": 32,
+      "token": " a",
+      "top1_lp": -0.25,
+      "top2_lp": -2.75,
+      "margin": 2.5
+    },
+    {
+      "n": 33,
+      "token": " test",
+      "top1_lp": -0.25,
+      "top2_lp": -3.375,
+      "margin": 3.125
+    },
+    {
+      "n": 34,
+      "token": " to",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 35,
+      "token": " see",
+      "top1_lp": 0.0,
+      "top2_lp": -8.75,
+      "margin": 8.75
+    },
+    {
+      "n": 36,
+      "token": " if",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 37,
+      "token": " I",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 38,
+      "token": " follow",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 39,
+      "token": " the",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 40,
+      "token": " instruction",
+      "top1_lp": -0.5,
+      "top2_lp": -2.0,
+      "margin": 1.5
+    },
+    {
+      "n": 41,
+      "token": " at",
+      "top1_lp": -0.25,
+      "top2_lp": -2.5,
+      "margin": 2.25
+    },
+    {
+      "n": 42,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -17.875,
+      "margin": 17.875
+    },
+    {
+      "n": 43,
+      "token": " end",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 44,
+      "token": ":",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 45,
+      "token": " \"",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 46,
+      "token": "Think",
+      "top1_lp": 0.0,
+      "top2_lp": -10.5,
+      "margin": 10.5
+    },
+    {
+      "n": 47,
+      "token": " step",
+      "top1_lp": 0.0,
+      "top2_lp": -18.375,
+      "margin": 18.375
+    },
+    {
+      "n": 48,
+      "token": " by",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 49,
+      "token": " step",
+      "top1_lp": 0.0,
+      "top2_lp": -15.0,
+      "margin": 15.0
+    },
+    {
+      "n": 50,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -13.0,
+      "margin": 13.0
+    },
+    {
+      "n": 51,
+      "token": " write",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 52,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -14.75,
+      "margin": 14.75
+    },
+    {
+      "n": 53,
+      "token": " very",
+      "top1_lp": 0.0,
+      "top2_lp": -15.5,
+      "margin": 15.5
+    },
+    {
+      "n": 54,
+      "token": " detailed",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 55,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -14.25,
+      "margin": 14.25
+    },
+    {
+      "n": 56,
+      "token": " 800",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 57,
+      "token": "+",
+      "top1_lp": 0.0,
+      "top2_lp": -14.25,
+      "margin": 14.25
+    },
+    {
+      "n": 58,
+      "token": " token",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 59,
+      "token": " explanation",
+      "top1_lp": 0.0,
+      "top2_lp": -13.375,
+      "margin": 13.375
+    },
+    {
+      "n": 60,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -14.25,
+      "margin": 14.25
+    },
+    {
+      "n": 61,
+      "token": " how",
+      "top1_lp": 0.0,
+      "top2_lp": -10.75,
+      "margin": 10.75
+    },
+    {
+      "n": 62,
+      "token": " photosynthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -12.875,
+      "margin": 12.875
+    },
+    {
+      "n": 63,
+      "token": " works",
+      "top1_lp": 0.0,
+      "top2_lp": -16.125,
+      "margin": 16.125
+    },
+    {
+      "n": 64,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -6.625,
+      "margin": 6.625
+    },
+    {
+      "n": 65,
+      "token": " covering",
+      "top1_lp": 0.0,
+      "top2_lp": -16.875,
+      "margin": 16.875
+    },
+    {
+      "n": 66,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -16.75,
+      "margin": 16.75
+    },
+    {
+      "n": 67,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -17.75,
+      "margin": 17.75
+    },
+    {
+      "n": 68,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -15.0,
+      "margin": 15.0
+    },
+    {
+      "n": 69,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -20.0,
+      "margin": 20.0
+    },
+    {
+      "n": 70,
+      "token": " reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -21.25,
+      "margin": 21.25
+    },
+    {
+      "n": 71,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -16.125,
+      "margin": 16.125
+    },
+    {
+      "n": 72,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -15.5,
+      "margin": 15.5
+    },
+    {
+      "n": 73,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -16.375,
+      "margin": 16.375
+    },
+    {
+      "n": 74,
+      "token": " Calvin",
+      "top1_lp": 0.0,
+      "top2_lp": -13.125,
+      "margin": 13.125
+    },
+    {
+      "n": 75,
+      "token": " cycle",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 76,
+      "token": ".\"\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 77,
+      "token": "2",
+      "top1_lp": 0.0,
+      "top2_lp": -8.875,
+      "margin": 8.875
+    },
+    {
+      "n": 78,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -17.375,
+      "margin": 17.375
+    },
+    {
+      "n": 79,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -16.125,
+      "margin": 16.125
+    },
+    {
+      "n": 80,
+      "token": "  The",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 81,
+      "token": " instruction",
+      "top1_lp": -0.25,
+      "top2_lp": -2.625,
+      "margin": 2.375
+    },
+    {
+      "n": 82,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 83,
+      "token": " clear",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 84,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 85,
+      "token": " write",
+      "top1_lp": -1.125,
+      "top2_lp": -1.375,
+      "margin": 0.25
+    },
+    {
+      "n": 86,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 87,
+      "token": " detailed",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 88,
+      "token": "",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 89,
+      "token": " 800",
+      "top1_lp": 0.0,
+      "top2_lp": -13.875,
+      "margin": 13.875
+    },
+    {
+      "n": 90,
+      "token": "+",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 91,
+      "token": " token",
+      "top1_lp": 0.0,
+      "top2_lp": -6.5,
+      "margin": 6.5
+    },
+    {
+      "n": 92,
+      "token": " explanation",
+      "top1_lp": 0.0,
+      "top2_lp": -9.625,
+      "margin": 9.625
+    },
+    {
+      "n": 93,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 94,
+      "token": " photosynthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -6.5,
+      "margin": 6.5
+    },
+    {
+      "n": 95,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 96,
+      "token": " covering",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 97,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 98,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 99,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 100,
+      "token": " reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 101,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 102,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 103,
+      "token": " Calvin",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 104,
+      "token": " cycle",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 105,
+      "token": ".",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 106,
+      "token": " I",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 107,
+      "token": " must",
+      "top1_lp": -0.25,
+      "top2_lp": -3.0,
+      "margin": 2.75
+    },
+    {
+      "n": 108,
+      "token": " ignore",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 109,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -9.375,
+      "margin": 9.375
+    },
+    {
+      "n": 110,
+      "token": " repetitive",
+      "top1_lp": -0.25,
+      "top2_lp": -2.375,
+      "margin": 2.125
+    },
+    {
+      "n": 111,
+      "token": " text",
+      "top1_lp": -1.0,
+      "top2_lp": -1.625,
+      "margin": 0.625
+    },
+    {
+      "n": 112,
+      "token": " and",
+      "top1_lp": -0.25,
+      "top2_lp": -2.75,
+      "margin": 2.5
+    },
+    {
+      "n": 113,
+      "token": " fulfill",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 114,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -8.25,
+      "margin": 8.25
+    },
+    {
+      "n": 115,
+      "token": " final",
+      "top1_lp": -1.0,
+      "top2_lp": -1.5,
+      "margin": 0.5
+    },
+    {
+      "n": 116,
+      "token": " request",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 117,
+      "token": ".\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 118,
+      "token": "3",
+      "top1_lp": 0.0,
+      "top2_lp": -9.25,
+      "margin": 9.25
+    },
+    {
+      "n": 119,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -15.4375,
+      "margin": 15.4375
+    },
+    {
+      "n": 120,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 121,
+      "token": "  Let",
+      "top1_lp": -1.0,
+      "top2_lp": -1.25,
+      "margin": 0.25
+    },
+    {
+      "n": 122,
+      "token": "'s",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 123,
+      "token": " structure",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 124,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 125,
+      "token": " explanation",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 126,
+      "token": ":\n",
+      "top1_lp": -0.25,
+      "top2_lp": -2.875,
+      "margin": 2.625
+    },
+    {
+      "n": 127,
+      "token": "   ",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 128,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 129,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -11.875,
+      "margin": 11.875
+    },
+    {
+      "n": 130,
+      "token": " Introduction",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 131,
+      "token": ":",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 132,
+      "token": " What",
+      "top1_lp": -0.5,
+      "top2_lp": -2.0,
+      "margin": 1.5
+    },
+    {
+      "n": 133,
+      "token": " is",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 134,
+      "token": " photosynthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 135,
+      "token": ",",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 136,
+      "token": " overall",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 137,
+      "token": " equation",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 138,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 139,
+      "token": " purpose",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 140,
+      "token": ".\n",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 141,
+      "token": "   ",
+      "top1_lp": 0.0,
+      "top2_lp": -15.75,
+      "margin": 15.75
+    },
+    {
+      "n": 142,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -17.125,
+      "margin": 17.125
+    },
+    {
+      "n": 143,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -8.625,
+      "margin": 8.625
+    },
+    {
+      "n": 144,
+      "token": " Chlor",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 145,
+      "token": "ophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 146,
+      "token": " and",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 147,
+      "token": " Pig",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 148,
+      "token": "ments",
+      "top1_lp": 0.0,
+      "top2_lp": -17.75,
+      "margin": 17.75
+    },
+    {
+      "n": 149,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 150,
+      "token": " Role",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 151,
+      "token": " of",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 152,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -6.0,
+      "margin": 6.0
+    },
+    {
+      "n": 153,
+      "token": " a",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 154,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 155,
+      "token": " b",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 156,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -16.0,
+      "margin": 16.0
+    },
+    {
+      "n": 157,
+      "token": " caroten",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 158,
+      "token": "oids",
+      "top1_lp": 0.0,
+      "top2_lp": -19.5,
+      "margin": 19.5
+    },
+    {
+      "n": 159,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 160,
+      "token": " absorption",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 161,
+      "token": " spectra",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 162,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -6.5,
+      "margin": 6.5
+    },
+    {
+      "n": 163,
+      "token": " location",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 164,
+      "token": " in",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 165,
+      "token": " th",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 166,
+      "token": "yl",
+      "top1_lp": 0.0,
+      "top2_lp": -20.0,
+      "margin": 20.0
+    },
+    {
+      "n": 167,
+      "token": "ak",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 168,
+      "token": "oid",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 169,
+      "token": " membranes",
+      "top1_lp": 0.0,
+      "top2_lp": -7.0,
+      "margin": 7.0
+    },
+    {
+      "n": 170,
+      "token": ".\n",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 171,
+      "token": "   ",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 172,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 173,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 174,
+      "token": " Light",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 175,
+      "token": " Reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 176,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 177,
+      "token": "Th",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 178,
+      "token": "yl",
+      "top1_lp": 0.0,
+      "top2_lp": -18.5,
+      "margin": 18.5
+    },
+    {
+      "n": 179,
+      "token": "ak",
+      "top1_lp": 0.0,
+      "top2_lp": -21.75,
+      "margin": 21.75
+    },
+    {
+      "n": 180,
+      "token": "oid",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 181,
+      "token": " membrane",
+      "top1_lp": -1.0,
+      "top2_lp": -1.5,
+      "margin": 0.5
+    },
+    {
+      "n": 182,
+      "token": "):\n",
+      "top1_lp": 0.0,
+      "top2_lp": -2.125,
+      "margin": 2.125
+    },
+    {
+      "n": 183,
+      "token": "       ",
+      "top1_lp": 0.0,
+      "top2_lp": -11.875,
+      "margin": 11.875
+    },
+    {
+      "n": 184,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -11.125,
+      "margin": 11.125
+    },
+    {
+      "n": 185,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 186,
+      "token": " Photos",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 187,
+      "token": "ystem",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 188,
+      "token": " II",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 189,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 190,
+      "token": "PS",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 191,
+      "token": "II",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 192,
+      "token": "):",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 193,
+      "token": " Light",
+      "top1_lp": -1.0,
+      "top2_lp": -1.0,
+      "margin": 0.0
+    },
+    {
+      "n": 194,
+      "token": " absorption",
+      "top1_lp": 0.0,
+      "top2_lp": -7.5,
+      "margin": 7.5
+    },
+    {
+      "n": 195,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 196,
+      "token": " water",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 197,
+      "token": " splitting",
+      "top1_lp": 0.0,
+      "top2_lp": -8.75,
+      "margin": 8.75
+    },
+    {
+      "n": 198,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 199,
+      "token": "phot",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 200,
+      "token": "olysis",
+      "top1_lp": 0.0,
+      "top2_lp": -18.0,
+      "margin": 18.0
+    },
+    {
+      "n": 201,
+      "token": "),",
+      "top1_lp": 0.0,
+      "top2_lp": -5.875,
+      "margin": 5.875
+    },
+    {
+      "n": 202,
+      "token": " oxygen",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 203,
+      "token": " release",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 204,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 205,
+      "token": " electron",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 206,
+      "token": " transport",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 207,
+      "token": " chain",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 208,
+      "token": " (",
+      "top1_lp": -0.25,
+      "top2_lp": -2.125,
+      "margin": 1.875
+    },
+    {
+      "n": 209,
+      "token": "pl",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 210,
+      "token": "ast",
+      "top1_lp": 0.0,
+      "top2_lp": -17.75,
+      "margin": 17.75
+    },
+    {
+      "n": 211,
+      "token": "oqu",
+      "top1_lp": 0.0,
+      "top2_lp": -12.0,
+      "margin": 12.0
+    },
+    {
+      "n": 212,
+      "token": "in",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 213,
+      "token": "one",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 214,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 215,
+      "token": " cytochrome",
+      "top1_lp": 0.0,
+      "top2_lp": -10.25,
+      "margin": 10.25
+    },
+    {
+      "n": 216,
+      "token": " b",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 217,
+      "token": "6",
+      "top1_lp": 0.0,
+      "top2_lp": -13.25,
+      "margin": 13.25
+    },
+    {
+      "n": 218,
+      "token": "f",
+      "top1_lp": 0.0,
+      "top2_lp": -16.25,
+      "margin": 16.25
+    },
+    {
+      "n": 219,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 220,
+      "token": " plast",
+      "top1_lp": 0.0,
+      "top2_lp": -12.75,
+      "margin": 12.75
+    },
+    {
+      "n": 221,
+      "token": "ocyan",
+      "top1_lp": 0.0,
+      "top2_lp": -19.75,
+      "margin": 19.75
+    },
+    {
+      "n": 222,
+      "token": "in",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 223,
+      "token": "),",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 224,
+      "token": " proton",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 225,
+      "token": " gradient",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 226,
+      "token": ".\n",
+      "top1_lp": 0.0,
+      "top2_lp": -4.125,
+      "margin": 4.125
+    },
+    {
+      "n": 227,
+      "token": "       ",
+      "top1_lp": 0.0,
+      "top2_lp": -12.875,
+      "margin": 12.875
+    },
+    {
+      "n": 228,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -17.375,
+      "margin": 17.375
+    },
+    {
+      "n": 229,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -16.375,
+      "margin": 16.375
+    },
+    {
+      "n": 230,
+      "token": " Photos",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 231,
+      "token": "ystem",
+      "top1_lp": 0.0,
+      "top2_lp": -16.0,
+      "margin": 16.0
+    },
+    {
+      "n": 232,
+      "token": " I",
+      "top1_lp": 0.0,
+      "top2_lp": -15.0,
+      "margin": 15.0
+    },
+    {
+      "n": 233,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 234,
+      "token": "PS",
+      "top1_lp": 0.0,
+      "top2_lp": -15.375,
+      "margin": 15.375
+    },
+    {
+      "n": 235,
+      "token": "I",
+      "top1_lp": 0.0,
+      "top2_lp": -13.25,
+      "margin": 13.25
+    },
+    {
+      "n": 236,
+      "token": "):",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 237,
+      "token": " Light",
+      "top1_lp": 0.0,
+      "top2_lp": -6.0,
+      "margin": 6.0
+    },
+    {
+      "n": 238,
+      "token": " absorption",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 239,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 240,
+      "token": " electron",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 241,
+      "token": " re",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 242,
+      "token": "-",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 243,
+      "token": "ener",
+      "top1_lp": 0.0,
+      "top2_lp": -13.75,
+      "margin": 13.75
+    },
+    {
+      "n": 244,
+      "token": "g",
+      "top1_lp": 0.0,
+      "top2_lp": -18.375,
+      "margin": 18.375
+    },
+    {
+      "n": 245,
+      "token": "ization",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 246,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -10.5,
+      "margin": 10.5
+    },
+    {
+      "n": 247,
+      "token": " NAD",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 248,
+      "token": "PH",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 249,
+      "token": " reduction",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 250,
+      "token": " (",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 251,
+      "token": "ferred",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 252,
+      "token": "oxin",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 253,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -6.125,
+      "margin": 6.125
+    },
+    {
+      "n": 254,
+      "token": " NAD",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 255,
+      "token": "P",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 256,
+      "token": "+",
+      "top1_lp": 0.0,
+      "top2_lp": -9.25,
+      "margin": 9.25
+    },
+    {
+      "n": 257,
+      "token": " reductase",
+      "top1_lp": 0.0,
+      "top2_lp": -18.25,
+      "margin": 18.25
+    },
+    {
+      "n": 258,
+      "token": ").\n",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 259,
+      "token": "       ",
+      "top1_lp": 0.0,
+      "top2_lp": -15.125,
+      "margin": 15.125
+    },
+    {
+      "n": 260,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -18.25,
+      "margin": 18.25
+    },
+    {
+      "n": 261,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -13.625,
+      "margin": 13.625
+    },
+    {
+      "n": 262,
+      "token": " Chem",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 263,
+      "token": "ios",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 264,
+      "token": "m",
+      "top1_lp": 0.0,
+      "top2_lp": -14.375,
+      "margin": 14.375
+    },
+    {
+      "n": 265,
+      "token": "osis",
+      "top1_lp": 0.0,
+      "top2_lp": -16.875,
+      "margin": 16.875
+    },
+    {
+      "n": 266,
+      "token": "/",
+      "top1_lp": -1.0,
+      "top2_lp": -1.25,
+      "margin": 0.25
+    },
+    {
+      "n": 267,
+      "token": "ATP",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 268,
+      "token": " Syn",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 269,
+      "token": "th",
+      "top1_lp": 0.0,
+      "top2_lp": -19.375,
+      "margin": 19.375
+    },
+    {
+      "n": 270,
+      "token": "ase",
+      "top1_lp": 0.0,
+      "top2_lp": -18.125,
+      "margin": 18.125
+    },
+    {
+      "n": 271,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 272,
+      "token": " Proton",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 273,
+      "token": " gradient",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 274,
+      "token": " driving",
+      "top1_lp": -0.5,
+      "top2_lp": -1.125,
+      "margin": 0.625
+    },
+    {
+      "n": 275,
+      "token": " ATP",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 276,
+      "token": " synthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 277,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -3.625,
+      "margin": 3.625
+    },
+    {
+      "n": 278,
+      "token": "phot",
+      "top1_lp": 0.0,
+      "top2_lp": -7.5,
+      "margin": 7.5
+    },
+    {
+      "n": 279,
+      "token": "ophosph",
+      "top1_lp": 0.0,
+      "top2_lp": -16.0,
+      "margin": 16.0
+    },
+    {
+      "n": 280,
+      "token": "orylation",
+      "top1_lp": 0.0,
+      "top2_lp": -15.875,
+      "margin": 15.875
+    },
+    {
+      "n": 281,
+      "token": ").\n",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 282,
+      "token": "   ",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 283,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -18.0,
+      "margin": 18.0
+    },
+    {
+      "n": 284,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 285,
+      "token": " Calvin",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 286,
+      "token": " Cycle",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 287,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -12.875,
+      "margin": 12.875
+    },
+    {
+      "n": 288,
+      "token": "St",
+      "top1_lp": 0.0,
+      "top2_lp": -10.0,
+      "margin": 10.0
+    },
+    {
+      "n": 289,
+      "token": "roma",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 290,
+      "token": "):\n",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 291,
+      "token": "       ",
+      "top1_lp": 0.0,
+      "top2_lp": -16.125,
+      "margin": 16.125
+    },
+    {
+      "n": 292,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -16.625,
+      "margin": 16.625
+    },
+    {
+      "n": 293,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 294,
+      "token": " Carbon",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 295,
+      "token": " Fix",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 296,
+      "token": "ation",
+      "top1_lp": 0.0,
+      "top2_lp": -20.5,
+      "margin": 20.5
+    },
+    {
+      "n": 297,
+      "token": ":",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 298,
+      "token": " Ru",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 299,
+      "token": "B",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 300,
+      "token": "is",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 301,
+      "token": "CO",
+      "top1_lp": 0.0,
+      "top2_lp": -9.25,
+      "margin": 9.25
+    },
+    {
+      "n": 302,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 303,
+      "token": " Ru",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 304,
+      "token": "BP",
+      "top1_lp": 0.0,
+      "top2_lp": -16.75,
+      "margin": 16.75
+    },
+    {
+      "n": 305,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -1.875,
+      "margin": 1.625
+    },
+    {
+      "n": 306,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 307,
+      "token": " 3",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 308,
+      "token": "-P",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 309,
+      "token": "GA",
+      "top1_lp": 0.0,
+      "top2_lp": -20.0,
+      "margin": 20.0
+    },
+    {
+      "n": 310,
+      "token": ".\n",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 311,
+      "token": "       ",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 312,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -20.375,
+      "margin": 20.375
+    },
+    {
+      "n": 313,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -13.25,
+      "margin": 13.25
+    },
+    {
+      "n": 314,
+      "token": " Reduction",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 315,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 316,
+      "token": " ATP",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 317,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 318,
+      "token": " NAD",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 319,
+      "token": "PH",
+      "top1_lp": 0.0,
+      "top2_lp": -16.75,
+      "margin": 16.75
+    },
+    {
+      "n": 320,
+      "token": " converting",
+      "top1_lp": -0.25,
+      "top2_lp": -2.375,
+      "margin": 2.125
+    },
+    {
+      "n": 321,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -8.875,
+      "margin": 8.875
+    },
+    {
+      "n": 322,
+      "token": " 3",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 323,
+      "token": "-P",
+      "top1_lp": 0.0,
+      "top2_lp": -15.0,
+      "margin": 15.0
+    },
+    {
+      "n": 324,
+      "token": "GA",
+      "top1_lp": 0.0,
+      "top2_lp": -21.0,
+      "margin": 21.0
+    },
+    {
+      "n": 325,
+      "token": " to",
+      "top1_lp": 0.0,
+      "top2_lp": -10.125,
+      "margin": 10.125
+    },
+    {
+      "n": 326,
+      "token": " G",
+      "top1_lp": 0.0,
+      "top2_lp": -15.5,
+      "margin": 15.5
+    },
+    {
+      "n": 327,
+      "token": "3",
+      "top1_lp": 0.0,
+      "top2_lp": -20.625,
+      "margin": 20.625
+    },
+    {
+      "n": 328,
+      "token": "P",
+      "top1_lp": 0.0,
+      "top2_lp": -16.625,
+      "margin": 16.625
+    },
+    {
+      "n": 329,
+      "token": ".\n",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 330,
+      "token": "       ",
+      "top1_lp": 0.0,
+      "top2_lp": -15.625,
+      "margin": 15.625
+    },
+    {
+      "n": 331,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 332,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -15.5,
+      "margin": 15.5
+    },
+    {
+      "n": 333,
+      "token": " Reg",
+      "top1_lp": 0.0,
+      "top2_lp": -15.75,
+      "margin": 15.75
+    },
+    {
+      "n": 334,
+      "token": "eneration",
+      "top1_lp": 0.0,
+      "top2_lp": -15.25,
+      "margin": 15.25
+    },
+    {
+      "n": 335,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 336,
+      "token": " Ru",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 337,
+      "token": "BP",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 338,
+      "token": " regeneration",
+      "top1_lp": 0.0,
+      "top2_lp": -4.75,
+      "margin": 4.75
+    },
+    {
+      "n": 339,
+      "token": ",",
+      "top1_lp": -0.625,
+      "top2_lp": -1.125,
+      "margin": 0.5
+    },
+    {
+      "n": 340,
+      "token": " G",
+      "top1_lp": -1.375,
+      "top2_lp": -1.75,
+      "margin": 0.375
+    },
+    {
+      "n": 341,
+      "token": "3",
+      "top1_lp": 0.0,
+      "top2_lp": -15.875,
+      "margin": 15.875
+    },
+    {
+      "n": 342,
+      "token": "P",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 343,
+      "token": " output",
+      "top1_lp": -0.125,
+      "top2_lp": -4.625,
+      "margin": 4.5
+    },
+    {
+      "n": 344,
+      "token": " (",
+      "top1_lp": -0.75,
+      "top2_lp": -0.875,
+      "margin": 0.125
+    },
+    {
+      "n": 345,
+      "token": "gl",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 346,
+      "token": "ucose",
+      "top1_lp": 0.0,
+      "top2_lp": -17.125,
+      "margin": 17.125
+    },
+    {
+      "n": 347,
+      "token": ").\n",
+      "top1_lp": -0.5,
+      "top2_lp": -2.0,
+      "margin": 1.5
+    },
+    {
+      "n": 348,
+      "token": "   ",
+      "top1_lp": 0.0,
+      "top2_lp": -3.375,
+      "margin": 3.375
+    },
+    {
+      "n": 349,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -17.625,
+      "margin": 17.625
+    },
+    {
+      "n": 350,
+      "token": "  ",
+      "top1_lp": 0.0,
+      "top2_lp": -10.375,
+      "margin": 10.375
+    },
+    {
+      "n": 351,
+      "token": " Summary",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 352,
+      "token": "/",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 353,
+      "token": "Conclusion",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 354,
+      "token": ":",
+      "top1_lp": -0.25,
+      "top2_lp": -1.875,
+      "margin": 1.625
+    },
+    {
+      "n": 355,
+      "token": " Overall",
+      "top1_lp": -2.0,
+      "top2_lp": -2.125,
+      "margin": 0.125
+    },
+    {
+      "n": 356,
+      "token": " significance",
+      "top1_lp": -1.875,
+      "top2_lp": -2.0,
+      "margin": 0.125
+    },
+    {
+      "n": 357,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -1.375,
+      "margin": 1.125
+    },
+    {
+      "n": 358,
+      "token": " inputs",
+      "top1_lp": -1.5,
+      "top2_lp": -1.75,
+      "margin": 0.25
+    },
+    {
+      "n": 359,
+      "token": "/output",
+      "top1_lp": -0.375,
+      "top2_lp": -2.125,
+      "margin": 1.75
+    },
+    {
+      "n": 360,
+      "token": "s",
+      "top1_lp": 0.0,
+      "top2_lp": -14.75,
+      "margin": 14.75
+    },
+    {
+      "n": 361,
+      "token": ".\n\n",
+      "top1_lp": -0.375,
+      "top2_lp": -1.5,
+      "margin": 1.125
+    },
+    {
+      "n": 362,
+      "token": "4",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 363,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 364,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -10.5,
+      "margin": 10.5
+    },
+    {
+      "n": 365,
+      "token": "  **",
+      "top1_lp": 0.0,
+      "top2_lp": -6.375,
+      "margin": 6.375
+    },
+    {
+      "n": 366,
+      "token": "Token",
+      "top1_lp": -0.875,
+      "top2_lp": -1.125,
+      "margin": 0.25
+    },
+    {
+      "n": 367,
+      "token": " Count",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 368,
+      "token": " Check",
+      "top1_lp": -0.125,
+      "top2_lp": -2.75,
+      "margin": 2.625
+    },
+    {
+      "n": 369,
+      "token": ":**",
+      "top1_lp": -0.25,
+      "top2_lp": -1.875,
+      "margin": 1.625
+    },
+    {
+      "n": 370,
+      "token": " The",
+      "top1_lp": -1.0,
+      "top2_lp": -1.5,
+      "margin": 0.5
+    },
+    {
+      "n": 371,
+      "token": " response",
+      "top1_lp": -1.5,
+      "top2_lp": -1.75,
+      "margin": 0.25
+    },
+    {
+      "n": 372,
+      "token": " needs",
+      "top1_lp": -0.625,
+      "top2_lp": -1.625,
+      "margin": 1.0
+    },
+    {
+      "n": 373,
+      "token": " to",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 374,
+      "token": " be",
+      "top1_lp": 0.0,
+      "top2_lp": -8.75,
+      "margin": 8.75
+    },
+    {
+      "n": 375,
+      "token": "",
+      "top1_lp": -0.5,
+      "top2_lp": -2.125,
+      "margin": 1.625
+    },
+    {
+      "n": 376,
+      "token": " 800",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 377,
+      "token": "+",
+      "top1_lp": 0.0,
+      "top2_lp": -8.0,
+      "margin": 8.0
+    },
+    {
+      "n": 378,
+      "token": " tokens",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 379,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -7.0,
+      "margin": 7.0
+    },
+    {
+      "n": 380,
+      "token": " The",
+      "top1_lp": -1.0,
+      "top2_lp": -1.5,
+      "margin": 0.5
+    },
+    {
+      "n": 381,
+      "token": " drafted",
+      "top1_lp": -1.125,
+      "top2_lp": -1.75,
+      "margin": 0.625
+    },
+    {
+      "n": 382,
+      "token": " response",
+      "top1_lp": -0.875,
+      "top2_lp": -1.75,
+      "margin": 0.875
+    },
+    {
+      "n": 383,
+      "token": " is",
+      "top1_lp": -0.125,
+      "top2_lp": -2.5,
+      "margin": 2.375
+    },
+    {
+      "n": 384,
+      "token": " around",
+      "top1_lp": -1.375,
+      "top2_lp": -1.375,
+      "margin": 0.0
+    },
+    {
+      "n": 385,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -7.875,
+      "margin": 7.875
+    },
+    {
+      "n": 386,
+      "token": " 800",
+      "top1_lp": -1.0,
+      "top2_lp": -2.0,
+      "margin": 1.0
+    },
+    {
+      "n": 387,
+      "token": "-",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 388,
+      "token": "900",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 389,
+      "token": " words",
+      "top1_lp": -0.375,
+      "top2_lp": -1.25,
+      "margin": 0.875
+    },
+    {
+      "n": 390,
+      "token": ",",
+      "top1_lp": -0.625,
+      "top2_lp": -0.625,
+      "margin": 0.0
+    },
+    {
+      "n": 391,
+      "token": " which",
+      "top1_lp": 0.0,
+      "top2_lp": -4.875,
+      "margin": 4.875
+    },
+    {
+      "n": 392,
+      "token": " is",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 393,
+      "token": " roughly",
+      "top1_lp": -0.5,
+      "top2_lp": -1.875,
+      "margin": 1.375
+    },
+    {
+      "n": 394,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -7.875,
+      "margin": 7.875
+    },
+    {
+      "n": 395,
+      "token": " 100",
+      "top1_lp": 0.0,
+      "top2_lp": -2.0,
+      "margin": 2.0
+    },
+    {
+      "n": 396,
+      "token": "0",
+      "top1_lp": 0.0,
+      "top2_lp": -10.375,
+      "margin": 10.375
+    },
+    {
+      "n": 397,
+      "token": "-",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 398,
+      "token": "120",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 399,
+      "token": "0",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 400,
+      "token": " tokens",
+      "top1_lp": 0.0,
+      "top2_lp": -10.25,
+      "margin": 10.25
+    },
+    {
+      "n": 401,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -2.625,
+      "margin": 2.625
+    },
+    {
+      "n": 402,
+      "token": " Let",
+      "top1_lp": -1.125,
+      "top2_lp": -1.375,
+      "margin": 0.25
+    },
+    {
+      "n": 403,
+      "token": "'s",
+      "top1_lp": 0.0,
+      "top2_lp": -3.375,
+      "margin": 3.375
+    },
+    {
+      "n": 404,
+      "token": " ensure",
+      "top1_lp": -0.75,
+      "top2_lp": -1.125,
+      "margin": 0.375
+    },
+    {
+      "n": 405,
+      "token": " it",
+      "top1_lp": -0.125,
+      "top2_lp": -3.125,
+      "margin": 3.0
+    },
+    {
+      "n": 406,
+      "token": "'s",
+      "top1_lp": 0.0,
+      "top2_lp": -3.125,
+      "margin": 3.125
+    },
+    {
+      "n": 407,
+      "token": " detailed",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 408,
+      "token": " enough",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 409,
+      "token": ".",
+      "top1_lp": -0.5,
+      "top2_lp": -1.125,
+      "margin": 0.625
+    },
+    {
+      "n": 410,
+      "token": " I",
+      "top1_lp": -0.125,
+      "top2_lp": -2.875,
+      "margin": 2.75
+    },
+    {
+      "n": 411,
+      "token": " will",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 412,
+      "token": " expand",
+      "top1_lp": -0.375,
+      "top2_lp": -1.875,
+      "margin": 1.5
+    },
+    {
+      "n": 413,
+      "token": " on",
+      "top1_lp": -0.125,
+      "top2_lp": -2.75,
+      "margin": 2.625
+    },
+    {
+      "n": 414,
+      "token": " the",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 415,
+      "token": " specifics",
+      "top1_lp": -1.125,
+      "top2_lp": -1.875,
+      "margin": 0.75
+    },
+    {
+      "n": 416,
+      "token": " of",
+      "top1_lp": -0.25,
+      "top2_lp": -3.0,
+      "margin": 2.75
+    },
+    {
+      "n": 417,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 418,
+      "token": " electron",
+      "top1_lp": -0.25,
+      "top2_lp": -2.75,
+      "margin": 2.5
+    },
+    {
+      "n": 419,
+      "token": " transport",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 420,
+      "token": " chain",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 421,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 422,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.125,
+      "margin": 4.125
+    },
+    {
+      "n": 423,
+      "token": " role",
+      "top1_lp": -1.0,
+      "top2_lp": -1.125,
+      "margin": 0.125
+    },
+    {
+      "n": 424,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -13.125,
+      "margin": 13.125
+    },
+    {
+      "n": 425,
+      "token": " the",
+      "top1_lp": -0.375,
+      "top2_lp": -1.75,
+      "margin": 1.375
+    },
+    {
+      "n": 426,
+      "token": " proton",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 427,
+      "token": " gradient",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 428,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -4.625,
+      "margin": 4.625
+    },
+    {
+      "n": 429,
+      "token": " and",
+      "top1_lp": -0.25,
+      "top2_lp": -1.375,
+      "margin": 1.125
+    },
+    {
+      "n": 430,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 431,
+      "token": " stoichi",
+      "top1_lp": -1.5,
+      "top2_lp": -1.625,
+      "margin": 0.125
+    },
+    {
+      "n": 432,
+      "token": "ometry",
+      "top1_lp": 0.0,
+      "top2_lp": -7.0,
+      "margin": 7.0
+    },
+    {
+      "n": 433,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 434,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -10.0,
+      "margin": 10.0
+    },
+    {
+      "n": 435,
+      "token": " Calvin",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 436,
+      "token": " cycle",
+      "top1_lp": 0.0,
+      "top2_lp": -9.125,
+      "margin": 9.125
+    },
+    {
+      "n": 437,
+      "token": ".\n\n",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 438,
+      "token": "5",
+      "top1_lp": 0.0,
+      "top2_lp": -4.75,
+      "margin": 4.75
+    },
+    {
+      "n": 439,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 440,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -13.75,
+      "margin": 13.75
+    },
+    {
+      "n": 441,
+      "token": "  **",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 442,
+      "token": "Final",
+      "top1_lp": -0.5,
+      "top2_lp": -2.25,
+      "margin": 1.75
+    },
+    {
+      "n": 443,
+      "token": " Polish",
+      "top1_lp": -0.125,
+      "top2_lp": -3.375,
+      "margin": 3.25
+    },
+    {
+      "n": 444,
+      "token": ":**",
+      "top1_lp": 0.0,
+      "top2_lp": -5.375,
+      "margin": 5.375
+    },
+    {
+      "n": 445,
+      "token": " Ensure",
+      "top1_lp": -0.5,
+      "top2_lp": -1.875,
+      "margin": 1.375
+    },
+    {
+      "n": 446,
+      "token": " the",
+      "top1_lp": -0.875,
+      "top2_lp": -1.75,
+      "margin": 0.875
+    },
+    {
+      "n": 447,
+      "token": " response",
+      "top1_lp": -1.5,
+      "top2_lp": -1.625,
+      "margin": 0.125
+    },
+    {
+      "n": 448,
+      "token": " is",
+      "top1_lp": -0.375,
+      "top2_lp": -2.25,
+      "margin": 1.875
+    },
+    {
+      "n": 449,
+      "token": " coherent",
+      "top1_lp": -1.0,
+      "top2_lp": -1.75,
+      "margin": 0.75
+    },
+    {
+      "n": 450,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 451,
+      "token": " well",
+      "top1_lp": -1.5,
+      "top2_lp": -1.5,
+      "margin": 0.0
+    },
+    {
+      "n": 452,
+      "token": "-structured",
+      "top1_lp": -0.5,
+      "top2_lp": -2.0,
+      "margin": 1.5
+    },
+    {
+      "n": 453,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -2.125,
+      "margin": 1.875
+    },
+    {
+      "n": 454,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 455,
+      "token": " directly",
+      "top1_lp": -0.75,
+      "top2_lp": -1.5,
+      "margin": 0.75
+    },
+    {
+      "n": 456,
+      "token": " addresses",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 457,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.625,
+      "margin": 4.625
+    },
+    {
+      "n": 458,
+      "token": " prompt",
+      "top1_lp": -0.5,
+      "top2_lp": -2.125,
+      "margin": 1.625
+    },
+    {
+      "n": 459,
+      "token": ".",
+      "top1_lp": -0.625,
+      "top2_lp": -1.125,
+      "margin": 0.5
+    },
+    {
+      "n": 460,
+      "token": "The",
+      "top1_lp": -0.25,
+      "top2_lp": -3.25,
+      "margin": 3.0
+    },
+    {
+      "n": 461,
+      "token": " repetitive",
+      "top1_lp": -1.0,
+      "top2_lp": -1.375,
+      "margin": 0.375
+    },
+    {
+      "n": 462,
+      "token": " text",
+      "top1_lp": 0.0,
+      "top2_lp": -3.375,
+      "margin": 3.375
+    },
+    {
+      "n": 463,
+      "token": " you",
+      "top1_lp": -0.875,
+      "top2_lp": -1.375,
+      "margin": 0.5
+    },
+    {
+      "n": 464,
+      "token": " provided",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 465,
+      "token": " describes",
+      "top1_lp": -0.75,
+      "top2_lp": -1.75,
+      "margin": 1.0
+    },
+    {
+      "n": 466,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.75,
+      "margin": 4.75
+    },
+    {
+      "n": 467,
+      "token": " Observer",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 468,
+      "token": " pattern",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 469,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.375,
+      "margin": 2.375
+    },
+    {
+      "n": 470,
+      "token": " but",
+      "top1_lp": -0.25,
+      "top2_lp": -2.375,
+      "margin": 2.125
+    },
+    {
+      "n": 471,
+      "token": " your",
+      "top1_lp": 0.0,
+      "top2_lp": -2.875,
+      "margin": 2.875
+    },
+    {
+      "n": 472,
+      "token": " final",
+      "top1_lp": -0.25,
+      "top2_lp": -2.5,
+      "margin": 2.25
+    },
+    {
+      "n": 473,
+      "token": " instruction",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 474,
+      "token": " asks",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 475,
+      "token": " for",
+      "top1_lp": 0.0,
+      "top2_lp": -7.0,
+      "margin": 7.0
+    },
+    {
+      "n": 476,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -8.0,
+      "margin": 8.0
+    },
+    {
+      "n": 477,
+      "token": " detailed",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 478,
+      "token": " explanation",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 479,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -10.25,
+      "margin": 10.25
+    },
+    {
+      "n": 480,
+      "token": " photosynthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 481,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -6.375,
+      "margin": 6.375
+    },
+    {
+      "n": 482,
+      "token": " I",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 483,
+      "token": " will",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 484,
+      "token": " follow",
+      "top1_lp": -1.0,
+      "top2_lp": -1.75,
+      "margin": 0.75
+    },
+    {
+      "n": 485,
+      "token": " that",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 486,
+      "token": " instruction",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 487,
+      "token": " and",
+      "top1_lp": -0.75,
+      "top2_lp": -1.75,
+      "margin": 1.0
+    },
+    {
+      "n": 488,
+      "token": " provide",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 489,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 490,
+      "token": " comprehensive",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 491,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 492,
+      "token": " step",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 493,
+      "token": "-by",
+      "top1_lp": 0.0,
+      "top2_lp": -10.875,
+      "margin": 10.875
+    },
+    {
+      "n": 494,
+      "token": "-step",
+      "top1_lp": 0.0,
+      "top2_lp": -18.125,
+      "margin": 18.125
+    },
+    {
+      "n": 495,
+      "token": " breakdown",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 496,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -8.25,
+      "margin": 8.25
+    },
+    {
+      "n": 497,
+      "token": " this",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 498,
+      "token": " vital",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 499,
+      "token": " biological",
+      "top1_lp": 0.0,
+      "top2_lp": -8.0,
+      "margin": 8.0
+    },
+    {
+      "n": 500,
+      "token": " process",
+      "top1_lp": 0.0,
+      "top2_lp": -14.625,
+      "margin": 14.625
+    },
+    {
+      "n": 501,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 502,
+      "token": " covering",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 503,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 504,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -10.375,
+      "margin": 10.375
+    },
+    {
+      "n": 505,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -10.25,
+      "margin": 10.25
+    },
+    {
+      "n": 506,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -15.375,
+      "margin": 15.375
+    },
+    {
+      "n": 507,
+      "token": " reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 508,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 509,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -13.0,
+      "margin": 13.0
+    },
+    {
+      "n": 510,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -18.625,
+      "margin": 18.625
+    },
+    {
+      "n": 511,
+      "token": " Calvin",
+      "top1_lp": 0.0,
+      "top2_lp": -17.875,
+      "margin": 17.875
+    },
+    {
+      "n": 512,
+      "token": " cycle",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 513,
+      "token": ".\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 514,
+      "token": "Photos",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 515,
+      "token": "ynthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -18.75,
+      "margin": 18.75
+    },
+    {
+      "n": 516,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -12.375,
+      "margin": 12.375
+    },
+    {
+      "n": 517,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -6.0,
+      "margin": 6.0
+    },
+    {
+      "n": 518,
+      "token": " remarkable",
+      "top1_lp": -0.25,
+      "top2_lp": -3.0,
+      "margin": 2.75
+    },
+    {
+      "n": 519,
+      "token": " biochemical",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 520,
+      "token": " process",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 521,
+      "token": " by",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 522,
+      "token": " which",
+      "top1_lp": 0.0,
+      "top2_lp": -19.25,
+      "margin": 19.25
+    },
+    {
+      "n": 523,
+      "token": " green",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 524,
+      "token": " plants",
+      "top1_lp": 0.0,
+      "top2_lp": -18.75,
+      "margin": 18.75
+    },
+    {
+      "n": 525,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 526,
+      "token": " algae",
+      "top1_lp": 0.0,
+      "top2_lp": -15.5,
+      "margin": 15.5
+    },
+    {
+      "n": 527,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -18.875,
+      "margin": 18.875
+    },
+    {
+      "n": 528,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -21.125,
+      "margin": 21.125
+    },
+    {
+      "n": 529,
+      "token": " certain",
+      "top1_lp": 0.0,
+      "top2_lp": -10.25,
+      "margin": 10.25
+    },
+    {
+      "n": 530,
+      "token": " bacteria",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 531,
+      "token": " convert",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 532,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 533,
+      "token": " energy",
+      "top1_lp": 0.0,
+      "top2_lp": -16.25,
+      "margin": 16.25
+    },
+    {
+      "n": 534,
+      "token": " into",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 535,
+      "token": " chemical",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 536,
+      "token": " energy",
+      "top1_lp": 0.0,
+      "top2_lp": -15.625,
+      "margin": 15.625
+    },
+    {
+      "n": 537,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 538,
+      "token": " storing",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 539,
+      "token": " it",
+      "top1_lp": 0.0,
+      "top2_lp": -14.75,
+      "margin": 14.75
+    },
+    {
+      "n": 540,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -4.75,
+      "margin": 4.75
+    },
+    {
+      "n": 541,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -8.25,
+      "margin": 8.25
+    },
+    {
+      "n": 542,
+      "token": " bonds",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 543,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -19.25,
+      "margin": 19.25
+    },
+    {
+      "n": 544,
+      "token": " glucose",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 545,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 546,
+      "token": " This",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 547,
+      "token": " process",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 548,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -3.375,
+      "margin": 3.375
+    },
+    {
+      "n": 549,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 550,
+      "token": " foundation",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 551,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -11.875,
+      "margin": 11.875
+    },
+    {
+      "n": 552,
+      "token": " almost",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 553,
+      "token": " all",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 554,
+      "token": " life",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 555,
+      "token": " on",
+      "top1_lp": 0.0,
+      "top2_lp": -18.875,
+      "margin": 18.875
+    },
+    {
+      "n": 556,
+      "token": " Earth",
+      "top1_lp": 0.0,
+      "top2_lp": -16.875,
+      "margin": 16.875
+    },
+    {
+      "n": 557,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -9.25,
+      "margin": 9.25
+    },
+    {
+      "n": 558,
+      "token": " providing",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 559,
+      "token": " both",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 560,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -6.0,
+      "margin": 6.0
+    },
+    {
+      "n": 561,
+      "token": " oxygen",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 562,
+      "token": " we",
+      "top1_lp": 0.0,
+      "top2_lp": -10.0,
+      "margin": 10.0
+    },
+    {
+      "n": 563,
+      "token": " breathe",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 564,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 565,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -13.75,
+      "margin": 13.75
+    },
+    {
+      "n": 566,
+      "token": " organic",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 567,
+      "token": " compounds",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 568,
+      "token": " that",
+      "top1_lp": 0.0,
+      "top2_lp": -9.375,
+      "margin": 9.375
+    },
+    {
+      "n": 569,
+      "token": " serve",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 570,
+      "token": " as",
+      "top1_lp": 0.0,
+      "top2_lp": -14.125,
+      "margin": 14.125
+    },
+    {
+      "n": 571,
+      "token": " food",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 572,
+      "token": ".",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 573,
+      "token": " The",
+      "top1_lp": 0.0,
+      "top2_lp": -6.5,
+      "margin": 6.5
+    },
+    {
+      "n": 574,
+      "token": " overall",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 575,
+      "token": " chemical",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 576,
+      "token": " equation",
+      "top1_lp": 0.0,
+      "top2_lp": -8.0,
+      "margin": 8.0
+    },
+    {
+      "n": 577,
+      "token": " is",
+      "top1_lp": -0.5,
+      "top2_lp": -1.375,
+      "margin": 0.875
+    },
+    {
+      "n": 578,
+      "token": ":",
+      "top1_lp": -0.125,
+      "top2_lp": -3.25,
+      "margin": 3.125
+    },
+    {
+      "n": 579,
+      "token": " **",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 580,
+      "token": "6",
+      "top1_lp": 0.0,
+      "top2_lp": -12.75,
+      "margin": 12.75
+    },
+    {
+      "n": 581,
+      "token": "CO",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 582,
+      "token": "\u2082",
+      "top1_lp": 0.0,
+      "top2_lp": -8.625,
+      "margin": 8.625
+    },
+    {
+      "n": 583,
+      "token": " +",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 584,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 585,
+      "token": " 6",
+      "top1_lp": 0.0,
+      "top2_lp": -9.125,
+      "margin": 9.125
+    },
+    {
+      "n": 586,
+      "token": "H",
+      "top1_lp": 0.0,
+      "top2_lp": -14.75,
+      "margin": 14.75
+    },
+    {
+      "n": 587,
+      "token": "\u2082",
+      "top1_lp": 0.0,
+      "top2_lp": -19.25,
+      "margin": 19.25
+    },
+    {
+      "n": 588,
+      "token": "O",
+      "top1_lp": 0.0,
+      "top2_lp": -13.25,
+      "margin": 13.25
+    },
+    {
+      "n": 589,
+      "token": " +",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 590,
+      "token": " Light",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 591,
+      "token": " Energy",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 592,
+      "token": " \u2192",
+      "top1_lp": 0.0,
+      "top2_lp": -10.25,
+      "margin": 10.25
+    },
+    {
+      "n": 593,
+      "token": " C",
+      "top1_lp": 0.0,
+      "top2_lp": -15.625,
+      "margin": 15.625
+    },
+    {
+      "n": 594,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -15.125,
+      "margin": 15.125
+    },
+    {
+      "n": 595,
+      "token": "\u2086",
+      "top1_lp": 0.0,
+      "top2_lp": -19.25,
+      "margin": 19.25
+    },
+    {
+      "n": 596,
+      "token": "H",
+      "top1_lp": 0.0,
+      "top2_lp": -21.375,
+      "margin": 21.375
+    },
+    {
+      "n": 597,
+      "token": "\u2081",
+      "top1_lp": 0.0,
+      "top2_lp": -13.75,
+      "margin": 13.75
+    },
+    {
+      "n": 598,
+      "token": "\u2082",
+      "top1_lp": 0.0,
+      "top2_lp": -18.875,
+      "margin": 18.875
+    },
+    {
+      "n": 599,
+      "token": "O",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 600,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -13.625,
+      "margin": 13.625
+    },
+    {
+      "n": 601,
+      "token": "\u2086",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 602,
+      "token": " +",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 603,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -15.25,
+      "margin": 15.25
+    },
+    {
+      "n": 604,
+      "token": " 6",
+      "top1_lp": 0.0,
+      "top2_lp": -16.375,
+      "margin": 16.375
+    },
+    {
+      "n": 605,
+      "token": "O",
+      "top1_lp": 0.0,
+      "top2_lp": -16.375,
+      "margin": 16.375
+    },
+    {
+      "n": 606,
+      "token": "\u2082",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 607,
+      "token": "**.",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 608,
+      "token": " This",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 609,
+      "token": " seemingly",
+      "top1_lp": -0.625,
+      "top2_lp": -2.125,
+      "margin": 1.5
+    },
+    {
+      "n": 610,
+      "token": " simple",
+      "top1_lp": 0.0,
+      "top2_lp": -12.125,
+      "margin": 12.125
+    },
+    {
+      "n": 611,
+      "token": " equation",
+      "top1_lp": 0.0,
+      "top2_lp": -6.0,
+      "margin": 6.0
+    },
+    {
+      "n": 612,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -2.375,
+      "margin": 2.125
+    },
+    {
+      "n": 613,
+      "token": " however",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 614,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -12.375,
+      "margin": 12.375
+    },
+    {
+      "n": 615,
+      "token": " masks",
+      "top1_lp": -0.5,
+      "top2_lp": -2.0,
+      "margin": 1.5
+    },
+    {
+      "n": 616,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 617,
+      "token": " complex",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 618,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 619,
+      "token": " two",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 620,
+      "token": "-stage",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 621,
+      "token": " process",
+      "top1_lp": -0.375,
+      "top2_lp": -2.5,
+      "margin": 2.125
+    },
+    {
+      "n": 622,
+      "token": " that",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 623,
+      "token": " occurs",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 624,
+      "token": " in",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 625,
+      "token": " the",
+      "top1_lp": -1.0,
+      "top2_lp": -1.5,
+      "margin": 0.5
+    },
+    {
+      "n": 626,
+      "token": " chloroplast",
+      "top1_lp": 0.0,
+      "top2_lp": -9.375,
+      "margin": 9.375
+    },
+    {
+      "n": 627,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 628,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 629,
+      "token": " specialized",
+      "top1_lp": 0.0,
+      "top2_lp": -7.5,
+      "margin": 7.5
+    },
+    {
+      "n": 630,
+      "token": " organ",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 631,
+      "token": "elle",
+      "top1_lp": 0.0,
+      "top2_lp": -20.375,
+      "margin": 20.375
+    },
+    {
+      "n": 632,
+      "token": " within",
+      "top1_lp": -0.25,
+      "top2_lp": -1.375,
+      "margin": 1.125
+    },
+    {
+      "n": 633,
+      "token": " plant",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 634,
+      "token": " cells",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 635,
+      "token": ".\n\n",
+      "top1_lp": -0.5,
+      "top2_lp": -0.875,
+      "margin": 0.375
+    },
+    {
+      "n": 636,
+      "token": "###",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 637,
+      "token": "",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 638,
+      "token": " 1",
+      "top1_lp": 0.0,
+      "top2_lp": -13.875,
+      "margin": 13.875
+    },
+    {
+      "n": 639,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -13.375,
+      "margin": 13.375
+    },
+    {
+      "n": 640,
+      "token": " Chlor",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 641,
+      "token": "ophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -12.875,
+      "margin": 12.875
+    },
+    {
+      "n": 642,
+      "token": " and",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 643,
+      "token": " the",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 644,
+      "token": " Absorption",
+      "top1_lp": -1.0,
+      "top2_lp": -1.25,
+      "margin": 0.25
+    },
+    {
+      "n": 645,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 646,
+      "token": " Light",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 647,
+      "token": "\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 648,
+      "token": "The",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 649,
+      "token": " process",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 650,
+      "token": " begins",
+      "top1_lp": 0.0,
+      "top2_lp": -7.0,
+      "margin": 7.0
+    },
+    {
+      "n": 651,
+      "token": " with",
+      "top1_lp": 0.0,
+      "top2_lp": -6.125,
+      "margin": 6.125
+    },
+    {
+      "n": 652,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 653,
+      "token": " capture",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 654,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -15.25,
+      "margin": 15.25
+    },
+    {
+      "n": 655,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 656,
+      "token": " energy",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 657,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 658,
+      "token": " a",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 659,
+      "token": " task",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 660,
+      "token": " performed",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 661,
+      "token": " by",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 662,
+      "token": " pigments",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 663,
+      "token": " embedded",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 664,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 665,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -10.625,
+      "margin": 10.625
+    },
+    {
+      "n": 666,
+      "token": " th",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 667,
+      "token": "yl",
+      "top1_lp": 0.0,
+      "top2_lp": -18.875,
+      "margin": 18.875
+    },
+    {
+      "n": 668,
+      "token": "ak",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 669,
+      "token": "oid",
+      "top1_lp": 0.0,
+      "top2_lp": -18.0,
+      "margin": 18.0
+    },
+    {
+      "n": 670,
+      "token": " membranes",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 671,
+      "token": " of",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 672,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 673,
+      "token": " chloroplast",
+      "top1_lp": 0.0,
+      "top2_lp": -16.0,
+      "margin": 16.0
+    },
+    {
+      "n": 674,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -5.625,
+      "margin": 5.625
+    },
+    {
+      "n": 675,
+      "token": " The",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 676,
+      "token": " most",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 677,
+      "token": " important",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 678,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 679,
+      "token": " these",
+      "top1_lp": 0.0,
+      "top2_lp": -15.5,
+      "margin": 15.5
+    },
+    {
+      "n": 680,
+      "token": " pigments",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 681,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -9.25,
+      "margin": 9.25
+    },
+    {
+      "n": 682,
+      "token": " **",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 683,
+      "token": "chlor",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 684,
+      "token": "ophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -18.625,
+      "margin": 18.625
+    },
+    {
+      "n": 685,
+      "token": "**,",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 686,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -3.125,
+      "margin": 3.125
+    },
+    {
+      "n": 687,
+      "token": " green",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 688,
+      "token": " molecule",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 689,
+      "token": " that",
+      "top1_lp": -0.375,
+      "top2_lp": -1.75,
+      "margin": 1.375
+    },
+    {
+      "n": 690,
+      "token": " absorbs",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 691,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -12.0,
+      "margin": 12.0
+    },
+    {
+      "n": 692,
+      "token": " most",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 693,
+      "token": " efficiently",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 694,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -13.875,
+      "margin": 13.875
+    },
+    {
+      "n": 695,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -16.625,
+      "margin": 16.625
+    },
+    {
+      "n": 696,
+      "token": " blue",
+      "top1_lp": 0.0,
+      "top2_lp": -4.75,
+      "margin": 4.75
+    },
+    {
+      "n": 697,
+      "token": "-v",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 698,
+      "token": "iolet",
+      "top1_lp": 0.0,
+      "top2_lp": -24.75,
+      "margin": 24.75
+    },
+    {
+      "n": 699,
+      "token": " and",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 700,
+      "token": " red",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 701,
+      "token": " regions",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 702,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -15.25,
+      "margin": 15.25
+    },
+    {
+      "n": 703,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -19.875,
+      "margin": 19.875
+    },
+    {
+      "n": 704,
+      "token": " electromagnetic",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 705,
+      "token": " spectrum",
+      "top1_lp": 0.0,
+      "top2_lp": -17.0,
+      "margin": 17.0
+    },
+    {
+      "n": 706,
+      "token": ",",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 707,
+      "token": " while",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 708,
+      "token": " reflecting",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 709,
+      "token": " green",
+      "top1_lp": 0.0,
+      "top2_lp": -6.625,
+      "margin": 6.625
+    },
+    {
+      "n": 710,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 711,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -2.375,
+      "margin": 2.125
+    },
+    {
+      "n": 712,
+      "token": " which",
+      "top1_lp": 0.0,
+      "top2_lp": -6.375,
+      "margin": 6.375
+    },
+    {
+      "n": 713,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 714,
+      "token": " why",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 715,
+      "token": " plants",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 716,
+      "token": " appear",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 717,
+      "token": " green",
+      "top1_lp": 0.0,
+      "top2_lp": -12.125,
+      "margin": 12.125
+    },
+    {
+      "n": 718,
+      "token": ".",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 719,
+      "token": " There",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 720,
+      "token": " are",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 721,
+      "token": " two",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 722,
+      "token": " main",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 723,
+      "token": " types",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 724,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 725,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 726,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 727,
+      "token": "a",
+      "top1_lp": 0.0,
+      "top2_lp": -15.875,
+      "margin": 15.875
+    },
+    {
+      "n": 728,
+      "token": "*,",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 729,
+      "token": " which",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 730,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -4.875,
+      "margin": 4.875
+    },
+    {
+      "n": 731,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 732,
+      "token": " primary",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 733,
+      "token": " pigment",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 734,
+      "token": " directly",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 735,
+      "token": " involved",
+      "top1_lp": 0.0,
+      "top2_lp": -11.375,
+      "margin": 11.375
+    },
+    {
+      "n": 736,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -13.25,
+      "margin": 13.25
+    },
+    {
+      "n": 737,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 738,
+      "token": " light",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 739,
+      "token": " reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 740,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 741,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 742,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 743,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -16.875,
+      "margin": 16.875
+    },
+    {
+      "n": 744,
+      "token": "b",
+      "top1_lp": 0.0,
+      "top2_lp": -19.625,
+      "margin": 19.625
+    },
+    {
+      "n": 745,
+      "token": "*,",
+      "top1_lp": 0.0,
+      "top2_lp": -7.875,
+      "margin": 7.875
+    },
+    {
+      "n": 746,
+      "token": " an",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 747,
+      "token": " accessory",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 748,
+      "token": " pigment",
+      "top1_lp": 0.0,
+      "top2_lp": -12.125,
+      "margin": 12.125
+    },
+    {
+      "n": 749,
+      "token": " that",
+      "top1_lp": 0.0,
+      "top2_lp": -6.5,
+      "margin": 6.5
+    },
+    {
+      "n": 750,
+      "token": " captures",
+      "top1_lp": -1.0,
+      "top2_lp": -1.25,
+      "margin": 0.25
+    },
+    {
+      "n": 751,
+      "token": " light",
+      "top1_lp": -0.25,
+      "top2_lp": -2.75,
+      "margin": 2.5
+    },
+    {
+      "n": 752,
+      "token": " energy",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 753,
+      "token": " and",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 754,
+      "token": " passes",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 755,
+      "token": " it",
+      "top1_lp": 0.0,
+      "top2_lp": -13.875,
+      "margin": 13.875
+    },
+    {
+      "n": 756,
+      "token": " to",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 757,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -13.375,
+      "margin": 13.375
+    },
+    {
+      "n": 758,
+      "token": " *",
+      "top1_lp": 0.0,
+      "top2_lp": -10.0,
+      "margin": 10.0
+    },
+    {
+      "n": 759,
+      "token": "a",
+      "top1_lp": 0.0,
+      "top2_lp": -18.125,
+      "margin": 18.125
+    },
+    {
+      "n": 760,
+      "token": "*.",
+      "top1_lp": -0.5,
+      "top2_lp": -1.125,
+      "margin": 0.625
+    },
+    {
+      "n": 761,
+      "token": " Other",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 762,
+      "token": " accessory",
+      "top1_lp": 0.0,
+      "top2_lp": -6.0,
+      "margin": 6.0
+    },
+    {
+      "n": 763,
+      "token": " pigments",
+      "top1_lp": 0.0,
+      "top2_lp": -11.875,
+      "margin": 11.875
+    },
+    {
+      "n": 764,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 765,
+      "token": " such",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 766,
+      "token": " as",
+      "top1_lp": 0.0,
+      "top2_lp": -13.625,
+      "margin": 13.625
+    },
+    {
+      "n": 767,
+      "token": " caroten",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 768,
+      "token": "oids",
+      "top1_lp": 0.0,
+      "top2_lp": -14.25,
+      "margin": 14.25
+    },
+    {
+      "n": 769,
+      "token": ",",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 770,
+      "token": " absorb",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 771,
+      "token": " light",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 772,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 773,
+      "token": " different",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 774,
+      "token": " wavelengths",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 775,
+      "token": " and",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 776,
+      "token": " help",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 777,
+      "token": " protect",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 778,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 779,
+      "token": " plant",
+      "top1_lp": 0.0,
+      "top2_lp": -5.875,
+      "margin": 5.875
+    },
+    {
+      "n": 780,
+      "token": " from",
+      "top1_lp": 0.0,
+      "top2_lp": -8.375,
+      "margin": 8.375
+    },
+    {
+      "n": 781,
+      "token": " excess",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 782,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -8.25,
+      "margin": 8.25
+    },
+    {
+      "n": 783,
+      "token": " damage",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 784,
+      "token": ".\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 785,
+      "token": "These",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 786,
+      "token": " pigments",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 787,
+      "token": " are",
+      "top1_lp": 0.0,
+      "top2_lp": -6.375,
+      "margin": 6.375
+    },
+    {
+      "n": 788,
+      "token": " organized",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 789,
+      "token": " into",
+      "top1_lp": 0.0,
+      "top2_lp": -5.75,
+      "margin": 5.75
+    },
+    {
+      "n": 790,
+      "token": " **",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 791,
+      "token": "photos",
+      "top1_lp": 0.0,
+      "top2_lp": -6.5,
+      "margin": 6.5
+    },
+    {
+      "n": 792,
+      "token": "ystems",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 793,
+      "token": "**,",
+      "top1_lp": 0.0,
+      "top2_lp": -2.625,
+      "margin": 2.625
+    },
+    {
+      "n": 794,
+      "token": " which",
+      "top1_lp": 0.0,
+      "top2_lp": -4.625,
+      "margin": 4.625
+    },
+    {
+      "n": 795,
+      "token": " are",
+      "top1_lp": 0.0,
+      "top2_lp": -5.625,
+      "margin": 5.625
+    },
+    {
+      "n": 796,
+      "token": " complexes",
+      "top1_lp": -1.0,
+      "top2_lp": -1.125,
+      "margin": 0.125
+    },
+    {
+      "n": 797,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -4.5,
+      "margin": 4.5
+    },
+    {
+      "n": 798,
+      "token": " proteins",
+      "top1_lp": 0.0,
+      "top2_lp": -5.5,
+      "margin": 5.5
+    },
+    {
+      "n": 799,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -5.625,
+      "margin": 5.625
+    },
+    {
+      "n": 800,
+      "token": " pigments",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 801,
+      "token": " embedded",
+      "top1_lp": -0.25,
+      "top2_lp": -1.625,
+      "margin": 1.375
+    },
+    {
+      "n": 802,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 803,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -11.75,
+      "margin": 11.75
+    },
+    {
+      "n": 804,
+      "token": " th",
+      "top1_lp": 0.0,
+      "top2_lp": -12.75,
+      "margin": 12.75
+    },
+    {
+      "n": 805,
+      "token": "yl",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 806,
+      "token": "ak",
+      "top1_lp": 0.0,
+      "top2_lp": -13.125,
+      "margin": 13.125
+    },
+    {
+      "n": 807,
+      "token": "oid",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 808,
+      "token": " membrane",
+      "top1_lp": 0.0,
+      "top2_lp": -9.25,
+      "margin": 9.25
+    },
+    {
+      "n": 809,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 810,
+      "token": " Each",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 811,
+      "token": " photos",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 812,
+      "token": "ystem",
+      "top1_lp": 0.0,
+      "top2_lp": -14.875,
+      "margin": 14.875
+    },
+    {
+      "n": 813,
+      "token": " consists",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 814,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -15.125,
+      "margin": 15.125
+    },
+    {
+      "n": 815,
+      "token": " a",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 816,
+      "token": " large",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 817,
+      "token": " \"",
+      "top1_lp": -1.25,
+      "top2_lp": -1.25,
+      "margin": 0.0
+    },
+    {
+      "n": 818,
+      "token": "anten",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 819,
+      "token": "na",
+      "top1_lp": 0.0,
+      "top2_lp": -15.875,
+      "margin": 15.875
+    },
+    {
+      "n": 820,
+      "token": " complex",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 821,
+      "token": "\"",
+      "top1_lp": 0.0,
+      "top2_lp": -6.375,
+      "margin": 6.375
+    },
+    {
+      "n": 822,
+      "token": " of",
+      "top1_lp": -0.25,
+      "top2_lp": -3.25,
+      "margin": 3.0
+    },
+    {
+      "n": 823,
+      "token": " hundreds",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 824,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -15.375,
+      "margin": 15.375
+    },
+    {
+      "n": 825,
+      "token": " pigment",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 826,
+      "token": " molecules",
+      "top1_lp": 0.0,
+      "top2_lp": -15.375,
+      "margin": 15.375
+    },
+    {
+      "n": 827,
+      "token": " that",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 828,
+      "token": " act",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 829,
+      "token": " like",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 830,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 831,
+      "token": " funnel",
+      "top1_lp": 0.0,
+      "top2_lp": -7.0,
+      "margin": 7.0
+    },
+    {
+      "n": 832,
+      "token": ",",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 833,
+      "token": " capturing",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 834,
+      "token": " photons",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 835,
+      "token": " and",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 836,
+      "token": " transferring",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 837,
+      "token": " their",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 838,
+      "token": " energy",
+      "top1_lp": 0.0,
+      "top2_lp": -4.25,
+      "margin": 4.25
+    },
+    {
+      "n": 839,
+      "token": " from",
+      "top1_lp": -0.25,
+      "top2_lp": -1.875,
+      "margin": 1.625
+    },
+    {
+      "n": 840,
+      "token": " one",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 841,
+      "token": " pigment",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 842,
+      "token": " to",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 843,
+      "token": " another",
+      "top1_lp": 0.0,
+      "top2_lp": -2.5,
+      "margin": 2.5
+    },
+    {
+      "n": 844,
+      "token": " until",
+      "top1_lp": -0.5,
+      "top2_lp": -1.375,
+      "margin": 0.875
+    },
+    {
+      "n": 845,
+      "token": " it",
+      "top1_lp": 0.0,
+      "top2_lp": -5.875,
+      "margin": 5.875
+    },
+    {
+      "n": 846,
+      "token": " reaches",
+      "top1_lp": 0.0,
+      "top2_lp": -11.375,
+      "margin": 11.375
+    },
+    {
+      "n": 847,
+      "token": " a",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 848,
+      "token": " special",
+      "top1_lp": 0.0,
+      "top2_lp": -3.5,
+      "margin": 3.5
+    },
+    {
+      "n": 849,
+      "token": " pair",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 850,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -13.625,
+      "margin": 13.625
+    },
+    {
+      "n": 851,
+      "token": " chlorophyll",
+      "top1_lp": 0.0,
+      "top2_lp": -12.125,
+      "margin": 12.125
+    },
+    {
+      "n": 852,
+      "token": " *",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 853,
+      "token": "a",
+      "top1_lp": 0.0,
+      "top2_lp": -17.375,
+      "margin": 17.375
+    },
+    {
+      "n": 854,
+      "token": "*",
+      "top1_lp": 0.0,
+      "top2_lp": -14.0,
+      "margin": 14.0
+    },
+    {
+      "n": 855,
+      "token": " molecules",
+      "top1_lp": 0.0,
+      "top2_lp": -10.125,
+      "margin": 10.125
+    },
+    {
+      "n": 856,
+      "token": " located",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 857,
+      "token": " in",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 858,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 859,
+      "token": " **",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 860,
+      "token": "re",
+      "top1_lp": 0.0,
+      "top2_lp": -12.75,
+      "margin": 12.75
+    },
+    {
+      "n": 861,
+      "token": "action",
+      "top1_lp": 0.0,
+      "top2_lp": -18.375,
+      "margin": 18.375
+    },
+    {
+      "n": 862,
+      "token": " center",
+      "top1_lp": 0.0,
+      "top2_lp": -10.5,
+      "margin": 10.5
+    },
+    {
+      "n": 863,
+      "token": "**.",
+      "top1_lp": 0.0,
+      "top2_lp": -3.125,
+      "margin": 3.125
+    },
+    {
+      "n": 864,
+      "token": " This",
+      "top1_lp": -0.75,
+      "top2_lp": -1.75,
+      "margin": 1.0
+    },
+    {
+      "n": 865,
+      "token": " is",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 866,
+      "token": " where",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 867,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 868,
+      "token": " magic",
+      "top1_lp": -0.875,
+      "top2_lp": -1.25,
+      "margin": 0.375
+    },
+    {
+      "n": 869,
+      "token": " of",
+      "top1_lp": 0.0,
+      "top2_lp": -4.125,
+      "margin": 4.125
+    },
+    {
+      "n": 870,
+      "token": " energy",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 871,
+      "token": " conversion",
+      "top1_lp": 0.0,
+      "top2_lp": -5.0,
+      "margin": 5.0
+    },
+    {
+      "n": 872,
+      "token": " begins",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 873,
+      "token": ".\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -3.875,
+      "margin": 3.875
+    },
+    {
+      "n": 874,
+      "token": "###",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 875,
+      "token": "",
+      "top1_lp": 0.0,
+      "top2_lp": -12.5,
+      "margin": 12.5
+    },
+    {
+      "n": 876,
+      "token": " 2",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 877,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -17.75,
+      "margin": 17.75
+    },
+    {
+      "n": 878,
+      "token": " The",
+      "top1_lp": 0.0,
+      "top2_lp": -8.25,
+      "margin": 8.25
+    },
+    {
+      "n": 879,
+      "token": " Light",
+      "top1_lp": 0.0,
+      "top2_lp": -15.0,
+      "margin": 15.0
+    },
+    {
+      "n": 880,
+      "token": " Reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 881,
+      "token": " (",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 882,
+      "token": "Th",
+      "top1_lp": -0.25,
+      "top2_lp": -2.5,
+      "margin": 2.25
+    },
+    {
+      "n": 883,
+      "token": "yl",
+      "top1_lp": 0.0,
+      "top2_lp": -12.875,
+      "margin": 12.875
+    },
+    {
+      "n": 884,
+      "token": "ak",
+      "top1_lp": 0.0,
+      "top2_lp": -16.375,
+      "margin": 16.375
+    },
+    {
+      "n": 885,
+      "token": "oid",
+      "top1_lp": 0.0,
+      "top2_lp": -12.25,
+      "margin": 12.25
+    },
+    {
+      "n": 886,
+      "token": " Membrane",
+      "top1_lp": -0.25,
+      "top2_lp": -2.25,
+      "margin": 2.0
+    },
+    {
+      "n": 887,
+      "token": ")\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 888,
+      "token": "The",
+      "top1_lp": 0.0,
+      "top2_lp": -5.25,
+      "margin": 5.25
+    },
+    {
+      "n": 889,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -7.25,
+      "margin": 7.25
+    },
+    {
+      "n": 890,
+      "token": " reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -6.125,
+      "margin": 6.125
+    },
+    {
+      "n": 891,
+      "token": " are",
+      "top1_lp": 0.0,
+      "top2_lp": -2.375,
+      "margin": 2.375
+    },
+    {
+      "n": 892,
+      "token": " the",
+      "top1_lp": 0.0,
+      "top2_lp": -8.125,
+      "margin": 8.125
+    },
+    {
+      "n": 893,
+      "token": " first",
+      "top1_lp": -0.25,
+      "top2_lp": -1.25,
+      "margin": 1.0
+    },
+    {
+      "n": 894,
+      "token": " major",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 895,
+      "token": " stage",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 896,
+      "token": " of",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 897,
+      "token": " photosynthesis",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 898,
+      "token": " and",
+      "top1_lp": -0.5,
+      "top2_lp": -1.125,
+      "margin": 0.625
+    },
+    {
+      "n": 899,
+      "token": " are",
+      "top1_lp": -0.625,
+      "top2_lp": -1.0,
+      "margin": 0.375
+    },
+    {
+      "n": 900,
+      "token": " entirely",
+      "top1_lp": -0.5,
+      "top2_lp": -1.625,
+      "margin": 1.125
+    },
+    {
+      "n": 901,
+      "token": " dependent",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 902,
+      "token": " on",
+      "top1_lp": 0.0,
+      "top2_lp": -8.875,
+      "margin": 8.875
+    },
+    {
+      "n": 903,
+      "token": " light",
+      "top1_lp": 0.0,
+      "top2_lp": -2.75,
+      "margin": 2.75
+    },
+    {
+      "n": 904,
+      "token": ".",
+      "top1_lp": 0.0,
+      "top2_lp": -6.25,
+      "margin": 6.25
+    },
+    {
+      "n": 905,
+      "token": " Their",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 906,
+      "token": " primary",
+      "top1_lp": -0.75,
+      "top2_lp": -1.5,
+      "margin": 0.75
+    },
+    {
+      "n": 907,
+      "token": " goal",
+      "top1_lp": -1.125,
+      "top2_lp": -1.5,
+      "margin": 0.375
+    },
+    {
+      "n": 908,
+      "token": " is",
+      "top1_lp": 0.0,
+      "top2_lp": -11.625,
+      "margin": 11.625
+    },
+    {
+      "n": 909,
+      "token": " to",
+      "top1_lp": 0.0,
+      "top2_lp": -6.125,
+      "margin": 6.125
+    },
+    {
+      "n": 910,
+      "token": " convert",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 911,
+      "token": " solar",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 912,
+      "token": " energy",
+      "top1_lp": 0.0,
+      "top2_lp": -10.875,
+      "margin": 10.875
+    },
+    {
+      "n": 913,
+      "token": " into",
+      "top1_lp": 0.0,
+      "top2_lp": -11.375,
+      "margin": 11.375
+    },
+    {
+      "n": 914,
+      "token": " the",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    },
+    {
+      "n": 915,
+      "token": " chemical",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 916,
+      "token": " energy",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 917,
+      "token": " of",
+      "top1_lp": -0.375,
+      "top2_lp": -1.375,
+      "margin": 1.0
+    },
+    {
+      "n": 918,
+      "token": " two",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 919,
+      "token": " molecules",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 920,
+      "token": ":",
+      "top1_lp": 0.0,
+      "top2_lp": -8.875,
+      "margin": 8.875
+    },
+    {
+      "n": 921,
+      "token": " **",
+      "top1_lp": 0.0,
+      "top2_lp": -4.125,
+      "margin": 4.125
+    },
+    {
+      "n": 922,
+      "token": "ATP",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 923,
+      "token": "**",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 924,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -4.0,
+      "margin": 4.0
+    },
+    {
+      "n": 925,
+      "token": "aden",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 926,
+      "token": "osine",
+      "top1_lp": 0.0,
+      "top2_lp": -20.625,
+      "margin": 20.625
+    },
+    {
+      "n": 927,
+      "token": " tri",
+      "top1_lp": 0.0,
+      "top2_lp": -16.125,
+      "margin": 16.125
+    },
+    {
+      "n": 928,
+      "token": "phosphate",
+      "top1_lp": 0.0,
+      "top2_lp": -14.5,
+      "margin": 14.5
+    },
+    {
+      "n": 929,
+      "token": ")",
+      "top1_lp": 0.0,
+      "top2_lp": -7.625,
+      "margin": 7.625
+    },
+    {
+      "n": 930,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 931,
+      "token": " **",
+      "top1_lp": 0.0,
+      "top2_lp": -7.375,
+      "margin": 7.375
+    },
+    {
+      "n": 932,
+      "token": "NA",
+      "top1_lp": 0.0,
+      "top2_lp": -17.375,
+      "margin": 17.375
+    },
+    {
+      "n": 933,
+      "token": "DP",
+      "top1_lp": 0.0,
+      "top2_lp": -19.5,
+      "margin": 19.5
+    },
+    {
+      "n": 934,
+      "token": "H",
+      "top1_lp": 0.0,
+      "top2_lp": -19.875,
+      "margin": 19.875
+    },
+    {
+      "n": 935,
+      "token": "**",
+      "top1_lp": 0.0,
+      "top2_lp": -9.5,
+      "margin": 9.5
+    },
+    {
+      "n": 936,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -15.75,
+      "margin": 15.75
+    },
+    {
+      "n": 937,
+      "token": "nic",
+      "top1_lp": 0.0,
+      "top2_lp": -8.0,
+      "margin": 8.0
+    },
+    {
+      "n": 938,
+      "token": "otin",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 939,
+      "token": "amide",
+      "top1_lp": 0.0,
+      "top2_lp": -17.375,
+      "margin": 17.375
+    },
+    {
+      "n": 940,
+      "token": " adenine",
+      "top1_lp": 0.0,
+      "top2_lp": -16.25,
+      "margin": 16.25
+    },
+    {
+      "n": 941,
+      "token": " din",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 942,
+      "token": "ucleotide",
+      "top1_lp": 0.0,
+      "top2_lp": -17.5,
+      "margin": 17.5
+    },
+    {
+      "n": 943,
+      "token": " phosphate",
+      "top1_lp": 0.0,
+      "top2_lp": -15.25,
+      "margin": 15.25
+    },
+    {
+      "n": 944,
+      "token": ").",
+      "top1_lp": 0.0,
+      "top2_lp": -5.375,
+      "margin": 5.375
+    },
+    {
+      "n": 945,
+      "token": " These",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 946,
+      "token": " reactions",
+      "top1_lp": 0.0,
+      "top2_lp": -3.625,
+      "margin": 3.625
+    },
+    {
+      "n": 947,
+      "token": " also",
+      "top1_lp": -1.0,
+      "top2_lp": -1.0,
+      "margin": 0.0
+    },
+    {
+      "n": 948,
+      "token": " produce",
+      "top1_lp": -0.25,
+      "top2_lp": -1.875,
+      "margin": 1.625
+    },
+    {
+      "n": 949,
+      "token": " oxygen",
+      "top1_lp": 0.0,
+      "top2_lp": -4.875,
+      "margin": 4.875
+    },
+    {
+      "n": 950,
+      "token": " as",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 951,
+      "token": " a",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 952,
+      "token": " by",
+      "top1_lp": 0.0,
+      "top2_lp": -5.875,
+      "margin": 5.875
+    },
+    {
+      "n": 953,
+      "token": "product",
+      "top1_lp": 0.0,
+      "top2_lp": -8.5,
+      "margin": 8.5
+    },
+    {
+      "n": 954,
+      "token": ".",
+      "top1_lp": -0.25,
+      "top2_lp": -2.75,
+      "margin": 2.5
+    },
+    {
+      "n": 955,
+      "token": " They",
+      "top1_lp": -0.5,
+      "top2_lp": -1.75,
+      "margin": 1.25
+    },
+    {
+      "n": 956,
+      "token": " occur",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 957,
+      "token": " in",
+      "top1_lp": -0.25,
+      "top2_lp": -2.375,
+      "margin": 2.125
+    },
+    {
+      "n": 958,
+      "token": " the",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 959,
+      "token": " th",
+      "top1_lp": 0.0,
+      "top2_lp": -7.75,
+      "margin": 7.75
+    },
+    {
+      "n": 960,
+      "token": "yl",
+      "top1_lp": 0.0,
+      "top2_lp": -18.75,
+      "margin": 18.75
+    },
+    {
+      "n": 961,
+      "token": "ak",
+      "top1_lp": 0.0,
+      "top2_lp": -15.625,
+      "margin": 15.625
+    },
+    {
+      "n": 962,
+      "token": "oid",
+      "top1_lp": 0.0,
+      "top2_lp": -10.75,
+      "margin": 10.75
+    },
+    {
+      "n": 963,
+      "token": " membrane",
+      "top1_lp": -0.25,
+      "top2_lp": -1.75,
+      "margin": 1.5
+    },
+    {
+      "n": 964,
+      "token": " and",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 965,
+      "token": " involve",
+      "top1_lp": 0.0,
+      "top2_lp": -3.0,
+      "margin": 3.0
+    },
+    {
+      "n": 966,
+      "token": " two",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 967,
+      "token": " distinct",
+      "top1_lp": -0.875,
+      "top2_lp": -0.875,
+      "margin": 0.0
+    },
+    {
+      "n": 968,
+      "token": " photos",
+      "top1_lp": 0.0,
+      "top2_lp": -2.25,
+      "margin": 2.25
+    },
+    {
+      "n": 969,
+      "token": "ystems",
+      "top1_lp": 0.0,
+      "top2_lp": -9.75,
+      "margin": 9.75
+    },
+    {
+      "n": 970,
+      "token": " working",
+      "top1_lp": -0.75,
+      "top2_lp": -1.0,
+      "margin": 0.25
+    },
+    {
+      "n": 971,
+      "token": " in",
+      "top1_lp": 0.0,
+      "top2_lp": -3.75,
+      "margin": 3.75
+    },
+    {
+      "n": 972,
+      "token": " series",
+      "top1_lp": -1.0,
+      "top2_lp": -1.0,
+      "margin": 0.0
+    },
+    {
+      "n": 973,
+      "token": ",",
+      "top1_lp": -0.75,
+      "top2_lp": -0.75,
+      "margin": 0.0
+    },
+    {
+      "n": 974,
+      "token": " a",
+      "top1_lp": -0.75,
+      "top2_lp": -1.25,
+      "margin": 0.5
+    },
+    {
+      "n": 975,
+      "token": " process",
+      "top1_lp": 0.0,
+      "top2_lp": -3.25,
+      "margin": 3.25
+    },
+    {
+      "n": 976,
+      "token": " known",
+      "top1_lp": 0.0,
+      "top2_lp": -3.875,
+      "margin": 3.875
+    },
+    {
+      "n": 977,
+      "token": " as",
+      "top1_lp": 0.0,
+      "top2_lp": -14.625,
+      "margin": 14.625
+    },
+    {
+      "n": 978,
+      "token": " non",
+      "top1_lp": -0.5,
+      "top2_lp": -0.75,
+      "margin": 0.25
+    },
+    {
+      "n": 979,
+      "token": "-",
+      "top1_lp": -0.25,
+      "top2_lp": -2.0,
+      "margin": 1.75
+    },
+    {
+      "n": 980,
+      "token": "cyclic",
+      "top1_lp": 0.0,
+      "top2_lp": -11.5,
+      "margin": 11.5
+    },
+    {
+      "n": 981,
+      "token": " phot",
+      "top1_lp": 0.0,
+      "top2_lp": -8.25,
+      "margin": 8.25
+    },
+    {
+      "n": 982,
+      "token": "ophosph",
+      "top1_lp": 0.0,
+      "top2_lp": -18.0,
+      "margin": 18.0
+    },
+    {
+      "n": 983,
+      "token": "orylation",
+      "top1_lp": 0.0,
+      "top2_lp": -16.5,
+      "margin": 16.5
+    },
+    {
+      "n": 984,
+      "token": ".\n\n",
+      "top1_lp": 0.0,
+      "top2_lp": -6.75,
+      "margin": 6.75
+    },
+    {
+      "n": 985,
+      "token": "**",
+      "top1_lp": -0.25,
+      "top2_lp": -2.5,
+      "margin": 2.25
+    },
+    {
+      "n": 986,
+      "token": "Photos",
+      "top1_lp": -0.5,
+      "top2_lp": -1.0,
+      "margin": 0.5
+    },
+    {
+      "n": 987,
+      "token": "ystem",
+      "top1_lp": 0.0,
+      "top2_lp": -12.0,
+      "margin": 12.0
+    },
+    {
+      "n": 988,
+      "token": " II",
+      "top1_lp": 0.0,
+      "top2_lp": -11.0,
+      "margin": 11.0
+    },
+    {
+      "n": 989,
+      "token": " (",
+      "top1_lp": 0.0,
+      "top2_lp": -8.625,
+      "margin": 8.625
+    },
+    {
+      "n": 990,
+      "token": "PS",
+      "top1_lp": 0.0,
+      "top2_lp": -11.25,
+      "margin": 11.25
+    },
+    {
+      "n": 991,
+      "token": "II",
+      "top1_lp": 0.0,
+      "top2_lp": -9.0,
+      "margin": 9.0
+    },
+    {
+      "n": 992,
+      "token": ")",
+      "top1_lp": -0.5,
+      "top2_lp": -1.5,
+      "margin": 1.0
+    },
+    {
+      "n": 993,
+      "token": " and",
+      "top1_lp": -0.375,
+      "top2_lp": -1.5,
+      "margin": 1.125
+    },
+    {
+      "n": 994,
+      "token": " Water",
+      "top1_lp": -0.25,
+      "top2_lp": -1.5,
+      "margin": 1.25
+    },
+    {
+      "n": 995,
+      "token": " Spl",
+      "top1_lp": 0.0,
+      "top2_lp": -13.25,
+      "margin": 13.25
+    },
+    {
+      "n": 996,
+      "token": "itting",
+      "top1_lp": 0.0,
+      "top2_lp": -17.375,
+      "margin": 17.375
+    },
+    {
+      "n": 997,
+      "token": ":**",
+      "top1_lp": -0.75,
+      "top2_lp": -0.875,
+      "margin": 0.125
+    },
+    {
+      "n": 998,
+      "token": " The",
+      "top1_lp": -0.5,
+      "top2_lp": -1.25,
+      "margin": 0.75
+    }
+  ]
+}

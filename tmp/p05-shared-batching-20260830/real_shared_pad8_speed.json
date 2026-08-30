@@ -1,0 +1,17 @@
+{
+ "host": "Adams-Mac-Studio-M4-1",
+ "gpu": "applegpu_g16s",
+ "tensor": "layers.3.ffn.shared_experts.w1.weight (per-rank out-slice 1024)",
+ "speeds_us": {
+  "per_row_m1_x4": 267.08299992606044,
+  "batched_m4_wide": 176.79104348644614,
+  "pad8_qmm": 174.37501810491085,
+  "pad16_qmm": 256.5000322647393,
+  "pad32_qmm": 257.7499835751951
+ },
+ "pad8_numerics_recheck": {
+  "max_abs": 0.0,
+  "nonzero": 0
+ },
+ "note": "pad8 is the only bitwise-lossless padded level on real weights (see real_shared_padded_qmm.json); this file adds its SPEED."
+}

@@ -1,0 +1,15 @@
+{
+  "tag": "quant_5k_1",
+  "target_tokens": 5000,
+  "prompt_tokens": 5619,
+  "completion_tokens": 65,
+  "prefill_s": 121.21,
+  "prefill_tps": 46.36,
+  "decode_s": 16.4,
+  "decode_tps": 3.96,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_quant_5k_1.json

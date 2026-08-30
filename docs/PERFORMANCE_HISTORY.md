@@ -5298,3 +5298,74 @@ escape route. The two mlx-lm submodule diffs (`EXO_DSV4_LMHEAD_MXFP8`,
 `EXO_DSV4_PRENORM_H_DUMP`) stay uncommitted, env-gated and inert — no code
 lands from this review. Cluster untouched throughout (pure read-only JSON
 analysis, verified clean production config before this review began).
+
+## 2026-08-30 — P05 leads 1&2 run down: "zero-acceptance bug" CLOSED as wrong-model harness artifact; true 0731 baseline + real margin data collected; Phase C REOPENED via lossless pad-to-M=8
+
+Follow-up to the P05 review above. Both review-flagged leads were run to a
+verified conclusion; artifacts under `tmp/p05-lmhead-mxfp8-20260830/`
+(rootcause2/, live_ab_v3/, real_margins/) and `tmp/p05-shared-batching-20260830/`
+(real_shared_padded_qmm.json, real_shared_pad8_speed*.json). Reviews updated in
+place: `tmp/p05-review-20260830/phase{A,C}_review.md`.
+
+- **LEAD 1 — the Phase A "zero-acceptance draft/verify bug" never existed.**
+  Full log-forensic run→instance→model→sharding→knob attribution
+  (rootcause2/RUN_ATTRIBUTION.md + attribution_table.json, 30 rows): every
+  catastrophic 0.05-0.06x "quant" run (11:19-11:50) hit `mlx-community/
+  DeepSeek-V4-Flash` (8-bit) — the wrong model (its lm_head is already
+  quantized, so the mxfp8 knob silently no-ops: the `not hasattr(mod,"scales")`
+  guard fails, no `[LMHEAD_MXFP8]` stderr line; independently confirmed on the
+  studio node — `mlx-community--DeepSeek-V4-Flash/model.safetensors.index.json`
+  ships `lm_head.scales`/`lm_head.biases`, 0731 ships only unquantized
+  `head.weight`). **Correction from independent review:** the acceptance
+  collapse tracks the mlx-community model itself, not single-node Pipeline
+  placement specifically — raw logs show the SAME model under Tensor sharding
+  (10:47-10:58, knob-off) also sustained 0.000/3 acceptance with healthy
+  ~14.6ms drafts; only the ~500-552ms draft *latency* (not the acceptance
+  collapse) tracks the Pipeline placement. The wrong-model finding stands;
+  the original PP-specific framing was imprecise. The probe harness
+  hardcoded that model id until `de925720e` added `--model`. The
+  knob-quantized 0731 head's own live evidence was healthy at every measured
+  context (trivial + 5.6K, rowseq verify): mean_accept 1.890/3, draft ~9ms,
+  verify ~66ms, decode 200-223 tok/s. All H1-H5 hypotheses (incl. the H5
+  QuantizedLinear-inside-mx.compile theory) are moot. The 12:45 API death was a
+  CLEAN manual shutdown (SIGTERM, exit 0), not a crash.
+- **True 0731 production baseline measured (the review's "99 tok/s @100K" was
+  also wrong-model data): 100K decode 271.4/345.1/276.8 tok/s (median 276.8),
+  prefill ~375 tok/s, needle_hit true in 3/3 (live_ab_v3/, model id verified
+  per-file). 5K decode 169-369 tok/s.** Collection gotcha banked: a c=1 cluster
+  rejects concurrent heavy probes with 500 admission errors — sequential only
+  (a prior worker's parallel fan-out produced the misleading "cluster
+  instability").
+- **The missing n=798 real-token margin data now EXISTS** (real_margins/,
+  n=3999 committed tokens, 4 contexts 35→25.1K prompt tokens, temp-0, logprobs
+  top1-vs-top2 margins): pooled **42.7% of real tokens below margin 3.62**
+  (n≥798 slice 44.5%), implying an mxfp8 top-1 flip rate of **~11.5%**
+  (n≥798: ~12.8%) via the synthetic band kernel — an estimate, not a direct
+  measurement. The prior campaign's "~58% below 3.6 → ~16% flip" is REFUTED
+  (both figures asserted without data; the flip rate was overstated ~40%).
+  Margin distribution is stable across context depths (42.0-43.6% per ctx).
+  G5 same-prompt A/B completed: mxfp8 arm byte-identical for 199 chars then
+  diverges mid-reasoning — the visible quality cost is real (same_prompt_G5_result.json).
+- **LEAD 2 — Phase C shared_experts batching REOPENED.** The missing
+  real-weight padded-qmm numerics were captured (real_shared_padded_qmm.json,
+  layer-3 w1 AND w2): pad→M=8 qmm is **bitwise-lossless on real weights**
+  (0/8192 + 0/4096 nonzero), while M≥16 pads diverge 1-ULP-class as on
+  synthetic. Crucially the M=8 SPEED was never measured before — only pad16/32
+  (~257µs, "just ~4%"). Measured now (real_shared_pad8_speed*.json): **M=8 pad
+  = 174.4µs on w1 vs 267.1µs per-row (−34.8%) and 179.0µs on w2 vs 202.8µs
+  (−11.7%) — faster than even the divergent qmv_wide path.** The lossless
+  formulation captures ~100% of the batching win. Next step: knob-gated code
+  change running shared_experts verify-batch through pad-to-M=8 + end-to-end
+  A/B against the P03 −1.2 ms/cycle projection (needs relaunch approval).
+- **Phase A remaining open:** ≥8K batched-verify and 100K regimes on the
+  quantized head remain UNMEASURED; a ship decision needs a knob-ON relaunch
+  A/B at 100K vs the true baseline above (relaunch approval gated).
+- **Knob comment corrected in-place** (mlx-lm utils.py): 0.98x markov_w2 →
+  measured 1.00x (253.9 vs 254.7µs); the asserted 58%/16% numerics figures →
+  the measured 42.7%/~11.5% (with the refutation noted).
+- **Cluster untouched:** zero relaunches (both leads were log-forensics,
+  standalone studio scripts, and API-only probes against the clean production
+  verbon3 cluster). Config verified clean before/after (pid 65573, spec-ON
+  verbon3 env, LMHEAD_MXFP8 absent). Working-tree changes (mlx-lm utils.py +
+  deepseek_v4.py, bench/ab_probe_tier1.py, docs, tmp/ artifacts) left
+  UNCOMMITTED per the supervisor-commits pattern.

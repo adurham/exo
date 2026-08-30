@@ -141,3 +141,69 @@ quantized head (the zero-acceptance bug must be fixed first — see
 
 ## 4. Files created
 - `tmp/p05-review-20260830/phaseA_review.md` (this document)
+
+---
+
+## Follow-up (root-cause investigation)
+
+**2026-08-30 · LEAD 1 forensics (read-only) · full evidence in `tmp/p05-lmhead-mxfp8-20260830/rootcause2/`**
+
+### Verdict: the zero-acceptance regression was a wrong-model harness artifact, not a QuantizedLinear bug
+
+The catastrophic 0.05-0.06x zero-acceptance regression was **never a property of the mxfp8-quantized 0731 head**. It was measured against a **different model** — `mlx-community/DeepSeek-V4-Flash` (8-bit) — JIT-loaded under **pipeline parallelism** (single-node, `min_nodes=1`) for the 11:19-11:50 window, a configuration with a documented depth-dependent spec-decode collapse (100% zero-acceptance, draft ~550ms).
+
+**Root cause of the false claim:** `bench/ab_probe_tier1.py` hardcoded `MODEL='mlx-community/DeepSeek-V4-Flash'` until commit `de925720e` (13:04) added `--model`. Every "quant" run in `live_ab/` hit the 8-bit mlx-community model — which the knob **cannot** quantize (its `lm_head` already has `.scales`, so the `not hasattr(mod,"scales")` guard at `mlx_lm/utils.py:620` no-ops; `model_type=='deepseek_v4'` and `EXO_DSV4_LMHEAD_MXFP8=1` both pass) — under a degenerate single-node Pipeline placement. The 0.05-0.06x decode and ~550ms draft signature were the Pipeline-parallel mlx-community instance's spec-decode collapse, wrongly attributed to the quantized 0731 head.
+
+**Healthy quantized-head evidence (12:32-12:45, instance 99e6a0a5, knob ON):** `[MTP] cycles=237 mean_accept=1.890/3 hist=0:43,1:37,2:60,3:97`; `[MTP-PROF]` draft ~9ms / verify ~66ms / total ~78ms; decode ~200-223 tok/s at 5.6K prompt tokens. The 11:13 "Say OK" probe (instance 6a7f098e, knob ON) was also healthy (mean_accept ~1.3-1.6/3).
+
+**Unmeasured regimes on the quantized head:** ≥8K batched verify (`EXO_DSV4_VERIFY_BATCH=1`, `MIN_CTX=8192`) was **never** exercised; 100K was killed mid-prefill (88064/111074) by the 12:45 clean manual shutdown (SIGTERM, exit 0; new cluster pid 65573 started 12:46:02).
+
+**Deliverables:** `rootcause2/attribution_table.json`, `rootcause2/v2_0731_acceptance.json`, `rootcause2/RUN_ATTRIBUTION.md`.
+
+---
+
+## Follow-up 2 (PM, same day): zero-acceptance bug CLOSED as harness misattribution; true 0731 baseline + real margin data collected
+
+**The "zero-acceptance draft/verify bug" never existed.** Full log-forensic
+attribution in `../p05-lmhead-mxfp8-20260830/rootcause2/` (RUN_ATTRIBUTION.md,
+30-row attribution_table.json): every catastrophic 0.05-0.06x "quant" run
+(11:19-11:50) was served by `mlx-community/DeepSeek-V4-Flash` (8-bit, lm_head
+already quantized → the mxfp8 knob silently no-ops on it) JIT-loaded under
+SINGLE-NODE PIPELINE parallelism — a placement with a documented depth-dependent
+spec-decode collapse (draft ~500-552ms, mean_accept 0.000/3, knob-independent:
+the knob-off base arm showed the same early zero-acceptance). The probe harness
+hardcoded that wrong model id until `de925720e` (13:04) added `--model`. The
+knob-quantized 0731 head's own live measurements were healthy: trivial ctx +
+5.6K ctx (rowseq verify) at mean_accept 1.890/3, draft ~9ms, decode ~200-223
+tok/s. H1-H5 (including the H5 QuantizedLinear-in-mx.compile theory) are all
+moot — there was no bug to explain.
+
+**Correction to this review's own §1b:** the "99.1 tok/s base 100k decode"
+figure was ALSO mlx-community data and is not a valid production baseline.
+The TRUE 0731 production baseline (live_ab_v3/, clean verbon3 cluster, model
+id verified in every file, needle_hit true in all runs):
+- 100K decode: **271.4 / 345.1 / 276.8 tok/s (median 276.8)**, prefill
+  374.8-376.5 tok/s — ~2.8x the figure this review carried.
+- 5K decode: 169.4 / 289.0 / 368.6 tok/s; 1K warmup decode 133.6 tok/s.
+
+**Missing n≥798 margin data — collected (real_margins/, n=3999 committed
+tokens across 35 / 2.5K / 6.3K / 25.1K-ctx temp-0 generations, top1-vs-top2
+logprob margins via /v1 logprobs; every run reached 1000 committed tokens):**
+- Pooled fraction with margin < 3.62: **42.7%** (n≥798 slice: **44.5%**) —
+  the prior campaign's "~58% below 3.6" is **REFUTED**.
+- Implied mxfp8 top-1 flip rate (synthetic-band kernel — an estimate, not a
+  direct measurement): **~11.5% pooled / ~12.8% at n≥798** — the asserted
+  "~16%" is **REFUTED** (overstated by ~40%).
+- Median margin 4.875, mean 6.75, p10 0.5, p90 15.5. Stable across contexts
+  (per-context frac<3.62 within 42.0-43.6%) — the flip risk does NOT grow
+  with context depth in this sample.
+
+**G5 same-prompt divergence (completed):** arm A (mxfp8 head, 12:37 capture)
+vs arm B (BF16, live) on the fixed temp-0 prompt: byte-identical for 199
+chars, then diverge mid-reasoning ("all colors" vs "different wavelengths")
+— same_prompt_G5_result.json. Real visible quality cost, as expected.
+
+**Remaining open on Phase A (unchanged):** ≥8K batched-verify and 100K on the
+quantized head are still UNMEASURED (the healthy evidence covers ≤5.6K,
+rowseq). A ship decision still needs a knob-ON relaunch A/B at 100K against
+the true baseline above — requires supervisor relaunch approval, not taken.

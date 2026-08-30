@@ -1,0 +1,65 @@
+{
+ "host": "Adams-Mac-Studio-M4-1",
+ "gpu": "applegpu_g16s",
+ "tensors": {
+  "layers.3.ffn.shared_experts.w1.weight": {
+   "m4_vs_m1": {
+    "max_abs": 0.001953125,
+    "nonzero": 13,
+    "total": 131072
+   },
+   "padded_qmm": {
+    "M8": {
+     "max_abs": 0.0,
+     "nonzero": 0,
+     "total": 8192
+    },
+    "M16": {
+     "max_abs": 0.03125,
+     "nonzero": 4826,
+     "total": 8192
+    },
+    "M32": {
+     "max_abs": 0.03125,
+     "nonzero": 4826,
+     "total": 8192
+    },
+    "M64": {
+     "max_abs": 0.03125,
+     "nonzero": 4099,
+     "total": 8192
+    }
+   }
+  },
+  "layers.3.ffn.shared_experts.w2.weight": {
+   "m4_vs_m1": {
+    "max_abs": 0.00390625,
+    "nonzero": 17,
+    "total": 262144
+   },
+   "padded_qmm": {
+    "M8": {
+     "max_abs": 0.0,
+     "nonzero": 0,
+     "total": 16384
+    },
+    "M16": {
+     "max_abs": 0.015625,
+     "nonzero": 8251,
+     "total": 16384
+    },
+    "M32": {
+     "max_abs": 0.015625,
+     "nonzero": 8251,
+     "total": 16384
+    },
+    "M64": {
+     "max_abs": 0.015625,
+     "nonzero": 6267,
+     "total": 16384
+    }
+   }
+  }
+ },
+ "padded_qmm_lossless_on_real_weights": false
+}

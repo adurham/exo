@@ -1,0 +1,14 @@
+Testing layers.3.ffn.shared_experts.w1.weight...
+  m4_vs_m1: max=1.953e-03, nz=13
+  M8: max=0.000e+00, nz=0
+  M16: max=3.125e-02, nz=4826
+  M32: max=3.125e-02, nz=4826
+  M64: max=3.125e-02, nz=4099
+Testing layers.3.ffn.shared_experts.w2.weight...
+  m4_vs_m1: max=3.906e-03, nz=17
+  M8: max=0.000e+00, nz=0
+  M16: max=1.562e-02, nz=8251
+  M32: max=1.562e-02, nz=8251
+  M64: max=1.562e-02, nz=6267
+
+ wrote /Users/adam.durham/repos/exo/tmp/p05-shared-batching-20260830/real_shared_padded_qmm.json

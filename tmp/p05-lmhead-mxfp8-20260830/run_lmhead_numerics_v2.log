@@ -1,0 +1,23 @@
+=== quantized-vs-BF16 per-row (M=1), 128 real-weighted rows ===
+logit err: max=7.500 mean=0.5337 rms=0.6795
+logit scale: bf16 std=11.32
+top-1 flips: 17/128 = 13.28%
+greedy margin: p50=3.625 p10=0.250 p90=12.650
+  margin [0.00, 1.44): 13/32 (40.6% flips)
+  margin [1.44, 3.62): 4/32 (12.5% flips)
+  margin [3.62, 7.50): 0/31 (0.0% flips)
+  margin [7.50, inf): 0/33 (0.0% flips)
+top-5 set overlap: 90.0%
+
+=== M-batch invariance (row i's output vs same row at M=1) ===
+M=3: BF16 head batch-vs-M1 max=0.00e+00 | mxfp8 head batch-vs-M1 max=0.00e+00
+M=4: BF16 head batch-vs-M1 max=0.00e+00 | mxfp8 head batch-vs-M1 max=0.00e+00
+
+=== laptop-GPU timing (direction only; cluster A/B is the real test) ===
+BF16 head M=1:   2955.5 us  (1.059 GB -> 358 GB/s)
+mxfp8 head M=1:   1527.9 us  (0.149 GB -> 97 GB/s)
+BF16 M=4:   3028.0 us | mxfp8 M=4:   3666.8 us
+M=1 speedup: 1.93x | M=4 speedup: 0.83x
+
+wrote /Users/adam.durham/repos/exo/tmp/p05-lmhead-mxfp8-20260830/lmhead_numerics_v2.json
+EXIT=0

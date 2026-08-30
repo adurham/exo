@@ -1,0 +1,231 @@
+{
+ "per_context": {
+  "trivial": {
+   "full": {
+    "n": 1000,
+    "counts": [
+     205,
+     219,
+     159,
+     417
+    ],
+    "fractions": [
+     0.205,
+     0.219,
+     0.159,
+     0.417
+    ],
+    "frac_below_3_62": 0.424,
+    "implied_flip_rate": 0.1106,
+    "mean": 7.075,
+    "median": 5.125,
+    "p10": 0.625,
+    "p90": 15.75
+   },
+   "n_ge_798": {
+    "n": 202,
+    "counts": [
+     57,
+     45,
+     35,
+     65
+    ],
+    "fractions": [
+     0.2822,
+     0.2228,
+     0.1733,
+     0.3218
+    ],
+    "frac_below_3_62": 0.505,
+    "implied_flip_rate": 0.1424,
+    "mean": 5.684,
+    "median": 3.5,
+    "p10": 0.5,
+    "p90": 14.25
+   }
+  },
+  "ctx2k": {
+   "full": {
+    "n": 1000,
+    "counts": [
+     225,
+     211,
+     193,
+     371
+    ],
+    "fractions": [
+     0.225,
+     0.211,
+     0.193,
+     0.371
+    ],
+    "frac_below_3_62": 0.436,
+    "implied_flip_rate": 0.1177,
+    "mean": 6.343,
+    "median": 4.75,
+    "p10": 0.5,
+    "p90": 14.625
+   },
+   "n_ge_798": {
+    "n": 202,
+    "counts": [
+     47,
+     43,
+     59,
+     53
+    ],
+    "fractions": [
+     0.2327,
+     0.2129,
+     0.2921,
+     0.2624
+    ],
+    "frac_below_3_62": 0.4455,
+    "implied_flip_rate": 0.1211,
+    "mean": 5.454,
+    "median": 4.125,
+    "p10": 0.625,
+    "p90": 13.0
+   }
+  },
+  "ctx5k": {
+   "full": {
+    "n": 1000,
+    "counts": [
+     233,
+     193,
+     183,
+     391
+    ],
+    "fractions": [
+     0.233,
+     0.193,
+     0.183,
+     0.391
+    ],
+    "frac_below_3_62": 0.426,
+    "implied_flip_rate": 0.1187,
+    "mean": 6.646,
+    "median": 4.75,
+    "p10": 0.5,
+    "p90": 15.375
+   },
+   "n_ge_798": {
+    "n": 202,
+    "counts": [
+     51,
+     32,
+     44,
+     75
+    ],
+    "fractions": [
+     0.2525,
+     0.1584,
+     0.2178,
+     0.3713
+    ],
+    "frac_below_3_62": 0.4109,
+    "implied_flip_rate": 0.1223,
+    "mean": 6.221,
+    "median": 4.812,
+    "p10": 0.375,
+    "p90": 14.125
+   }
+  },
+  "ctx20k": {
+   "full": {
+    "n": 999,
+    "counts": [
+     213,
+     207,
+     183,
+     396
+    ],
+    "fractions": [
+     0.2132,
+     0.2072,
+     0.1832,
+     0.3964
+    ],
+    "frac_below_3_62": 0.4204,
+    "implied_flip_rate": 0.1125,
+    "mean": 6.955,
+    "median": 4.875,
+    "p10": 0.5,
+    "p90": 16.375
+   },
+   "n_ge_798": {
+    "n": 201,
+    "counts": [
+     53,
+     31,
+     36,
+     81
+    ],
+    "fractions": [
+     0.2637,
+     0.1542,
+     0.1791,
+     0.403
+    ],
+    "frac_below_3_62": 0.4179,
+    "implied_flip_rate": 0.1263,
+    "mean": 6.629,
+    "median": 4.875,
+    "p10": 0.375,
+    "p90": 15.875
+   }
+  }
+ },
+ "pooled": {
+  "full": {
+   "n": 3999,
+   "counts": [
+    876,
+    830,
+    718,
+    1575
+   ],
+   "fractions": [
+    0.2191,
+    0.2076,
+    0.1795,
+    0.3938
+   ],
+   "frac_below_3_62": 0.4266,
+   "implied_flip_rate": 0.1149,
+   "mean": 6.754,
+   "median": 4.875,
+   "p10": 0.5,
+   "p90": 15.5
+  },
+  "n_ge_798": {
+   "n": 807,
+   "counts": [
+    208,
+    151,
+    174,
+    274
+   ],
+   "fractions": [
+    0.2577,
+    0.1871,
+    0.2156,
+    0.3395
+   ],
+   "frac_below_3_62": 0.4449,
+   "implied_flip_rate": 0.128,
+   "mean": 5.996,
+   "median": 4.25,
+   "p10": 0.5,
+   "p90": 14.375
+  }
+ },
+ "note": "implied_flip_rate = sum fraction(band) * offline_band_flip_rate(band) via lmhead_numerics_v2.json kernel \u2014 estimate, not direct measurement; margin = top1_lp - top2_lp (log space == logit space for softmax temp 1)",
+ "asserted_vs_measured": {
+  "asserted_frac_below_3.62": 0.58,
+  "measured_frac_below_3.62_pooled": 0.4266,
+  "asserted_flip_rate": 0.16,
+  "measured_implied_flip_rate_pooled": 0.1149
+ }
+}

@@ -1,0 +1,7 @@
+{
+ "arm": "A",
+ "finish": "stop",
+ "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where sunlight interacts with gas molecules in Earth's atmosphere. Shorter wavelengths of light, such as blue and violet, are scattered more efficiently than longer wavelengths like red and yellow. Although violet light is scattered even more strongly than blue, our eyes are less sensitive to violet and more sensitive to blue, and sunlight also contains less violet light at the surface. Consequently, the dominant scattered light we perceive from the sky is blue.",
+ "reasoning": "We need to write exactly four sentences about why the sky is blue, precise and scientific. No extra. So: Rayleigh scattering, sunlight, shorter wavelengths, etc.",
+ "compl": 131
+}

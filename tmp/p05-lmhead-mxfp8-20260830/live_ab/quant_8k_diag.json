@@ -1,0 +1,15 @@
+{
+  "tag": "quant_8k_diag",
+  "target_tokens": 8192,
+  "prompt_tokens": 9084,
+  "completion_tokens": 79,
+  "prefill_s": 29.9,
+  "prefill_tps": 303.83,
+  "decode_s": 0.78,
+  "decode_tps": 101.12,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_quant_8k_diag.json

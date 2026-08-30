@@ -1,0 +1,15 @@
+{
+  "tag": "B_warmup_2",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 1000,
+  "prompt_tokens": 1176,
+  "completion_tokens": 49,
+  "prefill_s": 5.77,
+  "prefill_tps": 203.69,
+  "decode_s": 0.3,
+  "decode_tps": 163.6,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}

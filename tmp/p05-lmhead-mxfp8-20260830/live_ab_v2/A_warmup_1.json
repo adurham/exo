@@ -1,0 +1,15 @@
+{
+  "tag": "A_warmup_1",
+  "target_tokens": 300,
+  "prompt_tokens": 360,
+  "completion_tokens": 72,
+  "prefill_s": 4.47,
+  "prefill_tps": 80.55,
+  "decode_s": 0.34,
+  "decode_tps": 214.16,
+  "needle_hit": true,
+  "bos_spam": false,
+  "output_head": "FALCON-MERCURY-7749",
+  "output_tail": "FALCON-MERCURY-7749"
+}
+saved -> /tmp/ab_probe_A_warmup_1.json

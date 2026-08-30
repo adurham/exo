@@ -1,0 +1,16 @@
+{
+ "host": "Adams-Mac-Studio-M4-1",
+ "gpu": "applegpu_g16s",
+ "divergence_m4_vs_m1": {
+  "max_abs": 0.001953125,
+  "nonzero": 13,
+  "total": 131072,
+  "pct": 0.009918212890625
+ },
+ "speeds_us": {
+  "per_row_m1_x4": 268.499949015677,
+  "batched_m4_wide": 180.99998123943806,
+  "pad16_qmm": 257.332983892411,
+  "pad32_qmm": 257.8750136308372
+ }
+}
