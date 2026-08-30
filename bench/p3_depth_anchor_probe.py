@@ -116,14 +116,15 @@ def build_prompt(target_tokens: int, tokenizer) -> tuple[str, int]:
 
 
 async def probe(
-    base_url: str, model: str, prompt: str, max_tokens: int
+    base_url: str, model: str, prompt: str, max_tokens: int,
+    temperature: float = 0.0,
 ) -> dict:
     """One streamed request against the EOS-BANNING /bench endpoint."""
     body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
-        "temperature": 0.0,
+        "temperature": temperature,
         "stream": True,
         # BenchChatCompletionRequest-only field. Its presence is what forces
         # task_params.bench = True server-side, which bans EOS.
@@ -257,6 +258,10 @@ async def main() -> None:
     ap.add_argument("--target-tokens", type=int, action="append", required=True,
                     help="real prompt-token depth; repeatable")
     ap.add_argument("--max-tokens", type=int, default=2000)
+    ap.add_argument("--temperature", type=float, default=0.0,
+                    help="sampling temperature (P02c: temp>0 for moe-NOP arms "
+                         "so garbage logits don't trip the LONG-period "
+                         "degeneration detector's byte-exact block cycles)")
     ap.add_argument("--out", default="/tmp/p3_depth_anchor.json")
     ap.add_argument("--depth-cap", type=int, default=355_000,
                     help="hard safety cap on real prompt depth")
@@ -285,7 +290,8 @@ async def main() -> None:
               f"locally predicted {predicted:,} tokens", flush=True)
         t0 = time.time()
         try:
-            r = await probe(base_url, args.model, prompt, args.max_tokens)
+            r = await probe(base_url, args.model, prompt, args.max_tokens,
+                            temperature=args.temperature)
         except Exception as exc:  # noqa: BLE001 - probe reports, never crashes
             print(f"  ERROR after {time.time() - t0:.0f}s: "
                   f"{type(exc).__name__}: {exc}", flush=True)

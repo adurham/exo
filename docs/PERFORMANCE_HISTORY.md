@@ -5072,3 +5072,81 @@ analyzer in `tmp/p01a-20260829/`.
   nodes, ps eww shows zero JACCL_TRACE_* + all production flags, no new
   trace files under new PIDs, smoke probe @2K clean (35.15 tok/s,
   coherent, finish_reason=length).
+
+## 2026-08-29 — Phase (c): MoE-at-depth + allocator/memory-pressure — both candidates INCONCLUSIVE, residual still open
+
+**PM/analysis pass, offline only** (no cluster access — pure post-hoc
+analysis of already-collected R1 probe data; probes themselves were run by
+a prior session that exhausted its iteration budget before write-up). Full
+detail: `docs/p02c-moe-allocator-depth-residual-2026-08-29.md`; raw data +
+new analysis scripts in `tmp/p02c-20260829/` (`analysis/*.py`).
+
+- **Method:** delta-of-deltas A/B (`bench/p3_depth_anchor_probe.py`,
+  `/tmp/dsv4_nop_targets=moe` short-circuits `DeepseekV4MoE.__call__` to
+  `mx.zeros_like(x)` for arm B), spec-off band-era-allocator config
+  (`CLEAR_CACHE_INTERVAL=0`, `GC_COLLECT_INTERVAL=0`), n=2/depth/arm, both
+  100K and 352.6K, plus `MLX_LOG_NEW_BUFFER_PATH` fresh-alloc log +
+  `EXO_MEMORY_PROFILE_INTERVAL=8` structured dump + 1Hz vm_stat sampler
+  (m4-1 only) for the allocator candidate.
+- **Reproduction gate PASSED:** arm A dA = +4.70 ms/tok (35.64→40.34),
+  within 4.8% of the established +4.94 clean-anchor total (P3 Part III) —
+  third independent confirmation of the same total this campaign day.
+- **Candidate 1 (MoE-at-depth): validity gate FAILS.** dB (MoE-NOP arm
+  depth-delta) = **+5.05 ms/tok** vs worker C's kernel-census expectation
+  of +2.56 (primary run) to +3.34 (noisiest of 3 fencing-mode runs) — a
+  1.5-2x overshoot, not a marginal miss, confirmed real (reps tight to
+  <0.3% spread, not n=2 noise). Per DESIGN.md's own instruction, the naive
+  delta-of-deltas (dA−dB = **−0.35 ms/tok**) is reported only as a
+  weakly-related observation, NOT forced into an attribution. Root-cause
+  dig (not just citing the gate failure): the DESIGN.md-flagged arm-B bias
+  (garbage hidden states → cheaper attention at depth) predicts dB should
+  UNDERSHOOT census — wrong direction to explain an overshoot. A plausible
+  mechanistic explanation exists — dB is defined as "attention+framework"
+  and structurally still pays P3 worker C3's already-isolated
+  `BatchPoolingCache` per-flush concat cost (+1.91 ms/tok, additive with
+  kernel census per C3/R2) that C's bare synthetic census never paid;
+  under kernel+C3 (+4.47..+5.25) dB's overshoot shrinks to −0.20..+0.58 —
+  but adopting this requires also removing C3 from the residual band's
+  subtracted side (double-count risk, flagged not resolved) and a small
+  gap remains even then. **Net: not established either way**, flagged as
+  inconclusive rather than forced.
+- **Candidate 2 (allocator/memory-pressure): the intended cross-depth test
+  COULD NOT RUN — a real data gap, confirmed two independent ways
+  (timestamp ranges AND newbuf byte-offset watermarks).** All three
+  per-node telemetry streams (newbuf log, structured mem JSONL, vm_stat
+  sampler) stop at/just after the 100kb block ends, ~9 minutes before the
+  352.6K block starts; zero telemetry coverage of the 352.6K block exists
+  in the collected files, on either rank. 100K-only findings: **zero
+  gc_limit crossings** (peak active+cache 80.57GB vs 114.557GB limit, 34GB
+  headroom), `active_bytes` flat through decode (79.06-79.31GB). One
+  same-regime both-depths check WAS possible (each probe's own recorded
+  inter-token gaps, independent of the missing telemetry): quintile trend
+  does **NOT** reproduce P01a's spec-ON "352.6K worsens monotonically
+  within-window" claim in this spec-off regime — both depths show flat-to-
+  noisy quintile trends (Q5-Q1 within ±1.6ms, no consistent direction),
+  leaning against the escalating-churn mechanism but scope-limited to
+  spec-off (P01a's claim was spec-ON/batched-verify, untested here).
+  **Net: data gap prevents the designed test; partial available evidence
+  leans negative on the mechanism but is not a full refutation.**
+- **Data-quality note:** arm B's temp=1.0 degeneration mitigation
+  (documented in `run_block.py`) only partially held — first 100K B-reps
+  (`100k_1B`/`100k_2B`) both still hit the exact-repeat degeneration kill
+  at 71 tokens despite temp=1.0; re-run (`100kb_0B`/`100kb_1B`) completed
+  clean to 2000 tokens. Correctly excluded/replaced; flagged for anyone
+  re-running MoE-NOP arms in the future.
+- **Residual after (c): still fully open at +1.67..+2.52 ms/tok.** Neither
+  candidate produced a validated attribution — one hit a genuine
+  validity-gate failure with a plausible-but-unconfirmed partial
+  explanation, the other hit a telemetry collection gap, not a clean
+  negative result on either candidate's core mechanism.
+- **Recommendation: diminishing returns reached for now.** Residual is
+  small (4-7% of total decode ms/tok), multiple relaunch-gated phases
+  already spent today, and both remaining paths to a cleaner answer are
+  non-trivial (Candidate 1 needs either a residual-band bookkeeping
+  decision or a new 3rd cache-management-NOP arm; Candidate 2 needs a full
+  R1 redo with telemetry verified to actually span 352.6K). Documented as
+  a bounded, low-priority open item rather than continued in-session.
+- **Cluster state:** not touched — pure offline analysis, zero SSH/relaunch/
+  probe activity this phase, per task scope. Last known state stands
+  (supervisor-verified production config, both nodes, moments before this
+  phase began).
