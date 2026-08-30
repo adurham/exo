@@ -1013,6 +1013,13 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
     mod.load_weights(list(weights.items()), strict=True)
     mx.eval(mod.parameters())
 
+    # EXO_DSV4_LMHEAD_MXFP8 (P05, 2026-08-30): markov_w2 is deliberately
+    # NOT quantized under this knob. The P05 studio microbench
+    # (tmp/p05-lmhead-mxfp8-20260830/studio_lmhead_microbench.json) measured
+    # mxfp8 markov_w2 at 0.98x vs BF16 (260 -> 131 GB/s — the 34 MB weight
+    # is latency-bound on both kernels, so halving bytes buys nothing) while
+    # adding logit noise to the draft path. Pure risk, zero reward: skipped.
+
     inner.dspark = mod
     set_dspark_taps(mod.target_layer_ids)
     logger.info(
