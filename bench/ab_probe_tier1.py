@@ -60,11 +60,16 @@ def main() -> int:
     ap.add_argument("target_tokens", type=int, nargs="?", default=100_000)
     ap.add_argument("--max-tokens", type=int, default=1500)
     ap.add_argument("--tag", default="untagged")
+    ap.add_argument(
+        "--model",
+        default=MODEL,
+        help="model id to send in the request body (default: %(default)s)",
+    )
     args = ap.parse_args()
 
     prompt = build_prompt(args.target_tokens)
     body = {
-        "model": MODEL,
+        "model": args.model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": args.max_tokens,
         "temperature": 0.0,
