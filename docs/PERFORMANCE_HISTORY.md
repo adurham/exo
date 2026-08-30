@@ -5230,3 +5230,71 @@ detail + all arithmetic:
 - **Verdict: P03's "truncate to ~4-5 iters, 5.24 → 1.5-2 ms/cycle" is numerically NOT viable.** Minimum defensible candidate is iters=10 (halves the loop, "plausibly tolerable, unproven"); anything ≤5 carries per-application comb error of the same order as the mixing weights themselves. Any live throughput test must be paired with the generation-quality gate (exo-local-vs-cloud-dsv4 probe suite) and is reversible per-restart via the knob. Cheapest upgrade path before any live test: read-only dump of one real decode cycle's comb-logit std on a studio (standalone process, no relaunch — p01/p03 recipe) to replace the synthetic O(1)-logit assumption with the checkpoint's actual distribution.
 - **Two measurement traps found (each silently produced a false "zero divergence" answer until caught):** (1) `uv run python script.py` resolved `import mlx_lm` to the STALE non-editable copy in `exo/.venv/site-packages` — knob silently absent, env ignored; fixed by pinning sys.path to the submodule + asserting the knob's presence in the imported source. (2) fn drawn at naive init scale 1/sqrt(fan-in) gives softmax-logit std ≈0.08 — a flat softmax converges in 1-2 iters and makes iters=2 measure bit-identical to iters=20; fixed by calibrating fn so logit std hits the target regime (1.0 realistic, 4.0 stress). Also: scaling the input x is a no-op for Sinkhorn (rms_norm is scale-invariant) — the case axis must be the logit scale.
 - **Cluster untouched:** no SSH, no production API, no relaunches — verified by construction. mlx-lm submodule and parent-repo working trees carry the code+doc changes UNCOMMITTED per instructions (supervisor commits).
+
+## 2026-08-30 — P05 review: independent re-derivation of the three fusion-target claims from an interrupted, oversight-flagged campaign
+
+A PM (sa-0-e5a81d3d) ran P05 autonomously against P03/P04's three fusion
+targets (lm_head mxfp8, HC Sinkhorn real-weight re-validation, shared_experts
+batching) but was killed mid-flight after two operational problems (left the
+cluster on a test config at one point, since restored/confirmed clean; a
+nested dispatch of its own picked an invalid model string). None of its
+numbers were trusted as-is — three independent read-only review subagents
+re-derived each phase from the raw JSON directly. Full docs:
+`tmp/p05-review-20260830/phase{A,B,C}_review.md`; raw data in
+`tmp/p05-{lmhead-mxfp8,sinkhorn-real,shared-batching}-20260830/`.
+
+**Phase A (lm_head mxfp8) — DON'T SHIP.** Kernel-level speedup CONFIRMED
+(studio microbench 1.64-1.85x across M=1..4, matches the PM's claim exactly)
+but never validated end-to-end: the only live quantized-head A/B runs show
+0.05-0.06x (catastrophic regression, ~4-5 tok/s vs ~99 tok/s baseline) — a
+zero-acceptance draft/verify break, not a valid speedup measurement (likely
+`QuantizedLinear` inside `@mx.compile`). The `live_ab_v2` re-runs that might
+have shown a working head are all connection-refused tracebacks — no valid
+live 100k throughput exists anywhere in the data. The ~13% synthetic top-1
+flip rate is CONFIRMED (17/128, 100% concentrated below margin 3.62). The
+~16% real-token flip-rate claim (n=798) is UNVERIFIABLE — that dataset does
+not exist anywhere in the repo; the only occurrence of "n=798" is the code
+comment itself. markov_w2's exclusion from quantization is CONFIRMED sound
+(microbench 1.00x, not the comment's 0.98x — conclusion unchanged). Before
+any ship decision: fix the zero-acceptance bug, get one valid live 100k A/B
+of a working head, and produce the missing n=798 margin data.
+
+**Phase B (Sinkhorn, real HC weights) — P04's gate CONFIRMED and gate
+should TIGHTEN, not loosen.** Real extracted comb-logits are ~10x wilder
+than P04's synthetic "realistic O(1)" assumption (measured std 2.5-14.9,
+median 11.4, vs P04's std=1.0), and are bias-dominated (base2/logits ratio
+0.85-1.00, non-row-constant, so no softmax-shift escape) — the worst case
+for the 86x/forward comb-error compounding P04 already flagged. Real
+truncation divergence at iters=10 is 1.33e-1, already exceeding P04's own
+synthetic iters=4 value (8.6e-2) — P04's "minimum defensible iters=10" is
+NOT supported once real weights replace the synthetic assumption. P03's
+4-5-iter projection stays dead (real div@4-5 = 0.37-0.47, 5.4-12.4x worse
+than P04's synthetic numbers at the same iter counts). Recommendation:
+keep iters=20 as the shipped default; any live truncation test must use
+iters=10 at most, be quality-gated, and stay reversible via
+`EXO_HC_SINKHORN_ITERS`.
+
+**Phase C (shared_experts batching) — NOT M-invariant on real weights;
+confirms the existing 2026-08-04 divergence, no lossless fix found.** Real
+layer-3 shared_experts weights: `qmv_wide(M=4)` vs `qmv(M=1)` diverges on
+13/131072 elements (0.0099%, max 2⁻⁹) — reproduces the known 2026-08-04
+divergence offline. The batched win is real (181µs vs 268.5µs, 32.5%
+faster) but numerically unsound as-is. The proposed zero-pad-to-`qmm`
+workaround is NOT lossless as claimed: 0-ulp only at M=8, 1-ULP divergence
+at M=16/32/64, and the one case where it might matter most (real weights)
+never got its numerics saved to the output JSON — the single most
+important number for this phase is missing from the data entirely. Speed
+gain if the padded path were used is marginal anyway (257µs vs 268.5µs,
+~4%) — not attractive even before the correctness question. Stays
+BLOCKED per the existing 2026-08-04 fix (`ROWSEQ=shared`) until a lossless
+formulation is found and the missing real-weight padded-qmm numerics are
+captured.
+
+**Net P05 verdict: none of the three fusion targets are ready to ship.**
+Phase A needs a real bug fix before it can even be measured honestly; Phase
+B's real data argues the opposite direction from what P05 was chasing
+(tighten, don't loosen); Phase C confirms a known blocker with no new
+escape route. The two mlx-lm submodule diffs (`EXO_DSV4_LMHEAD_MXFP8`,
+`EXO_DSV4_PRENORM_H_DUMP`) stay uncommitted, env-gated and inert — no code
+lands from this review. Cluster untouched throughout (pure read-only JSON
+analysis, verified clean production config before this review began).
