@@ -559,6 +559,28 @@ fi
 # the bare L>1 gate caused verify-slicing degeneration (mlx-lm 7c721d9).
 # Decode probes: 29.0 t/s mean, quality gates clean.
 : "${EXO_DSV4_LMHEAD_LASTROW:=1}"
+# lm_head mxfp8 quantization (P05 Phase A, 2026-08-30). lm_head ships as
+# UNQUANTIZED BF16 (1.059 GB/rank, replicated on every rank) and the P03
+# per-kernel capture measured it at 92.6% of spec bandwidth -- purely
+# byte-limited, so halving its bytes converts directly into time. Quantized
+# in place at load (group=32, bits=8, mxfp8) in mlx-lm's load_model.
+#
+# SHIP DECISION (2026-08-30): ON by default. Live 100K A/B, 3 reps/arm,
+# 1200-token generations (short ~90-token probes are startup noise and were
+# NOT used): decode 34.28 vs 32.35 tok/s median = +6.0%, with ZERO overlap
+# between arms (ON worst 34.12 > OFF best 33.09). Prefill unchanged
+# (378.3 vs 378.0). Quality gate: a 15-task mechanically-scored eval
+# (arithmetic, exact factual recall, and 5 executed-and-asserted code tasks)
+# scored 15/15 on BOTH arms with all 15 answers BYTE-IDENTICAL.
+#
+# The ~11.5% top-1 flip-rate estimate (tmp/p05-lmhead-mxfp8-20260830/
+# real_margins/) is real but is a DIAGNOSTIC, not a quality metric: flips
+# concentrate in low-margin near-ties between near-equivalent tokens. Free
+# prose does visibly diverge (0/5 byte-identical on long-form prompts --
+# bullet style and phrasing differ) while the substance stays correct. If a
+# workload needs byte-reproducible prose rather than correct answers, set
+# EXO_DSV4_LMHEAD_MXFP8=0 to restore the BF16 head.
+: "${EXO_DSV4_LMHEAD_MXFP8:=1}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage.
@@ -1620,6 +1642,7 @@ for NODE in "${NODES[@]}"; do
     [ -n "$EXO_DSV4_PREFILL_ARGPARTITION" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PREFILL_ARGPARTITION=$EXO_DSV4_PREFILL_ARGPARTITION"
     [ -n "${EXO_DSV4_ARGPARTITION_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ARGPARTITION_MIN_P=$EXO_DSV4_ARGPARTITION_MIN_P"
     [ -n "$EXO_DSV4_LMHEAD_LASTROW" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_LASTROW=$EXO_DSV4_LMHEAD_LASTROW"
+    [ -n "${EXO_DSV4_LMHEAD_MXFP8:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_MXFP8=$EXO_DSV4_LMHEAD_MXFP8"
     [ -n "$EXO_DSV4_SEQ_SPLIT" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT=$EXO_DSV4_SEQ_SPLIT"
     # Seq-split output reconstruction path: default (unset/1) uses a
     # zero-padded all_sum on the TOP-LEVEL group (2x wire bytes) to work

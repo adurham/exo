@@ -5369,3 +5369,68 @@ place: `tmp/p05-review-20260830/phase{A,C}_review.md`.
   verbon3 env, LMHEAD_MXFP8 absent). Working-tree changes (mlx-lm utils.py +
   deepseek_v4.py, bench/ab_probe_tier1.py, docs, tmp/ artifacts) left
   UNCOMMITTED per the supervisor-commits pattern.
+
+## 2026-08-30 — P06 Phase A: lm_head mxfp8 SHIPS (+6.0% decode @100K, zero measured quality cost); the flip-rate framing was a near-miss false negative
+
+Live knob-ON A/B against the true 0731 baseline, 2 relaunches, sequential
+probes only (c=1 admission gotcha respected). Artifacts:
+`tmp/p05-lmhead-mxfp8-20260830/live_ab_v4/`. New harnesses:
+`bench/long_decode_probe.py`, `bench/lmhead_task_eval.py`,
+`bench/lmhead_quality_gate.py`.
+
+- **MEASUREMENT TRAP FOUND AND FIXED FIRST — the existing A/B harness could
+  not answer this question.** `bench/ab_probe_tier1.py` asks a needle
+  question the model answers in ~80-100 tokens, i.e. a 0.2-0.3 s decode
+  window. The standing rule (never quote t/s from <400-token generations)
+  makes those numbers startup noise, and the *baseline* in the file
+  (`live_ab_v3`, 81-93 tokens) has the identical defect — so the "271.4/
+  345.1/276.8, median 276.8 tok/s" figures are comparing noise to noise and
+  must NOT be used for a ship decision. First knob-ON reps reproduced the
+  artifact perfectly: 469.6 and 322.8 tok/s off 97-token samples, a spread
+  no real effect could produce. `bench/long_decode_probe.py` keeps the same
+  100K prefill but asks for a long essay, giving a 1200-token / ~35 s decode
+  window, and records `decode_sample_trustworthy` so this trap cannot be
+  re-entered silently.
+- **Throughput (3 reps/arm, 1200 tokens each, same probe both arms):
+  ON 34.35/34.12/34.28 (median 34.28) vs OFF 32.35/33.09/32.11 (median
+  32.35) = +1.93 tok/s, +6.0%.** The arms do NOT overlap — ON's worst rep
+  (34.12) beats OFF's best (33.09) — so at n=3 this is signal, not jitter.
+  Prefill unchanged as expected for a decode-side byte win (378.3 vs 378.0);
+  needle retrieved 3/3 in both arms.
+- **Quality: 15/15 on BOTH arms, all 15 answers BYTE-IDENTICAL.**
+  `bench/lmhead_task_eval.py` scores mechanically (no LLM grader, no human
+  judgment): 6 arithmetic/word problems checked as exact numbers, 4 exact
+  factual-recall items, and 5 code tasks whose generated functions are
+  EXECUTED against real assertions. A flipped digit, operator or index
+  fails loudly. Nothing failed, and the two arms produced the same bytes on
+  every task.
+- **The ~11.5% flip-rate estimate is REAL but is a DIAGNOSTIC, not a quality
+  metric — reading it as one would have produced a false negative.** Prior
+  campaign framing (42.7% of real tokens below margin 3.62 → ~11.5% implied
+  top-1 flips, plus a same-prompt G5 divergence at 199 chars) pointed at
+  "don't ship". It is now clear why that inference over-reads: flips
+  concentrate in low-margin near-ties, i.e. between near-equivalent tokens,
+  so they change wording without changing answers. Measured directly: free
+  prose does diverge (0/5 byte-identical on the long-form gate — bullet
+  style, phrasing) while every checkable answer stayed correct and identical
+  (element list identical, same exact fraction 381 5/7, same ages). The
+  arithmetic behind 11.5% was re-verified as a 4-band weighted sum and is
+  sound; only its *interpretation* was wrong. A consult review flagged this
+  exact risk ("flip rate is a diagnostic, not a quality metric; you may be
+  steering toward a false negative") and prompted the task-eval that
+  inverted the call.
+- **VERDICT: SHIP.** +6.0% decode for zero measured quality cost is a good
+  trade. Landed the project's real way — `start_cluster.sh` gets
+  `: "${EXO_DSV4_LMHEAD_MXFP8:=1}"` plus EXO_ENV plumbing, matching the
+  EXO_DSV4_LMHEAD_LASTROW pattern. (Note for the record: the task brief
+  asked for a `config.yaml`-gated flag; this repo has NO config.yaml — its
+  user-facing knob surface is start_cluster.sh defaults. Followed the actual
+  convention rather than inventing a second one.) Reversible per-restart
+  with `EXO_DSV4_LMHEAD_MXFP8=0`; the mlx-lm quantizer itself is unchanged
+  and still no-ops on any checkpoint whose head is already quantized.
+- **Eval-oracle bug caught and fixed before it could corrupt the result:**
+  the first task-eval draft asserted (47*83-1229)/7 == 382 (truly 381.714)
+  and 90 km/60 min == 12 per 10 min (truly 15), scoring two CORRECT model
+  answers as failures and yielding a bogus 13/15 baseline. Both expectations
+  were wrong, not the model. Fixed, re-run, 15/15. A quality gate whose
+  oracle is wrong manufactures exactly the regression it is meant to detect.
