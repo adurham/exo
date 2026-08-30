@@ -5150,3 +5150,67 @@ new analysis scripts in `tmp/p02c-20260829/` (`analysis/*.py`).
   probe activity this phase, per task scope. Last known state stands
   (supervisor-verified production config, both nodes, moments before this
   phase began).
+
+## 2026-08-29 — Phase (d): 14-20% roofline × 78-85% occupancy × 88-97% switch_mlp — the three numbers multiplied together for the first time; "5-7x slower than hardware ceiling" closes as an accounting artifact
+
+**Pure desk analysis** (no cluster access — arithmetic against
+already-documented numbers only; consult-reviewed before writing, which
+caught three framing overreaches now baked into the doc as caveats). Full
+detail + all arithmetic:
+`docs/p02d-roofline-occupancy-kernel-reconciliation-2026-08-29.md`; scripts
++ JSON output in `tmp/p02d-20260829/`.
+
+- **The never-done multiplication, done:** naive product 0.80 occupancy ×
+  0.91 switch_mlp efficiency = 0.73, vs the observed aggregate 0.14-0.20 —
+  a **3.8x mismatch**. Factorized exactly as `headline = coverage ×
+  occupancy × busy-blend`: **2.29-2.57x is the roofline's byte denominator**
+  (3.56 GB counts routed-expert bytes only at a whole-model 0.588 B/param
+  average, halved for TP — it omits the REPLICATED 5.30 GB/rank attention
+  path, 1930.25 B/ctx-token depth-linear reads, lm_head/shared-expert/gate;
+  per-tensor dtypes are mxfp8 attn vs mxfp4 experts, not one average), and
+  **1.63-2.08x is busy-time composition** (switch_mlp is 13.7% of busy, not
+  the retracted "~30-45% of wall" span artifact — the blend is set by the
+  attention census at 49-58% of busy / 57-75% of spec, and dragged by the
+  implied small-op bucket at 27-31% of busy / 16-23% of spec). Weighted
+  average across all buckets reproduces the headline within ~1pp at every
+  clean depth. Candidates (a) and (b) both CONFIRMED and quantified.
+- **B_true = 8.17-9.14 GB/rank/token** (true byte inventory), validated
+  independently: worker C's census at L=520 agrees with the byte model to
+  2% (12.876 vs 13.1 ms), C2's measured idle at 100K matches exactly
+  (6.09), switch_mlp bytes agree across two independent docs to 4 sig
+  figs. Honest status of the identity: bookkeeping, not validation — stated
+  as such in the doc.
+- **Corrected efficiency: decode runs at 36-44% of the 546 spec, i.e.
+  46-57% of the measured 424 GB/s real-streaming ceiling — 1.75-2.16x
+  slower than the REAL ceiling, not 5-7x.** Both denominators reported.
+  The §13/§4.3 "highest-priority open question" framing ("decode is 5-7x
+  slower than the hardware ceiling") is CLOSED as an artifact of the
+  3.56 GB denominator; the 2026-08-22 reframe ("why is GPU-busy time
+  ~4-5x the roofline floor") inherits the same correction (real answer:
+  ~1.9-2.2x, of which idle is ~6-8 ms and the small-op bucket ~6-10 ms).
+- **True-gap decomposition (vs real-streaming floor, ms/token):** idle
+  6.1-8.2 (measured, C2-confirmed at 100K); small-op latency-bound excess
+  5.7-9.8; attention+switch above byte floor 0.6-7.0 growing with depth
+  (upper bound — B_true assumes zero L2 reuse; indexer-score measured at
+  477-558 GB/s shows real efficiency is higher at depth). The campaign's
+  open +1.67..+2.52 ms/tok residual band lives inside these buckets —
+  bounded here, not attributed.
+- **Genuinely new, cheap next target identified (NOT executed):** the
+  small-op bucket (moe.gate, shared_experts, post_combine, norms,
+  residuals, rope, lm_head) is 27-31% of GPU-busy time at an implied
+  16-23% of spec (~88-140 GB/s effective) and has NEVER been measured
+  per-kernel in any campaign. One `mx.metal.start_capture()` +
+  `MLX_GPU_TIME=1` bracketing pass (the p01-proven recipe,
+  `METAL_CAPTURE_ENABLED=1`), run in both spec-off (comparability) and
+  spec-ON verbon3 (production relevance) regimes, would produce the first
+  per-kernel table for the largest never-characterized decode cost —
+  either it's irreducible dispatch latency (decode tuning is done) or
+  it's a concrete fusion target.
+- **Caveats carried in the doc, per consult review:** the factorization's
+  closure is by construction (busy-blend is derived); attention-byte
+  model is census-validated only at short context; 424 GB/s real-streaming
+  is a transplant from a different workload (shown alongside spec, not
+  instead of it); 300K/500K rows pair T1-era EOS-bug-flagged anchors with
+  cross-run occupancy (clean-anchor claim = short/100K/352.6K); the
+  spec-off era ≠ current spec-ON production wall times (re-basing is part
+  of the recommended next step).
