@@ -6880,3 +6880,48 @@ consistent regression, not jitter. Every rep `decode_sample_trustworthy=true`
 measurement on the full current stack (P05-P09 shipped) and it does NOT confirm
 the "no decode-side effect" prediction. Must be investigated before campaign
 close. Prefill unchanged (417-419 tps, consistent with prior 100K runs).
+
+### P12 pre-register — is the P11 FAIL-LOW a CODE regression or CLUSTER-STATE drift? (2026-08-31)
+
+P11 measured median 30.71 tok/s vs the P06 Phase A reference 34.28 (-10.41%,
+FAIL-LOW). PM-verified against the raw JSONs: 3/3 reps `trustworthy=true`,
+1200 completion tokens each, `finish_reason=length`, prompt 106.6K-112.3K.
+All three reps sit below the reference's WORST rep (34.12) — consistent, not
+jitter. The regression is real as measured. What it is NOT yet is attributed.
+
+**The two arms differ in TWO ways, not one.** This is the confound that must be
+split before anyone touches code:
+1. **Config.** The P06 reference predates P08 (`EXO_DSV4_EXACT_TOPK_PREFILL=1`)
+   and P09 (`EXO_DSV4_QUERY_TILED_SDPA=1`, `EXO_DSV4_QUERY_TILED_B=64`), both
+   confirmed live on both nodes via `ps eww`. Both were analyzed as
+   prefill-only. The named reason that analysis could be wrong: query-tiled
+   SDPA is gated on query length, and shipped spec-ON decode runs VERIFY
+   BATCHES AT L=4, not L=1.
+2. **Cluster state.** The P06 reference was taken on a FRESHLY RELAUNCHED
+   cluster ("2 relaunches", PH:5376). P11 ran on a cluster with ~4h uptime that
+   had just executed the P07/P08/P09 prefill campaign at 220K and 500K context.
+   Allocator/residency drift after deep-context work is a live, named suspect
+   in this campaign already — it is one of the two surviving candidates for the
+   P02C depth residual ("allocator/~90 GB-resident regime", p02c §6.2).
+
+**Decisive experiment (pre-registered BEFORE running):** relaunch the cluster
+fresh with the IDENTICAL currently-shipped config, change nothing else, re-run
+the identical probe (100K, 1200-token window, n=3, all reps trustworthy).
+
+- **Outcome A — state drift (config exonerated):** fresh-relaunch median
+  >= 33.25 tok/s (back inside the P11 PASS band). Then P05-P09 did NOT regress
+  decode; instead we have a real, separately-valuable operational finding —
+  decode loses ~10% after a deep-context prefill workload without a relaunch —
+  which should be handed to the P02C allocator thread rather than treated as a
+  code bug.
+- **Outcome B — real code regression:** fresh-relaunch median < 33.25 tok/s,
+  i.e. the regression survives a clean relaunch. Then config is implicated and
+  the next step is a single-flag A/B with `EXO_DSV4_QUERY_TILED_SDPA=0`
+  (verified live via `ps eww`, not just set in the script) to test the L=4
+  verify-batch mechanism named above.
+- **Outcome C — ambiguous:** median lands 33.25-34.12 with reps straddling.
+  Then n=3 is insufficient; escalate to n=5 at the same depth before concluding
+  anything (this campaign's own repeat-testing rule).
+
+No code will be changed until this experiment picks A or B. Neither arm is
+allowed to be rationalized after the fact.
