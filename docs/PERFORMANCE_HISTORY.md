@@ -6606,3 +6606,113 @@ OFF arm still pending; ship/no-ship verdict remains **OPEN**. Pre-registered dec
 boundary, computed **before any OFF data exists**: ON median = 686.23s, the gate
 requires >= 2.0% e2e gain, therefore **SHIP requires OFF median >= 700.24s**;
 anything below that is NO-SHIP.
+
+---
+
+## P09 CLOSE — query-range tiled compressed attention SHIPPED at +7.20% e2e
+
+**Verdict: SHIP.** The pre-registered >=2.0% e2e gate at 220K is beaten by **3.6x**
+(measured **+7.20%**), the numerics gate passed pre-A/B, and the quality gate
+PASSED. `EXO_DSV4_QUERY_TILED_SDPA=1` + `EXO_DSV4_QUERY_TILED_B=64` are now
+**default-ON** (`start_cluster.sh` commit **b27a83ced**), mirroring the P08
+`EXO_DSV4_EXACT_TOPK_PREFILL` knob pattern. This is the largest single win of the
+campaign to date.
+
+### Full live A/B at 220K — all six reps (server-side "Prefill complete" wall, NOT client wall)
+
+Raw artifacts: `tmp/p09-20260831/p09_ab_ON_220000.json` and
+`p09_ab_OFF_220000.json`. ON = `EXO_DSV4_QUERY_TILED_SDPA=1`, `EXO_DSV4_QUERY_TILED_B=64`
+(verified via `ps eww` on the real PIDs on **both** nodes). OFF = both vars genuinely
+absent, verified the same way.
+
+| side | rep | server prefill (s) | tps | prompt_tokens |
+|---|---|---|---|---|
+| ON | 1 | 687.54 | 397.46 | 273,271 |
+| ON | 2 | 685.95 | 398.37 | 273,265 |
+| ON | 3 | 686.23 | 398.22 | 273,271 |
+| **ON** | **median** | **686.23** | **398.22** | 273,271 |
+| OFF | 1 | 740.65 | 368.96 | 273,271 |
+| OFF | 2 | 739.47 | 369.55 | 273,272 |
+| OFF | 3 | 738.69 | 369.94 | 273,270 |
+| **OFF** | **median** | **739.47** | **369.55** | 273,271 |
+
+ON spread 685.95–687.54 (1.59s); OFF spread 738.69–740.65 (1.96s). Ranges are
+**DISJOINT** (ON max 687.54 < OFF min 738.69) — the win sits far outside
+run-to-run noise.
+
+### Derived metrics
+
+- **e2e prefill-wall gain = (739.47 − 686.23) / 739.47 = +7.20%**
+- **Throughput gain = 398.22 vs 369.55 tps = +7.76%**
+- Ranges DISJOINT — the win is far outside run-to-run noise (no overlapping spread).
+- **Worst-case bound** (ON slowest vs OFF fastest) = **+6.92%**, still **3.4x** the gate.
+- **Median prompt_tokens delta between arms = 0** (273,271 on both) — arms directly
+  comparable, no normalization needed.
+- **Salt check passed both arms**: 3 unique salts across 3 reps/side (6 unique total).
+
+### Verdict vs the pre-registered gate
+
+Gate was **>=2.0% e2e at 220K**, and it had to beat the already-shipped P08 Item 2
+(+1.61%). Measured **+7.20% = 3.6x the gate**. The decision boundary (SHIP requires
+OFF median >= 700.24s) was pre-registered in the previous entry **before any OFF
+data existed**; the actual OFF median 739.47s cleared it by **39s**. **SHIP.**
+
+### Calibration note — the isolated-chain projection was CONSERVATIVE, not optimistic
+
+P08 projected this lever at ~5.9% of prefill wall from isolated-chain measurements,
+and the phase's pre-registered worry was that the **27x dispatch explosion (192 vs 7
+dispatches per compressed-attention call at B=64)** would erode that inside the real
+43-layer loop. It did **not** erode — the realized **+7.20%** actually **EXCEEDS**
+the 5.9% projection. This is the opposite of the failure mode the phase was designed
+to catch, and it is the largest single win of the campaign to date (vs P08 Item 2's
++1.61%).
+
+### Numerics gate — PASSED
+
+Passed pre-A/B: per-block visible key-set == production mask under exact boolean
+equality; variant-vs-fused p50 == 0.0%; all deviation attributable to the existing
+fused kernel, none introduced by tiling. The flag unset leaves the production path
+byte-identical (an additive `elif` branch that short-circuits before
+`_query_tiled_ok` is even called) — re-confirmed empirically by the OFF arm running
+the historical baseline path cleanly.
+
+### Quality gate — PASSED
+
+Documented in the previous entry: needle retrieved at 220K from **~1270 segments
+deep**, source segment cited correctly (model right, harness expected-marker off by
+one), natural `stop` termination, no BOS spam / U+FFFD / pathological repetition,
+achieved depth confirmed from the API's own `usage` block.
+
+### What shipped
+
+`start_cluster.sh` commit **b27a83ced** adds `: "${EXO_DSV4_QUERY_TILED_SDPA:=1}"` and
+`: "${EXO_DSV4_QUERY_TILED_B:=64}"` next to the P08 `EXO_DSV4_EXACT_TOPK_PREFILL`
+default, mirroring that knob's established pattern. The model-side gate at
+`mlx-lm/mlx_lm/models/deepseek_v4.py:3522` is `os.environ.get("EXO_DSV4_QUERY_TILED_SDPA", "0") == "1"`
+— a strict string compare, so `EXO_DSV4_QUERY_TILED_SDPA=0` genuinely disables the
+feature (the `:=` default only applies when unset, and the forwarding guard at `:1789`
+forwards an explicit `"0"` correctly). Escape hatch verified, not assumed.
+
+### The correctness bug this phase caught (the phase's most important artifact)
+
+The TP/seq-split **band-relative-vs-absolute coordinate-frame bug** was found in
+independent review and fixed **BEFORE any A/B number existed** (mlx-lm `2e2d17d`;
+`_key_lo = _seq_lo + _r`). Had it shipped, rank 1 of a 2-rank prefill would have
+silently attended to the wrong keys — no crash, no shape error, just wrong attention
+all-summed into the shared result. The pre-registered "key-set equality verified
+BEFORE timing is trusted" rule is what made it findable. A speed number measured on
+that code would have been meaningless.
+
+### Measurement-discipline tally
+
+This phase caught **3 more measurement-invalidating defects** — the TP coordinate-frame
+bug pre-A/B, the A/B harness's 24-token budget + content-only field blindness, and the
+quality-gate expected-marker off-by-one — bringing the campaign total to **6**. The
+mandatory env-knob whitelist + `ps eww`-on-real-PIDs pre-flight ran on both arms and is
+what makes the OFF baseline trustworthy.
+
+### Final cluster state
+
+Relaunched on the shipped **default-ON** config with the QUERY_TILED vars **UNSET** at
+launch (proving the new default puts them live rather than an inherited shell export).
+Health verification is being recorded separately.
