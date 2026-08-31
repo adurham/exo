@@ -6416,3 +6416,99 @@ is safe across the 16 per-block calls (`base.py:122` uses it only for a
 `hasattr(cache,"bits")` quantized-kernel check — never mutated, no offset
 advance), and `finalize()` parity with the `else` branch is exact.
 
+---
+
+### P09 ON-arm A/B complete — all 3 reps, needle_hit:false resolved as a harness artifact
+
+ON arm driven to completion: 3 reps, deterministic per-rep prompts with distinct
+cache-busting salts (3 unique salts across the 3 reps, OK), harness exit 0, at
+the campaign reference depth (~220K). Raw output in
+`tmp/p09-20260831/p09_ab_ON_220000.json`. Per the pre-registered protocol all
+samples are reported individually, never just the median:
+
+| rep | prompt_tokens | server_prefill_s | tps |
+|---|---|---|---|
+| 1 | 273271 | 687.54 | 397.46 |
+| 2 | 273265 | 685.95 | 398.37 |
+| 3 | 273271 | 686.23 | 398.22 |
+| **median** | **273271** | **686.23** | **398.22** |
+
+Prompt-token spread across reps is 0.002% — effectively identical prompts (the
+only difference is the per-rep salt). All 3 reps report `needle_hit: false`,
+`bos_spam: false`, `finish_reason: "length"`, `completion_tokens: 24`, and empty
+`content`.
+
+**Live config verified on the real running PIDs, both nodes, at the time of the
+run** (`ps eww`, 4 exo PIDs/node, 1 instance, 2 runners):
+`EXO_DSV4_QUERY_TILED_SDPA=1`, `EXO_DSV4_QUERY_TILED_B=64`,
+`EXO_DSV4_LMHEAD_MXFP8=1`, `EXO_DSV4_EXACT_TOPK_PREFILL=1`,
+`EXO_DSV4_SEQ_SPLIT=1` — all five present on both nodes, so the ON arm ran the
+tiled path on every layer of every chunk, and pre-flight's 3rd-instance rule
+(`ps eww`, not the launch command) is satisfied.
+
+#### `needle_hit: false` — RESOLVED as a harness artifact, not a quality signal
+
+Every rep is flagged `needle_hit:false` with `finish_reason:"length"`,
+`completion_tokens:24`, and empty content. This is **two compounding, purely
+harness-side causes** — neither is a model or kernel fault:
+
+1. **A 24-token budget far too small for the answer.** `max_tokens: 24` is
+   hardcoded at `tmp/p09-20260831/p09_live_ab.py:232` (in `one_run`), not
+   derived from `--depth`.
+2. **Content-only field blindness.** Needle detection at `p09_live_ab.py:273`
+   tests `NEEDLE.split(": ")[-1] in text` where `text` comes from `:244`
+   `d["choices"][0]["message"].get("content") or ""` — it reads `message.content`
+   **only**; `reasoning_content` is never read anywhere in that file.
+
+Why content is EMPTY while `completion_tokens` is 24: DeepSeek-V4-Flash under
+this fork's encoding path appends the thinking_start_token to the END of the
+prompt and sets `thinking_mode="thinking"` when a request sends no tools and
+leaves `enable_thinking` unset →
+`src/exo/worker/engines/mlx/vendor/deepseek_v4_encoding.py:443-455` (in
+particular the `prompt += thinking_start_token` at `:453`). The model therefore
+opens in a reasoning block, and essentially all 24 tokens are consumed as
+`reasoning_content` before any answer text can reach `content`.
+
+**P08 precedent** (`docs/PERFORMANCE_HISTORY.md` lines ~6235-6241): P08
+documented the same pattern at `max_tokens=32` and recorded it as a harness
+artifact, confirmed there by a separate untruncated quality-gate run. P08's
+driver (`tmp/p08-20260830/item2_retry_driver.py:87,120`) had the identical
+content-only blindness in its boolean.
+
+**One honest difference worth stating**: P08's reps still showed partial
+non-empty content with the needle visibly forming mid-emission (`"...is:
+FALCON-MERCURY-774"`). P09's content is **fully empty** — 8 fewer tokens of
+budget plus the reasoning-block open. Same phenomenon, more extreme point on
+the curve: consistent and explainable, but not literally identical to the P08
+precedent.
+
+**Conclusion**: `needle_hit:false` in the A/B JSONL is **not** a quality signal
+in either direction. The real quality gate is
+`tmp/p09-20260831/p09_quality_gate.py` (`max_tokens 250`, reads
+`reasoning_content + content`, requires `finish_reason=="stop"`, checks segment
+citation + BOS spam + U+FFFD + n-gram repetition); its result is being recorded
+separately.
+
+**The one real correctness risk specific to this lever is already ruled out.**
+The TP/seq-split band-relative-vs-absolute coordinate-frame bug caught in review
+is already FIXED at the commit under test (mlx-lm `2e2d17d`; `_key_lo =
+_seq_lo + _r` at `mlx-lm/mlx_lm/models/deepseek_v4.py:4519`, with the absolute
+key-space indexing comment at `:4516`). Silent-wrong-attention is not an
+explanation for this run.
+
+#### Methodology correction — P08-vs-P09 prompt-size incomparability at nominal 220K
+
+**Do not compare P09 ON wall time to P08's 220K numbers.** P08's shipped 220K
+figure (OFF 630.48s / ON 620.33s median, 370.22 tps) is NOT comparable to P09's
+ON arm (686.23s median, 398.22 tps) as a wall-clock time, because the P09
+harness builds a materially larger prompt at the same nominal 220K depth:
+**273,271 real prompt tokens vs P08's ~229.8K**. Throughput (tps) is in fact
+**higher** in P09 (398.22 vs 370.22). Any cross-phase wall-clock comparison at
+"220K" is therefore invalid; a future reader must NOT read 686s as a regression
+against P08's 620s. The pre-registered >=2.0% gate is evaluated **strictly on
+P09 ON vs P09 OFF measured with the SAME harness**.
+
+**Status: OFF arm not yet run at time of this entry — verdict still OPEN.**
+ON arm complete; OFF arm pending. No ship/no-ship conclusion is recorded here.
+
+
