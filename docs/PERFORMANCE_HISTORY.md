@@ -6212,3 +6212,86 @@ the index set is right, matching the 0/1024 op-level exactness result.
 UP on the clean production config (`b36a5dc8b`), all 12 prod flags present.
 
 Raw batteries: `tmp/p08-20260830/item2_battery_ON.jsonl` / `item2_battery_OFF.jsonl`.
+
+**PM independent verification of the Item 2 SHIP** (re-derived from the raw
+batteries, not from the worker's summary):
+
+- Flag propagation re-checked live by the PM *after* the worker finished, on the
+  final running config: `EXO_DSV4_EXACT_TOPK_PREFILL=1` present in the live env of
+  m4-1 PID 2963 and m4-2 PID 3692. Zero leftover test vars (`MLX_GPU_TIME`,
+  `MLX_DISPATCH_COUNT`, `EXO_TEST*` all absent). Wiring confirmed at
+  `start_cluster.sh:40` (default) and `:1786` (forwarding). Tree clean, HEAD ==
+  origin/main at `d1245646c`. Cluster serving: 1 instance, 2 runners.
+- **220K re-derived: OFF median 630.48s → ON median 620.33s = 1.61% faster.**
+  Confirmed. The three-sample ranges do **not** overlap (OFF 630.44-631.27, ON
+  620.22-621.13; spread ≤0.91s within each arm), so the win is well outside
+  run-to-run noise. Gate ≥1.0% cleared on a real live measurement.
+- **75K corrected: the entry's "0.11%" should read "no measurable win."**
+  Re-derived from medians it is 0.23%, but the arms **overlap** (OFF
+  203.21-203.68, ON 203.13-203.56). At this depth the difference is inside noise
+  and should not be quoted as a gain in either direction. This does not weaken
+  the finding — it *is* the predicted shape, since top-k cost scales with pooled
+  width, so the win must be negligible at shallow depth and appear at depth.
+- **`needle_hit: false` in the battery JSONL is a harness artifact, not a quality
+  failure.** Those runs used `max_tokens=32` and every one finished
+  `finish_reason: "length"` mid-answer — the captured content shows the model
+  actively emitting the needle when it was cut off ("...is: FALCON-MERCURY-774",
+  "...is: FALCON-MERCURY-7749."). The dedicated quality-gate run (untruncated)
+  retrieved `FALCON-MERCURY-7749` and cited its source segment. Recorded so a
+  future reader does not mistake the raw field for a regression.
+
+Net: SHIP upheld on independent re-derivation, with the 75K number restated
+honestly as noise rather than a small win.
+
+## P08 CLOSE — both P07 items resolved; one SHIPPED, one opens a genuinely larger P09
+
+**Item 1 — `attn.sdpa.compressed` ceiling: RESOLVED, and it is a REAL LEVER.**
+The registered question ("is the denominator inflated by masked-position FLOP
+counting?") answered **yes, by 2.11x** — more than P07's 1.65x estimate, because
+the real production mask is 47.3% dense, not the bench's synthetic 95%. But the
+decisive finding is the one the denominator argument alone could not deliver:
+`R = t_causal/t_dense = 1.0007` means **MLX's fused SDPA does not exploit the mask
+at all** — it computes the full dense work and masks after. So the 79.1% figure
+stands *as a hardware-efficiency number* (12.20 TF = 80.2% of the measured 15.21 TF
+on-node peak) while ~2.1x of the work it does is arithmetically unnecessary.
+Neither "48%" nor "79.1%" alone is the honest answer; both are, for different
+questions. **The unnecessary work is reachable**: query-range tiling at B=64 is
+2.01x isolated / **1.90x pipelined**, numerically exact (variant-vs-fused p50 0.0%;
+all deviation from exact fp32 is the fused kernel's own 0.34%), implying **~5.9%
+of prefill wall**.
+
+**Item 2 — indexer top-k: SHIPPED**, +1.61% live at 220K, default-ON. The
+"custom kernel" turned out to already exist in-repo, default-ON, blocked from
+prefill only by a hardcoded `L <= 16`. The ~1.03x ceiling was approximately right
+(1.016x realized).
+
+**Both P07 open items are now closed.** The campaign's easy wins in the *top-k*
+area are exhausted — but Item 1 did not close as a dead end, so this phase does
+NOT end with "nothing left."
+
+### P09 candidate (named, scoped, ready for a fresh PM)
+
+**Query-range tiled compressed attention.** Ceiling ~5.9% of prefill wall — the
+largest single lever surfaced since hc_expand, ~5x Item 2's entire ceiling.
+
+- *What*: replace the single fused SDPA call over 3894 keys with per-query-block
+  calls over (own 128+B local window + all 1719 pooled keys), concatenated along
+  the query axis. No LSE merge — each block is a complete independent attention.
+- *Where*: `mlx-lm/mlx_lm/models/deepseek_v4.py` around the concat at `:4359` and
+  the compressed-attention call at `:4385/:4413-4425`; needs block-local key views.
+- *Measured*: B=64 best (10655.7µs vs 21423.4µs); monotone in B, no knee found
+  below 64 — **try smaller B first**. Exact-mask key-set equality verified per
+  block before timing.
+- *Known risks, in priority order*: (1) **dispatch count 192 vs 7** — survived the
+  chain test (94% retention) but multiplies per-layer graph construction, which
+  GPU-busy timing does not capture; validate under the real multi-layer loop, not
+  a standalone chain. (2) The B=1024 control ran 1.34x, not 1.0x, vs baseline —
+  worth understanding before trusting the B-sweep shape. (3) Rows must stay
+  contiguous; `EXO_DSV4_SEQSPLIT_BALANCED` is currently inert (implementation
+  reverted at mlx-lm `bf8cbad5`), and re-introducing it would *hurt* this lever.
+- *Numerics gate must be re-anchored*: the "<0.2% vs fused output" gate is
+  structurally unmeetable at D=512 (the fused kernel is itself 0.34% p50 from
+  exact fp32). Anchor to exact fp32, or to the kernel's own error bar.
+- *Method note*: at D=512 raw relative-error RMS is dominated by near-zero output
+  elements and reads ~62% for any pair including the kernel against itself. Use
+  p50 and a floored RMS.
