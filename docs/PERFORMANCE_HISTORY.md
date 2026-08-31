@@ -5747,3 +5747,157 @@ lever AND Item 2 closes KILL, the verdict is recorded plainly as *"the easy wins
 in this area are now exhausted"* — no manufactured P09. Neither item may close
 as "needs more investigation" without naming the specific measurement that would
 resolve it and why it wasn't made.
+
+### P08 Item 1 — the causal-vs-dense test: MLX's fused SDPA does NOT exploit the mask (measured)
+
+Raw: `tmp/p08-20260830/item1_results.json`, harness `p08_item1_capture.py`.
+Standalone on m4-1 beside the live runner; PIDs 59909/60392 verified unchanged
+before AND after (etime continuous 02:00→02:09). Zero relaunches.
+
+**Production shape nailed down with file:line provenance** (P07 had this only by
+arithmetic): q `(1,32,1024,512)` bf16, kv `(1,1,3894,512)` bf16, mask
+**materialized bool** `(1,1,1024,3894)` = 3.99MB, sinks `(32,)`.
+`CATTN_KV=3894 = 2175` local ring (`cache.py:633`, `128 + 2048-1`) `+ 1719`
+pooled (`ceil(220000/128)`), concat at `deepseek_v4.py:4359`; n_heads=32 =
+64//TP2 (`dv4:7390`); L_band=1024 from the seq-split slice (`dv4:4381`,
+`EXO_DSV4_SEQ_SPLIT=1` verified in the LIVE runner env via `ps eww 59909`, not
+the source default).
+
+**The bench's SHAPES were right; its mask CONTENT was wrong.**
+`bench/attn_production_class_bench.py:212-236` builds the correct q/kv, but
+`bench:219` uses a random **~95%-dense** mask while the real production mask is
+**47.3% dense** (1844/3894 visible keys per row, computed by summing the
+reconstructed production mask at runtime). So `f = causal/dense FLOP = 0.4736`
+— the real mask is even sparser than P07's arithmetic estimated (0.6058).
+
+**Decisive result — the registered gate resolves cleanly:**
+
+| condition | µs/call | dispatches |
+|---|---|---|
+| causal (production mask) | 21423.4 | 7 |
+| dense (all visible, same dtype/shape) | 21408.6 | 7 |
+| `mask=None` | 20255.7 | 6 |
+
+`R = t_causal/t_dense = **1.0007**`, identical dispatch counts. Registered rule
+was `R ≥ 0.92` → **KERNEL DOES FULL WORK**. The `mask=None` control shows the
+5.4% causal-vs-nomask delta is the *fixed cost of reading the mask tensor*
+(one extra dispatch), not work-skipping.
+
+**So P07's arithmetic was RIGHT and its conclusion was WRONG, in the useful
+direction.** The denominator really is inflated — by 2.11x (1/0.4736), even more
+than P07's 1.65x estimate. But the kernel leaves that entire gap **unexploited**:
+it computes ~2.1x the causally-required FLOPs. The 79.1%-class efficiency figure
+therefore *stands as a hardware-efficiency number* — the kernel really does emit
+that many FLOPs, at 12.20 TF = **80.2% of the measured on-node peak**.
+
+**P07's flagged caveat closed: on-node GEMM peak MEASURED, not theoretical.**
+Dense bf16 GEMM sweep on m4-1 (40-core Studio): **15.21 TFLOPS** measured at
+`[16384x4096x4096]` (fp16 15.10). Replaces the 11.66 figure
+(`bench/attn_production_class_bench.py:136-145`, measured on a 32-core **laptop**)
+and *exceeds* P07's theoretical 14.34. Also measured 488.4 GB/s streaming r+w on
+this node. **Rebasing P07's headline: `indexer.score_gemm` 14.23 TF = 93.6% of
+the measured peak** (was quoted 99.3% vs theoretical 14.34) — still AT CEILING,
+now on a measured denominator.
+
+**Direct floor — and an ambiguity in this phase's own pre-registration.**
+Measured on the same node: `matmul_QK 8847.6µs + matmul_PV 8732.3µs = 17579.9µs`,
+softmax stream-bound 522.5µs; roofline `max()` (never additive) → floor.
+
+- Against a **dense** floor (what MLX can do today at the full 3894-key shape):
+  headroom **1.2186x** → gate needs ≥1.40 → **FAILS**.
+- Against a **causal** floor (`f × dense = 8325.8µs`, what the math actually
+  requires): headroom **2.573x** → passes 1.40, and
+  `span_share × (1−1/h) = 11.8% × 0.611 = **7.21%** of prefill wall` → passes 1.0%.
+
+`span_share = 11.8%` is citable, not estimated:
+`docs/dsv4-220k-prefill-span-profile-2026-08-18.md:84` (2200 calls, 73396.81 ms).
+
+**§2.4 did not specify which floor, so the verdict is not yet earned.** Recorded
+as such rather than picked. The two floors answer different questions: the dense
+floor says *the fused kernel is only 1.22x off what MLX's own matmuls cost, i.e.
+softmax+masking is nearly free and there is no kernel-inefficiency headroom*; the
+causal floor says *2.1x of the work it does is arithmetically unnecessary*. Both
+are true. What decides the phase is **reachability**, which is one more
+measurement, not an argument — see the next entry.
+
+**Mask structure (the reason this is even askable), from the measured density:**
+1844 visible ≈ 1719 pooled + ~125 local. The **pooled half is ~100% dense** (at
+ctx 220K nearly every pooled entry precedes every query row) — zero waste there.
+**All the waste is in the local ring**: 2175 keys computed, ~128 needed per row
+(the sliding window, `max_size=128`) = **~17x over-computation on 55.9% of the
+key space**. That is a sliding-window mask, which is exactly the block structure
+a block-sparse kernel skips — and MLX's SDPA here does not.
+
+### P08 Item 2 Phase A — top-k floor measured; the "4-7% of bandwidth" framing was far too kind
+
+Raw: `tmp/p08-20260830/item2_phaseA_results.json`, harness `item2_phaseA.py`.
+Standalone on m4-2; PIDs 59909/60392 verified unchanged before AND after
+(etime 01:57:13 → 02:15:36 continuous). Zero relaunches.
+
+Live branch confirmed from the **running process env** (not the source default):
+`EXO_DSV4_PREFILL_ARGPARTITION=1`, `EXO_DSV4_ARGPARTITION_MIN_P=8192`,
+`EXO_DSV4_INDEX_TOPK=512`; scores `(1,1024,P)` bf16 (`dv4:3760`), band L=1024
+(`dv4:3909-3913`), k=512 (`dv4:3998`, `dv4:3840`); live expression is
+`mx.argpartition(-scores, kth=k-1, axis=-1)[..., :k]` at **`dv4:4055`**.
+`EXO_DSV4_EXACT_TOPK`/`EXO_DSV4_TOPK_FUSED` confirmed NOT set, and L=1024>16, so
+the L≤16 exact-topk and shape[1]==1 fused branches are OFF.
+
+**The single-pass floor P07 never measured.** P07 scored top-k against a *single*
+streaming pass ("4-7% of 424 GB/s"), which understates the gap because a radix
+sort is inherently multi-pass. Measured honestly, on the identical tensor:
+
+| P | ~ctx | single-pass `mx.max` µs | production argpartition µs | **pass_ratio** |
+|---|---|---|---|---|
+| 55,000 | 220K | 221.7 | 15413.5 | **69.53** |
+| 125,000 | 500K | — | — | **79.81** |
+
+The floor is genuinely at streaming peak (221.7µs ≈ 509 GB/s read). **The
+production sort costs ~70-80 single-pass-equivalents.** That is a much larger
+structural gap than P07's framing implied, and it grows with P.
+
+**Existing-op composition sweep** (all GPU-timed, same barrier discipline, all
+checked for EXACT top-k index-set equality vs production on random AND
+forced-tie inputs — ~1010/1024 rows carried an exact boundary tie):
+
+| variant | µs | disp | speedup | set-eq (rand / tie) |
+|---|---|---|---|---|
+| production argpartition | 15420.4 | 13 | 1.000 | PASS / PASS |
+| argpartition kth +1 / +16 / +128 | 15419.1 / 15418.6 / 15416.5 | 13 | 1.000 | PASS / PASS |
+| chunked C=8 | 12867.7 | 18 | 1.198 | PASS / PASS |
+| chunked C=16 | 12712.8 | 21 | 1.212 | PASS / PASS |
+| **chunked C=32** | **12182.0** | 20 | **1.265** | PASS / PASS |
+| chunked C=64 | 16348.8 | 22 | 0.943 | PASS / PASS |
+| chunked C=128 | 22646.0 | 23 | 0.681 | PASS / PASS |
+| two-pass threshold select | 30692.9 | 27 | 0.502 | **FAIL** / FAIL |
+| `mx.topk` (values only) | 14489.5 | 12 | 1.064 | N/A (no indices) |
+
+Chunked top-k+merge is **exact at every C** (per-chunk `kth=min(K,size)` keeps
+whole chunks when chunk<K, so the merged candidate set is a strict superset of
+the global top-K) — but peaks at only **1.265x** and inverts past C=32. The
+kth-offset variants are a dead heat with identical 13-dispatch counts,
+independently reproducing P07's "same radix-sort kernel family" conclusion.
+`mx.topk` in this build returns VALUES only, so it cannot produce an exact index
+set under ties. Two-pass threshold select in existing ops is both **slower**
+(0.502x) and **inexact** (boundary ties).
+
+**Gates, applied as written in §3.3:**
+- **(a) composition ≥1.5x with exact equality → NOT MET** (best 1.265x).
+- **(b) `pass_ratio ≥ 4.0` AND a named mechanism that reduces real WORK →
+  MET.** 69.53 ≫ 4.0, and the mechanism is concrete: a threshold-select touches
+  the score tensor ~2x where the radix sort touches it ~70x.
+
+Gate (b) is an OR-branch and it is satisfied, so **Phase B (one disposable Metal
+spike) is authorized by the pre-registration.** Noting explicitly: the worker
+recommended skipping Phase B on the grounds that no *existing-op* composition
+captures the gap — but existing-op expressibility is gate (a)'s requirement, not
+gate (b)'s. Gate (b) exists precisely for "the gap is structural and no MLX
+primitive expresses it." Declining Phase B here would be moving a pre-registered
+gate after seeing the data, which this campaign does not do.
+
+**Why this is not the prior fused-kernel failure pattern** (the reason the spike
+isn't obviously doomed): the 0.54x fused-indexer and −0.48% wq_a+wkv failures
+were attempts to out-kernel MLX's **steel GEMM** at D=512, where hand-written
+Metal peaks ~4.4 TFLOP/s vs steel's ~14-15 TF — a structural MMA-tiling wall.
+Top-k is not a GEMM; it is a bandwidth-bound selection with a 69.5x pass gap
+against a general-purpose radix sort. Different regime, so the prior art does not
+transfer automatically. It still has to beat the pipelined in-situ gate.
