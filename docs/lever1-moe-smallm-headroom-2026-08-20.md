@@ -117,6 +117,75 @@ confirms it is at ceiling — there is no second version of it worth writing.
 - Net: **MoE GEMM kernel efficiency is not where the remaining prefill
   throughput is.** Redirect to a different part of the budget.
 
+## ADDENDUM 2026-08-31 — re-checked. Verdict UPHELD, headline number RETRACTED.
+
+Scoped local re-check (no cluster contact). **The conclusion below stands: there
+is no small-M kernel lever. But the `0.63x` figure in the table above is an
+M-alignment artifact and must not be cited.**
+
+**Root cause of the artifact.** `gather_qmm` *and* dense `quantized_matmul` are
+both tile-quantized in rows-per-expert at **~32 rows**. Cost per row is a
+staircase, not a curve. Measured on the same build/machine as the original:
+
+| dense qmm (the `ceiling` tier) | gather_qmm (the `live` tier) |
+|---|---|
+| M=32 → 6.75 ms, M=33 → **13.3 ms** (1.97x for one row) | m=32 → 0.954 us/row, m=31 → 1.390, m=33 → 1.359 |
+
+The original run drew `mean_M=35` — just past a cliff — so its **denominator was
+~2x inflated**. That, and only that, produced "headroom 0.63x = the live kernel
+is 1.6x FASTER than an idealized dense GEMM". A kernel cannot beat an ideal GEMM
+that reads the same bytes; that number should have been treated as a red flag at
+the time. Comparing against any single M is invalid on a staircase.
+
+**Corrected measurement.** Same kernel, same rows, same used-expert count, only
+raggedness varying — real ragged histogram (6 independent draws) vs uniform swept
+across a **full staircase period** (m=24..55, every alignment), in us/row:
+
+| | us/row |
+|---|---|
+| live (ragged, real histogram), median of 6 draws | **1.383** (spread 1.371-1.413, ±1.5%) |
+| balanced (uniform), median over full alignment period | **1.255** |
+| **R = live / balanced** | **1.10x** |
+
+Pre-registered gates were R≤1.15 holds / R≥1.30 reopen. **R=1.10x → holds.**
+The live kernel pays no meaningful penalty for raggedness beyond the tile
+quantization a balanced load pays too.
+
+**The luckiest notch is not a lever.** Balanced at m=32/48 hits 0.94 us/row, a
+~1.47x gap — but that is unreachable, and the reason is mechanistic, not
+practical: the notch is a property of **uniformity, not of the mean**. Forcing
+the real ragged histogram to `mean=32` leaves it at **1.415 us/row** (vs uniform
+1.415/0.959 = **1.47x**), i.e. identical to the untouched real distribution.
+Only **5.3%** of rows sit within ±2 of a 32-multiple; the histogram spans 1..413.
+Reaching the notch requires making every expert's row count equal — a **router**
+change (load balancing, which changes model outputs), not a kernel change. This
+*strengthens* the conclusion below: the constraint is the routing distribution.
+
+**MLX version caveat — resolved, no re-run needed.** Original: `ac73d0c9`;
+campaign now `e40a416b2` (183 commits). The live path is **byte-identical**:
+`affine_gather_qmv_rhs`, `affine_gather_qmv_rhs_chunk`, `affine_gather_qmm_rhs`
+all SHA-match; `steel_gemm_gather.h` SHA-matches; the `gather_qmv_rhs` dispatch
+block and the `MAXBE` bound are unchanged; `GatherQMM::eval_gpu` is untouched.
+The delta adds a `qmv_wide` kernel, but it is reached only via `dispatch_qmv`,
+which is called **only** from `QuantizedMatmul::eval_gpu` / `QQMatmul::eval_gpu`
+— never from `GatherQMM`. (It would have perturbed the old `ceiling` tier, which
+is exactly the tier now retracted.) `qmm_splitk`'s new `k_align` is a no-op here
+(g=32: `K/32 == K/max(32,32)`).
+
+**32-core vs 40-core caveat: still open, and NOT resolvable locally.** All of the
+above is a laptop 32-core measurement, as was the original. This does not affect
+the verdict — R=1.10x is a ratio between two runs of the same kernel on the same
+device, and the artifact being corrected is arithmetic, not hardware-dependent.
+But the *absolute* us/row and the exact tile-cliff positions are core-count
+dependent (cf. PERFORMANCE_HISTORY's own 11.66→14.34 TFLOPS 32-vs-40-core
+correction). Confirming the staircase geometry on a 40-core Studio requires
+cluster access and is a **separate follow-up needing explicit relaunch approval**
+— deliberately not taken here. It is not blocking: no decision changes on it.
+
+Artifacts: `tmp/lever1-recheck-20260831/` (`ceiling_m_sweep`, `balanced_m_cliff`,
+`alignment_fair`, `notch_reachability`, `.json` each). Everything below this line
+is the original 2026-08-20 text, unmodified except this addendum.
+
 ## Caveats
 
 - Laptop 32-core GPU vs cluster 40-core. Ratios transfer; absolute ms do not.

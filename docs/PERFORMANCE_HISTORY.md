@@ -6716,3 +6716,60 @@ what makes the OFF baseline trustworthy.
 Relaunched on the shipped **default-ON** config with the QUERY_TILED vars **UNSET** at
 launch (proving the new default puts them live rather than an inherited shell export).
 Health verification is being recorded separately.
+
+## Lever-1 MoE small-M re-check — verdict UPHELD, headline number RETRACTED (2026-08-31)
+
+Scoped local re-check of `docs/lever1-moe-smallm-headroom-2026-08-20.md`. **No
+cluster contact, no relaunch, read-only + local microbench.** Full detail in that
+doc's ADDENDUM; artifacts `tmp/lever1-recheck-20260831/`.
+
+**The `0.63x` headroom number is an artifact — retracted.** `gather_qmm` and dense
+`quantized_matmul` are both tile-quantized at **~32 rows/expert**, so cost/row is a
+STAIRCASE: dense M=32 → 6.75ms vs M=33 → **13.3ms** (1.97x for one row);
+gather m=32 → 0.954 us/row vs m=31 → 1.390, m=33 → 1.359. The original drew
+`mean_M=35`, just past a cliff → denominator ~2x inflated → "live is 1.6x FASTER
+than an ideal dense GEMM". A kernel cannot beat an ideal GEMM reading the same
+bytes; that should have been a red flag. **Comparing against a single M is invalid
+on a staircase** — this class of error is now the campaign's 7th measurement-
+invalidating defect, and the first found in an already-CLOSED result.
+
+**Corrected, alignment-fair (gates pre-registered before running):** live = real
+ragged histogram, 6 independent draws; balanced = uniform swept over a FULL
+staircase period (m=24..55, every alignment), median us/row:
+
+| live (ragged) | balanced (full period) | R |
+|---|---|---|
+| **1.383** (spread ±1.5%) | **1.255** | **1.10x** |
+
+Gates R≤1.15 holds / R≥1.30 reopen → **1.10x = HOLDS**. An intermediate denominator
+(balanced at m=32 only) gave 1.48x and would have triggered a false REOPEN — it sat
+exactly on the luckiest notch, the same artifact class being audited.
+
+**The tile-aligned notch is not a lever (mechanism, not judgment).** Balanced at
+m=32/48 reaches 0.94 us/row (~1.47x better), but the notch is a property of
+**UNIFORMITY, not the mean**: forcing the real histogram to `mean=32` still measures
+**1.415 us/row**, identical to untouched. Only **5.3%** of rows lie within ±2 of a
+32-multiple (histogram spans 1..413). Capturing it requires equalizing every
+expert's row count = a **router/load-balancing change that alters model outputs**,
+not a kernel change. Strengthens the original conclusion: the constraint is routing.
+
+**MLX version caveat RESOLVED, no re-run needed.** `ac73d0c9` → `e40a416b2` (183
+commits): `affine_gather_qmv_rhs`, `affine_gather_qmv_rhs_chunk`,
+`affine_gather_qmm_rhs` **SHA-identical**; `steel_gemm_gather.h` SHA-identical;
+`gather_qmv_rhs` dispatch + `MAXBE` bound unchanged; `GatherQMM::eval_gpu`
+untouched. New `qmv_wide` reaches only `dispatch_qmv`, called **only** from
+`QuantizedMatmul`/`QQMatmul::eval_gpu` — never `GatherQMM`. (It would have
+perturbed the old `ceiling` tier, i.e. exactly the retracted one.) `qmm_splitk`
+`k_align` no-op at g=32. Also: the repo venv still runs the **original** build
+(`0.32.0.dev20260804+ac73d0c9`, .so dated Aug 4) — the submodule moved, the
+installed binary did not, so this re-check ran on the doc's own build.
+
+**Still open, NOT locally resolvable:** 32-core laptop vs 40-core Studio. Does not
+change the verdict (R is a same-device ratio; the corrected error is arithmetic),
+but absolute us/row and exact cliff positions are core-count dependent — cf. the
+11.66→14.34 TFLOPS 32-vs-40-core correction. Confirming staircase geometry on a
+Studio needs cluster access = **separate follow-up requiring explicit relaunch
+approval**, deliberately not taken. Non-blocking; no decision hinges on it.
+
+**Net: LEVER 1 STAYS CLOSED.** No kernel rewrite, no MAXBE widening, no tile
+retune. Unchanged from 2026-08-20 — but now on a denominator that survives audit.
