@@ -6048,3 +6048,111 @@ not close it). A gate defined against a reference that is itself 0.34% from trut
 rejects mathematically-exact restructurings by construction. Not amended
 unilaterally; recorded so the next phase anchors numerics to exact fp32 (or to
 the kernel's own error bar) rather than to the fused output.
+
+### P08 Item 1c — QUERY-range tiling BEATS the fused SDPA baseline 1.90x pipelined; Item 1 is NOT a dead end
+
+Raw: `tmp/p08-20260830/item1c_querytiled_results.json`, harness `p08_item1c_querytiled.py`.
+Standalone on m4-1; PID 59909 unchanged throughout (02:54:06 → 03:02:09).
+
+The prior key-range split needed an LSE merge MLX cannot supply. A **query**-range
+split needs no merge at all: each block of B query rows attends to (its own
+128+B local window + all 1719 pooled keys) and is a complete independent
+attention; outputs simply concatenate along the query axis.
+
+| B | GPU µs | dispatches | speedup vs 21423.4µs |
+|---|---|---|---|
+| **64** | **10655.7** | 192 | **2.01x** |
+| 128 | 11020.3 | 96 | 1.94x |
+| 256 | 11757.3 | 48 | 1.82x |
+| 512 | 13122.3 | 24 | 1.63x |
+| 1024 (control) | 15946.0 | 11 | 1.34x |
+| baseline (re-run same session) | 21318.3 | 7 | 1.00x (anchor reproduced within 0.5%) |
+
+**Key-set correctness verified BEFORE any timing**: every block's visible-key set
+checked for exact boolean equality against the reconstructed production mask, all
+B (`keyset_verification.all_match=true`).
+
+**Geometry correction to the prior entry**: "window AHEAD of the row `[i, i+127]`"
+was a coordinate-frame artifact. With the chunk offset `p = i+127` the window is
+`[p-127, p]` — **behind** the row, as originally expected. The +127 belongs inside
+the block-mask formula. Caught by the exact-mask equality check, which is why that
+check ran first.
+
+**The pipelined check — the one that killed the prior fused kernel at 0.54x —
+holds**: in a realistic chain (projection matmul → attention → reduce), tiled
+11986.5µs vs fused 22726.5µs = **1.90x pipelined**, retaining **94%** of the 2.01x
+isolated win. MLX's async executor absorbs the dispatch increase almost perfectly.
+Measured concat cost: 133.6µs = **1.3%** of the variant — not material.
+
+**Dispatch honesty**: 192 vs baseline 7 at B=64 — a real 27x explosion. Unlike the
+prior 352-dispatch attempt it does **not** eat the win, but it multiplies
+graph-construction work per layer, which GPU-busy timing does not capture and the
+chain test only partly does. This is the main productionization risk.
+
+**Numerics — the query-split is mathematically exact, and measurement confirms it:**
+
+| comparison | p50 | RMS (floored) |
+|---|---|---|
+| variant vs fused production output | **0.0%** | 0.006% |
+| variant vs exact fp32 reference | 0.3449% | 0.86% |
+| fused production output vs same exact reference | **0.3449%** | 0.86% |
+
+(b) == (c) to four decimals and (a) ≈ 0: the tiled output is bit-identical to the
+fused kernel at the median element, and **all** deviation from exact attention is
+the fused kernel's own — independently reproducing this phase's ~0.34% D=512
+precision finding from a different direction. The variant is not less accurate
+than production; it is the same kernel applied to row blocks. Reproduced in a
+fresh process.
+
+Note the raw-RMS trap recorded for reuse: at D=512 raw relative-error RMS is
+dominated by near-zero output elements (median |out| = 0.039 vs bf16 LSB ~2e-4),
+so raw RMS reads ~62% for *any* pair including the fused kernel against itself.
+p50 and a floored RMS are the meaningful statistics.
+
+**Implied e2e: 11.8% × (1 − 10655.7/21423.4) = ~5.9% of prefill wall** (~5.7%
+using the pipelined ratio). That is roughly 5x Item 2's ceiling and the largest
+single lever this campaign has surfaced since hc_expand.
+
+**Item 1 VERDICT: REAL LEVER, opens P09.** P07's arithmetic was right, its
+"at ceiling, dead end" inheritance from T7 was wrong, and the recoverable work is
+real, reachable with existing MLX primitives, and numerically exact.
+
+### P08 measurement trap caught by the user before it produced a false result: an env knob that never reaches the node
+
+While the Item 2 live A/B was being set up, the user flagged that
+`EXO_DSV4_EXACT_TOPK_PREFILL` is **not wired into `start_cluster.sh`'s
+env-forwarding whitelist**. Independently confirmed here, twice:
+
+1. `grep EXACT_TOPK_PREFILL start_cluster.sh` → **no match**. Sibling knobs ARE
+   wired, via the standard pattern:
+   `:1771 [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"`
+   (same at `:1772` INDEX_TOPK, `:1775` TOPK_OVERLAP_LOG, `:1999` MTP_DUMP_TOPK).
+2. `ps eww` on all four live `exo -v` PIDs on m4-1 → only `EXO_DSV4_PREFILL_ARGPARTITION=1`
+   and `EXO_DSV4_LMHEAD_MXFP8=1` present. `EXO_DSV4_EXACT_TOPK_PREFILL` **absent**.
+
+**Mechanism**: `start_cluster.sh` ssh's out and builds the REMOTE runner's env from
+its own explicit whitelist. Setting a var in the local invoking shell
+(`EXO_DSV4_EXACT_TOPK_PREFILL=1 ./start_cluster.sh`) does **not** reach the node
+process unless the var is on that list. The "ON" arm would have silently run the
+**identical code path** as baseline — producing a false null (or a
+coincidentally-similar number) rather than a measurement.
+
+**No result was corrupted**: the Item 2 A/B worker terminated on a tool guardrail
+before producing a verdict, so there is no number to retract. The code change it
+landed (`mlx-lm a248d0a7`, exo pin `f96853544`) is **default-OFF and inert** —
+verified `_EXACT_TOPK_PREFILL = os.environ.get("EXO_DSV4_EXACT_TOPK_PREFILL","0")`
+at `deepseek_v4.py:3503`, gate at `:4046` reads
+`scores.shape[1] <= 16 or _EXACT_TOPK_PREFILL`, so with the flag absent production
+behaviour is byte-identical to before.
+
+**Third instance of the same class in this campaign** (P05 wrong-model artifact,
+P07 span-timer-vs-eval-barrier, now this). Generalized rule, banked:
+***verify the knob actually reached the code path being measured — via `ps eww` on
+the real PID — BEFORE trusting any A/B number. Never infer from the launch command
+that it did what it looked like it should.*** An env var has three independent
+places to fail: the source default, the launcher whitelist, and the live process
+env. All three must be checked, and only the third is authoritative.
+
+**Cluster note**: the failed A/B worker left both nodes cleanly shut down
+("EXO Shutdown complete", "Released MLX buffers before exit" on both — no crash,
+no orphaned GPU memory). Relaunched from the laptop; both nodes back up.
