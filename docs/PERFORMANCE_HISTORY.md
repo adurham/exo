@@ -5434,3 +5434,83 @@ probes only (c=1 admission gotcha respected). Artifacts:
   answers as failures and yielding a bogus 13/15 baseline. Both expectations
   were wrong, not the model. Fixed, re-run, 15/15. A quality gate whose
   oracle is wrong manufactures exactly the regression it is meant to detect.
+
+## 2026-08-30 — P06 Phase C: pad-to-M=8 shared_experts batching DON'T-SHIP — the "lossless" microbench was measuring the divergent kernel all along (root cause: MLX's qmv batch limit is 12, not 8)
+
+Knob written, deployed live, measured, root-caused, and REVERTED. Artifacts:
+`tmp/p05-shared-batching-20260830/` (cycle_ab/, p05b-p05f_*.py/json,
+verify_threshold_independent*.py/json). New harnesses:
+`bench/mtp_cycle_time.py`, `bench/phase_c_cycle_ab.sh`.
+
+- **The code was written and it worked as specified.** Env-gated
+  `EXO_DSV4_SHARED_PAD8`, default OFF, bit-identical when unset; pads the
+  M<=8 verify rows to exactly 8, one shared_experts call, slices M back.
+  Local test 16/16 with every max_abs exactly 0.0, negative controls bite
+  (pad-to-16 sabotage flips assertion 2; re-introducing the prefill bug
+  flips assertion 7). A review caught one real blocker pre-deploy: the
+  first draft's `or (_SHARED_PAD8 and _prs_L > 8)` disjunct made the knob
+  hijack the PREFILL path (L=2048) into a 2048-iteration per-row loop —
+  `DeepseekV4MoE.__call__` is prefill AND verify. Removed at root (the
+  pre-existing gate already restricts _prs to B=1, 2<=L<=8) rather than
+  guarded around.
+- **Live per-cycle result CONFIRMED P03's projection: -1.755 ms/cycle**
+  (69.65 ON vs 71.41 OFF, trimmed means over ~1000 cycles/arm, paired
+  relaunch A/B, both arms env-verified 5/5 verbon3 flags). P03 projected
+  -1.2 ms/cycle. The speed theory was right.
+- **But acceptance FELL: mean_accept 1.31/1.249 ON vs 1.412/1.386 OFF**,
+  which cancelled the per-cycle win — end-to-end decode did not improve
+  (33.53/32.82/35.24 ON vs 34.35/34.12/34.28 OFF). A bitwise-lossless path
+  CANNOT move acceptance. That contradiction, not the tok/s, is what
+  forced the root-cause dig.
+- **Fixed-prompt temp-0 task eval: 14/15 byte-identical, 1 DIVERGENT**
+  (code_anagram, diverges at char 110). Both arms still scored 15/15
+  correct, but a lossless path must be 15/15 identical. Direct proof the
+  path is not lossless in production.
+- **ROOT CAUSE (independently verified twice, hardware-level):** MLX
+  dispatches `qmm`/`qmm_splitk` only when M >= `get_qmv_batch_limit(K,N,arch)`.
+  For BOTH real shared_experts per-rank shapes — gate/up (K=4096,N=1024) and
+  down (K=1024,N=4096) — that limit is **12** on applegpu_g16s (M4 Max,
+  arch_gen=16). **8 < 12, so pad-to-8 never reaches qmm at all**: it falls
+  into `dispatch_qmv`, which for mxfp8 (any non-affine mode) always routes to
+  `qmv_wide` — the exact kernel proven divergent on real weights on
+  2026-08-04, i.e. the reason `ROWSEQ=shared` exists. Padding to 8 is
+  mechanically indistinguishable from just batching the rows. Confirmed by
+  `mx.metal.dispatch_count()` sweep (1 dispatch at M<=11, 2 at M>=12,
+  transition exactly at 12 on both shapes) and by pad-4-to-8-then-slice
+  being BIT-IDENTICAL to a plain unpadded M=4 call (max_abs exactly 0.0,
+  both shapes) — padding provably changes nothing.
+- **Why the original microbench read 0.0 — sampling luck, not a safe path.**
+  It sampled only 4 rows (8192/4096 elements) against the known real-weight
+  divergence rate (13/131072, 17/262144). Poisson: ~0.8-1.1 expected hits,
+  P(zero) ~35-44% per tensor, ~15% both. The "0/8192 + 0/4096, bitwise
+  lossless" result was an unremarkable draw from the ALREADY-BUGGY kernel.
+  The same data's M=16 lossiness (max 0.03125) is the same mechanism
+  crossing the REAL threshold into qmm_splitk. Methodology lesson: a
+  zero-divergence result on a sample far smaller than 1/rate is not evidence
+  of losslessness — it needs a power calculation, or a dispatch-level check
+  that the intended kernel is even running.
+- **Also found: the earlier w2 microbench used the wrong shape** (sharded
+  the wrong axis: built K=2048/N=1024 instead of the real K=1024/N=4096).
+  Doesn't change the verdict — both shapes have limit 12 — but the
+  "-11.7% on w2" figure was never measuring the production tensor.
+- **VERDICT: DON'T SHIP. Phase C is structurally dead as a padding trick,
+  and is now CLOSED rather than parked.** Every dispatch path for this op
+  has measured nonzero real-weight divergence: qmv_wide for 2<=M<12 (rare
+  but real), qmm_splitk for M>=12 (drastically lossy). The per-row loop is
+  the only proven-lossless formulation, so `EXO_DSV4_MOE_PARTS_ROWSEQ=shared`
+  stays exactly as-is. A real fix would need a custom fixed-accumulation-order
+  Metal kernel — not a padding trick, and not a reachable win at -1.2ms/cycle
+  (~+1.3% decode) for that cost. Knob code REVERTED on the laptop and both
+  studios (all three copies md5-verified back to 46cc271d, pad8 refs = 0).
+- **Deploy trap banked:** the studios' `.venv/.../site-packages/mlx_lm/` is a
+  physical COPY, not an editable install (different inodes, `direct_url.json`
+  has no `"editable": true`). Editing only `mlx-lm/` in the repo deploys
+  NOTHING — both paths must be written and md5-verified, or the knob silently
+  no-ops. This is the same class as P04's stale-import trap.
+- **Instrument note:** end-to-end tok/s could not have answered this question.
+  The projected win (~+1.3%) is smaller than the 100K probe's run-to-run
+  spread, so tok/s alone would have been a coin flip in either direction.
+  `bench/mtp_cycle_time.py` derives real ms/cycle from the runner's own [MTP]
+  log lines (~500-1000 samples/run, same unit as the projection) and records
+  a per-run byte-offset window — a naive `tail` mixes arms and yields a
+  descending cycle_range, which is the tell the window is wrong.
