@@ -38,6 +38,15 @@
 # To override (back to argpartition baseline): unset this before launch or set
 # EXO_DSV4_EXACT_TOPK_PREFILL=0.
 : "${EXO_DSV4_EXACT_TOPK_PREFILL:=1}"
+# P09 Item 1 (SHIPPED 2026-08-31): per-query-block tiled compressed SDPA.
+# Replaces the single fused SDPA call over all keys with per-query-block
+# calls over (own local window + all pooled keys), concatenated along the
+# query axis, so masked-position FLOPs are NOT computed. Live e2e A/B
+# measured +7.20% prefill wall at 220K context (739.47s -> 686.23s OFF
+# median, 3 reps/side, ranges disjoint). EXO_DSV4_QUERY_TILED_B = query
+# block size; 64 measured best. To disable: set EXO_DSV4_QUERY_TILED_SDPA=0.
+: "${EXO_DSV4_QUERY_TILED_SDPA:=1}"
+: "${EXO_DSV4_QUERY_TILED_B:=64}"
 # 2026-06-04: libp2p -> zenoh migration (exo #2132) renamed this env var.
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
