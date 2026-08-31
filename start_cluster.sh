@@ -1784,6 +1784,10 @@ for NODE in "${NODES[@]}"; do
     # kernel for PREFILL chunks (L>16) too. Default OFF -> absent unless set,
     # so production behaviour is unchanged.
     [ -n "${EXO_DSV4_EXACT_TOPK_PREFILL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_EXACT_TOPK_PREFILL=$EXO_DSV4_EXACT_TOPK_PREFILL"
+    # P09 Item 1 (mlx-lm query-tiled compressed SDPA): default OFF -> absent
+    # unless set, so the OFF arm of the A/B is a genuine unset env.
+    [ -n "${EXO_DSV4_QUERY_TILED_SDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_SDPA=$EXO_DSV4_QUERY_TILED_SDPA"
+    [ -n "${EXO_DSV4_QUERY_TILED_B:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_B=$EXO_DSV4_QUERY_TILED_B"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
     # MTP-1 chained draft at c=1. DEFAULT RE-ENABLED 2026-08-02: the
