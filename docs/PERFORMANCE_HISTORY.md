@@ -6156,3 +6156,59 @@ env. All three must be checked, and only the third is authoritative.
 **Cluster note**: the failed A/B worker left both nodes cleanly shut down
 ("EXO Shutdown complete", "Released MLX buffers before exit" on both — no crash,
 no orphaned GPU memory). Relaunched from the laptop; both nodes back up.
+
+### P08 Item 2 — EXO_DSV4_EXACT_TOPK_PREFILL SHIPPED (live e2e A/B, verified flag)
+
+The wiring bug that killed the previous worker is fixed and the live A/B is
+done. Full chain, with the third (authoritative) env place checked at every step.
+
+**Wiring fix**: added `EXO_DSV4_EXACT_TOPK_PREFILL` to `start_cluster.sh`'s
+env-forwarding whitelist (commit `e5e8c1c72`), mirroring the sibling TOPK knobs
+with the `[ -n "${VAR:-}" ] &&` guard form so it stays absent (unset) unless
+explicitly set. Then flipped to `: "${EXO_DSV4_EXACT_TOPK_PREFILL:=1}"` default-ON
+at SHIP (`b36a5dc8b`).
+
+**Verified flag propagation (`ps eww`, the authoritative check)**:
+- Flag ON: `EXO_DSV4_EXACT_TOPK_PREFILL=1` literally present in all 4 live
+  `exo -v` PIDs on BOTH nodes (~46060/46072 m4-1, ~45942/45953 m4-2).
+- Flag OFF (baseline launch with nothing set): present in ZERO PIDs on both nodes
+  (`grep count = 0`), confirming the OFF arm genuinely ran the argpartition path.
+- Every relaunch certified the full 12-flag verbon3 set present and ZERO leftover
+  test env vars (checked `MLX_GPU_TIME`, `MLX_DISPATCH_COUNT`, `EXO_TEST*`, etc).
+
+**Behavior probe (flag present ≠ path taken) — PASSED**, standalone on m4-1 using
+the installed mlx_lm (module `deepseek_v4.py:3503`):
+- (a) gate reads env correctly (`_EXACT_TOPK_PREFILL=True` with flag; `False`
+  control in a fresh interpreter without it);
+- (b) exact-topk Metal kernel runs at prefill-chunk shape `(1,1024,55000)` and
+  returns the EXACT top-k set — **0/1024 rows** vs argpartition (P=55000, k=512);
+- (c) positive GPU-execution proof: exact-topk **1.33 ms** GPU vs argpartition
+  **15.6 ms** at production shape (≈11.7x isolated), confirming real dispatch.
+  (First pass used `mx.metal.dispatch_count()` which reads 0 without
+  `MLX_GPU_TIME`/`MLX_DISPATCH_COUNT` set — the earlier phaseC harness set those;
+  `gpu_time_ns()` with them set is the reliable counter.)
+
+**Live A/B (server "Prefill complete: N tokens in Xs" line from ~/exo.log, NOT
+client wall time; deterministic per-rep prompts; cache-busting salt; cluster
+warmed before each side; ALL samples reported):**
+
+| depth | OFF baseline (s) | ON exact-topk (s) | prefill-wall gain |
+|---|---|---|---|
+| 220K ctx | 631.27 / 630.44 / 630.48 | 621.13 / 620.33 / 620.22 | **1.61%** (370.22 vs 364.24 tps) |
+| 75K ctx | 203.21 / 203.68 / 203.68 | 203.22 / 203.13 / 203.56 | **0.11%** (384.58 vs 384.16 tps) |
+
+The win **scales with P** exactly as the op-level microbench predicted: negligible
+at 75K, 1.61% at the 220K campaign reference depth (top-k cost grows with pooled
+width). Pre-registered ship gate ≥1.0% e2e → **cleared**. Predicted 1.23%
+(2.9% op-level * 1/1.738 pipeline retention) was if anything conservative.
+
+**Quality gate — PASSED**: real 75K-depth generation with flag ON retrieved the
+needle `FALCON-MERCURY-7749` and cited the exact source segment (`[P08I2-QUALITY-
+75000 i 432]`), finishing `stop` with no BOS spam / no degeneration. Top-k selects
+which KV positions attention attends to; the retrieved-answer correctness confirms
+the index set is right, matching the 0/1024 op-level exactness result.
+
+**VERDICT: SHIP.** `EXO_DSV4_EXACT_TOPK_PREFILL` is now default-ON. Cluster left
+UP on the clean production config (`b36a5dc8b`), all 12 prod flags present.
+
+Raw batteries: `tmp/p08-20260830/item2_battery_ON.jsonl` / `item2_battery_OFF.jsonl`.
