@@ -6295,3 +6295,67 @@ largest single lever surfaced since hc_expand, ~5x Item 2's entire ceiling.
 - *Method note*: at D=512 raw relative-error RMS is dominated by near-zero output
   elements and reads ~62% for any pair including the kernel against itself. Use
   p50 and a floored RMS.
+
+---
+
+## P09 — query-range tiled compressed attention: does the 1.90x survive the real 43-layer forward pass? (2026-08-31)
+
+Inherits P08 Item 1c. The lever is measured, exact, and reachable; the ONE
+unresolved question is whether the **27x dispatch explosion (192 vs 7 per
+compressed-attention call at B=64)** behaves the same inside the real 43-layer
+loop as it did in an isolated 3-op chain. Isolated-chain retention was 94%
+(2.01x -> 1.90x). The real loop multiplies per-layer Python graph-construction
+by 43 and runs against a GPU already saturated by every other op in the model.
+
+### P09 gate — PRE-REGISTERED before any measurement was taken
+
+Registered at phase start, with the cluster verified healthy on the clean
+verbon3 production config (4 exo PIDs/node, `EXO_DSV4_LMHEAD_MXFP8=1` +
+`EXO_DSV4_EXACT_TOPK_PREFILL=1` confirmed via `ps eww` on both nodes, TP
+worldSize=2, 43 layers) and **before any P09 code existed**.
+
+**Primary metric**: e2e prefill-wall gain at the campaign reference depth
+(~220K ctx), read from the server's own `Prefill complete: N tokens in Xs`
+line in `~/exo.log` — never client wall time. >=3 reps/side, deterministic
+per-rep prompts with a cache-busting salt, cluster warmed before each side,
+ALL samples reported (P08's protocol, which reproduced to +/-0.1%).
+
+| outcome | condition | action |
+|---|---|---|
+| **SHIP** | >= **2.0%** e2e prefill-wall gain at 220K, AND numerics gate passes, AND quality gate passes | land default-ON |
+| **NO-SHIP (eroded)** | 0% < gain < 2.0% | keep code default-OFF or revert; document as characterized |
+| **NO-SHIP (collapsed)** | gain <= 0% | close as a well-characterized dead end |
+| **NO-SHIP (unsafe)** | any numerics or quality gate failure, at any speed | revert regardless of speed |
+
+**Why 2.0% and not something lower**: P08 shipped `EXO_DSV4_EXACT_TOPK_PREFILL`
+at +1.61% for a change that is a pure kernel-selection swap. This lever
+restructures how attention is *called* (192 dispatches/layer instead of 7,
+per-block key views, output concat along the query axis) in a production hot
+path. It must beat the already-shipped simpler lever to justify carrying that
+structural complexity, or it is not worth landing. Anything under 2.0% means
+the dispatch explosion ate most of the projected 5.9% and the honest answer is
+"the isolated chain test overstated it."
+
+**Numerics gate** (re-anchored per P08's correction — the "<0.2% vs fused
+output" form is structurally unmeetable at D=512):
+1. Flag unset -> production path **byte-identical** to today (inert knob).
+2. Per-block visible key-set == production mask, **exact boolean equality**,
+   verified BEFORE any timing is trusted (this check is what caught the
+   coordinate-frame bug in P08).
+3. variant-vs-fused-output **p50 == 0.0%**, and
+   variant-vs-exact-fp32 == fused-vs-exact-fp32 (all deviation belongs to the
+   existing fused kernel, none introduced by the tiling).
+   p50 + floored RMS only — raw RMS reads ~62% for any pair at D=512.
+
+**Quality gate**: real generation at depth with the flag ON must retrieve a
+planted needle, cite its source segment, terminate on `stop`, and show no
+degeneration/BOS-spam. This lever changes attention output structure, not a
+quantization detail, so a speed-only verdict is not acceptable.
+
+**Mandatory pre-flight before ANY A/B number is trusted** (3rd-instance rule
+from P08 — P05 wrong-model artifact, P07 span-timer bug, P08 env-wiring gap):
+the new knob must be (a) present in `start_cluster.sh`'s env-forwarding
+whitelist AND (b) literally visible in `ps eww` on the real running PIDs on
+**both** nodes for the ON arm, and absent from all PIDs on the OFF arm.
+Neither check is optional and the launch command is not evidence.
+
