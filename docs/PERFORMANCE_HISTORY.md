@@ -5514,3 +5514,81 @@ verify_threshold_independent*.py/json). New harnesses:
   log lines (~500-1000 samples/run, same unit as the projection) and records
   a per-run byte-offset window — a naive `tail` mixes arms and yields a
   descending cycle_range, which is the tell the window is wrong.
+
+---
+
+## P07 — prefill's non-GEMM remainder, re-opened on new methodology (2026-08-30)
+
+**Framing correction first: T7's "19.3% unattributed remainder" is stale, and
+~5.3pp of it is already fixed and shipped.** T10
+(`docs/t10-final-decomposition-closed-2026-08-22.md`) closed the 28.8%
+remainder honestly and that closure is not disputed. But it named its own
+reopening condition — "a new methodology that reveals something the
+span-profile approach can't see" — and two things now meet it.
+
+**(1) T10's span table is stale by construction.** Two fused Metal kernels
+shipped default-ON *after* T10 closed, both landing inside the remainder:
+`hc_expand` (08-24, `deb1c8a6d`, 8.66x op-path, +3.87% e2e @70.5K) and
+`hc_collapse` (08-25, `99f5f96b8`, 2.47x span, +1.89% e2e, depth-verified at
+300K/500K). Recomputed from raw ms totals in the 220K span profile:
+
+| Span | T10 (08-22) | Today | Note |
+|---|---|---|---|
+| `moe.all_sum` | 9.5% | 9.5% | out of scope, closed separately |
+| `moe.post_combine` (+shared_experts fwd) | 4.2% | 4.2% | unchanged |
+| `attn.indexer` | 4.0% | 4.0% | decomposed 08-24, nothing shipped |
+| tail spans (7) | ~2.5% | ~2.5% | unchanged |
+| HyperConnection (`attn_hc`/`ffn_hc`) | 4.6% | **~1.9%** | hc_collapse shipped |
+| `moe.gate` | 0.9% | 0.9% | unchanged |
+| `hc_expand` (`attn`/`ffn_residual`) | 4.4% | **~0.5%** | hc_expand shipped |
+| **total remainder** | **~28.8%** | **~23.5%** | |
+| **non-`all_sum` (the target)** | **~19.3%** | **~14.0%** | |
+
+So the honest answer to "was the 19.3% a floor or a fixable bottleneck" is
+already partly settled: **~5.3pp was genuinely fixable, and it shipped.** The
+open scope is ~14.0%, not 19.3%. Also confirmed: `lm_head` is NOT in the
+prefill budget (ship commit `80ec8ec03` records "Prefill unchanged (378.3 vs
+378.0)"; `model.lm_head` is 0.2% of prefill wall) — the mxfp8 win is
+decode-only.
+
+**(2) Per-kernel GPU capture at PREFILL shape has never been done, and the
+span profiler is provably blind inside these spans.** P03 (08-30) was the
+first per-kernel capture but at DECODE shape (L=1/L=4). Every "at ceiling"
+verdict inside the prefill remainder rests on FLOP/bandwidth arithmetic or
+CPU-side microbenches. The indexer decomposition already documents the blind
+spot in its own numbers: `indexer.score` (8.34µs/call) and `indexer.topk`
+(5.81µs/call) "only measure **lazy-graph build time**, not GPU compute — if
+the score GEMM at 220K (14.42 GFLOP) executed in 8.34µs it would be 1.7
+PFLOPS, physically impossible" (`indexer-prefill-decomposition-2026-08-24.md:116-119`),
+and that doc's own caveat at :254 — **"the 'score GEMM at ceiling' claim is
+inferred, not directly measured."** Under MLX's lazy executor a span timer not
+terminated by an eval barrier measures graph construction, not work. Per-kernel
+capture is exactly the instrument that resolves this; span-profiling
+structurally cannot.
+
+Gates, regime-choice rules, ship criteria and method constraints pre-registered
+BEFORE measurement in `docs/p07-prefill-remainder-perkernel-preregister-2026-08-30.md`.
+
+**SECONDARY (T7's never-checked flag): SDPA ceiling denominators audited — one
+real error found.** T7 flagged that `attn.sdpa`/`attn.sdpa.compressed` ceiling
+denominators were never checked for causal-mask / MLA-absorption FLOP
+inflation. Audited against `bench/attn_production_class_bench.py` + real code:
+- **MLA absorption: not in play.** DSv4-Flash has no `kv_lora_rank` (unlike
+  v2/v3); KV projects directly `hidden(4096)→head_dim(512)` and is stored at
+  full head_dim. Naive D=512 formula is correct.
+- **`attn.sdpa` (sparse): denominator CORRECT, 61.7% stands.**
+  `_sparse_pooled_attention_inner` does a **dense** local matmul over all 2175
+  keys and masks *after* — the masked positions genuinely are computed.
+- **`attn.sdpa.compressed`: denominator INFLATED ~1.65x.** The bench counted
+  full `L_band × CATTN_KV` using a synthetic 95%-dense mask; production passes
+  a real **causal** mask to `mx.fast.scaled_dot_product_attention`. Real causal
+  work 158.3 GFLOP vs 261.3 counted → corrected efficiency **~48%, not 79.1%**.
+  Flagged UNDETERMINED pending one runtime test (causal-vs-dense timing at
+  production shape) — registered as a pre-declared test, not a conclusion.
+  Note the direction: if confirmed, a span T7 wrote off as "at ceiling, dead
+  end" actually has real headroom. This sits in the 71.2% GEMM-covered
+  majority, not in the remainder.
+
+Cluster untouched for all of the above (code reading + arithmetic only): PIDs
+59909/60392 continuous since 19:34, all verbon3 production flags verified live
+on both nodes, zero leftover test env vars.
