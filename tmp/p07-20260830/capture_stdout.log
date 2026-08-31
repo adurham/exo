@@ -1,0 +1,46 @@
+=== P07 prefill-remainder capture ===
+header scan: 72317 keys in 0.1s
+ASSERT gate.weight: OK ('mlx.core.bfloat16', (256, 4096), 2097152)
+ASSERT gate.bias: OK ('mlx.core.float32', (256,), 1024)
+ASSERT norm.weight: OK ('mlx.core.bfloat16', (4096,), 8192)
+weight bank ready; shared weight bytes/rank = 12582912
+modules ready
+l2sanity.gate_2_L1024          L=1024 gpu=   298.64us wall=   489.85us disp=    7.0    35.3GB/s   6.5%spec   8.3%real [bw]
+l2sanity.gate_64_L1024         L=1024 gpu=   299.55us wall=   516.54us disp=    7.0    35.2GB/s   6.4%spec   8.3%real [bw]
+l2sanity.shared_2_L1024        L=1024 gpu=  2061.28us wall=  2266.81us disp=    4.0    29.7GB/s   5.4%spec   7.0%real [bw]
+l2sanity.shared_16_L1024       L=1024 gpu=  2060.63us wall=  2262.23us disp=    4.0    29.7GB/s   5.4%spec   7.0%real [bw]
+L2 SANITY: {"gate_2_L1024": 35.3, "gate_64_L1024": 35.2, "shared_2_L1024": 29.7, "shared_16_L1024": 29.7}
+moe.post_combine.hot           L=1024 gpu=   358.65us wall=   520.32us disp=    3.0   210.6GB/s  38.6%spec  49.7%real [bw]
+moe.post_combine.dram          L=1024 gpu=   359.41us wall=   514.29us disp=    3.0   210.1GB/s  38.5%spec  49.6%real [bw]
+moe.shared_experts             L=1024 gpu=  2062.01us wall=  2274.77us disp=    4.0   12.50TF 107.2%ceil [flops]
+moe.gate.routed                L=1024 gpu=   299.16us wall=   504.90us disp=    7.0    7.18TF  61.6%ceil [flops]
+moe.gate.hash                  L=1024 gpu=   273.25us wall=   448.84us disp=    6.0    7.86TF  67.4%ceil [flops]
+tail.rmsnorm                   L=1024 gpu=    28.99us wall=   195.02us disp=    1.0   579.0GB/s 106.0%spec 136.6%real [bw]
+tail.rope.q_L512               L=1024 gpu=   269.92us wall=   435.23us disp=    1.0   497.3GB/s  91.1%spec 117.3%real [bw]
+tail.rope.q_idx                L=1024 gpu=    66.65us wall=   271.20us disp=    1.0   503.4GB/s  92.2%spec 118.7%real [bw]
+tail.rope.kv                   L=1024 gpu=     8.25us wall=   190.11us disp=    1.0   254.2GB/s  46.6%spec  60.0%real [bw]
+tail.attn_mask.windowed        L=1024 gpu=  3852.08us wall=  3026.07us disp=    4.0     0.0GB/s   0.0%spec   0.0%real [bw]
+tail.attn_mask.full            L=1024 gpu=   731.41us wall=   927.15us disp=    1.0   307.9GB/s  56.4%spec  72.6%real [bw]
+tail.kv_cache.write            L=1024 gpu=     4.69us wall=   194.31us disp=    2.0   447.0GB/s  81.9%spec 105.4%real [bw]
+indexer weights: wq_b QuantizedLinear (8192, 256) mode=mxfp8, wproj (64, 4096) mlx.core.bfloat16
+attn.indexer.score_gemm.folded L=1024 gpu=  1012.96us wall=  1247.36us disp=   13.0   14.23TF 122.1%ceil [flops]
+ERROR attn.indexer.score_full L=1024: 'mlx.core.array' object is not callable
+attn.indexer.pmask.apply       L=1024 gpu=   561.16us wall=   757.91us disp=    5.0   200.7GB/s  36.8%spec  47.3%real [bw]
+attn.indexer.topk.argpartition L=1024 gpu= 15406.34us wall= 15634.17us disp=   13.0    0.12TF   1.0%ceil [flops]
+attn.indexer.combined_q_rope_score_topk L=1024 gpu= 17870.76us wall= 18123.55us disp=   18.0    0.81TF   6.9%ceil [flops]
+=== isolated ops complete ===
+ROLLUP: {
+ "moe.post_combine (43)_us_per_chunk": 15454.7,
+ "moe.shared_experts (43)_us_per_chunk": 88666.5,
+ "moe.gate.routed (40)_us_per_chunk": 11966.4,
+ "moe.gate.hash (3)_us_per_chunk": 819.8,
+ "tail.rmsnorm (87)_us_per_chunk": 2522.2,
+ "tail.rope (43q+43kv+21idx)_us_per_chunk": 11606.5,
+ "tail.kv_cache.write (22 local)_us_per_chunk": 103.2,
+ "attn.indexer (21 sparse)_us_per_chunk": 375286.0,
+ "attn.indexer.score_gemm (21)_us_per_chunk": 21272.2,
+ "attn.indexer.topk (21)_us_per_chunk": 323533.0,
+ "attn.indexer.pmask (21)_us_per_chunk": 11784.3,
+ "_NOTE": "per-chunk = per-call x calls(43-layer, L_band=1024, ctx=220K); attn.indexer uses score+rope+topk combined call (excl. compressor)"
+}
+=== P07 CAPTURE COMPLETE ===

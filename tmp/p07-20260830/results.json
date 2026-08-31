@@ -1,0 +1,689 @@
+{
+ "meta": {
+  "host": "Adams-Mac-Studio-M4-1",
+  "mlx": "0.32.1.dev20260822+e40a416b2",
+  "gpu": "applegpu_g16s",
+  "ts": "2026-08-30 20:46:03",
+  "spec_gbps": 546.0,
+  "real_streaming_gbps": 424.0,
+  "flops_ceiling": 11660000000000.0,
+  "model": "deepseek-ai--DeepSeek-V4-Flash-0731 (TP rank prefill shapes)",
+  "L_band": 1024,
+  "L_chunk": 2048,
+  "ctx": 220000,
+  "P_pool": 55000
+ },
+ "l2_sanity": {
+  "gate_2_L1024": 35.3,
+  "gate_64_L1024": 35.2,
+  "shared_2_L1024": 29.7,
+  "shared_16_L1024": 29.7
+ },
+ "ops": {
+  "l2sanity.gate_2_L1024": {
+   "1024": {
+    "wall_us": 489.85250003170216,
+    "gpu_us": 298.6391,
+    "dispatches": 7.0,
+    "bytes": 10541056,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 35.29697216472994,
+    "pct_spec": 6.4646469166172045,
+    "pct_real": 8.324757586021212,
+    "passes": [
+     {
+      "wall_us": 489.85250003170216,
+      "gpu_us": 298.8078,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 494.02500037103897,
+      "gpu_us": 298.51948,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 479.69624982215464,
+      "gpu_us": 298.6391,
+      "dispatches": 7.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "l2sanity.gate_64_L1024": {
+   "1024": {
+    "wall_us": 516.5362503612414,
+    "gpu_us": 299.54619,
+    "dispatches": 7.0,
+    "bytes": 10541056,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 35.19008537548082,
+    "pct_spec": 6.445070581589894,
+    "pct_real": 8.299548437613401,
+    "passes": [
+     {
+      "wall_us": 507.50459020491695,
+      "gpu_us": 299.80789,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 518.6825001146644,
+      "gpu_us": 299.54619,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 516.5362503612414,
+      "gpu_us": 299.29581,
+      "dispatches": 7.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "l2sanity.shared_2_L1024": {
+   "1024": {
+    "wall_us": 2266.8055501223234,
+    "gpu_us": 2061.2793166666665,
+    "dispatches": 4.0,
+    "bytes": 61210624,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 29.695453452172046,
+    "pct_spec": 5.438727738493049,
+    "pct_real": 7.0036446821160485,
+    "passes": [
+     {
+      "wall_us": 2273.520833114162,
+      "gpu_us": 2058.8496,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 2262.2930497163907,
+      "gpu_us": 2061.7431833333335,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 2266.8055501223234,
+      "gpu_us": 2061.2793166666665,
+      "dispatches": 4.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "l2sanity.shared_16_L1024": {
+   "1024": {
+    "wall_us": 2262.231932642559,
+    "gpu_us": 2060.6265166666667,
+    "dispatches": 4.0,
+    "bytes": 61210624,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 29.704860878436232,
+    "pct_spec": 5.4404507103363065,
+    "pct_real": 7.0058634147255265,
+    "passes": [
+     {
+      "wall_us": 2271.5639002854005,
+      "gpu_us": 2065.1522666666665,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 2262.231932642559,
+      "gpu_us": 2060.6265166666667,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 2258.2958335988224,
+      "gpu_us": 2058.4924666666666,
+      "dispatches": 4.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "moe.post_combine.hot": {
+   "1024": {
+    "wall_us": 520.3170797904022,
+    "gpu_us": 358.65093,
+    "dispatches": 3.0,
+    "bytes": 75522048,
+    "flops": 24576.0,
+    "intensity_flop_per_byte": 0.0003254149040026033,
+    "ceiling": "bandwidth",
+    "gbps": 210.57256982436937,
+    "pct_spec": 38.56640472973798,
+    "pct_real": 49.66334193970976,
+    "passes": [
+     {
+      "wall_us": 519.2870847531594,
+      "gpu_us": 358.65093,
+      "dispatches": 3.0
+     },
+     {
+      "wall_us": 520.3170797904022,
+      "gpu_us": 358.596095,
+      "dispatches": 3.0
+     },
+     {
+      "wall_us": 521.134790033102,
+      "gpu_us": 358.837145,
+      "dispatches": 3.0
+     }
+    ],
+    "L": 1024,
+    "note": "L2-hot primary (production-adjacent: y/shared fresh-written)"
+   }
+  },
+  "moe.post_combine.dram": {
+   "1024": {
+    "wall_us": 514.2864974914119,
+    "gpu_us": 359.410875,
+    "dispatches": 3.0,
+    "bytes": 75522048,
+    "flops": 24576.0,
+    "intensity_flop_per_byte": 0.0003254149040026033,
+    "ceiling": "bandwidth",
+    "gbps": 210.1273312890157,
+    "pct_spec": 38.48485921044244,
+    "pct_real": 49.55833285118295,
+    "passes": [
+     {
+      "wall_us": 514.1614965396002,
+      "gpu_us": 359.343125,
+      "dispatches": 3.0
+     },
+     {
+      "wall_us": 514.2864974914119,
+      "gpu_us": 360.202625,
+      "dispatches": 3.0
+     },
+     {
+      "wall_us": 522.9478774708696,
+      "gpu_us": 359.410875,
+      "dispatches": 3.0
+     }
+    ],
+    "L": 1024,
+    "note": "rotated 8 sets (604 MB) \u2014 DRAM-real"
+   }
+  },
+  "moe.shared_experts": {
+   "1024": {
+    "wall_us": 2274.7694340068847,
+    "gpu_us": 2062.0118666666667,
+    "dispatches": 4.0,
+    "bytes": 61210624,
+    "flops": 25769803776.0,
+    "intensity_flop_per_byte": 421.0021413276231,
+    "ceiling": "flops",
+    "tflops": 12.497408086044638,
+    "pct_ceiling": 107.18188753039998,
+    "passes": [
+     {
+      "wall_us": 2275.5770827643573,
+      "gpu_us": 2063.341266666667,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 2274.7694340068847,
+      "gpu_us": 2062.0118666666667,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 2266.2687493721023,
+      "gpu_us": 2061.8696,
+      "dispatches": 4.0
+     }
+    ],
+    "L": 1024,
+    "note": "cold-weight DRAM-real (rotated 16 sets)",
+    "weight_bytes": 12582912
+   }
+  },
+  "moe.gate.routed": {
+   "1024": {
+    "wall_us": 504.90166991949087,
+    "gpu_us": 299.16073,
+    "dispatches": 7.0,
+    "bytes": 12583936,
+    "flops": 2147483648.0,
+    "intensity_flop_per_byte": 170.65277890796648,
+    "ceiling": "flops",
+    "tflops": 7.178360769476663,
+    "pct_ceiling": 61.56398601609489,
+    "passes": [
+     {
+      "wall_us": 518.7595798633993,
+      "gpu_us": 299.81324,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 504.90166991949087,
+      "gpu_us": 299.11243,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 504.50292008463293,
+      "gpu_us": 299.16073,
+      "dispatches": 7.0
+     }
+    ],
+    "L": 1024,
+    "note": "weight-rotated 64 sets; per-rank L_band rows"
+   }
+  },
+  "moe.gate.hash": {
+   "1024": {
+    "wall_us": 448.8441703142598,
+    "gpu_us": 273.25410999999997,
+    "dispatches": 6.0,
+    "bytes": 12608512,
+    "flops": 2147483648.0,
+    "intensity_flop_per_byte": 170.32014943555592,
+    "ceiling": "flops",
+    "tflops": 7.858925335102921,
+    "pct_ceiling": 67.40073186194616,
+    "passes": [
+     {
+      "wall_us": 450.0654200091958,
+      "gpu_us": 273.53283,
+      "dispatches": 6.0
+     },
+     {
+      "wall_us": 446.20166008826345,
+      "gpu_us": 273.14371,
+      "dispatches": 6.0
+     },
+     {
+      "wall_us": 448.8441703142598,
+      "gpu_us": 273.25410999999997,
+      "dispatches": 6.0
+     }
+    ],
+    "L": 1024,
+    "note": "weight-rotated; layers 0-2 only (3 of 43)"
+   }
+  },
+  "tail.rmsnorm": {
+   "1024": {
+    "wall_us": 195.02166513120756,
+    "gpu_us": 28.99032,
+    "dispatches": 1.0,
+    "bytes": 16785408,
+    "flops": 8388608.0,
+    "intensity_flop_per_byte": 0.4997559785261103,
+    "ceiling": "bandwidth",
+    "gbps": 579.0004387671471,
+    "pct_spec": 106.0440364042394,
+    "pct_real": 136.55670725640263,
+    "passes": [
+     {
+      "wall_us": 195.02166513120756,
+      "gpu_us": 29.149105,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 194.51687490800396,
+      "gpu_us": 28.99032,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 195.08458499331027,
+      "gpu_us": 28.907610000000002,
+      "dispatches": 1.0
+     }
+    ],
+    "L": 1024,
+    "note": "L2-hot primary (production: x fresh from hc_expand); 87 calls/chunk"
+   }
+  },
+  "tail.rope.q_L512": {
+   "1024": {
+    "wall_us": 435.23000000277534,
+    "gpu_us": 269.91871000000003,
+    "dispatches": 1.0,
+    "bytes": 134217728,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 497.2524061040452,
+    "pct_spec": 91.07186924982511,
+    "pct_real": 117.27651087359556,
+    "passes": [
+     {
+      "wall_us": 435.23000000277534,
+      "gpu_us": 270.153885,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 435.68916502408683,
+      "gpu_us": 269.751615,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 433.54749999707565,
+      "gpu_us": 269.91871000000003,
+      "dispatches": 1.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "tail.rope.q_idx": {
+   "1024": {
+    "wall_us": 271.20125014334917,
+    "gpu_us": 66.64905999999999,
+    "dispatches": 1.0,
+    "bytes": 33554432,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 503.44944099736756,
+    "pct_spec": 92.20685732552519,
+    "pct_real": 118.73807570692631,
+    "passes": [
+     {
+      "wall_us": 277.10291993571445,
+      "gpu_us": 66.64905999999999,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 271.20125014334917,
+      "gpu_us": 66.66008000000001,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 270.7822900265455,
+      "gpu_us": 66.643675,
+      "dispatches": 1.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "tail.rope.kv": {
+   "1024": {
+    "wall_us": 190.1062499382533,
+    "gpu_us": 8.249799999999999,
+    "dispatches": 1.0,
+    "bytes": 2097152,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 254.2064050037577,
+    "pct_spec": 46.55794963438786,
+    "pct_real": 59.95434080277305,
+    "passes": [
+     {
+      "wall_us": 189.61624999064952,
+      "gpu_us": 8.153805,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 190.1062499382533,
+      "gpu_us": 8.31251,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 190.41250023292378,
+      "gpu_us": 8.249799999999999,
+      "dispatches": 1.0
+     }
+    ],
+    "L": 1024
+   }
+  },
+  "tail.attn_mask.windowed": {
+   "1024": {
+    "wall_us": 3026.0745802661404,
+    "gpu_us": 3852.08131,
+    "dispatches": 4.0,
+    "bytes": 132096,
+    "flops": 396288.0,
+    "intensity_flop_per_byte": 3.0,
+    "ceiling": "bandwidth",
+    "gbps": 0.0342921110354236,
+    "pct_spec": 0.0062806064167442496,
+    "pct_real": 0.00808776203665651,
+    "passes": [
+     {
+      "wall_us": 3089.5708402385935,
+      "gpu_us": 3852.08131,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 3025.9458400541916,
+      "gpu_us": 3870.60826,
+      "dispatches": 4.0
+     },
+     {
+      "wall_us": 3026.0745802661404,
+      "gpu_us": 3847.26438,
+      "dispatches": 4.0
+     }
+    ],
+    "L": 1024,
+    "note": "windowed-causal band (1,1,L,128+1) bool; local-sparse layers"
+   }
+  },
+  "tail.attn_mask.full": {
+   "1024": {
+    "wall_us": 927.1520839926477,
+    "gpu_us": 731.4091333333333,
+    "dispatches": 1.0,
+    "bytes": 225181696,
+    "flops": 450363392.0,
+    "intensity_flop_per_byte": 2.0,
+    "ceiling": "bandwidth",
+    "gbps": 307.8737819061051,
+    "pct_spec": 56.38713954324269,
+    "pct_real": 72.61174101559082,
+    "passes": [
+     {
+      "wall_us": 928.2312501454726,
+      "gpu_us": 731.4091333333333,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 924.9645828579863,
+      "gpu_us": 732.0189333333334,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 927.1520839926477,
+      "gpu_us": 730.70845,
+      "dispatches": 1.0
+     }
+    ],
+    "L": 1024,
+    "note": "full causal bool (1,1,L,N) for compressed layers"
+   }
+  },
+  "tail.kv_cache.write": {
+   "1024": {
+    "wall_us": 194.3145747645758,
+    "gpu_us": 4.691350000000001,
+    "dispatches": 2.0,
+    "bytes": 2097152,
+    "flops": null,
+    "intensity_flop_per_byte": null,
+    "ceiling": "bandwidth(bytes-only model)",
+    "gbps": 447.02526991164586,
+    "pct_spec": 81.872760057078,
+    "pct_real": 105.43048818670893,
+    "passes": [
+     {
+      "wall_us": 193.53230018168688,
+      "gpu_us": 4.750649999999999,
+      "dispatches": 2.0
+     },
+     {
+      "wall_us": 201.4677011175081,
+      "gpu_us": 4.662100000000001,
+      "dispatches": 2.0
+     },
+     {
+      "wall_us": 194.3145747645758,
+      "gpu_us": 4.691350000000001,
+      "dispatches": 2.0
+     }
+    ],
+    "L": 1024,
+    "note": "steady-state windowed update: _update_concat (temporal reorder + trim + append) of (1,1,1024,512) into 128-slot ring"
+   }
+  },
+  "attn.indexer.score_gemm.folded": {
+   "1024": {
+    "wall_us": 1247.355566980938,
+    "gpu_us": 1012.9635,
+    "dispatches": 13.0,
+    "bytes": 126982144,
+    "flops": 14417920000.0,
+    "intensity_flop_per_byte": 113.54289308581843,
+    "ceiling": "flops",
+    "tflops": 14.233405251028294,
+    "pct_ceiling": 122.07037093506254,
+    "passes": [
+     {
+      "wall_us": 1345.7346998620778,
+      "gpu_us": 1086.9092,
+      "dispatches": 14.466666666666667
+     },
+     {
+      "wall_us": 1243.3555675670505,
+      "gpu_us": 1012.9230666666666,
+      "dispatches": 13.0
+     },
+     {
+      "wall_us": 1247.355566980938,
+      "gpu_us": 1012.9635,
+      "dispatches": 13.0
+     }
+    ],
+    "L": 1024,
+    "note": "THE never-measured GEMM: single (1024,128)@(128,55000) bf16 (OPT-6 folded, docs/indexer-prefill-decomposition-2026-08-24.md:254)"
+   }
+  },
+  "attn.indexer.pmask.apply": {
+   "1024": {
+    "wall_us": 757.9137501306832,
+    "gpu_us": 561.1590799999999,
+    "dispatches": 5.0,
+    "bytes": 112640000,
+    "flops": 526336.0,
+    "intensity_flop_per_byte": 0.004672727272727273,
+    "ceiling": "bandwidth",
+    "gbps": 200.7273944493601,
+    "pct_spec": 36.76325905665936,
+    "pct_real": 47.34136661541512,
+    "passes": [
+     {
+      "wall_us": 775.376670062542,
+      "gpu_us": 560.4665,
+      "dispatches": 5.0
+     },
+     {
+      "wall_us": 756.5591699676588,
+      "gpu_us": 561.1590799999999,
+      "dispatches": 5.0
+     },
+     {
+      "wall_us": 757.9137501306832,
+      "gpu_us": 561.3420500000001,
+      "dispatches": 5.0
+     }
+    ],
+    "L": 1024,
+    "note": "EXO_DSV4_TAIL_PMASK=1 production form: only band cols are row-dependent; band=257 cols, tail 23 cols const-fill"
+   }
+  },
+  "attn.indexer.topk.argpartition": {
+   "1024": {
+    "wall_us": 15634.168067481369,
+    "gpu_us": 15406.335533333333,
+    "dispatches": 13.0,
+    "bytes": 112640000,
+    "flops": 1773758299.9557552,
+    "intensity_flop_per_byte": 15.747143998186747,
+    "ceiling": "flops",
+    "tflops": 0.11513174538604787,
+    "pct_ceiling": 0.9874077648889182,
+    "passes": [
+     {
+      "wall_us": 16019.581933505833,
+      "gpu_us": 15393.345166666666,
+      "dispatches": 13.0
+     },
+     {
+      "wall_us": 15634.168067481369,
+      "gpu_us": 15420.599366666667,
+      "dispatches": 13.0
+     },
+     {
+      "wall_us": 15613.545834397277,
+      "gpu_us": 15406.335533333333,
+      "dispatches": 13.0
+     }
+    ],
+    "L": 1024,
+    "note": "prefill path (L=1024>16): argpartition(-scores, kth=511)[..., :512]"
+   }
+  },
+  "attn.indexer.combined_q_rope_score_topk": {
+   "1024": {
+    "wall_us": 18123.545800335705,
+    "gpu_us": 17870.76395,
+    "dispatches": 18.0,
+    "bytes": 137992192,
+    "flops": 14417920000.0,
+    "intensity_flop_per_byte": 104.48359281081643,
+    "ceiling": "flops",
+    "tflops": 0.8067881171918226,
+    "pct_ceiling": 6.919280593411858,
+    "passes": [
+     {
+      "wall_us": 18283.154148957692,
+      "gpu_us": 17858.511899999998,
+      "dispatches": 18.0
+     },
+     {
+      "wall_us": 18120.4541499028,
+      "gpu_us": 17886.5141,
+      "dispatches": 18.0
+     },
+     {
+      "wall_us": 18123.545800335705,
+      "gpu_us": 17870.76395,
+      "dispatches": 18.0
+     }
+    ],
+    "L": 1024,
+    "note": "wq_b mxfp8 proj + rope + sigmoid-fold + score GEMM + argpartition topk in one call (the whole prefill indexer q-side minus compressor/pool)"
+   }
+  }
+ },
+ "errors": [
+  "attn.indexer.score_full L=1024: TypeError: 'mlx.core.array' object is not callable"
+ ],
+ "rollup": {
+  "moe.post_combine (43)_us_per_chunk": 15454.7,
+  "moe.shared_experts (43)_us_per_chunk": 88666.5,
+  "moe.gate.routed (40)_us_per_chunk": 11966.4,
+  "moe.gate.hash (3)_us_per_chunk": 819.8,
+  "tail.rmsnorm (87)_us_per_chunk": 2522.2,
+  "tail.rope (43q+43kv+21idx)_us_per_chunk": 11606.5,
+  "tail.kv_cache.write (22 local)_us_per_chunk": 103.2,
+  "attn.indexer (21 sparse)_us_per_chunk": 375286.0,
+  "attn.indexer.score_gemm (21)_us_per_chunk": 21272.2,
+  "attn.indexer.topk (21)_us_per_chunk": 323533.0,
+  "attn.indexer.pmask (21)_us_per_chunk": 11784.3,
+  "_NOTE": "per-chunk = per-call x calls(43-layer, L_band=1024, ctx=220K); attn.indexer uses score+rope+topk combined call (excl. compressor)"
+ }
+}

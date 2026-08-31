@@ -1,0 +1,115 @@
+{
+ "meta": {
+  "host": "Adams-Mac-Studio-M4-1",
+  "mlx": "0.32.1.dev20260822+e40a416b2",
+  "gpu": "applegpu_g16s",
+  "ts": "2026-08-30 20:50:41",
+  "note": "top-up for P07: score_full (fixed call), rmsnorm dram, gate dram, post_combine gputrace evidence, tail pmask FULL variant",
+  "spec_gbps": 546.0,
+  "real_streaming_gbps": 424.0,
+  "flops_ceiling_40core_fp32_fma": 14.34,
+  "post_combine_gputrace": {
+   "path": "/Users/adam.durham/repos/exo/tmp/p07-20260830/captures/p07b_post_combine.gputrace",
+   "bytes": 6688
+  }
+ },
+ "ops": {
+  "attn.indexer.score_full": {
+   "1024": {
+    "wall_us": 1498.1000014813617,
+    "gpu_us": 1309.04315,
+    "dispatches": 6.0,
+    "bytes": 135895040,
+    "flops": 14434697216.0,
+    "intensity_flop_per_byte": 106.21945595659709,
+    "ceiling": "flops",
+    "tflops": 11.02690710844788,
+    "pct_ceiling": 76.89614441037573,
+    "passes": [
+     {
+      "wall_us": 1606.3333518104628,
+      "gpu_us": 1326.3392,
+      "dispatches": 6.55
+     },
+     {
+      "wall_us": 1498.1000014813617,
+      "gpu_us": 1309.04315,
+      "dispatches": 6.0
+     },
+     {
+      "wall_us": 1485.66875141114,
+      "gpu_us": 1308.5996,
+      "dispatches": 6.0
+     }
+    ],
+    "L": 1024,
+    "note": "sigmoid weights_proj + H-fold + GEMM: fills the P07a gap (POTENTIAL CONCERN: pooled NOT rotated here, single set is 14 MB, partially L2-resident)"
+   }
+  },
+  "tail.rmsnorm.dram": {
+   "1024": {
+    "wall_us": 193.38254457000983,
+    "gpu_us": 22.249363636363636,
+    "dispatches": 1.0,
+    "bytes": 16785408,
+    "flops": null,
+    "ceiling": "bandwidth(bytes-only)",
+    "gbps": 754.421936480308,
+    "pct_spec": 138.17251583888424,
+    "pct_real": 177.9297020000726,
+    "passes": [
+     {
+      "wall_us": 193.38254457000983,
+      "gpu_us": 22.132,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 192.8295453333042,
+      "gpu_us": 22.268272727272727,
+      "dispatches": 1.0
+     },
+     {
+      "wall_us": 206.09472730112347,
+      "gpu_us": 22.249363636363636,
+      "dispatches": 1.0
+     }
+    ],
+    "L": 1024,
+    "note": "rotated 11 sets (185 MB); fast.rms_norm \u2014 P07a hot said 579 GB/s (over spec)"
+   }
+  },
+  "moe.gate.check": {
+   "1024": {
+    "wall_us": 499.4554200675338,
+    "gpu_us": 299.29699,
+    "dispatches": 7.0,
+    "bytes": 12583936,
+    "flops": 2147483648.0,
+    "intensity_flop_per_byte": 170.65277890796648,
+    "ceiling": "flops",
+    "tflops": 7.175092699729456,
+    "pct_ceiling": 50.03551394511476,
+    "passes": [
+     {
+      "wall_us": 503.87250026687985,
+      "gpu_us": 299.22333000000003,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 495.4699997324496,
+      "gpu_us": 299.29699,
+      "dispatches": 7.0
+     },
+     {
+      "wall_us": 499.4554200675338,
+      "gpu_us": 299.30831,
+      "dispatches": 7.0
+     }
+    ],
+    "L": 1024,
+    "note": "repeat of P07a moe.gate.routed for cross-run stability"
+   }
+  }
+ },
+ "errors": []
+}

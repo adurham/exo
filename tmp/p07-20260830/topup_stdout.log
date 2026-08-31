@@ -1,0 +1,6 @@
+bank ready
+attn.indexer.score_full            gpu=  1309.04 wall=  1498.10 disp=   6.0
+tail.rmsnorm.dram                  gpu=    22.25 wall=   193.38 disp=   1.0
+moe.gate.check                     gpu=   299.30 wall=   499.46 disp=   7.0
+gputrace post_combine: 0.0 MB
+=== P07b TOPUP COMPLETE ===

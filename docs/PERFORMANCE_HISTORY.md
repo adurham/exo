@@ -5592,3 +5592,95 @@ inflation. Audited against `bench/attn_production_class_bench.py` + real code:
 Cluster untouched for all of the above (code reading + arithmetic only): PIDs
 59909/60392 continuous since 19:34, all verbon3 production flags verified live
 on both nodes, zero leftover test env vars.
+
+**P07 RESULTS (2026-08-30, same session): first per-kernel GPU capture at
+PREFILL shape — remainder is mostly a genuine floor, with ONE real open
+item found that the span profiler was structurally blind to.**
+Full writeup: `docs/p07-prefill-remainder-perkernel-results-2026-08-30.md`.
+Artifacts `tmp/p07-20260830/`. Zero cluster relaunches; PIDs 59909/60392
+verified identical before/after every capture.
+
+**Answer to the phase question — it is BOTH, in now-known proportion:**
+1. **~5.3pp of T7's original 19.3% was a real fixable bottleneck, and it is
+   already fixed and shipped** (hc_expand 08-24, hc_collapse 08-25).
+   Remainder today ~14.0%, not 19.3%.
+2. **norms / rope / kv_cache are a genuine dispatch/latency floor** — 1-2
+   dispatches, sub-ms/chunk, same shape as decode's own ~1.9ms/token floor.
+   Confirmed by measurement, not assumed.
+3. **One real, open, non-floor item: `attn.indexer` top-k, ~2.9% of prefill
+   wall, running at ~4-7% of achievable bandwidth.**
+
+**Two previously-INFERRED claims now MEASURED and confirmed**:
+`indexer.score_gemm` **99.3% of ceiling** (the OPT-6 folded GEMM really is at
+hardware peak — `indexer-prefill-decomposition-2026-08-24.md:254` had flagged
+this as "inferred, not directly measured"), and `moe.shared_experts` **87.2%**
+(independently corroborating T10's 1.05x-of-peak estimate via a different
+instrument). `moe.gate`/`post_combine`/`pmask` land 47-55% — each <1.0% e2e,
+below the ship gate.
+
+**Why span-profiling could never have found the top-k cost**: `indexer.topk`'s
+span reads **5.81 µs/call** for an op that really costs **7.7-15.4 ms** — a
+~1300-2600x under-read, because under MLX's lazy executor a span timer not
+terminated by an eval barrier measures graph CONSTRUCTION, not GPU work. This
+is the pre-registered justification for reopening T10, and it held.
+
+**The "impossible" number, reconciled.** The capture's 15406 µs/call top-k
+exceeds the whole `attn.indexer` span (24,596.71ms/2310 = 10.65 ms/call). Both
+are right: the span is a run-AVERAGE over 110 chunks with ctx growing 0→220K
+(mean P ≈ P_final/2); the capture is at FINAL-chunk shape (P=55000). Top-k is
+~linear in P (0.20→0.31 µs per unit P over a 25x sweep). Run-averaged:
+7.70 ms/call = **72.3% of the 10.65ms span** → 4.0% × 72.3% = **~2.9% of
+prefill wall**. Fits its parent, coherent with the rest of the span being the
+at-ceiling score GEMM.
+
+**A review pass wrongly called this an artifact** ("argpartition is default
+off"), reading only the code's `os.environ.get(...,"0")` fallback. Wrong:
+`start_cluster.sh:553` sets `: "${EXO_DSV4_PREFILL_ARGPARTITION:=1}"` and the
+live runner env confirms it. **Reusable lesson: a code-level env default is NOT
+the production default — check the launcher and the live process env.**
+
+**Is default-ON argpartition a pessimization? NO — measured, closed.** Isolated
+GPU-timed A/B vs the `argsort` fallback (whose code comment claims "~5% faster
+on Metal"), bf16 k=512 L_band=1024, rotation banks, median-of-5,
+`results_topk_ab.json`:
+
+| P | ~ctx | argpartition µs | argsort µs | ratio | disp |
+|---|---|---|---|---|---|
+| 5,000 | 20K | 1003.1 | 1003.0 | 1.0002 | 7 |
+| 25,000 | 100K | 6336.8 | 6337.2 | 1.0000 | 11 |
+| 55,000 | 220K | 15396.0 | 15402.5 | 0.9996 | 13 |
+| 125,000 | 500K | 39149.3 | 39174.1 | 0.9994 | 15 |
+
+Dead heat at every production P with **identical dispatch counts** — both
+expressions lower to the SAME radix-sort kernel in this MLX build. Top-k sets
+equal at all P incl. forced ties. So `EXO_DSV4_PREFILL_ARGPARTITION` /
+`EXO_DSV4_ARGPARTITION_MIN_P` are **not levers** — no config change
+recommended, and the cost is structural to MLX's sort, not a wrong-branch bug.
+The historical "295→163 tok/s at P=500" collapse does NOT reproduce on the
+current build (divergence only at P≤2000).
+
+**Open next step (top-k), scoped honestly**: the only remaining path is a
+custom Metal top-k exploiting k=512 ≪ P=55000 (MLX full-radix-sorts all P to
+extract 512). Ceiling if perfect ≈ **1.03x prefill** — a scoped spike, not a
+campaign. Must reduce real WORK (not just dispatch bookkeeping) and be
+validated PIPELINED in situ: this repo's whole-indexer fused kernel measured
+0.54x = SLOWER, and wq_a+wkv fusion -0.48%.
+
+**Ceiling-denominator correction banked**: the 11.66 TFLOPS figure
+(`bench/attn_production_class_bench.py:136-145`) was measured on the LAPTOP
+M4 Max (32-core), not the 40-core Studio nodes. On-node achieved `score_gemm`
+of 14.23 TFLOPS is 122% of 11.66 (impossible) but 99.3% of 14.34 (plausible).
+**Any prior doc quoting 11.66 against a Studio measurement understated
+efficiency by ~19%.** Caveat: 14.34 is theoretical, not on-node measured;
+running `measure_peak_gemm()` on a Studio node is the rigorous fix (not done).
+Separately, four tail ops (rmsnorm, rope.q, rope.q_idx, kv_cache.write) report
+>100% of the bandwidth ceiling — byte-model over-count (tensors are L2-resident
+from the immediately-preceding op, so the modeled DRAM round trip never
+happens), published with that caveat, not as real bandwidth. LATENCY FLOOR
+verdict unaffected.
+
+**NOT measured (flagged, not glossed)**: HyperConnection `attn_hc`/`ffn_hc` and
+`hc_expand` at prefill shape with both fused kernels ON — ran out of capture
+window. These are the two spans already reduced by shipped kernels, so least
+likely to hide headroom, but their post-ship prefill-shape per-kernel numbers
+are genuinely unmeasured; do not reuse pre-ship figures as if current.
