@@ -6359,3 +6359,60 @@ whitelist AND (b) literally visible in `ps eww` on the real running PIDs on
 **both** nodes for the ON arm, and absent from all PIDs on the OFF arm.
 Neither check is optional and the launch command is not evidence.
 
+### P09 implementation + review — a TP coordinate-frame blocker caught before any A/B ran
+
+Knob implemented as `EXO_DSV4_QUERY_TILED_SDPA` (+ `EXO_DSV4_QUERY_TILED_B`,
+default 64) in `mlx-lm/mlx_lm/models/deepseek_v4.py`: module-level gate at
+`:3504` mirroring `_EXACT_TOPK_PREFILL`, helpers `_pooled_len`/`_query_tiled_ok`,
+and an additive `elif` branch in `CompressedAttention.__call__`'s
+`attn.sdpa.compressed` span. Both vars wired into `start_cluster.sh`'s
+env-forwarding whitelist at `:1789-1790` (sibling `[ -n "${VAR:-}" ] &&` guard
+form, so they stay genuinely ABSENT when unset — the OFF arm depends on that).
+
+**Independent read-only review found a BLOCKER, confirmed here by direct code
+read before acting on it.** At `:4444-4458`, when seq-split is active the code
+slices the QUERY side to this rank's row band — `q = q[:,:,_seq_lo:_seq_hi,:]`
+and `mask = mask[...,_seq_lo:_seq_hi,:]` — but deliberately leaves `kv`
+**full-width** (its own comment: *"kv is full-width so each band attends
+correctly"*). The tiled branch then used the loop index `_r` as BOTH a
+band-relative query-row index AND a full-width key index. For rank 1 of a
+2-rank prefill (`_seq_lo=512`), block `_r=0` is absolute query row 512 but was
+slicing local keys `[0,191]` where the production mask marks `[512,703]`
+visible.
+
+Severity is maximal because it is **silent**: no crash, no shape error, wrong
+attention output all-summed into the shared result. And it is **reachable in
+production right now** — `ps eww` on the live PIDs shows `EXO_DSV4_SEQ_SPLIT=1`,
+`L>=16` and `L % 2 == 0` hold at prefill shape, so the ON arm would have taken
+this path on every layer of every chunk. `_query_tiled_ok` did not catch it:
+after band-slicing, `q.shape[0]==1`, `mask.shape[-2]==n_q` (512==512) and
+`n_q >= 2*B` all still pass.
+
+**This is the SAME coordinate-frame bug class as P08's, one level up.** P08's
+was window-vs-row (`[p-127,p]` behind, not ahead); this one is
+band-relative-vs-absolute. The tiled formula was only ever proven against
+un-band-split query rows — the standalone P08 harness had no TP sharding, so
+no isolated test could have surfaced it. Root-cause fix (not a disable):
+index key-space by `_seq_lo + _r` while keeping `_r` for band-relative query
+rows and mask ROWS (mask columns were never band-sliced).
+
+**The validation harness also did not actually prove what was claimed.** Its
+assertion 2 reconstructs the block endpoint with `min(LOCAL_LEN, r + (b1-r) -
+1 + SLIDING)` — the *same formula as the implementation* — then asserts the two
+match: circular, and a one-key truncation would shrink both sides identically
+and still pass. Assertion 3's `p50 == 0.0%` cannot catch it either (a missing
+visible key corrupts only block-final rows, ~1.6% of elements, leaving the
+median exactly 0). Independent hand-trace of blocks r=0/512/960 confirms the
+shipped non-TP `_khi` is exactly correct, but the harness is not what proves
+it. Additionally A5 (tail block) and the timing block **crashed** —
+`ValueError: [rope] freqs must be one dimensional with size 16 but got shape
+(32)` and an `IndexError` in the SDPA recorder, then `ZeroDivisionError` on the
+speedup. **No implementation-level speedup number exists yet**; nothing was
+committed.
+
+Verified-good regardless: inertness (flag unset short-circuits before
+`_query_tiled_ok` is ever called; diff is additions-only), `cache=local_cache`
+is safe across the 16 per-block calls (`base.py:122` uses it only for a
+`hasattr(cache,"bits")` quantized-kernel check — never mutated, no offset
+advance), and `finalize()` parity with the `else` branch is exact.
+
