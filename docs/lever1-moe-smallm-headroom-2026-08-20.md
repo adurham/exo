@@ -181,10 +181,48 @@ dependent (cf. PERFORMANCE_HISTORY's own 11.66→14.34 TFLOPS 32-vs-40-core
 correction). Confirming the staircase geometry on a 40-core Studio requires
 cluster access and is a **separate follow-up needing explicit relaunch approval**
 — deliberately not taken here. It is not blocking: no decision changes on it.
+**→ Now done. See the 40-core section below: caveat CLOSED.**
 
 Artifacts: `tmp/lever1-recheck-20260831/` (`ceiling_m_sweep`, `balanced_m_cliff`,
 `alignment_fair`, `notch_reachability`, `.json` each). Everything below this line
 is the original 2026-08-20 text, unmodified except this addendum.
+
+### 40-core Studio confirmation (2026-08-31, later same day) — caveat CLOSED
+
+The one caveat left open above is now closed on the real production hardware.
+`alignment_fair.py` run **byte-identical** (sha256 `4c198b3b…52e6f0`, verified
+both ends) on `adams-mac-studio-m4-1` — 40-core M4 Max, MLX
+`0.32.1.dev20260822+e40a416b2` — as an isolated standalone process in `/tmp`,
+sharing the GPU with the live production runner (idle, `active=87.83 GB` of a
+115 GB wired limit ⇒ ~27 GB headroom). Same gates, pre-registered before the run:
+R≤1.15 holds / R≥1.30 reopen. 4 independent runs:
+
+| | 32-core laptop | **40-core Studio** (4 runs) |
+|---|---|---|
+| median live (ragged) | 1.383 us/row | **1.120** |
+| median balanced (m=24..55) | 1.255 us/row | **1.010** |
+| **R = live / balanced** | **1.102** | **1.106** (1.106/1.109/1.115/1.12, ±0.8%) |
+
+**R = 1.11x on 40 cores vs 1.10x on 32 cores — a +0.3% difference. Gate R≤1.15
+holds on production hardware. The caveat is closed; the verdict is unchanged.**
+
+The ratio-invariance argument is not just upheld, it is *directly demonstrated*:
+both tiers sped up by the **identical 1.24x** going 32c→40c (live 1.383→1.120,
+balanced 1.255→1.013), so the ratio cancels the core count exactly as predicted.
+The staircase geometry is also core-count-invariant in shape — the notch set is
+*identical* (`m = 48, 32, 40, 52, 54, 55` lowest-cost on both), and cliff depth at
+the 32-row tile boundary matches to within 1% (laptop m31/m32 = 1.46x, m33/m32 =
+1.43x; Studio 1.47x / 1.44x). Only the absolute us/row moved, exactly as the
+original caveat predicted. The luckiest-notch cherry-pick likewise reproduces
+(1.47x laptop / 1.48x Studio) and remains just as unreachable.
+
+Live inference untouched throughout: m4-1 pid 58066 and m4-2 pid 60416 both
+persisted with original start times (12:09:36 / 12:09:38) across all runs,
+allocator flat at `active=87.83 GB` on both, both APIs HTTP 200, zero tracebacks
+/ OOM / command-buffer failures in either log. No cluster operation was performed;
+artifacts confined to `/tmp/lever1-studio` on the node.
+
+Artifacts: `alignment_fair_studio40_rep{2,3,4}.json` (same dir).
 
 ## Caveats
 
