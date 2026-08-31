@@ -6773,3 +6773,76 @@ approval**, deliberately not taken. Non-blocking; no decision hinges on it.
 
 **Net: LEVER 1 STAYS CLOSED.** No kernel rewrite, no MAXBE widening, no tile
 retune. Unchanged from 2026-08-20 — but now on a denominator that survives audit.
+
+---
+
+## P11 — Decode-gap re-audit: the "5-7x / 14-20% of ceiling" brief was STALE (2026-08-31)
+
+**PM finding, before any measurement was run.** A fresh investigation was
+commissioned against the 2026-08-22 framing ("decode runs at 14.0-20.2% of its
+bandwidth-bound ceiling, ~5-7x gap; two named-but-never-executed next steps:
+(1) fresh Instruments capture with real per-kernel labels, (2) per-token
+gap-rate check vs per-layer moe.all_sum/fence boundaries"). A read-only audit
+of repo HEAD (`d15c3f639`) found **all three premises already superseded**.
+Every claim below was independently re-verified by the PM against the cited
+lines, not taken on the worker's report.
+
+1. **The 5-7x gap is CLOSED, and was mostly a wrong denominator.** §P02D
+   (2026-08-29, `docs/p02d-...md`, quoted at PH:5183-5190): *"Corrected
+   efficiency: decode runs at 36-44% of the 546 spec, i.e. 46-57% of the
+   measured 424 GB/s real-streaming ceiling — 1.75-2.16x slower than the REAL
+   ceiling, not 5-7x... The §13/§4.3 'highest-priority open question' framing
+   ... is CLOSED as an artifact of the 3.56 GB denominator."* The old
+   denominator omitted the REPLICATED 5.30 GB/rank attention path (exo shards
+   MoE only), depth-linear reads, lm_head, and shared-expert/gate;
+   `B_true = 8.17-9.14 GB/rank/token`. **Do not cite 14-20%/5-7x again.**
+
+2. **Next step #1 (Instruments per-kernel labels) is DEAD AS SPECIFIED, and the
+   goal was reached by another instrument.** `xctrace`'s
+   `metal-gpu-intervals` template only ever emits generic
+   `Compute`/`Fragment`/`Vertex` channel names — re-confirmed structurally
+   across 5+ attempts (PH:2128-2134, :2300-2301, :3301, 99.98% generic).
+   Real per-kernel attribution WAS achieved via
+   `mx.metal.start_capture()` + `MLX_GPU_TIME=1`/`MLX_DISPATCH_COUNT=1`
+   bracketing: P01 (switch_mlp, 2026-08-29) and **P03 (2026-08-30) which
+   measured the entire decode small-op bucket per-kernel in BOTH spec-off
+   (8.34 ms/token) and spec-ON (17.2 ms/cycle ÷ 3.2 = 5.38 ms/token) regimes.**
+   Commissioning a fresh Instruments capture would have burned cluster time
+   re-proving a known-impossible thing.
+
+3. **Next step #2 (gap-rate vs all_sum/fence) is ANSWERED, from both sides.**
+   The literal gap-rate re-count was never re-run, but the question it existed
+   to answer is closed by a strictly stronger method — P01a's direct CPU-side
+   timer INSIDE the collective (`docs/p01a-...md`:96-105): *"Phase 1(a) CLOSED:
+   arrival skew at depth is ruled out as the residual's owner ... per-token
+   arrival skew grows only +0.079 ms/tok from 100K→352.6K — 3-5% of the band
+   ... not in idle, not inside the collective call."* P01b independently
+   refutes inter-layer pipelining loss (+0.076 ms/tok vs a +1.67..+2.52 ms/tok
+   residual band).
+
+**Consequence: the campaign does not need the work this brief named.** Decode
+is 1.75-2.16x from the real ceiling, not 5-7x, and its two named next steps are
+respectively impossible-as-specified and already-answered. Re-running either
+would have been pure waste. What IS genuinely open is recorded in P12 below.
+
+### P11 pre-registered gate (written BEFORE the measurement, per campaign rule)
+
+The one cheap check the brief asked for that had NOT been done: does tonight's
+own P05-P09 campaign have any **decode**-side effect? P07/P08/P09 measured
+prefill wall ONLY — **no decode tok/s measurement exists in this repo after
+2026-08-30** (P06 Phase A). Non-trivial reason to actually check rather than
+assume: P09's query-tiled SDPA is gated on query length, and while decode is
+L=1 spec-off, **spec-ON production runs verify batches at L=4** — so "decode is
+L=1, nothing to tile" is NOT automatically true under the shipped spec-ON config.
+
+- **Reference (locked):** P06 Phase A, 2026-08-30, spec-ON, 100K ctx,
+  `bench/long_decode_probe.py`, 1200-token windows, n=3:
+  **34.35 / 34.12 / 34.28, median 34.28 tok/s.**
+- **Prediction:** no decode-side effect (P07/P08/P09 are prefill-only).
+- **PASS (expectation confirmed):** |Δ median| ≤ 3% of 34.28 (i.e.
+  33.25-35.31 tok/s).
+- **FAIL-LOW (regression, must investigate before campaign close):**
+  median < 33.25 tok/s.
+- **FAIL-HIGH (unexpected decode win, must attribute):** median > 35.31 tok/s.
+- Same harness, same depth, same rep count, `decode_sample_trustworthy=true`
+  required on every rep (the <400-token sampling trap guard).
