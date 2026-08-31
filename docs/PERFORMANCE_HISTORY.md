@@ -6512,3 +6512,97 @@ P09 ON vs P09 OFF measured with the SAME harness**.
 ON arm complete; OFF arm pending. No ship/no-ship conclusion is recorded here.
 
 
+
+---
+
+### P09 ON-arm quality gate — PASSED; spurious segment-citation FAIL traced to a harness off-by-one
+
+Quality gate for the P09 lever (query-tiled compressed SDPA, TP/seq-split) run at real
+production depth (220K) against the **live ON config**, using
+`tmp/p09-20260831/p09_quality_gate.py`. The lever flag set was verified on the real
+running PIDs on **both nodes** at run time (`ps eww`, 4 exo PIDs/node):
+`EXO_DSV4_QUERY_TILED_SDPA=1`, `EXO_DSV4_QUERY_TILED_B=64`,
+`EXO_DSV4_LMHEAD_MXFP8=1`, `EXO_DSV4_EXACT_TOPK_PREFILL=1`, `EXO_DSV4_SEQ_SPLIT=1`.
+
+**Two runs** were recorded: the script's original hardcoded default `max_tokens=250`,
+and a second run after adding a `--max-tokens` CLI arg to the harness (the 250 default
+is unchanged, so prior invocations are unaffected). Per-assertion results for both:
+
+| # | assertion | RUN 1 — max_tokens=250 | RUN 2 — max_tokens=2000 |
+|---|---|---|---|
+| 1 | needle_retrieved | PASS | PASS |
+| 2 | source_segment_cited | PASS | FAIL * |
+| 3 | finish_reason_stop | FAIL (reason=length, budget ran out mid-reasoning) | PASS (reason=stop) |
+| 4 | no_bos_spam | PASS | PASS |
+| 5 | no_fffd | PASS | PASS |
+| 6 | no_pathological_repetition | PASS | PASS |
+| 7 | achieved_depth_landed | PASS | PASS |
+
+\* The `source_segment_cited` FAIL in RUN 2 is a **harness off-by-one**, not a model
+error — see next subsection.
+
+**Run metrics.** RUN 1 (max_tokens=250): `elapsed_s=685.6`,
+`usage.prompt_tokens=266101` (nominal 220000), `completion_tokens=250`,
+`finish_reason=length`. Note this run did cite the segment correctly *by luck*: its
+truncated reasoning happened to contain the literal marker string the harness greps
+for. RUN 2 (max_tokens=2000): `elapsed_s=10.6` (a prefix-cache hit on the identical
+prompt — **NOT a new prefill**; do not read 10.6s as a speed result),
+`usage.prompt_tokens=266101`, `completion_tokens=151`, `finish_reason=stop`. The
+model's final answer retrieved needle `P09-ORION-8821` correctly and cited it as
+segment `[P09-QUALITY-220000 i 1270]`.
+
+#### The `source_segment_cited` FAIL is a harness off-by-one, not a model error
+
+The model is right; the harness's *expected* marker is off by one. The relevant
+facts in `tmp/p09-20260831/p09_quality_gate.py`:
+
+- `:92-93` builds the `n_fill` marker-prefixed segments, indexed `i = 0..n_fill-1`,
+  each formatted `"[P09-QUALITY-{depth} i {i}] s {seed} " + FILLER`.
+- `:94` then splices the needle in **after** the loop:
+  `fillers.insert(int(n_fill * 0.4), " " + NEEDLE + " ")`.
+- `:137-139` computes the EXPECTED marker as `needle_seg_i = int(n_fill * 0.4)` —
+  reusing the `list.insert` POSITION as if it were the index of the segment the
+  needle lands inside.
+- Python's `list.insert(k, x)` places `x` **AT index `k`** and pushes the element
+  formerly at `k` to `k+1`. So the segment physically PRECEDING the needle is `k-1`,
+  not `k`.
+
+Arithmetic at depth=220000: `len(FILLER)=346`, so
+`n_fill = int(220000 * 5 // 346) = 3179`, and
+`k = int(3179 * 0.4) = 1271`. The needle therefore sits between segment 1270's text
+and segment 1271's marker; the nearest preceding marker is **i 1270** — exactly what
+the model answered.
+
+Independently corroborated by the max_tokens=250 run, where the model quoted the raw
+document: `"... A red-black tree self-balances through rotations.  The secret
+authorization code for project AURORA is: P09-ORION-8821. [P09-QUALITY-220000 i 1271]
+s 999540459 ..."` — the needle appears BEFORE the `i-1271` marker, confirming it
+belongs to segment 1270.
+
+Suggested harness fix (NOT applied — artifact script only): line 138 becomes
+`needle_seg_i = max(0, int(n_fill * 0.4) - 1)`.
+
+#### Verdict: **P09 ON-arm QUALITY GATE — PASSED**
+
+All seven substantive conditions hold at real production depth with the flag ON:
+needle retrieved, source segment cited correctly (model right, harness expectation
+off by one), natural `stop` termination once the token budget is adequate, no BOS
+spam, no U+FFFD, no pathological repetition, and the intended depth genuinely landed
+(266,101 real prompt tokens confirmed from the API's own `usage` block, not a
+client-side count). The lever changes attention-output structure, and at 220K it
+still retrieves a planted needle from ~1270 segments deep and cites its source — this
+is the evidence the pre-registered quality gate asked for.
+
+#### Two more harness defects found (now the 5th and 6th measurement-invalidating harness defects caught this campaign)
+
+Both the 24-token A/B budget + content-only field blindness (already documented in
+the previous entry) and this expected-marker off-by-one are **measurement-side**, in
+throwaway `tmp/` artifact scripts. Neither is in shipped code and neither affects the
+timing numbers.
+
+#### Status: OFF arm still pending — verdict OPEN
+
+OFF arm still pending; ship/no-ship verdict remains **OPEN**. Pre-registered decision
+boundary, computed **before any OFF data exists**: ON median = 686.23s, the gate
+requires >= 2.0% e2e gain, therefore **SHIP requires OFF median >= 700.24s**;
+anything below that is NO-SHIP.
