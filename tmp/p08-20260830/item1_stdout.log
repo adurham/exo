@@ -1,0 +1,42 @@
+=== P08 Item 1: sdpa compressed causal-vs-dense + direct floor ===
+--- (A) runtime production-mask reconstruction ---
+mask shape (1, 1, 1024, 3894) dtype mlx.core.bool density 0.4729
+avg visible keys/row (both ranks): 1844.2 of 3894
+q 33.5MB; kv bank 3.99MB x 16 banks
+  sdpa[causal] gpu= 21423.38us wall= 21687.71us disp=7
+  sdpa[ dense] gpu= 21408.62us wall= 21673.83us disp=7
+  sdpa[  none] gpu= 20255.71us wall= 20499.29us disp=6
+  f(flop ratio, actual mask content) = 0.4736; R = 1.0007
+  l2sanity: {"sdpa_kvbanks2": {"median_wall_us": 21643.5, "median_gpu_us": 21416.75, "median_dispatches": 7, "all_wall_us": [21686.6, 21778.2, 21522.0, 21597.1, 21588.5, 21691.9, 21609.5, 21883.7, 21643.5], "all_gpu_us": [21457.6, 21548.4, 21324.6, 21350.3, 21346.5, 21474.2, 21416.7, 21655.1, 21382.6], "warmup": 5, "iters": 9}, "sdpa_kvbanks16": {"median_wall_us": 21680.04, "median_gpu_us": 21399.79, "median_dispatches": 7, "all_wall_us": [21690.3, 21680.0, 21696.2, 21740.1, 21537.5, 21619.1, 21716.4, 21591.9, 21509.0], "all_gpu_us": [21467.1, 21434.3, 21446.2, 21475.4, 21347.6, 21399.8, 21396.1, 21371.9, 21284.4], "warmup": 5, "iters": 9}}
+--- (C) on-node dense GEMM peak sweep ---
+  bf16   2048x4096x4096:  14.83 TF
+  bf16   4096x4096x4096:  15.10 TF
+  bf16   8192x4096x4096:  15.17 TF
+  bf16  16384x4096x4096:  15.21 TF
+  bf16   8192x8192x8192:  15.18 TF
+  fp16   2048x4096x4096:  14.83 TF
+  fp16   4096x4096x4096:  15.10 TF
+  fp16   8192x4096x4096:  14.67 TF
+  fp16  16384x4096x4096:  15.04 TF
+  fp16   8192x8192x8192:  15.00 TF
+  PEAK: 15.21 TF at [16384, 4096, 4096] .bfloat16
+  streaming: 488.4 GB/s (r+w)
+--- (D) direct floor ---
+  QK_broadcast: gpu=  8847.62us disp=1
+  QK_loop32: gpu=  9043.71us disp=64
+  PV_broadcast: gpu=  8732.25us disp=1
+  softmax_pass: gpu=  5726.96us disp=6
+RECHECK from json: R=1.0007 headroom=1.2186 (should equal 1.2186)
+
+=== P08 Item 1 SUMMARY ===
+shape: q (1,32,1024,512) kv (1,1,3894,512) bf16, mask bool (1,1,1024,3894) materialized
+t_causal=21423.38us  t_dense=21408.62us  t_none=20255.71us
+R = t_causal/t_dense = 1.0007   -> KERNEL DOES FULL WORK
+f = causal/dense FLOP (actual mask content) = 0.4736
+dispatches: causal=7 dense=7 none=6
+on-node GEMM peak: 15.21 TF at [16384, 4096, 4096] .bfloat16
+Traceback (most recent call last):
+  File "/Users/adam.durham/repos/exo/tmp/p08-20260830/p08_item1_capture.py", line 424, in <module>
+    log(f"floor: QK {floor['matmul_QK_us']:.1f} + PV {floor['matmul_PV_us']:.1f} = "
+                     ~~~~~^^^^^^^^^^^^^^^^
+KeyError: 'matmul_QK_us'

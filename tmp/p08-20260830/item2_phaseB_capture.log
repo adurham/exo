@@ -1,0 +1,30 @@
+=== P08 Item2 PHASE B ===
+host=Adams-Mac-Studio-M4-2 mlx=0.32.1.dev20260822+e40a416b2
+--- PART B: exactness gate (random + forced-tie, 3 seeds) ---
+  random seed=101: rows_mismatched=0/1024 (boundary_tie_rows=977)
+  random seed=202: rows_mismatched=0/1024 (boundary_tie_rows=986)
+  random seed=303: rows_mismatched=0/1024 (boundary_tie_rows=974)
+  forced-tie P=55000: rows_mismatch=0/1024 (boundary_tie_rows=1013)
+  forced-tie P=125000: rows_mismatch=0/1024 (boundary_tie_rows=1007)
+--- PART C: isolated timing (P=55000, P=125000) ---
+  P=  55000 gpu=   1040.2us disp=1 gbps= 216.6 speedup=14.82x
+  P= 125000 gpu=   2339.5us disp=1 gbps= 218.9 speedup=16.77x
+--- PART D: pipelined chain (GEMM -> top-k -> gather/mask) ---
+Traceback (most recent call last):
+  File "/Users/adam.durham/repos/exo/tmp/p08-20260830/item2_phaseB.py", line 490, in <module>
+    main()
+    ~~~~^^
+  File "/Users/adam.durham/repos/exo/tmp/p08-20260830/item2_phaseB.py", line 429, in main
+    RESULTS["pipelined"][str(P)][tag] = {
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+KeyError: '55000'
+--- PART D (cont): pipelined chain (GEMM -> top-k -> gather) ---
+  P=55000: prod=33582.0us disp=16.0 cust=19321.7us disp=4.0 pipelined_speedup=1.738x
+  P=125000: prod=72162.7us disp=18.0 cust=35516.3us disp=4.0 pipelined_speedup=2.032x
+--- VERDICT: SHIP
+    iso=14.82x disp=1 pip(P55000)=1.738x pip(P125000)=2.032x e2e=1.669% exact=True
+    gate gate1_e2e_ge_1pct: PASS
+    gate gate2_work_or_dispatch_reduction: PASS
+    gate gate3_pipelined_win: PASS
+    gate gate4_exactness: PASS
+results: /Users/adam.durham/repos/exo/tmp/p08-20260830/item2_phaseB_results.json

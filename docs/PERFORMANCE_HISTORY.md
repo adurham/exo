@@ -5901,3 +5901,150 @@ Metal peaks ~4.4 TFLOP/s vs steel's ~14-15 TF — a structural MMA-tiling wall.
 Top-k is not a GEMM; it is a bandwidth-bound selection with a 69.5x pass gap
 against a general-purpose radix sort. Different regime, so the prior art does not
 transfer automatically. It still has to beat the pipelined in-situ gate.
+
+### P08 Item 2 Phase B — the "custom kernel" already exists in this repo and is default-ON; only a `L <= 16` shape gate blocks it from prefill
+
+Raw: `tmp/p08-20260830/item2_phaseB_results.json`, kernel source
+`item2_phaseB_kernel_source.metal`, harness `item2_phaseB.py` + `item2_phaseB_partD.py`.
+Standalone on m4-2; PIDs 59909/60392 verified unchanged before AND after. Zero relaunches.
+
+**The spike built a threshold-select top-k — then found it was re-deriving
+`_exact_topk`, which has been in `deepseek_v4.py` since 2026-07-07.**
+Verified directly at the source (`mlx-lm/mlx_lm/models/deepseek_v4.py`):
+
+- `:3495` — `_EXACT_TOPK = os.environ.get("EXO_DSV4_EXACT_TOPK", "1") == "1"`.
+  **The code default is `"1"` — ON.** It is not an off-by-default experiment.
+- `:3511 _exact_topk_source()`, `:3641 _get_exact_topk_kernel(L)`, `:3664 _exact_topk()`
+  — a complete `mx.fast.metal_kernel` histogram/threshold top-k, parameterized by L.
+- `:~4030` — the live gate is `_EXACT_TOPK and scores.shape[1] <= 16`. The
+  in-code comment states the intent plainly: *"decode + MTP-verify rows (L <= 16)
+  take the histogram/threshold kernel ... Prefill chunks (L > 16) keep the landed
+  argpartition path."*
+
+So the blocker is **not** the env var and **not** a missing kernel. It is one
+hardcoded shape condition. The kernel is already default-ON, already shipped,
+already carrying exactness guarantees in its own comment ("exact top-k set ...
+always", "deterministic lowest-index tie-breaking"), and already handling the
+masked-score case ("finfo.min fills from the pmask path map to the lowest key,
+so masking semantics carry through unchanged").
+
+**Correcting the Phase A note in the record**: Phase A reported
+"`EXO_DSV4_EXACT_TOPK` NOT set in live env → exact-topk branch OFF." The first
+half is true and the conclusion is wrong — unset means it takes the code default,
+which is `"1"`. The branch is ENABLED; it simply never fires at prefill because
+L=1024 > 16. This is the *same* class of error P07 recorded as a reusable lesson
+(a review pass misread `os.environ.get(X,"0")` and called a real finding an
+artifact), just inverted: **an unset env var is not an off switch — read the
+default.** Both directions of this mistake have now cost this campaign a wrong
+call; the rule is to read the default AND the launcher AND the live env.
+
+**Measured, at production shape (1,1024,P) bf16, k=512:**
+
+| metric | production argpartition | `_exact_topk` @ L=1024 |
+|---|---|---|
+| passes over score tensor | ~70 single-pass-equiv | **3** |
+| dispatches | 13 | **1** |
+| µs @ P=55,000 | 15413.5 | **1040.2** (14.82x) |
+| µs @ P=125,000 | — | 2339.5 (16.77x) |
+| pipelined chain (GEMM→topk→gather) | 33582 | **19322 (1.738x)** |
+| pipelined @ P=125,000 | — | 2.032x |
+
+Exactness: **0/1024 mismatching rows on all 5 cases** — 3 random seeds
+(974-986 tie rows each) plus forced-tie at P=55,000 (1013/1024 tie rows) and
+P=125,000. Effective read bandwidth 325-328 GB/s across 3 passes, under the
+~490 GB/s physics ceiling.
+
+The isolated 14.82x collapsing to 1.738x pipelined is **exactly** the inflation
+pattern the pre-registration warned about and that killed the prior fused-indexer
+attempt (0.54x). Here the pipelined number still wins decisively.
+
+**Pre-registered ship gate (§3.4), all four:**
+1. e2e ≥1.0%: `2.9% × (1 − 1/1.738)` = **1.23%** → PASS. (An intermediate log
+   printed 1.67% from a wrong formula; 1.2315% is the value re-derived from raw JSON.)
+2. Reduces real WORK/dispatch COUNT: 3 passes vs ~70, 1 dispatch vs 13 → PASS.
+3. Validated PIPELINED, not isolated → PASS.
+4. Exact top-k index-set equality → PASS.
+
+**Op-level verdict: SHIP.** Not yet a production change — the remaining work is
+the gate relaxation plus a LIVE e2e A/B, since a pipelined microbench is still
+not a live measurement. Two gaps to close before landing: (a) Phase B's exactness
+cases used clean random/forced-tie inputs, **not** `pmask`-masked scores carrying
+`finfo.min` fills, which is the real prefill input; (b) `_EXACT_TOPK_PARAM_CAP`
+(`:3507`, default 64) governs a `(P,k)` params-array cache whose behaviour at
+L=1024 with growing P across a 110-chunk prefill is unverified.
+
+### P08 Item 1 reachability — waste localized and MEASURED, but the key-split decomposition was the wrong decomposition
+
+Raw: `tmp/p08-20260830/item1b_reachability_results.json` (on m4-1),
+harness `p08_item1b_reachability.py`. PID 59909 verified continuous; m4-2 untouched.
+
+**Mask structure now MEASURED per-region, closing the reviewer's flag** that the
+earlier "all waste is local" claim was inferred arithmetic stated in a measured
+voice. Empirically at production shape, rank-0 band:
+- local ring `[0:2175]`: **exactly 128.0 visible keys/row** (min=max=128), 5.9% dense
+- pooled `[2175:3894]`: min 1710 / max 1718 / **mean 1713.51 = 99.68% dense**
+
+Confirmed: the pooled half has ~zero waste; **all** of it is the local ring's
+**16.9x** over-computation. Correction to the assumed geometry: band row `i` sees
+local keys `[i, i+127]` — the window sits **ahead** of the row (lower-right
+aligned), not behind. Tiling arithmetic is unchanged (B+127 distinct keys per
+contiguous B-row block) but the key range each block needs is different.
+
+**MLX exposes no windowed/block-sparse path.** Introspected signature (mx
+0.32.1.dev): `scaled_dot_product_attention(q, k, v, *, scale, mask: Union[None,
+str, array], sinks, stream)`. The only string accepted is `'causal'`;
+`window_size`/`sliding_window`/`block_sparse`/`segment` all raise `TypeError`.
+`mask='causal'` measured 21336.7µs vs a materialized lower-right causal bool
+tensor at 21402.7µs (max rel diff 0.0) — same kernel path, no faster route. And
+`'causal'` cannot express the production mask anyway (windowed ring + dense
+row-causal pooled suffix).
+
+**A premise in the pre-registration was wrong, and checking it was worthwhile.**
+`EXO_DSV4_SEQSPLIT_BALANCED=1` IS in the live env (`start_cluster.sh:97`), but the
+balanced implementation was **reverted at mlx-lm `bf8cbad5`** (2026-07-13,
+"throughput-neutral, slight regression"). `grep SEQSPLIT_BALANCED mlx-lm/mlx_lm`
+= **0 hits**; `deepseek_v4.py:4376-4383` assigns a CONTIGUOUS band
+(`_seq_lo = rank * band`). **The flag is inert and rows are contiguous**, so
+window locality is intact in production. Measured anyway: contiguous gives
+255/383/639 distinct local keys at B=128/256/512; a worst-case stride-2 interleave
+gives 382/638/1150 and measurably destroys the win (B=512: 6473µs vs 3677µs
+contiguous). So re-introducing balanced seq-split would *hurt* windowed tiling.
+
+**Windowed local tiling works — the local half really is ~7x recoverable:**
+
+| variant | µs |
+|---|---|
+| untiled local SDPA (2175 keys) | 11919.5 |
+| tiled contiguous B=128 (255 keys/block) | **1697 (7.0x)** |
+| tiled contiguous B=256 (383 keys/block) | 2302 (5.2x) |
+| tiled contiguous B=512 (639 keys/block) | 3677 (3.2x) |
+
+**But the composite failed, and the reason is a decomposition mistake, not a
+hardware limit.** The harness split by KEY range (pooled call + local call) and
+merged with log-sum-exp. `mx.fast.scaled_dot_product_attention` returns no
+per-row LSE, forcing eager fp32 matmul+softmax partials: splitting *alone* cost
+33875µs = **1.59x SLOWER** than the 21423µs baseline, and the best composite
+(B=128) reached only 16909µs (1.27x) at **352-368 dispatches vs 7**. Numerics in
+that run were invalid (mean rel err ~85x) from a merge-formula bug — numerator
+weighted by `exp(lse_part − lmax)` instead of `exp(max_part − lmax)` — root-caused
+but not re-run in budget.
+
+**The mistake: a key-range split needs an LSE merge; a QUERY-range split does
+not.** If instead the 1024 query rows are tiled into blocks of B, and each block
+attends to (all 1719 pooled keys + its own 128+B local window), every block is a
+*complete, independent* attention — outputs concatenate along the query axis with
+**no merge at all**. Key-work becomes `1024 × (1719 + B + 127)` vs the baseline's
+`1024 × 3894` = **1.97x less work at B=128**, at ~8 SDPA calls (~56 dispatches),
+not 352. Sinks are per-row and survive unchanged. This is the decomposition that
+should have been measured and it is the one remaining Item 1 measurement.
+
+**Numerics-gate finding worth banking regardless of outcome**: the registered
+"<0.2% mean relative error vs the production fused output" gate is
+**structurally unmeetable at head_dim=512** for *any* recomposition — the fused
+kernel's own deviation from exact fp32 attention is p50 ~0.34% / rms ~0.31%
+(isolated to head_dim: at D=128 it falls to 0.135%; mask density and sinks have
+no effect — a pure precision signature, and bf16-score-rounding emulation does
+not close it). A gate defined against a reference that is itself 0.34% from truth
+rejects mathematically-exact restructurings by construction. Not amended
+unilaterally; recorded so the next phase anchors numerics to exact fp32 (or to
+the kernel's own error bar) rather than to the fused output.

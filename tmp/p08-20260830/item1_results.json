@@ -1,0 +1,442 @@
+{
+ "meta": {
+  "host": "Adams-Mac-Studio-M4-1",
+  "mlx": "0.32.1.dev20260822+e40a416b2",
+  "arch": {
+   "resource_limit": 5000000,
+   "max_buffer_length": 86586540032,
+   "architecture": "applegpu_g16s",
+   "memory_size": 137438953472,
+   "max_recommended_working_set_size": 120586240000,
+   "device_name": "Apple M4 Max"
+  },
+  "ts": "2026-08-30 21:41:56",
+  "shape_constants": {
+   "batch": 1,
+   "n_heads_per_rank": 32,
+   "L_band": 1024,
+   "local_kv": 2175,
+   "pool_r128": 1719,
+   "CATTN_KV": 3894,
+   "head_dim": 512,
+   "dtype": "bfloat16",
+   "scale": 0.04419417382415922,
+   "offset_final_chunk": 218880,
+   "sliding_window": 128
+  },
+  "assumed_by_bench": {
+   "bench": "bench/attn_production_class_bench.py:212-236",
+   "q": [
+    1,
+    32,
+    1024,
+    512
+   ],
+   "kv": [
+    1,
+    1,
+    3894,
+    512
+   ],
+   "mask_content": "random.uniform > 0.05 (95% dense), NOT production causal",
+   "mask_shape": [
+    1,
+    1,
+    1024,
+    3894
+   ],
+   "mask_dtype": "bool"
+  }
+ },
+ "runtime_shape_probe": {
+  "mask_rank0": {
+   "shape": [
+    1,
+    1,
+    1024,
+    3894
+   ],
+   "dtype": "mlx.core.bool",
+   "density": 0.472909,
+   "visible_keys_total": 1885704,
+   "avg_visible_keys_per_row": 1841.5078125
+  },
+  "mask_rank1": {
+   "shape": [
+    1,
+    1,
+    1024,
+    3894
+   ],
+   "dtype": "mlx.core.bool",
+   "visible_keys_total": 1891201,
+   "avg_visible_keys_per_row": 1846.8759765625
+  },
+  "mean_visible_keys_per_row_both_ranks": 1844.19189453125,
+  "q_shape_production": [
+   1,
+   32,
+   1024,
+   512
+  ],
+  "kv_shape_production": [
+   1,
+   1,
+   3894,
+   512
+  ],
+  "mask_shape_production": [
+   1,
+   1,
+   1024,
+   3894
+  ],
+  "mask_dtype": "bool (mx.concatenate of bools, MATERIALIZED, broadcast over heads by the kernel)",
+  "mask_materialized_bytes": 3987456,
+  "bench_assumed_mask": "random >=95% dense bool, same shape/dtype (bench:219)",
+  "shape_matches_bench": true,
+  "content_differs_from_bench": true
+ },
+ "gemm_peak": {
+  "bf16_2048x4096x4096": {
+   "dtype": ".bfloat16",
+   "shape": [
+    2048,
+    4096,
+    4096
+   ],
+   "gpu_us": 4633.75,
+   "tflops": 14.83,
+   "dispatches": 1
+  },
+  "bf16_4096x4096x4096": {
+   "dtype": ".bfloat16",
+   "shape": [
+    4096,
+    4096,
+    4096
+   ],
+   "gpu_us": 9099.54,
+   "tflops": 15.104,
+   "dispatches": 1
+  },
+  "bf16_8192x4096x4096": {
+   "dtype": ".bfloat16",
+   "shape": [
+    8192,
+    4096,
+    4096
+   ],
+   "gpu_us": 18116.04,
+   "tflops": 15.173,
+   "dispatches": 1
+  },
+  "bf16_16384x4096x4096": {
+   "dtype": ".bfloat16",
+   "shape": [
+    16384,
+    4096,
+    4096
+   ],
+   "gpu_us": 36146.21,
+   "tflops": 15.209,
+   "dispatches": 1
+  },
+  "bf16_8192x8192x8192": {
+   "dtype": ".bfloat16",
+   "shape": [
+    8192,
+    8192,
+    8192
+   ],
+   "gpu_us": 72422.58,
+   "tflops": 15.182,
+   "dispatches": 1
+  },
+  "fp16_2048x4096x4096": {
+   "dtype": ".float16",
+   "shape": [
+    2048,
+    4096,
+    4096
+   ],
+   "gpu_us": 4634.0,
+   "tflops": 14.829,
+   "dispatches": 1
+  },
+  "fp16_4096x4096x4096": {
+   "dtype": ".float16",
+   "shape": [
+    4096,
+    4096,
+    4096
+   ],
+   "gpu_us": 9100.83,
+   "tflops": 15.102,
+   "dispatches": 1
+  },
+  "fp16_8192x4096x4096": {
+   "dtype": ".float16",
+   "shape": [
+    8192,
+    4096,
+    4096
+   ],
+   "gpu_us": 18735.46,
+   "tflops": 14.672,
+   "dispatches": 1
+  },
+  "fp16_16384x4096x4096": {
+   "dtype": ".float16",
+   "shape": [
+    16384,
+    4096,
+    4096
+   ],
+   "gpu_us": 36548.0,
+   "tflops": 15.042,
+   "dispatches": 1
+  },
+  "fp16_8192x8192x8192": {
+   "dtype": ".float16",
+   "shape": [
+    8192,
+    8192,
+    8192
+   ],
+   "gpu_us": 73310.12,
+   "tflops": 14.998,
+   "dispatches": 1
+  },
+  "best": {
+   "dtype": ".bfloat16",
+   "shape": [
+    16384,
+    4096,
+    4096
+   ],
+   "gpu_us": 36146.21,
+   "tflops": 15.209,
+   "dispatches": 1
+  }
+ },
+ "bandwidth": {
+  "gpu_us": 1099.29,
+  "read_write_gbps": 488.37969234687847,
+  "note": "256MB bf16 stream, a+1.0"
+ },
+ "sdpa": {
+  "causal": {
+   "median_wall_us": 21687.71,
+   "median_gpu_us": 21423.38,
+   "median_dispatches": 7,
+   "all_wall_us": [
+    21698.3,
+    21688.3,
+    21579.9,
+    21498.2,
+    21979.3,
+    21655.3,
+    21630.3,
+    21855.0,
+    21687.7,
+    21513.4,
+    21855.6
+   ],
+   "all_gpu_us": [
+    21437.5,
+    21379.8,
+    21359.5,
+    21281.2,
+    21778.0,
+    21423.4,
+    21396.8,
+    21605.8,
+    21477.8,
+    21295.0,
+    21654.4
+   ],
+   "warmup": 6,
+   "iters": 11,
+   "mask": "causal"
+  },
+  "dense": {
+   "median_wall_us": 21673.83,
+   "median_gpu_us": 21408.62,
+   "median_dispatches": 7,
+   "all_wall_us": [
+    21726.5,
+    21647.5,
+    21532.7,
+    21931.7,
+    21590.2,
+    21584.3,
+    21676.7,
+    21731.3,
+    21673.8,
+    21597.5,
+    21684.7
+   ],
+   "all_gpu_us": [
+    21504.2,
+    21382.8,
+    21308.6,
+    21715.4,
+    21403.5,
+    21361.6,
+    21408.6,
+    21503.3,
+    21413.4,
+    21344.6,
+    21430.5
+   ],
+   "warmup": 6,
+   "iters": 11,
+   "mask": "dense"
+  },
+  "none": {
+   "median_wall_us": 20499.29,
+   "median_gpu_us": 20255.71,
+   "median_dispatches": 6,
+   "all_wall_us": [
+    20500.8,
+    20469.8,
+    20500.9,
+    20477.2,
+    20499.3,
+    20462.4,
+    20505.6,
+    20476.6,
+    20641.7,
+    20491.1,
+    20635.9
+   ],
+   "all_gpu_us": [
+    20288.1,
+    20249.5,
+    20253.1,
+    20246.5,
+    20289.7,
+    20217.6,
+    20289.4,
+    20256.6,
+    20255.7,
+    20247.6,
+    20384.1
+   ],
+   "warmup": 6,
+   "iters": 11,
+   "mask": "none"
+  }
+ },
+ "floor": {
+  "matmul_QK_us": 8847.62,
+  "matmul_QK_variant_used": "QK_broadcast",
+  "matmul_QK_broadcast_us": 8847.62,
+  "matmul_QK_loop32_us": 9043.71,
+  "matmul_PV_us": 8732.25,
+  "softmax_measured_us": 5726.96,
+  "softmax_stream_bound_us": 522.5384838867187,
+  "matmul_sum_us": 17579.870000000003,
+  "floor_us_max_convention": 17579.870000000003,
+  "floor_us_measured_softmax": 17579.870000000003,
+  "direct_headroom": 1.2186313095603094,
+  "direct_headroom_measured_softmax": 1.2186313095603094
+ },
+ "errors": [],
+ "sdpa_flops": {
+  "flop_dense": 261321916416,
+  "flop_actual_mask": 123761623040.0,
+  "f_flop_ratio": 0.4735983293608757,
+  "avg_visible_keys_per_row": 1844.19189453125,
+  "note": "f computed from the production mask CONTENT (windowed-causal local 128/2175 + row-causal pooled): mean visible keys/row = 1844.2. P07's 0.6058 was a run-average over growing context; at the final chunk the real content density is 0.4736."
+ },
+ "l2_sanity": {
+  "sdpa_kvbanks2": {
+   "median_wall_us": 21643.5,
+   "median_gpu_us": 21416.75,
+   "median_dispatches": 7,
+   "all_wall_us": [
+    21686.6,
+    21778.2,
+    21522.0,
+    21597.1,
+    21588.5,
+    21691.9,
+    21609.5,
+    21883.7,
+    21643.5
+   ],
+   "all_gpu_us": [
+    21457.6,
+    21548.4,
+    21324.6,
+    21350.3,
+    21346.5,
+    21474.2,
+    21416.7,
+    21655.1,
+    21382.6
+   ],
+   "warmup": 5,
+   "iters": 9
+  },
+  "sdpa_kvbanks16": {
+   "median_wall_us": 21680.04,
+   "median_gpu_us": 21399.79,
+   "median_dispatches": 7,
+   "all_wall_us": [
+    21690.3,
+    21680.0,
+    21696.2,
+    21740.1,
+    21537.5,
+    21619.1,
+    21716.4,
+    21591.9,
+    21509.0
+   ],
+   "all_gpu_us": [
+    21467.1,
+    21434.3,
+    21446.2,
+    21475.4,
+    21347.6,
+    21399.8,
+    21396.1,
+    21371.9,
+    21284.4
+   ],
+   "warmup": 5,
+   "iters": 9
+  }
+ },
+ "verdict": {
+  "R_causal_over_dense": 1.000689441916387,
+  "t_causal_us": 21423.38,
+  "t_dense_us": 21408.62,
+  "t_none_us": 20255.71,
+  "dispatches": {
+   "causal": 7,
+   "dense": 7,
+   "none": 6
+  },
+  "f_flop_ratio": 0.4735983293608757,
+  "pre_registered_verdict": "KERNEL DOES FULL WORK",
+  "measured_onnode_peak_tflops": 15.209,
+  "peak_shape": [
+   16384,
+   4096,
+   4096
+  ],
+  "peak_dtype": ".bfloat16",
+  "direct_headroom": 1.2186313095603094,
+  "direct_headroom_measured_softmax": 1.2186313095603094,
+  "lever_gate": {
+   "headroom_ge_140": false,
+   "e2e_ge_1pct": true,
+   "verdict": "DENOMINATOR CORRECTED, NO ACTIONABLE LEVER"
+  },
+  "span_share_citation": "docs/dsv4-220k-prefill-span-profile-2026-08-18.md:84 \u2014 attn.sdpa.compressed 2200 calls, 73396.81 ms total, 11.8% of prefill wall"
+ }
+}

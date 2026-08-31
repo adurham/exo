@@ -1,0 +1,149 @@
+{
+ "meta": {
+  "host": "Adams-Mac-Studio-M4-2",
+  "mlx": "0.32.1.dev20260822+e40a416b2",
+  "gpu": "applegpu_g16s",
+  "ts": "2026-08-30 22:07:22",
+  "shape": "(1,1024,P) bf16, k=512",
+  "baseline_us_P55000": 15413.483625,
+  "baseline_source": "tmp/p08-20260830/item2_phaseA_results.json partB 55000",
+  "kernel": {
+   "name": "dsv4_exact_topk (P08 Phase B spike instantiation)",
+   "provenance": "algorithm verbatim from mlx-lm/mlx_lm/models/deepseek_v4.py:3511-3637 (_exact_topk, session-5-endorsed design) copied into this standalone spike file; NO tracked-source modification.",
+   "passes_over_scores": 3,
+   "dispatches": 1,
+   "phase_detail": "phase1 high-byte hist (full-row read), phase2 low-byte hist in boundary bin (full-row read, mostly rejected), phase3 index-ordered compaction (full-row read)",
+   "tie_rule": "lowest-index ties at threshold; verified == argpartition's set on random + forced-tie inputs (probe_ties7: 60/60, plus harness below)",
+   "grid": "one (1024,1,1) threadgroup per score row; grid=(1024, L, B)"
+  }
+ },
+ "kernel": {},
+ "correctness": {
+  "cases": [
+   {
+    "case": "random_P55000_seed101",
+    "equal": true,
+    "mismatch_rows": 0,
+    "boundary_tie_rows": 977,
+    "seed": 101
+   },
+   {
+    "case": "random_P55000_seed202",
+    "equal": true,
+    "mismatch_rows": 0,
+    "boundary_tie_rows": 986,
+    "seed": 202
+   },
+   {
+    "case": "random_P55000_seed303",
+    "equal": true,
+    "mismatch_rows": 0,
+    "boundary_tie_rows": 974,
+    "seed": 303
+   },
+   {
+    "case": "forced_tie_P55000",
+    "equal": true,
+    "mismatch_rows": 0,
+    "boundary_tie_rows": 1013
+   },
+   {
+    "case": "forced_tie_P125000",
+    "equal": true,
+    "mismatch_rows": 0,
+    "boundary_tie_rows": 1007
+   }
+  ],
+  "all_pass": true
+ },
+ "isolated": {
+  "55000": {
+   "gpu_us": 1040.228625,
+   "wall_us": 1236.2917477730662,
+   "dispatches": 1.0,
+   "gbps_rw": 216.56777614632554,
+   "speedup_vs_baseline": 14.81739999704392
+  },
+  "125000": {
+   "gpu_us": 2339.48375,
+   "wall_us": 2566.7916270322166,
+   "dispatches": 1.0,
+   "gbps_rw": 218.85170179104688,
+   "speedup_vs_baseline": 16.769281791335374
+  }
+ },
+ "pipelined": {
+  "55000": {
+   "production": {
+    "wall_us": 33842.263830592856,
+    "gpu_us": 33581.971,
+    "dispatches": 16.0
+   },
+   "custom": {
+    "wall_us": 19577.090327705566,
+    "gpu_us": 19321.659166666668,
+    "dispatches": 4.0
+   },
+   "speedup": 1.7380479963094955
+  },
+  "125000": {
+   "production": {
+    "wall_us": 72373.0764972667,
+    "gpu_us": 72162.69966666667,
+    "dispatches": 18.0
+   },
+   "custom": {
+    "wall_us": 35747.00000657079,
+    "gpu_us": 35516.289833333336,
+    "dispatches": 4.0
+   },
+   "speedup": 2.0318197651078784
+  }
+ },
+ "verdict": {
+  "isolated_speedup_P55000": 14.81739999704392,
+  "pipelined_speedup_P55000": 1.7380479963094955,
+  "pipelined_speedup_P125000": 2.0318197651078784,
+  "predicted_e2e_win_pct": 1.2315,
+  "gates": {
+   "gate1_e2e_ge_1pct": true,
+   "gate2_work_or_dispatch_reduction": true,
+   "gate3_pipelined_win": true,
+   "gate4_exactness": true
+  },
+  "verdict": "SHIP",
+  "failed_gates": [],
+  "note": "predicted e2e win = span_share(2.9%) x per-op-reduction; per-op-reduction = 1 - 1/pipelined_speedup (top-k new in-chain cost = old / pipelined_speedup)",
+  "summary_table": {
+   "isolated_us_P55000": 1040.228625,
+   "isolated_us_P125000": 2339.48375,
+   "isolated_dispatches": 1.0,
+   "baseline_us_P55000": 15413.483625,
+   "isolated_speedup": 14.81739999704392,
+   "pipelined_prod_us_P55000": 33581.971,
+   "pipelined_cust_us_P55000": 19321.659166666668,
+   "pipelined_speedup_P55000": 1.7380479963094955,
+   "pipelined_speedup_P125000": 2.0318197651078784
+  },
+  "per_op_reduction": 0.4246,
+  "formula": "span_share(2.9%) x (1 - 1/pipelined_speedup)",
+  "isolated_dispatch_count_vs_production": "1 vs 13 (P=55000)",
+  "kernel_passes": "3 read passes over the score tensor (high-byte hist, low-byte refine, compaction) in ONE dispatch, vs production argpartition's ~70 single-pass-equivalents (pass_ratio 69.53, Phase A) across 13 dispatches",
+  "pid_check": {
+   "before_capture": {
+    "m4-1_59909": "alive etime 02:33:08",
+    "m4-2_60392": "alive (etime 02:39:21 at partD continuation)"
+   },
+   "after_capture": {
+    "m4-1_59909": "alive etime 02:41:46",
+    "m4-2_60392": "alive etime 02:41:43; EXO_DSV4_PREFILL_ARGPARTITION=1 still set"
+   }
+  },
+  "physics_check": {
+   "effective_read_bandwidth_3pass_GBs_P55000": 324.9,
+   "effective_read_bandwidth_3pass_GBs_P125000": 328.3,
+   "verdict": "PASS (<490 GB/s ceiling; above it would indicate a timing bug)"
+  }
+ },
+ "errors": []
+}
