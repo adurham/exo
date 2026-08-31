@@ -31,6 +31,13 @@
 # a quality-compromised config without realizing.
 # To override: set EXO_DSV4_INDEX_TOPK in the shell env before launch.
 : "${EXO_DSV4_INDEX_TOPK:=512}"
+# P08 Item 2 (SHIPPED 2026-08-31): exact fused top-k Metal kernel for PREFILL
+# chunks (L>16) too. Live A/B (server 'Prefill complete' line, 3 reps/side)
+# measured 1.61% prefill-wall gain at 220K ctx (370.22 vs 364.24 tps) and
+# 0.11% at 75K -- the win scales with P as the op-level microbench predicted.
+# To override (back to argpartition baseline): unset this before launch or set
+# EXO_DSV4_EXACT_TOPK_PREFILL=0.
+: "${EXO_DSV4_EXACT_TOPK_PREFILL:=1}"
 # 2026-06-04: libp2p -> zenoh migration (exo #2132) renamed this env var.
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
