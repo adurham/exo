@@ -6846,3 +6846,37 @@ L=1, nothing to tile" is NOT automatically true under the shipped spec-ON config
 - **FAIL-HIGH (unexpected decode win, must attribute):** median > 35.31 tok/s.
 - Same harness, same depth, same rep count, `decode_sample_trustworthy=true`
   required on every rep (the <400-token sampling trap guard).
+
+### P11 result -- live decode measurement on full current stack (2026-08-31)
+
+Live decode throughput measured against the already-running production cluster
+(no restart, no config change, read-only). Same harness as P06 Phase A
+(`bench/long_decode_probe.py`), same depth (100K), same 1200-token windows,
+n=3, one throwaway warmup request first (cold-start mirage guard). Raw JSON:
+`tmp/p11-decode-20260831/rep{1,2,3}.json` (warmup: `warmup.json`).
+
+**Verified live config on the real running PIDs, both nodes** (`ps eww`,
+m4-1 PID 58066, m4-2 PID 60416, 4 exo PIDs/node, 1 instance, 2 runners):
+`EXO_DSV4_LMHEAD_MXFP8=1`, `EXO_DSV4_EXACT_TOPK_PREFILL=1`,
+`EXO_DSV4_QUERY_TILED_SDPA=1`, `EXO_DSV4_QUERY_TILED_B=64`,
+`EXO_DSV4_SEQ_SPLIT=1`, `EXO_SPECULATIVE=1`, `EXO_SPECULATIVE_GAMMA=3`,
+`EXO_DSV4_VERIFY_BATCH=1`, `EXO_DSV4_VERIFY_BATCH_MIN_CTX=8192`,
+`EXO_DSV4_MTP=1`. Identical on both nodes; all match `start_cluster.sh`
+defaults. Spec-ON (verify batches at L=4) confirmed live.
+
+| rep | decode_tps | decode_sample_trustworthy | completion_tokens | finish_reason |
+|---|---|---|---|---|
+| 1 | 30.71 | true | 1200 | length |
+| 2 | 29.84 | true | 1200 | length |
+| 3 | 31.93 | true | 1200 | length |
+| **median** | **30.71** | true | 1200 | length |
+
+**VERDICT vs pre-registered gate: FAIL-LOW (regression).** Reference (P06 Phase
+A, 2026-08-30, spec-ON, 100K, same harness, n=3): 34.35/34.12/34.28, median
+34.28. Measured median 30.71 = **-3.57 tok/s, -10.41%** vs reference, below the
+33.25 PASS floor. All three reps are below the reference's WORST rep (34.12) --
+consistent regression, not jitter. Every rep `decode_sample_trustworthy=true`
+(1200-token windows, no <400-token sampling trap). This is the first decode
+measurement on the full current stack (P05-P09 shipped) and it does NOT confirm
+the "no decode-side effect" prediction. Must be investigated before campaign
+close. Prefill unchanged (417-419 tps, consistent with prior 100K runs).
