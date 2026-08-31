@@ -6925,3 +6925,75 @@ the identical probe (100K, 1200-token window, n=3, all reps trustworthy).
 
 No code will be changed until this experiment picks A or B. Neither arm is
 allowed to be rationalized after the fact.
+
+### P12 BLOCKED — `start_cluster.sh` route-clear needs a sudo right the sudoers rule doesn't grant (2026-08-31)
+
+The pre-registered P12 experiment did NOT run. The fresh relaunch aborts before
+launching anything, and the cause is an infrastructure gap, not a perf finding.
+
+**Root cause (PM-verified directly on both nodes, not taken on report).**
+`start_cluster.sh:917-920` clears stale direct-link routes before the
+connectivity test:
+
+```
+echo "Testing direct-link connectivity (clearing stale routes first)..."
+for node in macstudio-m4-1 macstudio-m4-2; do
+    ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
+done
+```
+
+`sudo route delete` is invoked WITHOUT `-n`, over a non-interactive ssh, and is
+NOT covered by the scoped NOPASSWD rule. Verified `sudo -n -l` on BOTH nodes —
+the rule grants exactly four things, none of them `route`:
+
+```
+(root) NOPASSWD: /usr/sbin/sysctl iogpu.wired_limit_mb\=*
+(root) NOPASSWD: /usr/bin/fdesetup authrestart*
+(ALL)  NOPASSWD: /usr/bin/ktrace
+(ALL)  NOPASSWD: /usr/bin/powermetrics
+```
+
+So the command blocks on a password prompt that can never be answered, and the
+launch hangs at the route-clear step indefinitely. `2>/dev/null` hides the
+prompt, and `&> /dev/null` on the ssh hides it again — which is why this
+presents as a silent hang rather than an error. Confirmed live: a stuck
+`sudo route delete -net 192.168.200.2` (PID 87204) was found sitting on m4-2
+and cleared by the PM.
+
+**This is NOT a no-op step that can be skipped blindly.** The matching routes
+genuinely exist right now — m4-1 has 1 (`192.168.200.2`), m4-2 has 2
+(`192.168.200.1`, `192.168.200.2`) — so the loop really does iterate and really
+does need the privilege. The `sysctl` form (`sudo -n sysctl
+iogpu.wired_limit_mb=115000`) still works passwordless on both nodes; only the
+route-clear is uncovered.
+
+**Cluster state left by the failed launch (verified, both nodes):**
+- **m4-1: DOWN.** No `python -m exo` process. Killed during the relaunch's
+  teardown, never came back up because the launch aborted before restart.
+- **m4-2: UP but STALE.** Old PIDs 60405/60416 still running the pre-relaunch
+  production config. Serves nothing useful alone — the model is TP-sharded
+  across both nodes.
+
+**Deliberately NOT worked around.** Editing the route-clear out of
+`start_cluster.sh`, or hand-rolling a launch that skips it, would be working
+around a sudo failure — explicitly out of bounds, and it would also silently
+change the network-path setup underneath a measurement whose entire purpose is
+attributing a 10% throughput delta. A perf experiment run on a quietly
+different network setup than its own reference is worthless.
+
+**Exact unblock (either one):**
+1. Add a scoped rule mirroring the existing `sysctl` one, e.g.
+   `(root) NOPASSWD: /sbin/route delete -net *` on both nodes; or
+2. Change `start_cluster.sh:919` to `sudo -n route delete` so it fails fast and
+   loud instead of hanging silently — but that only converts the hang into a
+   clean error; the privilege is still required for the step to actually work.
+
+**P12's pre-registered gate stands unchanged and is still the right next step**
+once the relaunch works: fresh relaunch on identical config, 100K / 1200-token
+/ n=3, Outcome A (median >= 33.25 = state drift, config exonerated) vs B
+(< 33.25 = real code regression) vs C (ambiguous, escalate to n=5). The
+before-snapshot is already captured at
+`tmp/p12-relaunch-20260831/before_node{1,2}_ps_eww.txt` (both nodes identical,
+74 EXO vars, `EXACT_TOPK_PREFILL=1 QUERY_TILED_SDPA=1 QUERY_TILED_B=64
+LMHEAD_MXFP8=1 VERIFY_BATCH=1 VERIFY_BATCH_MIN_CTX=8192 SPECULATIVE=1 GAMMA=3`),
+so the post-relaunch config diff can be done immediately.
