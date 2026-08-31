@@ -1773,6 +1773,10 @@ for NODE in "${NODES[@]}"; do
     # One-shot decode-step top-k overlap diagnostic (Indexer, deepseek_v4.py)
     # -- opt-in, off by default, no effect on production decode.
     [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
+    # P08 Item 2 live A/B gate (mlx-lm a248d0a7): take the exact top-k Metal
+    # kernel for PREFILL chunks (L>16) too. Default OFF -> absent unless set,
+    # so production behaviour is unchanged.
+    [ -n "${EXO_DSV4_EXACT_TOPK_PREFILL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_EXACT_TOPK_PREFILL=$EXO_DSV4_EXACT_TOPK_PREFILL"
     [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
     # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
     # MTP-1 chained draft at c=1. DEFAULT RE-ENABLED 2026-08-02: the
