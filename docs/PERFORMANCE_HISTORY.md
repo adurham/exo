@@ -5684,3 +5684,66 @@ verdict unaffected.
 window. These are the two spans already reduced by shipped kernels, so least
 likely to hide headroom, but their post-ship prefill-shape per-kernel numbers
 are genuinely unmeasured; do not reuse pre-ship figures as if current.
+
+## P08 — resolving P07's two open items: SDPA-compressed ceiling denominator + indexer top-k spike (2026-08-30)
+
+Pre-registration: `docs/p08-sdpa-ceiling-and-topk-spike-preregister-2026-08-30.md`
+(gates written BEFORE any measurement). Raw artifacts will land in `tmp/p08-20260830/`.
+
+**Cluster state at phase open, verified from real signals (not assumed):** m4-1
+PID **59909**, m4-2 PID **60392**, both `etime` 01:48:14 (continuous since
+~19:34 today, zero relaunches across P06/P07). Both hosts `up 4 days, 23:46`.
+Full verbon3 production flag set verified via `ps eww <live pid>` on BOTH nodes,
+identical, **zero leftover test env vars** — incl. `EXO_DSV4_PREFILL_ARGPARTITION=1`,
+`EXO_DSV4_INDEX_TOPK=512`, `EXO_DSV4_SEQ_SPLIT=1`, `EXO_COMPUTE_DTYPE=bf16`,
+`EXO_DSV4_HC_EXPAND_KERNEL=1`, `EXO_DSV4_HC_COLLAPSE_KERNEL=1`,
+`EXO_DSV4_LMHEAD_MXFP8=1`. Target: zero relaunches, captures standalone beside
+the live runner (p01/P03/P07-proven).
+
+**Two items, both from P07, nothing else in scope:**
+
+1. **`attn.sdpa.compressed` denominator (P07 §8, UNDETERMINED).** P07's
+   arithmetic says the bench counted dense `L_band × CATTN_KV` (261.3 GFLOP)
+   with a synthetic 95%-dense mask while production passes a real causal mask
+   (158.3 GFLOP) → corrected efficiency ~48%, not 79.1%, i.e. **more** headroom
+   than T7 believed. Whether that correction is real hinges on one unmeasured
+   runtime fact: does MLX's fused SDPA skip fully-masked blocks or mask after?
+   Registered decisive test: GPU-timed causal-vs-dense-vs-nomask at production
+   shape, `R = t_causal/t_dense`; `R ≤ 0.75` → kernel exploits mask (48% class),
+   `R ≥ 0.92` → 79.1% stands, in between → report both bounds.
+2. **`attn.indexer` top-k (P07 §7, OPEN).** ~2.9% of prefill wall at ~4-7% of
+   achievable bandwidth; e2e ceiling if perfect ~1.03x. Boxed to a two-phase
+   spike with a hard stop: Phase A (floor + existing-op composition, no Metal),
+   Phase B (one disposable Metal kernel) ONLY if Phase A clears a pre-registered
+   gate. No third phase under any outcome.
+
+**Two methodology upgrades registered before measuring, both aimed at not
+repeating this campaign's own past mistakes:**
+
+- **A denominator argument alone cannot open a lever.** Item 1 must also measure
+  a denominator-free **direct floor** — `max(matmul_QK + matmul_PV,
+  softmax_bw_time)` built from the same node's own measured `mx.matmul`
+  performance at the exact shapes, under the roofline `max()` convention (never
+  additive). Item 1 only becomes a P09 candidate if `direct_headroom ≥ 1.40x`
+  AND `span_share × (1 − 1/direct_headroom) ≥ 1.0%` of prefill wall. Correcting
+  a percentage is not the same as finding recoverable work.
+- **P07's "4-7% of 424 GB/s" framing is structurally generous to the
+  complaint** — a radix sort is inherently multi-pass, so scoring it against a
+  *single* streaming pass overstates the gap. Item 2 Phase A must measure a real
+  single-pass floor over the identical tensor and report
+  `pass_ratio = t_current / t_single_pass`, not reuse the streaming-bandwidth
+  comparison.
+
+**Also closing a P07 self-flagged caveat:** P07 §9 replaced the FLOPS ceiling
+11.66 → 14.34 TF after finding 11.66 was measured on the **laptop** M4 Max
+(32-core), not the 40-core Studio nodes — but flagged that 14.34 is theoretical,
+named the rigorous fix (run `measure_peak_gemm()` on a Studio node), and did not
+do it. P08 does it; every Item 1 efficiency figure is computed against the
+MEASURED on-node peak, re-derived from fresh timings, never by scaling a stale
+percentage.
+
+**Pre-registered phase-level conclusion gate:** if Item 1 yields no actionable
+lever AND Item 2 closes KILL, the verdict is recorded plainly as *"the easy wins
+in this area are now exhausted"* — no manufactured P09. Neither item may close
+as "needs more investigation" without naming the specific measurement that would
+resolve it and why it wasn't made.
