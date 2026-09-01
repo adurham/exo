@@ -7621,3 +7621,15 @@ Independent reviewer subagent verdict: **PASS** on commit 37260bbd6ecd05c3105fc3
 - Non-blocking notes: `extend()` discards any carry held by `other` (theoretical edge; no production call path merges two live carry-caches); fetch-time invariant itself lacks a direct test.
 
 Deployment (repos-only, restart HELD per user): parent repo bumped 50c202e6e -> ea891d77 (submodule pointer -> 37260bb), pushed to origin/main; both studios `git fetch && git reset --hard ea891d77 && git submodule update` -- exo PIDs unchanged on both nodes (m4-1: 20509-20521, m4-2: 22405-22416), cluster NOT restarted. Activation requires start_cluster.sh relaunch (pending explicit user go).
+
+### DEPLOY VERIFY — fix confirmed LIVE in running cluster (2026-09-01)
+
+Post-relaunch verification subagent verdict: **LIVE** (all criteria, both nodes).
+
+- Fresh processes 12:37 launch (m4-1 pid 75148/75160, m4-2 pid 77337/77348), exactly one exo python per node, no survivors.
+- Live env on running PIDs (`ps eww`): EXO_DSV4_LMHEAD_MXFP8=1, EXACT_TOPK_PREFILL=1, QUERY_TILED_SDPA=1, VERIFY_BATCH=1 (+VERIFY_BATCH_MIN_CTX=8192, MLX_JACCL_SHARDING_MODE=Tensor).
+- Installed venv mlx_lm/models/cache.py sha256 5aefd039... == git show 37260bb:mlx_lm/models/cache.py byte-for-byte on BOTH nodes; invariant present at cache.py:2050. Running pid lsof-confirmed bound to that venv.
+- API: /v1/models 200 (model listed); smoke completion HTTP 200 in 2.7s, finish_reason=stop, correct answer "43". (max_tokens=50 attempt hit length w/ empty content -- thinking budget; not a fault.)
+- Nodes synced a4d5bae65 + submodule 37260bb; only benign dirt: dashboard/package-lock.json + tmp launcher logs (identical both nodes).
+
+BatchPoolingCache overlap-carry fix: VERIFIED LIVE. Cluster healthy, shipped default config.
