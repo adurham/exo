@@ -7633,3 +7633,21 @@ Post-relaunch verification subagent verdict: **LIVE** (all criteria, both nodes)
 - Nodes synced a4d5bae65 + submodule 37260bb; only benign dirt: dashboard/package-lock.json + tmp launcher logs (identical both nodes).
 
 BatchPoolingCache overlap-carry fix: VERIFIED LIVE. Cluster healthy, shipped default config.
+
+### RESEARCH ROUND — V1/V2/V3 outcomes (2026-09-01)
+
+PM-executed follow-up to the researcher's vector recommendations. V4 (c=2 concurrency) DROPPED by user decision (workload shape doesn't fit). Full artifacts: tmp/research-v1v2v3-20260901/
+
+**V2 (acceptance-rate as unmodeled state): CLOSED, proven infeasible.** Per-cycle [MTP] acceptance lines exist (59,582/node) but only in untimestamped runner stderr.log; PM re-derived the anchor itself: last [MTP] line predates every campaign boot (P11-P15 data never written). Also found bench/mtp_cycle_time.py regex requires a timestamp prefix and matches 0 real lines. Revival requires emitting [MTP] through the timestamped logger — a code change, not mining.
+
+**V1 (log mining + passive telemetry): DONE.** Metal/IOGPU warnings: count=0. Jetsam/memory-pressure: count=0. Runner restarts: exactly 1 = the P15 BatchPoolingCache reshape crash (already fixed + deployed). Weakened driver-leak hypothesis but does not explain P13/P14A/P14B spread (zero anomalies on those boots). Telemetry kit written (5 samplers, JSONL). Validation found a real bug: sampler (e) restart detector matches launcher wrapper processes via embedded "-m exo" (3 false positives/node); one-line fix identified (require comm basename python*). Fix before unattended use.
+
+**V3 (SPEC_STATE_RESTORE per-cycle snapshot cost): CLOSED — hypothesis refuted.**
+- Profiled relaunch with EXO_DSV4_MTP_PROFILE=50 EXO_DSV4_RB_PROFILE=1 (user-approved, manual).
+- rb_snap = 0.150 ms = 0.218% of a 68.85 ms verify cycle (1300 cycles, both nodes identical to 3 s.f.). Gate closes on ABSOLUTE FLOOR (<1 ms); 14x short of the 3% PROCEED bar.
+- Profiler inflation 0.93x (below 1.2x) -> absolute ms trustworthy. Cycle budget: verify 81.4%, draft 13.3%, accept 4.3%, rollback ~1.0%.
+- Bench sanity: decode 33.99 mean / 34.03 med (s=1.79), prefill 425.7 mean, 0 errors, tail_ratio 1.00, no runner restarts.
+- Side findings: (1) rb_pool_restores is a COUNT mislabeled "ms" by the unit-blind profiler formatter (dsv4_mtp.py:819-822) — reads as a fake 25% hotspot; one-line label fix worth doing. (2) The O(1)-reference-snapshot claim at dsv4_mtp.py:692-694 is a stale COMMENT; cache.py:783-784 confirms references do NOT preserve pre-write contents, so both rings and pools copy — any future COW fix must cover both (and pool count is 62, not 41). (3) Stale comment should be fixed at source.
+- Bottom line: if per-cycle decode latency is the goal, the data points at verify (56 ms, 81%), not snapshots. Pool ratchet (1.95->2.27 GB) remains a separate memory-residency question.
+
+Methodology notes recorded: cumulative [MTP-PROF] dumps are running means — naive mean-of-dumps double-counts early cycles; must de-aggregate per interval. Model ID used was deepseek-ai/DeepSeek-V4-Flash-0731 (actually placed). PYTHONPATH=<repo>/tools/src required for bench/concurrent_bench.py.

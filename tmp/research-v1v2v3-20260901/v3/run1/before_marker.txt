@@ -1,0 +1,10 @@
+=== macstudio-m4-1 BEFORE-BENCH ===
+cycles=1050
+total mean= 76.45ms min= 52.85ms max=168.35ms n=1050
+rb_snap mean= 0.15ms min= 0.10ms max= 0.24ms n=1050
+log_bytes=8231238
+=== macstudio-m4-2 BEFORE-BENCH ===
+cycles=1050
+total mean= 76.50ms min= 52.89ms max=168.40ms n=1050
+rb_snap mean= 0.15ms min= 0.11ms max= 0.26ms n=1050
+log_bytes=9152426

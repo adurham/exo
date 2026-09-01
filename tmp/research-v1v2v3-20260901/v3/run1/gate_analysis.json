@@ -1,0 +1,176 @@
+{
+  "node1": {
+    "rb_snap": {
+      "weighted_mean": 0.15,
+      "cycles": 650,
+      "iv_min": 0.15,
+      "iv_max": 0.15,
+      "observed_max": 0.33
+    },
+    "total": {
+      "weighted_mean": 68.8392307692308,
+      "cycles": 650,
+      "iv_min": 61.44999999999971,
+      "iv_max": 79.0899999999997,
+      "observed_max": 168.35
+    },
+    "draft": {
+      "weighted_mean": 9.18923076923077,
+      "cycles": 650,
+      "iv_min": 8.21,
+      "iv_max": 11.28,
+      "observed_max": 90.91
+    },
+    "verify": {
+      "weighted_mean": 56.08692307692308,
+      "cycles": 650,
+      "iv_min": 49.88,
+      "iv_max": 63.87,
+      "observed_max": 95.64
+    },
+    "accept": {
+      "weighted_mean": 2.8676923076923075,
+      "cycles": 650,
+      "iv_min": 2.28,
+      "iv_max": 3.21,
+      "observed_max": 7.02
+    },
+    "rollback": {
+      "weighted_mean": 0.7053846153846154,
+      "cycles": 650,
+      "iv_min": 0.47,
+      "iv_max": 0.8,
+      "observed_max": 2.19
+    },
+    "rb_ring": {
+      "weighted_mean": 0.5610431654676258,
+      "cycles": 278,
+      "iv_min": 0.2745833333333323,
+      "iv_max": 0.5900000000000021,
+      "observed_max": 1.27
+    },
+    "rb_pool": {
+      "weighted_mean": 0.301043165467626,
+      "cycles": 278,
+      "iv_min": 0.011304347826086561,
+      "iv_max": 0.5839130434782611,
+      "observed_max": 0.81
+    },
+    "rb_pool_restores": {
+      "weighted_mean": 18.325647482014386,
+      "cycles": 278,
+      "iv_min": 14.684999999999945,
+      "iv_max": 25.51173913043488,
+      "observed_max": 62.0
+    },
+    "rb_drain": {
+      "weighted_mean": 0.03,
+      "cycles": 278,
+      "iv_min": 0.029999999999999895,
+      "iv_max": 0.0300000000000001,
+      "observed_max": 0.05
+    },
+    "rb_gate": {
+      "weighted_mean": 0.06,
+      "cycles": 278,
+      "iv_min": 0.05999999999999979,
+      "iv_max": 0.0600000000000002,
+      "observed_max": 0.12
+    },
+    "rb_tail": {
+      "weighted_mean": 0.03,
+      "cycles": 278,
+      "iv_min": 0.029999999999999895,
+      "iv_max": 0.0300000000000001,
+      "observed_max": 0.05
+    },
+    "_share": 0.21789900660401595
+  },
+  "node2": {
+    "rb_snap": {
+      "weighted_mean": 0.15,
+      "cycles": 650,
+      "iv_min": 0.15,
+      "iv_max": 0.15,
+      "observed_max": 0.29
+    },
+    "total": {
+      "weighted_mean": 68.86307692307692,
+      "cycles": 650,
+      "iv_min": 61.48999999999971,
+      "iv_max": 78.92,
+      "observed_max": 168.4
+    },
+    "draft": {
+      "weighted_mean": 9.18307692307692,
+      "cycles": 650,
+      "iv_min": 8.22,
+      "iv_max": 11.3,
+      "observed_max": 90.91
+    },
+    "verify": {
+      "weighted_mean": 55.956923076923076,
+      "cycles": 650,
+      "iv_min": 50.07,
+      "iv_max": 63.74,
+      "observed_max": 95.68
+    },
+    "accept": {
+      "weighted_mean": 3.0015384615384617,
+      "cycles": 650,
+      "iv_min": 2.43,
+      "iv_max": 3.38,
+      "observed_max": 7.05
+    },
+    "rollback": {
+      "weighted_mean": 0.7215384615384616,
+      "cycles": 650,
+      "iv_min": 0.48,
+      "iv_max": 0.8,
+      "observed_max": 2.85
+    },
+    "rb_ring": {
+      "weighted_mean": 0.5800000000000001,
+      "cycles": 278,
+      "iv_min": 0.5799999999999983,
+      "iv_max": 0.5800000000000031,
+      "observed_max": 1.16
+    },
+    "rb_pool": {
+      "weighted_mean": 0.32,
+      "cycles": 278,
+      "iv_min": -0.04368421052631495,
+      "iv_max": 0.5839130434782611,
+      "observed_max": 0.83
+    },
+    "rb_pool_restores": {
+      "weighted_mean": 18.325647482014386,
+      "cycles": 278,
+      "iv_min": 14.684999999999945,
+      "iv_max": 25.51173913043488,
+      "observed_max": 62.0
+    },
+    "rb_drain": {
+      "weighted_mean": 0.03,
+      "cycles": 278,
+      "iv_min": 0.029999999999999895,
+      "iv_max": 0.0300000000000001,
+      "observed_max": 0.1
+    },
+    "rb_gate": {
+      "weighted_mean": 0.06,
+      "cycles": 278,
+      "iv_min": 0.05999999999999979,
+      "iv_max": 0.0600000000000002,
+      "observed_max": 0.12
+    },
+    "rb_tail": {
+      "weighted_mean": 0.02,
+      "cycles": 278,
+      "iv_min": 0.019999999999999928,
+      "iv_max": 0.020000000000000042,
+      "observed_max": 0.04
+    },
+    "_share": 0.21782355175264181
+  }
+}
