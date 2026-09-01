@@ -7610,3 +7610,14 @@ this document can be trusted, including the ones that look clean.
   config — it is the control), whether any runner crash/restart occurred, and the
   warmup rep's value. P15's warmup came in at 12.00 tok/s, far off every other
   warmup; warmup behaviour may itself be a boot-state signal worth tracking.
+
+### DEPLOY — BatchPoolingCache overlap-carry fix verified + shipped repos-only (2026-09-01)
+
+Independent reviewer subagent verdict: **PASS** on commit 37260bbd6ecd05c3105fc32489bea18ae29d0ede.
+
+- Root cause addressed as prescribed: `extend()` grows all four `_overlap_*` structures (valid/windows lists + zero/-inf padded carry rows), `filter()` reindexes them to the surviving stream set, `fetch_overlap_carry()` gains a fail-fast invariant (raises ValueError on length mismatch) — NOT a silent "sequence start" mitigation.
+- Regression tests: 4 new tests in `tests/test_batch_pooling_cache_overlap.py`, 4/4 pass at the fix; all 4 fail against pre-fix `cache.py` (verified in throwaway worktree), confirming the tests exercise the actual defect.
+- Scope: only `mlx_lm/models/cache.py` (+60) and the test file (+154); zero `EXO_*` flag-gated code touched. Neighbor suite `test_prompt_cache.py`: 2 pre-existing failures identical at pre-fix commit (unrelated).
+- Non-blocking notes: `extend()` discards any carry held by `other` (theoretical edge; no production call path merges two live carry-caches); fetch-time invariant itself lacks a direct test.
+
+Deployment (repos-only, restart HELD per user): parent repo bumped 50c202e6e -> ea891d77 (submodule pointer -> 37260bb), pushed to origin/main; both studios `git fetch && git reset --hard ea891d77 && git submodule update` -- exo PIDs unchanged on both nodes (m4-1: 20509-20521, m4-2: 22405-22416), cluster NOT restarted. Activation requires start_cluster.sh relaunch (pending explicit user go).
