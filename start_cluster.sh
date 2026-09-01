@@ -914,9 +914,15 @@ done
 
 # Direct-link pings — clear any stale cross-subnet routes from previous runs first,
 # then ping. Without routes, pings can only succeed over direct physical links — no relay.
+#
+# sudo -n (non-interactive): fail fast instead of hanging on a password prompt
+# that can never arrive over a non-interactive SSH session -- same pattern as
+# the xcode-select -n call below. Discovered 2026-08-31: without -n, a missing
+# passwordless-sudo grant for `route delete` here silently hung the whole
+# launch indefinitely (no error, no timeout) instead of failing visibly.
 echo "Testing direct-link connectivity (clearing stale routes first)..."
 for node in macstudio-m4-1 macstudio-m4-2; do
-    ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo route delete -net \$r 2>/dev/null; done" &> /dev/null
+    ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo -n route delete -net \$r 2>/dev/null; done" &> /dev/null
 done
 
 # Direct-link TB MTU. The KNOWN-GOOD BASELINE is 9000 — verified 2026-06-08
