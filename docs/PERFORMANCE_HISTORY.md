@@ -7139,3 +7139,121 @@ Neither arm may be rationalized after the fact. Note for whoever runs it: P12's
 within-run spread (31.36-32.89, range 1.53) was markedly wider than P06's
 (34.12-34.35, range 0.23) — if P13 also comes back wide, between-boot reproducibility
 of this probe is itself unmeasured and becomes the next thing worth pinning down.
+
+### P13 RESULT — CONFIG-IMPLICATED. Both flags OFF recovers decode to 36.08 (2026-08-31)
+
+**Outcome: CONFIG-IMPLICATED, and not marginally.** Median **36.08** tok/s vs the
+pre-registered floor of **33.25**. Every one of the three reps clears the floor. No
+rep lands in the 32.89-33.25 AMBIGUOUS band, so there is nothing to straddle and
+no case for n=5.
+
+**Pre-flight (non-negotiable, verified on the REAL running PIDs, both nodes, then
+independently re-verified by a second agent from live state rather than from the
+first agent's files).** Cold relaunch with `EXO_DSV4_QUERY_TILED_SDPA=0` and
+`EXO_DSV4_EXACT_TOPK_PREFILL=0`. Old P12 PIDs 21927 / 21675 confirmed GONE
+(`ps -p` empty, rc=1). New real `exo -v` PIDs **7728** (m4-1) / **7776** (m4-2),
+etime ~7 min at proof time. `ps eww` on both real PIDs: both flags literally `=0`
+on both nodes. Full live-env diff vs the P12 arm: **exactly two differing vars per
+node** (`EXACT_TOPK_PREFILL` 1->0, `QUERY_TILED_SDPA` 1->0), 74 EXO_* vars each
+side, **zero other drift** — `QUERY_TILED_B=64`, `VERIFY_BATCH=1`,
+`VERIFY_BATCH_MIN_CTX=8192`, `MTP=1`, `SPECULATIVE=1`, `GAMMA=3`, `SEQ_SPLIT=1`,
+`LMHEAD_MXFP8=1` all identical. Capture:
+`tmp/p13-relaunch-20260831/preflight_node{1,2}_ps_eww.txt`.
+
+**Probe: identical instrument, identical protocol.** `bench/long_decode_probe.py`
+unmodified (`git status --porcelain` clean, `git diff --stat` empty), 100K,
+`--max-tokens 1200`, warmup + n=3 as separate sequential invocations, venv
+interpreter. Raw: `tmp/p13-decode-20260831/{warmup,rep1,rep2,rep3}.json` + logs.
+
+| rep | decode_tps | trustworthy | completion_tokens | finish_reason | prompt_tokens | prefill_tps |
+|---|---|---|---|---|---|---|
+| warmup (discarded) | 29.95 | true | 1200 | length | 110009 | 377.79 |
+| 1 | 36.08 | true | 1200 | length | 110006 | 378.95 |
+| 2 | 36.20 | true | 1200 | length | 112251 | 377.71 |
+| 3 | 34.18 | true | 1200 | length | 108887 | 378.15 |
+| **median** | **36.08** | true | 1200 | length | — | 378.15 |
+
+**Effect size, clean arm-to-arm.** P12 (both flags ON) 32.18 -> P13 (both OFF)
+36.08 = **+3.90 tok/s, +12.12%**. Identical build, identical everything, two env
+vars. This also lands **above** the P06 reference (34.28) by +1.80 / +5.25%.
+
+**Complete separation, which matters given the spread.** Min P13 rep (34.18)
+exceeds max P12 rep (32.89). All 3 vs all 3, zero overlap in the two arms' rep
+distributions. So although the within-run spread is again wide (P13 range 2.02;
+P12 1.53; P06 only 0.23), the arm effect is larger than the spread and does not
+depend on the median choice.
+
+**Positive control — the flags demonstrably reached the kernels, not just the env.**
+Prefill dropped from a P12 median of **417.21** to **378.15** tok/s, **-9.36%**.
+Both flags are prefill optimizations; turning them off is *supposed* to cost
+prefill. Prefill had been pinned at 416.9-418.4 across every prior 100K run in the
+campaign, so this is the first time it moved — and it moved exactly when and in the
+direction the flags predict. This independently rules out the "knob never reached
+the live process" failure mode that invalidated four earlier measurements.
+
+**So the static analysis is WRONG somewhere, and it must be re-opened at the kernel
+level.** §P12-addendum's two independent verbatim traces are almost certainly
+correct about what they actually proved: at decode's L=4 verify shape,
+`_query_tiled_ok` returns False (`4 < 2*64`) and the exact-topk `<=16` disjunct
+already passes, so neither flag changes the *branch taken during decode*. P13 shows
+that is not the same claim as "neither flag changes decode throughput." The
+mechanism is therefore NOT branch selection at decode. Live candidates, none yet
+tested: (a) prefill running a different SDPA decomposition leaves the MLX allocator
+/ memory-pool / fragmentation state different at ~108K, and decode is
+bandwidth-bound on that state; (b) Metal shader-cache or `@mx.compile` graph-cache
+occupancy — the tiled path compiles extra kernels whose residency displaces
+something decode needs; (c) a numerics difference in prefill output shifting
+speculative accept rate at verify, which would change effective decode tok/s
+without changing any decode code path. (c) is directly testable from the accept-rate
+counters and should be checked first because it is the cheapest.
+
+**Correction to the §P12-addendum change-window inventory — `LMHEAD_MXFP8` was NOT
+constant across the arms.** The addendum stated `LMHEAD_MXFP8=1` "shipped *with* the
+reference commit, so it is constant across both arms, not a delta." That conflates
+the env var shipping with the implementation existing. Git evidence:
+`git -C mlx-lm show a6eb893:mlx_lm/utils.py | grep LMHEAD_MXFP8` is **empty** — the
+reference submodule has no consumer for the flag. The implementation landed in
+`a248d0a`, and `git merge-base --is-ancestor a248d0a a6eb893` returns **rc=1** (not
+an ancestor). Reference commit `80ec8ec03` shipped `EXO_DSV4_LMHEAD_MXFP8:=1` in
+`start_cluster.sh` while pinning a submodule that ignored it. **So at P06 the
+lm_head was NOT mxfp8-quantized; from P08 onward it is.** Consequence: any
+P06-vs-later comparison (including the headline -6.13%) carries this extra
+uncontrolled delta. It runs the *opposite* direction to the regression (the shipping
+commit measured mxfp8 lm_head at +6.0% decode), so it cannot be the regression's
+cause — but it means **P12-vs-P13 is the only clean pairwise comparison in this
+sequence**, and P06 should be treated as a contaminated reference until re-measured.
+
+**Full newly-activated-knob ledger for the window** (every env var read by mlx-lm at
+`2e2d17d` but not at `a6eb893`, cross-checked against what `start_cluster.sh` sets):
+`EXO_DSV4_LMHEAD_MXFP8` (set=1 at both reference and HEAD, but inert at reference —
+the delta above); `EXO_DSV4_EXACT_TOPK_PREFILL`, `EXO_DSV4_QUERY_TILED_SDPA`,
+`EXO_DSV4_QUERY_TILED_B` (all unset at reference, defaulted ON at HEAD — the P13
+subject); `EXO_DSV4_PRENORM_H_DUMP` and `..._BUDGET` (never set in either arm,
+confirmed absent from the live env on both nodes — genuinely inert). No other new
+env reads in the window.
+
+### P14 pre-register — single-flag split (written BEFORE the run)
+
+P13 was a joint revert, so it cannot say *which* flag pays. Pre-registered per the
+P13 CONFIG-IMPLICATED branch.
+
+- **Arm A:** `EXO_DSV4_QUERY_TILED_SDPA=0`, `EXO_DSV4_EXACT_TOPK_PREFILL=1`.
+- **Arm B:** `EXO_DSV4_QUERY_TILED_SDPA=1`, `EXO_DSV4_EXACT_TOPK_PREFILL=0`.
+- Both arms run regardless of what the other does — a shared or interaction effect is
+  only diagnosable with both.
+- Probe unchanged: cold relaunch, `ps eww` proof on real PIDs both nodes, 100K,
+  `--max-tokens 1200`, warmup + n=3 sequential, `trustworthy=true` required on all 3.
+- **Anchors:** P12 (both ON) 32.18; P13 (both OFF) 36.08; gap **3.90** tok/s.
+  Recovery fraction R = (median_arm - 32.18) / 3.90.
+- **DOMINANT:** R >= 0.75, i.e. median **>= 35.11**.
+- **PARTIAL:** 0.25 < R < 0.75, i.e. median **33.16-35.11**.
+- **NOT-THIS-FLAG:** R <= 0.25, i.e. median **<= 33.16**.
+- If BOTH arms come back NOT-THIS-FLAG, the effect is an interaction requiring both
+  flags on, and the next step is mechanism (a)/(b)/(c) above, not more flag A/Bs.
+- **Stated power limitation, in advance:** rep-level range was 1.53 (P12) and 2.02
+  (P13), comparable to the 1.95-wide PARTIAL band. A PARTIAL landing is therefore
+  weak evidence and triggers n=5 on that arm before any attribution is claimed. A
+  DOMINANT or NOT-THIS-FLAG landing is outside the noise and may be taken at n=3.
+- Prefill is a free positive control on every arm: whichever flag is set to 0 should
+  move prefill off the 416.9-418.4 band. If prefill does NOT move on an arm where a
+  prefill flag was turned off, that arm is invalid regardless of its decode number.
