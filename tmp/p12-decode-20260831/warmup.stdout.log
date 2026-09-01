@@ -1,0 +1,18 @@
+{
+  "tag": "WARMUP",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 100000,
+  "prompt_tokens": 108886,
+  "completion_tokens": 1200,
+  "prefill_s": 260.89,
+  "prefill_tps": 417.36,
+  "decode_s": 36.5,
+  "decode_tps": 32.88,
+  "decode_sample_trustworthy": true,
+  "finish_reason": "length",
+  "needle_hit": true,
+  "gen_chars": 5853,
+  "reasoning_chars": 2016,
+  "content_chars": 3837
+}
+wrote tmp/p12-decode-20260831/warmup.json

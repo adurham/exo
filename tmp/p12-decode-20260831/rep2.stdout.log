@@ -1,0 +1,18 @@
+{
+  "tag": "P12_REP2",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 100000,
+  "prompt_tokens": 110006,
+  "completion_tokens": 1200,
+  "prefill_s": 263.67,
+  "prefill_tps": 417.21,
+  "decode_s": 37.29,
+  "decode_tps": 32.18,
+  "decode_sample_trustworthy": true,
+  "finish_reason": "length",
+  "needle_hit": true,
+  "gen_chars": 5891,
+  "reasoning_chars": 1982,
+  "content_chars": 3909
+}
+wrote tmp/p12-decode-20260831/rep2.json

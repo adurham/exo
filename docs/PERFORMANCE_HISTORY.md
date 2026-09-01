@@ -6997,3 +6997,145 @@ before-snapshot is already captured at
 74 EXO vars, `EXACT_TOPK_PREFILL=1 QUERY_TILED_SDPA=1 QUERY_TILED_B=64
 LMHEAD_MXFP8=1 VERIFY_BATCH=1 VERIFY_BATCH_MIN_CTX=8192 SPECULATIVE=1 GAMMA=3`),
 so the post-relaunch config diff can be done immediately.
+
+### P12 RESULT — OUTCOME B: the decode regression SURVIVES a cold relaunch (2026-08-31)
+
+The pre-registered decisive experiment ran. **Outcome B: real, code/config-implicated
+regression.** Cluster-state drift is real but accounts for less than half of it.
+
+**Pre-flight (non-negotiable, all verified on the REAL running PIDs, both nodes).**
+Cluster cold-relaunched 17:46; main PIDs m4-1 `21927`, m4-2 `21675`, etime ~2h at
+probe time; old P11-era PIDs 60405/60416 confirmed GONE (`ps -p` empty, rc=1), so
+the relaunch genuinely happened. `ps eww` on both real PIDs extracted 74 `EXO_*`
+vars each; diffed against the pre-relaunch P11 snapshot
+(`tmp/p12-relaunch-20260831/before_node{1,2}_ps_eww.txt`): **empty diff, both nodes**
+— live config is byte-identical to what P11 was measured under. All 10 decode-
+relevant flags confirmed live (`QUERY_TILED_SDPA=1 QUERY_TILED_B=64
+EXACT_TOPK_PREFILL=1 SPECULATIVE=1 GAMMA=3 VERIFY_BATCH=1 VERIFY_BATCH_MIN_CTX=8192
+MTP=1 LMHEAD_MXFP8=1 SEQ_SPLIT=1`). 1 instance, 2 runners, both `RunnerReady`.
+Capture: `tmp/p12-decode-20260831/preflight_node{1,2}_ps_eww.txt`.
+
+**Probe: identical instrument.** `bench/long_decode_probe.py` unmodified
+(`git status --porcelain` clean, `git diff --stat` empty; `API` and `MODEL`
+constants unchanged), 100K target, `--max-tokens 1200`, warmup + n=3 as separate
+sequential invocations — the exact P11/P06 protocol. Raw:
+`tmp/p12-decode-20260831/{warmup,rep1,rep2,rep3}.json` + `.stdout.log`.
+
+| rep | decode_tps | trustworthy | completion_tokens | finish_reason | prompt_tokens | prefill_tps |
+|---|---|---|---|---|---|---|
+| warmup (discarded) | 32.88 | true | 1200 | length | 108886 | 417.36 |
+| 1 | 31.36 | true | 1200 | length | 108886 | 416.93 |
+| 2 | 32.18 | true | 1200 | length | 110006 | 417.21 |
+| 3 | 32.89 | true | 1200 | length | 110008 | 418.39 |
+| **median** | **32.18** | true | 1200 | length | — | — |
+
+**VERDICT vs the pre-registered bands: OUTCOME B, unambiguously.** Median 32.18 is
+below the 33.25 floor. This is not a near-miss and Outcome C does not apply: **all
+three reps (31.36 / 32.18 / 32.89) are below 33.25**, and **no rep lands anywhere in
+the 33.25-34.12 C-band**, so there is nothing to straddle and no case for escalating
+to n=5. vs the P06 Phase A reference (34.28): **-2.10 tok/s, -6.13%.**
+
+**Independently re-verified** (separate agent, raw artifacts not the report): mtimes
+strictly increasing 19:55:11 → 20:00:13 → 20:05:18 → 20:10:21, gaps 302/305/303 s
+(consistent with ~261 s prefill + ~37 s decode); all four `content` /
+`reasoning_content` sha256s distinct and all four file md5s distinct (genuinely
+independent runs, nothing copied — the near-equal `prompt_tokens` are the ~4 chars/
+token heuristic, not duplicate files); no traceback / ModuleNotFoundError / truncated
+stream in any log; post-run PIDs still 21927 / 21675 (no restart mid-measurement).
+
+**The -10.41% P11 gap decomposes.** Same code, stale→fresh cluster: 30.71 → 32.18,
+**+1.47 tok/s (+4.79%)**. So allocator/residency drift after deep-context work is
+REAL and worth ~1.5 tok/s — **41.2%** of the P11 gap. It is NOT the whole story:
+**58.8%** (-2.10 tok/s) survives a clean relaunch. Both halves are now separately
+attributed instead of confounded.
+
+**Prefill is untouched** at 416.9-418.4 tps across all four runs, consistent with
+every prior 100K run. The regression is decode-specific.
+
+### P12 addendum — the NAMED candidate mechanism is REFUTED (static, two independent traces)
+
+The pre-registration named one mechanism: P09's query-tiled SDPA interacting with
+spec-ON decode's L=4 verify batch (the "decode is L=1, nothing to tile" analysis
+being wrong). **That mechanism is dead.** Traced twice by independent agents reading
+`mlx-lm/mlx_lm/models/deepseek_v4.py` verbatim; the second was explicitly tasked to
+refute the first and confirmed it line-for-line.
+
+1. **The L=4 premise is CORRECT.** `src/exo/worker/engines/mlx/speculative/dsv4_mtp.py`
+   :4082-4087 builds `verify_input` as `(1, γ+1)` = **(1, 4)** at γ=3, and
+   `deepseek_v4.py:7034-7044` activates the batched verify path
+   (`2 <= h.shape[1] <= _VERIFY_ROWSEQ_MAX_L` and `_vb_ctx_len >= 8192`) — at ~108K
+   ctx it IS active, so attention really does see q_len=4 in production decode.
+2. **But the tiled path cannot be entered at L=4.** `_query_tiled_ok`
+   (`deepseek_v4.py:3558-3584`) hard-returns at line **3572**:
+   `if n_q < 2 * _QUERY_TILED_B or mask.shape[-2] != n_q: return False`.
+   With `_QUERY_TILED_B=64`: `4 < 128` → **True** → unconditional early `False`,
+   short-circuiting before every other clause. The dispatch at :4481-4483
+   (`elif _QUERY_TILED_SDPA and _query_tiled_ok(...)`) therefore always declines at
+   decode and falls through to the unchanged fused SDPA. `_QUERY_TILED_B` parses to
+   int 64 with no clamp beyond positivity (:3527-3546). **The path needs q_len >= 128;
+   decode is 1 and verify is 4.**
+3. **No 16x padding-waste mechanism either.** The tile loop (:4507) uses
+   `_b1 = min(_r + _b_q, _n_q)` — real-row slicing, never pads up to B.
+4. **The indirect route was checked too and is also closed.** The one way a
+   "prefill-only" flag could still hurt decode is by leaving divergent persistent
+   cache state behind. It does not: `local_cache.update_and_fetch` (:4441-4446), the
+   pooled compressor write (:4421) and the `kv` concat (:4452) all happen **upstream
+   of the branch**, both branches call the same SDPA wrapper, and neither writes to
+   `pool_cache`/`local_cache` in its own body. **Cache state is identical.**
+5. **P08 is inert at L=4 by construction.** `deepseek_v4.py:4123-4126` gates on
+   `(scores.shape[1] <= 16 or _EXACT_TOPK_PREFILL)`; `scores` is `(B, L, P)` from
+   `_indexer_score` (:3849), so `shape[1]` IS the query length. At L=4 the `<= 16`
+   disjunct already passes, so flipping `EXO_DSV4_EXACT_TOPK_PREFILL` **cannot change
+   behavior at L=4**. The exact-topk kernel does run during verify, but via the
+   pre-existing `L<=16` clause, not via P08's flag.
+
+**Change-window inventory (P06 reference → HEAD).** Reference commit `80ec8ec03`
+(2026-08-30 18:07, submodule `a6eb893`) — it is the commit that shipped the very
+config the 34.28 was measured on. HEAD `1365cecc9`, submodule `2e2d17d`. The window
+contains exactly **two** submodule commits — `a248d0a` (P08 exact-topk prefill gate)
+and `2e2d17d` (P09 query-tiled SDPA TP/seq-split fix) — plus `start_cluster.sh`
+default flips for their flags (`b36a5dc8b`, `b27a83ced`) and whitelist adds
+(`e5e8c1c72`, `1a25163ca`), and deploy/doc noise. **No change to
+`src/exo/worker/engines/mlx/` in the window beyond a comment.** `LMHEAD_MXFP8=1`
+shipped *with* the reference commit, so it is constant across both arms, not a delta.
+
+**So there is a real tension, and it is stated rather than resolved:** the regression
+is empirically real and survives a cold relaunch (-6.13%, both arms fresh), yet every
+code change in the window is statically gated out of the decode path. One of these is
+wrong. That is the question the next experiment exists to settle.
+
+### P13 pre-register — is the surviving -6.13% CONFIG or NOT-CONFIG? (written BEFORE the run)
+
+The pre-registration's Outcome-B next step was a single-flag A/B on
+`EXO_DSV4_QUERY_TILED_SDPA=0`. **Deviating deliberately, and the reason is on the
+record:** that flag is now proven inert at L=4 by two independent verbatim traces
+(§P12 addendum), so a single-flag A/B on it has near-zero prior of being informative
+and would burn a full relaunch to likely re-prove a null. The strictly stronger test
+for the same cluster time is to revert the **entire config delta** at once — both
+flags OFF — which is the only dimension separating current HEAD from the P06
+reference config. A null there exonerates the whole config dimension in one shot; a
+non-null implicates it and *then* justifies the single-flag split.
+
+- **Arms:** identical fresh cold relaunch, identical everything, except
+  `EXO_DSV4_QUERY_TILED_SDPA=0` **and** `EXO_DSV4_EXACT_TOPK_PREFILL=0`. Both MUST be
+  confirmed as `=0` via `ps eww` on the real running PIDs on BOTH nodes before any
+  measurement is trusted — set-in-the-script does not count (this class of bug has
+  invalidated 4 measurements this campaign).
+- **Probe:** unchanged. 100K, `--max-tokens 1200`, warmup + n=3 separate sequential
+  invocations, `decode_sample_trustworthy=true` required on all 3.
+- **CONFIG-IMPLICATED:** median **>= 33.25** tok/s. The two shipped flags do cause the
+  decode loss despite the static gating analysis; the static analysis is then WRONG
+  and must be re-opened at the kernel level. Next step: single-flag split to identify
+  which one.
+- **CONFIG-EXONERATED:** median **< 33.25** tok/s. The flags are not the cause, the
+  static traces are corroborated, and the residual lies either in the submodule diff
+  `a6eb893→2e2d17d` outside the gated paths, or in a non-code difference between the
+  two fresh boots. Next step is a code-level bisect of the submodule pointer, NOT
+  further flag A/Bs.
+- **AMBIGUOUS:** median lands **32.89-33.25** (above P12's best rep but below the
+  floor) with reps straddling → n=5 at the same depth before concluding.
+
+Neither arm may be rationalized after the fact. Note for whoever runs it: P12's
+within-run spread (31.36-32.89, range 1.53) was markedly wider than P06's
+(34.12-34.35, range 0.23) — if P13 also comes back wide, between-boot reproducibility
+of this probe is itself unmeasured and becomes the next thing worth pinning down.
